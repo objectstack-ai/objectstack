@@ -209,13 +209,19 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `62597c588`; re-derived at that pin 2026-09-23 — `dataset-format.ts` is
-   * byte-identical to `87af769e9`, and `date-display.ts` moved (objectui
-   * `516583b54`, +77/-4): `formatDate` now parses through `toDisplayDate`, so a
-   * date-only value renders the calendar day it names in every timezone,
-   * while the style handling this record cites re-reads unchanged; its two
-   * anchors MOVED `198-233` -> `271-306` and `152` -> `225`, the second
-   * byte-identical. At `87af769e9` (2026-09-20) every anchor below MOVED and
+   * `f8a9d0fb0`; re-derived at that pin 2026-09-24 — both files moved on this
+   * hop (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
+   * date-only calendar day that does not exist, with the dash it renders for
+   * any unparsable value, and `dataset-format.ts` rewrote
+   * `formatMeasureDate`'s comment on that case), while the style handling
+   * this record cites re-reads unchanged: `formatDate` `271-306` -> `355-390`
+   * and the ±7-day fallback `225` -> `309` MOVED byte-identical, and
+   * `formatMeasureDate` is `:229-263` (one comment line shorter), its call at
+   * `:369` and its datetime arm at `:259`-`:261`. At `62597c588` (2026-09-23)
+   * `dataset-format.ts` was byte-identical to `87af769e9`, and `date-display.ts`
+   * had moved (objectui `516583b54`, +77/-4): `formatDate` parses through
+   * `toDisplayDate`, so a date-only value renders the calendar day it names in
+   * every timezone. At `87af769e9` (2026-09-20) every anchor below MOVED and
    * one of them changed SUBSTANCE, so nothing here was carried there either:
    * `formatMeasureDate`'s datetime arm no longer calls
    * `formatDateTime(v, { locale })` unconditionally, it SELECTS a formatter,
@@ -223,17 +229,17 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * into and widening that published signature was refused) in
    * objectui
    * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
-   * non-numeric value through `formatMeasureDate` (`:229-264`, was `:185-198`)
-   * at `:370`,
+   * non-numeric value through `formatMeasureDate` (`:229-263`, was `:229-264`
+   * and before that `:185-198`) at `:369`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:271-306`, was `:198-233` and before
-   * that `:131-164`, whose `relative` branch falls back to the absolute form
-   * beyond ±7 days at `:225`, was `:152` and `:117` — the fallback strips the style through
+   * `formatDate` (`utils/date-display.ts:355-390`, was `:271-306`, `:198-233`
+   * and before that `:131-164`, whose `relative` branch falls back to the absolute form
+   * beyond ±7 days at `:309`, was `:225`, `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
-   * `formatRelativeDate` (`:260`), `short` with
-   * `formatDateTime(v, { locale, style: 'compact' })` (`:261`) and everything
+   * `formatRelativeDate` (`:259`), `short` with
+   * `formatDateTime(v, { locale, style: 'compact' })` (`:260`) and everything
    * else — a date PATTERN included — with the bare
-   * `formatDateTime(v, { locale })` (`:262`).
+   * `formatDateTime(v, { locale })` (`:261`).
    * Teaching
    * the shared path a pattern grammar would change every list cell that reads
    * it, so that gap is still DOCUMENTED here rather than closed (objectui#7178

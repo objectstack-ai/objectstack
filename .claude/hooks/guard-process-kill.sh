@@ -53,8 +53,8 @@
 #                                                                you picked, not a name
 #   pgrep -P "$pid" / pgrep -s "$leader" — even piped into a kill: the selector is a parent
 #                                          or session handle the caller owns, and both are
-#                                          live in scripts/publish-smoke.sh and
-#                                          scripts/gen-sdui-manifest.sh
+#                                          legitimate teardown shapes (scripts/publish-smoke.sh
+#                                          uses the first)
 #   pkill -P "$pid" / pkill -s "$sid"    — the same selectors on pkill, with NO pattern
 #                                          operand. Add a pattern and it is blocked again.
 #   pgrep -f foo / ps aux | grep node    — a READ. Nothing dies; look all you like. But a
@@ -243,7 +243,7 @@ check_killall() {
 # --- does this segment select processes by NAME? (pgrep with a bare pattern operand) -----
 # Returns 0 = yes, this is a name-pattern selector. `pgrep -s "$leader"` and
 # `pgrep -P "$pid"` consume their argument and leave no operand behind, so they answer 1 —
-# which is what keeps scripts/publish-smoke.sh and scripts/gen-sdui-manifest.sh legal.
+# which is what keeps scripts/publish-smoke.sh's `pgrep -P` teardown legal.
 is_name_selector() {
   [ "$HEAD" = "pgrep" ] || return 1
   local n=${#W[@]} i=$((HEAD_I + 1))

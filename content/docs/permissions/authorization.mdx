@@ -111,11 +111,16 @@ implementation detail:
    `viewAllRecords` / `modifyAllRecords` (super-user bypass, posture-gated)
    short-circuit the object's *business* RLS. Crossing the **tenant wall**,
    though, requires the **`PLATFORM_ADMIN` posture** (ADR-0099 D1). That posture
-   is derived at one site from **two anchors**, either of which is sufficient:
-   the deployment's **configured administrator list** — an address declared in
+   is derived at one site, and which anchors it reads depends on the
+   deployment's [tenancy posture](/docs/deployment/tenancy-modes). The
+   deployment's **configured administrator list** — an address declared in
    `OS_PLATFORM_OWNER_EMAIL`, matched against the caller's own stored and
-   **email-verified** `sys_user` row — and an **unscoped `admin_full_access`
-   grant** row. See
+   **email-verified** `sys_user` row — is sufficient under every posture. An
+   **unscoped `admin_full_access` grant** row is sufficient only under
+   `single`; under the walled postures (`group` / `isolated`) it is no longer
+   an anchor — the set it names still grants what any held set grants, but it
+   confers no `PLATFORM_ADMIN` standing, so there standing comes from
+   configuration alone. See
    [who holds `admin_full_access`](/docs/permissions/permission-sets#built-in-permission-sets)
    for both. A *scoped* grant, or
    piecemeal platform capabilities (`studio.access`, `manage_users`, …), grant

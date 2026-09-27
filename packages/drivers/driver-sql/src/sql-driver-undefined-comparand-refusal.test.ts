@@ -74,6 +74,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from './index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -120,6 +121,14 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
     throw new Error('expected the driver to refuse this filter, but it resolved');
   };
 
+  // [#20039] The field and the position are the predicate's detail, named on
+  // the wire only for a `where` the caller is known to have written (the #8220
+  // contract) — so the pins below that read them mark their `where` 'author',
+  // as a read-scope merge boundary marks a caller's own predicate (a shallow
+  // copy, so a shared case constant stays unmarked). The withheld half is
+  // pinned in `sql-driver-compile-refusal-seam.test.ts`.
+  const own = (where: unknown) => markFilterSubtreeProvenance({ ...(where as object) }, 'author');
+
   /**
    * Every position a comparand can occupy, with the path the refusal must name.
    *
@@ -160,7 +169,7 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
 
   for (const [label, where, path] of UNDEFINED_POSITIONS) {
     it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-      const err = await refusalOf(where);
+      const err = await refusalOf(own(where));
       // Defect A: the envelope. Without these two lines the test passes on the
       // UNFIXED driver, which threw knex's bare `Undefined binding(s)`.
       expect(err.code).toBe('INVALID_FILTER');
@@ -187,13 +196,13 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
    * offending one, making the refusal conditional on evaluation order.
    */
   it('refuses an undefined comparand beside a satisfiable disjunct', async () => {
-    const err = await refusalOf({ $or: [{ stage: 'won' }, { stage: undefined }] });
+    const err = await refusalOf(own({ $or: [{ stage: 'won' }, { stage: undefined }] }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.message).toContain('filter.$or[1].stage');
   });
 
   it('refuses an undefined comparand beside the TRUE identity `{}`', async () => {
-    const err = await refusalOf({ $or: [{}, { stage: { $eq: undefined } }] });
+    const err = await refusalOf(own({ $or: [{}, { stage: { $eq: undefined } }] }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.message).toContain('filter.$or[1].stage.$eq');
   });
@@ -209,7 +218,7 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
    * than some downstream consequence of the tautology.
    */
   it('refuses the guard/emitter split case instead of answering it', async () => {
-    const err = await refusalOf({ $not: { stage: { $ne: undefined } } });
+    const err = await refusalOf(own({ $not: { stage: { $ne: undefined } } }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
     expect(err.message).toContain('filter.$not.stage.$ne');

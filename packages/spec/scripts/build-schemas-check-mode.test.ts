@@ -163,8 +163,7 @@ function writeDefaultsShards(dir: string, entries: readonly string[]): string {
 /**
  * Every run loads the entire spec surface and emits ~1700 JSON Schemas (~7s
  * alone, more under turbo's parallel test load). A timeout here should mean
- * "the script hung", not "the runner was busy" — cf. the same note in
- * check-react-blocks-declaration-parity.test.ts.
+ * "the script hung", not "the runner was busy".
  */
 const SPAWN_TIMEOUT_MS = 180_000;
 

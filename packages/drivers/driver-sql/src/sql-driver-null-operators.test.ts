@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -78,8 +78,12 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
       // ENGINE door gates on `isFilterAST` first and refuses this a layer
       // earlier (engine-filter-array-lowering.test.ts). Either way it throws;
       // what #2704 forbids is the whole-table answer.
+      // [#20020] The refusal is the INVALID_FILTER identity whatever the
+      // predicate's provenance; its wording names the operator only for a
+      // predicate marked 'author' (the #8220 contract), which this lowered,
+      // unmarked one is not — so the assertion is on the identity.
       await expect(lowered([['assignee', 'totally_bogus', null]]))
-        .rejects.toThrow(/Unsupported filter operator/);
+        .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
     });
 
     it('count with is_null is scoped, not the whole table', async () => {
@@ -134,8 +138,11 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
     });
 
     it('$regex is REFUSED, in the ADR-0112 envelope, naming $icontains', async () => {
+      // [#20020] Marked 'author', as a read-scope merge boundary marks a
+      // caller's own predicate: the operator and its replacement are named
+      // only then (the #8220 contract).
       const err = await driver
-        .find('tasks', { where: { assignee: { $regex: 'aro' } } })
+        .find('tasks', { where: markFilterSubtreeProvenance({ assignee: { $regex: 'aro' } }, 'author') })
         .then(() => null, (e: any) => e);
       expect(err).toBeInstanceOf(Error);
       expect(err.code).toBe('INVALID_FILTER');
@@ -161,9 +168,10 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
     });
 
     it('unknown $-operator throws instead of a silent equality compare', async () => {
+      // [#20020] Identity, not wording — see the lowered-array case above.
       await expect(
         driver.find('tasks', { where: { assignee: { $bogus: 1 } } }),
-      ).rejects.toThrow(/Unsupported filter operator/);
+      ).rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
     });
   });
 });

@@ -646,9 +646,9 @@ export default defineStack({
     srcFiles: {
       'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
+const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {
@@ -679,7 +679,7 @@ const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
   // authored decision rather than an accident. The other values, and how to
   // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
-};
+});
 
 export default ${toCamelCase(namespace)}Item;
 `,
@@ -741,9 +741,9 @@ export default defineStack({
     srcFiles: {
       'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
+const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {
@@ -760,7 +760,7 @@ const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
   // authored decision rather than an accident. The other values, and how to
   // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
-};
+});
 
 export default ${toCamelCase(namespace)}Item;
 `,

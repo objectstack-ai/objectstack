@@ -407,6 +407,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Account ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the provider and the account id it issued (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -498,6 +502,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Verification ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the identifier being verified (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -606,6 +614,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the member and, when recorded, their role (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -667,6 +679,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Invitation ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the invited email address (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -815,6 +831,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Team Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the team (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -932,6 +952,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the business unit they are assigned to (computed on read)"
+      },
       business_unit_id: {
         label: "Business Unit"
       },
@@ -1048,6 +1072,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Two Factor ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user the credential belongs to (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -2091,6 +2119,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the provisioned user and the group (computed on read)"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the projected role and the user it is granted to (computed on read)"
       },
       connection_id: {
         label: "Connection ID"
@@ -2601,130 +2637,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       customized: {
         label: "Customized",
         help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
-      },
-      created_at: {
-        label: "Created At"
-      },
-      updated_at: {
-        label: "Updated At"
-      }
-    }
-  },
-  sys_saved_report: {
-    label: "Saved Report",
-    pluralLabel: "Saved Reports",
-    description: "Persisted ObjectQL report definition — re-runnable and schedulable",
-    fields: {
-      id: {
-        label: "Report ID"
-      },
-      name: {
-        label: "Name"
-      },
-      description: {
-        label: "Description"
-      },
-      object_name: {
-        label: "Object",
-        help: "Short object name the report queries"
-      },
-      query_json: {
-        label: "Query",
-        help: "ObjectQL query envelope — { filter, fields, orderBy, limit, groupBy }"
-      },
-      format: {
-        label: "Format",
-        help: "Rendering used by IReportService.run() and email digests",
-        options: {
-          csv: "csv",
-          json: "json",
-          html_table: "html_table"
-        }
-      },
-      owner_id: {
-        label: "Owner",
-        help: "User that owns the report definition (drives sharing)"
-      },
-      last_run_at: {
-        label: "Last Run",
-        help: "Stamped by IReportService.run() on successful execution"
-      },
-      last_row_count: {
-        label: "Last Row Count"
-      },
-      created_at: {
-        label: "Created At"
-      },
-      updated_at: {
-        label: "Updated At"
-      }
-    }
-  },
-  sys_report_schedule: {
-    label: "Report Schedule",
-    pluralLabel: "Report Schedules",
-    description: "Recurring delivery of a sys_saved_report via email",
-    fields: {
-      id: {
-        label: "Schedule ID"
-      },
-      report_id: {
-        label: "Report"
-      },
-      name: {
-        label: "Name",
-        help: "Optional label for the digest — used in the email subject"
-      },
-      interval_minutes: {
-        label: "Interval (minutes)",
-        help: "How often to send (1440 = daily, 10080 = weekly)"
-      },
-      cron_expression: {
-        label: "Cron Expression",
-        help: "Optional 5/6-field cron — overrides interval_minutes when present"
-      },
-      timezone: {
-        label: "Timezone"
-      },
-      active: {
-        label: "Active"
-      },
-      recipients: {
-        label: "Recipients",
-        help: "Comma-separated email addresses"
-      },
-      format: {
-        label: "Format",
-        help: "Render format — csv is attached, html_table is inlined",
-        options: {
-          csv: "csv",
-          html_table: "html_table"
-        }
-      },
-      subject_template: {
-        label: "Subject Template",
-        help: "Email subject; {{name}} / {{date}} / {{rows}} are substituted"
-      },
-      owner_id: {
-        label: "Owner"
-      },
-      next_run_at: {
-        label: "Next Run",
-        help: "Dispatcher loads schedules where next_run_at <= now"
-      },
-      last_sent_at: {
-        label: "Last Sent"
-      },
-      last_status: {
-        label: "Last Status",
-        options: {
-          ok: "ok",
-          failed: "failed",
-          skipped: "skipped"
-        }
-      },
-      last_error: {
-        label: "Last Error"
       },
       created_at: {
         label: "Created At"

@@ -173,8 +173,13 @@ export interface AutomationContext {
      * a client that mirrors the row id into `params.recordId` is addressing the
      * row, not answering a question the flow asks.
      *
+     * One producer with no caller at all states the empty list: the schedule
+     * trigger (`ScheduleTrigger` in `@objectstack/trigger-schedule`, #19900).
+     * Its `jobId`, `flowName` and `schedule` keys in {@link params} are its own
+     * seeds, so none of them answers a question the flow asks.
+     *
      * Absent means the producer does not state provenance: a record-change,
-     * schedule, time-relative or webhook trigger, a `subflow` or `map` child run
+     * time-relative or webhook trigger, a `subflow` or `map` child run
      * (those two nodes drop the parent's list from the child context, because it
      * describes the PARENT's bag), or code calling `execute` directly. Its
      * consumer, the `screen` node's headless verdict in
@@ -586,8 +591,8 @@ export interface FlowRuntimeState {
  * One window of execution runs, plus the truncation fact the window alone
  * cannot carry (#19543).
  *
- * The sibling shape is `ExportJobListResult` (`contracts/export-service.ts`),
- * and the difference from it is deliberate: there is ⛔ NO `nextCursor` here.
+ * Unlike a cursor-paged list shape, and deliberately: there is ⛔ NO
+ * `nextCursor` here.
  * Nothing on this door has ever minted a continuation token, the request half
  * that would have spent one is a retired key, and a `nextCursor` no caller can
  * send back is the same declared-and-unusable shape #19543 exists to close.

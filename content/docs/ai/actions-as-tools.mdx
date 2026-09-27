@@ -11,8 +11,8 @@ Any business `Action` you already have — a `script` action or a Flow — can b
 reached by an LLM as a callable tool. On the **open edition** this happens
 through [`@objectstack/mcp`](/docs/ai): your own AI (Claude, Cursor, any MCP
 client, or a local model) connects over the Model Context Protocol, and the
-server exposes two business-action tools — `list_actions` and `run_action` —
-bound to the caller's principal. The agent invokes actions the same way the
+server exposes three business-action tools — `list_actions`, `run_action` and
+`resume_run` — bound to the caller's principal. The agent invokes actions the same way the
 Console toolbar does — but only actions the author explicitly exposed to AI, and
 only ones the caller is permitted to run. No cloud service and no ObjectOS
 runtime are required.
@@ -50,6 +50,7 @@ bound to the caller's principal (the API key acts as the user):
 |:---|:---|
 | `list_actions` | Enumerates the business actions that are **AI-exposed** (`ai.exposed: true`) **and** the caller is permitted to run — name, target object, description, whether it needs a `recordId`, whether it is destructive, and its declared params. |
 | `run_action` | Invokes an action by name with `{ recordId, params }`. Invocation is gated (author opt-in + capabilities); the action body then runs the app's registered logic as trusted code. |
+| `resume_run` | Continues a flow run that `run_action` answered with `status: "paused"` and a `screen`, by submitting that screen's field values as `{ runId, values }`. Only the user who started the run can resume it, behind the same gates as `run_action`. See [Completing a paused screen flow](#completing-a-paused-screen-flow). |
 
 `run_action` resolves the action and dispatches it through the framework's own
 action mechanism — `IDataEngine.executeAction` for `script` / inline-`body`
@@ -161,6 +162,53 @@ A BYO-AI client invokes `run_action` the same way it calls any MCP tool:
 // → invoke-gated as the caller; case_triage is a flow, so it honours runAs. Returns the flow result.
 ```
 
+### Completing a paused screen flow
+
+A flow action whose flow opens on a `screen` node stops there when the call did
+not already answer the screen. `run_action` then answers with the run paused and
+the form it is waiting for:
+
+```jsonc
+// tools/call → run_action
+{ "actionName": "schedule_followup", "recordId": "lead_42" }
+// → { "ok": true, "action": "schedule_followup", "objectName": "crm_lead", "recordId": "lead_42",
+//     "result": { "success": true, "status": "paused", "runId": "run_…",
+//                 "screen": { "nodeId": "screen_1", "fields": [ { "name": "subject", "required": true }, … ] } } }
+```
+
+`resume_run` submits the screen's values, keyed by the names in `screen.fields`,
+and the run continues from that screen:
+
+```jsonc
+// tools/call → resume_run
+{ "runId": "run_…", "values": { "subject": "Call back", "dueDate": "2026-10-01" } }
+// → the same envelope as run_action: the run completed, or it paused again on its
+//   next screen, which you answer with another resume_run.
+```
+
+The call is admitted only where `run_action` would admit starting the same flow
+on the same record for this caller:
+
+- **Only your own run.** The user whose call started the run is the only one
+  who can resume it. Another user's run id, a finished run and an unknown id all
+  answer the same `404`, so a run id says nothing about runs you did not start.
+- **The same gates as `run_action`.** A flow action exposed to AI
+  (`ai.exposed`) must target the run's flow on the run's object, and the caller
+  must pass its `requiredPermissions` and its activation switch. An action
+  flagged `ai.requiresConfirmation` needs `confirm: true` on the resume as well,
+  because the flow's writes happen after the screen.
+- **The record is read again as you.** A subject record you can no longer read
+  is refused `RECORD_NOT_FOUND` (`404`), as `run_action` refuses it.
+- **Screens only.** A run waiting on anything other than a screen (a timer
+  `wait`, an approval) is refused `409` and left as it is.
+
+A submission that does not satisfy the screen (a required field missing, a
+field the screen does not declare) is refused `400` and the run stays paused,
+so you can correct the values and call `resume_run` again. Every refusal leaves
+the run parked. The engine's answers carry the same code and status the REST
+resume route (`POST /api/v1/automation/:name/runs/:runId/resume`) gives for the
+same result.
+
 ## Human-in-the-loop approval
 
 Destructive actions are too risky to let an LLM execute unattended, but locking
@@ -212,6 +260,8 @@ On the open MCP path the action gate works like this:
    `run_action` refuses anything the user cannot invoke.
 4. The subject record (for record-context actions) is loaded under the caller's
    RLS, so an action over a record the user cannot see reads as not-found.
+   `resume_run` applies steps 2–4 again before a paused run continues, and only
+   the user who started the run can resume it.
 5. The action body then executes with the app's full data authority (flows honour
    `runAs`), and the dispatch is audit-logged against the real user.
 

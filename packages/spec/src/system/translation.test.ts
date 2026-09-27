@@ -1276,8 +1276,10 @@ describe('translation unknown-key strictness (#4001)', () => {
   it('still accepts every declared group together', () => {
     // The shape is spread into three schemas (per-app bundle entry, platform
     // bundle entry, metadata item); this is the guard against closing one of
-    // them against a stale key list. `settings` is the one group the per-app
-    // face does NOT take, so it is authored separately below.
+    // them against a stale key list. `settings` is the one group only the
+    // PLATFORM face takes (the item left it with #19620), so it is authored
+    // separately below and its refusal at both application doors is pinned in
+    // the block after this one.
     const body = {
       objects: { account: { label: 'Account', _views: { all: { label: 'All', emptyState: { title: 'None' } } } } },
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
@@ -1292,7 +1294,14 @@ describe('translation unknown-key strictness (#4001)', () => {
     const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
     expect(() => TranslationDataSchema.parse(body)).not.toThrow();
     expect(() => PlatformTranslationDataSchema.parse({ ...body, settings })).not.toThrow();
-    expect(() => TranslationItemSchema.parse({ locale: 'en', ...body, settings })).not.toThrow();
+    expect(() => TranslationItemSchema.parse({ locale: 'en', ...body })).not.toThrow();
+    // #19620: the SAME full body plus `settings` is refused on the item — and
+    // only for `settings`, so the refusal cannot be a stale key list elsewhere.
+    const item = TranslationItemSchema.safeParse({ locale: 'en', ...body, settings });
+    expect(item.success).toBe(false);
+    expect(item.error?.issues.map((i) => [i.code, (i as { keys?: string[] }).keys])).toEqual([
+      ['unrecognized_keys', ['settings']],
+    ]);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1329,12 +1338,54 @@ describe('translation unknown-key strictness (#4001)', () => {
       expect(() => defineTranslationBundle({ 'zh-CN': { settings } } as never)).toThrow(/PLATFORM group/s);
     });
 
-    it('still accepts it on the platform face and on the registered `translation` item', () => {
-      // The over-acceptance control for the refusals above: the group did not
-      // leave the contract, it left ONE of its three faces.
+    it('still accepts it on the platform face', () => {
+      // The over-acceptance control for the refusals above and below: the
+      // group did not leave the contract, it left the two APPLICATION faces
+      // and stays on the platform's.
       expect(() => PlatformTranslationDataSchema.parse({ settings })).not.toThrow();
       expect(() => PlatformTranslationBundleSchema.parse({ 'zh-CN': { settings } })).not.toThrow();
-      expect(() => TranslationItemSchema.parse({ locale: 'zh-CN', settings })).not.toThrow();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // #19620 — the `translation` ITEM door refuses `settings` too (ruling batch
+  // #210 item 2 letter B: two authoring doors, one app metadata type, one
+  // accepted shape). It used to ACCEPT it — and there it overrode the
+  // platform's copy, not merely filled gaps.
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('item-door `settings` is refused with the platform-only prescription (#19620)', () => {
+    const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
+
+    it.each([
+      ['`settings`', 'settings'],
+      // The singular was an ALIAS for `settings` on this door too; it rides
+      // the prescription now, never a rename into a second rejection.
+      ['the singular `setting`', 'setting'],
+    ])('refuses %s on a `translation` item', (_what, key) => {
+      const result = TranslationItemSchema.safeParse({ locale: 'zh-CN', [key]: settings });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue?.path).toEqual([]);
+      expect((issue as { keys?: string[] } | undefined)?.keys).toEqual([key]);
+      const message = issue?.message ?? '';
+      // The prescription names the group platform-only and the face that
+      // takes it — not a rename, which would send the author into a second
+      // rejection.
+      expect(message).toContain('PLATFORM group');
+      expect(message).toContain('PlatformTranslationData');
+      expect(message).not.toContain(`\`${key}\` →`);
+    });
+
+    it('refuses it through `defineTranslation`, the file-authored item door', () => {
+      expect(() => defineTranslation({ locale: 'zh-CN', settings } as never)).toThrow(/PLATFORM group/s);
+    });
+
+    it('CONTROL — the same item without `settings` parses, `settingsCommon` included', () => {
+      expect(() => TranslationItemSchema.parse({
+        locale: 'zh-CN',
+        settingsCommon: { sourceLabels: { tenant: '租户' } },
+        apps: { crm: { label: '客户关系管理' } },
+      })).not.toThrow();
     });
   });
 

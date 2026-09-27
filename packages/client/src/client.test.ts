@@ -390,93 +390,21 @@ describe('ObjectStackClient', () => {
     });
 });
 
-describe('Reports namespace (#3587 gap closure)', () => {
-    it('reports.list pins GET /reports with filters and unwraps {data}', async () => {
-        const { client, fetchMock } = createMockClient({ data: [{ id: 'r1' }] });
-        const rows = await client.reports.list({ object: 'lead', ownerId: 'u1' });
-        expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/reports?object=lead&ownerId=u1',
-        );
-        expect(rows).toEqual([{ id: 'r1' }]);
-    });
-
-    it('reports.save pins POST /reports', async () => {
-        const { client, fetchMock } = createMockClient({ id: 'r1' });
-        await client.reports.save({ name: 'Pipeline', object: 'lead', query: { fields: ['id'] } });
-        const [url, init] = fetchMock.mock.calls[0];
-        expect(String(url)).toBe('http://localhost:3000/api/v1/reports');
-        expect(init.method).toBe('POST');
-        expect(JSON.parse(init.body)).toEqual({ name: 'Pipeline', object: 'lead', query: { fields: ['id'] } });
-    });
-
-    // [#11926] The literal below is the ORIGINAL fixture of the test above,
-    // preserved verbatim rather than repaired. For as long as `reports.save`
-    // took `any` it sat there constructing an input the service contract
-    // REFUSES — `SaveReportInput.query` is required — against a mock transport
-    // that never reaches a service, so no run could ever have failed on it. It
-    // is evidence, and giving it a `query` would have silenced the evidence
-    // without closing anything. So it moves here, and the compiler asserts the
-    // refusal instead.
-    //
-    // This is a bidirectional pin, not a comment. `client.test.ts` is compiled
-    // by `tsconfig.test.json` — named by this package's `typecheck` script —
-    // and holds no `test-typecheck-debt.json` entry, so an unlisted file must
-    // have zero errors. Widen the parameter back to `any` and the directive
-    // below stops matching an error: tsc reds with TS2578, "unused
-    // '@ts-expect-error' directive". It cannot rot into a phantom check.
-    it('[#11926] reports.save refuses a query-less report at the type level', async () => {
-        const { client, fetchMock } = createMockClient({ id: 'r1' });
-        // @ts-expect-error — `query` is required by `SaveReportInput`.
-        await client.reports.save({ name: 'Pipeline', object: 'lead' });
-        // The SDK is a transport, not a second validator: the request still
-        // goes out unaltered. The refusal ON THE WIRE belongs to the route and
-        // is pinned in packages/rest/src/rest.test.ts — see
-        // 'POST /reports refuses a body the service contract requires more of'.
-        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ name: 'Pipeline', object: 'lead' });
-    });
-
-    it('reports.get / delete pin /reports/:id and delete tolerates 204', async () => {
-        const { client, fetchMock } = createMockClient({ id: 'r1' });
-        await client.reports.get('r1');
-        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1');
-
-        const del = createMockClient(undefined, 204);
-        // A 204 has no JSON body — the method must not try to parse one.
-        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
-        const out = await del.client.reports.delete('r1');
-        expect(String(del.fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1');
-        expect(del.fetchMock.mock.calls[0][1].method).toBe('DELETE');
-        expect(out).toEqual({ deleted: true });
-    });
-
-    it('reports.run pins POST /reports/:id/run', async () => {
-        const { client, fetchMock } = createMockClient({ rows: [] });
-        await client.reports.run('r1');
-        const [url, init] = fetchMock.mock.calls[0];
-        expect(String(url)).toBe('http://localhost:3000/api/v1/reports/r1/run');
-        expect(init.method).toBe('POST');
-    });
-
-    it('reports.schedule pins POST /reports/:id/schedule with the schedule body', async () => {
-        const { client, fetchMock } = createMockClient({ id: 's1' });
-        await client.reports.schedule('r1', { recipients: ['a@example.com'], cronExpression: '0 8 * * 1' });
-        const [url, init] = fetchMock.mock.calls[0];
-        expect(String(url)).toBe('http://localhost:3000/api/v1/reports/r1/schedule');
-        expect(JSON.parse(init.body)).toEqual({ recipients: ['a@example.com'], cronExpression: '0 8 * * 1' });
-    });
-
-    it('reports.listSchedules / unschedule pin the schedule routes', async () => {
-        const { client, fetchMock } = createMockClient({ data: [{ id: 's1' }] });
-        const rows = await client.reports.listSchedules('r1');
-        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/r1/schedules');
-        expect(rows).toEqual([{ id: 's1' }]);
-
-        const del = createMockClient(undefined, 204);
-        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
-        const out = await del.client.reports.unschedule('s1');
-        expect(String(del.fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/reports/schedules/s1');
-        expect(del.fetchMock.mock.calls[0][1].method).toBe('DELETE');
-        expect(out).toEqual({ deleted: true });
+describe('[#20102] the saved-report namespace is retired', () => {
+    // The `reports` namespace left with the `/api/v1/reports` routes it
+    // called. Both halves are pinned: a caller that still writes
+    // `client.reports` is a compile error (tsc checks this file through
+    // `tsconfig.test.json`, so an unused directive reds as TS2578 the moment
+    // the namespace comes back), and at runtime there is no such member to
+    // reach for.
+    it('has no `reports` member, at the type level or at runtime', () => {
+        const { client, fetchMock } = createMockClient({ data: [] });
+        // @ts-expect-error — `reports` was retired; a report is `report` metadata.
+        const retired = client.reports;
+        expect(retired).toBeUndefined();
+        expect('reports' in client).toBe(false);
+        // Nothing was sent: the member is absent, not a stub that still calls out.
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });
 
@@ -1291,18 +1219,24 @@ describe('FilterBuilder enhancements', () => {
 // ==========================================
 
 describe('ObjectStackClient.automation', () => {
-    it('should list flows', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { flows: ['flow_a', 'flow_b'], total: 2, hasMore: false },
-        });
+    // [#19543, door ④] `automation.list` is retired with `GET /api/v1/automation`;
+    // the flow list is `meta.getItems('flow')` (`GET /api/v1/meta/flow`).
+    it('declares no `list` — the retired flow-list door has no SDK method', () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: {} });
+        expect('list' in client.automation).toBe(false);
+        // @ts-expect-error `automation.list` was removed; calling it is a compile error.
+        void client.automation.list;
+        // Anti-vacuity: the namespace itself is live and its sibling reads survive.
+        expect(typeof client.automation.get).toBe('function');
+        expect(typeof client.automation.getRuntimeStatus).toBe('function');
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 
-        const result = await client.automation.list();
-        expect(fetchMock).toHaveBeenCalledWith(
-            'http://localhost:3000/api/v1/automation',
-            expect.any(Object),
-        );
-        expect(result.flows).toEqual(['flow_a', 'flow_b']);
+    it('the replacement read — meta.getItems(\'flow\') — targets GET /api/v1/meta/flow', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { type: 'flow', items: [] } });
+        await client.meta.getItems('flow');
+        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/meta/flow');
+        expect(fetchMock.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
     });
 
     it('should get a flow by name', async () => {

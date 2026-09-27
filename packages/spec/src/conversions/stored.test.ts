@@ -168,6 +168,34 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
     });
   });
 
+  // #19620 — `translation` has no manifest-collection spelling, so until this
+  // the stored pass returned every translation row untouched and no seam ever
+  // replayed a translation conversion over one. The item door's `settings` is
+  // the case that made it matter: a stored item's copy overrides the
+  // platform's, because the runtime-authored layer is read over the bundles.
+  describe('stored translation rows (translation-per-app-settings-removed, #19620)', () => {
+    const storedItem = () => ({
+      name: 'zh-CN',
+      locale: 'zh-CN',
+      settings: { mail: { title: '邮件' } },
+      apps: { crm: { label: '客户关系管理' } },
+    });
+
+    it.each(['translation', 'translations'])('drops `settings` from a stored `%s` row, loudly, keeping the rest', (type) => {
+      const notices: ConversionNotice[] = [];
+      const out = applyConversionsToStoredItem(type, storedItem(), { onNotice: (n) => notices.push(n) });
+      expect(out).toEqual({ name: 'zh-CN', locale: 'zh-CN', apps: { crm: { label: '客户关系管理' } } });
+      expect(notices.map((n) => [n.conversionId, n.from, n.to])).toEqual([
+        ['translation-per-app-settings-removed', 'settings', '(removed)'],
+      ]);
+    });
+
+    it('CONTROL — a canonical translation row passes through by reference', () => {
+      const row = { name: 'zh-CN', locale: 'zh-CN', apps: { crm: { label: '客户关系管理' } } };
+      expect(applyConversionsToStoredItem('translation', row)).toBe(row);
+    });
+  });
+
   it('threads the conflict guard context through (flow callers that own a registry)', () => {
     const flow = {
       name: 'notify_flow',

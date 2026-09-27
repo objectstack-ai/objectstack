@@ -23,6 +23,14 @@
  * own pins, because the #5685 side of this file is what stops a narrowing from
  * running on past the query path.
  *
+ * [#19751] The absent-value carve-out went the same way, for the same reason: it
+ * was recorded as one the query path makes, and measurement found the query path
+ * refusing it — a rule with no `value` lowers to `[field, operator]`, which the
+ * runtime refuses with its undefined-comparand `INVALID_FILTER` / 400 on every
+ * operator that takes a value. Two pins moved from the accepted side to the
+ * refused side, and the four valueless operators are now the ONLY carve-out for
+ * an absent value; the sweep below holds that in both directions.
+ *
  * Every rejection pin asserts the issue PATH and the message's leading sentence,
  * not merely that a throw happened: a bare `.toThrow()` cannot tell "refused for
  * the right reason at the right key" from "refused because the value union
@@ -31,6 +39,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  ListViewSchema,
   VIEW_FILTER_LIST_VALUE_OPERATORS,
   VIEW_FILTER_OPERATORS,
   VIEW_FILTER_PAIR_VALUE_OPERATORS,
@@ -66,6 +75,15 @@ const UNSHAPED_VALUE_OPERATORS: readonly string[] = VIEW_FILTER_OPERATORS.filter
         ...VALUELESS_OPERATORS,
       ] as readonly string[]
     ).includes(operator),
+);
+
+/**
+ * Every operator that TAKES a value — the canonical vocabulary minus the four
+ * valueless ones. DERIVED, like the set above, and wider than it: it keeps the
+ * list and range operators, whose own arms already refuse an absent value.
+ */
+const VALUE_TAKING_OPERATORS: readonly string[] = VIEW_FILTER_OPERATORS.filter(
+  (operator) => !(VALUELESS_OPERATORS as readonly string[]).includes(operator),
 );
 
 /** The single `value`-path issue a shape refusal must produce. */
@@ -185,10 +203,10 @@ describe('#6227 — what stays accepted (the #5685 side: never stricter than the
     ['greater_than + ISO string', { field: 'd', operator: 'greater_than', value: '2026-01-01' }],
     ['before + string', { field: 'd', operator: 'before', value: '2026-01-01' }],
     ['after + string', { field: 'd', operator: 'after', value: '2026-01-01' }],
-    // A scalar operator with NO value: `value` is optional and absence is not a
-    // shape. The scalar arm must not turn an omitted comparand into a refusal.
-    ['equals + omitted', { field: 'f', operator: 'equals' }],
-    ['greater_than + omitted', { field: 'd', operator: 'greater_than' }],
+    // [#19751] `equals + omitted` and `greater_than + omitted` sat here, recorded
+    // as "absence is not a shape". They moved to the absent-value block below:
+    // the query path refuses both, so accepting them was the #5685 mismatch
+    // pointing the other way.
     // Every scalar type the declared union carries still parses on a scalar operator.
     ['equals + null', { field: 'f', operator: 'equals', value: null }],
     ['equals + boolean', { field: 'f', operator: 'equals', value: false }],
@@ -290,6 +308,117 @@ describe('#19514 — the scalar arm, in both directions', () => {
       expect(parse({ field: 'f', operator, value: 'x' }).success, operator).toBe(true);
       expect(parse({ field: 'f', operator }).success, operator).toBe(true);
     }
+  });
+});
+
+describe('#19751 — an ABSENT value on an operator that takes one is refused', () => {
+  /** The rule as a view stores it when the comparand was never written. */
+  const valueless = (operator: string, field = 'f') => ({ field, operator });
+
+  it.each([
+    ['equals + omitted', 'equals'],
+    ['greater_than + omitted', 'greater_than'],
+  ])('refuses %s — recorded as ACCEPTED until this change, reversed on measurement', (_label, operator) => {
+    const issue = valueIssue(parse(valueless(operator)));
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['value']);
+    expect(issue.message).toContain(`Filter comparand for operator "${operator}" on field "f" is undefined.`);
+  });
+
+  it('refuses the card example, naming the operator and the field the author wrote', () => {
+    const issue = valueIssue(parse(valueless('icontains', 'name')));
+    // Leading sentence: the runtime's undefined-comparand sentence, with the
+    // location named in the view vocabulary (a view rule has no `where` path).
+    expect(issue.message).toContain('Filter comparand for operator "icontains" on field "name" is undefined.');
+    // Traceable to the query-path refusal by its ERROR CODE, not a tracker id.
+    expect(issue.message).toContain('400 INVALID_FILTER');
+  });
+
+  it('sweeps every operator that takes a value: an omitted value REFUSES at the value path', () => {
+    expect(VALUE_TAKING_OPERATORS.length).toBeGreaterThan(0);
+    for (const operator of VALUE_TAKING_OPERATORS) {
+      const result = parse(valueless(operator));
+      expect(result.success, `${operator} + omitted`).toBe(false);
+      if (result.success) continue;
+      const issues = result.error.issues.filter((i) => i.path.join('.') === 'value');
+      // ONE issue — `icontains` must not be answered twice (shape arm + comparand arm).
+      expect(issues, operator).toHaveLength(1);
+    }
+  });
+
+  it('answers the SCALAR operators with the new wording, and leaves list and range to their own arms', () => {
+    // The scalar set — every value-taking operator outside the list and range
+    // sets — is where absence used to ride through. The list and range arms
+    // refused an absent value before this change and keep their own wording, so
+    // an author is told what SHAPE to write rather than only that one is missing.
+    for (const operator of UNSHAPED_VALUE_OPERATORS) {
+      const issue = valueIssue(parse(valueless(operator)));
+      expect(issue.message, operator).toContain(`Filter comparand for operator "${operator}" on field "f" is undefined.`);
+      expect(issue.message, operator).not.toContain('requires a SCALAR value');
+    }
+    for (const operator of VIEW_FILTER_LIST_VALUE_OPERATORS) {
+      const issue = valueIssue(parse(valueless(operator)));
+      expect(issue.message, operator).toContain('requires an ARRAY of values');
+      expect(issue.message, operator).not.toContain('Filter comparand');
+    }
+    for (const operator of VIEW_FILTER_PAIR_VALUE_OPERATORS) {
+      const issue = valueIssue(parse(valueless(operator)));
+      expect(issue.message, operator).toContain('requires a [min, max] value array');
+      expect(issue.message, operator).not.toContain('Filter comparand');
+    }
+  });
+
+  it('refuses a key that is PRESENT but undefined exactly as an omitted one', () => {
+    // `{ value: undefined }` is what a JS producer spreading an unset variable
+    // writes; the runtime cannot tell it from an omitted key, and neither does this.
+    const issue = valueIssue(parse({ field: 'f', operator: 'contains', value: undefined }));
+    expect(issue.message).toContain('Filter comparand for operator "contains" on field "f" is undefined.');
+  });
+
+  it('refuses through an ALIAS spelling too, naming the CANONICAL operator', () => {
+    for (const [alias, canonical] of [['eq', 'equals'], ['gt', 'greater_than'], ['startsWith', 'starts_with']]) {
+      const issue = valueIssue(parse(valueless(alias!)));
+      expect(issue.message, alias).toContain(`Filter comparand for operator "${canonical}"`);
+    }
+  });
+
+  it('prescribes both repairs: write the value, or use an operator that takes none', () => {
+    const issue = valueIssue(parse(valueless('equals')));
+    expect(issue.message).toContain('write the value to compare against');
+    // The valueless operators are named from the schema's own set — every one of
+    // them, so an author who meant "no value" finds the spelling for it.
+    for (const operator of VALUELESS_OPERATORS) expect(issue.message).toContain(`"${operator}"`);
+  });
+
+  it('carries no internal tracker id — the reader of this string cannot open one', () => {
+    const issue = valueIssue(parse(valueless('equals')));
+    expect(issue.message).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
+  });
+
+  it('keeps an absent value LEGAL on exactly the four valueless operators — both directions', () => {
+    // The equality this file cannot import: the schema's valueless set is
+    // private, and this transcription is held to it by behaviour. An operator in
+    // the schema's set but missing here would refuse below as value-taking; one
+    // listed here but not in the schema's set would refuse in the second loop.
+    for (const operator of VIEW_FILTER_OPERATORS) {
+      const accepted = parse(valueless(operator)).success;
+      expect(accepted, `${operator} + omitted`).toBe((VALUELESS_OPERATORS as readonly string[]).includes(operator));
+    }
+    for (const operator of VALUELESS_OPERATORS) {
+      expect(parse(valueless(operator)).success, operator).toBe(true);
+    }
+  });
+
+  it('reaches through a carrier: a ListView filter reports the rule by its index', () => {
+    const result = ListViewSchema.safeParse({ columns: ['name'], filter: [
+      { field: 'status', operator: 'equals', value: 'open' },
+      { field: 'name', operator: 'icontains' },
+    ] });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('unreachable');
+    const issues = result.error.issues.filter((i) => i.path.join('.') === 'filter.1.value');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('Filter comparand for operator "icontains" on field "name" is undefined.');
   });
 });
 

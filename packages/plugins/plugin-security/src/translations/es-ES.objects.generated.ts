@@ -318,6 +318,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID de asignación",
         help: "UUID de la asignación."
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the permission set assigned to them (computed on read)"
+      },
       user_id: {
         label: "Usuario",
         help: "Clave foránea a sys_user."
@@ -371,6 +375,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID de vinculación",
         help: "UUID de la vinculación puesto-conjunto de permisos."
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the position and the permission set bound to it (computed on read)"
+      },
       position_id: {
         label: "Puesto",
         help: "Clave foránea a sys_position."
@@ -395,6 +403,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de asignación",
         help: "UUID de la asignación usuario-puesto."
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the position they hold (computed on read)"
       },
       user_id: {
         label: "Usuario",

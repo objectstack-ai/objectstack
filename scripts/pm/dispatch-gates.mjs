@@ -12709,10 +12709,12 @@ export function changedLineLines(size) {
     ];
   }
   return [
-    `${reading} ⛔ OVER — this PR lands only by a HUMAN MERGE (maintainer ruling 2026-09-18; no exemption for generated` +
-      ' files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues it, or' +
-      ' arms auto-merge — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读, review requested' +
-      ' from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the PR\'s own number.',
+    `${reading} ⛔ OVER — this PR lands as a Tier H surface does: an authorized APPROVED review (GOVERNED_APPROVERS, on ANY` +
+      ' commit) and then the owning seat, or a HUMAN MERGE (maintainer rulings 2026-09-18 and 2026-09-27; no exemption for' +
+      ' generated files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues' +
+      ' it, or arms auto-merge before that — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读,' +
+      ' review requested from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the' +
+      ' PR\'s own number.',
   ];
 }
 
@@ -25666,8 +25668,9 @@ function selfTest() {
 
   // ── The changed-line reading beside the tier verdict (2026-09-18 ruling) ──
   const overLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 }).join('\n');
-  t('over the threshold, the line says HUMAN MERGE, names the governed terminal and the landing pre-check',
-    overLine.includes('HUMAN MERGE') && overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
+  t('over the threshold, the line names BOTH landings — an authorized APPROVED review or a HUMAN MERGE — the governed terminal and the landing pre-check',
+    overLine.includes('HUMAN MERGE') && overLine.includes('authorized APPROVED review (GOVERNED_APPROVERS, on ANY commit)') && !overLine.includes('lands only by') &&
+      overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
   const atLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 }).join('\n');
   t('exactly at the threshold is under it — strictly greater, as the gate reads it', atLine.includes('under.') && !atLine.includes('HUMAN MERGE'), atLine);
   const noneLine = changedLineLines(null).join('\n');

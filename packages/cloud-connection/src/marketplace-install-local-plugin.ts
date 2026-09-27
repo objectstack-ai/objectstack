@@ -23,6 +23,10 @@
  *          body: { packageId: string, versionId?: string }   (default: "latest")
  *          → fetches manifest from cloud, caches to disk, registers via
  *            the kernel's `manifest` service. Returns the installed entry.
+ *            The manifest's `id` is parsed through `ManifestSchema.shape.id`
+ *            before anything else looks at it; an id the declaration refuses
+ *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
+ *            502 for a cloud snapshot) and nothing is registered or written.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -69,6 +73,7 @@ import {
     type GlobalUniqueFinding,
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -670,12 +675,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         if (inlineManifest) {
             manifest = normalizeBundle(inlineManifest);
-            packageId = String(manifest.id ?? manifest.name ?? '').trim();
+            // The package id on this branch IS the manifest's declared id, so
+            // it is assigned below, once the id gate has parsed it — there is
+            // no second, looser derivation of it here.
+            packageId = '';
             version = String(manifest.version ?? 'unknown');
             resolvedVersionId = String(body?.versionId ?? version);
-            if (!packageId) {
-                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Inline manifest must have an "id" or "name".' } }, 400);
-            }
         } else {
             if (!this.cloudUrl) {
                 return c.json({ success: false, error: { code: 'MARKETPLACE_UNAVAILABLE', message: 'OS_CLOUD_URL not configured.' } }, 503);
@@ -760,10 +765,62 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             version = String(data?.version ?? 'unknown');
         }
 
-        const manifestId = String(manifest?.id ?? manifest?.name ?? '');
-        if (!manifest || !manifestId) {
+        if (!manifest || typeof manifest !== 'object') {
             return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' } }, inlineManifest ? 400 : 502);
         }
+
+        // 1b. [#19576] ⭐ THE DOOR PARSES THE PACKAGE ID — through its
+        //     declaration, `ManifestSchema.shape.id`, by reference: never a
+        //     copy of the grammar, so a future move of the reverse-domain rule
+        //     reaches this door with no further edit.
+        //
+        //     Before this, the id was `String(manifest?.id ?? manifest?.name)`
+        //     and nothing parsed it, so an id the declaration refuses
+        //     (`late-app`, `com.example.my_erp`, a number, a manifest carrying
+        //     only a `name`) installed cleanly and became the key for the
+        //     ledger file and for every `:manifestId` route. The other two
+        //     package-install doors — `POST /api/v1/packages`
+        //     (`packages/runtime/src/domains/packages.ts`) and the protocol
+        //     install primitive — already refuse those ids. This door never
+        //     calls the primitive, so neither of their gates covered it.
+        //
+        //     ⛔ `manifest.name` is NOT an id. `ManifestSchema` declares `id`,
+        //     and `name` is a display label with no pattern at all; falling
+        //     back to it is exactly how a label became a ledger key.
+        //
+        //     ⭐ HERE, AND ONLY HERE: this is the one point where both branches
+        //     — the inline manifest (after `normalizeBundle` has flattened a
+        //     compiled bundle) and the cloud-fetched snapshot — have
+        //     converged, and it sits ahead of the collision check, the posture
+        //     gate, the hot-register and the ledger write, so none of them
+        //     ever sees an unparsed id. Validity is answered BEFORE collision.
+        //
+        //     ⛔ Rehydrate and the three `:manifestId` routes (DELETE,
+        //     reseed, purge) are deliberately NOT gated: they act on ledger
+        //     entries that already exist, and gating them would strand an
+        //     entry an older build installed under a now-refused id — it could
+        //     no longer be healed or removed. Such an entry still rehydrates
+        //     and can still be deleted; it cannot be RE-installed under that
+        //     id.
+        //
+        //     The status follows the split this door already makes for an
+        //     invalid manifest: caller input answers 400, an upstream snapshot
+        //     502. The sentence is the declaration's own, surfaced rather than
+        //     reworded. A non-string id fails the leg's type check first,
+        //     whose generic sentence names neither the key nor the form, so
+        //     that case is answered with `manifestIdRefusal` directly — the
+        //     same helper the leg's own pattern refusal is built from.
+        const rawId: unknown = manifest.id;
+        const declaredId = ManifestSchema.shape.id.safeParse(rawId);
+        if (!declaredId.success) {
+            const [issue] = declaredId.error.issues;
+            const message = typeof rawId === 'string' && issue?.message
+                ? issue.message
+                : manifestIdRefusal('manifest.id', rawId);
+            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message } }, inlineManifest ? 400 : 502);
+        }
+        const manifestId = declaredId.data;
+        if (inlineManifest) packageId = manifestId;
 
         // 2. Conflict check — refuse to overwrite user-authored apps
         const conflict = this.findConflict(ctx, manifestId);

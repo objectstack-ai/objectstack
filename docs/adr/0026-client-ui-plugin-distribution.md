@@ -104,6 +104,17 @@ A UI plugin is an `.osplugin` with:
 > `ManifestSchema` and `PluginSchema` refuse `ui-plugin`; the example above and
 > §3.7 use `ui`.
 
+> **Note (2026-09-23, #16140) — the example above is the proposed shape.** It
+> is kept as this ADR proposes it, and the current `ManifestSchema`
+> (`packages/spec/src/kernel/manifest.zod.ts#ManifestSchema`) refuses it as
+> written. What it proposes beyond that schema: `runtime: "ui"` (the
+> `PluginRuntimeSchema` enum is `node` / `sandbox` / `worker`);
+> `engines.objectui` and `engines.react`; the top-level `ui` block; and
+> `permissions.data` and `permissions.navigation`. It also omits `name`, which
+> `ManifestSchema` requires. The rule for pasteable ADR examples is read this
+> way: an example validates against the current schema, or carries a caption
+> that names the keys it proposes beyond it.
+
 `extends` reuses the existing `capabilities.extensionPoints`/`extensions` seam;
 `ui.shared` lists singletons the host injects (never bundled — same externalize
 rule as ADR-0025 §3.3, applied to browser deps).

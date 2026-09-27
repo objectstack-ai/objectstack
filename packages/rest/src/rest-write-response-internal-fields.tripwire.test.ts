@@ -353,12 +353,6 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'DELETE /api/v1/sharing/rules/:idOrName': { kind: 'no-record-echo', why: 'Rule delete receipt.' },
   'POST /api/v1/sharing/rules/:idOrName/evaluate': { kind: 'no-record-echo', why: 'Evaluation verdict (ids/counts).' },
 
-  'POST /api/v1/reports': { kind: 'no-record-echo', why: 'Report definition (metadata).' },
-  'DELETE /api/v1/reports/:id': { kind: 'no-record-echo', why: 'Delete receipt.' },
-  'POST /api/v1/reports/:id/run': { kind: 'no-record-echo', why: 'Aggregated report result set, not a write response.' },
-  'POST /api/v1/reports/:id/schedule': { kind: 'no-record-echo', why: 'Schedule definition (metadata).' },
-  'DELETE /api/v1/reports/schedules/:scheduleId': { kind: 'no-record-echo', why: 'Delete receipt.' },
-
   // Approvals: every arm answers the approval REQUEST/step state machine.
   'POST /api/v1/approvals/requests/:id/approve': { kind: 'no-record-echo', why: 'Approval request state, not the target row.' },
   'POST /api/v1/approvals/requests/:id/reject': { kind: 'no-record-echo', why: 'Approval request state.' },

@@ -27,15 +27,12 @@
  *
  * ## Why an allowance table and not a flat zero
  *
- * Three files in this tree hold calls that are legitimately direct (four calls
+ * Two files in this tree hold calls that are legitimately direct (two calls
  * in all), and each is a different reason rather than one exemption repeated:
  *
  *   - `union-branch-projection.ts`'s `projectsUnderStrictMode` asks zod whether
  *     a node is representable at all and DISCARDS the result — a yes/no
  *     question, not a projection;
- *   - `check-react-blocks-declaration-parity.ts` reads a schema's accepted KEY
- *     set twice, for a declaration-parity gate; the override emits keywords,
- *     never keys, and the gate publishes nothing;
  *   - `build-react-blocks-contract.ts` renders a markdown prop table into the
  *     governed `skills/**` catalog — a published artifact, but not a published
  *     JSON Schema, and rewriting it is a governed-surface decision of its own.
@@ -90,11 +87,10 @@ function collectScriptSources(): Map<string, string> {
 
 /**
  * Direct `z.toJSONSchema(` calls in CODE — comments and string literals both
- * masked. Masking literals as well as comments is not tidiness: two files here
- * name `z.toJSONSchema()` inside text they PRINT — `openapi-self-consistency.ts`
- * tells an author it "threw for these", `check-react-blocks-declaration-parity.ts`
- * explains the pipe in a help paragraph. Counted as calls, those earn rows in
- * the allowance table for prose, which is the rot the table exists to prevent.
+ * masked. Masking literals as well as comments is not tidiness: a file here can
+ * name `z.toJSONSchema()` inside text it PRINTS — `openapi-self-consistency.ts`
+ * tells an author it "threw for these". Counted as calls, such text earns a row
+ * in the allowance table for prose, which is the rot the table exists to prevent.
  */
 function directCallCount(source: string): number {
   return (maskCommentsAndLiterals(source).match(/\bz\.toJSONSchema\s*\(/g) ?? []).length;
@@ -116,11 +112,6 @@ const DECLARED_DIRECT_CALLS: ReadonlyArray<{ file: string; count: number; why: s
     file: 'lib/union-branch-projection.ts',
     count: 1,
     why: 'projectsUnderStrictMode asks zod whether a node is representable and DISCARDS the result; nothing it produces is published',
-  },
-  {
-    file: 'check-react-blocks-declaration-parity.ts',
-    count: 2,
-    why: "deriveNodeContractKeys() and specProps() read a schema's accepted KEY set for a declaration-parity gate; it publishes nothing, and the override emits keywords, never keys",
   },
   {
     file: 'build-react-blocks-contract.ts',

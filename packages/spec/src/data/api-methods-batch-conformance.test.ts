@@ -61,17 +61,22 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `62597c588`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-23 — previously measured at `87af769e9`, `53ded82bf`,
-  // `a472b0716`, `00d3f09c5`, `67dadd602`, before that at `d8ec8d6d4`,
-  // `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at `6314e87f2`.
-  // `ObjectGrid.tsx` changed again across the move off `87af769e9` (119
-  // insertions, 9 deletions), and THIS time the selection block's CONTENT
+  // (`.objectui-sha` = `f8a9d0fb0`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-24 — previously measured at `62597c588`, `87af769e9`,
+  // `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before that at
+  // `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
+  // `6314e87f2`. On the hop off `62597c588`, `ObjectGrid.tsx` changed again
+  // (18 insertions, 5 deletions: objectui#10083's `rowActionsDeclared` row-menu
+  // signal and objectui#9909's currency display locale), none of it inside the
+  // selection block, which only MOVED: `ObjectGrid.tsx:4032-4059` here, still
+  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the
+  // same reading below. `ObjectGrid.tsx` changed across the move off
+  // `87af769e9` too (119 insertions, 9 deletions), and THAT time the selection block's CONTENT
   // moved, not only its position: objectui#10218 (`62597c588` itself)
   // rewrote the `selection` arm to "presence enables; an explicit off wins",
   // so an authored `selection` object with no `type` now selects
   // (`DEFAULT_SELECTION_TYPE`, `'multiple'`) where it used to fall through.
-  // The block is `ObjectGrid.tsx:4024-4051` here — `3940-3955` at `87af769e9`,
+  // The block was `ObjectGrid.tsx:4024-4051` at `62597c588` — `3940-3955` at `87af769e9`,
   // `3538-3553` at `53ded82bf` — and no longer hashes to the
   // `6133933199230670e29d8c7f51c558d86a0af1d2` the previous three hops
   // recorded (`c88443302d40c2db739ddb235470bafa29056e2e` now). Re-READ, the
@@ -86,7 +91,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
   // describing the wrong function. The second claim,
   // `hooks/useBulkExecutor.ts:298-303`, sits in a file that is byte-identical
-  // to `87af769e9` on this hop (it last changed on the hop off `53ded82bf`, 36
+  // to `62597c588` and to `87af769e9` on the last two hops (it last changed on the hop off `53ded82bf`, 36
   // insertions, 22 deletions, when it was re-READ rather than carried on file
   // identity): the six lines hash to
   // `01083348330f10a201cdf1078b4c21c236402b6a` at every one of those pins and

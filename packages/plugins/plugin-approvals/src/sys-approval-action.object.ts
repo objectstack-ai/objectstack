@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 import { APPROVAL_ACTION_KINDS, APPROVAL_ACTION_KIND_LABELS } from '@objectstack/spec/contracts';
 
 /**
@@ -22,8 +23,14 @@ export const SysApprovalAction = ObjectSchema.create({
   isSystem: true,
   managedBy: 'append-only',
   description: 'Append-only audit trail for approval actions',
-  displayNameField: 'id',
-  nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // renderer honours ADR-0079's order (an explicit `nameField` wins over
+  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
+  // stays for renderers that still read it first;
+  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{action} · {step_name}',
   highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'via_override', 'created_at'],
 
@@ -70,6 +77,17 @@ export const SysApprovalAction = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Action ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. `step_name` is nullable, so a row without
+    // one is titled by its action alone rather than failing to evaluate.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.step_name != null ? record.action + ' · ' + record.step_name : record.action`,
+      description: 'Record title: the action and, when recorded, its step (computed on read)',
+      group: 'Action',
+    }),
 
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',

@@ -1,6 +1,6 @@
 # 契约复核细则(按面)
 
-见 landing-operations.md 〈入队与落地〉的条款②闸门;本文只放复核归属与资格。
+见 landing-operations.md 〈入队与落地〉的条款②闸门;本文只放复核归属、资格与等复核标记。
 
 ## 复核归属与资格(按面)
 
@@ -26,3 +26,11 @@
 - 例外:纯重生成 head 后移原记录继续管;判据机读已提交树;PR 落 `Regen-provenance:` 行。
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
+
+## 等复核标记 `needs:contract-review`
+
+- 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
+- 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
+- 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
+- 读者 = 维护者过滤 `is:pr is:open label:needs:contract-review` 与席位巡查、交接。
+- ⛔ 无 check、workflow、队列守卫或巡查脚本读它;入队只认同形记录,标记有无不改判。

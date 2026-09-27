@@ -53,13 +53,13 @@
  * and refused by the post-hook one, which is what makes it the ablation of this
  * whole change rather than a restatement of it.
  *
- * ⚠️ WHAT THIS FILE DOES NOT CLAIM. The two verbs still diverge on one route:
- * an UPDATE that repoints the parent so the `beforeUpdate` stamp rewrites the
- * checked field AFTER the middleware merged its pre-image is admitted, and the
- * row is stored in an organization the caller does not hold. Measured on this
- * branch, both drivers; filed as #16790, which is this card's defect one verb
- * over. It is deliberately NOT pinned here — a test asserting today's answer
- * there would advertise a guarantee the runtime does not deliver (PD #10).
+ * The UPDATE route this file does not take — a `beforeUpdate` hook rewriting
+ * the checked field after the middleware merged its pre-image — was measured on
+ * this change's branch as admitted, with the row stored in an organization the
+ * caller does not hold (the original tracker no longer resolves). #19989 closed
+ * it: the engine now runs the same seam on a by-id update, on the row it
+ * stores. Its pins live in `rls-check-by-id-update-post-hook.test.ts`, not
+ * here.
  *
  * Ground truth is read straight off the driver's own table, past every scope —
  * "the check refused" and "nothing was stored" are separate facts and both are
@@ -508,13 +508,10 @@ const DRIVERS: Array<[string, () => unknown]> = [
  *     landing). That is the update path's long-standing behaviour and it is
  *     what this change makes insert agree with.
  *
- * ⚠️ The route the update arm does NOT take — repointing the parent so the
- * `beforeUpdate` stamp rewrites the checked field after the merge — is the same
- * defect one verb over, and it is still open: measured on this branch as
- * ADMITTED with the row stored in an organization the caller does not hold, and
- * filed as #16790. It is deliberately not pinned here: this file asserts what
- * the runtime guarantees, and ⛔ a test that pinned today's answer there would
- * be advertising a guarantee the runtime does not deliver.
+ * The route the update arm does NOT take — repointing the parent so the
+ * `beforeUpdate` stamp rewrites the checked field after the merge — was the same
+ * defect one verb over. #19989 closed it; its cells, on both drivers, live in
+ * `rls-check-by-id-update-post-hook.test.ts`.
  */
 interface VerbArm {
   verb: 'insert' | 'update';

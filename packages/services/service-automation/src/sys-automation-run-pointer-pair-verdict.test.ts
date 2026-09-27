@@ -28,8 +28,10 @@ import { SysAutomationRun } from './sys-automation-run.object.js';
  *  - a terminal row is telemetry under this object's own retention contract
  *    (`class: 'telemetry'`, 30d sweep scoped to completed/failed), so seeded
  *    run history deletes itself on the first Reaper pass that reaches its age.
- *  - the object has no natural key to be addressed BY: `nameField: 'id'`, the
- *    id is the engine's raw `runId`, and there is no `name` field at all.
+ *  - the object has no natural key to be addressed BY: the id is the engine's
+ *    raw `runId`, there is no `name` field at all, and the title pointer names
+ *    a formula (`display_title`, #20015), which has no stored column a seed
+ *    row could match on.
  *
  * Declaring would not make a real corpus resolvable; it would advertise run
  * rows as authorable seed content. To flip it: land a consumer that reads the
@@ -64,6 +66,14 @@ describe('sys_automation_run — pointer pair stays undeclared (#11386 verdict)'
 
   it('has no natural key a seed dataset could address its rows by — one of the verdict\'s measured legs', () => {
     expect(fields.name).toBeUndefined();
-    expect(SysAutomationRun.nameField).toBe('id');
+    // [#20015] Re-judged, not dropped. This leg used to read the pointer as
+    // `id`. The pointer now names `display_title` so the record page's H1 is a
+    // real title under ADR-0079's order. The leg still holds: a formula is
+    // computed on read and has no stored column, so the title is not a key a
+    // seed row could match. If the pointer ever names a STORED column, this
+    // goes red and the verdict above needs re-deriving.
+    const titleField = SysAutomationRun.nameField as string;
+    expect(titleField).toBe('display_title');
+    expect(fields[titleField]?.type).toBe('formula');
   });
 });

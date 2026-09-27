@@ -119,7 +119,11 @@ export interface RouteLedgerEntry {
   /** Dotted method path on `ObjectStackClient` — required when disposition is `sdk`. */
   client?: string;
   /**
-   * Name of the `@objectstack/spec/api` export declaring this route's response
+   * Name of the API-protocol export declaring this route's response PAYLOAD —
+   * an export of `@objectstack/spec/api`, or of its sibling entry
+   * `@objectstack/spec/api-assembled`, which carries the API declarations whose
+   * payload embeds the assembled package body (the two package READ responses;
+   * the #18576 ruling moved them off the browser-facing `/api`). The
    * PAYLOAD — the `data` of the shared `{ success, data }` envelope where the
    * route emits one, the whole body where it does not. The envelope itself is
    * not this field's business; `pnpm check:route-envelope` guards it
@@ -140,8 +144,8 @@ export interface RouteLedgerEntry {
    * can demand coverage for it; a name written ahead of the test it points at
    * would BE the "declared but unverified" surface the programme exists to
    * remove. `packages/client/src/route-ledger-response-schema.test.ts` resolves
-   * every name written here against the live `@objectstack/spec/api` exports,
-   * so a typo or a retired schema fails loudly rather than rotting.
+   * every name written here against the live exports of those two entries, so a
+   * typo or a retired schema fails loudly rather than rotting.
    *
    * A NAME rather than a live schema object, deliberately: this module stays
    * import-free — the client-side guards compile it as a relative SOURCE file,
@@ -273,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 82 rows.
+ * CENSUS (generated): this list holds 81 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -382,7 +386,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // note records what its declaration does NOT carry.
   { route: 'GET /packages', domain: '/packages', disposition: 'sdk', client: 'packages.list',
     responseSchema: 'ListInstalledPackagesResponseSchema',
-    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. This row was blank until now as a MEASURED verdict: an earlier contract review had added `hasMore`, but every row was still typed `InstalledPackageSchema`, whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob patterns), while a `defineStack()` host installs the ASSEMBLED body (`objects` = object definitions) — the stage mismatch the comment above names. It is filled by following that ruling one layer up: `@objectstack/spec/api` declares `AssembledInstalledPackageSchema` and binds both read responses to `InstalledPackageAtEitherStageSchema`, a union over the two whole CLOSED stage declarations — neither stage widened, and a row belonging to neither still refused. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers on BOTH authoring paths. ⚠️ The declaration is a strict SUBSET of the wire: each row also carries `writable`, this door\'s own computed verdict and not a declared record field, which a declared parse therefore strips — asserted by name in the same file rather than fixed' },
+    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. This row was blank until now as a MEASURED verdict: an earlier contract review had added `hasMore`, but every row was still typed `InstalledPackageSchema`, whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob patterns), while a `defineStack()` host installs the ASSEMBLED body (`objects` = object definitions) — the stage mismatch the comment above names. It is filled by following that ruling one layer up: the API protocol declares `AssembledInstalledPackageSchema` and binds both read responses to `InstalledPackageAtEitherStageSchema`, a union over the two whole CLOSED stage declarations — neither stage widened, and a row belonging to neither still refused. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers on BOTH authoring paths. ⚠️ The declaration is a strict SUBSET of the wire: each row also carries `writable`, this door\'s own computed verdict and not a declared record field, which a declared parse therefore strips — asserted by name in the same file rather than fixed' },
   { route: 'POST /packages', domain: '/packages', disposition: 'sdk', client: 'packages.install' },
   { route: 'GET /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.get',
     responseSchema: 'GetInstalledPackageResponseSchema',
@@ -425,7 +429,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── automation ────────────────────────────────────────────────────────────
   { route: 'POST /automation/trigger/:name', domain: '/automation', disposition: 'sdk', client: 'automation.trigger',
     note: 'legacy verb-first shape; duplicates execute() against a different URL — candidates for consolidation' },
-  { route: 'GET /automation', domain: '/automation', disposition: 'sdk', client: 'automation.list' },
+  // `GET /automation` (flow list, `automation.list`) — RETIRED by #19543 (door ④):
+  // unmounted, and the flow list is `GET /meta/flow`. No row, because nothing serves it.
   { route: 'POST /automation', domain: '/automation', disposition: 'sdk', client: 'automation.create',
     note: "authored metadata, so `manage_metadata` gates it (#10145): a flow definition lives on the metadata plane (ADR-0106), and this door now asks the capability every other door onto that plane already asks. Fail-closed by construction — an absent executionContext, an absent `systemPermissions` or an empty one all fall through to the refusal, 403 with code `PERMISSION_DENIED` (ADR-0112); only engine self-invocation (`isSystem`, never settable from the wire) bypasses. WHICH routes is one predicate, `isFlowAuthoringWrite` in `domains/automation.ts` — this row, PUT/DELETE `/:name` below, and (since the #10243 ruling) `POST /:name/toggle`, with the execution doors (trigger / execute / resume) deliberately outside it. Second layer, not the first: the #5519 anonymous floor answers an unidentified caller 401 here, not 403. Pinned in `domains/automation-write-capability-gate.test.ts`" },
   { route: 'GET /automation/actions', domain: '/automation', disposition: 'sdk', client: 'automation.listActions' },
@@ -435,7 +440,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /automation/:name/toggle', domain: '/automation', disposition: 'sdk', client: 'automation.toggle',
     note: "enablement, and since the #10243 ruling (2026-08-23) `manage_metadata` gates it — the same `isFlowAuthoringWrite` door as `POST /automation` above, NOT a fourth copy of the policy. #10145 deliberately left this one out as engine state and filed the question; the measurement is what settled it. The enabled bit is not a ROW, so no organization wall scopes it: `toggleFlow` writes an in-process map keyed by flow name only, `getFlowRuntimeStates()` reads it with no caller and no organization, and the automation service is ONE instance per environment — so an unentitled tenant org owner switched a shipped flow off and an unrelated tenant in a different organization, plus the platform admin, read it off, in both directions. Disabling a shipped flow is equivalent to deleting it for as long as it stays off, and DELETE was already gated. ⚠️ BREAKING: 200 → 403 for callers without the capability. Fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing; the #5519 anonymous floor still answers 401 first. The predicate excludes `POST /automation/trigger/:name` so a flow literally NAMED `toggle` keeps its execution door. Pinned in `domains/automation-write-capability-gate.test.ts` and `qa/dogfood/test/automation-toggle-tenant-scope.dogfood.test.ts`" },
   { route: 'POST /automation/:name/runs/:runId/resume', domain: '/automation', disposition: 'sdk', client: 'automation.resume',
-    note: "generic, so the SUSPENDED NODE gates it (#3801): a pause whose descriptor declares resumeAuthority:'service' — today `approval` / `approval_revise` — answers 403 here and continues only through its owning service (ApprovalService.decide), which authorizes and records the decision first. A node type that declares NO resumeAuthority answers 403 too, fail-closed since #5561: this door is an opt-in a descriptor states with 'any'. Screen/wait pauses are unaffected because they declare it; this route is the screen-flow runner's door" },
+    note: "generic, so the SUSPENDED NODE gates it (#3801): a pause whose descriptor declares resumeAuthority:'service' — today `approval` / `approval_revise` — answers 403 here and continues only through its owning service (ApprovalService.decide), which authorizes and records the decision first. A node type that declares NO resumeAuthority answers 403 too, fail-closed since #5561: this door is an opt-in a descriptor states with 'any'. Screen/wait pauses are unaffected because they declare it; this route is the screen-flow runner's door. The node gate asks WHAT the run is parked on, never WHO is resuming, so the route also gates the CALLER on the screen read's own question: the run's own trigger identity, or the `sys_automation_run` read grant as the operator override — one predicate, `isRunStarterOrRunStateReader` in `domains/automation.ts`. Refused 403 `PERMISSION_DENIED` before the engine is reached, so nothing is consumed. Pinned in `domains/automation-resume-caller-gate.test.ts`" },
   { route: 'GET /automation/:name/runs/:runId/screen', domain: '/automation', disposition: 'sdk', client: 'automation.getScreen' },
   // [#13953] Cancel a suspended run (ADR-0044) — the maintainer ruling of 2026-09-05
   // (option A) on the two operator run-lifecycle verbs. The engine has carried both for

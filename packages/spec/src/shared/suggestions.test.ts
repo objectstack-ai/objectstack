@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   levenshteinDistance,
   findClosestMatches,
-  suggestFieldType,
   formatSuggestion,
 } from './suggestions.zod';
+import { suggestFieldType } from './field-type-suggestion';
 
 describe('levenshteinDistance', () => {
   it('should return 0 for identical strings', () => {

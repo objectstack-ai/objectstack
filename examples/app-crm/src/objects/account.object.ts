@@ -33,7 +33,6 @@ export const Account = ObjectSchema.create({
     }),
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
-      scale: 2,
       min: 0,
     }),
     website: Field.url({

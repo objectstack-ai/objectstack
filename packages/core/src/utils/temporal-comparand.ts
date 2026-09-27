@@ -41,9 +41,9 @@
  * ## Interpretability is defined by the DRIVERS' own totals, deliberately
  *
  * Each predicate below mirrors the total function that would receive the value
- * if the door let it through — `storageDatetimeValue` / `storageDateValue` /
- * `storageTimeValue` in `driver-memory`, and their `SqlDriver` twins. Those
- * functions are total on purpose: an input they cannot interpret is returned
+ * if the door let it through — `temporalStorageForm` (`temporal-storage-form.ts`,
+ * the one rule both drivers read since #20176; before it, a copy in each).
+ * That function is total on purpose: an input it cannot interpret is returned
  * UNCHANGED rather than becoming an invented instant. So "the driver would
  * return it unchanged" IS the definition of uninterpretable, and defining it
  * any other way would refuse comparands that work today.
@@ -87,7 +87,7 @@ export function temporalComparandKind(fieldType: unknown): TemporalComparandKind
 }
 
 /**
- * `storageDatetimeValue`'s reading, as a yes/no.
+ * `temporalStorageForm`'s `datetime` reading, as a yes/no.
  *
  * Mirrors it step for step: a bare integer in either sign is epoch
  * milliseconds; a bare `YYYY-MM-DD` is midnight UTC; a zone-naive
@@ -105,11 +105,11 @@ function readsAsInstant(s: string): boolean {
 }
 
 /**
- * `storageDateValue`'s reading of a STRING: its leading `YYYY-MM-DD`, and
+ * `temporalStorageForm`'s `date` reading of a STRING: its leading `YYYY-MM-DD`, and
  * nothing else.
  *
  * Narrower than {@link readsAsInstant} on purpose, because the rule it mirrors
- * is narrower: `storageDateValue` collapses a leading calendar day and returns
+ * is narrower: the `date` rule collapses a leading calendar day and returns
  * every other string untouched. `2026/07/15` is therefore uninterpretable for a
  * `date` column even though `Date.parse` reads it — today it survives to the
  * driver and compares as text against `YYYY-MM-DD` values, which is the silent
@@ -120,7 +120,7 @@ function readsAsCalendarDay(s: string): boolean {
 }
 
 /**
- * `storageTimeValue`'s reading: a bare wall clock whose components are in
+ * `temporalStorageForm`'s `time` reading: a bare wall clock whose components are in
  * range. Out-of-range (`25:00`) is uninterpretable — the rule it mirrors
  * returns such a value untouched rather than wrapping it.
  */

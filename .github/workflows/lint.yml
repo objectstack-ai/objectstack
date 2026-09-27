@@ -902,7 +902,8 @@ jobs:
       # is the thing that notices. Offline record checks only (existence, shape,
       # sha256 vs the provenance record, record pin vs `.objectui-sha`): the
       # regenerate-and-compare half runs where a regeneration can (the Node
-      # generator needs the published @object-ui set — see
+      # generator reads objectui's BUILT tree at the pin, which only
+      # `pnpm objectui:build` materialises — see
       # scripts/gen-sdui-manifest-node.mjs), and a pin bump goes red HERE until
       # it has been re-run — the same moment the lockstep step above forces the
       # parser parity re-verification, with an objectui checkout guaranteed in
@@ -6711,18 +6712,6 @@ jobs:
       # neighbours.
       - name: Check docs YAML examples parse against live spec schemas
         run: pnpm --filter @objectstack/spec run check:yaml-examples
-
-      # ADR-0082 D4's spec↔registry react-block declaration-parity ratchet, fed
-      # by the checked-in repo-root manifest (#12924 execution point 1: the same
-      # artefact resolves this gate's EXTERNAL_INPUT_REQUIRED standing — the
-      # input it always lacked now lives in the tree, held fresh by the
-      # check-sdui-manifest step in the lint job). Baseline-ratcheted: only a
-      # divergence NEW since packages/spec/react-declaration-parity.baseline.json
-      # reds, so wiring it per-PR promotes the cut-rc-only run without
-      # manufacturing a standing red. Reads spec src/ through tsx like its
-      # neighbours — no dist. ~5 s.
-      - name: Ratchet spec-vs-registry react declaration parity against the checked-in manifest
-        run: MANIFEST="$PWD/sdui.manifest.json" pnpm --filter @objectstack/spec check:react-declaration-parity --baseline react-declaration-parity.baseline.json --strict
 
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing

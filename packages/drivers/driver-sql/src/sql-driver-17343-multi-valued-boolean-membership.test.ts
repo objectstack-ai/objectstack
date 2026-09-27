@@ -255,10 +255,12 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
    * emitter OR the membership construct that replaced it for `$contains`. This
    * file's question is whether the declared-type gate fired, so it must accept
    * either; asserting one SHAPE here would make it red on the card that changes
-   * the other, which is exactly what #17590 did to its predecessor.
+   * the other, which is exactly what #17590 did to its predecessor. [#20024]
+   * On SQLite the substring emitter spells `contains` as `instr(` and `ends` as
+   * `substr(CAST(`; only `starts` and the `$like` pair keep `GLOB`.
    */
   const REAL_PREDICATE: Record<string, RegExp> = {
-    sqlite: /LIKE|GLOB|json_each\(/,
+    sqlite: /LIKE|GLOB|instr\(|substr\(CAST\(|json_each\(/,
     postgres: /LIKE|GLOB|::jsonb @> /,
     mysql: /LIKE|GLOB|JSON_CONTAINS\(/,
   };
@@ -286,7 +288,7 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
         for (const op of POSITIVE_OPERATORS) {
           const sql = d.compileWhere({ [field]: { [op]: 'true' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).toMatch(/where 1 = 0/);
-          expect(sql, `${op} over ${field}`).not.toMatch(/LIKE|GLOB|lower\(|CAST\(/);
+          expect(sql, `${op} over ${field}`).not.toMatch(/LIKE|GLOB|instr\(|lower\(|CAST\(/);
         }
         expect(d.compileWhere({ [field]: { $notContains: 'true' } } as FilterCondition), field)
           .toMatch(/where 1 = 1/);
@@ -299,9 +301,10 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
         expect(d.compileWhere({ [field]: { $contains: 'red' } } as FilterCondition), field)
           .toMatch(REAL_PREDICATE[label]!);
       }
-      // …and the SCALAR string column among them is the one still on the pattern
-      // emitter, which is what keeps the row above from passing vacuously.
-      expect(d.compileWhere({ label: { $contains: 'red' } } as FilterCondition)).toMatch(/LIKE|GLOB/);
+      // …and the SCALAR string column among them is the one still on the
+      // substring emitter (`instr(` on SQLite since #20024), which is what keeps
+      // the row above from passing vacuously.
+      expect(d.compileWhere({ label: { $contains: 'red' } } as FilterCondition)).toMatch(/LIKE|GLOB|instr\(/);
     });
   }
 

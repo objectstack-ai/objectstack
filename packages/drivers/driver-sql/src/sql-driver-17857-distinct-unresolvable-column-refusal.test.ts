@@ -83,6 +83,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -182,7 +183,13 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
     const onCount = await caught(() => driver.count(TABLE, { where: { [MISSING_COLUMN]: 1 } }));
     const onFind = await caught(() => driver.find(TABLE, { where: { [MISSING_COLUMN]: 1 } }));
     const onAggregate = await caught(() => driver.aggregate(TABLE, GROUP_BY_MISSING));
-    const onDistinctFilter = await caught(() => driver.distinct(TABLE, 'title', { [MISSING_COLUMN]: 1 }));
+    // [#20020] The caller's own filter, marked as a read-scope merge boundary
+    // marks it: the column NAME reaches the wire only for a predicate the
+    // caller is known to have written (the #8220 contract). The unmarked and
+    // policy answers are pinned in `sql-driver-refusal-door-provenance.test.ts`.
+    const onDistinctFilter = await caught(() =>
+      driver.distinct(TABLE, 'title', markFilterSubtreeProvenance({ [MISSING_COLUMN]: 1 }, 'author')),
+    );
     const onDistinctField = await caught(() => driver.distinct(TABLE, MISSING_COLUMN));
 
     // Rows 1-3: the ruled answers, unmoved by this card.

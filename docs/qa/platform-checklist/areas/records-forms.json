@@ -4100,6 +4100,83 @@
           "ref": "#sweep-2026-08-30"
         }
       ]
+    },
+    {
+      "id": "records-forms.predicate-relationship-traversal",
+      "title": "A validation rule reads a parent field one hop through a lookup",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a member with showcase_invoice CRUD and NO read on showcase_account — the persona the rule exists to constrain"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice — carries the script validation no_invoice_for_churned_account, whose condition reads record.account.status one hop through the `account` lookup (examples/app-showcase/src/data/objects/invoice.object.ts)",
+          "showcase_account — the referenced object; its `status` select carries the value 'churned' (examples/app-showcase/src/data/objects/account.object.ts)",
+          "at least one churned account and one non-churned account to invoice against"
+        ],
+        "knownGaps": [
+          "An earlier revision of this item asserted that no seeded persona fails to read showcase_account. CI measured that false: the Dogfood Regression Gate persona in packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts holds showcase_invoice CRUD and no grant on showcase_account, and under the security plugin CRUD gate member_default does not grant it either. That is now the POINT of the item rather than a gap: a validation rule reads the related record under SYSTEM authority, bounded by the fields the predicate names, so this persona writes successfully and the rule still enforces. The clause that once expected a loud fault for this persona has been inverted accordingly."
+        ]
+      },
+      "steps": [
+        "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
+        "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
+        "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
+        "as the persona with NO read on showcase_account, POST an invoice against a non-churned account, then against a churned one"
+      ],
+      "acceptance": [
+        {
+          "clause": "the write PASSES when the parent field does not trip the rule — the traversal resolves, it does not fault",
+          "oracle": "api",
+          "verify": "2xx and the row is readable; the response carries no validation error, and in particular no 'could not be evaluated' fault",
+          "evidence": "the create response and the read-back"
+        },
+        {
+          "clause": "the write is REFUSED when the parent field trips the rule, carrying the AUTHORED message, not a fault",
+          "oracle": "api",
+          "verify": "400 VALIDATION_FAILED naming the rule no_invoice_for_churned_account, with the authored sentence about reactivating the account — a refusal that reads 'could not be evaluated' is a FAIL, not a pass",
+          "evidence": "the rejection envelope"
+        },
+        {
+          "clause": "a REPOINT on update is judged against the account the write lands on",
+          "oracle": "api",
+          "verify": "the PATCH onto a churned account is refused even though the patch alone carries no status, because the FK is read off the merged record",
+          "evidence": "the patch response"
+        },
+        {
+          "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
+          "oracle": "api",
+          "verify": "the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
+          "evidence": "both responses for the restricted persona"
+        }
+      ],
+      "negative": [
+        "a 2xx on the churned-account create is a FAIL — the rule did not run",
+        "a rejection whose text is the unevaluable-rule fault on the READABLE-parent cases is a FAIL: the related row was not preloaded and the rule is rejecting every write, which is the pre-capability behaviour",
+        "a 400 unevaluable-rule envelope for the persona who cannot read the parent is a FAIL: it means the related read was not system-authority, and the rule cannot be authored for the persona it exists to constrain. A 2xx on the CHURNED account is also a FAIL — the rule did not enforce"
+      ],
+      "traps": [
+        "seed-data-thin"
+      ],
+      "source": [
+        "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
+        "packages/objectql/src/validation/rule-validator.ts (checkPredicate, resolveTraversalScope, collectPredicateRelationships)",
+        "packages/formula/src/relationship-traversal.ts (which hops a predicate names)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-22",
+          "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule). The related record is read under SYSTEM authority bounded by the fields the predicate names, so the ruled outcomes are: the write passes when the parent field does not trip the rule, is refused with the AUTHORED message when it does, and is refused naming the related object when the rule cannot be evaluated at all",
+          "ref": "claude/issue-18682-predicate-relationship-traversal"
+        }
+      ]
     }
   ]
 }

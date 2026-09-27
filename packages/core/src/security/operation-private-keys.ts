@@ -52,7 +52,7 @@
  * permission sets for the new object (`if (permissionSets.length > 0)`), so a
  * stale depth SURVIVES into a question it was never resolved for whenever that
  * branch does not fire. A REST request that touched another object before
- * reaching, say, `/reports/:id/run` hands over an envelope the middleware has
+ * reaching, say, an attachment download hands over an envelope the middleware has
  * already written into.
  *
  * Dropping is safe in the one direction that matters: the middleware re-stamps
@@ -74,12 +74,12 @@
  *
  * ## Known consumers
  *
- * `plugin-audit` (`comment-access-hooks.ts`, #7141), `service-storage`
- * (`attachment-access-hooks.ts`, #7145) and `plugin-reports`
- * (`report-service.ts`, #7204) — each forwarding a caller envelope to a gate or
- * a read that asks about a parent/target object rather than about the object the
- * middleware resolved for. Each of the three grew its own byte-equivalent copy
- * of this file by hand before #7284 gave the rule a home; `operation-private-
+ * `plugin-audit` (`comment-access-hooks.ts`, #7141) and `service-storage`
+ * (`attachment-access-hooks.ts`, #7145) — each forwarding a caller envelope to a
+ * gate or a read that asks about a parent/target object rather than about the
+ * object the middleware resolved for. They and a third consumer (the saved-report
+ * service, #7204 — retired whole in #20102) each grew a byte-equivalent copy of
+ * this file by hand before #7284 gave the rule a home; `operation-private-
  * keys.pin.test.ts` is what now catches a fourth.
  */
 

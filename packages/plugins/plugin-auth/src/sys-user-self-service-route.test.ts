@@ -61,6 +61,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -204,9 +205,31 @@ async function route(
     context,
   };
 
+  // [#19989] The engine's half of the write gate, which the terminal `next()`
+  // stands in for. `ObjectQL.update` runs the installed
+  // `postHookWriteImageCheck` on the row a by-id update writes (the stored row
+  // merged with the payload) before the statement; a terminal that skipped it
+  // would be refused fail-closed by the middleware, and would read here as a
+  // `row-scope` refusal. The row comes straight from the fixture, NOT through
+  // `findOne`, so `preImageWheres` still records only the middleware's reads.
+  // The guard below runs after this, so the image carries the pre-guard
+  // payload; the check this file composes (`sys_user_self`, whose `using` is
+  // the check: `id == current_user.id`) reads only `id`, which the guard never
+  // touches. Only the by-id path is modelled, through the producer's own
+  // dispatch predicate.
+  const runByIdWriteImageCheck = async () => {
+    const seam = opCtx.postHookWriteImageCheck;
+    if (!seam || operation !== 'update') return;
+    const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
+    if (dispatch.kind !== 'by-id') return;
+    seam.honoured = true;
+    const row = ROWS[String(dispatch.id)];
+    await seam.evaluate(row ? [{ ...row, ...opCtx.data }] : []);
+  };
+
   const snapshotWrites: Array<{ key: string; value: any }> = [];
   try {
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, runByIdWriteImageCheck);
   } catch (error: any) {
     return {
       // The pre-image re-read is the first engine call past the CRUD gate, so

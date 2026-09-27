@@ -62,7 +62,7 @@ notes: Field.markdown({ label: 'Notes' }),
 
 ```typescript
 quantity: Field.number({ label: 'Quantity', min: 0, max: 10000, step: 1 }),
-price: Field.currency({ label: 'Price', scale: 2, min: 0 }),
+price: Field.currency({ label: 'Price', min: 0 }),
 // percent stores a fraction: 0.15 = 15% (the UI renders it as a percentage)
 discount: Field.percent({ label: 'Discount', scale: 2, min: 0, max: 1 }),
 ```
@@ -74,11 +74,17 @@ price: Field.currency({
   label: 'Price',
   currencyConfig: {
     precision: 2,
-    currencyMode: 'dynamic',    // 'dynamic' | 'fixed'
-    defaultCurrency: 'USD',
+    currencyMode: 'fixed',      // 'fixed' pins the column to defaultCurrency;
+                                // 'dynamic' (default) shows the tenant default
+    defaultCurrency: 'USD',     // the column's currency under 'fixed'
   },
 }),
 ```
+
+The stored value is a bare number in both modes — never `{ value, currency }`.
+Under `dynamic` (the default) the amount displays in the tenant's
+`localization.currency` setting and `defaultCurrency` is not the displayed
+currency; `fixed` pins the column to `defaultCurrency`.
 
 ### Date & Time Types
 

@@ -259,12 +259,14 @@ describe('#13953 — the run-lifecycle doors require the platform operator', () 
 
     describe('at least as strict as `resume` — the card\'s hard floor', () => {
         it('the same caller `resume` forwards to the service is refused at both lifecycle doors', async () => {
-            // `resume` has no route-level gate: it is fail-closed in the ENGINE
-            // on the suspended node's declared `resumeAuthority` (#3801/#5561),
-            // so an ordinary caller reaches the service and the engine decides.
-            // These doors refuse the same caller before the service is even
-            // resolved — strictly narrower, and nothing existing was relaxed to
-            // build them.
+            // `resume` is fail-closed in the ENGINE on the suspended node's
+            // declared `resumeAuthority` (#3801/#5561), and since #19987 its
+            // route admits only the run's starter or a `sys_automation_run`
+            // read grant holder — a grant this harness's deployment, with no
+            // security service, does not withhold from anyone. So an ordinary
+            // caller reaches the service and the engine decides. These doors
+            // refuse the same caller before the service is even resolved —
+            // strictly narrower, and nothing existing was relaxed to build them.
             const h = makeDispatcher();
             const resumed = await h.dispatcher.handleAutomation(
                 'approval_flow/runs/run_7/resume', 'POST', undefined, USER_CTX(), undefined,

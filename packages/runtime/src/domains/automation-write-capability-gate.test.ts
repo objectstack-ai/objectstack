@@ -441,7 +441,13 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             expect(h.toggleFlow).not.toHaveBeenCalled();
         });
 
-        it('POST /:name/runs/:runId/resume stays ungated — it is fail-closed on `resumeAuthority` (#3801/#5561)', async () => {
+        it('POST /:name/runs/:runId/resume stays outside this gate — it is fail-closed on `resumeAuthority` (#3801/#5561)', async () => {
+            // Outside the `manage_metadata` gate, not ungated: since #19987 the
+            // resume door asks WHO is resuming (the run's starter, or the
+            // `sys_automation_run` read grant) inside its own arm. This harness
+            // mounts no security service, so that gate's override half admits
+            // (`/data/sys_automation_run` is itself ungated there) and what is
+            // left to see is that authoring capability is not asked for.
             const h = boot();
             const { response } = await h.dispatcher.handleAutomation(
                 `/${FLOW}/runs/run_1/resume`, 'POST', { inputs: {} }, UNENTITLED(), undefined,
@@ -451,11 +457,11 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             expect(h.resume).toHaveBeenCalled();
         });
 
-        it('the reads are untouched — GET / and GET /:name', async () => {
+        it('the reads are untouched — GET /:name', async () => {
+            // [#19543] `GET /` used to be the second read here; the flow list is
+            // retired (flows are listed through `GET /meta/flow`), so the one
+            // definition read this domain still serves is the single flow.
             const h = boot();
-
-            const list = await h.dispatcher.handleAutomation('', 'GET', undefined, UNENTITLED(), undefined);
-            expect(statusOf(list.response)).toBe(200);
 
             const detail = await h.dispatcher.handleAutomation(`/${FLOW}`, 'GET', undefined, UNENTITLED(), undefined);
             expect(statusOf(detail.response)).toBe(200);

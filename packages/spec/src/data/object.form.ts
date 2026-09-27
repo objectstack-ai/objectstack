@@ -187,7 +187,8 @@ export const objectForm = defineForm({
             { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
             { field: 'max', type: 'number', helpText: 'Maximum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
             { field: 'precision', type: 'number', helpText: 'Total digits', visibleWhen: "data.type in ['number','currency','percent']" },
-            { field: 'scale', type: 'number', helpText: 'Decimal places', visibleWhen: "data.type in ['number','currency','percent']" },
+            // #19629 (ruling 5791803339 B): `scale` is retired from `currency` and refused at parse, so it is not offered there.
+            { field: 'scale', type: 'number', helpText: 'Decimal places', visibleWhen: "data.type in ['number','percent']" },
 
             // Selection options
             //

@@ -13,7 +13,8 @@
  *     not a bag of values, and not a boolean per key.
  *  2. **Additive.** A context literal without it still type-checks, so no
  *     existing `IAutomationService.execute` caller moves, and an absent key is
- *     what every producer other than the two doors sends.
+ *     what every producer other than the two doors and the schedule trigger
+ *     (which states `[]`, #19900) sends.
  *  3. **An empty list is a legal value** — "the caller supplied nothing" — and
  *     it is a different value from an absent key.
  *

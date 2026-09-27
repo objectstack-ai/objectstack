@@ -56,7 +56,6 @@
     "@objectstack/plugin-email": 39.1,
     "@objectstack/plugin-hono-server": 25.18,
     "@objectstack/plugin-pinyin-search": 14.4,
-    "@objectstack/plugin-reports": 33.34,
     "@objectstack/plugin-security": 114.92,
     "@objectstack/plugin-sharing": 62.69,
     "@objectstack/plugin-webhooks": 25.97,

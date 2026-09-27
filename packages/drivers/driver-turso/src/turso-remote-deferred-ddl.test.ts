@@ -39,9 +39,14 @@
  * backfill rewrites a value's spelling, not the instant it names.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { replicaFiles } from './replica-file.testkit.js';
+
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+const replicaFileUrls = replicaFiles();
+afterAll(() => replicaFileUrls.removeAll());
 
 interface WireBearingError extends Error {
   code?: string;
@@ -259,7 +264,7 @@ describe.each([
     mode: 'replica',
     make: (client: unknown) =>
       new TursoDriver({
-        url: ':memory:',
+        url: replicaFileUrls.next(),
         syncUrl: 'libsql://primary.turso.io',
         authToken: 'token',
         client: client as never,

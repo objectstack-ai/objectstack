@@ -274,11 +274,13 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — so it decides which tenant\'s customization row '
-    + 'is served as the item. Absent = environment-wide read: only env-level '
-    + 'overlays apply and no org partition is consulted.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — so it decides which '
+    + 'tenant\'s customization row is served as the item. Supplying a value '
+    + 'does not by itself guarantee an org partition is consulted; where none '
+    + 'applies, and whenever it is absent, the read is environment-wide and '
+    + 'only env-level overlays apply.',
   ),
   state: z.enum(['active', 'draft']).optional().describe(
     'Draft-visibility switch — which lifecycle row to read (strict mode): '
@@ -444,10 +446,13 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
     + 'resolves to the requested package\'s artifact (ADR-0048).',
   ),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order, so it decides which tenant\'s customization '
-    + 'row is reported as the `overlay` layer (and merged into `effective`). '
-    + 'Absent = environment-wide read: `overlay` reports the env-level row only.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order, so it decides which '
+    + 'tenant\'s customization row is reported as the `overlay` layer (and '
+    + 'merged into `effective`). Supplying a value does not by itself guarantee '
+    + 'an org partition is consulted; where none applies, and whenever it is '
+    + 'absent, the read is environment-wide: `overlay` reports the env-level '
+    + 'row only.',
   ),
 }));
 
@@ -1818,11 +1823,14 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
     + 'cache validator check (issue).',
   ),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — exactly as on the uncached read. Also '
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — exactly as on the '
+    + 'uncached read. Also '
     + 'folded into the ETag, so a scope switch never returns a stale 304 from '
-    + 'another scope\'s cached representation. Absent = environment-wide read.',
+    + 'another scope\'s cached representation. Supplying a value does not by '
+    + 'itself guarantee an org partition is consulted; where none applies, and '
+    + 'whenever it is absent, the read is environment-wide.',
   ),
 }));
 
@@ -2936,15 +2944,44 @@ export const CreateAiConversationRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
 }));
 
-/** `GET /api/v1/ai/conversations` query — scoped to the authenticated user. */
+/**
+ * `GET /api/v1/ai/conversations` query — scoped to the authenticated user.
+ *
+ * [#19543, door ③] The list is NEWEST FIRST (maintainer ruling on that card:
+ * 「Ruled: the list is newest first.」), and it pages by keyset: `cursor` is the
+ * `id` of the last conversation the caller already holds — no opaque token is
+ * minted, so a caller that has a page has its next cursor. The server half
+ * (descending order, the flipped keyset, `hasMore` and the unknown-cursor
+ * refusal) is objectstack-ai/cloud#2426; the ruling lets this declaration land
+ * first.
+ */
 export const ListAiConversationsRequestSchema = lazySchema(() => z.object({
   agentId: z.string().optional().describe('Filter by agent'),
   limit: z.number().int().positive().optional().describe('Maximum conversations to return'),
-  cursor: z.string().optional().describe('Pagination cursor'),
+  cursor: z.string().optional().describe(
+    'The `id` of the last conversation on the previous page. The next page starts with the '
+    + 'conversation created immediately before it, continuing newest first. Omit it to read '
+    + 'the first page. An id that names no conversation of the caller is refused rather than '
+    + 'read as the start of the list.',
+  ),
 }));
 
 export const ListAiConversationsResponseSchema = lazySchema(() => z.object({
-  conversations: z.array(AiConversationSchema).describe('Matching conversations'),
+  conversations: z.array(AiConversationSchema).describe(
+    'The caller\'s conversations, newest first — ordered by creation time, then `id`, both descending',
+  ),
+  // [#19543, door ③] REQUIRED, not optional: an optional flag lets a server
+  // that never computes it stay spec-valid forever, and a caller cannot tell
+  // "no further page" from "this server does not say". The ruling makes the
+  // server compute it (objectstack-ai/cloud#2426, over-read by one row).
+  // `nextCursor` is deliberately NOT declared: the ruling defines it as the
+  // id of the last conversation on the page, which every caller already
+  // holds in `conversations`, so a second field would only be a second place
+  // for the same value to disagree.
+  hasMore: z.boolean().describe(
+    'Whether at least one more conversation follows this page. When `true`, send the `id` of '
+    + 'the last conversation in `conversations` as `cursor` to read the next page.',
+  ),
 }));
 
 /**

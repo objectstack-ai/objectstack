@@ -45,8 +45,8 @@
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
-- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底与裸 GraphQL 均已拒。
-- 2026-09-17 单席实测:该路吃会话凭据的 GraphQL 小时池,尽则 429 且零字节写入,`draft` 未动。
+- undraft 与挂载走中继 op,auto 模式三次零拒;ccr 路带 allow 行仍被拒,已退役;MCP 兜底已拒。
+- 2026-09-17 单席实测:ccr 路吃会话凭据的 GraphQL 小时池,尽则 429 且零字节写入,`draft` 未动。
 - 唯一可读信号是该 429 体自报的 `resets at` 时刻;体自带指令 ⛔ 重置前不重试。
 - ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
 - auto-merge 回读 `merge_method` 不恒定:同 `SQUASH` 载荷 `merge`/`squash` 皆现,⛔ 非落地方法判据。
@@ -135,7 +135,7 @@
 - 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
 - ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
-- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有 ccr 路、不在内。
+- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有中继 op、不在内。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
@@ -143,7 +143,7 @@
 - porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
-- 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
+- 走队列的仓落地仍必经 auto-merge,红窗里照样走中继 op 挂载;直合仓合并本身有 REST 端点。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
 - `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
@@ -432,7 +432,7 @@
 - `check:pm-dispatch-gates` 单机 430–450 秒贴容器上限 ⇒ detach 加 `tail --pid=$!`;超时非读数。
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
-- harness 按内容拒写:同会话派发 PR 上 PASS 拒为 `[Self-Approval]`;同通道建卡、ACCEPT 照过。
+- harness 按内容拒写:同会话派发 PR 上 PASS 拒 `[Self-Approval]`,建卡、ACCEPT 照过;ccr 翻转亦拒。
 
 ## 闭合关键词解析(PR 正文写侧)
 

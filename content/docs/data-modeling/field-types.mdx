@@ -21,7 +21,7 @@ Single-line plain text input.
 |:---|:---|:---|:---|
 | `maxLength` | `number` | — | Maximum character length |
 | `minLength` | `number` | — | Minimum character length |
-| `format` | `string` | — | Validation format pattern |
+| `format` | `string` | — | Display hint, **not validation** — the server runs no check from it. The UI's cell-renderer resolver reads a small set of words and renders the cell as the richer type: `phone` / `tel` / `telephone` (a `tel:` link), `email` (a `mailto:` link), `url` / `uri` / `link` (a clickable link), `currency` / `money`, `percent` / `percentage`; any other word renders as plain text. To reject a malformed email, URL or phone number, use that field `type` instead, or a [`format` validation rule](/docs/data-modeling/validation#format-validation) |
 | `valueDomain` | `'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'` | — | Standard the written value must be a member of (IANA time zone, ISO 4217 currency code, ISO 3166-1 alpha-2 country code); `text` only |
 
 ```typescript
@@ -68,7 +68,6 @@ Phone number field.
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `maxLength` | `number` | — | Maximum character length |
-| `format` | `string` | — | Phone format pattern |
 
 ```typescript
 { name: 'phone', label: 'Phone', type: 'phone' }
@@ -144,29 +143,36 @@ Numeric value with optional precision.
 ```
 
 ### `currency`
-Monetary value with currency configuration.
+Monetary value. The stored value is a bare number in both modes; the currency
+code lives in `currencyConfig`, never in the value.
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `precision` | `number` | — | Total digits |
-| `scale` | `number` | — | Decimal places |
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
 | `currencyConfig.precision` | `number` | `2` | Decimal precision for currency |
-| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether currency is per-record or fixed |
-| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | Default currency code |
+| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
+| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | The column's currency code under `fixed`; not the displayed currency under `dynamic` |
 
 ```typescript
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } }
 ```
 
-A declared `precision` must agree with the currency's ISO 4217 fraction digits
-when the currency is statically known — that is, when `currencyConfig` is in
-`fixed` mode. Publish-time validation rejects the contradiction, naming both
-numbers ("currency JPY has 0 fraction digits; `precision: 2` contradicts it"):
-the yen has no minor unit to show two digits of, and `precision: 2` on a KWD
-field would silently drop the third fils digit that exists. Omit `precision`
-to let renderers derive the width from the currency itself. The rule is
+A currency amount's decimal places are its currency's ISO 4217 minor unit
+(2 for USD, 0 for JPY, 3 for KWD), not a field setting, so a `currency` field
+takes no `scale`: publish-time validation refuses the key. The field-level
+`precision` is the amount's total digit count — a DECIMAL(18,2) amount declares
+`precision: 18` — and is never compared with the currency.
+
+A declared `currencyConfig.precision` must agree with the currency's ISO 4217
+fraction digits when the currency is statically known — that is, when
+`currencyConfig` is in `fixed` mode. Publish-time validation rejects the
+contradiction, naming both numbers ("currency JPY has 0 fraction digits;
+`precision: 2` contradicts it"): the yen has no minor unit to show two digits
+of, and `precision: 2` on a KWD field would silently drop the third fils digit
+that exists. Omit `currencyConfig.precision` to let renderers derive the width
+from the currency itself. The rule is
 deliberately partial: a field in `dynamic` currencyMode has no single currency
 to check against, and currency codes outside CLDR `currencyData`
 (cryptocurrency or custom business codes) are not checked. The rule judges

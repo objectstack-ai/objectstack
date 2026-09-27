@@ -168,6 +168,13 @@ create/update payload.
   \`requiresConfirmation\` — the server REFUSES such a call without it
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
   the flag asserts an approval, it does not obtain one.
+- **resume_run({ runId, values?, confirm? })** — continue a flow run that
+  \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
+  flow needs filled in). Send the screen's field values in \`values\`, keyed by
+  the names in \`screen.fields\`. The run completes, or pauses again on its next
+  screen, which you fill with another \`resume_run\`. Only the user whose call
+  started the run can resume it, under the same gates as \`run_action\`
+  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
 
 ## Conventions & gotchas
 

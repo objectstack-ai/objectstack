@@ -38,6 +38,7 @@ import {
   checkCoreEntryShape,
   checkSingleOwner,
   checkTransitiveAllowlist,
+  publishedPointers,
   stripInternalIssueIds,
   type SkillCoreMap,
 } from './lib/skill-map-guards';
@@ -118,45 +119,65 @@ describe('checkSingleOwner — one schema file, one owning package', () => {
   });
 });
 
+// A fabricated `packages/spec/src`: what is on disk, for the allowlist legs.
+// `shared/identifiers.zod.ts` exists and NO closure below reaches it — that
+// is the row the list exists to keep. `contracts/plugin-lifecycle-events.ts`
+// exists and does not ship. `data/gone.zod.ts` never appears: a dead file.
+const ON_DISK = new Set([
+  'system/translation.zod.ts',
+  'kernel/metadata-protection.zod.ts',
+  'shared/identifiers.zod.ts',
+  'data/query.zod.ts',
+  'contracts/plugin-lifecycle-events.ts',
+]);
+const exists = (rel: string): boolean => ON_DISK.has(rel);
+
 describe('checkTransitiveAllowlist — a constraint that constrains nothing is refused', () => {
   const map: SkillCoreMap = { 'objectstack-i18n': ['system/translation.zod.ts'] };
-  const closures = {
-    'objectstack-i18n': ['system/translation.zod.ts', 'shared/identifiers.zod.ts'],
-  };
 
-  it('accepts a list naming a file the closure really reaches', () => {
+  it('accepts a row naming a shipped file, whether or not any import edge reaches it', () => {
+    // The declared pointer: on disk, `*.zod.ts`, and reachable through nothing.
     expect(
-      checkTransitiveAllowlist(map, { 'objectstack-i18n': ['shared/identifiers.zod.ts'] }, closures),
+      checkTransitiveAllowlist(map, { 'objectstack-i18n': ['shared/identifiers.zod.ts'] }, exists),
     ).toEqual([]);
   });
 
   it('accepts an empty list — publishing no transitive pointer is a real answer', () => {
-    expect(checkTransitiveAllowlist(map, { 'objectstack-i18n': [] }, closures)).toEqual([]);
+    expect(checkTransitiveAllowlist(map, { 'objectstack-i18n': [] }, exists)).toEqual([]);
   });
 
   it('refuses a package name that is not in the map', () => {
     // The failure this exists for: a typo leaves the over-eager closure fully
     // published while the map LOOKS constrained.
-    const problems = checkTransitiveAllowlist(map, { 'objectstack-i18nn': [] }, closures);
+    const problems = checkTransitiveAllowlist(map, { 'objectstack-i18nn': [] }, exists);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('not a SKILL_MAP package');
   });
 
-  it('refuses a file the closure never reaches', () => {
+  it('refuses a dead file — a row that keeps a pointer that does not exist', () => {
+    const problems = checkTransitiveAllowlist(map, { 'objectstack-i18n': ['data/gone.zod.ts'] }, exists);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('data/gone.zod.ts');
+    expect(problems[0]).toContain('no such file');
+  });
+
+  it('refuses a file that exists but does not ship', () => {
+    // On disk, so not dead; outside `*.zod.ts`, so absent from a consumer's
+    // node_modules — the pointer would 404 exactly as a dead one does.
     const problems = checkTransitiveAllowlist(
       map,
-      { 'objectstack-i18n': ['data/query.zod.ts'] },
-      closures,
+      { 'objectstack-i18n': ['contracts/plugin-lifecycle-events.ts'] },
+      exists,
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain('does not exist');
+    expect(problems[0]).toContain('not a *.zod.ts path');
   });
 
   it('refuses a file that is already a core entry', () => {
     const problems = checkTransitiveAllowlist(
       map,
       { 'objectstack-i18n': ['system/translation.zod.ts'] },
-      closures,
+      exists,
     );
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('already a core entry');
@@ -166,7 +187,7 @@ describe('checkTransitiveAllowlist — a constraint that constrains nothing is r
     const problems = checkTransitiveAllowlist(
       map,
       { 'objectstack-i18n': ['shared/identifiers.zod.ts', 'shared/identifiers.zod.ts'] },
-      closures,
+      exists,
     );
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('listed twice');
@@ -174,11 +195,56 @@ describe('checkTransitiveAllowlist — a constraint that constrains nothing is r
 
   it('every shipped list names a package the map has', () => {
     // The one fact about the real list this file can assert without re-running
-    // the generator; reachability of each row is `check:skill-refs`'s job,
-    // because only it has the closure.
+    // the generator; existence of each row on disk is `check:skill-refs`'s job,
+    // because only it reads packages/spec/src.
     for (const skillName of Object.keys(TRANSITIVE_ALLOWLIST)) {
       expect(skillName).toMatch(/^objectstack-/);
     }
+  });
+});
+
+describe('publishedPointers — a declared row publishes on existence, an undeclared file never does', () => {
+  const core = ['system/translation.zod.ts'];
+  // What resolveAll() would hand over: the shipped closure, sorted. It reaches
+  // `kernel/metadata-protection.zod.ts` and NOT `shared/identifiers.zod.ts`.
+  const closure = ['kernel/metadata-protection.zod.ts', 'system/translation.zod.ts'];
+
+  it('an allowlisted, existing, unreachable pointer publishes', () => {
+    const rows = publishedPointers(core, closure, ['shared/identifiers.zod.ts'], exists);
+    expect(rows).toContain('shared/identifiers.zod.ts');
+    expect(rows).toContain('system/translation.zod.ts');
+  });
+
+  it('an allowlisted dead file is not emitted — the guard refuses the run for it by name', () => {
+    // The emit path must not crash on the row (the description reader opens
+    // the file), so the refusal above is the one the operator sees.
+    const rows = publishedPointers(core, closure, ['data/gone.zod.ts'], exists);
+    expect(rows).not.toContain('data/gone.zod.ts');
+    expect(
+      checkTransitiveAllowlist({ 'objectstack-i18n': core }, { 'objectstack-i18n': ['data/gone.zod.ts'] }, exists),
+    ).toHaveLength(1);
+  });
+
+  it('a non-allowlisted unreachable pointer is not published, list or no list', () => {
+    // `data/query.zod.ts` exists, no edge reaches it, and no row declares it.
+    expect(publishedPointers(core, closure, ['shared/identifiers.zod.ts'], exists)).not.toContain('data/query.zod.ts');
+    expect(publishedPointers(core, closure, undefined, exists)).not.toContain('data/query.zod.ts');
+  });
+
+  it('with a list, a file the closure reached on its own stays out', () => {
+    // The list is the answer for a package that carries one; reachability
+    // through a helper edge adds nothing to it.
+    expect(publishedPointers(core, closure, [], exists)).toEqual(['system/translation.zod.ts']);
+  });
+
+  it('with no list, the closure publishes unchanged', () => {
+    expect(publishedPointers(core, closure, undefined, exists)).toEqual(closure);
+  });
+
+  it('returns the rows sorted, the order the index template relies on', () => {
+    const rows = publishedPointers(core, closure, ['shared/identifiers.zod.ts', 'data/query.zod.ts'], exists);
+    expect(rows).toEqual([...rows].sort());
+    expect(rows).toEqual(['data/query.zod.ts', 'shared/identifiers.zod.ts', 'system/translation.zod.ts']);
   });
 });
 
@@ -230,11 +296,16 @@ describe('the generator wires the guards in', () => {
     expect(source()).toContain('checkSingleOwner(SKILL_MAP, SHARED_CORE_SCHEMAS)');
   });
 
-  it('calls checkTransitiveAllowlist, and filters the emitted set by the list', () => {
+  it('calls checkTransitiveAllowlist on disk existence, and selects the emitted set by the list', () => {
     // Both halves matter: the guard alone would validate a list the emit path
     // never reads, which is the shape of a constraint that constrains nothing.
-    expect(source()).toContain('checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures)');
-    expect(source()).toContain('allowed.includes(f)');
+    // And the guard must be handed the disk, not a closure — a closure-fed
+    // guard is the reachability filter this list stopped being.
+    expect(source()).toContain('checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, existsInSpecSrc)');
+    expect(source()).toContain(
+      'publishedPointers(coreFiles, resolved, TRANSITIVE_ALLOWLIST[skillName], existsInSpecSrc)',
+    );
+    expect(source()).not.toContain('closures[skillName]');
   });
 
   it('strips internal ids on the description path, not somewhere unreachable', () => {

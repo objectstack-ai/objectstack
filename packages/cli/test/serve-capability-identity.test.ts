@@ -105,11 +105,14 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   realtime: 'com.objectstack.service.realtime',
   mcp: 'com.objectstack.mcp',
   marketplace: 'package-service',
+  // Same provider as `marketplace` (#19387). The resolver's own-mount dedup
+  // relies on this: each row's identities contain the name the ONE constructed
+  // PackageServicePlugin registers, which the drift block below re-derives.
+  'package-registry': 'package-service',
   email: 'com.objectstack.service.email',
   sms: 'com.objectstack.service.sms',
   sharing: 'com.objectstack.service.sharing',
   'pinyin-search': 'com.objectstack.plugin.pinyin-search',
-  reports: 'com.objectstack.service.reports',
   approvals: 'com.objectstack.service.approvals',
   settings: 'com.objectstack.service.settings',
   webhooks: 'com.objectstack.plugin-webhook-outbox',

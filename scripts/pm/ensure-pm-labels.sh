@@ -325,6 +325,24 @@ done
 # would assert a kinship the paragraph above spends its length denying.
 gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge pack smoke: self-declared breaking auth/audience change (see CONTRIBUTING.md)" 2>/dev/null || true
 
+# needs:contract-review — a MARKER, never a gate; rules in
+# .claude/skills/pm-dispatch/references/contract-review.md 〈等复核标记〉. The
+# dispatching seat hangs it on the PR at ACCEPT when either clause-② limb hits
+# and no same-form PASS is on the current head; the seat posting that PASS, or
+# the dispatching seat at merge/close, clears it (a FAIL leaves it on). Named
+# readers: the maintainer's PR-list filter
+# `is:pr is:open label:needs:contract-review` and each seat's patrol and
+# handover. ⛔ No check, workflow, queue guard or patrol script reads it — the
+# queue releases on the `## Contract review` record alone.
+# Restored by the maintainer's instruction recorded on #19973, verbatim:
+# 「恢复 needs:contract-review，把这句原话写进一张 skills 车道的卡」 — answering a
+# question that proposed a marker, not a gate. The gate role, `--pair`, the
+# double carrier and the independence pair that ruling record 5770886272
+# retired stay retired. Main repo only: the clause-② contract surface lives
+# here. Colour bfdadc sits outside the state and red (blocked / decision)
+# families.
+gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d "Marker only — PR awaits its at-tier Contract review PASS; no check reads it, the record decides" 2>/dev/null || true
+
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
 #

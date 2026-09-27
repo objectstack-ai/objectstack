@@ -492,20 +492,34 @@ describe('#7968 — the paused-run screen is gated to its trigger identity, or t
         });
     });
 
-    describe('scope — what this card does NOT change', () => {
-        it('leaves `resume`\'s own authority checks alone (#3801 / #5561)', async () => {
-            // The write sibling answers in the ENGINE, on the suspension's
-            // declared `resumeAuthority`. A stranger reaching it is the engine's
-            // question to answer, not this gate's — and Option A, which would
-            // put the READ on that same per-run axis, is explicitly out of scope
-            // here.
+    describe('the write twin — the resume door asks this same question since #19987', () => {
+        it('refuses the same stranger at `resume` with the same code and status, and never calls it', async () => {
+            // This case used to pin the opposite: that the stranger refused a
+            // READ here was let through to `resume` on the same pause, because
+            // the write answered only the engine's node-level `resumeAuthority`
+            // (#3801 / #5561), which asks WHAT the run is parked on and never
+            // WHO is resuming. #19987 closed that on this gate's own predicate;
+            // the write's full matrix lives in
+            // `automation-resume-caller-gate.test.ts`. Option A — both doors on
+            // a per-run authority axis — is still out of scope on both.
             const h = makeDispatcher('refusing');
             const { response } = await h.dispatcher.handleAutomation(
                 'lead_followup/runs/run_1/resume', 'POST', { inputs: {} }, STRANGER(), undefined,
             );
 
-            expect((response as any).status).not.toBe(403);
-            expect(h.resume).toHaveBeenCalled();
+            expect(codeOf(response)).toBe('PERMISSION_DENIED');
+            expect((response as any).status).toBe(403);
+            expect(h.resume).not.toHaveBeenCalled();
+        });
+
+        it('admits the triggering user at `resume` with no grant, as it serves them the screen', async () => {
+            const h = makeDispatcher('refusing');
+            const { response } = await h.dispatcher.handleAutomation(
+                'lead_followup/runs/run_1/resume', 'POST', { inputs: {} }, TRIGGERING_USER(), undefined,
+            );
+
+            expect((response as any).status).toBe(200);
+            expect(h.resume).toHaveBeenCalledTimes(1);
             expect(h.explainCalls).toHaveLength(0);
         });
     });

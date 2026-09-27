@@ -162,9 +162,9 @@ export const SysBusinessUnit = ObjectSchema.create({
     // the ruling's own precondition, 「rather than shipping an unvalidated text
     // column」): membership is the shared `Intl.DateTimeFormat` probe, never
     // the `Intl.supportedValuesOf('timeZone')` enumeration, which omits `UTC`
-    // — the very fallback this contract names. `maxLength: 64` follows
-    // `sys_report_schedule.timezone`, the platform's other IANA column that
-    // pairs a bound with the `UTC` default; the enumeration's longest name on
+    // — the very fallback this contract names. `maxLength: 64` followed
+    // `sys_report_schedule.timezone` (retired since, #20102), then the
+    // platform's other IANA column pairing a bound with the `UTC` default; the enumeration's longest name on
     // the repo's Node baseline is 30 characters and the tzdb caps each path
     // component at 14, so 64 is twice the domain's real ceiling and the smaller
     // of the two precedents (`sys_job.timezone` still says 100 — #15872 gave

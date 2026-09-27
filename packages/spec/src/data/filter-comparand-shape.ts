@@ -5,6 +5,16 @@
  * operators — the one place that decides whether `$in` / `$nin` / `$between`
  * received a list at all, for every driver.
  *
+ * [#19757] And its mirror, one slot over: the one place that decides whether
+ * an EQUALITY comparand — implicit (`{ field: V }`) or `$eq` — received ONE
+ * value rather than a list, for every driver. Two arms, one door: "a list
+ * operator takes a list" and "an equality comparand is not one". The second
+ * is the 2026-09-23 ruling's, recorded in its own section below.
+ *
+ * [#19886] And the same question for equality's negation: whether a `$ne`
+ * comparand received ONE value rather than a list. Ruling A's, recorded in the
+ * last "Refused BY RULING" section.
+ *
  * `FieldOperatorsSchema` (`./filter.zod.ts`) declares three operators whose
  * comparand is a LIST rather than a scalar:
  *
@@ -63,6 +73,21 @@
  * drivers"). `@objectstack/objectql`'s `assertListComparandShapes` is now a
  * delegating wrapper that supplies the engine's `find('deal')` context prefix;
  * there is exactly one implementation of "a list operator takes a list".
+ *
+ * That sentence is true of THREE slots, and each is named because it was once
+ * true of fewer:
+ *
+ * - **The list-operator slot** (`$in` / `$nin` / `$between`) — a scalar where a
+ *   list belongs, since #9228 moved the rule here.
+ * - **The equality slot** (implicit `{ field: V }` and `$eq`) — a list where one
+ *   value belongs, since the 2026-09-23 ruling (#19757). Until then this face
+ *   judged only the first slot, and the door stood open in the second: the
+ *   SQL family and `driver-memory` refused the shape, `@objectstack/formula`
+ *   excluded every row, and `driver-mongodb` alone ANSWERED it, as MongoDB's
+ *   array equality. That is the arm's section below.
+ * - **The inequality slot** (`$ne`) — a list where one value belongs, since
+ *   ruling A on #19886 (2026-09-24). Until then this face passed it and each
+ *   backend answered it alone. That is the last "Refused BY RULING" section.
  *
  * ## Both engine doors, because only one of them carries an array
  *
@@ -209,6 +234,120 @@
  *   prescription — so this check changes the verdict only for pairs this door
  *   accepts today.
  *
+ * ## Refused BY RULING, 2026-09-23: an ARRAY in the EQUALITY slot (#19757)
+ *
+ * The ruling (letter 乙, record 5793368540): "an array in the implicit-equality
+ * slot is refused at the shared face, for every driver at once" — ⛔ no alias,
+ * ⛔ no grace window. {@link parseFilterAST} lowers
+ * `['tags', 'equals', ['a']]` (and `=` / `==` / `eq`) to the IMPLICIT form
+ * `{ tags: ['a'] }`, and before this arm that shape passed both shared doors
+ * and got one answer per backend, measured on the lowered node:
+ *
+ * | backend | `{ tags: ['a'] }` |
+ * |:--|:--|
+ * | SQL family (`driver-sql`; `driver-sqlite-wasm` / `driver-turso` built on it) | refused, 400 — top level only: nested in `$and` / `$or` / `$not` it reached SQLite and came back a 500 |
+ * | `driver-memory` | refused, 400, at every depth |
+ * | `@objectstack/formula` | no row, including a row storing exactly `['a']` |
+ * | `driver-mongodb` | ANSWERED — `translateFilter` emits it unchanged, and MongoDB's equality on an array operand selects a stored array EQUAL to `['a']` or HOLDING `['a']` as an element (mingo 7.2.4, the named proxy; a live mongod is NOT measured) |
+ *
+ * One stored filter, a 400 on most backends and a silent, differently-shaped
+ * row set on one — the silent direction on exactly one backend. Refusing here
+ * makes every one of those cells unreachable through a platform door.
+ *
+ * The scope is the EQUALITY slot, and it is spelled out because the next slot
+ * over looks the same:
+ *
+ * - **Implicit equality** — `{ field: [...] }`, the lowering of every `$eq`
+ *   authoring spelling given an array, at any depth under `$and` / `$or` /
+ *   `$not`. An EMPTY array is still an array: `{ tags: [] }` is refused too.
+ * - **`$eq`** — `{ field: { $eq: [...] } }`, the explicit spelling of the same
+ *   comparison.
+ * - **`$ne` is not THIS arm's.** It is equality's negation, not equality, and
+ *   this ruling names implicit and explicit equality. It measured the same
+ *   split (refused on the SQL family and `driver-memory`, answered by
+ *   `driver-mongodb`), so it went to its own card and got its own ruling —
+ *   the last section below, with its own remedy. The other scalar operators
+ *   (`$gt`, `$contains`, …) carrying an array are not this ruling's, and not
+ *   that one's either.
+ * - **The list operators keep their lists**, `$in: []` / `$nin: []` included,
+ *   and every scalar — `null` above all, since `{ field: null }` and
+ *   `$eq: null` ARE the has-no-value predicate (#5332) — keeps passing.
+ * - **A field spec with no `$` key** (`{ author: { name: 'x' } }`) is still not
+ *   descended into; an array sitting INSIDE one is its nested condition's
+ *   business, not this slot's.
+ *
+ * The prescription names the two operators an author holding a list was
+ * reaching for, by their spec spellings, never an invented one: `$in`
+ * ("one of these values", authoring spelling `in`) and `$contains`
+ * ("the stored list holds this value" on a multi-value field — the MEMBERSHIP
+ * reading `FieldOperatorsSchema` declares for a `multiple: true` / JSON-stored
+ * column, authoring spelling `contains`). Both are hand-spelled for the import
+ * cycle {@link LIST_COMPARAND_OPERATORS} records, and
+ * `filter-comparand-shape.test.ts` reconciles them against `FieldOperatorsSchema`
+ * and the AST vocabulary.
+ *
+ * The leading sentence is `driver-memory`'s own for the same condition
+ * (`arrayComparandError`), kept verbatim so one condition keeps one wording
+ * across the platform (#5240's rule, applied across packages).
+ *
+ * [#19889] The SCHEMA door refuses the same shape on save (ruling A, record
+ * 5805248669: "one constant, two doors"): `FilterConditionSchema`'s implicit
+ * form and `$eq`, and `FieldOperatorsSchema.$eq`. So the whole sentence — the
+ * position, the received list, the prescription — is assembled in
+ * `./filter-comparand-refusal-text.ts`, which both doors import; this door adds
+ * only its `at <path>` location and its envelope.
+ *
+ * ## Refused BY RULING, 2026-09-24: an ARRAY under `$ne` (#19886)
+ *
+ * Ruling A (record 5805254639, the director seat, class 1): "The shared
+ * comparand-shape face refuses an array under `$ne` for every driver, and
+ * `FieldOperatorsSchema.$ne` refuses it at parse — one remedy text, naming the
+ * declared list-negation operator by its spec spelling" — ⛔ no alias, ⛔ no
+ * window. The governing text is `$ne`'s own published describe
+ * (`NE_DESCRIPTION`, `./filter.zod.ts`): "the comparand is a literal, or a
+ * { $field } reference to another column of the same table". An array is
+ * neither. So this refusal pulls the face back to what `$ne` already declared.
+ *
+ * {@link parseFilterAST} lowers `['tags', 'ne', ['a']]` (and `!=`, `<>`, `neq`,
+ * `not_equals`, `notequals`) to `{ tags: { $ne: ['a'] } }`, and until this arm
+ * the face passed that shape. Measured on the card before any stage landed:
+ * the SQL family and `driver-memory` refused it (400); `driver-mongodb`
+ * ANSWERED it as MongoDB reads `$ne` against an array operand, "not equal to
+ * that array and not holding it as an element", which is every scalar row
+ * (mingo, the named proxy; a live mongod is NOT measured); and
+ * `@objectstack/formula` matched EVERY row, which on the row-level write check
+ * admitted every write a `!=` policy against a list was written to refuse.
+ * The two answering faces were closed first, each at its own face (the formula
+ * evaluator, and `driver-mongodb`'s walk). This arm closes the shared one, so
+ * the shape is refused before any driver runs, on every driver at once.
+ *
+ * The scope is `$ne` carrying an ARRAY, and nothing wider:
+ *
+ * - **Every depth** under `$and` / `$or` / `$not`, and the EMPTY array too.
+ *   `$ne: []` is an array in a one-value slot; only `$in: []` / `$nin: []` are
+ *   declared predicates.
+ * - **The pass list is the equality arm's.** `$ne: null` is the has-a-value
+ *   predicate (#5332). Every scalar, a `Date`, and a `{ $field }` reference
+ *   (`$ne` is one of the six comparisons a reference may be the whole
+ *   comparand of) are not arrays, and pass exactly as before.
+ * - **The remedy is ONE operator**, `$nin` ("none of these values"), by its spec
+ *   spelling and its authoring spellings, as the ruling says. It is read off
+ *   `FieldOperatorsSchema`, where `$nin` is the operator declared as "Not in
+ *   list". ⛔ `$notContains` is not offered: it is declared on a STRING
+ *   comparand and is no list operator. `filter-comparand-shape.test.ts`
+ *   reconciles the spellings against `FieldOperatorsSchema` and the AST table.
+ * - ⛔ **Not the ordering operators, a nested array inside `$in`, or a
+ *   `{ $field }` referent to a multi-valued field.** Those are the same class,
+ *   are recorded on the card, and are scoped separately.
+ * - **The leading sentence is `driver-memory`'s** `arrayComparandError` for
+ *   `$ne`, word for word, so one condition keeps one wording across packages.
+ *
+ * The schema door's half is `FieldOperatorsSchema.$ne` and its documentation
+ * copy `EqualityOperatorSchema.$ne` (`./filter.zod.ts`), which print this
+ * sentence without the location. As with the equality slot, the whole sentence
+ * is assembled in `./filter-comparand-refusal-text.ts`, which both doors
+ * import.
+ *
  * ## Refusal envelope
  *
  * Every refusal carries `code: 'INVALID_FILTER'` and `status: 400` (ADR-0112
@@ -220,7 +359,17 @@
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/5869 (the rule)
  * @see https://github.com/objectstack-ai/objectstack/issues/9228 (the move)
+ * @see https://github.com/objectstack-ai/objectstack/issues/19757 (the equality-slot arm)
+ * @see https://github.com/objectstack-ai/objectstack/issues/19886 (the `$ne` arm)
  */
+
+import {
+  IN_OPERATOR_SPELLINGS,
+  NIN_OPERATOR_SPELLINGS,
+  arrayEqualityComparandMessage,
+  arrayInequalityComparandMessage,
+  shapePreview,
+} from './filter-comparand-refusal-text';
 
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
@@ -235,9 +384,12 @@
  * cycle. `filter-comparand-shape.test.ts` reconciles the two sets, so a new
  * membership spelling cannot land with this message left behind.
  */
-const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['$in', ['in']],
-  ['$nin', ['nin', 'not_in', 'notin']],
+const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  // [#19889] The `$in` row is read from the shared refusal text, so the operator
+  // the equality-slot refusal prescribes and this row cannot name two lists.
+  ['$in', IN_OPERATOR_SPELLINGS],
+  // [#19886] The `$nin` row likewise, for the operator the `$ne` refusal prescribes.
+  ['$nin', NIN_OPERATOR_SPELLINGS],
   ['$between', ['between']],
 ]);
 
@@ -312,28 +464,6 @@ function describeOperand(value: unknown): string {
   return typeof value;
 }
 
-/**
- * A short, bounded rendering of the offending value.
- *
- * Bounded because the value came off the wire and a filter comparand can be
- * arbitrarily large; the message is for a human reading a 400, not a dump.
- *
- * The whole message has a second, harder bound: `rest-server.ts` TRUNCATES a
- * declared-4xx message at `CLIENT_MESSAGE_MAX` (500) before it reaches the
- * client (#5423). Everything a caller needs in order to act — operator, field,
- * received value, position, corrected shape — is therefore front-loaded, and
- * the test file pins the assembled length under that bound so a later edit
- * cannot silently push the tail off the wire.
- */
-function shapePreview(value: unknown): string {
-  let text: string;
-  try {
-    text = JSON.stringify(value) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
-}
 
 /**
  * The wire envelope every filter refusal on the platform carries — ADR-0112
@@ -581,16 +711,76 @@ function nullOrderingComparandError(
 }
 
 /**
+ * An ARRAY as an EQUALITY comparand — implicit (`{ field: [...] }`, `op`
+ * omitted) or `$eq` — refused BY RULING, 2026-09-23 (#19757); see the module
+ * note's fifth "Refused BY RULING" section.
+ *
+ * The leading sentence is `driver-memory`'s `arrayComparandError` verbatim, so
+ * the one condition keeps one wording across packages. What follows is this
+ * door's own: the two operators an author holding a list was reaching for, by
+ * their spec spellings and their authoring spellings, then the "NOT applied"
+ * sentence — front-loaded and inside the 500-char client bound (#5423) like
+ * every sibling. The corrected shapes are written WITHOUT the field wrapper and
+ * with `…` for the value: the field is already the subject of the first
+ * sentence, and the bound buys more as prescription than as a second and third
+ * echo of the field name or the received list. For the same reason the four
+ * equality spellings (`=`, `==`, `equals`, `eq`) are not listed: "the
+ * implicit-equality comparand" names the slot, and a received list of 60
+ * characters leaves no room for them inside the bound.
+ *
+ * [#19889] The sentence itself is `arrayEqualityComparandMessage`
+ * (`./filter-comparand-refusal-text.ts`), the one the schema door prints on
+ * save; this door passes its `path` and wraps the envelope.
+ */
+function arrayEqualityComparandError(
+  context: string | undefined,
+  field: string,
+  value: unknown,
+  path: string,
+  op?: '$eq',
+): Error {
+  return invalidFilterComparandError(
+    context,
+    arrayEqualityComparandMessage(value, op ? { op, field, path } : { field, path }),
+  );
+}
+
+/**
+ * An ARRAY under `$ne` — refused BY RULING, 2026-09-24 (#19886, ruling A); see
+ * the module note's sixth "Refused BY RULING" section.
+ *
+ * The sentence is `arrayInequalityComparandMessage`
+ * (`./filter-comparand-refusal-text.ts`), which `FieldOperatorsSchema.$ne`
+ * prints on parse. Its leading sentence is `driver-memory`'s
+ * `arrayComparandError` for `$ne`, word for word, and its one remedy is the
+ * declared list-negation operator `$nin` with its authoring spellings. As with
+ * {@link arrayEqualityComparandError}, this door adds only its `at <path>`
+ * location and its envelope.
+ */
+function arrayInequalityComparandError(
+  context: string | undefined,
+  field: string,
+  value: unknown,
+  path: string,
+): Error {
+  return invalidFilterComparandError(context, arrayInequalityComparandMessage(value, { field, path }));
+}
+
+/**
  * Walk one `FilterCondition` and refuse every list-shaped operator whose
  * comparand cannot be one — and, since the two null rulings (2026-08-31,
- * 2026-09-01), the null comparand positions those rulings carved out.
+ * 2026-09-01), the null comparand positions those rulings carved out; and,
+ * since the 2026-09-23 ruling (#19757), every EQUALITY comparand (implicit or
+ * `$eq`) that IS a list; and, since ruling A on #19886, every `$ne` comparand
+ * that is a list.
  *
  * Read-only and allocation-free on the overwhelmingly common path (a filter
  * with no list operator walks its own keys and returns). Runs on every engine
  * read and write and inside every {@link parseFilterAST} call, so it stays a
  * walk rather than a schema parse — that cost is now the whole reason, and this
  * gate deliberately enforces only the three list declarations the drivers
- * genuinely cannot agree on, plus the null carve-outs ruled onto the same door.
+ * genuinely cannot agree on, the equality slot's mirror of them, plus the null
+ * carve-outs ruled onto the same door.
  *
  * @param node    the LOWERED `FilterCondition` — never the authoring array.
  * @param context optional caller prefix (`find('deal')`), the engine's #5346
@@ -644,13 +834,39 @@ function assertFieldListComparands(
   path: string,
 ): void {
   // A spec that is not a plain object is a comparand (implicit equality) and
-  // carries no operator to check.
+  // carries no operator to check — unless it is a LIST, which the equality
+  // slot does not take (2026-09-23 ruling, #19757). Empty included: `[]` is
+  // an array in this slot like any other, and only `$in: []` / `$nin: []` are
+  // declared predicates.
+  if (Array.isArray(spec)) {
+    throw arrayEqualityComparandError(context, field, spec, path);
+  }
   if (!isFilterNode(spec)) return;
   const keys = Object.keys(spec);
   // No `$` key at all → a deep-equality comparand or a nested-relation
   // condition. Not descended into; see the module note.
   if (!keys.some((key) => key.startsWith('$'))) return;
   for (const op of keys) {
+    // The explicit spelling of the same equality slot (#19757). `null` / every
+    // scalar / a `{ $field }` reference are not arrays, so they pass exactly as
+    // before.
+    if (op === '$eq') {
+      if (Array.isArray(spec[op])) {
+        throw arrayEqualityComparandError(context, field, spec[op], `${path}.${op}`, '$eq');
+      }
+      continue;
+    }
+    // Its negation (ruling A on #19886): `$ne` takes one value too. Its own
+    // arm and its own remedy (`$nin`), because the equality remedy (`$in` /
+    // `$contains`) names the wrong operators for a negation. The same pass
+    // list: `null` is the has-a-value predicate, and scalars and a `{ $field }`
+    // reference are not arrays.
+    if (op === '$ne') {
+      if (Array.isArray(spec[op])) {
+        throw arrayInequalityComparandError(context, field, spec[op], `${path}.${op}`);
+      }
+      continue;
+    }
     // The ordering carve-out (2026-09-01 ruling, #14080). Strictly `null`:
     // `undefined` keeps the TYPE door's own sentence, and every other
     // comparand type in these slots is that door's question, not this one's.

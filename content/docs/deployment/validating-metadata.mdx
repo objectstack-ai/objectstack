@@ -623,7 +623,10 @@ matrix answers the first question only.
 2. **The per-package walk.** The same table again, once per entry of `packages[]`:
    each package's body re-read as the stack it was assembled from, handed the
    artifact's own `packages[]` as **resolution context** so a sibling package's
-   object still resolves, while the collections being judged stay that package's
+   object still resolves — and so does a translation key naming a sibling's view,
+   page, action, app, dashboard or flow (the
+   [orphan-key table](/docs/protocol/kernel/i18n-standard#orphan-keys-and-option-keys)
+   lists every rung) — while the collections being judged stay that package's
    alone. It is de-duplicated against the union run, so what it reports is the
    set of per-package findings no union finding already carried under the same
    rule, `where`, message and non-top-level position — the leading

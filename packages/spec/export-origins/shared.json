@@ -120,7 +120,7 @@
     "safeParsePretty": "src/shared/error-map.zod.ts#safeParsePretty (function)",
     "singularToPlural": "src/meta-spelling/manifest-collection-spelling.ts#singularToPlural (function)",
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
-    "suggestFieldType": "src/shared/suggestions.zod.ts#suggestFieldType (function)",
+    "suggestFieldType": "src/shared/field-type-suggestion.ts#suggestFieldType (function)",
     "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
     "unrecognisedMetaTypeRefusal": "src/meta-spelling/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
   }

@@ -29,7 +29,7 @@ export const Account = ObjectSchema.create({
         { label: 'Healthcare', value: 'healthcare' },
       ],
     }),
-    annual_revenue: Field.currency({ label: 'Annual Revenue', scale: 2 }),
+    annual_revenue: Field.currency({ label: 'Annual Revenue' }),
     owner: Field.user({ label: 'Owner', required: true }),
   },
 

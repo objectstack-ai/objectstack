@@ -50,8 +50,9 @@
 #      except another agent going and looking with `fuser`.
 #
 #   3. ORPHANED FD HOLDERS — a backgrounded child inherited the caller's lock
-#      fd and kept the lock long after the caller was gone (see the lifecycle
-#      block in scripts/gen-sdui-manifest.sh, where that was diagnosed).
+#      fd and kept the lock long after the caller was gone (diagnosed in the
+#      dev-server lifecycle block of the since-retired scripts/gen-sdui-manifest.sh;
+#      scripts/publish-smoke.sh carries the same discipline).
 #
 # A declared cap that nothing enforces is not a convention when its violators
 # win. So the cap moves from prose into the call site: this entry point takes no

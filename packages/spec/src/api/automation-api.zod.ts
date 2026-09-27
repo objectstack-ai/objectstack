@@ -11,19 +11,30 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * Defines REST CRUD endpoint schemas for managing automation flows,
  * triggering executions, and querying execution history.
  *
- * Base path: /api/automation
+ * Base path: /api/v1/automation
+ *
+ * The wire paths the platform serves: the dispatcher mounts this door at its
+ * `prefix` (default `/api/v1`, the one `objectstack serve` uses) plus
+ * `/automation`. A drift pin in `@objectstack/runtime`
+ * (`automation-api-contract-mounts.test.ts`) holds every `path` in
+ * {@link AutomationApiContracts} to that mount table.
+ *
+ * The flow LIST is not on this door. Flows are metadata (ADR-0106), and the
+ * governed read of them is `GET /api/v1/meta/flow` (`client.meta.getItems`);
+ * the former `GET /api/v1/automation` list route, its request/response schemas
+ * and `client.automation.list` are retired (ADR-0087 semantic entry
+ * `automation-flow-list-route-retired`).
  *
  * @example Endpoints
  * ```
- * GET    /api/automation                         — List flows
- * GET    /api/automation/:name                   — Get flow
- * POST   /api/automation                         — Create flow
- * PUT    /api/automation/:name                   — Update flow
- * DELETE /api/automation/:name                   — Delete flow
- * POST   /api/automation/:name/trigger           — Trigger flow execution
- * POST   /api/automation/:name/toggle            — Enable/disable flow
- * GET    /api/automation/:name/runs              — List execution runs
- * GET    /api/automation/:name/runs/:runId       — Get single execution run
+ * GET    /api/v1/automation/:name                — Get flow
+ * POST   /api/v1/automation                      — Create flow
+ * PUT    /api/v1/automation/:name                — Update flow
+ * DELETE /api/v1/automation/:name                — Delete flow
+ * POST   /api/v1/automation/:name/trigger        — Trigger flow execution
+ * POST   /api/v1/automation/:name/toggle         — Enable/disable flow
+ * GET    /api/v1/automation/:name/runs           — List execution runs
+ * GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
  * ```
  */
 
@@ -50,60 +61,23 @@ export const AutomationRunPathParamsSchema = lazySchema(() => AutomationFlowPath
 export type AutomationRunPathParams = z.input<typeof AutomationRunPathParamsSchema>;
 
 // ==========================================
-// 2. List Flows (GET /api/automation)
+// 2. List Flows — RETIRED (#19543, door ④)
 // ==========================================
-
-/**
- * Query parameters for listing automation flows.
- *
- * @example GET /api/automation?status=active&limit=20
- */
-export const ListFlowsRequestSchema = lazySchema(() => z.object({
-  status: z.enum(['draft', 'active', 'obsolete', 'invalid']).optional()
-    .describe('Filter by flow status'),
-  type: z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api']).optional()
-    .describe('Filter by flow type'),
-  limit: z.number().int().min(1).max(100).default(50)
-    .describe('Maximum number of flows to return'),
-  cursor: z.string().optional()
-    .describe('Cursor for pagination'),
-}));
-export type ListFlowsRequest = z.input<typeof ListFlowsRequestSchema>;
-/** Post-parse shape of {@link ListFlowsRequest} — defaults applied, transforms run (ADR-0122). */
-export type ListFlowsRequestParsed = z.infer<typeof ListFlowsRequestSchema>;
-
-/**
- * Summary information for a flow in list results.
- */
-export const FlowSummarySchema = lazySchema(() => z.object({
-  name: z.string().describe('Flow machine name'),
-  label: z.string().describe('Flow display label'),
-  type: z.string().describe('Flow type'),
-  status: z.string().describe('Flow deployment status'),
-  version: z.number().int().describe('Flow version number'),
-  enabled: z.boolean().describe('Whether the flow is enabled for execution'),
-  nodeCount: z.number().int().optional().describe('Number of nodes in the flow'),
-  lastRunAt: z.string().datetime().optional().describe('Last execution timestamp'),
-}));
-export type FlowSummary = z.input<typeof FlowSummarySchema>;
-
-/**
- * Response for the list flows endpoint.
- */
-export const ListFlowsResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    flows: z.array(FlowSummarySchema).describe('Flow summaries'),
-    total: z.number().int().optional().describe('Total matching flows'),
-    nextCursor: z.string().optional().describe('Cursor for the next page'),
-    hasMore: z.boolean().describe('Whether more flows are available'),
-  }),
-}));
-export type ListFlowsResponse = z.input<typeof ListFlowsResponseSchema>;
-/** Post-parse shape of {@link ListFlowsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListFlowsResponseParsed = z.infer<typeof ListFlowsResponseSchema>;
+//
+// `ListFlowsRequestSchema`, `ListFlowsResponseSchema` and `FlowSummarySchema`
+// were removed with the `GET /api/v1/automation` list route (maintainer
+// ruling: 「退役，统一走 /meta/flow」). The route read none of its declared
+// request (`status` / `type` / `limit` / `cursor`) and answered bare flow
+// names with a literal `hasMore: false` where the response declared
+// `FlowSummary[]` and a `nextCursor`, and it had zero callers in this
+// repository, objectui and cloud. Flows are metadata (ADR-0106): the list is
+// `GET /api/v1/meta/flow`. Registered as whole-def removals in
+// `RETIRED_DEFS_BY_MAJOR[18]` and as the D3 semantic entry
+// `automation-flow-list-route-retired`. The section number stays vacant so the
+// sections below keep the numbers other files cite.
 
 // ==========================================
-// 3. Get Flow (GET /api/automation/:name)
+// 3. Get Flow (GET /api/v1/automation/:name)
 // ==========================================
 
 /**
@@ -123,13 +97,13 @@ export type GetFlowResponse = z.input<typeof GetFlowResponseSchema>;
 export type GetFlowResponseParsed = z.infer<typeof GetFlowResponseSchema>;
 
 // ==========================================
-// 4. Create Flow (POST /api/automation)
+// 4. Create Flow (POST /api/v1/automation)
 // ==========================================
 
 /**
  * Request body for creating a new flow.
  *
- * @example POST /api/automation
+ * @example POST /api/v1/automation
  * { name: 'approval_flow', label: 'Approval Flow', type: 'autolaunched', ... }
  */
 export const CreateFlowRequestSchema = lazySchema(() => FlowSchema);
@@ -144,7 +118,7 @@ export type CreateFlowRequestParsed = z.infer<typeof CreateFlowRequestSchema>;
  * `FlowSchema.parse` output with schema defaults materialized (`version`,
  * `status`, `runAs`, per-edge `type`/`isDefault`) and `edge.condition`
  * strings lowered to their `{dialect, source}` envelopes — the same shape
- * `GET /api/automation/:name` answers, never an echo of the request bytes.
+ * `GET /api/v1/automation/:name` answers, never an echo of the request bytes.
  */
 export const CreateFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: FlowSchema.describe('The created flow, canonicalized — the parsed shape the engine stored, identical to what a subsequent GET answers'),
@@ -154,7 +128,7 @@ export type CreateFlowResponse = z.input<typeof CreateFlowResponseSchema>;
 export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
 
 // ==========================================
-// 5. Update Flow (PUT /api/automation/:name)
+// 5. Update Flow (PUT /api/v1/automation/:name)
 // ==========================================
 
 /**
@@ -166,7 +140,7 @@ export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
  * `.partial()` here declared a partial-update capability nothing implements.
  * A real partial-update capability would be its own feature card.
  *
- * @example PUT /api/automation/approval_flow
+ * @example PUT /api/v1/automation/approval_flow
  * { name: 'approval_flow', definition: { name: 'approval_flow', label: 'Approval Flow', type: 'autolaunched', nodes: [...], edges: [...] } }
  */
 export const UpdateFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
@@ -191,7 +165,7 @@ export type UpdateFlowResponse = z.input<typeof UpdateFlowResponseSchema>;
 export type UpdateFlowResponseParsed = z.infer<typeof UpdateFlowResponseSchema>;
 
 // ==========================================
-// 6. Delete Flow (DELETE /api/automation/:name)
+// 6. Delete Flow (DELETE /api/v1/automation/:name)
 // ==========================================
 
 /**
@@ -214,13 +188,13 @@ export type DeleteFlowResponse = z.input<typeof DeleteFlowResponseSchema>;
 export type DeleteFlowResponseParsed = z.infer<typeof DeleteFlowResponseSchema>;
 
 // ==========================================
-// 7. Trigger Flow (POST /api/automation/:name/trigger)
+// 7. Trigger Flow (POST /api/v1/automation/:name/trigger)
 // ==========================================
 
 /**
  * Request body for triggering a flow execution.
  *
- * @example POST /api/automation/approval_flow/trigger
+ * @example POST /api/v1/automation/approval_flow/trigger
  * { record: { id: 'rec-1' }, object: 'account', event: 'on_create' }
  */
 export const TriggerFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
@@ -398,14 +372,14 @@ export type TriggerFlowResponse = z.input<typeof TriggerFlowResponseSchema>;
 export type TriggerFlowResponseParsed = z.infer<typeof TriggerFlowResponseSchema>;
 
 // ==========================================
-// 7b. Resume failure details (POST /api/automation/:name/runs/:runId/resume, 400 FLOW_FAILED)
+// 7b. Resume failure details (POST /api/v1/automation/:name/runs/:runId/resume, 400 FLOW_FAILED)
 // ==========================================
 
 /**
  * The machine-readable half of a resume failure, as it reaches the caller
  * (#15221; the #16472 family ruling, maintainer 2026-09-07, option A).
  *
- * `POST /api/automation/:name/runs/:runId/resume` answers a run that consumed
+ * `POST /api/v1/automation/:name/runs/:runId/resume` answers a run that consumed
  * its pause and then failed with `400 FLOW_FAILED` (#8684), and the
  * `error.details` of that answer carried the run's two artefacts only — the
  * author's `errorMessage` and the per-node `summary`. The engine's own verdict
@@ -477,13 +451,13 @@ export type ResumeFailureDetails = z.input<typeof ResumeFailureDetailsSchema>;
 export type ResumeFailureDetailsParsed = z.infer<typeof ResumeFailureDetailsSchema>;
 
 // ==========================================
-// 8. Toggle Flow (POST /api/automation/:name/toggle)
+// 8. Toggle Flow (POST /api/v1/automation/:name/toggle)
 // ==========================================
 
 /**
  * Request body for enabling/disabling a flow.
  *
- * @example POST /api/automation/approval_flow/toggle
+ * @example POST /api/v1/automation/approval_flow/toggle
  * { enabled: true }
  */
 export const ToggleFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
@@ -505,7 +479,7 @@ export type ToggleFlowResponse = z.input<typeof ToggleFlowResponseSchema>;
 export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 
 // ==========================================
-// 9. List Runs (GET /api/automation/:name/runs)
+// 9. List Runs (GET /api/v1/automation/:name/runs)
 // ==========================================
 
 /**
@@ -519,7 +493,7 @@ export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
  * at the authoring site) and raises this text at parse time.
  */
 const RUNS_LIST_CURSOR_REMOVED =
-  '`cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 '
+  '`cursor` was removed from GET /api/v1/automation/:name/runs in @objectstack/spec 17.5.0 '
   + '(ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: '
   + 'the option reached the service and the engine never looked at it, no emit site has ever '
   + 'written the response half `nextCursor`, and the only ordering this door has is a required '
@@ -554,7 +528,7 @@ const RUNS_LIST_CURSOR_REMOVED =
  * unfiltered set and nothing in the status, headers or body distinguishes that
  * from a request served as asked.
  *
- * @example GET /api/automation/approval_flow/runs?status=completed&limit=10
+ * @example GET /api/v1/automation/approval_flow/runs?status=completed&limit=10
  */
 export const ListRunsRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
   // [#7359] The canonical `ExecutionStatus`, not a copy of its members. The
@@ -605,7 +579,7 @@ export type ListRunsResponse = z.input<typeof ListRunsResponseSchema>;
 export type ListRunsResponseParsed = z.infer<typeof ListRunsResponseSchema>;
 
 // ==========================================
-// 10. Get Run (GET /api/automation/:name/runs/:runId)
+// 10. Get Run (GET /api/v1/automation/:name/runs/:runId)
 // ==========================================
 
 /**
@@ -653,57 +627,54 @@ export type AutomationApiErrorCode = z.input<typeof AutomationApiErrorCode>;
  * Used for generating SDKs, documentation, and route registration.
  */
 export const AutomationApiContracts = {
-  listFlows: {
-    method: 'GET' as const,
-    path: '/api/automation',
-    input: ListFlowsRequestSchema,
-    output: ListFlowsResponseSchema,
-  },
+  // No `listFlows` entry: the list route is retired (#19543) — flows are read
+  // through `GET /api/v1/meta/flow`. `POST /api/v1/automation` (createFlow)
+  // below is unaffected and stays at the same path.
   getFlow: {
     method: 'GET' as const,
-    path: '/api/automation/:name',
+    path: '/api/v1/automation/:name',
     input: GetFlowRequestSchema,
     output: GetFlowResponseSchema,
   },
   createFlow: {
     method: 'POST' as const,
-    path: '/api/automation',
+    path: '/api/v1/automation',
     input: CreateFlowRequestSchema,
     output: CreateFlowResponseSchema,
   },
   updateFlow: {
     method: 'PUT' as const,
-    path: '/api/automation/:name',
+    path: '/api/v1/automation/:name',
     input: UpdateFlowRequestSchema,
     output: UpdateFlowResponseSchema,
   },
   deleteFlow: {
     method: 'DELETE' as const,
-    path: '/api/automation/:name',
+    path: '/api/v1/automation/:name',
     input: DeleteFlowRequestSchema,
     output: DeleteFlowResponseSchema,
   },
   triggerFlow: {
     method: 'POST' as const,
-    path: '/api/automation/:name/trigger',
+    path: '/api/v1/automation/:name/trigger',
     input: TriggerFlowRequestSchema,
     output: TriggerFlowResponseSchema,
   },
   toggleFlow: {
     method: 'POST' as const,
-    path: '/api/automation/:name/toggle',
+    path: '/api/v1/automation/:name/toggle',
     input: ToggleFlowRequestSchema,
     output: ToggleFlowResponseSchema,
   },
   listRuns: {
     method: 'GET' as const,
-    path: '/api/automation/:name/runs',
+    path: '/api/v1/automation/:name/runs',
     input: ListRunsRequestSchema,
     output: ListRunsResponseSchema,
   },
   getRun: {
     method: 'GET' as const,
-    path: '/api/automation/:name/runs/:runId',
+    path: '/api/v1/automation/:name/runs/:runId',
     input: GetRunRequestSchema,
     output: GetRunResponseSchema,
   },

@@ -30,13 +30,30 @@ import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
  *
  * So the executor honours the seam the way the engine does: the flag first (it
  * answers "did the seam run", never "did the write pass"), then the judgement.
- * These doubles run no hooks, so the row that would be stored IS `opCtx.data`.
+ * These doubles run no hooks, so the rows an insert would store ARE
+ * `opCtx.data` — each element of an array insert ([#19964]).
+ *
+ * [#19950] A predicate (`multi`) update installs the same seam, and the engine
+ * hands it every row the composed AST matches, merged with the payload. These
+ * doubles hold no table, so that match set is empty: the judgement runs over
+ * no rows, exactly as a real engine's would over an empty one.
+ *
+ * [#19989] A by-id update installs it too, and a real engine hands it the one
+ * row it writes, merged with the final payload. These doubles hold no row to
+ * merge onto, so that judgement also runs over none here: the cells in this
+ * file exercise the middleware's own change-set judgement, which still runs,
+ * and the stored-row judgement is pinned against the real engine in
+ * `rls-check-by-id-update-post-hook.test.ts`.
  */
 const runEngineWriteBody = async (opCtx: any): Promise<void> => {
   const seam = opCtx?.postHookWriteImageCheck;
   if (!seam) return;
   seam.honoured = true;
-  await seam.evaluate([opCtx.data]);
+  if (opCtx.operation === 'update') {
+    await seam.evaluate([]);
+    return;
+  }
+  await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
 };
 
 // ---------------------------------------------------------------------------

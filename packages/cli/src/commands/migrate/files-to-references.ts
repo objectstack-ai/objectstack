@@ -14,7 +14,9 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  type ErrorCodeFields,
 } from '../../utils/format.js';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
@@ -37,12 +39,24 @@ import type { MediaColumnMoveScan, SqlDialectName } from '@objectstack/driver-sq
  * is the one outcome that leaves storage an operator has to be told about.
  */
 interface ColumnStepOutcome {
-  skipped: 'gate_not_passed' | 'no_sql_driver' | 'no_sql_seam' | 'nothing_to_move' | null;
+  skipped:
+    | 'gate_not_passed'
+    | 'no_sql_driver'
+    | 'no_sql_seam'
+    | 'driver_cannot_plan'
+    | 'nothing_to_move'
+    | null;
   failed: boolean;
   /** `sys_migration.columns_moved_at` as written, or `null` if it was not written. */
   stampedAt: string | null;
   /** Set when the columns moved and RECORDING that failed — a durability failure. */
   stampError?: string;
+  /**
+   * Set with `skipped: 'driver_cannot_plan'`: the driver's own refusal, in this
+   * command's error-envelope shape (`{ error, code }`), so a `--json` consumer
+   * reads it with the parser it already has for the command's failures.
+   */
+  planRefusal?: { error: string } & ErrorCodeFields;
   report: {
     dialect: SqlDialectName;
     apply: boolean;
@@ -308,6 +322,7 @@ export default class MigrateFilesToReferences extends Command {
           flag: result.flag,
           columnMove: columnMove.report,
           columnsMovedAt: columnMove.stampedAt,
+          columnMoveRefused: columnMove.planRefusal ?? null,
           duration: timer.elapsed(),
         });
         if (!result.gatePassed || columnMove.failed) this.exit(1);
@@ -391,7 +406,27 @@ export default class MigrateFilesToReferences extends Command {
       return { skipped: 'no_sql_driver', failed: false, stampedAt: null, report: null };
     }
 
-    const scan = await stack.driver.planMediaColumnMove();
+    let scan: MediaColumnMoveScan;
+    try {
+      scan = await stack.driver.planMediaColumnMove();
+    } catch (error: any) {
+      // [#19894] A driver that answers NOT_IMPLEMENTED cannot plan the move on
+      // this datastore (the Turso remote face is the measured case). That is a
+      // stated skip, and ⛔ never "nothing to move" nor a failed run: the
+      // backfill and its self-check have already reported, and an `--apply`
+      // run has already recorded the deployment flag, so letting the refusal
+      // reach the outer `catch` would replace that whole report with a bare
+      // error. Asked by the error's CODE, so any other throw is still a failure
+      // and still takes the outer `catch`.
+      if (error?.code !== StandardErrorCode.enum.NOT_IMPLEMENTED) throw error;
+      return {
+        skipped: 'driver_cannot_plan',
+        failed: false,
+        stampedAt: null,
+        report: null,
+        planRefusal: { error: error.message || String(error), ...errorCodeFields(error) },
+      };
+    }
     if (scan.plans.length === 0 && scan.refusals.length === 0) {
       return { skipped: 'nothing_to_move', failed: false, stampedAt: null, report: null };
     }
@@ -472,6 +507,13 @@ export default class MigrateFilesToReferences extends Command {
         printWarning(
           'Column step: SKIPPED — the active driver exposes no usable raw SQL seam, so the media ' +
             'columns were neither inspected nor moved. The deployment stays on the JSON encoding.',
+        );
+      } else if (outcome.skipped === 'driver_cannot_plan') {
+        printWarning(
+          `Column step: NOT JUDGED — the active driver cannot plan the media column move here ` +
+            `(${outcome.planRefusal?.code}), so the media columns were neither inspected nor moved ` +
+            'and no column move was recorded. The deployment stays on the JSON encoding. ' +
+            `The driver says: ${outcome.planRefusal?.error}`,
         );
       } else if (outcome.skipped === 'nothing_to_move') {
         printInfo('Column step: nothing to move — this datastore declares no single-value media column.');

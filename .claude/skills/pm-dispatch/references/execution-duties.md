@@ -18,7 +18,7 @@
 - 引用读到的现状,⛔ 不引用裁决写作时的描述。
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 每条工作项写进派发令时都是 dev 首先证伪的前提。
-- 并行度以 `batch` 封顶,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
+- `batch` 封顶全部子代理,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
 - 舰队至多一张 `tooling` 卡带 `pm:dispatched`,第二张等;带 `Unblocks:` 者继承产品级不计数。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
@@ -42,7 +42,7 @@
 - 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等:`pm:blocking` 在其车道排最前、等待者写该卡;p0/p1 优先级沿链传递。
-- 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:产品仓开放 P0/P1 每次取卡现读。
+- 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:本车道队列开放 P0/P1 每次取卡现读。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。
@@ -52,8 +52,9 @@
 
 ## 认领(先认领后动工)
 
-- 共享身份下 assignee 只答有无认领;身份只认正文 session ID,⛔ 不认作者字段,接管同此。
-- assignee 字段归 PM:原子对 step 1 设,dev 席恒不写它;跨账号 assignee 不是你 ⇒ 永不碰。
+- 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
+- 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
+- dev `pr_create` 同轮 `label-write.mjs --issue PR_NUMBER --assign LOGIN`;席位自有 PR 指派自己。
 - 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
@@ -72,10 +73,9 @@
 - ③ 竞态复读:认领评论上墙后重读全线程;认领评论时间戳是唯一仲裁。
 - 更早的评论带不同 session ID/分支 ⇒ 你输了,回 `already claimed — yielding` 另选。
 - 让行是交接不是退场:连同让行评论交出已诊断的一切与已取的板面读数,赢家不必重扫。
-- dev 每个可编译小步即 push:容器随会话回收,未 push 的树救不回,可交接的只有远程分支。
 - 认领人不可达(token 耗尽/会话结束/身份退役)⇒ 接管:一条评论四件齐,⛔ 不判死活。
 - ① 跨账号 `Release:` 点名被撤认领的 id 与 session ID,带出处三件(谁的指令/原话/在哪说)。
-- ② assignee 同笔换人(`--unassign 旧 --assign 新`);③ 新 `Claim:`:新 session、续用分支与远程 sha。
+- ② assignee 同笔换人(`--unassign`+`--assign`);③ 新 `Claim:`:新 session 与 `Account:`,续用分支与 sha。
 - ④ 交接记录:旧分支最后已 push 的 sha + 一句状态;读者只验①③形状,缺一件即非撤销。
 - C9 只剩一种红:无任何 `Release:` 的跨账号 `Claim:`(真抢卡);线程上每条活认领都要点名。
 - 误伤活席位 ⇒ 令其追加式更正,落 PR 正文不落分支历史。
@@ -144,9 +144,9 @@
 
 ## 收集
 
-- 报告通道统一:GitHub 是两种模式共用的真相源;dev 终报先落 issue 评论、再作返回消息。
-- 收集先扫 GitHub,标记评论在 = 报告完整;两处皆无才进探活/判死。
+- 收集先扫 GitHub(两种模式),标记评论在 = 报告完整;评论与返回消息皆无才进探活/判死。
 - 标记两种拼写等效(HTML 注释形、首行 `os-dev-report`);⛔ 永不把没收到失败通知读作还在跑。
+- 报告点名 PR ⇒ 会话席当即 `subscribe_pr_activity` 并记座位贴;中继开的 PR 永不自动挂会话。
 - 探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。
 - ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
 - ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
@@ -172,7 +172,7 @@
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
 - PR 形态与范围:draft、目标 `main`、`Fixes`/`Part of` 首行判据,翻 ready 前亲核。
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
-- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取维护者原话或出处三件转述。
+- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。

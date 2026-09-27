@@ -3,6 +3,7 @@ import {
   ManifestSchema,
   MANIFEST_ID_PATTERN,
   MANIFEST_ID_EXAMPLES,
+  manifestIdRefusal,
   type ObjectStackManifest,
 } from './manifest.zod';
 import { PackageSchema } from '../marketplace/package.zod';
@@ -563,6 +564,37 @@ describe('dead-container retirement (#11332, ADR-0049 — tombstoned, not delete
 describe('manifest.id — reverse-domain identifier', () => {
   const legal = (id: string) => ({ id, version: '1.0.0', type: 'app' as const, name: 'X' });
 
+  // ONE table, judged at BOTH doors that share `MANIFEST_ID_PATTERN` — the
+  // `ManifestSchema.id` rows below and the `PackageSchema.manifestId` test at
+  // the end of this block read these same two lists.
+  //
+  // A segment may open with a digit: DNS labels may (`com.163.crm` is a real
+  // company's reverse domain), and the id is never a table name, a JS
+  // identifier or a path, so the leading-letter clause carried no reason and
+  // the refusal sentence could not state one. `manifest.namespace` — the
+  // physical SQL prefix — keeps ITS leading-letter rule; see the block below.
+  const ACCEPTED = [
+    'com.acme.crm',
+    'com.example.my-app',
+    'org.apache.superset',
+    'app.example.hr',
+    'a.b',
+    'com.example.app2',
+    'com.example.2app',
+    'com.163.crm',
+  ] as const;
+
+  const REFUSED = [
+    ['blank', 'a bare word carries no dot'],
+    ['com', 'one segment is not reverse domain'],
+    ['com.', 'a trailing dot leaves an empty segment'],
+    ['.com.app', 'a leading dot leaves an empty segment'],
+    ['com.example.my_app', 'underscores are not admitted'],
+    ['Com.Example.App', 'uppercase is not admitted'],
+    ['com.example.-app', 'a segment may not open with a hyphen'],
+    ['com example.app', 'spaces are not admitted'],
+  ] as const;
+
   it('the examples the TSDoc and the refusal show are themselves legal', () => {
     // The refusal shows these two ids to an author who is already stuck. An
     // example that fails its own rule teaches exactly the wrong thing, so the
@@ -573,29 +605,32 @@ describe('manifest.id — reverse-domain identifier', () => {
     }
   });
 
-  it.each([
-    'com.acme.crm',
-    'com.example.my-app',
-    'org.apache.superset',
-    'app.example.hr',
-    'a.b',
-    'com.example.app2',
-  ])('accepts %s', (id) => {
-    expect(ManifestSchema.safeParse(legal(id)).success).toBe(true);
+  it.each(ACCEPTED)('accepts %s, and parses it to itself', (id) => {
+    const r = ManifestSchema.safeParse(legal(id));
+    expect(r.success).toBe(true);
+    // The id is an identity: an accepted value is kept byte for byte, never
+    // normalised into a different package's name.
+    expect(r.success && r.data.id).toBe(id);
   });
 
-  it.each([
-    ['blank', 'a bare word carries no dot'],
-    ['com', 'one segment is not reverse domain'],
-    ['com.', 'a trailing dot leaves an empty segment'],
-    ['.com.app', 'a leading dot leaves an empty segment'],
-    ['com.example.my_app', 'underscores are not admitted'],
-    ['Com.Example.App', 'uppercase is not admitted'],
-    ['com.example.-app', 'a segment must open with a letter'],
-    ['com.example.2app', 'a segment must open with a letter, not a digit'],
-    ['com example.app', 'spaces are not admitted'],
-  ])('refuses %s (%s)', (id) => {
-    expect(ManifestSchema.safeParse(legal(id)).success).toBe(false);
+  it.each(REFUSED)('refuses %s (%s)', (id) => {
+    const r = ManifestSchema.safeParse(legal(id));
+    expect(r.success).toBe(false);
+    const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === 'id');
+    expect(issue?.code).toBe('invalid_format');
+    expect(issue?.message).toBe(manifestIdRefusal('manifest.id', id));
+  });
+
+  it('the refusal sentence states the rule the pattern enforces — digits admitted, a leading hyphen not', () => {
+    // The defect this holds shut: the sentence listed clauses
+    // `com.example.2app` satisfied, and the pattern refused it anyway. The
+    // sentence and the pattern now say the same rule, so what the sentence
+    // admits the pattern admits.
+    const msg = manifestIdRefusal('manifest.id', 'com.example.-app');
+    expect(msg).toContain('letters, digits and inner hyphens');
+    expect(msg).toContain('a segment may not open with a hyphen');
+    expect(msg).toContain('underscores are not admitted');
+    expect(msg).not.toMatch(/start(s|ing)? with a letter|open(s|ing)? with a letter/);
   });
 
   it('a namespace is never an id — the two rules contradict on the underscore', () => {
@@ -649,8 +684,14 @@ describe('manifest.id — reverse-domain identifier', () => {
       expect(msg).not.toContain('Did you mean');
     });
 
+    it('suggests the prefixed form for a digit-led bare word, since a segment may open with a digit', () => {
+      // Until the leading-letter clause went, `com.example.2fa` failed the
+      // pattern and the refusal offered nothing; it is now the repair.
+      expect(refusalFor('2fa')).toContain("Did you mean 'com.example.2fa'?");
+    });
+
     it('every suggestion it makes is itself accepted by the schema', () => {
-      for (const input of ['blank', 'my_app', 'com.dogfood.flow_fixture', 'support_desk']) {
+      for (const input of ['blank', 'my_app', 'com.dogfood.flow_fixture', 'support_desk', '2fa']) {
         const suggested = /Did you mean '([^']+)'\?/.exec(refusalFor(input))?.[1];
         expect(suggested, `${input} should get a suggestion`).toBeTruthy();
         expect(ManifestSchema.safeParse(legal(suggested as string)).success).toBe(true);
@@ -659,19 +700,64 @@ describe('manifest.id — reverse-domain identifier', () => {
   });
 
   it('PackageSchema.manifestId enforces the SAME declaration — the two cannot drift', () => {
-    // The point of the shared constant: one verdict, two surfaces. A future
-    // edit to either regex literal would have to break this table to pass.
-    const cases = ['com.acme.crm', 'org.apache.superset', 'blank', 'com.example.my_app', 'Com.App', 'a.b'];
+    // The point of the shared constant: one verdict, two surfaces, judged on
+    // the SAME table the `manifest.id` rows above read. The expected verdict
+    // comes from the table, never from the pattern, so a future edit to either
+    // regex literal would have to break this table to pass.
+    const cases: ReadonlyArray<readonly [string, boolean]> = [
+      ...ACCEPTED.map((id) => [id, false] as const),
+      ...REFUSED.map(([id]) => [id, true] as const),
+    ];
     // Judged per FIELD, not on whole-object success: the two schemas require
     // different neighbours, so an overall verdict would be measuring those.
     const fieldRefused = (schema: typeof ManifestSchema | typeof PackageSchema, key: string, value: unknown) => {
       const r = schema.safeParse({ [key]: value } as never);
       return r.success ? false : r.error.issues.some((i) => i.path[0] === key);
     };
-    for (const id of cases) {
-      const refused = !MANIFEST_ID_PATTERN.test(id);
+    for (const [id, refused] of cases) {
       expect(fieldRefused(ManifestSchema, 'id', id), `manifest.id verdict for ${id}`).toBe(refused);
       expect(fieldRefused(PackageSchema, 'manifestId', id), `manifestId verdict for ${id}`).toBe(refused);
     }
   });
+});
+
+describe('manifest.namespace — the refusal states the rule the regex enforces', () => {
+  // The pattern is `^[a-z][a-z0-9_]{1,19}$`: the FIRST character must be a
+  // lowercase letter. A refusal sentence that only says "2-20 chars, lowercase
+  // alphanumeric + underscore" is satisfied by `1leave` and `_leave`, so the
+  // author it refuses is told a rule they already follow. The sentence is also
+  // surfaced verbatim by other doors (e.g. `duplicatePackage`'s explicit
+  // `targetNamespace`), so it has to carry the whole rule on its own.
+  const namespaceRefusal = (value: string) => {
+    const r = ManifestSchema.shape.namespace.safeParse(value);
+    expect(r.success, `'${value}' must be refused`).toBe(false);
+    const issues = r.success ? [] : r.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('invalid_format');
+    return issues[0].message;
+  };
+
+  it.each([
+    ['1leave', 'a leading digit'],
+    ['_leave', 'a leading underscore'],
+  ])('refuses %s (%s) with a sentence naming the leading-letter rule', (value) => {
+    expect(namespaceRefusal(value)).toMatch(/start with a lowercase letter/);
+  });
+
+  it('the same sentence still names the length and the charset', () => {
+    const msg = namespaceRefusal('1leave');
+    expect(msg).toMatch(/2-20 chars/);
+    expect(msg).toMatch(/lowercase letters, digits and underscores/);
+  });
+
+  it.each(['leave', 'crm', 'my_app_2', 'a1', 'abcdefghijklmnopqrst'])(
+    'lit control — %s still parses',
+    (value) => {
+      expect(ManifestSchema.shape.namespace.safeParse(value).success).toBe(true);
+      expect(
+        ManifestSchema.safeParse({ id: 'com.example.leave', version: '1.0.0', type: 'app', name: 'X', namespace: value })
+          .success,
+      ).toBe(true);
+    },
+  );
 });

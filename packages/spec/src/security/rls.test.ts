@@ -7,6 +7,8 @@ import {
   RLS,
   type RowLevelSecurityPolicy,
 } from './rls.zod';
+import { PermissionSetSchema } from './permission.zod';
+import { defineStack } from '../stack.zod';
 
 describe('Row-Level Security (RLS) Protocol', () => {
   describe('RLSOperation', () => {
@@ -40,12 +42,15 @@ describe('Row-Level Security (RLS) Protocol', () => {
     });
 
     it('should validate a complete policy with all fields', () => {
+      // `all`, not `select`: every field has to be one the runtime reads on this
+      // operation, and a `check` on a `select` policy is refused (see the
+      // "a check on a policy that writes no row" block below).
       const policy: RowLevelSecurityPolicy = {
         name: 'manager_team_access',
-        label: 'Managers Can View Team Records',
-        description: 'Allow managers to view records of their team members',
+        label: 'Managers Can Access Team Records',
+        description: 'Allow managers to read and write records of their team members',
         object: 'task',
-        operation: 'select',
+        operation: 'all',
         using: 'assigned_to_id IN (SELECT id FROM users WHERE manager_id = current_user.id)',
         check: 'assigned_to_id IN (SELECT id FROM users WHERE manager_id = current_user.id)',
         positions: ['manager', 'director'],
@@ -541,6 +546,120 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     const messages = result.error!.issues.map((i) => i.message).join('\n');
     expect(messages).toContain('`rowLevelSecurity[].priority` was removed');
     expect(messages).toContain('Delete the key');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A `check` on a policy that writes no row is REFUSED (ADR-0049).
+//
+// `check` judges the post-image of a write, and the runtime's write gate
+// (plugin-security `writeCheckPolicies`, reached only on insert / update)
+// collects only policies whose `operation` is the write's own or `all`. A
+// `check` on a `select` or `delete` policy was accepted, stored and never
+// evaluated: it neither guarded a write nor suppressed a sibling's `using`
+// default. Each refusal pin asserts the issue CODE, its PATH and the message
+// HEAD — a bare "it failed" would stay green on an unrelated refusal — and the
+// prescription is proven actionable by parsing the rewrite it asks for.
+// ---------------------------------------------------------------------------
+describe('RowLevelSecurityPolicySchema — a check on a policy that writes no row', () => {
+  const base = { name: 'p', object: 'account' };
+  const PREDICATE = "status != 'archived'";
+
+  const issuesOf = (value: unknown) => {
+    const result = RowLevelSecurityPolicySchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.success ? [] : result.error.issues;
+  };
+
+  for (const [operation, verb] of [['select', 'read'], ['delete', 'delete']] as const) {
+    it(`refuses a \`check\` on a \`${operation}\` policy at the \`check\` path, naming the operation`, () => {
+      const issues = issuesOf({ ...base, operation, using: 'owner_id == current_user.id', check: PREDICATE });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['check']);
+      expect(issues[0].message.startsWith(`\`check\` is never evaluated on a \`${operation}\` policy:`)).toBe(true);
+      // The prescription names both rewrites the author may have meant.
+      expect(issues[0].message).toContain(`To limit which rows the policy lets a caller ${verb}, write that predicate as \`using\``);
+      expect(issues[0].message).toContain('declare the `check` on a policy whose `operation` is `insert`, `update` or `all`');
+    });
+
+    it(`a check-only \`${operation}\` policy gets THIS refusal, not the "at least one" one`, () => {
+      // With `check` as the only predicate, the author is told where the
+      // predicate belongs — not merely that one is missing.
+      const issues = issuesOf({ ...base, operation, check: PREDICATE });
+      expect(issues.map((i) => i.path)).toEqual([['check']]);
+      expect(issues[0].message).not.toContain('At least one of');
+    });
+
+    it(`the prescription is actionable: the predicate moved to \`using\` parses (\`${operation}\`)`, () => {
+      expect(RowLevelSecurityPolicySchema.safeParse({ ...base, operation, using: PREDICATE }).success).toBe(true);
+    });
+
+    it(`a blank \`check\` on a \`${operation}\` policy declares nothing and is not refused by this rule`, () => {
+      // The runtime reads a blank clause as absent (`policyDeclaresClause`).
+      // With a `using` beside it the policy parses; with none, the existing
+      // "at least one" rule answers — this rule stays out of both.
+      expect(RowLevelSecurityPolicySchema.safeParse({ ...base, operation, using: PREDICATE, check: '  ' }).success).toBe(true);
+      const issues = issuesOf({ ...base, operation, check: '' });
+      expect(issues.map((i) => i.path)).toEqual([[]]);
+      expect(issues[0].message).toContain('At least one of');
+    });
+  }
+
+  it('accepts a `check` on every operation that writes a row: insert, update, all', () => {
+    for (const operation of ['insert', 'update', 'all'] as const) {
+      const result = RowLevelSecurityPolicySchema.safeParse({ ...base, operation, check: PREDICATE });
+      expect(result.success, operation).toBe(true);
+    }
+  });
+
+  it('accepts a `select` policy that declares `using` only', () => {
+    const result = RowLevelSecurityPolicySchema.safeParse({ ...base, operation: 'select', using: 'owner_id == current_user.id' });
+    expect(result.success).toBe(true);
+  });
+
+  it('reaches the permission set: the issue lands at rowLevelSecurity[N].check', () => {
+    const result = PermissionSetSchema.safeParse({
+      name: 'contributor',
+      objects: {},
+      rowLevelSecurity: [
+        { ...base, name: 'reads', operation: 'select', using: 'owner_id == current_user.id' },
+        { ...base, name: 'deletes', operation: 'delete', using: 'owner_id == current_user.id', check: PREDICATE },
+      ],
+    });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    const issue = issues[0];
+    expect(issue?.code).toBe('custom');
+    expect(issue?.path).toEqual(['rowLevelSecurity', 1, 'check']);
+    expect(issue?.message.startsWith('`check` is never evaluated on a `delete` policy:')).toBe(true);
+  });
+
+  it('reaches the authoring door: defineStack refuses it with the STACK_SCHEMA_INVALID envelope', () => {
+    const stack = (check?: string) => ({
+      manifest: { id: 'com.example.rls-check', name: 'rls_check', version: '1.0.0', type: 'app' },
+      permissions: [{
+        name: 'contributor',
+        objects: {},
+        rowLevelSecurity: [{ ...base, operation: 'delete', using: 'owner_id == current_user.id', ...(check ? { check } : {}) }],
+      }],
+    });
+    let thrown: unknown;
+    try {
+      defineStack(stack(PREDICATE) as never);
+    } catch (e) {
+      thrown = e;
+    }
+    const refusal = thrown as { code?: string; status?: number; issues?: Array<{ path: PropertyKey[]; message: string }> };
+    expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refusal?.status).toBe(422);
+    expect(refusal.issues).toHaveLength(1);
+    const issue = refusal.issues?.[0];
+    expect(issue?.path).toEqual(['permissions', 0, 'rowLevelSecurity', 0, 'check']);
+    expect(issue?.message.startsWith('`check` is never evaluated on a `delete` policy:')).toBe(true);
+    // Control: the same stack without the `check` is accepted by the same door.
+    expect(() => defineStack(stack() as never)).not.toThrow();
   });
 });
 

@@ -167,8 +167,6 @@ import {
   SysAttachment,
   SysEmail,
   SysEmailTemplate,
-  SysSavedReport,
-  SysReportSchedule,
   // sys_approval_* moved to @objectstack/plugin-approvals (ADR-0029 K2.b / D8).
   SysJob,
   SysJobRun,
@@ -302,8 +300,6 @@ const config: ObjectStackDefinition = defineStack({
     SysAttachment,
     SysEmail,
     SysEmailTemplate,
-    SysSavedReport,
-    SysReportSchedule,
     // sys_approval_* moved to @objectstack/plugin-approvals (ADR-0029 K2.b / D8).
     SysJob,
     SysJobRun,

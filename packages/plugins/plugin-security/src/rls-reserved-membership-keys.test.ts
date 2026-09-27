@@ -183,10 +183,12 @@ describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge
       // `compileFilter` is the ONE seam both faces pass through — the read layer
       // compiles `using`, the ADR-0058 D4 write gate compiles `check` — so a
       // repair that held on only one of them would be half a repair.
+      // `insert`: the write gate compiles `check` only for a policy that
+      // writes a row, and the spec refuses a `check` on `select` / `delete`.
       const checkPolicy = {
         name: 'p',
         object: 'o',
-        operation: 'select',
+        operation: 'insert',
         check: cell.using,
       } as never;
       const withBag = compiler.compileFilter([checkPolicy], {

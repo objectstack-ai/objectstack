@@ -40,6 +40,7 @@ const executeAction = vi.fn(async () => ({ ok: true, wrote: 'system-elevated' })
 const automationExecute = vi.fn(async () => ({ success: true, status: 'paused', runId: 'run_1' }));
 const unregisterFlow = vi.fn();
 const listFlows = vi.fn(async () => ['crm_escalation_flow']);
+const getFlowRuntimeStates = vi.fn(() => [{ name: 'crm_escalation_flow', enabled: true, bound: true }]);
 
 /** One `script` action, declared on the object and carrying NO `requiredPermissions`. */
 const scriptAction = {
@@ -78,6 +79,7 @@ function servicesPlugin(): Plugin {
                 execute: automationExecute,
                 unregisterFlow,
                 listFlows,
+                getFlowRuntimeStates,
                 registerFlow: () => { /* unused */ },
                 handlerReady: true,
             });
@@ -166,12 +168,55 @@ describe('#5519 — the mounted /actions and /automation routes deny anonymous c
         expect(automationExecute).not.toHaveBeenCalled();
     }, 60_000);
 
-    it('anonymous GET /api/v1/automation → 401, the flow inventory stays private', async () => {
-        listFlows.mockClear();
-        const res = await fetch(`${baseUrl}/api/v1/automation`);
+    it('anonymous GET /api/v1/automation/_status → 401, the flow inventory stays private', async () => {
+        getFlowRuntimeStates.mockClear();
+        const res = await fetch(`${baseUrl}/api/v1/automation/_status`);
 
         expect(res.status).toBe(401);
+        expect(getFlowRuntimeStates).not.toHaveBeenCalled();
+    }, 60_000);
+
+    // ── #19543 door ④: the flow list is RETIRED, and on the wire that means ──
+    // `GET` is not mounted at the path at all. Flows are metadata (ADR-0106);
+    // the list is `GET /api/v1/meta/flow`. `POST` (createFlow) still lives at
+    // the same path, so the host answers its standard METHOD MISMATCH — `405`
+    // with an accurate `Allow` — exactly as it does for any path where only
+    // another verb was ever registered. No retirement-specific text, code or
+    // hint reaches the wire.
+
+    it('[#19543] GET /api/v1/automation answers the host\'s standard 405 + Allow: POST — anonymous AND with a session', async () => {
+        listFlows.mockClear();
+        // The control: a path of this domain where GET was NEVER registered
+        // and POST is (`/:name/toggle`). Same host, same answer shape.
+        const control = await fetch(`${baseUrl}/api/v1/automation/crm_escalation_flow/toggle`);
+        const controlBody: any = await control.json();
+        expect(control.status).toBe(405);
+
+        for (const headers of [{}, { [SESSION_HEADER]: '1' }]) {
+            const res = await fetch(`${baseUrl}/api/v1/automation`, { headers });
+            expect(res.status).toBe(405);
+            expect(res.headers.get('allow')).toBe('POST');
+            const body: any = await res.json();
+            expect(body.success).toBe(false);
+            expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+            expect(body.error.details).toEqual({ method: 'GET', path: '/api/v1/automation', allowed: ['POST'] });
+            // Byte-identical to the never-a-GET control once the echoed path is
+            // factored out — the retired route left nothing of its own behind.
+            const echoless = (b: unknown, path: string) => JSON.stringify(b).split(path).join('PATH');
+            expect(echoless(body, '/api/v1/automation'))
+                .toBe(echoless(controlBody, '/api/v1/automation/crm_escalation_flow/toggle'));
+        }
+        // Answered by the host before any dispatch: the engine's name
+        // enumeration is unreachable over HTTP.
         expect(listFlows).not.toHaveBeenCalled();
+    }, 60_000);
+
+    it('[#19543] POST /api/v1/automation (createFlow) is still MOUNTED at the same path — the retirement is one verb', async () => {
+        // Anonymous, so the domain floor answers 401 — an answer only a mounted
+        // route can give. A 404 or 405 here would mean the retirement took the
+        // create door with it.
+        const res = await post('/automation', { name: 'injected_flow' });
+        expect(res.status).toBe(401);
     }, 60_000);
 
     it('anonymous DELETE /api/v1/automation/:name → 401 — the destructive one', async () => {

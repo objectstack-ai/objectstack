@@ -159,7 +159,7 @@ export const ExpenseLine = ObjectSchema.create({
         { label: 'Other', value: 'other', default: true },
       ],
     }),
-    amount: Field.currency({ label: 'Amount', required: true, scale: 2, min: 0 }),
+    amount: Field.currency({ label: 'Amount', required: true, min: 0 }),
     // Whether the expense is billable back to a client — the `billable: true`
     // filter on the report's `reimbursable_amount` rollup reads this.
     billable: Field.boolean({ label: 'Billable to client', defaultValue: false }),

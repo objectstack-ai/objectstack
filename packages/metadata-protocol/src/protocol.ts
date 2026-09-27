@@ -693,7 +693,9 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
  *     (e.g. `isPinned`, `isDefault`, `sortOrder`) survive the round-trip.
  *     The one exception is filter `operator` spellings, which are grafted back
  *     from `parsed.data` so a save stops minting new legacy-alias rows — see
- *     {@link graftNormalizedOperators}.
+ *     {@link graftNormalizedOperators}. [#20101] A page that omits `type` is
+ *     stored with the default `PageSchema` declares for it — see
+ *     {@link withDeclaredPageTypeDefault}.
  *   - Types without a registered schema (the wiring-layer types
  *     `function`/`service`/`router`, and any plugin types that have not
  *     yet called `registerMetadataTypeSchema()`) fall through unvalidated.
@@ -1322,6 +1324,54 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
     // `sections` wins when the author wrote it — including as an empty array,
     // which is what the producer's fold does and therefore what already renders.
     return rest.sections !== undefined ? rest : { ...rest, sections: groups };
+}
+
+/**
+ * [#20101] Give a page body that omits `type` the default `PageSchema`
+ * declares for it, and change nothing else.
+ *
+ * `PageSchema` declares `type: PageTypeSchema.default('record')`, so a page
+ * authored without `type` IS a record page. The save gate parses with that
+ * default and then persists the authored body verbatim (ADR-0005
+ * §"Validation", {@link resolveOverlaySchema}), and every read serves a stored
+ * row without parsing it. A record page written the natural way, with the
+ * defaulted key left out, therefore reached every reader of the served body
+ * with no `type` at all. A consumer that picks an object's record page by
+ * `type === 'record'` never picked it. The parse applied the declared default
+ * and nothing the server sends carried it.
+ *
+ * One function, applied at both seams:
+ *  - the WRITE (`saveMetaItem`, once the schema gate has accepted the body),
+ *    so a new row stores the key and a GET → PUT round-trip of the served
+ *    document stays byte-identical (#4326's invariant). A fix on the read
+ *    side alone breaks that round-trip: the first re-save of every such page
+ *    would write a one-key change and a history row that nobody authored;
+ *  - the READ ({@link ObjectStackProtocolImplementation.convertStoredItem},
+ *    the rehydration seam every stored row passes through), so a row stored
+ *    before this fix is served with the default and never rewritten. The row
+ *    at rest keeps its bytes and there is no migration.
+ *
+ * The value is READ from the registered `page` schema, the one the save gate
+ * validates with, and is never spelled here. A literal would be a second,
+ * silent spelling of the default: the consumer-side `?? 'record'` this
+ * replaces, moved up one layer.
+ *
+ * ⛔ The scope is `type` on `page` and nothing wider. It is not a general
+ * "fill every declared default" pass. Other stored types declare top-level
+ * defaults in the same position, and each of those is its own decision.
+ *
+ * Only an ABSENT key is filled (zod applies a default to `undefined`, not to
+ * `null`), and an explicit value is left as it is. Returns the input itself
+ * when nothing is filled.
+ */
+function withDeclaredPageTypeDefault(type: string, item: unknown): unknown {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'page') return item;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    if ((item as Record<string, unknown>).type !== undefined) return item;
+    const pageSchema = getMetadataTypeSchema('page') as { shape?: Record<string, z.ZodTypeAny> } | undefined;
+    const declared = pageSchema?.shape?.type?.safeParse(undefined);
+    if (!declared?.success || declared.data === undefined) return item;
+    return { ...(item as Record<string, unknown>), type: declared.data };
 }
 
 /**
@@ -3382,8 +3432,8 @@ function invalidSortError(
  * This is the one unknown key on this axis that has a KNOWN right answer, so it
  * gets a rejection that carries the translation rather than a generic refusal.
  * `direction` is not a typo — it is the live vocabulary of a neighbouring
- * contract (`IReportService.orderBy`, `spec/src/contracts/report-service.ts`),
- * which `plugin-auth/objectql-adapter.ts` already translates to `order` by hand.
+ * contract (better-auth's adapter `sortBy`), which
+ * `plugin-auth/objectql-adapter.ts` already translates to `order` by hand.
  * A necessary translation nothing enforced is exactly ADR-0049's shape.
  *
  * Measured on `main` before this rejection existed, on the schema side of the
@@ -3410,7 +3460,7 @@ function invalidSortDirectionKeyError(param: string, field: string): Error {
         {
             hint:
                 ` Write \`{ field: '${field}', order: 'desc' }\`. \`direction\` is`
-                + " `IReportService.orderBy`'s vocabulary, a genuinely different contract; on this"
+                + " the better-auth adapter's `sortBy` vocabulary, a genuinely different contract; on this"
                 + ' axis it was silently dropped and `order` fell back to `asc`, so a descending'
                 + ' request came back ascending — and with `limit`, a different set of rows.',
             extra: { field, key: 'direction' },
@@ -4678,10 +4728,17 @@ export class ObjectStackProtocolImplementation implements
      * executor registry (`reservedNodeTypes`), which this layer does not
      * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
      * execution seam — with the same full-chain policy.
+     *
+     * [#20101] …and a page that omits `type` is read with the default
+     * `PageSchema` declares ({@link withDeclaredPageTypeDefault}). That fill is
+     * applied HERE and not in {@link convertStoredItemDetailed}: it is not an
+     * ADR-0087 conversion and emits no notice, so the stored-migration pass
+     * (the Detailed caller) has nothing to rewrite, and the row at rest keeps
+     * its bytes.
      */
     private convertStoredItem(type: string, data: unknown): unknown {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        return this.convertStoredItemDetailed(type, data, (n) => {
+        const converted = this.convertStoredItemDetailed(type, data, (n) => {
             const name = (data as { name?: unknown } | null | undefined)?.name;
             const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
             if (this.storedConversionWarned.has(key)) return;
@@ -4692,6 +4749,7 @@ export class ObjectStackProtocolImplementation implements
                 `"os migrate meta --stored --apply") to persist the canonical shape.`,
             );
         }).item;
+        return withDeclaredPageTypeDefault(singular, converted);
     }
 
     /**
@@ -8991,8 +9049,8 @@ export class ObjectStackProtocolImplementation implements
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
-            // off `.order` with no fallback. `direction` is `IReportService`'s
-            // vocabulary and is silently DROPPED here (the schema is not
+            // off `.order` with no fallback. `direction` is another contract's
+            // vocabulary (better-auth's adapter `sortBy`) and is silently DROPPED here (the schema is not
             // `.strict()`), which left this query running ascending — the
             // OLDEST `limit` audit events, i.e. the beginning of an object's
             // life and never its recent changes (#4674). The `as any` is gone
@@ -9455,8 +9513,8 @@ export class ObjectStackProtocolImplementation implements
      * SCOPE: this is an INGRESS gate, so it covers what reaches {@link
      * findData}. The half it cannot reach — a caller handing a `where` straight
      * to `engine.find` / `findOne` / `count` / `aggregate` / `update` /
-     * `delete`, which is how a saved report's `query.filter` travels
-     * (`plugin-reports` forwards it verbatim) — is closed at the engine's own
+     * `delete`, which is how a flow node's `config.filter` travels — is closed
+     * at the engine's own
      * filter seam by `assertFilterIsMaterializable` (`@objectstack/objectql`,
      * `filter-comparand-shape.ts`), with the same `400 INVALID_FIELD` and the
      * same remedy sentence. Same two-door shape, and same reason, as the sort
@@ -9732,9 +9790,9 @@ export class ObjectStackProtocolImplementation implements
      * sentence this gate emits, ruled on #7095 (an ORDER BY the engine cannot
      * apply is a refusal with guidance prose, never a silent drop). What made
      * leaving it at ingress untenable is that the direct path is AUTHOR-
-     * reachable, not merely internal: a saved report's `query.orderBy` is
-     * forwarded verbatim into `engine.find` (`plugin-reports`), and it never
-     * passes through here.
+     * reachable, not merely internal: a saved report's `query.orderBy` was
+     * forwarded verbatim into `engine.find` (by the saved-report stack, since
+     * retired in #20102), and it never passed through here.
      *
      * ONE EDGE, measured and deliberately left: a nested `expand` sort is also
      * forwarded into the expansion sub-read (`expandRelatedRecords`), and the
@@ -10451,6 +10509,19 @@ export class ObjectStackProtocolImplementation implements
      * it answered `null`/`0` while looking like a served query. `count` with
      * no field (or the explicit `'*'` sentinel) is the one legitimate
      * field-less form and passes.
+     *
+     * [#20148] …and the KEYS inside each entry's `filter` (the per-aggregation
+     * filter, `AggregationNodeSchema.filter`), judged by the very gate the
+     * explicit `where` takes ({@link assertFilterFieldsExist}): the same field
+     * set, the same `unknown` > `dotted` > virtual ladder, the same
+     * `INVALID_FIELD` / 400, with the caller's own position as the parameter
+     * (`aggregations[1].filter`). Measured on the base through `POST
+     * /data/:object/query` on driver-memory and driver-sql: `{ nope: 1 }` in
+     * one aggregation's filter answered 200 with that count 0 (every count
+     * under `$ne`, a `$not`, or a `$or` branch that held), while the same key
+     * in `where` answered this 400. Run after the entry and field checks
+     * above, so an entry the spec cannot read keeps its shape verdict, and an
+     * unknown aggregated field keeps its own.
      */
     private assertAggregationFieldsExist(object: string, aggregations: unknown): void {
         if (aggregations === undefined || aggregations === null) return;
@@ -10539,7 +10610,15 @@ export class ObjectStackProtocolImplementation implements
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
         const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
-        if (unknown.length === 0) return;
+        if (unknown.length === 0) {
+            // [#20148] The filter keys, entry by entry, through `where`'s own
+            // gate — see this method's doc. A filter that is not a plain object
+            // names no key here and is left to the engine's shape gate.
+            aggregations.forEach((entry, i) => {
+                this.assertFilterFieldsExist(object, entry.filter, `aggregations[${i}].filter`);
+            });
+            return;
+        }
         const first = unknown[0];
         const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
             ? " Aggregation runs over this object's own columns; a related record's column cannot "
@@ -16120,6 +16199,13 @@ export class ObjectStackProtocolImplementation implements
                     graftFoldedFormSections(request.item, parsed.data),
                     parsed.data,
                 );
+                // [#20101] …and a page's declared `type` default, the one
+                // default that a reader of the served body selects on. It is
+                // stored so that the served document and the stored row are
+                // the same bytes, and a GET → PUT round-trip is a no-op. The
+                // read seam fills the same default for rows stored before this
+                // fix. See {@link withDeclaredPageTypeDefault}.
+                request.item = withDeclaredPageTypeDefault(request.type, request.item);
             }
         }
 
@@ -22643,17 +22729,18 @@ export class ObjectStackProtocolImplementation implements
      * boot hydration that replays it — out under its own always-on token
      * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
      * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
-     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
-     * runtime half of that split is NOT landed: measured on `origin/main` at
-     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
-     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
-     * `package-registry`, so the always-on token is force-appended to every
-     * app's `requires` and then resolves to no provider — silently, because the
-     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
-     * `objectstack dev` boot of an app that does not itself declare
-     * `requires: ['marketplace']`, this branch is still the one taken, which is
-     * the defect #17676 reports. Recorded here rather than worked around: the
-     * fix belongs to the capability resolver, not to this primitive.
+     * `marketplace` naming only the optional catalogue / browsing half. The
+     * runtime half of that split has landed (#19387): `objectstack serve` keys
+     * `package-registry` in `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) and mounts `PackageServicePlugin`
+     * for it, so a stock boot — an app that declares neither token — composes
+     * the `package` service and takes the `pkgSvc.publish` branch below. The
+     * in-memory-only branch is reached only on a host that mounts no provider
+     * (`objectstack serve --preset minimal`, a metadata-only embedding), the
+     * degraded path described above. ⚠️ Still open: `marketplace` maps to the
+     * same persistence provider today, and repointing it at the browse surface
+     * is #17676's remaining half. That repoint does not change which branch
+     * this primitive takes.
      *
      * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
      * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,

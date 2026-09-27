@@ -24,6 +24,11 @@
 // `where` door already speaks — and never answered true. See
 // PREVIEW_FIELD_OPERATORS. [#19835] So is a field constraint carrying ZERO
 // operators (`{ name: {} }`), at any depth — see isEmptyFieldConstraint.
+// [#19888] And a list in the equality slot (`{ stage: ['won', 'lost'] }`,
+// `{ stage: { $eq: [...] } }`), through the published door's own gate.
+// [#20010] Which now carries every arm of the shared comparand-shape face.
+// [#20035] And the shared comparand-TYPE face after it, whose narrowed
+// condition is the one this face evaluates.
 
 import {
   calendarPartsInTzOrUtc,
@@ -36,8 +41,11 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
 // invent a second spelling of it. A draft-preview filter is a `where`-door
 // refusal in every respect that matters: the caller authored the predicate and
-// the repair is theirs.
-import { invalidFilterError } from './strategies/filter-normalizer.js';
+// the repair is theirs. [#19888] So is the equality-slot list gate, for the
+// same reason: one rule, one spelling, on both faces. [#20010] And, through
+// the same gate, every other arm of the shared comparand-shape face. [#20035]
+// And the comparand-TYPE face, through the same gate again.
+import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
@@ -629,8 +637,25 @@ export function evaluateAnalyticsQueryOverRows(
   // [#19810] The operator vocabulary is decided BEFORE the rows are read, so an
   // unevaluable predicate refuses over an empty seed draft too — see
   // {@link assertPreviewCanEvaluate}.
-  assertPreviewCanEvaluate(query.where);
-  let filtered = rows.filter((r) => matchesWhere(r, query.where));
+  // [#19888] A list in the equality slot first, through the gate the published
+  // `where` door runs: {@link matchesWhere} would otherwise compare each row
+  // against the list's STRING form (`'won,lost'`) and chart that, for a filter
+  // publish refuses `INVALID_FILTER` / 400 (ruling 乙, #19757).
+  // [#20010] Then the shared face's other arms, through the same gate: a null
+  // `$in` member, a null ordering comparand, a null or blank `$between` bound,
+  // a scalar `$in` / `$nin`. Measured before, {@link matchesWhere} answered
+  // them (`{ amt: { $lt: null } }` charted every non-NULL row) for filters
+  // publish now refuses.
+  // [#20035] Then the shared comparand-TYPE face, through the same gate, and
+  // the rows are matched against what it RETURNS — the condition every
+  // published face lowers. Measured before: an `undefined` comparand answered
+  // NO row here while publish refused it 400; a plain-object or binary `$ne`
+  // answered EVERY row; and a bigint within 2^53 was ordered as text
+  // (`{ amt: { $gt: 2n } }` lost `amt = 10`), where publish narrows it to its
+  // number and serves the right rows.
+  const where = normalizeWhereComparands(query.where);
+  assertPreviewCanEvaluate(where);
+  let filtered = rows.filter((r) => matchesWhere(r, where));
   const timeDims = query.timeDimensions ?? [];
   for (const td of timeDims) {
     const dim = cube.dimensions?.[td.dimension];

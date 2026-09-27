@@ -55,9 +55,13 @@ describe('TursoConfigSchema', () => {
   // "All fields" is every field the driver READS. `localPath` and `wasm` used
   // to sit in this fixture too, and their presence here is what the #16024
   // measurement found: accepted, asserted, consumed by nothing.
+  // [#19977] An embedded replica — the one mode that reads every field — on a
+  // local `file:` url. The fixture used to put `syncUrl` beside a remote
+  // `libsql://` url, a configuration the driver refuses at construction and
+  // this schema now refuses too.
   it('should accept config with all fields', () => {
     const config = TursoConfigSchema.parse({
-      url: 'libsql://my-db-orgname.turso.io',
+      url: 'file:./local-replica.db',
       authToken: 'eyJhbGciOi...',
       encryptionKey: 'my-secret-key-256',
       concurrency: 50,
@@ -210,14 +214,27 @@ describe('TursoConfigSchema', () => {
     expect('timeout' in config).toBe(false);
   });
 
-  it('should accept config with environment variable patterns', () => {
-    const config = TursoConfigSchema.parse({
+  // [#19977] This used to pin the OPPOSITE: `url: '${TURSO_DATABASE_URL}'`
+  // parsed green. Nothing resolves a placeholder in a config (the spec
+  // contract refuses one outright), so the driver received the literal string,
+  // which is not `:memory:`, not a `file:` url and not a remote url — and
+  // `new TursoDriver` refuses exactly that in the local mode it selects. The
+  // mirror now refuses it at the door, on `url`, naming the spellings that
+  // work. The token beside it is no part of the refusal.
+  it('refuses a placeholder url — the driver cannot open it — and says what it can open', () => {
+    const result = TursoConfigSchema.safeParse({
       url: '${TURSO_DATABASE_URL}',
       authToken: '${TURSO_AUTH_TOKEN}',
     });
 
-    expect(config.url).toBe('${TURSO_DATABASE_URL}');
-    expect(config.authToken).toBe('${TURSO_AUTH_TOKEN}');
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    const [issue] = result.error!.issues;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['url']);
+    expect(issue.message).toContain('`url` is not a url the turso driver can open');
+    expect(issue.message).toContain("spell the path as a `file:` url: `url: 'file:./data/app.db'`.");
+    expect(issue.message).toContain('For a remote database, use one of the remote schemes above.');
   });
 
   it('should accept config with custom concurrency', () => {

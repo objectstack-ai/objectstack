@@ -91,7 +91,7 @@ describe('authz probe blind-spot census (#13260)', () => {
       0,
     );
     expect(staticTotal).toBe(BLIND_SPOT_TOTAL_STATIC);
-    // The runtime reading differs only for rest-server.ts (85 mounts vs 80 call
+    // The runtime reading differs only for rest-server.ts (77 mounts vs 72 call
     // sites — the approvals route factories and the capability-gated batch
     // routes; see the census header).
     expect(BLIND_SPOT_TOTAL_RUNTIME - BLIND_SPOT_TOTAL_STATIC).toBe(5);

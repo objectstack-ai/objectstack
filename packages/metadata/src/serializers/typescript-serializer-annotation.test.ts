@@ -12,7 +12,7 @@
  *  - a spec-valid body must type-check with no diagnostic at all;
  *  - the same body plus one undeclared key must fail with exactly TS2353. That
  *    is what makes the annotation a check: a spec type that is `unknown` (as
- *    `ViewMetadata` is) would pass the first file and the second.
+ *    `ViewMetadata` once was) would pass the first file and the second.
  *
  * `@objectstack/spec` is resolved the way a consumer of a saved file resolves
  * it, through this package's `node_modules` and the `exports` map's `types`,

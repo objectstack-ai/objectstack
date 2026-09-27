@@ -217,11 +217,13 @@ Two things to know:
   a silent skip is the hardest kind of missing translation to diagnose.
 - Only the groups on this page are accepted, and since #4001 that is literally
   true: a key none of them declares is rejected, in a runtime item **and** in a
-  file-authored bundle. One group differs between the two doors: `settings` is
-  **platform-only** — a file bundle refuses it by name, and although the
-  registered `translation` item still declares it, the only namespaces it can
-  address are the platform's own, because only platform code declares a settings
-  manifest. Keys from the retired `o.<object>` shape (`o`, `app`,
+  file-authored bundle. `settings` is **platform-only** and both doors refuse it
+  by name: it is keyed by a settings manifest's namespace, and only platform code
+  declares a manifest, so the only namespaces it could address are the platform's
+  own. On a runtime item it used to be accepted — and because published items
+  layer over the shipped bundles, it overrode the platform's own Settings copy. A
+  row stored with it before the door closed loads without that group, with a
+  warning in the server log. Keys from the retired `o.<object>` shape (`o`, `app`,
   `nav`, `dashboard`, `_globalOptions`, `_meta`, …) carry a message naming the
   group to use instead — they used to save cleanly and then render nothing
   (#3778). Everything else gets the nearest declared key suggested.

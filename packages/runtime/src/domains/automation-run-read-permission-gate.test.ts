@@ -327,7 +327,10 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
          * DECISION — changing any of these has to change this file too.
          */
         const AUTHENTICATED_ONLY: Array<{ path: string; why: string }> = [
-            { path: '', why: 'listFlows — flow names, not run state' },
+            // [#19543] `''` (`listFlows — flow names, not run state`) USED to be
+            // this table's first row. Door ④ retired that route — flows are
+            // listed through `GET /meta/flow`, and the domain now declines
+            // `GET /` (`handled: false`) — so there is no route left to audit.
             { path: 'approval_flow', why: 'getFlow — a flow definition, metadata-plane data' },
             { path: 'actions', why: 'getActionDescriptors — the deployment action catalog' },
             { path: '_status', why: 'getFlowRuntimeStates — per-flow enabled/bound state' },
@@ -363,7 +366,14 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
             );
 
             // `resume` answers on the engine's per-run `resumeAuthority` axis
-            // (#3801 / #5561), which this card does not touch.
+            // (#3801 / #5561), which this card does not touch. What this row
+            // pins is that the #7900 grant gate — the one that fires AHEAD of
+            // the service probe — is not applied to it: this harness mounts no
+            // `resume`, so the request reaches the arm and answers its 501.
+            // [#19987] The write now has a caller gate of its own INSIDE the
+            // arm, on the screen read's question (trigger identity OR this
+            // grant), not this gate's grant-alone one; it is pinned in
+            // `automation-resume-caller-gate.test.ts`.
             expect((response as any).status).not.toBe(403);
             expect(h.explainCalls).toHaveLength(0);
         });

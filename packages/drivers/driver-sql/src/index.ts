@@ -14,6 +14,10 @@ export { resolveSqliteAbsentFileTarget } from './sql-driver.js';
 // stops an embedder from re-deriving the seam (or, worse, putting the text back
 // on the wire by spreading the error, which the symbol key exists to prevent).
 export { withheldFilterDiagnosticOf } from './sql-driver.js';
+// [#19912] The rule that decides which json TEXT cell a storage backfill
+// rewrites. Exported because the Turso remote backfill applies the same rule to
+// its own residue, and a second copy there is how the two faces would drift.
+export { recoverUnencodedJsonText } from './unencoded-json-text.js';
 // [#11991] The #11756 emission-scope refusal. Exported because a host that
 // renders its own diagnostics (Studio, `os migrate plan`, an installer) needs
 // the structured `client` / `supportedClients` and the stable `code` — the

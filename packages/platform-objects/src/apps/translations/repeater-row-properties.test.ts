@@ -28,8 +28,8 @@
 //
 // The population is DERIVED from the forms, not listed here, so a repeater
 // enumerated tomorrow is red on the day it lands rather than a month later.
-// `view.columns` / `view.sort` / `view.tabs` enumerate no children and are
-// therefore outside it — their titles are #17507's.
+// `view.columns` / `view.sort` / `view.tabs` joined it with #19955: #17507
+// titled their item schemas, and `view.form.ts` now enumerates their children.
 
 import { describe, it, expect } from 'vitest';
 
@@ -136,17 +136,20 @@ describe('#17508 — the enumerated-repeater survey itself (controls before verd
     expect(CARRIERS).toContain('dashboard:header.actions');
 
     const carrying = new Set(ROW_PROPERTIES.map((p) => p.type));
-    for (const type of ['action', 'app', 'dashboard', 'dataset', 'field', 'flow', 'page', 'report', 'skill']) {
+    for (const type of ['action', 'app', 'dashboard', 'dataset', 'field', 'flow', 'page', 'report', 'skill', 'view']) {
       expect(carrying.has(type), `${type} enumerates a repeater's row properties`).toBe(true);
+    }
+    // Lit — the three `view` repeaters are inside the population (#19955).
+    // `view.columns` is the union case: a string-array arm beside the
+    // object-array arm whose properties these are.
+    for (const carrier of ['view:columns', 'view:sort', 'view:tabs']) {
+      expect(CARRIERS, `${carrier} enumerates its row properties`).toContain(carrier);
     }
     // Dark — forms that enumerate none contribute none. A walk that matched
     // everything, or nothing, cannot pass both halves.
     for (const type of ['agent', 'tool', 'hook', 'position']) {
       expect(carrying.has(type), `${type} enumerates no repeater row properties`).toBe(false);
     }
-    // Dark — `view.columns` / `view.sort` / `view.tabs` enumerate no children
-    // (their titles are #17507's), so `view` is outside this population.
-    expect(carrying.has('view'), 'view enumerates no repeater row properties yet').toBe(false);
   });
 
   it('every enumerated row child declares a `label` — an omitted one silently becomes the English source', () => {

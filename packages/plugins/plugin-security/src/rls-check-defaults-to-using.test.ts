@@ -164,7 +164,7 @@ const attempt = async (run: () => Promise<unknown>): Promise<Outcome> => {
   }
 };
 
-/** ⚠️ A SINGLE object, never an array: step 3.6 skips a bulk payload. */
+/** A single-row insert; the array shape is pinned in `rls-check-multi-row-writes.test.ts`. */
 const insert = (engine: ObjectQL, row: Record<string, unknown>) =>
   engine.insert('qa_ticket', { id: 't1', title: 't', ...row } as never, { context: CALLER } as never);
 

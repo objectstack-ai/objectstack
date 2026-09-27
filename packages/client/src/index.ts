@@ -123,21 +123,26 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
-  // [#17536] The element the two `/packages` READ doors are declared to serve.
-  // `ListInstalledPackagesResponseSchema.packages` is
-  // `z.array(InstalledPackageAtEitherStageSchema)` and
-  // `GetInstalledPackageResponseSchema.data` is that same schema
-  // (`spec/src/api/package-api.zod.ts`) — a union over the two manifest stages,
-  // authoring (`InstalledPackageSchema`) and assembled
-  // (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
-  // client is a CONSUMER of that contract, so the widest value those doors are
-  // declared to answer is what they are declared to return here. ⚠️ What the
-  // published TYPE admits is wider than what the runtime parse accepts — the
-  // measurement, and what a caller does about it, are on `packages.list` below
-  // (#19324). The WRITE methods on the same object keep `InstalledPackage`:
-  // PR #17517 moved the read doors alone.
-  InstalledPackageAtEitherStage,
 } from '@objectstack/spec/api';
+// [#17536] The element the two `/packages` READ doors are declared to serve.
+// `ListInstalledPackagesResponseSchema.packages` is
+// `z.array(InstalledPackageAtEitherStageSchema)` and
+// `GetInstalledPackageResponseSchema.data` is that same schema
+// (`spec/src/api/package-api-assembled.zod.ts`) — a union over the two manifest
+// stages, authoring (`InstalledPackageSchema`) and assembled
+// (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
+// client is a CONSUMER of that contract, so the widest value those doors are
+// declared to answer is what they are declared to return here. ⚠️ What the
+// published TYPE admits is wider than what the runtime parse accepts — the
+// measurement, and what a caller does about it, are on `packages.list` below
+// (#19324). The WRITE methods on the same object keep `InstalledPackage`:
+// PR #17517 moved the read doors alone.
+//
+// Imported from `@objectstack/spec/api-assembled`, not `/api`: the declarations
+// that embed the assembled package body left the browser-facing `/api` entry
+// (#18576 ruling, letter B). A TYPE import — erased from this package's
+// bundle, so the client links none of that tree.
+import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type {
   ApprovalRequestRow,
   ApprovalActionRow,
@@ -160,10 +165,6 @@ import type {
   ObjectDraft,
   RecordShare,
   RemoteTable,
-  ReportRunResult,
-  ReportSchedule,
-  SaveReportInput,
-  SavedReport,
   SchemaValidationReport,
   ScreenSpec,
   SendEmailResult,
@@ -2148,7 +2149,7 @@ export class ObjectStackClient {
     /**
      * ADR-0033: promote a single item's pending draft overlay to live —
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
-     * 404 [no_draft] when there is nothing to publish. [#12195] The name is
+     * 404 `NO_DRAFT` when there is nothing to publish. The name is
      * percent-encoded, like `getItem` — this line used to promise unencoded
      * pass-through for compound names, whose arity is now retired.
      *
@@ -2494,7 +2495,7 @@ export class ObjectStackClient {
      * the row with a `packages/spec` schema and reading the parse's output:
      *
      * ```ts
-     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api
+     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api-assembled
      * if (parsed.success) {
      *   // parsed.data.manifest — the ASSEMBLED stage, object definitions
      * } else {
@@ -2512,14 +2513,19 @@ export class ObjectStackClient {
      * as either stage, which is the right answer for it — the key such a guess
      * would read is not there.)
      *
-     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is a KNOWN GAP
-     * rather than a design: `InstalledPackageAtEitherStageSchema.safeParse()`
-     * refuses a `manifest` belonging to neither stage, while that same row
-     * COMPILES against this declaration. Tracked as #19324, whose root cause is
-     * the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at
-     * `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a
-     * declaration-chunk ceiling); ⛔ not something this declaration can fix, and
-     * ⛔ not a licence to relax either runtime branch to match the type.
+     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is the ACCEPTED
+     * static contract, not a gap waiting to close:
+     * `InstalledPackageAtEitherStageSchema.safeParse()` refuses a `manifest`
+     * belonging to neither stage, while that same row COMPILES against this
+     * declaration. The index signature comes from the deliberate
+     * `z.ZodType<Record<string, unknown>, …>` annotation on
+     * `RecordStagePackageBodySchema` in `@objectstack/spec` (the #14513 pattern —
+     * TS7056 and a declaration-chunk ceiling), and the maintainer ruled on
+     * #19324 (letter 丙) to keep it: the runtime Zod schema is the enforced
+     * contract, so narrow by parsing, as above. The precise form, A2, is
+     * recorded beside `RecordStagePackageBodySchema` for the day the schema
+     * depth allows it. ⛔ Not something this declaration can fix, and ⛔ not a
+     * licence to relax either runtime branch to match the type.
      */
     list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
         const route = this.getRoute('packages');
@@ -3240,7 +3246,7 @@ export class ObjectStackClient {
      */
     listRevisions: async (id: string, opts?: { limit?: number; cursor?: string; branch?: string }) => {
       const params = new URLSearchParams();
-      if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       if (opts?.cursor) params.set('cursor', opts.cursor);
       if (opts?.branch) params.set('branch', opts.branch);
       const qs = params.toString();
@@ -5413,14 +5419,12 @@ export class ObjectStackClient {
           return this.unwrapResponse<AutomationResult>(res);
       },
 
-      /**
-       * List all registered automation flows
-       */
-      list: async (): Promise<{ flows: string[]; total: number; hasMore: boolean }> => {
-          const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}`);
-          return this.unwrapResponse(res);
-      },
+      // [#19543, door ④] No `list` here: `GET /api/v1/automation` is
+      // retired. Flows are metadata (ADR-0106) — list them with
+      // `client.meta.getItems('flow')`, which answers the definitions rather
+      // than bare names; per-flow enablement is `getRuntimeStatus`. The method
+      // was removed rather than re-pointed so a caller learns at compile time,
+      // not from a 404.
 
       /**
        * Get a flow definition by name
@@ -5547,12 +5551,13 @@ export class ObjectStackClient {
            * REFUSED with `400 VALIDATION_FAILED`, never clamped — so raise it
            * deliberately to see further back.
            *
-           * ⚠️ `0` and `NaN` are the exception, and they are dropped rather
-           * than refused: the guard below is truthy, so a falsy `limit` never
-           * leaves the client and the server answers its DEFAULT window
-           * instead. `-5`, `1.5` and `101` are truthy, are sent, and are
-           * refused. The two `listRuns` surfaces guard on `!= null` and do
-           * send `0`.
+           * There is no exception: the SDK does not judge `limit`, it sends
+           * whatever it is given and leaves only an ABSENT (`undefined`) value
+           * off the wire. `0`, `NaN`, `-5`, `1.5` and `101` all reach the door
+           * and are all refused there — none of them is swapped for the
+           * default window. An untyped `null` is outside the declared type; it
+           * is sent as the text `null` and refused as not a whole number. The
+           * two `listRuns` surfaces guard the same way.
            *
            * There is no continuation token — read `hasMore` to learn whether
            * the window was short.
@@ -5560,7 +5565,7 @@ export class ObjectStackClient {
           list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
               const params = new URLSearchParams();
-              if (options?.limit) params.set('limit', String(options.limit));
+              if (options?.limit !== undefined) params.set('limit', String(options.limit));
               const qs = params.toString();
               const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs${qs ? `?${qs}` : ''}`);
               return this.unwrapResponse(res);
@@ -5639,7 +5644,7 @@ export class ObjectStackClient {
       ): Promise<T> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
-          if (opts?.limit != null) params.set('limit', String(opts.limit));
+          if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
           // [#7359] The route's declared `status` filter, now that the boundary
           // honours it instead of dropping it. Until this card the typed client
           // could not send it at all — which is why nothing had tripped over the
@@ -6347,109 +6352,11 @@ export class ObjectStackClient {
       return this.unwrapResponse<SearchAllResponse>(res);
   };
 
-  /**
-   * Saved reports (#3587 gap closure)
-   *
-   * Tenant-wide report definitions, execution, and recurring email
-   * schedules, served by `@objectstack/plugin-reports` behind the REST
-   * surface. Every route 501s [NOT_IMPLEMENTED] on deployments without the
-   * reports service. Fixed path — `reports` is not in `ApiRoutesSchema`.
-   */
-  reports = {
-    /** List saved reports, optionally filtered by object or owner. */
-    list: async (opts?: { object?: string; ownerId?: string }): Promise<SavedReport[]> => {
-        const params = new URLSearchParams();
-        if (opts?.object) params.set('object', opts.object);
-        if (opts?.ownerId) params.set('ownerId', opts.ownerId);
-        const qs = params.toString();
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports${qs ? `?${qs}` : ''}`);
-        const body = await this.unwrapResponse<{ data?: SavedReport[] } | SavedReport[]>(res);
-        return Array.isArray(body) ? body : (body?.data ?? []);
-    },
-
-    /**
-     * Create or update a saved report definition.
-     *
-     * [#11926] The parameter is the service contract's own `SaveReportInput`,
-     * not `any`: `name`, `object` and `query` are required, and omitting one is
-     * a compile error here rather than a surprise from whichever reports
-     * implementation the deployment mounts. The wire refusal is the route's —
-     * `POST /reports` answers 400 [VALIDATION_FAILED] for the same three keys,
-     * so a JavaScript caller that never sees this type is refused too.
-     */
-    save: async (report: SaveReportInput): Promise<SavedReport> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports`, {
-            method: 'POST',
-            body: JSON.stringify(report ?? {}),
-        });
-        return this.unwrapResponse<SavedReport>(res);
-    },
-
-    /** Get a saved report by id. 404 [REPORT_NOT_FOUND] when absent. */
-    get: async (id: string): Promise<SavedReport> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}`);
-        return this.unwrapResponse<SavedReport>(res);
-    },
-
-    /** Delete a saved report; its schedules cascade. */
-    delete: async (id: string): Promise<{ deleted: boolean }> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}`, {
-            method: 'DELETE',
-        });
-        if (res.status === 204) return { deleted: true };
-        return this.unwrapResponse<{ deleted: boolean }>(res);
-    },
-
-    /** Execute a saved report and return its rendered output. */
-    run: async (id: string): Promise<ReportRunResult> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/run`, {
-            method: 'POST',
-            body: JSON.stringify({}),
-        });
-        return this.unwrapResponse<ReportRunResult>(res);
-    },
-
-    /**
-     * Create a recurring email schedule for a report. Provide either
-     * `intervalMinutes` or `cronExpression`; `recipients` is required.
-     */
-    schedule: async (
-        id: string,
-        opts: {
-            recipients: string[];
-            name?: string;
-            intervalMinutes?: number;
-            cronExpression?: string;
-            timezone?: string;
-            format?: string;
-            subjectTemplate?: string;
-            ownerId?: string;
-            active?: boolean;
-        },
-    ): Promise<ReportSchedule> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedule`, {
-            method: 'POST',
-            body: JSON.stringify(opts),
-        });
-        return this.unwrapResponse<ReportSchedule>(res);
-    },
-
-    /** List the recurring schedules attached to a report. */
-    listSchedules: async (id: string): Promise<ReportSchedule[]> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedules`);
-        const body = await this.unwrapResponse<{ data?: ReportSchedule[] } | ReportSchedule[]>(res);
-        return Array.isArray(body) ? body : (body?.data ?? []);
-    },
-
-    /** Delete a schedule by its id (report-independent path). */
-    unschedule: async (scheduleId: string): Promise<{ deleted: boolean }> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/reports/schedules/${encodeURIComponent(scheduleId)}`, {
-            method: 'DELETE',
-        });
-        if (res.status === 204) return { deleted: true };
-        return this.unwrapResponse<{ deleted: boolean }>(res);
-    },
-  };
+  // The former `reports` namespace (saved-report definitions, runs and
+  // e-mail schedules) was retired with its server routes in #20102 — the
+  // saved-report stack had no consumer. A report is `report` metadata, read
+  // through `meta.*` and run through `analytics.*`; a saved ad-hoc object
+  // query is a ListView.
 
   // The former `views` CRUD namespace was removed in #3612 — no server
   // surface mounts /ui/views (both surfaces serve only /ui/view/:object…).
@@ -6479,7 +6386,7 @@ export class ObjectStackClient {
       const params = new URLSearchParams();
       if (options?.read !== undefined) params.set('read', String(options.read));
       if (options?.type) params.set('type', options.type);
-      if (options?.limit) params.set('limit', String(options.limit));
+      if (options?.limit !== undefined) params.set('limit', String(options.limit));
       const qs = params.toString();
       const res = await this.fetch(`${this.baseUrl}${route}${qs ? `?${qs}` : ''}`);
       return this.unwrapResponse<ListNotificationsResponse>(res);
@@ -7083,7 +6990,7 @@ export class ObjectStackClient {
         const qs = new URLSearchParams();
         if (query.object) qs.set('object', query.object);
         if (query.status) qs.set('status', query.status);
-        if (query.limit != null) qs.set('limit', String(query.limit));
+        if (query.limit !== undefined) qs.set('limit', String(query.limit));
         if (query.offset != null) qs.set('offset', String(query.offset));
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/import/jobs${suffix}`);
@@ -7929,7 +7836,7 @@ export class ScopedEnvironmentClient {
       const qs = new URLSearchParams();
       if (query.object) qs.set('object', query.object);
       if (query.status) qs.set('status', query.status);
-      if (query.limit != null) qs.set('limit', String(query.limit));
+      if (query.limit !== undefined) qs.set('limit', String(query.limit));
       if (query.offset != null) qs.set('offset', String(query.offset));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       const res = await this.parent._fetch(this.dataUrl(`/import/jobs${suffix}`));
@@ -8123,7 +8030,7 @@ export class ScopedEnvironmentClient {
       opts?: { limit?: number; status?: ExecutionStatus },
     ): Promise<T> => {
       const params = new URLSearchParams();
-      if (opts?.limit != null) params.set('limit', String(opts.limit));
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       // [#7359] — see the sibling `listRuns` alias above.
       if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();

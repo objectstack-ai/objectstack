@@ -118,7 +118,6 @@ export const Customer = ObjectSchema.create({
     
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
-      scale: 2,
     }),
     
     primary_contact: Field.lookup('contact', {
@@ -426,7 +425,6 @@ export const Opportunity = ObjectSchema.create({
     
     amount: Field.currency({
       label: 'Amount',
-      scale: 2,
     }),
     
     customer: Field.lookup('customer', {

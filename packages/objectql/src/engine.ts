@@ -42,7 +42,7 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
-import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
+import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
 import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
@@ -58,6 +58,7 @@ import {
   renderOperationMessage,
   objectLabelKey,
   resolveBundleLocale,
+  SystemFieldName,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -65,6 +66,8 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
+// [#20157] The judge-only filter-admission member's verdict and options.
+import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -152,6 +155,7 @@ import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
+  postureEnforcesWall,
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
@@ -191,7 +195,7 @@ import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine } from '@objectstack/formula';
+import { ExpressionEngine, toEvalPermissions, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -211,7 +215,8 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -253,7 +258,14 @@ import {
   type EngineUpdateDispatchData,
   type EngineUpdateDispatchInput,
 } from './engine-update-dispatch.js';
-import { applyHaving } from './having-filter.js';
+import {
+  applyHaving,
+  aggregatedRowColumns,
+  aggregatedRowColumnClasses,
+  assertAggregationFilterIsEvaluable,
+  assertHavingIsEvaluable,
+  assertHavingIsFilterCondition,
+} from './having-filter.js';
 import {
   auditDanglingReferences,
   type AuditableObject,
@@ -805,6 +817,66 @@ function foldEngineOptionAliases<T extends object | undefined>(
 }
 
 /**
+ * [#20121] Is this non-array `where` a filter OBJECT — the one non-array shape
+ * a driver reads as a predicate?
+ *
+ * The test is the object's built-in tag (`[object Object]`), not its
+ * prototype, and each edge shape lands where its measured answer puts it —
+ * nothing that answered correctly before this gate is refused by it:
+ *
+ * - a literal `{…}` and `{}` (match-all, a REAL query — the unscoped-write
+ *   detector reads it that way too) → accepted;
+ * - `Object.create(null)` and an instance of an author's class with the filter
+ *   on its own keys → accepted: both filtered correctly on `driver-memory` and
+ *   `SqlDriver`, because a driver reads a filter's own enumerable keys;
+ * - `Map`, `Set`, `Date`, a boxed primitive, a `Promise` (an un-awaited filter
+ *   builder) → refused: each carries its tag, has no own keys, and was
+ *   silently read as "no filter".
+ *
+ * `undefined` and `null` never reach this test — the caller skips them, and
+ * both keep meaning "no filter" (`findOne`'s no-predicate guard and the
+ * unscoped-write detector both read `null` as absent).
+ */
+function isWhereFilterObject(where: unknown): where is Record<string, unknown> {
+  return (
+    typeof where === 'object'
+    && where !== null
+    && !Array.isArray(where)
+    && Object.prototype.toString.call(where) === '[object Object]'
+  );
+}
+
+/**
+ * [#20121] How a refused non-filter `where` is named in the refusal: the
+ * primitive's `typeof` plus its value (bounded), or the object's built-in tag.
+ * The `typeof` spelling is the wire door's (`received number`); the value is
+ * added because a direct caller has no request to look at.
+ */
+function describeNonFilterWhere(where: unknown): string {
+  if (typeof where === 'object' && where !== null) {
+    return Object.prototype.toString.call(where).slice('[object '.length, -1);
+  }
+  if (typeof where === 'function') return 'function';
+  const text = typeof where === 'string' ? JSON.stringify(where) : String(where);
+  const bounded = text.length > 80 ? `${text.slice(0, 77)}...` : text;
+  return `${typeof where} ${bounded}`;
+}
+
+/**
+ * [#20121] What a dropped `where` would have done, per verb. The read wording is
+ * the wire door's verbatim; a write has no result set, and "every row in
+ * scope" is what an unapplied predicate on `multi: true` rewrote or removed.
+ */
+const UNAPPLIED_WHERE_CONSEQUENCE: Readonly<Record<string, string>> = {
+  find: 'returned the unfiltered result set',
+  findOne: 'returned the unfiltered result set',
+  count: 'returned the unfiltered result set',
+  aggregate: 'returned the unfiltered result set',
+  update: 'updated every row in scope',
+  delete: 'deleted every row in scope',
+};
+
+/**
  * **Door 2** — lower an arriving {@link FilterArray} on `where` to the
  * `FilterCondition` the AST actually declares (#5158, maintainer ruling C).
  *
@@ -848,6 +920,13 @@ function foldEngineOptionAliases<T extends object | undefined>(
  *    wording, or — for the infix dialect — silently compiled by a second
  *    implementation. Failing here names the caller's own value.
  *
+ * [#20121] A `where` that is not an array has to be a filter OBJECT, and that
+ * is checked FIRST, before any door below: a string, a number, a boolean, a
+ * `Map`, a `Date` — anything that is neither absent, a filter object nor an
+ * array — is refused with the same `INVALID_FILTER` / 400 envelope the array
+ * refusal (3) now carries. See {@link isWhereFilterObject} for the accept set
+ * and why each edge shape lands where it does.
+ *
  * Returns the SAME reference when `where` is not an array (the overwhelmingly
  * common path allocates nothing), otherwise a shallow copy: the bag belongs to
  * the caller and may be reused (view metadata, flow node config).
@@ -860,6 +939,33 @@ function lowerWhereFilterArray<T extends object | undefined>(
 ): T {
   if (!bag) return bag;
   const where = (bag as Record<string, unknown>).where;
+  // [#20121] The SHAPE gate, first on this seam and so first on all six verbs
+  // that call it (`find`, `findOne`, `count`, `aggregate`, `update`,
+  // `delete`) — each calls this before it resolves a driver, so a refusal
+  // here means no driver call is made at all.
+  //
+  // Before it, a string / number / `Map` `where` fell into the object branch
+  // below, every door there stepped around it (they walk the keys of a filter
+  // object, and it has none), and the driver ignored it: the READ answered the
+  // unfiltered set, and a `multi: true` UPDATE or DELETE rewrote or removed
+  // every row of the table (measured on `driver-memory` and `SqlDriver`
+  // without `SecurityPlugin`, and with it under a system context; with an
+  // RLS-scoped caller the RLS `$and` composition put the value where the
+  // driver's node gate refuses it). It also stepped past the unscoped-write
+  // guard (`dispatchUnscopedMultiWriteHooks`), which reads only an absent or
+  // `null` `where` as unscoped.
+  //
+  // The words are the wire door's (`metadata-protocol`'s normalizer answers
+  // `?filter=5` with "must be a filter object or condition array, received
+  // number … It was not applied"); the consequence is spelled per verb,
+  // because for a write it is not a result set.
+  if (where !== undefined && where !== null && !Array.isArray(where) && !isWhereFilterObject(where)) {
+    throw invalidFilterError(
+      `${operation}('${object}'): 'where' must be a filter object or condition array, ` +
+      `received ${describeNonFilterWhere(where)}. It was not applied, and an unapplied filter ` +
+      `would have ${UNAPPLIED_WHERE_CONSEQUENCE[operation] ?? UNAPPLIED_WHERE_CONSEQUENCE.find}.`,
+    );
+  }
   if (!Array.isArray(where)) {
     // [#5869] Door 1 lands HERE, not below: the protocol face runs its own
     // `isFilterAST` → `parseFilterAST` and hands the engine an already-lowered
@@ -920,8 +1026,12 @@ function lowerWhereFilterArray<T extends object | undefined>(
   }
 
   // (3) Not a shape `parseFilterAST` can express.
+  // [#20121] Through `invalidFilterError`, so this refusal carries the
+  // `INVALID_FILTER` / 400 envelope the wire door answers the same array with
+  // (`malformedFilterArrayError`) — it used to be a bare `Error`, `code` and
+  // `status` both `undefined`, a 400-class author error that read as a 500.
   if (!isFilterAST(where)) {
-    throw new Error(
+    throw invalidFilterError(
       `${operation}('${object}') received a 'where' array that is not a filter: ` +
       `${JSON.stringify(where)}. A filter array is a comparison [field, operator, value], ` +
       `a logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY ` +
@@ -976,6 +1086,124 @@ function lowerWhereFilterArray<T extends object | undefined>(
   assertTemporalComparandsInterpretable(object, operation, schema, condition);
   lowered.where = condition;
   return lowered as T;
+}
+
+/**
+ * [#20157] Stage 2 of `where` admission: expand the filter placeholders
+ * (`{current_user_id}`, date macros) against the execution context.
+ *
+ * The one spelling of that step. Execution reaches it through
+ * `ObjectQL.resolveWhereTokens` (the read verbs) and `ObjectQL.withResolvedWhere`
+ * (`update` / `delete`), and the judge ({@link judgeWhereAdmission}) calls it
+ * directly. So "what execution resolves" and "what the judge resolves" cannot
+ * drift. An unknown placeholder throws `FILTER_TOKEN_UNKNOWN`; a known one the
+ * context carries no value for throws `FILTER_TOKEN_UNRESOLVED`. Neither ever
+ * resolves to `null` (see `@objectstack/core`'s `filter-tokens.ts`).
+ *
+ * Returns the input by reference when it holds no placeholder.
+ */
+function resolveWhereFilterTokens<W>(
+  where: W,
+  context: Parameters<typeof filterTokenContextFrom>[0],
+): W {
+  return resolveFilterTokens(where, filterTokenContextFrom(context));
+}
+
+/**
+ * [#20157] Is this thrown value a door's DIAGNOSTIC (the ADR-0112 envelope:
+ * a string `code` and a numeric `status`), or something else?
+ *
+ * Every `where` door raises the envelope: `invalidFilterError`, the
+ * materializable door's `INVALID_FIELD`, spec's shape and type faces, and
+ * core's `FILTER_TOKEN_*` errors. A throw without it is not a verdict about the
+ * filter. It is a fault (the "unreachable by construction" branch of
+ * {@link lowerWhereFilterArray}, a bug), and the judge re-throws it rather than
+ * dressing it up as one.
+ */
+function admissionRefusalOf(
+  thrown: unknown,
+): Extract<EngineFilterJudgement, { ok: false }> | null {
+  if (!(thrown instanceof Error)) return null;
+  const { code, status } = thrown as Error & { code?: unknown; status?: unknown };
+  if (typeof code !== 'string' || typeof status !== 'number') return null;
+  return { ok: false, code, status, message: thrown.message };
+}
+
+/**
+ * [#20157] Judge a `where` against an object WITHOUT executing it: the engine
+ * side of `IObjectQLEngine.judgeFilter` (#19995 ruling C).
+ *
+ * ## The pipeline it runs is the one every verb runs
+ *
+ * Every verb that takes a `where` (`find`, `findOne`, `count`, `aggregate`,
+ * `update`, `delete`) admits it in the same two stages, in the same order:
+ *
+ * 1. {@link lowerWhereFilterArray}: the shape gate, then (object form)
+ *    `assertListComparandShapes` → `assertFilterIsMaterializable` (the dotted,
+ *    then the virtual-field verdict) → `assertTextOperatorTargetsAreStringCapable`
+ *    → `assertTemporalComparandsInterpretable` → `normalizeFilterComparandTypes`,
+ *    or (array form) `isFilterAST` → `parseFilterAST` → the same three
+ *    field-map doors on the lowered condition.
+ * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
+ *
+ * What differs by verb sits BETWEEN or AROUND those stages and judges
+ * something other than `where`: option-key folding and refusal, the driver
+ * lookup (`getDriver`, before stage 1 on the writes and between the stages on
+ * the reads), `orderBy` / projection doors on `find`, and the per-aggregation
+ * and `having` doors on `aggregate`. None of those is part of this judgement.
+ * The judge calls the two stage functions themselves, so the doors have one
+ * implementation and one order. It never calls a second copy of a walk.
+ *
+ * ## What it reads
+ *
+ * The `where` value, the object's declared field map (`schema`, the
+ * registry's), and the execution context (for stage 2). No driver, no data,
+ * no hook, no middleware. Execution's own stages read nothing more, measured
+ * door by door on #20157.
+ *
+ * A thrown door diagnostic becomes the returned refusal, with the same `code`,
+ * `status` and `message` execution raises. Anything else is re-thrown
+ * ({@link admissionRefusalOf}).
+ */
+function judgeWhereAdmission(
+  object: string,
+  operation: string,
+  where: unknown,
+  schema: unknown,
+  context: Parameters<typeof filterTokenContextFrom>[0],
+): EngineFilterJudgement {
+  try {
+    const admitted = lowerWhereFilterArray(object, operation, { where }, schema);
+    resolveWhereFilterTokens(admitted.where, context);
+    return { ok: true };
+  } catch (thrown) {
+    const refusal = admissionRefusalOf(thrown);
+    if (refusal) return refusal;
+    throw thrown;
+  }
+}
+
+/**
+ * [#20082] One operation's effective-permission resolution — see
+ * `ObjectQL.permissionResolution`. `get()` asks the registered resolver at most
+ * once for the operation and hands every caller the same answer, or the same
+ * rejection.
+ */
+interface PermissionResolution {
+  get(): Promise<EvalPermissions>;
+}
+
+/**
+ * Is this `defaultValue` an Expression envelope (`{ dialect, source }`) —
+ * evaluated at insert time — rather than a literal or a runtime token? The one
+ * test {@link ObjectQL.applyFieldDefaults} evaluates by and
+ * {@link ObjectQL.resolveDefaultPermissions} plans by, so the two can never
+ * disagree about which defaults are expressions.
+ */
+function isExpressionDefault(dv: unknown): dv is Expression {
+  return typeof dv === 'object' && dv !== null
+    && Boolean((dv as { dialect?: unknown }).dialect)
+    && typeof (dv as { source?: unknown }).source === 'string';
 }
 
 interface FormulaPlanEntry {
@@ -1242,9 +1470,9 @@ function assertOrderByIsMaterializable(
  * SQL renders `"account"."name"` against a table that was never joined, the DB
  * answers `no such column`, and the #3821 recovery ladder retries `select('*')`.
  * The caller asked to narrow and silently received EVERY field, byte-identical
- * to no projection at all. A saved report's `query.fields` reaches this the
- * same way (`plugin-reports` forwards it verbatim), as does every hook and
- * internal caller.
+ * to no projection at all. Every hook and internal caller reaches this the
+ * same way (a saved report's `query.fields` did too, until the saved-report
+ * stack was retired in #20102).
  *
  * WHY A REFUSAL: ruled 2026-08-12 on #7589 (adopting the drivers seat's
  * Option B) — a dotted entry the engine cannot resolve is refused loudly at
@@ -1494,6 +1722,15 @@ function undeclaredWriteFieldErrors(
  * `{ record }`, so `now()`/`today()` ran against live wall-clock and user/org
  * were unreachable.
  *
+ * [#20082] `permissions` is the acting subject's effective object-permission
+ * map, the one `current_user.can(object, verb)` answers from. The CALLER
+ * resolves it — at most once per operation, and only when a planned formula
+ * calls `can` ({@link ObjectQL.resolveFormulaPermissions}) — because this
+ * function is synchronous and owns no resolver. `undefined` is "no permission
+ * data", never an empty map: a `can`-calling formula then fails to evaluate and
+ * reads `null`, the rule every formula that does not evaluate follows here, and
+ * the caller has already said why in its log line.
+ *
  * That context has the same SHAPE as `applyFieldDefaults`' — the same keys, so
  * one expression vocabulary serves `formula` and `defaultValue` alike — but NOT
  * the same `now` value, and the two are sourced independently on purpose
@@ -1579,6 +1816,7 @@ function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContext,
+  permissions?: EvalPermissions,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -1588,7 +1826,7 @@ function applyFormulaPlan(
   for (const rec of records) {
     if (rec == null) continue;
     for (const fp of plan) {
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, record: rec });
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: rec });
       rec[fp.name] = r.ok ? roundFormulaValue(r.value, fp.scale) : null;
     }
   }
@@ -1620,6 +1858,10 @@ function applyFormulaPlan(
  *  - the execution context is threaded exactly as find threads it, so `os.user`
  *    / `os.org` resolve identically on both sides. Widening what that context
  *    carries is #1979's work and stays out of here.
+ *  - [#20082] the permission map comes from the same place find's does:
+ *    `permissionsFor` is the engine's {@link ObjectQL.resolveFormulaPermissions}
+ *    bound to the WRITE's own resolution, so a write that already resolved the
+ *    map for a default or an option gate reuses it rather than asking again.
  *
  * Evaluates against the record the driver returned (a full row: `create` uses
  * `RETURNING *`, `update` re-reads), so no extra round-trip is needed and no
@@ -1631,18 +1873,19 @@ function applyFormulaPlan(
  * otherwise take a property assignment, which throws under ES module strict
  * mode.
  */
-function hydrateWriteFormulas(
+async function hydrateWriteFormulas(
   schema: any,
   results: unknown[],
-  execCtx?: ExecutionContext,
-): void {
+  execCtx: ExecutionContext | undefined,
+  permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>,
+): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
   );
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx);
+  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records));
 }
 
 /**
@@ -1680,6 +1923,12 @@ function hydrateWriteFormulas(
  * that compiles and does not EVALUATE yields `null` — `applyFormulaPlan`'s own
  * `r.ok ? … : null`. A caller therefore cannot mistake "this title could not be
  * computed" for a computed value.
+ *
+ * ⚠️ One scope difference, named rather than hidden [#20082]: this helper is
+ * synchronous and passes NO permission map, so a formula that calls
+ * `current_user.can(…)` does not evaluate here and yields `null` by the rule
+ * above. The read and write paths resolve the map first
+ * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
  *
  * Returns `undefined` when `field` is not a declared formula field, which is
  * how a caller tells "read the stored column instead" from "the formula
@@ -2224,8 +2473,20 @@ export interface OperationContext {
    * against `opCtx.data`, and {@link ObjectQL.insert} calls it once the
    * `beforeInsert` chain has produced the row — before the first producer with
    * a side effect (the secret channel, the autonumber, the statement), so a
-   * refusal still costs nothing. `update` needs no seam: that path already
-   * merges its pre-image with the change set, which is the same proposition.
+   * refusal still costs nothing. An ARRAY insert is one operation: every live
+   * row is judged in the same call.
+   *
+   * [#19950] A PREDICATE `update` (`multi: true`, no row address) uses the same
+   * seam. The middleware cannot know which rows the write will change: they
+   * are the rows the COMPOSED AST selects, and that AST is complete only after
+   * every middleware has run. So {@link ObjectQL.update} calls it on that path,
+   * once the payload is final, with every matched row merged with the payload.
+   *
+   * [#19989] A by-id `update` uses it too. A middleware can read that one row,
+   * but only BEFORE the `beforeUpdate` chain runs, so its image is the change
+   * set as sent and a hook that rewrites a judged field is never judged. So
+   * {@link ObjectQL.update} calls it on the by-id path as well, once the
+   * payload is final, with the prior row merged with the payload.
    *
    * ABSENT is the ordinary state — no enforcement layer is mounted, or the
    * write is one it does not gate. The engine never invents one.
@@ -2237,11 +2498,13 @@ export interface OperationContext {
  * [#16608] The judgement {@link OperationContext.postHookWriteImageCheck}
  * carries, and the acknowledgement its installer reads back.
  *
- * `evaluate` receives the rows exactly as the `beforeInsert` chain left them —
- * the images the driver is about to be handed — and REFUSES by throwing. It is
- * called at most once per operation, and only for rows still live (a row the
- * declared-field door culled from a partial batch is never judged: it will not
- * be written).
+ * `evaluate` receives the images the driver is about to store, and REFUSES by
+ * throwing. On an `insert` those are the rows exactly as the `beforeInsert`
+ * chain left them, only the live ones (a row the declared-field door culled
+ * from a partial batch is never judged: it will not be written). On a
+ * predicate `update` they are the matched rows, each merged with the final
+ * payload; on a by-id `update` ([#19989]) the one prior row merged with the
+ * final payload. It is called at most once per operation.
  *
  * `honoured` is set by the engine immediately before `evaluate` runs. It exists
  * so the installer can fail CLOSED on a seam that was never called: an
@@ -4017,6 +4280,362 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#18682] "May this context CREATE or UPDATE this object?" — supplied by the
+   * security plugin, never decided here.
+   *
+   * ## What it protects
+   *
+   * A validation rule reads its related record under SYSTEM authority, and the
+   * accepted cost of that is an inference channel: a caller can learn something
+   * about a value they cannot read by observing which of THEIR WRITES are
+   * refused.
+   *
+   * `validate()` runs NO middleware for the target object, by design.
+   * Its network ingress (the `dryRun` import) checks auth and
+   * API access but not the caller's CRUD grant on the object. So the elevated
+   * read, wired into the preview without this gate, would hand the same
+   * one-bit-per-row oracle to any authenticated caller with no permission on the
+   * object and no ability to write it at all — a strictly wider channel than the
+   * one that was accepted.
+   *
+   * ## The payload is part of the question — and so are the limits
+   *
+   * The write decision is not object-level. The middleware also refuses a write
+   * for reasons that depend on THE PAYLOAD, before any rule runs: the
+   * field-level-security write gate refuses a caller who holds the object's
+   * CRUD grant but is not `editable` on a field the payload names. So the
+   * caller's rows are handed to the probe, and the plugin answers over them —
+   * an editor of the child object who is FLS-locked out of the lookup column is
+   * refused by `insert()` and refused the elevated read here, alike.
+   *
+   * ⭐ What this gate closes, stated POSITIVELY — by NAMING WHAT IT RUNS, ⛔
+   * never by naming a category of the write decision. An elevated read is
+   * issued only for a caller that passes, in the middleware's own order: the
+   * ADR-0103 engine-owned affordance gate and the ADR-0090 D12 delegated-admin
+   * gate (both BEFORE any permission set resolves, both the middleware's own
+   * primitives), the fail-closed postures (#3545's unresolvable posture and the
+   * D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
+   * principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090 D10
+   * delegator's independent grant, the middleware's own step 2.5 FLS write gate
+   * over the keys THIS payload names, and its ADR-0123 D2 organization wall
+   * (step 3.7). The gate says nothing about any refusal not in that list.
+   * `@objectstack/plugin-security`'s `can-write-object-admission.test.ts` pins
+   * the probe's answer equal to the registered middleware's on its equivalence
+   * block's cases, and pins one D12 UPDATE case as a direction: the probe
+   * `false`, the middleware `true`.
+   *
+   * ⛔ A `true` here is NOT a promise that the write would succeed, and ⛔ no
+   * enumeration of the distance to success is attempted — the middleware
+   * refuses both before and after `next()` for reasons this gate is never
+   * asked. The families nearest to hand, named so the arms above are not read
+   * as the whole write decision:
+   *
+   *  - **The remaining PRE-RESOLUTION gates, which run beside the two named
+   *    above.** Two judge a row's PROVENANCE, which the preview holds no row to
+   *    carry: the ADR-0086/0094 package-managed write gate and the ADR-0066
+   *    system-row write gate. Two judge a payload VALUE: the ADR-0066 D1
+   *    curated-capability-name refusal and the ADR-0090 D5/D9 audience-anchor
+   *    binding guard. And the ADR-0056 `publicFormGrant` scope, which admits
+   *    create plus read-back on exactly the granted object and refuses
+   *    everything else — not asked because no wire caller and no constructor
+   *    in the tree presents that grant here (only the public form-submit route
+   *    constructs one, and it goes to the real write, never to a preview) and
+   *    because it has no extracted primitive to call, so an arm would be a
+   *    second spelling of its scope.
+   *  - **Row-level and post-image refusals — the preview names no stored row.**
+   *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent
+   *    master-edit check (step 2.8), the RLS `check` post-image (step 3.6) and
+   *    the Layer 0 tenant post-image (step 3.7) each judge a ROW: a prior
+   *    image, a master record, or a pre-image merged with the change set. The
+   *    preview reads nothing and holds none of them, so it judges none of them.
+   *  - **Payload-VALUE refusals — the same caller passes by not sending the
+   *    value.** The masked-echo write refusal (step 2.5a) and the `owner_id`
+   *    ownership forge (step 3.5) refuse a VALUE, not a caller: the identical
+   *    caller sending the identical row without the echoed or forged value is
+   *    admitted. They widen the caller class by nothing, which is why this gate
+   *    does not ask them — measured, with the CRUD grant held and the column
+   *    editable and `owner_id` naming another user, `insert()` refuses at step
+   *    3.5 with ZERO related reads while the preview issues ONE.
+   *  - **The caller's own PREDICATE.** Step 2.9's anti-filter-oracle guard
+   *    refuses an update whose `where` names a field the caller may not read.
+   *    The preview carries no predicate, so that guard is never asked here.
+   *  - **After `next()`.** The fail-closed assertion that the engine honoured
+   *    `OperationContext.postHookWriteImageCheck` — that the insert `check`
+   *    seam really ran — refuses a write that already executed, which no
+   *    preview can be asked about at all.
+   *  - **The static `readonly` strip.** `insert()` strips an author-declared
+   *    `readonly` reference field inside the write's executor, so the real
+   *    write resolves NO related row for it and a traversing rule refuses;
+   *    the preview runs no strip, resolves the caller's own foreign key and
+   *    answers the rule against it — an id the write path never carries.
+   *
+   * ## Unwired
+   *
+   * A composition with no security plugin has no CRUD gate on the write path
+   * either, so there is no bound to restore and the preview resolves. That is
+   * the same behaviour such a composition already has everywhere else.
+   */
+  private _writeGateProbe?: (
+    object: string,
+    operation: 'insert' | 'update',
+    context: unknown,
+    data: unknown,
+  ) => Promise<boolean>;
+
+  /**
+   * Wire the create/update gate question (#18682). Last registration wins.
+   *
+   * `data` is the caller's RAW payload for this preview — the rows exactly as
+   * they arrived, before `applyFieldDefaults` and before any hook, which is the
+   * same image the middleware's own field-level gate reads off `opCtx.data`.
+   * ⛔ Not the defaulted rows: a default the runtime fills is not a field the
+   * caller wrote, and judging it would refuse writes the real path accepts.
+   */
+  registerWriteGateProbe(
+    fn: (
+      object: string,
+      operation: 'insert' | 'update',
+      context: unknown,
+      data: unknown,
+    ) => Promise<boolean>,
+  ): void {
+    this._writeGateProbe = fn;
+    this.logger.debug('Registered write-gate probe for validate() relationship resolution');
+  }
+
+  /**
+   * [#18783] Where the acting subject's EFFECTIVE object permissions come from —
+   * the map `current_user.can(object, verb)` is answered from: in a per-option
+   * `visibleWhen`, and since #20082 in a `formula` field and a CEL
+   * `defaultValue`. Registered by the security plugin (the one producer,
+   * `ISecurityService.getEffectiveObjectPermissions`), the same way it
+   * registers {@link registerWriteGateProbe}; last registration wins.
+   *
+   * Unregistered is a DEFINED state, not a fault: the engine then passes NO
+   * permission data — ⛔ never an empty map and never one it merged itself — so
+   * a `can` expression stays loudly unevaluable, exactly as the contract member
+   * prescribes for an absent method. See {@link permissionResolution} for how
+   * one operation asks at most once, and each consumer
+   * ({@link resolveOptionPermissions}, {@link resolveDefaultPermissions},
+   * {@link resolveFormulaPermissions}) for when it asks and what a throw does.
+   */
+  private _effectiveObjectPermissionsResolver?: (context: unknown) => Promise<unknown>;
+
+  /** Wire the effective object-permission source (#18783). Last registration wins. */
+  registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
+    this._effectiveObjectPermissionsResolver = fn;
+    this.logger.debug('Registered effective object-permission resolver for current_user.can()');
+  }
+
+  /**
+   * [#18783] The permission map one write's option gates are evaluated with —
+   * resolved at most ONCE for the whole write (a batch insert, a by-id update,
+   * an N-row bulk update, a `validate()` preview), never per row and never per
+   * predicate, and never kept past the call: the contract member is
+   * request-scoped, and a map held across writes would serve a grant that may
+   * since have been revoked.
+   *
+   * Asked ONLY when the write can need it — a resolver is registered, the write
+   * has an acting user (`current_user` is otherwise unbound and `can` asks
+   * about nobody), and some payload PICKS an option whose `visibleWhen` calls
+   * `can` ({@link optionVisibilityReadsPermissions}, the evaluator's own
+   * picker). Every other write pays nothing, and cannot be refused by a
+   * resolution it never depended on.
+   *
+   * The answer goes through `toEvalPermissions`, formula's one door into
+   * `EvalContext.permissions`, so a map that is not the published shape is
+   * refused here rather than answering `can()` confidently wrong.
+   *
+   * Returns a per-payload accessor, the shape {@link resolvePredicateRelated}
+   * hands back:
+   *
+   *  - a payload that picks no `can`-gated option gets `undefined`;
+   *  - one that does gets the map;
+   *  - when the resolution THREW (or the map was refused), one that does gets
+   *    the throw, re-raised untouched: the write fails CLOSED, with the
+   *    resolution's own error. ⛔ It is never read as "no grants", which would
+   *    publish a failure as a measured denial of everything.
+   */
+  private async resolveOptionPermissions(
+    schema: unknown,
+    payloads: ReadonlyArray<Record<string, unknown> | null | undefined>,
+    resolution: PermissionResolution | undefined,
+  ): Promise<(payload: Record<string, unknown> | null | undefined) => EvalPermissions | undefined> {
+    const none = (): undefined => undefined;
+    // [#20082] The write's ONE resolution ({@link permissionResolution}) —
+    // `undefined` on exactly the two conditions this method used to test
+    // itself: no resolver registered, or no acting user.
+    if (!resolution) return none;
+    const fields = (schema as { fields?: Parameters<typeof optionVisibilityReadsPermissions>[0] } | null | undefined)?.fields;
+    const needs = (payload: Record<string, unknown> | null | undefined): boolean =>
+      optionVisibilityReadsPermissions(fields, payload);
+    if (!payloads.some(needs)) return none;
+    let permissions: EvalPermissions;
+    try {
+      permissions = await resolution.get();
+    } catch (err) {
+      return (payload) => {
+        if (needs(payload)) throw err;
+        return undefined;
+      };
+    }
+    return (payload) => (needs(payload) ? permissions : undefined);
+  }
+
+  /**
+   * [#20082] ONE operation's effective-permission resolution — the single
+   * resolver ask every consumer inside that operation shares. On a write those
+   * are its CEL `defaultValue`s ({@link resolveDefaultPermissions}), its option
+   * gates ({@link resolveOptionPermissions}) and the formula fields on its
+   * response ({@link resolveFormulaPermissions}); on a read, its formula fields.
+   * The contract member's "resolve it ONCE per request" is kept per engine
+   * operation: a write that carries a `can` default, a `can` option gate and a
+   * `can` formula asks the resolver once, not three times.
+   *
+   * `undefined` when there is nothing to ask — no resolver registered, or no
+   * acting user (`current_user` is then unbound, and `can` asks about nobody).
+   * Every consumer then passes NO permission data: ⛔ never an empty map, which
+   * is a real answer ("holds nothing") and would deny confidently.
+   *
+   * Lazy and memoised for the operation: the ask happens when the first consumer
+   * NEEDS the map, never earlier, and a later consumer awaits the same promise —
+   * its rejection included, so one failed resolution is the same failure
+   * everywhere in the operation rather than a second, possibly different, ask.
+   * The answer goes through `toEvalPermissions`, formula's one door into
+   * `EvalContext.permissions`, so an off-shape map fails here like a throw.
+   * ⛔ Never kept past the operation: each operation mints its own, because a map
+   * held across operations would serve a grant that may since have been revoked.
+   */
+  private permissionResolution(context: ExecutionContext | undefined): PermissionResolution | undefined {
+    const resolver = this._effectiveObjectPermissionsResolver;
+    if (!resolver || !this.buildEvalUser(context)) return undefined;
+    let pending: Promise<EvalPermissions> | undefined;
+    return {
+      // `Promise.resolve().then(...)` so a resolver that throws SYNCHRONOUSLY is
+      // memoised as a rejection too, rather than escaping `get()` un-memoised
+      // and being asked again by the next consumer.
+      get: () => (pending ??= Promise.resolve()
+        .then(() => resolver(context))
+        .then((answer) => toEvalPermissions(answer))),
+    };
+  }
+
+  /**
+   * [#20082] The permission map a batch of `formula` fields is evaluated with —
+   * a read's (`find`, `findOne`) or a write response's
+   * ({@link hydrateWriteFormulas}).
+   *
+   * Asked only when it can change an answer: the context binds an acting user
+   * (the way {@link applyFormulaPlan} binds `current_user` — a truthy `userId`),
+   * some planned formula CALLS `can` ({@link readsPermissionPredicate}, the same
+   * reading the option gate uses), and there is a record to evaluate. Every
+   * other read pays nothing, and a whole `find` asks at most once, never per row.
+   *
+   * A read cannot refuse a row because one computed field lacks data, so when
+   * the map cannot be had the formula keeps the rule every formula that does not
+   * evaluate follows on this path — it reads `null` — and this method says so,
+   * once per operation, at `warn`, naming the object, the fields and the reason:
+   *
+   *  - `no-permission-source`: no resolver is registered. NO map is passed (the
+   *    contract member's rule for an absent method), so `can()` keeps its own
+   *    loud refusal and the field reads `null`.
+   *  - `permission-resolution-failed`: the resolution threw, or answered a map
+   *    that is not the published shape. Fail CLOSED: ⛔ never read as "no
+   *    grants" (an empty map would publish a confident `false`) and ⛔ never a
+   *    grant — the field reads `null`, with the resolution's error in the line.
+   *
+   * `warn`, not `error`: a formula is computed on read and nothing is persisted
+   * from it, so the degradation is visible to whoever reads the field.
+   */
+  private async resolveFormulaPermissions(
+    object: string,
+    plan: readonly FormulaPlanEntry[],
+    records: readonly unknown[],
+    context: ExecutionContext | undefined,
+    resolution: PermissionResolution | undefined,
+  ): Promise<EvalPermissions | undefined> {
+    if (!context?.userId) return undefined;
+    if (!records.some((r) => r != null && typeof r === 'object')) return undefined;
+    const fields = plan.filter((entry) => readsPermissionPredicate(entry.expression)).map((entry) => entry.name);
+    if (fields.length === 0) return undefined;
+    if (!resolution) {
+      this.logger.warn(
+        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and no `
+        + 'effective-permission source is registered, so they read null: compose a security '
+        + 'service that registers one (registerEffectiveObjectPermissionsResolver) for can() to '
+        + 'be answered',
+        { object, fields, reason: 'no-permission-source' },
+      );
+      return undefined;
+    }
+    try {
+      return await resolution.get();
+    } catch (error) {
+      this.logger.warn(
+        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and the `
+        + 'effective-permission resolution failed, so they read null on this read (failed closed: '
+        + 'neither a grant nor a denial was assumed)',
+        { object, fields, reason: 'permission-resolution-failed', error },
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * [#20082] The permission map a write's CEL `defaultValue`s are evaluated with
+   * — a per-row accessor, the shape {@link resolveOptionPermissions} hands back,
+   * over the write's ONE {@link permissionResolution}.
+   *
+   * Asked only when a row will really be defaulted by an expression that calls
+   * `can`: the write has an acting user (the way {@link applyFieldDefaults}
+   * binds `current_user` — a truthy `userId`), and the row leaves such a field
+   * without a value (`applyFieldDefaults`' own `!= null` test). A row that
+   * supplies the field, and an object whose defaults never call `can`, pay
+   * nothing and cannot be refused by a resolution they never depended on.
+   *
+   *  - no resolution (no resolver registered): every row gets `undefined` — NO
+   *    map. The default then does not evaluate and is left unset with
+   *    `applyFieldDefaults`' existing warn, which carries formula's own "carries
+   *    no permission data" refusal; a `required` field so defaulted is refused
+   *    by required-validation, exactly as before this seam existed.
+   *  - the resolution threw (or its map was refused): a row that needs it gets
+   *    the throw, re-raised untouched — the write fails CLOSED with the
+   *    resolution's own error, as an option gate's does. ⛔ Never read as "no
+   *    grants", which would STORE `false` as though it had been measured.
+   */
+  private async resolveDefaultPermissions(
+    object: string,
+    rows: ReadonlyArray<unknown>,
+    context: ExecutionContext | undefined,
+    resolution: PermissionResolution | undefined,
+    /** Only these fields' defaults count — the insert's re-default pass keeps no others. */
+    onlyFields?: readonly string[],
+  ): Promise<(row: unknown) => EvalPermissions | undefined> {
+    const none = (): undefined => undefined;
+    if (!resolution || !context?.userId) return none;
+    const gated = (this.defaultFieldEntries(object) ?? [])
+      .filter((f) => !onlyFields || onlyFields.includes(f.name))
+      .filter((f) => isExpressionDefault(f.defaultValue) && readsPermissionPredicate(f.defaultValue))
+      .map((f) => f.name);
+    if (gated.length === 0) return none;
+    const needs = (row: unknown): boolean =>
+      row != null && typeof row === 'object'
+      && gated.some((name) => (row as Record<string, unknown>)[name] == null);
+    if (!rows.some(needs)) return none;
+    let permissions: EvalPermissions;
+    try {
+      permissions = await resolution.get();
+    } catch (err) {
+      return (row) => {
+        if (needs(row)) throw err;
+        return undefined;
+      };
+    }
+    return (row) => (needs(row) ? permissions : undefined);
+  }
+
+
+  /**
    * [#11968] The engine-seam write epoch — the invalidation substrate of the
    * ruled authorization caching design (#11633 §2.1, §3).
    *
@@ -4907,22 +5526,25 @@ export class ObjectQL implements IObjectQLEngine {
    * `default: true` ({@link resolveOptionDefault}, #7246) — the select idiom,
    * which until then was authorable, spec-valid, and read by nothing on this
    * path.
+   *
+   * [#20082] `permissions` is the acting subject's effective object-permission
+   * map, which an expression default calling `current_user.can(object, verb)`
+   * answers from. This method is synchronous, so the CALLER resolves it — once
+   * per write, only for a row that will be defaulted by such an expression
+   * ({@link resolveDefaultPermissions}, which also owns what a failed resolution
+   * does: it refuses the write before this runs). `undefined` is "no permission
+   * data": a `can` default then does not evaluate and takes this method's rule
+   * for every expression default that does not — left unset, with the warn below.
    */
   private applyFieldDefaults(
     object: string,
     record: Record<string, unknown>,
     execCtx?: ExecutionContext,
     nowSnapshot?: Date,
+    permissions?: EvalPermissions,
   ): Record<string, unknown> {
-    const schema = this.getSchema(object);
-    const fieldsRaw = (schema as any)?.fields;
-    if (!fieldsRaw || typeof fieldsRaw !== 'object') return record;
-    // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
-    const fieldEntries: Array<{
-      name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
-    }> = Array.isArray(fieldsRaw)
-      ? fieldsRaw
-      : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
+    const fieldEntries = this.defaultFieldEntries(object);
+    if (!fieldEntries) return record;
     const out = { ...record };
     const now = nowSnapshot ?? new Date();
     for (const f of fieldEntries) {
@@ -4951,12 +5573,13 @@ export class ObjectQL implements IObjectQLEngine {
         continue;
       }
       const dv = f.defaultValue;
-      if (typeof dv === 'object' && dv !== null && (dv as any).dialect && typeof (dv as any).source === 'string') {
-        const result = ExpressionEngine.evaluate(dv as any, {
+      if (isExpressionDefault(dv)) {
+        const result = ExpressionEngine.evaluate(dv, {
           now,
           timezone: execCtx?.timezone,
           user: execCtx?.userId ? { id: String(execCtx.userId), positions: execCtx?.positions ?? [] } : undefined,
           org: execCtx?.tenantId ? { id: String(execCtx.tenantId) } : undefined,
+          permissions,
           record: out,
           extra: { object },
         });
@@ -5015,6 +5638,24 @@ export class ObjectQL implements IObjectQLEngine {
       }
     }
     return out;
+  }
+
+  /**
+   * The field entries {@link applyFieldDefaults} walks — one reading of an
+   * object's `fields`, shared with {@link resolveDefaultPermissions} so the
+   * planner and the evaluator see the same defaults. `undefined` when the object
+   * declares no fields, which is `applyFieldDefaults`' early return (it hands
+   * the SAME record reference back, and the insert path relies on knowing that).
+   */
+  private defaultFieldEntries(object: string): Array<{
+    name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
+  }> | undefined {
+    const fieldsRaw = (this.getSchema(object) as any)?.fields;
+    if (!fieldsRaw || typeof fieldsRaw !== 'object') return undefined;
+    // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
+    return Array.isArray(fieldsRaw)
+      ? fieldsRaw
+      : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
   }
 
   /**
@@ -7125,6 +7766,230 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#18682] Resolve the related rows this object's PREDICATE rules read one
+   * hop through a reference field, for a whole batch of rows at once.
+   *
+   * Returns a per-row lookup the validation seams hand to
+   * `evaluateValidationRules` as `related`. When no rule traverses anything the
+   * schema says so up front and this costs NOTHING — no query, no closure work
+   * — which is what bounds the N+1: one hop, only the fields a rule names, one
+   * batched read per reference field per write, and only when a rule asks.
+   *
+   * ## Read under SYSTEM authority, like `parent` and for a related reason
+   *
+   * {@link resolveMasterDetailParent} reads as SYSTEM because a master-detail
+   * lock is a property of the header's state, not of the caller's visibility of
+   * it. This read is the same shape: a validation rule's output is a pass/fail
+   * the SYSTEM enforces, not data handed to the caller — categorically unlike
+   * an access-control rule, which is why RLS predicates are excluded from this
+   * capability altogether. Reading as the acting user instead made the rule
+   * unauthorable for exactly the persona it exists to constrain.
+   *
+   * What bounds the elevation is the PROJECTION: only the
+   * columns the predicate names, intersected with the related object's declared
+   * fields. ⛔ Never the whole row. On a related object no organization wall
+   * scopes, the own read of any caller that is not SYSTEM also bounds the ROWS.
+   *
+   * ## An unresolved row is left UNAVAILABLE, and it says which kind
+   *
+   * No reference stored, the related record not found, the related object
+   * declares no such column, or the row could not be read: each is its own reason, and
+   * {@link checkPredicate} turns it into a refusal naming the related object and
+   * column. The write is REJECTED rather than judged on a rule that produced no
+   * verdict. ⛔ Never silently true, and never silently false.
+   *
+   * The projection always names `id` alongside the fields the rules read:
+   * the map below is keyed on `row.id`, and a projection that omitted it would
+   * build an EMPTY map and leave every row unbound (#7537's shape, one seam
+   * over).
+   */
+  private async resolvePredicateRelated(
+    schema: any,
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+  ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
+    const unbound = () => undefined;
+    // ⛔ A referential FK clear resolves NOTHING. `cascadeDeleteRelations`
+    // stamps `__referentialFieldClear` on its cleanup UPDATE, and plugin-security
+    // exempts an update carrying it from its object-level CRUD check — so the
+    // cleanup reaches this seam for a deleter holding no grant on the
+    // referencing object, and a system read here would let a traversing rule's
+    // verdict decide their delete: one bit of a related record they cannot
+    // read, per delete. Left unbound, such a rule meets the bare id as it did
+    // before this seam existed (`resolveTraversalScope` leaves an unbound record
+    // to CEL), where reading through it faults and refuses the cleanup. Pinned
+    // end to end in plugin-security's
+    // `delete-reference-cleanup-system-identity.test.ts`.
+    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) {
+      // [#20006] Still NOTHING is resolved: the binding handed back is empty.
+      // It carries WHY — the delete and the reference it clears, which
+      // `cascadeDeleteRelations` stamps beside the marker — so a traversing rule
+      // that faults here refuses with a text naming them, instead of one
+      // prescribing a column on the object carrying the rule. Only for the
+      // record the cleanup was issued for: a write a hook issues during the
+      // cleanup inherits the envelope, and that write is not the clear.
+      const cause = (context as { __referentialFieldClearCause?: Record<string, unknown> } | undefined)
+        ?.__referentialFieldClearCause;
+      if (!cause || schema?.name !== cause.referencingObject) return unbound;
+      const binding = referentialClearBinding({
+        object: String(cause.object),
+        id: String(cause.id),
+        referencingObject: String(cause.referencingObject),
+        field: String(cause.field),
+      });
+      return (row) => (row?.id != null && String(row.id) === String(cause.referencingId) ? binding : undefined);
+    }
+    const wanted = collectPredicateRelationships(schema);
+    if (wanted.size === 0) return unbound;
+    // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
+    // submitter or a principal-less caller is bound exactly like a user. Walled
+    // posture: such a caller with no `tenantId` cannot be scoped here, so it reads nothing.
+    const caller = context as ExecutionContext | undefined;
+    const bound = !caller?.isSystem;
+    const readsNothing = bound && !carriesOrganization(caller?.tenantId)
+      && postureEnforcesWall(this.resolveEnginePosture());
+
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    type Resolved = {
+      object: string;
+      byId: Map<string, Record<string, unknown>>;
+      /** Named fields the RELATED object does not declare. */
+      undeclared?: string[];
+      /** Set when the read itself failed, whatever the id. */
+      blocked?: boolean;
+      /** The ids the caller's OWN read returned, when that read decides (below). */
+      ownRead?: ReadonlySet<string>;
+    };
+    const resolved = new Map<string, Resolved>();
+
+    for (const [fk, namedFields] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      if (!target) continue;
+      const named = [...namedFields];
+
+      // ── The READ SET is the intersection of "what the predicate names" and
+      // "what the related object DECLARES", and it is computed here so that it
+      // can never be anything else. A predicate naming a column the related
+      // object does not declare must not put that name into a system-authority
+      // query: the read is elevated. An undeclared name is also a real
+      // authoring fault and is reported as one rather than silently dropped.
+      const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown>; external?: unknown } | undefined;
+      const declared = targetSchema?.fields;
+      // [#8215] The PRIMARY KEY is declared by the platform, not by the author,
+      // so it is absent from every object's field map — the map carries the
+      // injected audit/tenant/owner columns but never the PK. It still has to
+      // count as declared HERE, because `record.<fk>.id` is the repair this
+      // capability's own conflict refusal prescribes: without this the engine
+      // refuses the very spelling it just told the author to write, and then
+      // hands them a second prescription ("declare `id` on the related object")
+      // that is equally impossible. An actively misleading prescription is
+      // worse than none (ADR-0078 §6).
+      //
+      // ⛔ This widens the READ SET by nothing: `id` is already unconditionally
+      // in the projection below, because the by-id map is keyed on it.
+      const declaredHere = (n: string): boolean =>
+        n === SystemFieldName.ID || !!declared && n in declared;
+      const undeclared = declared ? named.filter((n) => !declaredHere(n)) : [];
+      if (undeclared.length > 0) {
+        resolved.set(fk, { object: target, byId: new Map(), undeclared });
+        continue;
+      }
+
+      const ids = new Set<string>();
+      for (const row of rows) {
+        const value = row?.[fk];
+        // A multi-value reference cannot be ONE hop: `record.fk.field` on a list
+        // names no single related record, so it is never hydrated.
+        if (value == null || Array.isArray(value) || typeof value === 'object') continue;
+        ids.add(String(value));
+      }
+      if (ids.size === 0 || readsNothing) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
+      try {
+        // ⭐ SYSTEM authority, and ONLY for this seam.
+        //
+        // A validation rule's output is a pass/fail the SYSTEM enforces, not
+        // data handed to the caller — categorically unlike an access-control
+        // rule, which is why RLS predicates are excluded from this capability
+        // altogether. Reading as the acting user instead made the rule
+        // unauthorable for exactly the persona it exists to constrain: a member
+        // with CRUD on the child and no read on the parent faulted on every
+        // write, so a legitimate business rule could not ship.
+        //
+        // What bounds the elevation is the PROJECTION: only the
+        // columns this predicate names, intersected with the related object's
+        // declared fields above. ⛔ Never the whole row.
+        //
+        // The accepted cost, recorded so nobody widens it by accident: a caller
+        // can INFER a value they cannot see by observing which writes refuse.
+        // The value itself never appears — not in the row handed to CEL beyond
+        // the predicate's own use of it, and not in the refusal text, which
+        // names the field and the rule and never the value.
+        //
+        // ⛔ No organization wall scopes a related object with no tenant column
+        // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a
+        // caller that is not SYSTEM its rows are the ones its OWN read returns,
+        // through every enforcement layer; any other id is 'unreadable', stored or not.
+        let ownRead: Set<string> | undefined;
+        if (bound && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
+          const own = await this.find(target, {
+            where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
+          }) as Array<Record<string, unknown>>;
+          ownRead = new Set((Array.isArray(own) ? own : []).flatMap((r) => (r?.id == null ? [] : [String(r.id)])));
+          if (ownRead.size === 0) { resolved.set(fk, { object: target, byId: new Map(), ownRead }); continue; }
+        }
+        const query: EngineQueryOptions = {
+          where: { id: { $in: [...(ownRead ?? ids)] } },
+          fields: [...new Set(['id', ...named])],
+          context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
+        };
+        const related = await this.find(target, query) as Array<Record<string, unknown>>;
+        const byId = new Map<string, Record<string, unknown>>();
+        // Materialise the named DECLARED columns to `null`. A driver omits a key
+        // whose value is `undefined`, so without this a legitimately-empty
+        // parent column would fault and refuse a valid write — #6457's trap, one
+        // root over and on a fail-CLOSED seam. A column the related object does
+        // not declare never reaches here (it was reported above), so a real
+        // "this field does not exist" fault stays distinguishable from a null.
+        for (const row of Array.isArray(related) ? related : []) {
+          if (row?.id == null) continue;
+          const copy: Record<string, unknown> = { ...row };
+          for (const name of named) if (!(name in copy)) copy[name] = null;
+          byId.set(String(row.id), copy);
+        }
+        resolved.set(fk, { object: target, byId, ownRead });
+      } catch (err) {
+        this.logger?.warn?.('predicate relationship read failed — the rule will reject the write', {
+          object: target, field: fk, error: err,
+        });
+        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
+      }
+    }
+    if (resolved.size === 0) return unbound;
+
+    return (row) => {
+      if (!row) return undefined;
+      const binding: Record<string, RelatedFieldBinding> = {};
+      for (const [fk, entry] of resolved) {
+        if (entry.undeclared) {
+          binding[fk] = { object: entry.object, unavailable: 'undeclared-field', undeclaredFields: entry.undeclared };
+          continue;
+        }
+        if (entry.blocked) { binding[fk] = { object: entry.object, unavailable: 'unreadable' }; continue; }
+        const value = row[fk];
+        if (value == null || Array.isArray(value) || typeof value === 'object') {
+          binding[fk] = { object: entry.object, unavailable: 'no-reference' };
+          continue;
+        }
+        const found = entry.byId.get(String(value));
+        binding[fk] = found
+          ? { object: entry.object, row: found }
+          : { object: entry.object, unavailable: entry.ownRead ? 'unreadable' : 'unresolved' };
+      }
+      return binding;
+    };
+  }
+
+  /**
    * [#6457] Make a resolved master-detail header TOTAL over the MASTER
    * object's declared fields, so a `parent.<field>` predicate is evaluable
    * whatever subset of columns the driver echoed back.
@@ -7902,6 +8767,32 @@ export class ObjectQL implements IObjectQLEngine {
     }
     // Return name as-is (canonical name = table name; no FQN prefix to strip)
     return StorageNameMapping.resolveTableName({ name });
+  }
+
+  /**
+   * [#20157] `IObjectQLEngine.judgeFilter`: judge whether `where` can run
+   * against `objectName`, without running it (#19995 ruling C). The contract
+   * docblock states the semantics; {@link judgeWhereAdmission} records the
+   * pipeline and why it is the same one every verb runs.
+   *
+   * The object name resolves exactly as the verbs resolve it, and the field map
+   * is the one they read, so the verdict (and the object name inside its
+   * message) is the one execution would give. It stops before `getDriver`:
+   * nothing is resolved from or sent to a datasource.
+   */
+  judgeFilter(
+    objectName: string,
+    where: EngineQueryOptions['where'],
+    options?: EngineFilterJudgementOptions,
+  ): EngineFilterJudgement {
+    const object = this.resolveObjectName(objectName);
+    return judgeWhereAdmission(
+      object,
+      options?.operation ?? 'find',
+      where,
+      this._registry.getObject(object),
+      options?.context,
+    );
   }
 
   /**
@@ -10104,7 +10995,8 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
     if (!ast || ast.where == null) return;
-    ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
+    // [#20157] Through the stage function the judge also calls.
+    ast.where = resolveWhereFilterTokens(ast.where, execCtx);
   }
 
   /**
@@ -10122,7 +11014,8 @@ export class ObjectQL implements IObjectQLEngine {
     options: T,
   ): T {
     if (!options || options.where == null) return options;
-    const resolved = resolveFilterTokens(options.where, filterTokenContextFrom(options.context));
+    // [#20157] Through the stage function the judge also calls.
+    const resolved = resolveWhereFilterTokens(options.where, options.context);
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
@@ -10405,8 +11298,14 @@ export class ObjectQL implements IObjectQLEngine {
       try {
           let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
 
-          // Post-process: evaluate formula virtual fields against the raw rows
-          if (Array.isArray(result)) applyFormulaPlan(_findFormula.plan, result, opCtx.context);
+          // Post-process: evaluate formula virtual fields against the raw rows.
+          // [#20082] With the caller's permission map when a formula calls
+          // `can` — one resolution for the whole result set, never per row.
+          if (Array.isArray(result)) {
+            applyFormulaPlan(_findFormula.plan, result, opCtx.context, await this.resolveFormulaPermissions(
+              object, _findFormula.plan, result, opCtx.context, this.permissionResolution(opCtx.context),
+            ));
+          }
 
           // Post-process: expand related records if expand is requested
           if (ast.expand && Object.keys(ast.expand).length > 0 && Array.isArray(result)) {
@@ -10675,7 +11574,12 @@ export class ObjectQL implements IObjectQLEngine {
       let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
 
       // Post-process: evaluate formula virtual fields against the raw row
-      if (result != null) applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context);
+      // ([#20082] with the caller's permission map when a formula calls `can`).
+      if (result != null) {
+        applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context, await this.resolveFormulaPermissions(
+          objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
+        ));
+      }
 
       // Post-process: expand related records if expand is requested
       if (ast.expand && Object.keys(ast.expand).length > 0 && result != null) {
@@ -10835,15 +11739,32 @@ export class ObjectQL implements IObjectQLEngine {
     //
     // Both helpers are pure and synchronous: they read the registry, copy the
     // row, and touch neither driver nor hook — so running them here keeps the
-    // "nothing is written, nothing is executed" contract intact. `update()`
-    // deliberately does not default (#2706: a PATCH's explicit `null` means
-    // "clear it"), so neither does an `update`-mode preview.
+    // "nothing is WRITTEN" contract intact.
+    //
+    // ⚠️ "Nothing is executed" is no longer literally true and must not be
+    // restated as if it were: a traversing validation rule needs its related
+    // rows, so this operation issues a READ per reference field the rules name
+    // (see the `previewRelatedForRow` block below). Nothing is written, no hook
+    // runs, and the read happens only for a caller who passes the arms the
+    // write-gate probe RUNS — ⛔ never a category of the write decision, and
+    // ⛔ not a promise the write would succeed (`registerWriteGateProbe` names
+    // those arms, and the families it does not carry).
+    // `update()` deliberately does not default (#2706: a PATCH's explicit
+    // `null` means "clear it"), so neither does an `update`-mode preview.
     const rawRows = Array.isArray(data) ? data : [data];
     const nowSnapshot = new Date();
+    // [#20082] The preview's ONE permission resolution, shared by its CEL
+    // defaults and its option gates below, exactly as the write shares one. A
+    // resolution failure rejects the preview for a row whose `can` default needed
+    // it, as it fails the write.
+    const permissionResolution = this.permissionResolution(options?.context);
+    const defaultPermissionsFor = mode === 'insert'
+      ? await this.resolveDefaultPermissions(object, rawRows, options?.context, permissionResolution)
+      : () => undefined;
     const rows: Record<string, unknown>[] = mode === 'insert'
       ? rawRows.map((row) => this.initializeSummaryFields(
           object,
-          this.applyFieldDefaults(object, row, options?.context, nowSnapshot),
+          this.applyFieldDefaults(object, row, options?.context, nowSnapshot, defaultPermissionsFor(row)),
         ) as Record<string, unknown>)
       : rawRows;
 
@@ -10854,6 +11775,50 @@ export class ObjectQL implements IObjectQLEngine {
     const messages = this.validationMessageContext(object, options?.context);
     const currentUser = this.buildEvalUser(options?.context);
     const skipStateMachine = shouldSkipStateMachine(options?.context);
+
+    // [#18682] The preview owes the SAME relationship resolution the real write
+    // does. Without it a rule that reads one hop through a reference field
+    // reports `valid: false` (unevaluable) against a row `insert()` happily
+    // accepts — the false alarm this operation was created to prevent, and the
+    // import dry run rides on it.
+    //
+    // Resolved once for the whole set, like every other posture input above.
+    // ⚠️ Named limit, not widened here: an `update`-mode preview
+    // carries no prior row (nothing is read), so a traversing rule whose FK the
+    // PATCH does not itself carry has no id to resolve and still refuses. The
+    // real update path reads the prior row and does resolve it; closing the
+    // preview's half needs a read this operation's "nothing is executed"
+    // contract does not make.
+    // ⚠️ Second named limit, the mirror of the first: a reference field the
+    // author declared static `readonly` is STRIPPED from the caller's payload
+    // inside `insert()`'s executor (`stripRuntimeOwnedFields`), so the real
+    // write resolves no related row for it and a traversing rule refuses there.
+    // Nothing is stripped here: the preview resolves the caller's own
+    // foreign key and answers the rule against an id the write path never
+    // carries, so the preview's verdict is not the write's for that
+    // declaration. Running the strip here would make them agree and is a
+    // behaviour change on the preview's payload, so it is named, not done.
+    // ⛔ Behind the caller's own create/update gate — see
+    // {@link registerWriteGateProbe}. A caller the probe refuses gets NO
+    // elevated read: `related` stays unresolved, and a traversing rule then
+    // refuses, which is the fail-closed direction and is honest about what it
+    // did not evaluate.
+    // ⛔ `rawRows`, not `rows`: the gate's field-level arm judges WHICH FIELDS
+    // THE CALLER WROTE, and `rows` has already been through
+    // `applyFieldDefaults` / `initializeSummaryFields` above. Handing it the
+    // defaulted image would offer the plugin keys the caller never sent — the
+    // exact reading the middleware avoids by gating on `opCtx.data`, which is
+    // the raw payload (defaults are resolved inside the executor, under it).
+    const mayWrite = this._writeGateProbe
+      ? await this._writeGateProbe(object, mode, options?.context, rawRows).catch(() => false)
+      : true;
+    const previewRelatedForRow = mayWrite
+      ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)
+      : () => undefined;
+    // [#18783] The preview answers a `can`-gated option with the SAME map the
+    // write would — resolved once for the whole set, like every posture input
+    // above. A resolution failure rejects the preview, as it fails the write.
+    const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, permissionResolution);
 
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
       const warnings: ValidateDataIssue[] = [];
@@ -10883,6 +11848,8 @@ export class ObjectQL implements IObjectQLEngine {
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
+          related: previewRelatedForRow(row),
+          permissions: previewPermissionsFor(row),
         });
       } catch (e) {
         if (e instanceof ValidationError) {
@@ -11023,16 +11990,43 @@ export class ObjectQL implements IObjectQLEngine {
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
           (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
         );
+      // [#20082] The write's ONE permission resolution, shared by every consumer
+      // below that needs the map: the CEL defaults here, the re-default after
+      // the static-`readonly` strip, the option gates at validation, and the
+      // formula fields on the response. Asked at most once for the whole write.
+      //
+      // A CEL default that calls `current_user.can(…)` is evaluated with it. A
+      // row whose default NEEDED it when the resolution failed is refused with
+      // the resolution's own error (fail CLOSED, see `resolveDefaultPermissions`)
+      // before any hook or producer runs for it: the whole write outside partial
+      // mode; under partial mode that row alone, carried with the declared-field
+      // door's per-row refusals — the array every later pass already reads as
+      // "this row is dead on arrival" (no hook, seeded into `rowErrors`).
+      const permissionResolution = this.permissionResolution(opCtx.context);
+      const payloadRows: unknown[] = isBatch ? (opCtx.data as unknown[]) : [opCtx.data];
+      const defaultPermissionsFor = await this.resolveDefaultPermissions(
+        object, payloadRows.filter((_, i) => undeclaredPerRow[i] === undefined), opCtx.context, permissionResolution,
+      );
+      const defaultPermissions: Array<EvalPermissions | undefined> = payloadRows.map((row, i) => {
+        if (undeclaredPerRow[i] !== undefined) return undefined;
+        try {
+          return defaultPermissionsFor(row);
+        } catch (err) {
+          if (!partialRowMode) throw err;
+          undeclaredPerRow[i] = err as Error;
+          return undefined;
+        }
+      });
       const defaultedData = isBatch
-        ? (opCtx.data as any[]).map((row) =>
+        ? (opCtx.data as any[]).map((row, i) =>
             this.initializeSummaryFields(
               object,
-              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[i]),
             ),
           )
         : this.initializeSummaryFields(
             object,
-            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap),
+            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
           );
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
@@ -11373,7 +12367,22 @@ export class ObjectQL implements IObjectQLEngine {
             // `null` must keep its null (the first defaults pass, ahead of
             // the hooks, is the one that owns those keys).
             if (takenFromRow.length > 0) {
-              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+              // [#20082] A re-derived `can` default takes the write's map too —
+              // from the same resolution, so this asks nothing new unless it is
+              // the first pass to need it. Scoped to the TAKEN keys: those are
+              // the only defaults this pass keeps, so no other field's default
+              // can make it ask, or fail.
+              let redefaultPermissions: EvalPermissions | undefined;
+              try {
+                redefaultPermissions = (await this.resolveDefaultPermissions(
+                  object, [stripped], opCtx.context, permissionResolution, takenFromRow,
+                ))(stripped);
+              } catch (err) {
+                if (!partialRowMode) throw err;
+                rowErrors[i] = err;
+                continue;
+              }
+              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap, redefaultPermissions);
               for (const k of takenFromRow) {
                 if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
               }
@@ -11579,12 +12588,25 @@ export class ObjectQL implements IObjectQLEngine {
         const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
           ? await this.resolveMasterDetailParents(schemaForValidation, null, rows, opCtx.context)
           : undefined;
+        // [#18682] The related rows this object's predicate rules read one hop
+        // through a reference field. Batched across the whole insert, and free
+        // when no rule traverses. Read under SYSTEM authority, bounded by the
+        // projection — see `resolvePredicateRelated`.
+        const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
+        // [#18783] The subject's effective object permissions, for an option
+        // gated on `current_user.can(…)`: ONE resolution for the whole batch,
+        // and none at all unless a row picks such an option. A resolution
+        // failure refuses exactly the rows that needed it (per-row under
+        // partial mode, like every other row error here).
+        const insertPermissionsFor = await this.resolveOptionPermissions(
+          schemaForValidation, rows.filter((_, i) => rowErrors[i] === undefined), permissionResolution,
+        );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]) });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -11721,7 +12743,10 @@ export class ObjectQL implements IObjectQLEngine {
         //    the caller-facing `rowCtx.result` carries the values too.
         // Batch (`insertMany` / `createManyData`) is covered by construction:
         // one hydration pass over every returned row, not one per call site.
-        hydrateWriteFormulas(schemaForValidation, resultRows, opCtx.context);
+        await hydrateWriteFormulas(
+          schemaForValidation, resultRows, opCtx.context,
+          (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+        );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
           rowCtx.event = 'afterInsert';
@@ -12140,6 +13165,10 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      await this.executeWithMiddleware(opCtx, async () => {
+       // [#20082] The write's ONE permission resolution, shared by its option
+       // gates and the formula fields on its response — asked at most once, and
+       // only by the first of them that needs the map.
+       const permissionResolution = this.permissionResolution(opCtx.context);
        // [#8738] The declared-field door, the insert path's (#8682) applied to
        // the second write verb — same function, not a second predicate. First
        // act inside the middleware body: after middleware (which may rewrite
@@ -13022,7 +14051,52 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent });
+               // ── [#19989] The post-image seam on the BY-ID path ─────────────
+               //
+               // The by-id twin of the predicate-path call below, placed at the
+               // same point and for the same reason: the payload is FINAL here.
+               // The `beforeUpdate` chain, the hand-back, both readonly strips
+               // and the strict-drop refusal have all run, and nothing below
+               // changes a value before the statement.
+               //
+               // An enforcement layer used to judge this row only in its own
+               // middleware, on its read of the row merged with the change set
+               // AS SENT. That image is taken before `next()` runs the hooks, so
+               // a `beforeUpdate` that rewrote a checked field (a scoping column
+               // derived from a re-pointed parent, a status derived from another
+               // field) was never judged, and the row it produced was stored
+               // unjudged. The layer keeps that earlier judgement and installs
+               // this seam as well, so the row the driver stores is judged too.
+               //
+               // The image is the prior row (read once, above, under the
+               // not-found gate, so it is present) merged with the final
+               // payload: the row `driver.update` is about to produce, and the
+               // shape the predicate path hands over per matched row. The
+               // credential channel runs above on this branch too, so a `check`
+               // naming a secret field judges the stored reference, as on the
+               // predicate path.
+               //
+               // `honoured` is set BEFORE `evaluate`: it answers "did the seam
+               // run", never "did the write pass".
+               const byIdImageCheck = opCtx.postHookWriteImageCheck;
+               if (byIdImageCheck) {
+                   byIdImageCheck.honoured = true;
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   await byIdImageCheck.evaluate([
+                     coerceBooleanFields(updateSchema as any, { ...priorRecord, ...payload } as any) as Record<string, unknown>,
+                   ]);
+               }
+               // [#18682] The reference FK a predicate traverses may come from
+               // the PATCH or from the stored row, so the id is read off the
+               // POST-strip merged view `evaluateValidationRules` evaluates.
+               const updateView = { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) };
+               const relatedForUpdate = (await this.resolvePredicateRelated(updateSchema, [updateView], opCtx.context))(updateView);
+               // [#18783] The map an option gated on `current_user.can(…)` is
+               // answered from — resolved only when the PATCH picks one, and a
+               // resolution failure fails this write closed right here.
+               const updatePayload = hookContext.input.data as Record<string, unknown>;
+               const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -13222,6 +14296,58 @@ export class ObjectQL implements IObjectQLEngine {
                // caller is told before N rows are written with a column missing
                // — the failure mode a bulk write makes N times larger.
                assertNoStrictDrops();
+               // ── [#19950] The post-image seam on the PREDICATE path ─────────
+               //
+               // An enforcement layer's write `check` must hold for EVERY row a
+               // write stores (ADR-0058 D4: "and on the AST-injected bulk
+               // path"). For a by-id update the enforcement middleware knows the
+               // one row, but can read it only before the hooks run, so that
+               // path hands the final row to the same seam ([#19989], the by-id
+               // branch above). For a predicate update the middleware cannot
+               // even name the rows: they are the ones the
+               // middleware-COMPOSED AST selects, and that AST is complete only
+               // once every middleware has run (the enforcement layer's own
+               // scope, a sharing layer's editable-rows filter, the tenant
+               // wall). So the layer installs its judgement on
+               // `opCtx.postHookWriteImageCheck`, as it does for an insert, and
+               // the engine hands it the rows here.
+               //
+               // Each image is one matched row merged with the payload, the
+               // row `updateMany` is about to produce, and it is the same shape
+               // the per-row `afterUpdate` context calls `result`
+               // (`buildPerRowAfterContexts`). The rows come from the D7 read,
+               // the one `readPriorRows` memo that validation, the
+               // `readonlyWhen` strip and both hook phases share, bound to the
+               // same composed AST the statement binds. That is the one read the
+               // ruling allows, never a second fetch.
+               //
+               // Placement: the payload is FINAL here. The per-row
+               // `beforeUpdate` chain, the hand-back, both readonly strips and
+               // the strict-drop refusal have all run, and nothing below
+               // changes a value before the statement. The seam judges the rows
+               // that will be stored, which is the rule the insert seam was
+               // held to. The credential channel (`encryptSecretFields`) runs
+               // above on this branch, so a refused write that carried a secret
+               // field has already minted its `sys_secret` row. A validation
+               // refusal two lines down already pays the same cost here, and
+               // moving that channel is a separate change. A `check` naming a
+               // secret field judges the stored reference.
+               //
+               // `honoured` is set BEFORE `evaluate`, exactly as on the insert
+               // path: it answers "did the seam run", never "did the write
+               // pass". Zero matched rows is an empty judgement, not a skipped
+               // one.
+               const predicateImageCheck = opCtx.postHookWriteImageCheck;
+               if (predicateImageCheck) {
+                   predicateImageCheck.honoured = true;
+                   const matchedRows = (await readPriorRows()) ?? [];
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   await predicateImageCheck.evaluate(
+                     matchedRows.map(
+                       (row) => coerceBooleanFields(updateSchema as any, { ...row, ...payload } as any) as Record<string, unknown>,
+                     ),
+                   );
+               }
                // [#3106] Same enforcement the single-id branch runs at its
                // `evaluateValidationRules` call, applied per matched row: any
                // error-severity violation rejects the WHOLE batch before
@@ -13232,10 +14358,26 @@ export class ObjectQL implements IObjectQLEngine {
                // the payload-only evaluation covers format / json_schema /
                // non-prior conditional at zero fetch cost.
                const bulkEvalUser = this.buildEvalUser(opCtx.context);
+               // [#18682] One batched resolution for the whole matched set, off
+               // the same merged view each row will be evaluated as. The
+               // no-prior branch below needs none: `needsPriorRecord` counts a
+               // traversing rule, so an object with one never reaches it.
+               const bulkPatch = hookContext.input.data as Record<string, unknown>;
+               const bulkRelatedForRow = rulesNeedRows
+                   ? await this.resolvePredicateRelated(
+                       updateSchema,
+                       (priorRows ?? []).map((r) => ({ ...(r ?? {}), ...bulkPatch })),
+                       opCtx.context,
+                     )
+                   : undefined;
+               // [#18783] ONE permission-map resolution for the whole matched
+               // set — the patch is shared, so either every row picks a
+               // `can`-gated option or none does. Never per row.
+               const bulkPermissions = (await this.resolveOptionPermissions(updateSchema, [bulkPatch], permissionResolution))(bulkPatch);
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row) });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -13251,7 +14393,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions });
                }
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
@@ -13288,10 +14430,11 @@ export class ObjectQL implements IObjectQLEngine {
            // letting a `typeof` sniff decide. Giving a bulk update a record
            // response is a contract change, not a hydration gap.
            if (!isPredicateWrite) {
-             hydrateWriteFormulas(
+             await hydrateWriteFormulas(
                updateSchema,
                Array.isArray(result) ? result : [result],
                opCtx.context,
+               (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
@@ -14367,7 +15510,20 @@ export class ObjectQL implements IObjectQLEngine {
             // operation-private key — on the real request path the inherited
             // caller envelope makes the cleanup otherwise indistinguishable
             // from a hand-clear of the same lookup.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
+            //
+            // [#20006] `__referentialFieldClearCause` rides beside it: the
+            // delete this cleanup serves and the reference it clears, which a
+            // traversing rule's refusal of the cleanup names (see
+            // `resolvePredicateRelated`). It authorizes nothing — it is read
+            // only where the marker already holds, and only to word a refusal —
+            // and the referencing row's id in it never reaches that text.
+            const referentialCtx = {
+              ...(context ?? {}),
+              __referentialFieldClear: true,
+              __referentialFieldClearCause: {
+                object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
+              },
+            } as ExecutionContext;
             if (multiValued) {
               // The FK is a SET, so `set_null` clears the deleted MEMBER, not
               // the slot: filter the stored array and write what remains.
@@ -15053,17 +16209,187 @@ export class ObjectQL implements IObjectQLEngine {
       // (#8296 — a typo'd column would otherwise select ZERO rows for that one
       // aggregation, silently, which is the same wrong-number shape #10413
       // measured). The path names which aggregation carries the offending key.
-      for (const [i, agg] of (Array.isArray(query.aggregations) ? query.aggregations : []).entries()) {
-          const aggFilter = (agg as { filter?: unknown })?.filter;
-          if (aggFilter == null) continue;
-          assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
-          assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
-          // [#15661] …and the declared-type door for the text operators: a
-          // `$contains` over a numeric column in ONE aggregation's filter is
-          // the same silent zero at a second filter position, and a door that
-          // spoke on `where` alone would answer one mistake two ways within a
-          // single verb.
-          assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+      {
+          const aggregations = Array.isArray(query.aggregations) ? query.aggregations : [];
+          let typedAggregations: typeof aggregations | undefined;
+          for (const [i, agg] of aggregations.entries()) {
+              const aggFilter = (agg as { filter?: unknown })?.filter;
+              if (aggFilter == null) continue;
+              // [#20122] The SHAPE gate `where` takes first on its own seam
+              // (`lowerWhereFilterArray`, #20121) — first here too, with its
+              // object test (`isWhereFilterObject`) and its words, minus the
+              // array half (below). A filter that is not a filter object
+              // (a string, a number, a boolean, `''`, a `Map`, a `Date`) was
+              // stepped around by every door below, each of which walks a filter
+              // node's keys, and then dropped: the fork below reads it as "no
+              // filter", so the aggregation read every row of its group
+              // (`driver-sql`'s native aggregate answered a non-empty string
+              // with a 501 instead). The wire door already refuses these shapes
+              // through `AggregationNodeSchema`; this closes the in-process one.
+              //
+              // An ARRAY is refused too, `[]` included — unlike `where`, which
+              // lowers the condition-array sugar in its array branch. The slot
+              // is declared `FilterConditionSchema` (an object, no array form),
+              // the wire door refuses every array here (`VALIDATION_FAILED`),
+              // and in-process a condition array counted no row (the walker
+              // read its index positions as column names) while `[]` read as
+              // no filter. Same ruling as `having`'s condition check (#20099).
+              if (Array.isArray(aggFilter)) {
+                  let shown: string;
+                  try {
+                      shown = JSON.stringify(aggFilter) ?? String(aggFilter);
+                  } catch {
+                      shown = String(aggFilter);
+                  }
+                  if (shown.length > 80) shown = `${shown.slice(0, 77)}...`;
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, received ` +
+                      `an array (${shown}). The condition-array form — [field, operator, value] tuples and ` +
+                      `["and", …] groups — is input-only sugar lowered on 'where' alone; a per-aggregation ` +
+                      `filter is declared as a filter condition object and does not take it, so an array here ` +
+                      `was never applied as the filter it spells. Write the object form, ` +
+                      `{ "FIELD": { "$gt": 100 } }, or omit 'filter' for no filter.`,
+                  );
+              }
+              if (!isWhereFilterObject(aggFilter)) {
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, ` +
+                      `received ${describeNonFilterWhere(aggFilter)}. It was not applied, and an ` +
+                      `unapplied filter would have aggregated every row of each group for that aggregation.`,
+                  );
+              }
+              assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
+              assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#15661] …and the declared-type door for the text operators: a
+              // `$contains` over a numeric column in ONE aggregation's filter is
+              // the same silent zero at a second filter position, and a door that
+              // spoke on `where` alone would answer one mistake two ways within a
+              // single verb.
+              assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20148] …and the TEMPORAL-comparand door, fourth here as it is
+              // fourth on `where`'s seam (#8690) — the same function, against the
+              // object's declared fields, since this filter reads the object's
+              // raw rows. A comparand a declared date / datetime / time field
+              // cannot interpret (`'not-a-date'`, the preset name
+              // `'last_30_days'`) was compared as written: no row counted, a
+              // `$between` with one such endpoint counted EVERY row, and the same
+              // bound in a `where` was refused 400 — measured on the base on
+              // driver-memory and driver-sql, through the engine and REST.
+              // Before the token resolver below, as there, so a `{placeholder}`
+              // is stepped around and resolved (or refused) a moment later.
+              assertTemporalComparandsInterpretable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20122] …and the two doors `having` took at its own entry
+              // (#20099), so a refusal here is the FILTER's, never the data's:
+              //  1. the comparand-TYPE door `where` takes in
+              //     `lowerWhereFilterArray`, rooted at this position — a plain
+              //     object, a `Map` or a function comparand was compared as it
+              //     stood and counted no row (every row under `$ne`), and a
+              //     `Symbol` under an ordering operator threw an uncoded
+              //     `TypeError`, on a populated table only. An exact-range
+              //     bigint is narrowed copy-on-write, as it is there;
+              //  2. the walker's own refusals, judged once
+              //     (`assertAggregationFilterIsEvaluable`). The fallback below
+              //     walks the filter per SOURCE row, so `{ amount: { $median: 1 } }`
+              //     was a 400 on a populated table and a `200 []` on an empty one,
+              //     and a `$or` whose first branch held counted every row.
+              //     [#20148] …then, against the object's DECLARED fields, the two
+              //     cross-field rules `where` gets from `driver-sql`'s compiler:
+              //     a `{ $field }` names a declared field, and an `addDays` pair
+              //     follows `FieldReferenceSchema.addDays`' class rule. Both were
+              //     answered by the fallback — no row counted — where `where` is
+              //     refused. Refused in `where`'s words for that comparison, which
+              //     withhold the fields, the operator and the reason; the
+              //     withheld half goes to this log, as the driver writes its own.
+              const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
+              assertAggregationFilterIsEvaluable(typed, i, {
+                  object,
+                  fields: (this._registry.getObject(object) as { fields?: unknown } | undefined)?.fields,
+                  reportWithheld: (diagnostic) => this.logger.warn(
+                      `aggregate('${object}'): INVALID_FILTER — refusal detail withheld from the response, as it `
+                      + `is for the same cross-field comparison in a where. Full diagnostic: ${diagnostic}`,
+                  ),
+              });
+              if (typed !== aggFilter) {
+                  typedAggregations ??= [...aggregations];
+                  typedAggregations[i] = { ...(agg as object), filter: typed } as typeof agg;
+              }
+          }
+          if (typedAggregations) query = { ...query, aggregations: typedAggregations };
+      }
+      // [#19974] `having` is this verb's THIRD filter position, and it walks
+      // through the same comparand-shape face the other two take above —
+      // called once, here, with the path seeded at `having`. The 2026-09-23
+      // ruling on #19757 refuses an array in the equality slot at that face
+      // "for every driver at once", and the face refuses it for `where` on
+      // every driver. `having` never reaches a driver, though: the engine
+      // evaluates it itself (`applyHaving`, having-filter.ts), and that walker
+      // ANSWERED every shape the face refuses — `{ total: [5] }` by JS `==`
+      // coercion (`5 == [5]` is true), `{ total: { $eq: [5] } }` by `!=`, a
+      // scalar `$nin` or a malformed `$between` by keeping every group, a null
+      // `$lt` bound by keeping none. Measured on the base through this method,
+      // on driver-memory and driver-sqlite-wasm, on both doors below.
+      //
+      // ONE call covers BOTH `applyHaving` doors — the native
+      // `driver.aggregate()` path and the in-memory fallback — because it runs
+      // before either is chosen and before any driver is asked for a row. The
+      // shape of a comparand is a property of the FILTER, so it is judged once
+      // per query, never per aggregated row: an empty grouped set refuses the
+      // same `having` a populated one does. ⛔ Not a second face and not a
+      // walker-local check in having-filter.ts: the verdicts, the wording and
+      // the `INVALID_FILTER` / 400 envelope are the face's own, so a `having`
+      // refusal reads byte for byte as the `where` refusal of the same shape,
+      // path aside — and whatever arm the face gains next, `having` gains too.
+      //
+      // [#20099] …and the rest of the doors `where` takes, at the same seam, so
+      // the whole clause is judged once, before any row exists. In order:
+      //  1. `having` is a filter condition at all — `QuerySchema.having` and
+      //     `EngineAggregateOptions.having` declare `FilterConditionSchema`,
+      //     which refuses an array or a scalar. The walker read an array's index
+      //     keys as columns (`[['total','>',100]]` kept no group) and a scalar
+      //     as no condition (every group). ⛔ Not lowered: the `FilterArray`
+      //     sugar is declared on `where` alone, and every later door steps
+      //     silently around a non-node, so this runs first.
+      //  2. the comparand-shape face (above);
+      //  3. the comparand-TYPE door — the same `normalizeFilterComparandTypes`
+      //     `lowerWhereFilterArray` runs on `where`, path rooted at `having`, so
+      //     `{ total: { $eq: { v: 1 } } }` is the `where` refusal of that shape
+      //     rather than a silent `[]`, and an exact-range bigint is narrowed
+      //     copy-on-write exactly as it is there;
+      //  4. the walker's own refusals plus the `{ $field }` reference's
+      //     position and name, judged against the aggregated row's column set
+      //     read off THIS query (`assertHavingIsEvaluable`). The walker raised
+      //     them per aggregated row, so an empty grouped set answered `200 []`
+      //     for a `having` a populated one refused. [#20123] The same column
+      //     set judges every KEY too: a key naming no column read "no value"
+      //     in every group, so a typo for an alias kept no group (every group
+      //     under a negation) with no error.
+      // A reference that passes is then RESOLVED against each aggregated row
+      // (having-filter.ts `compareWithReference`) on both doors below.
+      assertHavingIsFilterCondition(query.having);
+      assertListComparandShapes(object, 'aggregate', query.having, 'having');
+      // [#20176] The object's declaration, read once: the per-aggregation
+      // `filter` reads a temporal comparand by its column's storage rule
+      // (`applyInMemoryAggregation` below), and `having` by its aggregated
+      // column's — the rule the drivers apply to the same comparand in a
+      // `where`. Before, both positions compared it as written, so an ISO
+      // instant against a `date` field counted 1 row where the `where` twin
+      // counted 3, over REST, on driver-memory and driver-sql alike.
+      const declaredFields = (this._registry.getObject(object) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      // [#20127] …and each aggregated column's class, read off the query and the
+      // object's declaration, so a `{ $field, addDays }` pair is judged by the
+      // rule `FieldReferenceSchema.addDays` declares (two temporal columns of
+      // one class) rather than answered by epoch-ms coercion. [#20176] Kept for
+      // both `applyHaving` doors below, which read a temporal column's
+      // comparands by its storage rule.
+      const havingColumnClasses = aggregatedRowColumnClasses(query.groupBy, query.aggregations, declaredFields);
+      {
+          const having = normalizeFilterComparandTypes(query.having, `aggregate('${object}')`, 'having');
+          assertHavingIsEvaluable(
+              having,
+              aggregatedRowColumns(query.groupBy, query.aggregations),
+              havingColumnClasses,
+          );
+          if (having !== query.having) query = { ...query, having };
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
@@ -15165,7 +16491,7 @@ export class ObjectQL implements IObjectQLEngine {
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
             const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
-            return applyHaving(aggregated, ast.having);
+            return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
         // aggregate here. This guarantees `groupBy` (incl. structured items
@@ -15209,7 +16535,7 @@ export class ObjectQL implements IObjectQLEngine {
         delete rowsAst.aggregations;
         delete rowsAst.having;
         const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
-        return applyHaving(applyInMemoryAggregation(raw, ast, tz), ast.having);
+        return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 
       return opCtx.result as any[];

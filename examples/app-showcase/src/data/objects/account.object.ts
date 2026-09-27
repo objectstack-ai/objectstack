@@ -60,13 +60,13 @@ export const Account = ObjectSchema.create({
         { label: 'Retail', value: 'retail' },
       ],
     }),
-    // Explicit ISO code (spec channel: `currencyConfig.defaultCurrency`): a
-    // currency field without a resolvable code renders as a bare grouped
-    // number by design (no guessed symbol) — with it, the detail highlight
-    // strip and grids show "$25,000,000" instead of "25,000,000".
+    // Explicit ISO code (spec channel: `currencyConfig.defaultCurrency`, read
+    // only under `currencyMode: 'fixed'`): a currency field without a
+    // resolvable code renders as a bare grouped number by design (no guessed
+    // symbol) — with it, the detail highlight strip and grids show
+    // "$25,000,000" instead of "25,000,000".
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
-      scale: 2,
       min: 0,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
     }),

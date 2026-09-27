@@ -28,7 +28,20 @@ import {
 } from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
 import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
+import {
+  FILTER_ARRAY_LOGIC_KEYWORDS,
+  FILTER_OPERATORS,
+  isFilterAST,
+  parseFilterAST,
+} from '../data/filter.zod.js';
 import { deepEqualAuthored } from '../shared/deep-equal.js';
+import { isRecordForm } from '../ui/filter-rule-array.js';
+import {
+  VIEW_FILTER_OPERATORS,
+  ViewFilterRuleSchema,
+  normalizeFilterOperator,
+  type ViewFilterOperator,
+} from '../ui/view.zod.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -7114,9 +7127,10 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
- * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
- * group leaving `stack.translations` with the type split (protocol 18,
- * #15178, ruling batch #132 item 2 letter ②).
+ * `settings` on every APPLICATION-authored translation face — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18, #15178,
+ * ruling batch #132 item 2 letter ②) and then the registered `translation`
+ * item (#19620, ruling batch #210 item 2 letter B), both faces in one entry.
  *
  * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
  * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
@@ -7140,30 +7154,49 @@ const elementFormRemoved: MetadataConversion = {
  * `18.translation-per-app-settings-platform-only.ts` is where an author is
  * told that, because a notice reading "(removed)" does not say it.
  *
- * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
- * (the registered `translation` metadata type is out of this ruling's scope),
- * so a bare item entry replaying through this seam is left exactly as it is —
- * the opposite of the `translation-component-submit-label-removed` neighbour,
- * which retires its key at both doors and therefore walks both shapes. Getting
- * this backwards would strip a key its own schema still accepts.
+ * The ITEM shape went further, and that is why it is walked too (#19620). A
+ * stored `translation` item is NOT a bundle loaded into the static tree: the
+ * runtime-authored layer is read OVER the shipped bundles
+ * (`deepMerge(static, authored)` in both i18n adapters), so an item's
+ * `settings` did override the platform's own copy for its locale, not merely
+ * fill gaps in it. Dropping it takes those keys back to the platform bundle's
+ * string where it has one and to the manifest literal where it does not. The
+ * seam that matters for an item is the runtime one: `authored-translation-sync`
+ * replays this chain over each stored row before merging it
+ * (`applyConversionsToStoredItem`), so a row written before the item door
+ * closed stops overriding at the next sync, with this entry's notice logged,
+ * rather than at the next re-save. That needed the stored pass itself to
+ * reach `translation` rows at all — it had no collection for the type and
+ * returned every one untouched (`STORED_ONLY_COLLECTIONS` in `./stored.ts`) —
+ * which also puts the metadata API's reads and `os migrate meta --stored`
+ * on this entry.
  *
- * The bundle is told from an item structurally rather than by key spelling:
- * `locale` is REQUIRED on an item and never present on a bundle entry (the
- * bundle's keys ARE the locales), and the candidate value must be a dict whose
- * every key is a declared translation group — which an `objects` record, the
- * one other dict-of-dicts at that depth, is not.
+ * Two shapes, told apart structurally rather than by key spelling:
+ *
+ * - **A bare item** carries `locale` (REQUIRED on an item since #3778), or —
+ *   for a row written before `locale` was required, which the sync still reads
+ *   by its name — has a declared translation GROUP as a top-level key. A
+ *   bundle entry never does either: its top-level keys ARE the locale codes.
+ *   Only the item's own top-level `settings` is stripped, so an object
+ *   literally named `settings` under `objects` is untouched.
+ * - **A bundle entry**: the candidate value under each locale must be a dict
+ *   whose every key is a declared translation group — which an `objects`
+ *   record, the one other dict-of-dicts at that depth, is not.
  */
 const translationPerAppSettingsRemoved: MetadataConversion = {
   id: 'translation-per-app-settings-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'stack.translations[].<locale>.settings',
+  surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
-    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
-    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
-    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
-    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
-    + 'PLATFORM bundle, PlatformTranslationData)',
+    "translation group 'settings' removed from both application-authored faces, the per-app bundle "
+    + 'entry (#15178) and the registered translation item (#19620). It is keyed by '
+    + 'SettingsManifest.namespace and only platform code declares a manifest. A per-app bundle entry '
+    + "could only fill gaps the platform's own bundle left in the one merged served tree, and was "
+    + 'overwritten wherever both defined the key; a stored item OVERRODE the platform copy, because the '
+    + 'runtime-authored layer is read over the shipped bundles. Overrides now give way to the platform '
+    + 'copy, gaps fall back to the manifest literal, and the group stays on the PLATFORM bundle, '
+    + 'PlatformTranslationData',
   apply(stack, emit) {
     /** The top-level groups a translation bundle entry may carry (either face). */
     const GROUPS = new Set([
@@ -7171,9 +7204,10 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
       'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
     ]);
     return mapCollection(stack, 'translations', (entry, path) => {
-      // A `translation` ITEM, not a bundle — `settings` is still declared
-      // there. Leave it whole.
-      if ('locale' in entry) return entry;
+      // A bare `translation` ITEM: strip its own top-level group only.
+      if ('locale' in entry || Object.keys(entry).some((k) => GROUPS.has(k))) {
+        return stripKeys(entry, ['settings'], emit, path);
+      }
       let next = entry;
       for (const [locale, data] of Object.entries(entry)) {
         if (!isDict(data) || !isDict(data.settings)) continue;
@@ -7196,6 +7230,20 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          // The bare item shape a stored `translation` row replays as.
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          settings: { mail: { title: 'メール配信' } },
+          messages: { commonSave: '保存' },
+        },
+        {
+          // A row written before `locale` was required — told from a bundle
+          // entry by its top-level group key. The object literally NAMED
+          // `settings` is application copy under `objects` and stays.
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
     after: {
@@ -7205,10 +7253,19 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          messages: { commonSave: '保存' },
+        },
+        {
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
-    // One per stripped group: the single `zh-CN` entry.
-    expectedNotices: 1,
+    // One per stripped group: the `zh-CN` bundle entry and the `ja-JP` item.
+    expectedNotices: 2,
   },
 };
 
@@ -10237,6 +10294,482 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * The page-component types whose `properties.filter` is a converged rule-array
+ * door: every `ComponentPropsMap` row whose `filter` answers the record form
+ * with `ruleArrayFilterError`'s prescription (`ui/filter-rule-array.ts`).
+ * `page-component-filter-record-to-rule-array.test.ts` derives that set from
+ * the schema and holds this list equal to it, so a door that joins the family
+ * without this conversion learning of it goes red there rather than being
+ * silently skipped at rest.
+ */
+const RULE_ARRAY_FILTER_BLOCK_TYPES: ReadonlySet<string> = new Set([
+  'object-grid',
+  'object-metric',
+  'object-kanban',
+  'object-calendar',
+  'object-map',
+  'object-gantt',
+  'object-tree',
+  'object-timeline',
+  'element:number',
+  'element:record_picker',
+]);
+
+/**
+ * The one component type whose `properties.defaultFilters` is a rule-array
+ * door of the same family (`object-grid-default-filters-rule-array`). Held
+ * against the schema by the same test.
+ */
+const RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES: ReadonlySet<string> = new Set(['object-grid']);
+
+/** One rule a legacy filter maps to — the rule array's authored element. */
+interface MappedFilterRule {
+  field: string;
+  operator: ViewFilterOperator;
+  value?: unknown;
+}
+
+/**
+ * A FilterCondition `$` operator → the rule operator that lowers back to it,
+ * or `undefined` when the rule vocabulary has no such word.
+ *
+ * Read off the two tables that already exist, never a third: the operator must
+ * be a declared FilterCondition field operator (`FILTER_OPERATORS`, so a
+ * mis-cased `$Gt` or an unknown `$regex` is not a match), and its name without
+ * the `$` must fold through `normalizeFilterOperator` — the fold every rule
+ * door runs on `operator` — to a canonical `VIEW_FILTER_OPERATORS` member.
+ * That maps the fourteen comparison, set, range and text operators
+ * (`$gt` → `greater_than`, `$nin` → `not_in`, `$notContains` → `not_contains`,
+ * …) and declines the two whose meaning lives in their VALUE (`$null`,
+ * `$exists`); the lowering of every mapped rule back to the same `$` operator
+ * is pinned per operator against `parseFilterAST` by the test.
+ */
+function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefined {
+  if (!(FILTER_OPERATORS as readonly string[]).includes(op)) return undefined;
+  const folded = normalizeFilterOperator(op.slice(1));
+  return (VIEW_FILTER_OPERATORS as readonly string[]).includes(folded)
+    ? (folded as ViewFilterOperator)
+    : undefined;
+}
+
+/**
+ * The record form `{ field: value | { $op: value, … }, … }` → rules, or
+ * `undefined` when any part of it has no lossless rule spelling.
+ *
+ * All-or-nothing on purpose: the rules AND, so converting the keys that map and
+ * leaving the rest out would WIDEN what the filter selects. A top-level `$` key
+ * — `$and` / `$or` / `$not` above all — is not a field, so its record is left
+ * alone; that is the ruled boundary, and flattening a combinator into the AND
+ * list is exactly the silent selection change it excludes. A `null` value is
+ * declined too, and not for a schema reason: the renderer at the
+ * `.objectui-sha` pin (`convertFiltersToAST`) SKIPS a record key whose value is
+ * null, so that key constrains nothing today, while an `equals null` rule would
+ * test IS NULL. An empty operator object is declined for the same reason — it
+ * constrains nothing, and no rule says "nothing".
+ */
+function recordFilterToRules(record: Record<string, unknown>): MappedFilterRule[] | undefined {
+  const rules: MappedFilterRule[] = [];
+  for (const [field, value] of Object.entries(record)) {
+    if (field.startsWith('$')) return undefined;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      rules.push({ field, operator: normalizeFilterOperator('eq') as ViewFilterOperator, value });
+      continue;
+    }
+    if (!isRecordForm(value)) return undefined;
+    const operators = Object.entries(value);
+    if (operators.length === 0) return undefined;
+    for (const [op, comparand] of operators) {
+      const operator = ruleOperatorForFilterOperator(op);
+      if (!operator) return undefined;
+      rules.push({ field, operator, value: comparand });
+    }
+  }
+  return rules;
+}
+
+/**
+ * A single-level ObjectQL AST — one comparison `[field, op, value]`, or a flat
+ * list of them (implicit AND) — → rules, or `undefined`.
+ *
+ * `isFilterAST` is the recogniser (the spec's own, so an array of rule objects
+ * is never mistaken for one). An `and` / `or` group, or a list nesting one, is
+ * a combinator and is left alone for the record-form reason above. The
+ * operator folds through `normalizeFilterOperator` first; an infix spelling the
+ * rule vocabulary has no word for (`=`, `!=`, `>`, `<=`, …) is lowered through
+ * `parseFilterAST` — the AST's one sink, which the renderer's lowering of the
+ * rule reaches too — and read back from the `$` operator it produced, so
+ * neither table is copied here.
+ */
+function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefined {
+  if (!isFilterAST(ast)) return undefined;
+  const isLogicKeyword = (token: unknown): boolean =>
+    typeof token === 'string'
+    && (FILTER_ARRAY_LOGIC_KEYWORDS as readonly string[]).includes(token.toLowerCase());
+  const isComparison = (node: unknown): node is readonly [string, string, ...unknown[]] =>
+    Array.isArray(node)
+    && (node.length === 2 || node.length === 3)
+    && typeof node[0] === 'string'
+    && !isLogicKeyword(node[0])
+    && typeof node[1] === 'string';
+
+  let comparisons: ReadonlyArray<readonly [string, string, ...unknown[]]>;
+  if (isComparison(ast)) comparisons = [ast];
+  else if (ast.every(isComparison)) comparisons = ast as ReadonlyArray<readonly [string, string, ...unknown[]]>;
+  else return undefined;
+
+  const rules: MappedFilterRule[] = [];
+  for (const node of comparisons) {
+    const [field, op] = node;
+    let operator: ViewFilterOperator | undefined;
+    const folded = normalizeFilterOperator(op);
+    if ((VIEW_FILTER_OPERATORS as readonly string[]).includes(folded)) {
+      operator = folded as ViewFilterOperator;
+    } else {
+      let lowered: Record<string, unknown> | undefined;
+      try {
+        lowered = parseFilterAST([...node]) as Record<string, unknown> | undefined;
+      } catch {
+        return undefined;
+      }
+      if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return undefined;
+      const condition = lowered[field];
+      if (isRecordForm(condition)) {
+        const ops = Object.keys(condition);
+        operator = ops.length === 1 ? ruleOperatorForFilterOperator(ops[0]!) : undefined;
+      } else {
+        // A bare comparand is the implicit-equality lowering of `=` / `==`.
+        operator = normalizeFilterOperator('eq') as ViewFilterOperator;
+      }
+      if (!operator) return undefined;
+    }
+    rules.push(node.length === 3 ? { field, operator, value: node[2] } : { field, operator });
+  }
+  return rules;
+}
+
+/**
+ * The rule array a legacy `filter` value maps to losslessly, or `undefined`
+ * when it is not a legacy form (already a rule array, or some other value the
+ * door judges on its own) or has a part with no lossless rule spelling.
+ *
+ * The last gate is the DOOR's own: every produced rule must parse against
+ * `ViewFilterRuleSchema`, so the conversion never writes a value the next save
+ * refuses — a comparand shape the operator cannot take, an empty `icontains`,
+ * a field-reference object. Such a filter is left exactly as stored.
+ */
+function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined {
+  let rules: MappedFilterRule[] | undefined;
+  if (isRecordForm(value)) rules = recordFilterToRules(value);
+  else if (Array.isArray(value)) rules = astFilterToRules(value);
+  if (!rules) return undefined;
+  return rules.every((rule) => ViewFilterRuleSchema.safeParse(rule).success) ? rules : undefined;
+}
+
+/**
+ * Does this component render INLINE rows — rows carried on the node — rather
+ * than query an object? Then none of its filters is rewritten.
+ *
+ * Measured at the `.objectui-sha` pin `f8a9d0fb`: `object-map`
+ * (`ObjectMap.tsx:831-833`), `object-tree` (`ObjectTree.tsx:835-837`),
+ * `object-calendar` (`ObjectCalendar.tsx:645-647`) and `object-gantt`
+ * (`resolveDataSource.ts:70`, then `ObjectGantt.tsx:865`) hand `schema.filter`
+ * UNLOWERED to an in-memory `ValueDataSource` when their rows are inline, and
+ * `ValueDataSource.find` (`ValueDataSource.ts:1093-1105`) reads an OBJECT
+ * `$filter` in the record dialect but an ARRAY one as an AST, whose matcher
+ * refuses a rule object (`:564-597`, `:70-73`) and so excludes EVERY row. A
+ * converted filter there would take a block from its filtered rows to none —
+ * the silent selection change the ruling excluded. The binding goes with its
+ * component: `ElementDataSourceGate` composes `dataSource.filter` into that
+ * same `schema.filter` (`plugin-map/src/index.tsx:38-41`, `filter: true`).
+ *
+ * Read by SHAPE, on every component type, rather than by the four types
+ * measured: the other inline-row renderers at the pin ignore `filter` for
+ * inline rows (`object-grid`, `object-kanban`) or issue no query at all
+ * (`object-timeline`), so leaving their filter as stored changes nothing they
+ * select, and a type list would go stale the day a fifth renderer starts
+ * filtering its own rows. The three shapes are the record-source ladder's
+ * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
+ * `data` the spec declares on the kanban, calendar and timeline blocks:
+ * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
+ */
+function rendersInlineRows(properties: unknown): boolean {
+  if (!isDict(properties)) return false;
+  const { data, staticData } = properties;
+  if (Array.isArray(data)) return true;
+  if (isDict(data) && data.provider === 'value') return true;
+  return Boolean(staticData);
+}
+
+/**
+ * [#17321] The record-form and single-level AST `filter` values the converged
+ * rule-array doors refuse become the `ViewFilterRule` array, wherever that
+ * mapping is lossless — the D2 half of the one-filter-orthography convergence
+ * (objectui#6206). Ruling B of decision batch #121 item 4 (director seat,
+ * maintainer 「同意」): convert the mappable subset, leave combinator-carrying
+ * rows untouched, never flatten.
+ *
+ * ## What converts
+ *
+ * - a flat record `{ status: 'active' }` → `[{ field: 'status', operator:
+ *   'equals', value: 'active' }]`, several keys → several rules (they AND);
+ * - an operator object `{ amount: { $gt: 100 } }` → the mapped operator,
+ *   `[{ field: 'amount', operator: 'greater_than', value: 100 }]` — and an
+ *   object carrying several operators on one field (`{ $gte: 1, $lte: 9 }`)
+ *   → one rule per operator, which is the same AND;
+ * - a single-level ObjectQL AST, `['owner_id', '=', '{current_user_id}']` or a
+ *   flat list of such comparisons → one rule per comparison;
+ * - `{}` → `[]` (constrains nothing either way).
+ *
+ * Values are carried verbatim, value placeholders and date macros included.
+ *
+ * ## What is left exactly as stored — `legacyFilterToRuleArray` answers `undefined`
+ *
+ * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
+ * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
+ * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
+ * an array or object comparand in equality position, and any rule the door
+ * would refuse. All-or-nothing per filter: converting part of an AND-list
+ * widens it. And every filter of a component that renders INLINE rows
+ * ({@link rendersInlineRows}): the pin's in-memory `ValueDataSource` matches
+ * the record form and excludes every row for a rule array, so there the
+ * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
+ * and `$not` that changes which rows the page selects, which is the option the
+ * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
+ * does not validate) and is refused at its door on its next save, with the
+ * prescription that door gives for it. ⚠️ The ruled report of these rows — a
+ * structured TODO `os migrate meta --stored` prints — is NOT delivered here:
+ * the conversion layer has no TODO channel, and adding one reaches past
+ * `packages/spec` (the dispatcher error-vocabulary ledger in
+ * `packages/runtime`, and the stored pass in `packages/metadata-protocol`,
+ * whose change signal is a conversion notice and which counts a row that
+ * emitted none as canonical).
+ *
+ * ## Reach
+ *
+ * Every page component `mapPageComponents` visits (regions, slots, nested
+ * containers): `dataSource.filter` on any component (`ElementDataSourceSchema`),
+ * `properties.filter` on {@link RULE_ARRAY_FILTER_BLOCK_TYPES}, and
+ * `properties.defaultFilters` on {@link RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES}.
+ * The `filter` of any other component type is not this entry's surface and is
+ * never touched.
+ *
+ * ## Why `retiredFromLoadPath`
+ *
+ * The ruling is `Clause-②: no` — no accept-set change. Replayed on the
+ * authoring funnel (`normalizeStackInput`), this entry would quietly accept the
+ * record form again at `defineStack` / `validate`; retired, an author still
+ * meets the door and is taught the rule array, while the data-at-rest seams
+ * (`applyConversionsToStoredItem`, the artifact-ingestion door) and
+ * `os migrate meta` replay it.
+ */
+const pageComponentFilterRecordToRuleArray: MetadataConversion = {
+  id: 'page-component-filter-record-to-rule-array',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface:
+    'page.component.dataSource.filter / page.component.properties.filter (the object-* blocks, '
+    + 'element:number, element:record_picker) / page.component.properties.defaultFilters '
+    + '(object-grid) — the record and single-level AST filter forms',
+  summary:
+    'a record-form or single-level AST filter at a converged rule-array door becomes the '
+    + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
+    + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
+    + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
+    + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
+    + 'array, `staticData`) is left exactly as stored and is refused at its door on its next save (one filter '
+    + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
+  apply(stack, emit) {
+    const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
+      if (!(key in holder)) return holder;
+      const value = holder[key];
+      const rules = legacyFilterToRuleArray(value);
+      if (!rules) return holder;
+      emit({ from: JSON.stringify(value), to: JSON.stringify(rules), path: `${basePath}.${key}` });
+      return { ...holder, [key]: rules };
+    };
+
+    return mapPageComponents(stack, (component, path) => {
+      // Inline rows: every filter of this node stays as stored, the binding's
+      // included. Its children are separate nodes and are judged on their own.
+      if (rendersInlineRows(component.properties)) return component;
+
+      let next = component;
+
+      const dataSource = next.dataSource;
+      if (isDict(dataSource)) {
+        const converted = rewrite(dataSource, 'filter', `${path}.dataSource`);
+        if (converted !== dataSource) next = { ...next, dataSource: converted };
+      }
+
+      const type = next.type;
+      const properties = next.properties;
+      if (typeof type === 'string' && isDict(properties)) {
+        let props = properties;
+        if (RULE_ARRAY_FILTER_BLOCK_TYPES.has(type)) {
+          props = rewrite(props, 'filter', `${path}.properties`);
+        }
+        if (RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES.has(type)) {
+          props = rewrite(props, 'defaultFilters', `${path}.properties`);
+        }
+        if (props !== properties) next = { ...next, properties: props };
+      }
+
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'deal_desk',
+          label: 'Deal Desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The binding and both grid doors at once: a flat record with
+                // two keys, an operator object, and an AST tuple array.
+                {
+                  type: 'object-grid',
+                  dataSource: {
+                    object: 'deal',
+                    filter: { stage: 'open', owner_id: '{current_user_id}' },
+                  },
+                  properties: {
+                    objectName: 'deal',
+                    filter: { amount: { $gt: 100, $lte: 5000 } },
+                    defaultFilters: [['owner_id', '=', '{current_user_id}']],
+                  },
+                },
+                // A combinator is never flattened: left byte-identical.
+                {
+                  type: 'object-kanban',
+                  properties: {
+                    objectName: 'deal',
+                    filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
+                  },
+                },
+                // Inline rows: a mappable filter, left byte-identical, because
+                // the renderer matches it against those rows in the record
+                // dialect and would exclude every row for a rule array.
+                {
+                  type: 'object-map',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
+                    filter: { stage: 'open' },
+                  },
+                },
+                // Already the rule array: untouched.
+                {
+                  type: 'object-metric',
+                  properties: {
+                    objectName: 'deal',
+                    filter: [{ field: 'stage', operator: 'equals', value: 'won' }],
+                  },
+                },
+                // Nested inside a container: reached, and a legacy shorthand
+                // operator lands on its canonical spelling.
+                {
+                  type: 'page:card',
+                  properties: {
+                    children: [
+                      {
+                        type: 'element:number',
+                        properties: {
+                          object: 'deal',
+                          aggregate: 'count',
+                          filter: { stage: { $nin: ['lost', 'void'] } },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'deal_desk',
+          label: 'Deal Desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-grid',
+                  dataSource: {
+                    object: 'deal',
+                    filter: [
+                      { field: 'stage', operator: 'equals', value: 'open' },
+                      { field: 'owner_id', operator: 'equals', value: '{current_user_id}' },
+                    ],
+                  },
+                  properties: {
+                    objectName: 'deal',
+                    filter: [
+                      { field: 'amount', operator: 'greater_than', value: 100 },
+                      { field: 'amount', operator: 'less_than_or_equal', value: 5000 },
+                    ],
+                    defaultFilters: [
+                      { field: 'owner_id', operator: 'equals', value: '{current_user_id}' },
+                    ],
+                  },
+                },
+                {
+                  type: 'object-kanban',
+                  properties: {
+                    objectName: 'deal',
+                    filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
+                  },
+                },
+                {
+                  type: 'object-map',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
+                    filter: { stage: 'open' },
+                  },
+                },
+                {
+                  type: 'object-metric',
+                  properties: {
+                    objectName: 'deal',
+                    filter: [{ field: 'stage', operator: 'equals', value: 'won' }],
+                  },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    children: [
+                      {
+                        type: 'element:number',
+                        properties: {
+                          object: 'deal',
+                          aggregate: 'count',
+                          filter: [{ field: 'stage', operator: 'not_in', value: ['lost', 'void'] }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    // One per converted door: the binding, the grid filter, the grid
+    // defaultFilters, the nested element:number.
+    expectedNotices: 4,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -10343,6 +10876,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     dashboardWidgetChartConfigStructureRemoved,
     translationPerAppSettingsRemoved,
     objectTenancyOrganizationFieldRemoved,
+    pageComponentFilterRecordToRuleArray,
   ],
 };
 

@@ -24,7 +24,6 @@
     "docs:start": "pnpm --filter @objectstack/docs start",
     "os": "node packages/cli/bin/run.js",
     "objectui:build": "bash scripts/build-console.sh",
-    "sdui:manifest": "bash scripts/gen-sdui-manifest.sh",
     "gen:sdui-lockstep": "node scripts/check-sdui-lockstep.mjs --update",
     "objectui:bump": "bash scripts/bump-objectui.sh",
     "objectui:refresh": "bash scripts/bump-objectui.sh && bash scripts/build-console.sh",

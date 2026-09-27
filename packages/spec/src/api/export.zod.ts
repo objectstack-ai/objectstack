@@ -6,13 +6,19 @@ import { BaseResponseSchema } from './contract.zod';
 /**
  * Data Export & Import Protocol
  *
- * Defines schemas for streaming data export, import validation,
- * template-based field mapping, and scheduled export jobs.
+ * Defines the export file formats, import validation, template-based field
+ * mapping, and the asynchronous import-job contracts.
  *
  * Industry alignment: Salesforce Data Export, Airtable CSV Export,
  * Dynamics 365 Data Management.
  *
- * Base path: /api/v1/data/{object}/export
+ * The export the platform serves is the synchronous streaming door
+ * `GET /api/v1/data/:object/export`, which answers the file itself as CSV,
+ * JSON or XLSX. The asynchronous export-job API that used to be
+ * declared here (export jobs, their progress / download / list shapes,
+ * scheduled exports and `ExportApiContracts`) was never served by any route and
+ * was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove); a recurring
+ * export is a `Job` whose handler you write.
  */
 
 // ==========================================
@@ -33,100 +39,31 @@ export const ExportFormat = z.enum([
 ]);
 export type ExportFormat = z.input<typeof ExportFormat>;
 
-/**
- * Export Job Status
- */
-export const ExportJobStatus = z.enum([
-  'pending',
-  'processing',
-  'completed',
-  'failed',
-  'cancelled',
-  'expired',
-]);
-export type ExportJobStatus = z.input<typeof ExportJobStatus>;
-
 // ==========================================
-// 2. Export Job Request / Response
+// 2. Export Job API — RETIRED (#17158)
 // ==========================================
 
-/**
- * Create Export Job Request
- * Initiates an asynchronous streaming export.
+/*
+ * The export-job API family was DELETED here in @objectstack/spec 17 (ADR-0049
+ * enforce-or-remove; maintainer ruling A on #17158, landing route A). It
+ * declared an asynchronous export API — `ExportJobStatus`,
+ * `CreateExportJobRequest` / `CreateExportJobResponse`, `ExportJobProgress`,
+ * `ScheduledExport`, `GetExportJobDownloadRequest` / `GetExportJobDownloadResponse`,
+ * `ListExportJobsRequest` / `ExportJobSummary` / `ListExportJobsResponse`,
+ * `ScheduleExportRequest` / `ScheduleExportResponse` and the
+ * `ExportApiContracts` route map (formerly sections 2 and 5–9 of this file) —
+ * that nothing served: no route under `/api/v1/data/export`, no `POST` on
+ * `/api/v1/data/:object/export`, no provider for the `IExportService` contract
+ * that retired with it, and no reader in any repo. Each def is registered in
+ * `RETIRED_DEFS_BY_MAJOR[18]`; the D3 semantic entry
+ * `export-job-family-retired` carries the prescription.
  *
- * @example POST /api/v1/data/account/export
- * { format: 'csv', fields: ['name', 'email', 'status'], filter: { status: 'active' }, limit: 10000 }
+ * The export that IS served is the synchronous streaming door
+ * `GET /api/v1/data/:object/export` (`@objectstack/rest`), which answers CSV,
+ * JSON or XLSX (its own `format` read, not `ExportFormat` above). A recurring
+ * export is a `Job` whose handler you write (`Job.schedule.expression`,
+ * `system/job.zod.ts`).
  */
-export const CreateExportJobRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name to export'),
-  format: ExportFormat.default('csv').describe('Export file format'),
-  fields: z.array(z.string()).optional()
-    .describe('Specific fields to include (omit for all fields)'),
-  filter: z.record(z.string(), z.unknown()).optional()
-    .describe('Filter criteria for records to export'),
-  sort: z.array(z.object({
-    field: z.string().describe('Field name to sort by'),
-    direction: z.enum(['asc', 'desc']).default('asc').describe('Sort direction'),
-  })).optional().describe('Sort order for exported records'),
-  limit: z.number().int().min(1).optional()
-    .describe('Maximum number of records to export'),
-  includeHeaders: z.boolean().default(true)
-    .describe('Include header row (CSV/XLSX)'),
-  encoding: z.string().default('utf-8')
-    .describe('Character encoding for the export file'),
-  templateId: z.string().optional()
-    .describe('Export template ID for predefined field mappings'),
-}));
-export type CreateExportJobRequest = z.input<typeof CreateExportJobRequestSchema>;
-/** Post-parse shape of {@link CreateExportJobRequest} — defaults applied, transforms run (ADR-0122). */
-export type CreateExportJobRequestParsed = z.infer<typeof CreateExportJobRequestSchema>;
-
-/**
- * Export Job Response
- * Returns the created export job with tracking info.
- */
-export const CreateExportJobResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    jobId: z.string().describe('Export job ID'),
-    status: ExportJobStatus.describe('Initial job status'),
-    estimatedRecords: z.number().int().optional().describe('Estimated total records'),
-    createdAt: z.string().datetime().describe('Job creation timestamp'),
-  }),
-}));
-export type CreateExportJobResponse = z.input<typeof CreateExportJobResponseSchema>;
-/** Post-parse shape of {@link CreateExportJobResponse} — defaults applied, transforms run (ADR-0122). */
-export type CreateExportJobResponseParsed = z.infer<typeof CreateExportJobResponseSchema>;
-
-/**
- * Export Job Progress
- * Tracks the progress of an active export job.
- *
- * @example GET /api/v1/data/export/:jobId
- */
-export const ExportJobProgressSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    jobId: z.string().describe('Export job ID'),
-    status: ExportJobStatus.describe('Current job status'),
-    format: ExportFormat.describe('Export format'),
-    totalRecords: z.number().int().optional().describe('Total records to export'),
-    processedRecords: z.number().int().describe('Records processed so far'),
-    percentComplete: z.number().min(0).max(100).describe('Export progress percentage'),
-    fileSize: z.number().int().optional().describe('Current file size in bytes'),
-    downloadUrl: z.string().optional()
-      .describe('Presigned download URL (available when status is "completed")'),
-    downloadExpiresAt: z.string().datetime().optional()
-      .describe('Download URL expiration timestamp'),
-    error: z.object({
-      code: z.string().describe('Error code'),
-      message: z.string().describe('Error message'),
-    }).optional().describe('Error details if job failed'),
-    startedAt: z.string().datetime().optional().describe('Processing start timestamp'),
-    completedAt: z.string().datetime().optional().describe('Completion timestamp'),
-  }),
-}));
-export type ExportJobProgress = z.input<typeof ExportJobProgressSchema>;
-/** Post-parse shape of {@link ExportJobProgress} — defaults applied, transforms run (ADR-0122). */
-export type ExportJobProgressParsed = z.infer<typeof ExportJobProgressSchema>;
 
 // ==========================================
 // 3. Import Validation & Deduplication
@@ -424,8 +361,8 @@ export type ImportResponse = z.input<typeof ImportResponseSchema>;
 export const IMPORT_JOB_MAX_ROWS = 50_000;
 
 /**
- * Import Job Status. Mirrors {@link ExportJobStatus} but with the terminal
- * states the import worker actually uses (`succeeded` rather than `completed`).
+ * Import Job Status — the states the import worker actually moves a job
+ * through (`succeeded`, not `completed`, is the success terminal).
  */
 export const ImportJobStatus = z.enum([
   'pending',    // Row persisted, worker not yet started
@@ -544,267 +481,6 @@ export const UndoImportJobResponseSchema = lazySchema(() => z.object({
   failed: z.number().int().describe('Reversal operations that failed'),
 }));
 export type UndoImportJobResponse = z.input<typeof UndoImportJobResponseSchema>;
-
-// ==========================================
-// 5. Scheduled Export Jobs
-// ==========================================
-
-/**
- * Scheduled Export Schema
- * Defines a recurring data export job.
- *
- * @example
- * {
- *   name: 'weekly_account_export',
- *   object: 'account',
- *   format: 'csv',
- *   schedule: { timezone: 'America/New_York' },
- *   delivery: { method: 'email', recipients: ['admin@example.com'] },
- * }
- */
-export const ScheduledExportSchema = lazySchema(() => z.object({
-  id: z.string().optional().describe('Scheduled export ID'),
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Schedule name (snake_case)'),
-  label: z.string().optional().describe('Human-readable label'),
-  object: z.string().describe('Object name to export'),
-  format: ExportFormat.default('csv').describe('Export file format'),
-  fields: z.array(z.string()).optional().describe('Fields to include'),
-  filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
-  templateId: z.string().optional().describe('Export template ID for field mappings'),
-  /**
-   * Schedule timing configuration.
-   *
-   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
-   * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
-   * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
-   * has no provider binding, so the cron was parsed and never fired. Deleted outright —
-   * no `retiredKey()` tombstone, no D2 conversion, no D3 semantic entry (maintainer
-   * ruling 2026-09-10 on the retirement PR). The mechanism that does work is
-   * `Job.schedule.expression` (`system/job.zod.ts`), the one cron slot the platform
-   * evaluates: a recurring export is a job whose handler you write.
-   */
-  schedule: z.object({
-    timezone: z.string().default('UTC').describe('IANA timezone'),
-  }).describe('Schedule timing configuration'),
-  delivery: z.object({
-    method: z.enum(['email', 'storage', 'webhook'])
-      .describe('How to deliver the export file'),
-    recipients: z.array(z.string()).optional()
-      .describe('Email recipients (for email delivery)'),
-    storagePath: z.string().optional()
-      .describe('Storage path (for storage delivery)'),
-    webhookUrl: z.string().optional()
-      .describe('Webhook URL (for webhook delivery)'),
-  }).describe('Export delivery configuration'),
-  enabled: z.boolean().default(true).describe('Whether the scheduled export is active'),
-  lastRunAt: z.string().datetime().optional().describe('Last execution timestamp'),
-  nextRunAt: z.string().datetime().optional().describe('Next scheduled execution'),
-  createdAt: z.string().datetime().optional().describe('Creation timestamp'),
-  createdBy: z.string().optional().describe('User who created the schedule'),
-}));
-export type ScheduledExport = z.input<typeof ScheduledExportSchema>;
-/** Post-parse shape of {@link ScheduledExport} — defaults applied, transforms run (ADR-0122). */
-export type ScheduledExportParsed = z.infer<typeof ScheduledExportSchema>;
-
-// ==========================================
-// 6. Get Export Job Download
-// ==========================================
-
-/**
- * Get Export Job Download Request
- * Retrieves a presigned download link for a completed export job.
- *
- * @example GET /api/v1/data/export/:jobId/download
- */
-export const GetExportJobDownloadRequestSchema = lazySchema(() => z.object({
-  jobId: z.string().describe('Export job ID'),
-}));
-export type GetExportJobDownloadRequest = z.input<typeof GetExportJobDownloadRequestSchema>;
-
-/**
- * Get Export Job Download Response
- * Returns the presigned download URL and metadata.
- */
-export const GetExportJobDownloadResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    jobId: z.string().describe('Export job ID'),
-    downloadUrl: z.string().describe('Presigned download URL'),
-    fileName: z.string().describe('Suggested file name'),
-    fileSize: z.number().int().describe('File size in bytes'),
-    format: ExportFormat.describe('Export file format'),
-    expiresAt: z.string().datetime().describe('Download URL expiration timestamp'),
-    checksum: z.string().optional().describe('File checksum (SHA-256)'),
-  }),
-}));
-export type GetExportJobDownloadResponse = z.input<typeof GetExportJobDownloadResponseSchema>;
-/** Post-parse shape of {@link GetExportJobDownloadResponse} — defaults applied, transforms run (ADR-0122). */
-export type GetExportJobDownloadResponseParsed = z.infer<typeof GetExportJobDownloadResponseSchema>;
-
-// ==========================================
-// 7. List Export Jobs
-// ==========================================
-
-/**
- * List Export Jobs Request
- * Retrieves a paginated list of historical export jobs.
- *
- * @example GET /api/v1/data/export?object=account&status=completed&limit=20
- */
-export const ListExportJobsRequestSchema = lazySchema(() => z.object({
-  object: z.string().optional().describe('Filter by object name'),
-  status: ExportJobStatus.optional().describe('Filter by job status'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum number of jobs to return'),
-  cursor: z.string().optional()
-    .describe('Pagination cursor from a previous response'),
-}));
-export type ListExportJobsRequest = z.input<typeof ListExportJobsRequestSchema>;
-/** Post-parse shape of {@link ListExportJobsRequest} — defaults applied, transforms run (ADR-0122). */
-export type ListExportJobsRequestParsed = z.infer<typeof ListExportJobsRequestSchema>;
-
-/**
- * Export Job Summary
- * Compact representation of an export job for list views.
- */
-export const ExportJobSummarySchema = lazySchema(() => z.object({
-  jobId: z.string().describe('Export job ID'),
-  object: z.string().describe('Object name that was exported'),
-  status: ExportJobStatus.describe('Current job status'),
-  format: ExportFormat.describe('Export file format'),
-  totalRecords: z.number().int().optional().describe('Total records exported'),
-  fileSize: z.number().int().optional().describe('File size in bytes'),
-  createdAt: z.string().datetime().describe('Job creation timestamp'),
-  completedAt: z.string().datetime().optional().describe('Completion timestamp'),
-  createdBy: z.string().optional().describe('User who initiated the export'),
-}));
-export type ExportJobSummary = z.input<typeof ExportJobSummarySchema>;
-
-/**
- * List Export Jobs Response
- * Paginated list of export jobs with cursor-based pagination.
- */
-export const ListExportJobsResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    jobs: z.array(ExportJobSummarySchema).describe('List of export jobs'),
-    nextCursor: z.string().optional().describe('Cursor for the next page'),
-    hasMore: z.boolean().describe('Whether more jobs are available'),
-  }),
-}));
-export type ListExportJobsResponse = z.input<typeof ListExportJobsResponseSchema>;
-/** Post-parse shape of {@link ListExportJobsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListExportJobsResponseParsed = z.infer<typeof ListExportJobsResponseSchema>;
-
-// ==========================================
-// 8. Schedule Export Request/Response
-// ==========================================
-
-/**
- * Schedule Export Request
- * Creates a new scheduled (recurring) export job.
- *
- * @example POST /api/v1/data/export/schedules
- */
-export const ScheduleExportRequestSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Schedule name (snake_case)'),
-  label: z.string().optional().describe('Human-readable label'),
-  object: z.string().describe('Object name to export'),
-  format: ExportFormat.default('csv').describe('Export file format'),
-  fields: z.array(z.string()).optional().describe('Fields to include'),
-  filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
-  templateId: z.string().optional().describe('Export template ID for field mappings'),
-  /**
-   * Schedule timing configuration.
-   *
-   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
-   * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
-   * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
-   * has no provider binding, so the cron was parsed and never fired. Deleted outright —
-   * no `retiredKey()` tombstone, no D2 conversion, no D3 semantic entry (maintainer
-   * ruling 2026-09-10 on the retirement PR). The mechanism that does work is
-   * `Job.schedule.expression` (`system/job.zod.ts`), the one cron slot the platform
-   * evaluates: a recurring export is a job whose handler you write.
-   */
-  schedule: z.object({
-    timezone: z.string().default('UTC').describe('IANA timezone'),
-  }).describe('Schedule timing configuration'),
-  delivery: z.object({
-    method: z.enum(['email', 'storage', 'webhook'])
-      .describe('How to deliver the export file'),
-    recipients: z.array(z.string()).optional()
-      .describe('Email recipients (for email delivery)'),
-    storagePath: z.string().optional()
-      .describe('Storage path (for storage delivery)'),
-    webhookUrl: z.string().optional()
-      .describe('Webhook URL (for webhook delivery)'),
-  }).describe('Export delivery configuration'),
-}));
-export type ScheduleExportRequest = z.input<typeof ScheduleExportRequestSchema>;
-/** Post-parse shape of {@link ScheduleExportRequest} — defaults applied, transforms run (ADR-0122). */
-export type ScheduleExportRequestParsed = z.infer<typeof ScheduleExportRequestSchema>;
-
-/**
- * Schedule Export Response
- * Returns the created scheduled export with generated ID and next run info.
- */
-export const ScheduleExportResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    id: z.string().describe('Scheduled export ID'),
-    name: z.string().describe('Schedule name'),
-    enabled: z.boolean().describe('Whether the schedule is active'),
-    nextRunAt: z.string().datetime().optional().describe('Next scheduled execution'),
-    createdAt: z.string().datetime().describe('Creation timestamp'),
-  }),
-}));
-export type ScheduleExportResponse = z.input<typeof ScheduleExportResponseSchema>;
-/** Post-parse shape of {@link ScheduleExportResponse} — defaults applied, transforms run (ADR-0122). */
-export type ScheduleExportResponseParsed = z.infer<typeof ScheduleExportResponseSchema>;
-
-// ==========================================
-// 9. Export API Contracts
-// ==========================================
-
-/**
- * Export API Contract Registry
- * Used for generating SDKs, documentation, and route registration.
- */
-export const ExportApiContracts = {
-  createExportJob: {
-    method: 'POST' as const,
-    path: '/api/v1/data/:object/export',
-    input: CreateExportJobRequestSchema,
-    output: CreateExportJobResponseSchema,
-  },
-  getExportJobProgress: {
-    method: 'GET' as const,
-    path: '/api/v1/data/export/:jobId',
-    input: z.object({ jobId: z.string() }),
-    output: ExportJobProgressSchema,
-  },
-  getExportJobDownload: {
-    method: 'GET' as const,
-    path: '/api/v1/data/export/:jobId/download',
-    input: GetExportJobDownloadRequestSchema,
-    output: GetExportJobDownloadResponseSchema,
-  },
-  listExportJobs: {
-    method: 'GET' as const,
-    path: '/api/v1/data/export',
-    input: ListExportJobsRequestSchema,
-    output: ListExportJobsResponseSchema,
-  },
-  scheduleExport: {
-    method: 'POST' as const,
-    path: '/api/v1/data/export/schedules',
-    input: ScheduleExportRequestSchema,
-    output: ScheduleExportResponseSchema,
-  },
-  cancelExportJob: {
-    method: 'POST' as const,
-    path: '/api/v1/data/export/:jobId/cancel',
-    input: z.object({ jobId: z.string() }),
-    output: BaseResponseSchema,
-  },
-};
 
 // ==========================================
 // 10. Import API Contracts (async jobs)

@@ -1,6 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#19995] The engine's own shared comparand faces — run on a read scope, alone,
+// at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
+// [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
+import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [#20068] The `$icontains` text-comparand door: the table's discrimination and
+// its reason half, asked at {@link compileOperator}'s `$icontains` arm and at
+// the engine-bound merges through {@link assertReadScopeComparandsRunnable}.
+import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
+// [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
+// is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
+// {@link assertReadScopePlaceholdersResolvable}, and [#20075] before the
+// lowering in {@link compileScopedFilterToSql}.
+import { filterTokenContextFrom, resolveFilterTokens, type ExecutionContextLike } from '@objectstack/core';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
@@ -406,6 +419,133 @@ import {
  * and answers a different question — whether to DROP a degenerate policy
  * before emitting it. This one answers whether a scope that arrived from any
  * producer at all may be handed to an engine.
+ *
+ * ## A list under `$eq` is refused, not bound (#19975, applying ruling 乙 of #19757)
+ *
+ * The explicit spelling of the equality slot, `{ f: { $eq: [...] } }`, used to
+ * compile with the whole list bound as one parameter; the implicit spelling was
+ * already refused by the bare-array arm. {@link assertNoListInEqualitySlot}
+ * refuses it in this module's envelope. See there for the measured answers, the
+ * reachability reading, and why `$ne` is not judged here.
+ *
+ * ## The ObjectQL ENGINE path refuses a bad comparand in THIS envelope too (#19995)
+ *
+ * The #13640 section above is the vacancy half of the engine path; this is the
+ * comparand half. A scope carrying a comparand the ENGINE's shared comparand
+ * faces refuse was handed to `engine.aggregate` and came back as the engine's
+ * `INVALID_FILTER` / 400, a 4xx whose prose the HTTP doors relay — while the
+ * NativeSQL face and the echo refused the same scope in the withheld envelope
+ * above. One scope, two envelopes, and the 400 one is the disclosure #5367
+ * closed. The engine's refusal does not read the `'policy'` provenance mark
+ * (#8220); only `driver-sql`'s cross-field and bind refusals do.
+ * {@link assertReadScopeComparandsRunnable} closes it at the two engine-bound
+ * merge sites. See there for why its refusal set is exactly the engine's, and
+ * for what it deliberately leaves to the engine.
+ *
+ * ## …and THIS compiler runs the same two faces, after its own gates (#20018)
+ *
+ * The paragraph above held for most shapes, not all of them: this compiler's own
+ * gates are narrower than the two shared faces, so a class of scopes the
+ * ObjectQL face refused was LOWERED here and served by the NativeSQL face and
+ * the echo. Measured on real SQLite (`read-scope-comparand-three-faces.test.ts`
+ * carries the table):
+ *
+ *   - a `null` member of `$in` compiled to `IN (…, NULL)`, which matches nothing
+ *     through the NULL — and under `$not`, or as a `$nin` member, the scope
+ *     admitted ONLY the rows whose column is NULL, which it names as excluded;
+ *   - a `null` ordering comparand or `$between` bound compiled to a comparison
+ *     with NULL: zero rows, silently;
+ *   - a blank `$between` bound was bound and served;
+ *   - a bigint beyond 2^53 and a binary comparand (a package-local bindable,
+ *     `comparand-shape.ts`) bound and matched nothing;
+ *   - a plain-object or other non-plain-object comparand in a scalar position
+ *     was bound, and the DATABASE refused the statement (`DATABASE_ERROR`).
+ *
+ * {@link compileScopedFilterToSql} now calls
+ * {@link assertReadScopeComparandsRunnable} once {@link compileNode} returns.
+ * Both faces are pure walks of the scope, so the order cannot change WHICH
+ * scopes are refused — the verdict is the union of the two gate sets either
+ * way — only which sentence a doubly-refused scope carries. After the lowering,
+ * a shape this compiler already refuses keeps its own message (the #13926
+ * ordering, for the same door-distinguishable log), and the faces add only what
+ * would otherwise have been lowered. The envelope is this module's one
+ * envelope; nothing here re-argues the rulings the faces carry.
+ *
+ * ## An `$icontains` comparand the table refuses is refused, on every face (#20068)
+ *
+ * `FILTER_TEXT_CASES` declares two REJECTION rows for `$icontains`, an EMPTY
+ * comparand and a NON-STRING one, and `@objectstack/spec/data` publishes the
+ * discrimination (`isRefusedTextComparand`) and its reason half
+ * (`textComparandRefusalReason`). This module never asked. An empty comparand
+ * lowered to a predicate true for every non-NULL value, so the NativeSQL face
+ * and the echo admitted every row that has one, and a non-string was bound as
+ * its text; the ObjectQL face handed the scope to the engine, where
+ * `driver-sql` refused it as a 4xx carrying the policy's field and comparand.
+ * Now {@link compileOperator}'s `$icontains` arm asks the predicate after its
+ * renderability gate and before the non-text constant, and
+ * {@link assertReadScopeComparandsRunnable} asks it at the engine-bound merges,
+ * so all three faces refuse the scope in this module's one envelope. The
+ * case-exact operators are not asked: the table has no such row for them.
+ *
+ * ## …and a placeholder the engine cannot resolve, on the engine path (#19995)
+ *
+ * The engine resolves `{placeholder}` filter values on the COMPOSED `where`,
+ * after `withReadScope` has `$and`-ed the scope into it, so a scope carrying an
+ * unknown placeholder, or a known one the request context has no value for,
+ * came back as the engine's `FILTER_TOKEN_UNKNOWN` / `FILTER_TOKEN_UNRESOLVED`
+ * / 400: the token was relayed, and with it what the policy compares against.
+ * {@link assertReadScopePlaceholdersResolvable} runs the engine's own resolver
+ * on the scope alone, with the token context the engine builds, at the same
+ * two merge sites. A placeholder the engine resolves is resolved there too, so
+ * the scope is served as before.
+ *
+ * Still the engine's to answer on that path, with a 400 that names the policy:
+ * the doors that read the object's SCHEMA — a text operator over a field that
+ * never holds a string, a temporal comparand the field's storage rule cannot
+ * read, a filter over a virtual field or through a dotted path. Their walks
+ * live in `@objectstack/objectql`, are not exported from its package entries,
+ * and this package does not depend on the engine at runtime; judging them here
+ * would take a copy of each.
+ *
+ * ## …and THIS compiler resolves the placeholder before it lowers (#20075)
+ *
+ * The section above covered the engine path only. This compiler never resolved
+ * a placeholder, so the NativeSQL face and the echo bound `{current_user_id}`
+ * as its literal text. Measured on real SQLite against the ObjectQL face
+ * (`read-scope-placeholder-three-faces.test.ts` carries the table): an
+ * equality or membership scope admitted no row where the ObjectQL face
+ * admitted the caller's; a `$ne` scope admitted EVERY row where the ObjectQL
+ * face admitted all but the caller's, a widening; a date macro compared as
+ * text; an unknown or unresolvable placeholder was served where the ObjectQL
+ * face refused it.
+ *
+ * {@link compileScopedFilterToSql} now resolves the scope with the same
+ * resolver, over the context the caller hands it
+ * ({@link ReadScopeCompileOptions.context}; both strategies pass
+ * `ctx.context`, the context the ObjectQL face forwards to the engine), and
+ * lowers the RESOLVED tree. The bound value, and the parameter the echo
+ * prints, is the one the engine resolves. A placeholder the resolver refuses
+ * is refused in this module's envelope. That covers every hop: the NativeSQL
+ * face compiles each object's scope, base table and joined hops, through this
+ * function.
+ *
+ * Where it stands among the other gates:
+ *
+ *   - Resolution runs BEFORE the lowering, because the lowering binds values.
+ *   - Its refusal is raised AFTER the lowering's own gates (the #20068
+ *     `$icontains` arm among them) and the #20018 comparand faces. That is the
+ *     engine's order, whose lowering doors run before its resolver. No gate's
+ *     verdict moves either way. Resolving replaces a fully-wrapped placeholder
+ *     string with a non-empty string, and copies the tree around it, where a
+ *     class-instance comparand other than a `Date` becomes a plain object;
+ *     every such comparand is refused in both forms. So a doubly-refused scope
+ *     keeps the sentence the lowering or the faces give it.
+ *   - The #13926 vacancy guard runs at the two merge sites after this compiler
+ *     returns, as before.
+ *
+ * With no context the resolution is the engine's for a context-less
+ * operation: a date macro resolves against UTC now, and a context token is
+ * refused. A placeholder is never bound as its literal text.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -486,6 +626,21 @@ export interface ReadScopeCompileOptions {
    * compiler's consumers fill this in from the driver that owns the object.
    */
   dialect?: string;
+  /**
+   * [#20075] The request context the scope's filter placeholders
+   * (`{current_user_id}`, `{today}`, …) resolve against before the scope is
+   * lowered: the context the ObjectQL engine reads when it resolves the same
+   * scope on the other face. Both of this compiler's consumers pass the
+   * strategy's `ctx.context`.
+   *
+   * Absent means the request has no context, and the scope resolves exactly
+   * as the engine resolves it for a context-less operation: a date macro
+   * resolves against UTC now, and a context token (`{current_user_id}`,
+   * `{current_org_id}`) is refused, like an unknown placeholder. A placeholder
+   * is never bound as its literal text. See the module header's #20075
+   * section.
+   */
+  context?: ExecutionContextLike;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -506,8 +661,31 @@ export function compileScopedFilterToSql(
   options: ReadScopeCompileOptions = {},
 ): { sql: string; params: unknown[] } {
   const quotedAlias = quoteIdent(alias, 'alias');
+  // [#20075] Resolve the scope's placeholders with the engine's own resolver
+  // BEFORE the lowering, because the lowering binds values: what is bound, and
+  // what the echo prints, is the value the ObjectQL face's engine resolves. A
+  // refusal is held and raised after the gates below, the engine's order (its
+  // lowering doors run before its resolver), so a doubly-refused scope keeps
+  // the sentence those gates give it. Held rather than raised early, the tree
+  // lowered on that path is the unresolved one, and its SQL is discarded with
+  // the throw. See the module header's #20075 section.
+  let lowered = filter;
+  let unresolvable: Error | undefined;
+  try {
+    lowered = resolveReadScopePlaceholders(filter, alias, options.context);
+  } catch (e) {
+    unresolvable = e as Error;
+  }
   const params: unknown[] = [];
-  const sql = compileNode(filter, quotedAlias, params, options);
+  const sql = compileNode(lowered, quotedAlias, params, options);
+  // [#20018] The shared comparand faces, on the scope ALONE: the judgement the
+  // ObjectQL execute face makes at its merge sites (#19995), made here too, so
+  // one read scope gets one verdict on all three analytics faces. AFTER the
+  // lowering on purpose: a shape this compiler already refuses keeps its own
+  // sentence, and the faces add exactly the shapes it would otherwise have
+  // lowered. See the module header's #20018 section.
+  assertReadScopeComparandsRunnable(filter, alias);
+  if (unresolvable) throw unresolvable;
   return { sql, params };
 }
 
@@ -640,6 +818,182 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
 }
 
 /**
+ * [#19995] Refuse, in this module's envelope, a read scope the ENGINE would
+ * refuse for one of its comparands — judged on the scope ALONE, before it is
+ * composed with the caller's filter.
+ *
+ * The door for the two ENGINE-bound merges: `ObjectQLStrategy.withReadScope`
+ * (the direct and the cross-object base aggregate) and `resolveFkAttr` (the
+ * referenced object's scope). There the scope used to reach `engine.aggregate`
+ * unjudged, and a comparand the engine refuses came back as its
+ * `INVALID_FILTER` / 400, message relayed. At the merge site the scope is
+ * still a distinguishable object; one line later it is `$and`-composed with
+ * the caller's own filter and no consumer can tell whose clause a refusal
+ * came from — which is why this is a judgement here and ⛔ never a catch
+ * around `executeAggregate`: the caller's own `where` still reaches the
+ * engine's doors for some shapes, and those refusals are the caller's to read.
+ *
+ * [#20018] Its third caller is {@link compileScopedFilterToSql}, after the
+ * lowering, which is how the NativeSQL face and the `/analytics/sql` echo give
+ * the same verdict as the two merges above. There `objectName` is the alias the
+ * scope is compiled for: the object's name on the base table, the join alias on
+ * a joined hop.
+ *
+ * ## Why the refusal set is exactly the engine's
+ *
+ * The two faces called below are the ones the engine runs on every
+ * object-form `where` (`lowerWhereFilterArray`, `@objectstack/objectql`):
+ * `@objectstack/spec/data`'s list-shape face and comparand-type face. Both are
+ * pure walks whose verdict on a subtree does not depend on the rest of the
+ * tree or on any object's schema, so the scope alone answers exactly as the
+ * scope inside `{ $and: [userFilter, scope] }` does. Same functions, same
+ * verdicts: nothing the engine serves is refused here, and a `{ $field }`
+ * reference (served on this path under #7598 Q1 = B) is stepped around by
+ * both, as the engine steps around it.
+ *
+ * ## What it deliberately does not judge
+ *
+ * The engine refuses other scope shapes through doors that read the object's
+ * SCHEMA or the request's CONTEXT (text operators on non-text fields, temporal
+ * comparands, filter placeholders), and `driver-sql` refuses more at compile
+ * time. Judging those here would mean a second copy of rules this package
+ * cannot see; their envelope is the engine's and the driver's to give. The
+ * CONTEXT one is the exception, because its rule IS reachable from here: the
+ * placeholder resolver lives in `@objectstack/core`, and the sibling
+ * {@link assertReadScopePlaceholdersResolvable} runs it.
+ *
+ * Anything the two walks throw is attributable to the scope — they read
+ * nothing else — so every throw is re-raised in the one envelope, the walk's
+ * own sentence kept for the operator's log.
+ *
+ * ## …and the `$icontains` comparand the table refuses (#20068)
+ *
+ * One of `driver-sql`'s compile-time refusals is reachable from here after
+ * all: an empty or non-string `$icontains` comparand (#5702). Its rule is not
+ * the driver's own. `FILTER_TEXT_CASES` declares both rows and
+ * `@objectstack/spec/data` publishes the discrimination, `isRefusedTextComparand`,
+ * so asking it here is a call, not a second copy. Measured before this
+ * question was asked: a scope carrying `$icontains: ''` reached
+ * `engine.aggregate`, and the driver answered `INVALID_FILTER` / 400 with the
+ * policy's field name, path and comparand in the relayed message, while the
+ * NativeSQL face and the echo served every row that has a value. One scope,
+ * three answers. {@link findRefusedIcontainsComparand} now finds it on the
+ * scope alone, after the two faces, and it is refused in this envelope. On
+ * {@link compileScopedFilterToSql} the `$icontains` arm of
+ * {@link compileOperator} refuses the same scope first, in its own sentence.
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
+ *   500 declaration, like every message in this module.
+ */
+export function assertReadScopeComparandsRunnable(scope: unknown, objectName: string): void {
+  try {
+    assertListComparandShapes(scope, undefined, 'readScope');
+    normalizeFilterComparandTypes(scope, undefined, 'readScope');
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
+  // [#20068] After the two faces, so a doubly-refused scope carries the face's
+  // sentence, as it would on the engine; and after them for a second reason: the
+  // type face refuses an `undefined` comparand, which is the predicate's
+  // carve-out to own before it is asked.
+  const refused = findRefusedIcontainsComparand(scope, '');
+  if (refused) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses at ` +
+        `readScope.${refused.path} — the ${textComparandRefusalReason(refused.field, TABLE_REFUSED_TEXT_OPERATOR, refused.value)} ` +
+        `(fail-closed).`,
+    );
+  }
+}
+
+/**
+ * [#19995] Refuse, in this module's envelope, a read scope carrying a filter
+ * placeholder the ENGINE's resolver refuses — judged on the scope ALONE, at
+ * the two engine-bound merges, before it is composed with the caller's filter.
+ *
+ * The engine resolves `{placeholder}` values once per verb, on the whole
+ * `where` it is handed (`ObjectQL.resolveWhereTokens`, a call to
+ * `resolveFilterTokens`). On the ObjectQL face that `where` already carries
+ * the scope, so an unknown placeholder (`FILTER_TOKEN_UNKNOWN`) or a known one
+ * the request has no value for (`FILTER_TOKEN_UNRESOLVED`) came back as a 400
+ * whose message — the token, and a suggestion for a near miss — the HTTP doors
+ * relay. The caller's own `where` never reaches that door with a placeholder
+ * still in it: the analytics service resolves the query's own positions first,
+ * with its own 400 and message, which is why this is a judgement of the scope
+ * and ⛔ never a catch around `executeAggregate`.
+ *
+ * ## Why the refusal set is exactly the engine's
+ *
+ * Same function, same inputs. `resolveFilterTokens` classifies every string
+ * with the spec's `classifyFilterToken` and resolves what it recognises; its
+ * verdict on one string depends on nothing else in the tree, so the scope
+ * alone answers exactly as the scope inside `{ $and: [userFilter, scope] }`
+ * does. The token context is built by the engine's own bridge,
+ * `filterTokenContextFrom`, over the context the strategy forwards to
+ * `executeAggregate` — the one the engine reads when it resolves. A
+ * placeholder the engine resolves is therefore resolved here too, and the
+ * scope is served; the resolved tree is discarded, and the engine resolves the
+ * original as it always has.
+ *
+ * Whatever the resolver throws here is re-raised in the envelope. It read the
+ * scope and the request's token context and nothing else, and the engine
+ * throws the same thing for the same scope under the same request. Today that
+ * is its two refusals: an unknown placeholder, and a known one the context
+ * has no value for. (An unusable time zone is not a third: the calendar maths
+ * falls back to UTC rather than throwing.)
+ *
+ * [#20075] {@link compileScopedFilterToSql} makes the same judgement through
+ * {@link resolveReadScopePlaceholders}, and there the resolved tree is KEPT: it
+ * is what that compiler lowers, so the NativeSQL face and the echo bind the
+ * value this engine resolves.
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
+ *   500 declaration, like every message in this module.
+ * @param context the request context the strategy forwards to
+ *   `executeAggregate` with this scope
+ */
+export function assertReadScopePlaceholdersResolvable(
+  scope: unknown,
+  objectName: string,
+  context: ExecutionContextLike | undefined,
+): void {
+  resolveReadScopePlaceholders(scope, objectName, context);
+}
+
+/**
+ * [#19995 / #20075] The scope with every filter placeholder resolved against
+ * `context` by the engine's own resolver, or the resolver's refusal re-raised
+ * in this module's envelope. The one spelling of that judgement: the
+ * engine-bound merges ask it through
+ * {@link assertReadScopePlaceholdersResolvable} and discard the tree, and
+ * {@link compileScopedFilterToSql} lowers the tree it returns.
+ *
+ * A scope with no placeholder comes back by reference (`resolveFilterTokens`'
+ * contract), so its lowering is the one it always had.
+ */
+function resolveReadScopePlaceholders<T>(
+  scope: T,
+  objectName: string,
+  context: ExecutionContextLike | undefined,
+): T {
+  try {
+    return resolveFilterTokens(scope, filterTokenContextFrom(context));
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a filter placeholder the engine cannot resolve — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
+}
+
+/**
  * Compile a child node into its OWN bind buffer.
  *
  * A group can turn out to be a boolean identity only after its children have
@@ -722,6 +1076,13 @@ function compileNode(node: unknown, qAlias: string, params: unknown[], opts: Rea
 function compileField(field: string, value: unknown, qAlias: string, params: unknown[], opts: ReadScopeCompileOptions): string {
   const col = `${qAlias}.${quoteIdent(field, 'field')}`;
 
+  // [#19975] A LIST under `$eq`, refused before any gate reads one of its
+  // members — so `{ $eq: [undefined] }` is diagnosed as the list it is, the
+  // precedence the bare-array arm below already gets (every member gate skips
+  // a non-node spec). After `quoteIdent`, like every gate here. See
+  // {@link assertNoListInEqualitySlot}.
+  assertNoListInEqualitySlot(field, value);
+
   // [#6125] `undefined` in a comparand position, refused before anything binds —
   // and after `quoteIdent`, so an unsafe identifier (the injection vector) keeps
   // its own message and its precedence. See {@link assertDefinedComparands} for
@@ -752,6 +1113,8 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
     params.push(value);
     return `${col} = ?`;
   }
+  // The implicit spelling of the equality slot {@link assertNoListInEqualitySlot}
+  // guards under `$eq` — the shape a CEL `field == <list>` lowers to.
   if (Array.isArray(value)) {
     throw readScopeCompileError(`[read-scope-sql] bare array value for "${field}" — use { $in: [...] } (fail-closed).`);
   }
@@ -881,6 +1244,77 @@ function assertCompilableMembers(op: string, field: string, members: unknown[]):
 function assertRenderableText(op: string, field: string, val: unknown): void {
   if (isRenderableTextComparand(val)) return;
   throw readScopeCompileError(`[read-scope-sql] ${unrenderableTextComparandMessage(op, field, val)}`);
+}
+
+/**
+ * [#20068] The operator `FILTER_TEXT_CASES` writes comparand REJECTION rows
+ * for, in the `$` spelling a read scope carries.
+ */
+const TABLE_REFUSED_TEXT_OPERATOR = '$icontains';
+
+/**
+ * [#20068] Refuse an `$icontains` comparand `FILTER_TEXT_CASES` declares
+ * REFUSED: the empty string, or a non-string.
+ *
+ * The discrimination is the spec's `isRefusedTextComparand` and the reason its
+ * `textComparandRefusalReason`, seated in this module's sentence and envelope,
+ * `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld (#5367). Asked in
+ * {@link compileOperator}'s `$icontains` arm AFTER {@link assertRenderableText},
+ * so an object or an array keeps its #5234 sentence, and BEFORE
+ * {@link textOverNonTextColumn} and any bind, so a comparand the contract
+ * refuses is refused over a non-text column too: the 2026-09-05 constant
+ * answers only a comparand the contract accepts. The predicate's `undefined`
+ * carve-out is owned upstream: {@link assertDefinedComparands} refuses an
+ * `undefined` comparand in {@link compileField} before any operator arm runs.
+ *
+ * Before this gate an empty comparand lowered to a predicate true for every
+ * non-NULL value, so the scope admitted every row that has one. A non-string
+ * was bound as its text. ⛔ Only the two declared rows: the case-exact
+ * operators keep their answer, since widening by analogy is the table's call.
+ */
+function assertIcontainsComparandNotRefused(op: string, field: string, val: unknown): void {
+  if (!isRefusedTextComparand(val)) return;
+  throw readScopeCompileError(`[read-scope-sql] The ${textComparandRefusalReason(field, op, val)} (fail-closed).`);
+}
+
+/** [#20068] Where a read scope carries a refused `$icontains` comparand. */
+type RefusedTextComparandFinding = { field: string; path: string; value: unknown };
+
+/**
+ * [#20068] Walk a read scope and return the first `$icontains` comparand
+ * {@link isRefusedTextComparand} refuses, or `null`.
+ *
+ * The traversal is the shared comparand faces' own: `$and` / `$or` arrays,
+ * `$not`, and field entries, whose operator object is read for its own
+ * `$icontains` key. A nested-relation object is not descended, which is how the
+ * faces and {@link compileField} (which refuses one outright) treat it. A walk,
+ * never a reduction, so a refused comparand beside a constant-TRUE sibling is
+ * still found: `driver-sql` refuses that shape on its validating walk for the
+ * same reason (#5702).
+ */
+function findRefusedIcontainsComparand(node: unknown, path: string): RefusedTextComparandFinding | null {
+  if (!isFilterNode(node)) return null;
+  for (const [key, value] of Object.entries(node)) {
+    const here = path.length > 0 ? `${path}.${key}` : key;
+    if (key === '$not') {
+      const found = findRefusedIcontainsComparand(value, here);
+      if (found) return found;
+    } else if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      for (let i = 0; i < value.length; i++) {
+        const found = findRefusedIcontainsComparand(value[i], `${here}[${i}]`);
+        if (found) return found;
+      }
+    } else if (
+      !key.startsWith('$')
+      && isFilterNode(value)
+      && Object.prototype.hasOwnProperty.call(value, TABLE_REFUSED_TEXT_OPERATOR)
+      && isRefusedTextComparand(value[TABLE_REFUSED_TEXT_OPERATOR])
+    ) {
+      return { field: key, path: `${here}.${TABLE_REFUSED_TEXT_OPERATOR}`, value: value[TABLE_REFUSED_TEXT_OPERATOR] };
+    }
+  }
+  return null;
 }
 
 /**
@@ -1261,6 +1695,58 @@ function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
   }
 }
 
+/**
+ * [#19975] A LIST in the explicit equality slot — `{ f: { $eq: [...] } }` —
+ * refused, never bound.
+ *
+ * Ruling 乙 on #19757 (2026-09-23) refuses a list in the equality slot, implicit
+ * and `$eq` alike, at the shared comparand-shape face (`assertListComparandShapes`,
+ * `@objectstack/spec/data`) 「for every driver at once」. This compiler never
+ * meets that face: a read scope arrives through `getReadScope`, not through
+ * `parseFilterAST` or the engine's lowering seam. So the ruling is pushed down
+ * here, the way #6125, #6387 and #7598 pushed theirs.
+ *
+ * The implicit spelling was already refused ({@link compileField}'s bare-array
+ * arm). The `$eq` spelling was compiled to `col = ?` with the WHOLE list bound
+ * as one parameter, which hands the meaning of the predicate to whatever the
+ * executing engine makes of a list. Measured on the NativeSQL execute path
+ * (`applyReadScope` → `executeRawSql`), one scope got four answers: a driver
+ * error, zero rows, the rows whose stored text equals the driver's own
+ * serialisation of the list (rows the scope never named), and — under `$not` —
+ * every row. A read-scope compiler must never bind a list into an equality.
+ *
+ * ## Reachability, measured before this gate was written
+ *
+ * No in-repo producer emits the `$eq` spelling. `@objectstack/formula`'s CEL
+ * lowering emits `$eq` only around a `{ $field }` reference and lowers
+ * `field == <list>` to the implicit spelling, which the bare-array arm refuses;
+ * the tenant layer, `plugin-sharing`'s read filter and the controlled-by-parent
+ * filter carry no `$eq` at all. What remains is the door #6387 recorded: a
+ * host-supplied `getReadScope` (a documented option) and any direct caller of
+ * the `compileScopedFilterToSql` export.
+ *
+ * ## Envelope and wording
+ *
+ * `READ_SCOPE_COMPILE_FAILED` / 500, like every other site — not the shared
+ * face's `INVALID_FILTER` / 400. The #5367 ruling (re-affirmed as #7598 Q2 = A)
+ * is why, and it is recorded in the module header: the producer is a policy the
+ * caller cannot author, and a 4xx would echo it. The sentence follows this
+ * module's own bare-array refusal, so the two spellings of one condition read
+ * alike in the operator's log (#5240), and it names `$in`, the list operator an
+ * author holding a list was reaching for.
+ *
+ * ⛔ `$ne` is not judged here: ruling 乙 names equality, and `$ne` with a list is
+ * #19886's ruling A, carried on that card. The other scalar operators carrying a
+ * list are not this ruling's either.
+ */
+function assertNoListInEqualitySlot(field: string, spec: unknown): void {
+  if (!isFilterNode(spec) || !Array.isArray(spec.$eq)) return;
+  throw readScopeCompileError(
+    `[read-scope-sql] array value for "${field}".$eq — an equality compares one value, so a list is refused ` +
+      `rather than bound; use { $in: [...] } (fail-closed).`,
+  );
+}
+
 function compileOperator(
   col: string,
   op: string,
@@ -1270,6 +1756,8 @@ function compileOperator(
   opts: ReadScopeCompileOptions,
 ): string {
   switch (op) {
+    // [#19975] `val` is never a list here: {@link assertNoListInEqualitySlot}
+    // refused one at {@link compileField}, before this emitter runs.
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
     // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
     // value" is false for a row that has none. Only the comparison is guarded.
@@ -1354,6 +1842,10 @@ function compileOperator(
      */
     case '$icontains':
       assertRenderableText(op, field, val);
+      // [#20068] …then the two REJECTION rows `FILTER_TEXT_CASES` declares for
+      // this operator, before the non-text constant and before any bind. See
+      // {@link assertIcontainsComparandNotRefused}.
+      assertIcontainsComparandNotRefused(op, field, val);
       return textOverNonTextColumn(op, field, opts)
         ?? textMatch(col, 'contains', val, false, params, opts, true);
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not

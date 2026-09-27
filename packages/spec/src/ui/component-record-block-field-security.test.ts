@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #18159 — the record-block field-security pair, and the key that is
-// deliberately NOT beside it.
+// #18159 — the three keys objectui reads on the record blocks, all declared.
 //
 // `record:details`, `record:highlights` and `record:related_list` are
 // `strictObject`s, and objectui's `@object-ui/plugin-detail` reads three keys
@@ -10,33 +9,23 @@
 // refused at parse while the renderer honoured the same document on the raw-node
 // path — a contract that could not be satisfied by writing it down.
 //
-// This card declares TWO of the three and forks the third, so the pins below
-// come in two kinds, and the difference matters:
+// The card declared the field-security PAIR first and held the third key until
+// its semantics were ruled (#19186 ruling B: an ADR-0066 capability set) and the
+// renderers read it that way at the pin. Every pin below is an ACCEPT pin: a
+// full `safeParse` success is the assertion (not merely "no
+// `unrecognized_keys`"), because the value arm is part of what is being
+// declared, and a key-only assertion would stay green over a declaration that
+// refused every value.
 //
-//   ACCEPT pins  — `enforceFieldSecurity` / `redactFields` now parse GREEN on
-//                  all three blocks. A full `safeParse` success is the assertion
-//                  (not merely "no `unrecognized_keys`"): the value arm is part
-//                  of what is being declared, and a key-only assertion would
-//                  stay green over a declaration that refused every value.
+// `requiredPermissions` is pinned through the card's two instruments, each with
+// its lit controls `aria` / `fields`:
 //
-//   ABSENCE pin  — `requiredPermissions` is still refused BY NAME on all three.
-//                  That is a deliberate outcome, not an oversight. The renderer
-//                  evaluates it as `perms.can(objectName, name)`, whose second
-//                  parameter is this repo's closed `PermissionActionSchema` enum
-//                  and NOT the ADR-0066 capability set every other
-//                  `requiredPermissions` in this spec names. Measured on the two
-//                  shipped providers: an unmapped name falls to the object's
-//                  `allowRead` bit under the backend-backed one (so a capability
-//                  nobody holds passes for every reader), and is denied for
-//                  everyone under the role-based one whenever the object carries
-//                  a permission config. Declaring it would mint the ADR-0049
-//                  fail-open access gate this repo retired on
-//                  `app.areas[].requiredPermissions` in 17.0.0.
+//   A — a parse probe on each block's own legal base document;
+//   B — an enumeration of the block's public zod `.shape`.
 //
-//                  ⚠️ This pin is tree-scoped: it records what the contract
-//                  accepts TODAY, not that the key may never be declared. The
-//                  ruling that settles the fork updates this file in the same
-//                  PR — it does not route around it.
+// Plus the ruling's own condition: the four record blocks carrying the key
+// (the three above and `record:quick_actions`) declare it IDENTICALLY — same
+// shape, same describe, word for word.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -46,7 +35,7 @@ import {
   RecordQuickActionsProps,
   RecordRelatedListProps,
 } from './component.zod';
-import { PermissionActionSchema } from '../kernel/plugin-security-advanced.zod';
+import { z } from 'zod';
 
 /** A document that is legal on its own, per block — the baseline every case adds to. */
 const BASE: Record<string, Record<string, unknown>> = {
@@ -168,36 +157,98 @@ describe('#18159 — `redactFields` is declared on all three blocks', () => {
   });
 });
 
-describe('#18159 — `requiredPermissions` is REFUSED on the three blocks (the forked key)', () => {
-  it('is refused by name on each of the three, with the base document legal on its own', () => {
-    for (const type of BLOCKS) {
-      const issue = unknownKeyIssue(type, { requiredPermissions: ['crm.manage'] });
-      expect(issue).toBeDefined();
-      expect(issue!.message).toContain('requiredPermissions');
-    }
-  });
+/** Instrument B: the keys a schema declares, read off zod's public `.shape`. */
+const shapeKeys = (type: string): string[] =>
+  Object.keys((ComponentPropsMap[type as keyof typeof ComponentPropsMap] as { shape?: object }).shape ?? {});
 
-  it('is refused for the CRUD spelling too — the refusal is the key, not the value', () => {
-    for (const type of BLOCKS) {
-      expect(unknownKeyIssue(type, { requiredPermissions: ['read'] })).toBeDefined();
-    }
-  });
+/** Instrument B, map-wide: every `ComponentPropsMap` row declaring `key`. */
+const declaring = (key: string) =>
+  Object.entries(ComponentPropsMap)
+    .filter(([, schema]) => Object.keys((schema as { shape?: object }).shape ?? {}).includes(key))
+    .map(([type]) => type)
+    .sort();
 
-  it('the sibling `record:quick_actions` DOES declare it — the distinction a whole-file screen gets backwards', () => {
-    const r = RecordQuickActionsProps.safeParse({ requiredPermissions: ['crm.manage'] });
+/** One lit `aria` value — accepted on all three blocks, so the probe can say yes. */
+const ARIA = { ariaLabel: 'Record block' };
+
+describe('#18159 — `requiredPermissions` is declared on the three blocks (instruments A and B)', () => {
+  it.each(BLOCKS)('A · %s parses GREEN with the key set — the whole document, beside the lit control `aria`', (type) => {
+    // Lit control first, on the same block and the same base document: a probe
+    // that cannot say yes to a key known to be declared proves nothing below.
+    expect(parse(type, { aria: ARIA }).success).toBe(true);
+
+    const r = parse(type, { requiredPermissions: ['crm.manage'] });
     expect(r.success).toBe(true);
-    expect(ComponentPropsMap['record:quick_actions']).toBe(RecordQuickActionsProps);
+    expect((r.data as Record<string, unknown>).requiredPermissions).toEqual(['crm.manage']);
+
+    // And both at once — the key does not displace its neighbours.
+    expect(parse(type, { aria: ARIA, requiredPermissions: ['crm.manage'] }).success).toBe(true);
   });
 
-  it('names a vocabulary the renderer\'s evaluator cannot express: `perms.can()` takes the closed PermissionAction enum', () => {
-    // Why the key forks rather than being declared. `requiredPermissions` means
-    // ADR-0066 CAPABILITIES everywhere else in this spec (`action`, `app`,
-    // `field`, `bulkAction`); the renderer routes it into the object-ACTION
-    // evaluator, whose vocabulary is this enum and nothing else.
-    expect(PermissionActionSchema.safeParse('read').success).toBe(true);
-    expect(PermissionActionSchema.safeParse('update').success).toBe(true);
-    expect(PermissionActionSchema.safeParse('crm.manage').success).toBe(false);
-    expect(PermissionActionSchema.safeParse('showcase.restricted_ops').success).toBe(false);
+  it.each(BLOCKS)('B · %s lists the key in its `.shape`, beside the lit control `aria`', (type) => {
+    const keys = shapeKeys(type);
+    expect(keys).toContain('aria');
+    expect(keys).toContain('requiredPermissions');
+  });
+
+  it('B · the census: exactly the three blocks and `record:quick_actions` declare it — lit controls `aria` and `fields` fire on the same instrument', () => {
+    expect(declaring('requiredPermissions')).toEqual([...BLOCKS, 'record:quick_actions'].sort());
+    // Controls: the census can find a key at all, and finds the blocks under
+    // test when it should. `fields` is declared on two of the three (the related
+    // list's column key is `columns`), which is itself a discriminating reading.
+    const aria = declaring('aria');
+    for (const type of BLOCKS) expect(aria).toContain(type);
+    expect(aria.length).toBeGreaterThan(BLOCKS.length);
+    const fields = declaring('fields');
+    expect(fields).toContain('record:details');
+    expect(fields).toContain('record:highlights');
+    expect(fields).not.toContain('record:related_list');
+  });
+
+  it('names are capabilities, not object actions: any string is a legal element, `read` as much as `crm.manage`', () => {
+    for (const type of BLOCKS) {
+      const r = parse(type, { requiredPermissions: ['crm.manage', 'read'] });
+      expect(r.success).toBe(true);
+      expect((r.data as Record<string, unknown>).requiredPermissions).toEqual(['crm.manage', 'read']);
+    }
+  });
+
+  it('accepts the empty list, and carries NO schema default — an absent key stays absent', () => {
+    for (const type of BLOCKS) {
+      const empty = parse(type, { requiredPermissions: [] });
+      expect(empty.success).toBe(true);
+      expect((empty.data as Record<string, unknown>).requiredPermissions).toEqual([]);
+      const absent = parse(type, {});
+      expect(absent.success).toBe(true);
+      expect(absent.data as Record<string, unknown>).not.toHaveProperty('requiredPermissions');
+    }
+  });
+
+  it('refuses a bare string and a non-string member as TYPE errors, never as unknown keys', () => {
+    for (const type of BLOCKS) {
+      for (const bad of ['crm.manage', [1]] as unknown[]) {
+        const r = parse(type, { requiredPermissions: bad });
+        expect(r.success).toBe(false);
+        expect(r.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(false);
+      }
+    }
+  });
+
+  it('one key, one text: the four record blocks declare it IDENTICALLY — shape and describe, word for word', () => {
+    const declaration = (schema: { shape: Record<string, z.ZodType> }) =>
+      JSON.stringify(z.toJSONSchema(schema.shape.requiredPermissions!, { io: 'input' }));
+    const reference = declaration(RecordQuickActionsProps as unknown as { shape: Record<string, z.ZodType> });
+    for (const schema of [RecordDetailsProps, RecordHighlightsProps, RecordRelatedListProps]) {
+      expect(declaration(schema as unknown as { shape: Record<string, z.ZodType> })).toBe(reference);
+    }
+    // The comparison is not vacuous: the shared declaration is an optional
+    // string array that carries a describe.
+    const qa = (RecordQuickActionsProps as unknown as { shape: Record<string, z.ZodType> }).shape.requiredPermissions!;
+    expect(qa.safeParse(undefined).success).toBe(true);
+    expect(qa.safeParse(['a']).success).toBe(true);
+    expect(qa.safeParse('a').success).toBe(false);
+    expect(typeof qa.description).toBe('string');
+    expect((qa.description ?? '').length).toBeGreaterThan(0);
   });
 });
 
@@ -213,14 +264,7 @@ describe('#18159 — the pair was declared on THESE blocks only', () => {
   });
 
   it('exactly three rows in `ComponentPropsMap` declare each key', () => {
-    const declaring = (key: string) =>
-      Object.entries(ComponentPropsMap)
-        .filter(([, schema]) => Object.keys((schema as { shape?: object }).shape ?? {}).includes(key))
-        .map(([type]) => type)
-        .sort();
     expect(declaring('enforceFieldSecurity')).toEqual([...BLOCKS].sort());
     expect(declaring('redactFields')).toEqual([...BLOCKS].sort());
-    // The control that the census above can find a key at all.
-    expect(declaring('requiredPermissions')).toEqual(['record:quick_actions']);
   });
 });

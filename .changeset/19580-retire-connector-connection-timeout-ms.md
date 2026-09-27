@@ -25,12 +25,19 @@ The key was bounded (`min(1000).max(300000)`), defaulted (`30000`),
 | removed | what to write instead |
 | --- | --- |
 | `connector.connectionTimeoutMs` (on `Connector` and on `DeclarativeConnectorEntry`, so `stack.connectors[]` and `PUT /meta/connector/:name`) | `requestTimeoutMs` — the deadline the platform keeps, applied as `resilientFetch`'s per-attempt timeout. For a connect-only bound, configure it at a connector provider or upstream gateway on a transport that can separate the phases. |
-| `ConnectorProviderContext.connectionTimeoutMs` (handed to every `ConnectorProviderFactory`) | `ctx.requestTimeoutMs`, or the factory's own `providerConfig` where the provider owns the vocabulary. |
+| `ConnectorProviderContext.connectionTimeoutMs` (handed to every `ConnectorProviderFactory` — added after `@objectstack/spec@17.4.0` and never in a release, see below) | `ctx.requestTimeoutMs`, or the factory's own `providerConfig` where the provider owns the vocabulary. |
 | The `ZodObject` combinators on `ConnectorSchema` and `DeclarativeConnectorEntrySchema` — `.extend()`, `.omit()`, `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()`, `.safeExtend()` | Both exports are now `z.preprocess` **pipes** (the residue stage below), so those methods no longer exist on them. **Build on the object and re-wrap:** `acceptRetiredDefaultResidue(<your extended object>, { connectionTimeoutMs: 30000 })`, the `EffectiveObjectPermissionSchema` route. ⚠️ `.superRefine()` still *exists* on a pipe but returns a schema with no read-through `shape`, so refine before wrapping, not after. Parsing, `z.input` / `z.infer`, and the read-through `.shape` are unchanged. |
 
-**The one-line fix: delete the key** — and, for a custom provider factory, stop
-reading `ctx.connectionTimeoutMs`. `os migrate meta --from 17` lists the
+**The one-line fix: delete the key.** `os migrate meta --from 17` lists the
 mechanical edits for existing sources; apply them by hand.
+
+The three interface members withdrawn with it were **never in a release**:
+`ConnectorProviderContext.connectionTimeoutMs`,
+`RestConnectorOptions.connectionTimeoutMs` and
+`OpenApiConnectorConfig.connectionTimeoutMs` all entered with `b929e0a662`,
+after the `@objectstack/*@17.4.0` tag, and leave in this same release. A factory
+or caller built against a released version never saw them; only code written
+against an unreleased `main` in between can read them, and it stops.
 
 ⚠️ Runtime behaviour is **unchanged for every shipped provider**, because none
 ever applied the value: a connector that authored `connectionTimeoutMs: 1000`
@@ -41,7 +48,8 @@ not. What does change is observable and intended: the def served by
 ### ⭐ This is NOT the zero-mention retirement shape
 
 Measured with `git grep -n connectionTimeoutMs SHA -- . ':!packages/spec'` at
-`origin/main`: **thirteen** non-test source occurrences over seven files in five
+`e07843b5a6`, the tree this retirement landed on: **thirteen** non-test source
+occurrences over seven files in five
 packages — **six reads** (`openapi-connector.ts:242`, `openapi-provider.ts:193`,
 `rest-connector.ts:134`, `rest-provider.ts:64`, `plugin.ts:307`,
 `plugin.ts:1589`), **four type declarations**, and **three** surviving hardcoded
@@ -73,7 +81,8 @@ ruling that made the siblings live forbids.)
   both channels — `tsc` (input type `never`) and the parse, which raises the
   prescription itself. `DeclarativeConnectorEntrySchema` carries it too — both
   published carriers wrap the same private `ConnectorBaseSchema` — so
-  `stack.connectors[]` and the `/meta/connector` door refuse it too.
+  `stack.connectors[]` and the `/meta/connector` door refuse it too: every value
+  but the retired default `30000`, which the residue stage below strips first.
 - **A D2 conversion, `connector-connection-timeout-ms-removed`** — one strip per
   `connectors[]` entry, a pure lossless delete. ⭐ The ruling left whether one was
   owed to be **measured** ("a D2 conversion only if a stored connector row can
@@ -85,9 +94,11 @@ ruling that made the siblings live forbids.)
   written on 17.x therefore replay clean.
 - **A D3 semantic entry,
   `connector-provider-context-connection-timeout-ms-retired`**, for the withdrawn
-  `ConnectorProviderContext` member. A provider factory is code: there is no
-  authored source and no `sys_metadata` row for a conversion to rewrite, so the
-  removal reaches a factory author as a `tsc` error and as that entry.
+  `ConnectorProviderContext` member (never in a release, above). A provider
+  factory is code: there is no authored source and no `sys_metadata` row for a
+  conversion to rewrite, so the removal reaches a factory author who read it —
+  possible only against an unreleased `main` — as a `tsc` error and as that
+  entry.
 - **No def leaves.** The key was a bare `z.number()`, never a `ConfigSchema`
   shape, so `RETIRED_DEFS_BY_MAJOR[18]` gains nothing — and `api-surface/` and
   `json-schema.manifest/` are byte-identical, which is the correct reading for a
@@ -103,19 +114,26 @@ ruling that made the siblings live forbids.)
   carries both readings with their trees rather than one undated claim.
 - **An `acceptRetiredDefaultResidue` stage** (#12840), `{ connectionTimeoutMs: 30000 }`
   on both carriers. The key was `.optional().default(30000)`, so a 17.x parse
-  materialized it into **every** connector — measured across two builds: the base
-  build emits it for an entry that authored only `name`/`label`/`type`, and the
-  tombstoned build refuses that exact object at `connectors.0.connectionTimeoutMs`.
+  materialized it into **every** connector — measured on both sides of the
+  retirement: the released
+  `@objectstack/spec@17.4.0` emits `connectionTimeoutMs: 30000` for an entry that
+  authored only `name`/`label`/`type`, and the tombstone **without the stage**
+  refuses that exact object at `connectionTimeoutMs`. With the stage, as it
+  ships, that object is **accepted and the key stripped** before the tombstone
+  reads it — on `ConnectorSchema`, `DeclarativeConnectorEntrySchema`, the
+  `/meta/connector` schema and `stack.connectors[]` alike.
   The D2 does **not** discharge the obligation, and the precedent shows it:
   `ObjectPermission:allowPurge` carries a D2 **and** the residue stage, for its
   own reason (a released toolchain materialized its default into every built
   artifact's entries). The reason *here* is a different one — this schema has a
   second door: `AutomationEngine.registerConnector` parses `ConnectorSchema` for
   a def a plugin or provider factory builds **in code**, where no conversion
-  ever runs, and all four shipped connector packages put the materialized value
-  straight into that def literal. So the emitted `30000`
-  is accepted-and-stripped while `15000` keeps the tombstone's refusal, and
-  nothing is un-retired: `z.input` stays `never` and the `[RETIRED]` row stays.
+  ever runs, and in 17.4.0 all four shipped connector packages put that `30000`
+  straight into the def literal. So the emitted `30000` is accepted-and-stripped,
+  while every other value (`15000`, `1000`, the string `"30000"`) keeps the
+  tombstone's refusal — at `connectionTimeoutMs`, or at
+  `connectors.0.connectionTimeoutMs` inside a stack — and nothing is un-retired:
+  `z.input` stays `never` and the `[RETIRED]` row stays.
 - **No deprecation window** (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」),
   and no staged retirement.
 
@@ -126,8 +144,7 @@ occurrences of the name at objectui `87af769e`, against a lit control on the sam
 command and scope, so no sibling fix or pin bump rides with this.
 
 `Clause-②: yes (narrowing)` — a published authorable key is removed on two
-carriers and a published interface member leaves `ConnectorProviderContext`, so
-the accept set a consumer writes against narrows. Nothing is widened and nothing
-is renamed. Contract-review tier.
+carriers, so the accept set a consumer writes against narrows. Nothing is
+widened and nothing is renamed. Contract-review tier.
 
 <!-- adr-0087: registered connector-connection-timeout-ms-removed, connector-provider-context-connection-timeout-ms-retired -->

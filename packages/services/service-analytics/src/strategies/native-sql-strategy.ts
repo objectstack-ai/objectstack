@@ -651,9 +651,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // will run it. A read scope admitting rows the predicate excludes is
     // over-reach (#3948), not a loose filter — and this is the merge site where
     // that scope becomes an executed statement.
+    // [#20075] …and so does the request context, so a scope placeholder
+    // (`{current_user_id}`, `{today}`) binds the value the ObjectQL face's
+    // engine resolves for this caller, on this hop, rather than its literal
+    // text; one it cannot resolve is refused in the read-scope envelope.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
+      context: ctx.context,
     });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through

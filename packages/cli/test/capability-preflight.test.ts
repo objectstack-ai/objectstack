@@ -8,6 +8,7 @@ import {
 import {
   classifyRequiredCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  RETIRED_PLATFORM_CAPABILITY_GUIDANCE,
 } from '@objectstack/spec/kernel';
 
 // framework#3366 — the CLI-side resolution + message layer over the spec-owned
@@ -39,6 +40,12 @@ describe('preflightRequiredCapabilities (#3366)', () => {
     const r = call(['automations'], () => true);
     expect(r.errors).toHaveLength(0);
     expect(r.warnings.map((c) => c.status)).toEqual(['unknown']);
+  });
+
+  it('a retired token keeps the unknown-token posture: advisory, never fatal', () => {
+    const r = call(['reports'], () => true);
+    expect(r.errors).toHaveLength(0);
+    expect(r.warnings.map((c) => [c.token, c.status])).toEqual([['reports', 'unknown']]);
   });
 
   it('dedupes and ignores non-string entries', () => {
@@ -90,6 +97,25 @@ describe('renderCapabilityMessage (#3366)', () => {
 
   it('unknown token reads as a typo hint', () => {
     expect(msgFor('automations', () => true)).toContain('not a known platform capability');
+  });
+
+  it('a RETIRED token renders its retirement prescription, never the typo hint', () => {
+    // `os validate` / `os build` parse a plain-object config without the
+    // `defineStack` vocabulary check, so this renderer is the only text an
+    // author at those doors sees. It must be the spec-owned prescription
+    // verbatim — the same words `defineStack` refuses the token with.
+    const c = classifyRequiredCapability('reports', () => true);
+    expect(c.status).toBe('unknown');
+    const prescription = RETIRED_PLATFORM_CAPABILITY_GUIDANCE.reports;
+    expect(prescription, 'the retirement map must carry a `reports` row').toBeTruthy();
+    const m = renderCapabilityMessage(c);
+    expect(m).toBe(prescription);
+    expect(m).not.toContain('check for a typo');
+    // Control: an ordinary misspelling still gets the typo hint, and the
+    // retired-map lookup is an own-property read (an inherited name such as
+    // `constructor` is not a retired token).
+    expect(msgFor('reportz', () => true)).toContain('check for a typo');
+    expect(renderCapabilityMessage({ token: 'constructor', status: 'unknown' })).toContain('check for a typo');
   });
 });
 

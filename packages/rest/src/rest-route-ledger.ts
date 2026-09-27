@@ -428,15 +428,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/security/permission-sets/:id/discard-overlay', family: 'security', source: 'route-manager', disposition: 'server-only',
     note: 'Setup admin action only (sys_permission_set "Discard Overlay") — invoked via the declarative action target, not the SDK' },
 
-  // ── reports ───────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.list' },
-  { route: 'POST /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.save' },
-  { route: 'GET /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.get' },
-  { route: 'DELETE /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.delete' },
-  { route: 'POST /api/v1/reports/:id/run', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.run' },
-  { route: 'POST /api/v1/reports/:id/schedule', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.schedule' },
-  { route: 'GET /api/v1/reports/:id/schedules', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.listSchedules' },
-  { route: 'DELETE /api/v1/reports/schedules/:scheduleId', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.unschedule' },
+  // ── reports ── RETIRED (#20102): the eight saved-report rows left with
+  // their routes and the SDK's `reports` namespace; no row, no route, no method.
 
   // ── approvals ─────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/approvals/requests', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listRequests' },

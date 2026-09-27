@@ -141,6 +141,15 @@ os init my-app --no-install       # Skip dependency installation
 | `plugin` | **Metadata package**: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
 | `empty` | Minimal project with just `objectstack.config.ts` |
 
+The `app` and `plugin` templates declare their starter object with
+`ObjectSchema.create({ … })` — the one authorised shape for a `*.object.ts`, and the
+same one `os generate object` writes. The factory validates the declaration against
+the object protocol when the file is evaluated, so a mistake surfaces in the file
+where it was written. A project scaffolded by an earlier release carries a
+`Data.ServiceObject`-annotated object literal instead; converting it is one mechanical
+rewrite — wrap the literal in `ObjectSchema.create( … )`, drop the annotation, and
+import `ObjectSchema` from `@objectstack/spec/data`.
+
 #### `os dev`
 
 Starts development mode. Three usage shapes:
@@ -1438,7 +1447,7 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 - `--dry-run` — Preview without writing files
 
 **What it does:**
-1. Creates a typed TypeScript file using `Data.ServiceObject`, `UI.View`, `Automation.Flow`, etc.
+1. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 2. Creates or updates the barrel `index.ts` in the target directory
 3. Shows a hint to run `objectstack validate`
 
@@ -1900,7 +1909,7 @@ when both files' `url`s agree.
 | `artifact` (positional) | — | Path to the compiled artifact (default `dist/objectstack.json`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
-| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of `manifest.name`, else `local.` + a slug of the artifact filename. A derived default is **not guaranteed usable** — see below |
+| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of `manifest.name`, else `local.` + a slug of the artifact filename. A declared `manifest.id` is used or refused, never replaced by a derived one — see below |
 | `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
@@ -1922,19 +1931,21 @@ when both files' `url`s agree.
 | `-n, --note <markdown>` | — | Release notes |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
 
-**The derived `local.` id is a candidate, not a guaranteed default.** A derived
-id is held to exactly the rule an explicit one is — `PackageSchema.manifestId`,
-the schema for the very column publish writes — and slugifying has no
-letter-first rule, so a manifest named `2024 App` derives `local.2024-app`,
-which that schema rejects. `os package publish` then **refuses before any
-network call**, quoting the schema and naming which of the three sources above
-the id came from, rather than normalising it into a different permanent
-identifier or forwarding one the control plane would reject: `manifest_id` is
-immutable once published, so an id nobody wrote cannot be renamed afterwards.
-The remedy is the one the refusal prints for that source — pass
-`--manifest-id`, set `manifestId` in `objectstack.manifest.json`, or declare
-`manifest.id` in `objectstack.config.ts` and rebuild. A declared
-`manifest.id` is used or refused, never silently replaced by a derived one.
+**Every id is held to one rule, whichever source it came from.** An explicit,
+declared or derived id is parsed against `PackageSchema.manifestId` — the schema
+for the very column publish writes: lowercase dot-separated segments of letters,
+digits and inner hyphens, a segment never opening with a hyphen, no
+underscores. A slug is lowercase letters, digits and inner hyphens, so a
+derived `local.` id always satisfies it — a manifest named `2024 App` derives
+`local.2024-app` — and it is published exactly as derived, never normalised
+into a different identifier: `manifest_id` is immutable once published, so an
+id nobody wrote cannot be renamed afterwards. A declared `manifest.id` is used
+or refused, never silently replaced by a derived one: an id that fails the rule
+is **refused before any network call**, quoting the schema and naming which of
+the three sources above the id came from. The remedy is the one the refusal
+prints for that source — pass `--manifest-id`, set `manifestId` in
+`objectstack.manifest.json`, or fix `manifest.id` in `objectstack.config.ts`
+and rebuild.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,

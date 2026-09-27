@@ -108,16 +108,6 @@
       }
     },
     "./api": {
-      "browser": {
-        "import": {
-          "types": "./dist/api/index.d.mts",
-          "default": "./dist/browser/api/index.mjs"
-        },
-        "require": {
-          "types": "./dist/api/index.d.ts",
-          "default": "./dist/browser/api/index.js"
-        }
-      },
       "import": {
         "types": "./dist/api/index.d.mts",
         "default": "./dist/api/index.mjs"
@@ -125,6 +115,26 @@
       "require": {
         "types": "./dist/api/index.d.ts",
         "default": "./dist/api/index.js"
+      }
+    },
+    "./api-assembled": {
+      "browser": {
+        "import": {
+          "types": "./dist/api-assembled/index.d.mts",
+          "default": "./dist/browser/api-assembled/index.mjs"
+        },
+        "require": {
+          "types": "./dist/api-assembled/index.d.ts",
+          "default": "./dist/browser/api-assembled/index.js"
+        }
+      },
+      "import": {
+        "types": "./dist/api-assembled/index.d.mts",
+        "default": "./dist/api-assembled/index.mjs"
+      },
+      "require": {
+        "types": "./dist/api-assembled/index.d.ts",
+        "default": "./dist/api-assembled/index.js"
       }
     },
     "./ui": {
@@ -293,7 +303,6 @@
     "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
-    "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",
     "check:skill-examples": "tsx scripts/check-skill-examples.ts --self-test && tsx scripts/check-skill-examples.ts",
     "check:yaml-examples": "tsx scripts/check-yaml-examples.ts --self-test && tsx scripts/check-yaml-examples.ts",
     "check:template-manifests": "tsx scripts/check-template-manifests.ts --self-test && tsx scripts/check-template-manifests.ts",

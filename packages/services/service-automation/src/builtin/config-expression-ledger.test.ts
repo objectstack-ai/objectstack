@@ -281,12 +281,26 @@ describe('resolveFlowNodeExpressions — path resolution (#4027)', () => {
     expect(found[0].entry.role).toBe('flow-template');
   });
 
-  it('skips absent and empty values rather than inventing findings', () => {
+  it('skips absent values rather than inventing findings', () => {
     expect(resolveFlowNodeExpressions('screen', {})).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: [] })).toEqual([]);
-    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })).toEqual([]);
     // A repeater authored as a non-array must not throw.
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
+  });
+
+  // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted. The test
+  // above used to pin a whitespace-only `visibleWhen` as skipped too — "an
+  // empty value, not a finding" — on #15572's ground that the resolver and the
+  // evaluator treated the blank the same way. That agreement was ruled no
+  // defence: a blank predicate is an author's rule that was never written. So
+  // the blank is EMITTED for a `predicate` slot, for `registerFlow` and
+  // `objectstack validate` to refuse, and still skipped for a `flow-template`
+  // one, which the ruling did not reach.
+  it('emits a blank string in a predicate slot for the consumer to refuse (#17493)', () => {
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })
+      .map((f) => [f.path, f.value, f.entry.role]))
+      .toEqual([['fields[0].visibleWhen', '   ', 'predicate']]);
+    expect(resolveFlowNodeExpressions('loop', { collection: '   ' })).toEqual([]);
   });
 
   // [#15572] A NON-string in a predicate slot is no longer skipped. It was

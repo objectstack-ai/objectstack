@@ -86,6 +86,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -110,7 +111,13 @@ const SECRET_LITERAL = 'zz-backend-fault-must-not-leak';
  */
 const DOTTED_KEY: NonNullable<DriverQuery['where']> = { 'title.x': SECRET_LITERAL };
 const TYPE_REJECTED: NonNullable<DriverQuery['where']> = { rank: SECRET_LITERAL };
-const UNRESOLVABLE_COLUMN: NonNullable<DriverQuery['where']> = { nosuchcol: SECRET_LITERAL };
+// [#20020] Marked 'author', as a read-scope merge boundary marks a caller's own
+// predicate: the #8790 refusal names the column only for a predicate the caller
+// is known to have written (the #8220 contract).
+const UNRESOLVABLE_COLUMN: NonNullable<DriverQuery['where']> = markFilterSubtreeProvenance(
+  { nosuchcol: SECRET_LITERAL },
+  'author',
+);
 
 async function caught(run: () => Promise<unknown>): Promise<any> {
   try {

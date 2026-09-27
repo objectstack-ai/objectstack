@@ -42,7 +42,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
-import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 
 describe('SqlDriver rejects an uncompilable filter instead of dropping it', () => {
   let driver: SqlDriver;
@@ -134,7 +134,10 @@ describe('SqlDriver rejects an uncompilable filter instead of dropping it', () =
   it('still throws on an unsupported operator inside a well-formed condition', async () => {
     // Pre-existing behaviour on the shape the driver still compiles, pinned so
     // the refusal cannot regress into a silent drop one layer down.
-    await expect(find({ stage: { $sounds_like: 'won' } }))
+    // [#20020] Marked 'author', as a read-scope merge boundary marks a caller's
+    // own predicate: the operator and field are named only then (the #8220
+    // contract). Unmarked, the refusal is the same code, withheld.
+    await expect(find(markFilterSubtreeProvenance({ stage: { $sounds_like: 'won' } }, 'author')))
       .rejects.toThrow(/Unsupported filter operator "\$sounds_like"/);
   });
 

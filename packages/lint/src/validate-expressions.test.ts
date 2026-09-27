@@ -985,10 +985,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     });
 
     // #4977 — the same gate, extended to the slot the same issue gave a server
-    // `parent` binding. `requiredWhen` stays FAIL-OPEN at runtime, so this build
-    // gate is the only thing that stops an unbindable declaration from shipping
-    // and enforcing nothing forever — which is why the message must name that
-    // consequence and not `readonlyWhen`'s opposite one.
+    // `parent` binding. `requiredWhen` REFUSES the write at runtime when the
+    // predicate cannot be evaluated (ADR-0137 D2; it was fail-OPEN until then),
+    // so this build gate is what stops an unbindable declaration from shipping
+    // and refusing writes in production — which is why the message must name
+    // that consequence and not `readonlyWhen`'s LOCKED one.
     describe('parent-scoped `requiredWhen` needs a resolvable master (#4977)', () => {
       const parentScopeIssues = (obj: Record<string, unknown>) =>
         validateStackExpressions({ objects: [obj] }).filter((i) => /reads `parent`/.test(i.message));
@@ -1006,8 +1007,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(issues[0]!.where).toMatch(/field 'description' requiredWhen/);
         expect(issues[0]!.message).toMatch(/declares no `master_detail` relationships/);
         // The CONSEQUENCE clause is what separates this from its `readonlyWhen`
-        // twin: fail-open there, fail-closed here, opposite fixes.
-        expect(issues[0]!.message).toMatch(/the requirement would never be enforced/);
+        // twin: that one LOCKS the field, this one REFUSES the write.
+        expect(issues[0]!.message).toMatch(/writes would be refused/);
+        expect(issues[0]!.message).not.toMatch(/never be enforced/);
         expect(issues[0]!.message).not.toMatch(/locked on every write/);
       });
 
@@ -1883,10 +1885,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(m).toMatch(/editable/);
       });
 
-      it('`requiredWhen` — says the requirement is never enforced, not anything about visibility', () => {
+      it('`requiredWhen` — says the server refuses the write, not anything about visibility', () => {
         const m = messageFor('requiredWhen');
-        expect(m).toMatch(/never enforced/);
-        expect(m).toMatch(/saves with the field empty/);
+        expect(m).toMatch(/server REFUSES a write/);
+        expect(m).not.toMatch(/never enforced/);
+        expect(m).not.toMatch(/saves with the field empty/);
         expect(m).not.toMatch(/VISIBLE/);
         expect(m).not.toMatch(/showing for everyone/);
       });
@@ -2235,10 +2238,18 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(atSlot(['a > 1'])[0].message).toContain('Found an array');
       });
 
-      it('leaves string predicates alone — including the whitespace-only one', () => {
-        // The card states this boundary explicitly so nobody "fixes" it: a
-        // whitespace-only STRING is "not authored" on both sides and stays so.
-        expect(atSlot('   ')).toHaveLength(0);
+      it('leaves non-blank string predicates alone — and refuses the whitespace-only one (#17493)', () => {
+        // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted. This
+        // pinned `atSlot('   ')` at ZERO findings: "The card states this
+        // boundary explicitly so nobody 'fixes' it: a whitespace-only STRING
+        // is 'not authored' on both sides and stays so." Both sides do still
+        // agree; the ruling is that the agreement is no defence when the
+        // author's rule is silently dropped, so the blank is refused here — on
+        // the same rule and sentence as the envelope above.
+        const blank = atSlot('   ');
+        expect(blank).toHaveLength(1);
+        expect(blank[0].severity).toBe('error');
+        expect(blank[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
         expect(atSlot("lead_record.status == 'converted'")).toHaveLength(0);
       });
     });
@@ -2509,9 +2520,9 @@ describe('null-guard gate (#4763)', () => {
   // #4811 — the one surface the coverage review found to MEET the gate's
   // totality criterion: `evaluateValidationRules` evaluates a field's
   // `requiredWhen` against the same `materializeDeclaredFields`-merged record
-  // the object's validation rules see. It is also the quietest failure of the
-  // three covered surfaces: a faulting `requiredWhen` is fail-OPEN (logged and
-  // skipped), so the field is simply never required and the write sails through.
+  // the object's validation rules see. It WAS the quietest failure of the
+  // three covered surfaces — a faulting `requiredWhen` was fail-OPEN (logged
+  // and skipped) — until ADR-0137 D2 made it refuse the write like the rest.
   describe('field `requiredWhen` — covered since #4811', () => {
     const withField = (requiredWhen: string) =>
       validateStackExpressions({
@@ -2544,14 +2555,15 @@ describe('null-guard gate (#4763)', () => {
     });
 
     // The consequence clause is per-surface, and getting it wrong sends the
-    // author to the wrong place. `requiredWhen` is fail-OPEN — `rule-validator`
-    // logs and skips — so it must NOT borrow the validation rules' "the write
-    // is rejected fail-closed" wording.
-    it('reports the fail-OPEN consequence, not the validation rules’ fail-closed one', () => {
+    // author to the wrong place. Since ADR-0137 D2 a faulting `requiredWhen`
+    // REFUSES the write — `rule-validator` no longer logs and skips — so it
+    // takes the validation rules' "the write is rejected fail-closed" wording
+    // and must NOT keep promising that the write goes through.
+    it('reports the fail-CLOSED consequence — a faulting requiredWhen refuses the write (ADR-0137 D2)', () => {
       const [issue] = withField('has(record.budget) && record.budget > 100');
-      expect(issue.message).toContain('SKIPPED fail-open');
-      expect(issue.message).toContain('the field is never actually required');
-      expect(issue.message).not.toContain('rejected fail-closed');
+      expect(issue.message).toContain('rejected fail-closed');
+      expect(issue.message).not.toContain('SKIPPED fail-open');
+      expect(issue.message).not.toContain('the field is never actually required');
     });
 
     it('leaves the fail-closed wording on the surfaces that really fail closed', () => {
@@ -4291,5 +4303,267 @@ describe('masterDetailCount — an unreadable `reference` carrier is refused (#1
     const parentScope = issues.filter((i) => /reads `parent`/.test(i.message));
     expect(parentScope).toHaveLength(1);
     expect(parentScope[0]!.message).toMatch(/declares no `master_detail` relationships/);
+  });
+});
+
+/**
+ * [#17493] (ruling A, 5651023407) — a blank string in a ledger `predicate`
+ * slot, at the THIRD door: `objectstack validate`'s expression pass.
+ *
+ * `decision`'s `config.conditions[].expression` and `screen`'s
+ * `config.fields[].visibleWhen` reported NOTHING for `''` / `'   '`: the
+ * resolver skipped the blank as "not authored", so `validateStackExpressions`
+ * never saw it, and a branch carrying it was never taken at run time. The
+ * refusal is `predicateSlotRefusal`'s — the spec's one notion, shared with
+ * `FlowSchema.parse` and `registerFlow` — so the finding leads with the same
+ * published sentence the other two doors answer with.
+ *
+ * ⚠️ Through the CLI, `objectstack validate` meets these values first at its
+ * schema step (`FlowSchema.parse` refuses them there). This pass is what
+ * answers for a stack handed to `validateStackExpressions` directly, and it is
+ * what these pins drive.
+ */
+describe('a blank string in a ledger predicate slot (#17493)', () => {
+  const flowStack = (...middle: Record<string, unknown>[]) => ({
+    flows: [{
+      name: 'blank_flow',
+      nodes: [{ id: 'start', type: 'start' }, ...middle],
+      edges: [],
+    }],
+  });
+  const decision = (expression: unknown) =>
+    ({ id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression }] } });
+  const screen = (visibleWhen: unknown) =>
+    ({ id: 'form', type: 'screen', config: { fields: [{ name: 'amount', type: 'number', visibleWhen }] } });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  describe.each(['', '   ', '\t\n '])('the blank %j', (blank) => {
+    it('decision branch `config.conditions[].expression` — one error, located at node and branch', () => {
+      const found = errorsOf(flowStack(decision(blank)));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toBe("flow 'blank_flow' · node 'check' (decision) decision branch expression at config.conditions[0].expression");
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+      expect(found[0].source).toBe(blank);
+    });
+
+    it('screen field `config.fields[].visibleWhen` — one error, located at node and field', () => {
+      const found = errorsOf(flowStack(screen(blank)));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toBe("flow 'blank_flow' · node 'form' (screen) screen field visibleWhen at config.fields[0].visibleWhen");
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+    });
+  });
+
+  it('reaches a `decision` inside an ADR-0031 region body', () => {
+    const found = errorsOf(flowStack({
+      id: 'sweep', type: 'loop',
+      config: { collection: '{items}', itemVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].where).toContain("loop 'sweep' body");
+    expect(found[0].where).toContain('config.conditions[0].expression');
+    expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+  });
+
+  describe('CONTROLS — what this must NOT move', () => {
+    it('RED CONTROL — the brace trap on the same slot still earns its own verdict, not the blank one', () => {
+      const found = errorsOf(flowStack(decision('{amount} > 1')));
+      expect(found).toHaveLength(1);
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(false);
+    });
+
+    it('a non-blank predicate and an absent one report nothing', () => {
+      expect(errorsOf(flowStack(decision('amount > 1')))).toHaveLength(0);
+      expect(errorsOf(flowStack(screen('amount > 0')))).toHaveLength(0);
+      expect(errorsOf(flowStack(screen(undefined)))).toHaveLength(0);
+    });
+
+    it('the structural `config.condition` keeps its own rule and sentence', () => {
+      const found = errorsOf(flowStack({ id: 'gate', type: 'decision', config: { condition: '   ' } }));
+      expect(found).toHaveLength(1);
+      expect(found[0].message).toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(false);
+    });
+
+    it("a `flow-template` slot's blank is untouched", () => {
+      expect(errorsOf(flowStack({ id: 'sweep', type: 'loop', config: { collection: '   ' } }))).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * [#20078] A field-level predicate that reads THROUGH a reference field is
+ * refused at authoring, with the repair that is true for the root it reads.
+ *
+ * The field level is never hydrated (ObjectQL `rule-validator.ts`), so a
+ * reference there holds the related record's bare id and every read through it
+ * faults: since ADR-0137 D2 the two field-rule slots then REFUSE the write,
+ * and an option's `visibleWhen` — fail-open — admits the value unchecked.
+ * `packages/objectql/src/engine-field-predicate-fault.test.ts` pins that
+ * runtime half end to end; this block pins the authoring half.
+ *
+ * Every fixture goes through `specValid` — the rule is `input: 'parsed'`, and
+ * this is a verdict on a predicate's VALUE, so the stack it is asked about
+ * must be one the schema accepts outright, not merely one without an
+ * `unrecognized_keys` issue.
+ */
+describe('field-level predicates refuse a read THROUGH a reference (#20078)', () => {
+  const account = {
+    name: 'trav_account',
+    label: 'Account',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      tier: { type: 'text', label: 'Tier' },
+      region: { type: 'lookup', label: 'Region', reference: 'trav_region' },
+    },
+  };
+  const region = { name: 'trav_region', label: 'Region', fields: { code: { type: 'text', label: 'Code' } } };
+  const order = (fields: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'trav_order',
+    label: 'Order',
+    fields: {
+      account: { type: 'lookup', label: 'Account', reference: 'trav_account' },
+      owner: { type: 'user', label: 'Owner' },
+      status: { type: 'text', label: 'Status' },
+      ship_to: { type: 'address', label: 'Ship to' },
+      ...fields,
+    },
+    ...extra,
+  });
+  const errorsOf = (...objects: Array<Record<string, unknown>>) =>
+    validateStackExpressions(specValid({ objects: [account, region, ...objects] }))
+      .filter((i) => (i.severity ?? 'error') === 'error');
+
+  const premium = (visibleWhen: string) => ({
+    type: 'select',
+    label: 'Plan',
+    options: [{ value: 'basic', label: 'Basic' }, { value: 'premium', label: 'Premium', visibleWhen }],
+  });
+
+  describe.each([
+    {
+      slot: 'requiredWhen',
+      fields: { po_number: { type: 'text', label: 'PO', requiredWhen: "record.account.tier == 'enterprise'" } },
+      where: "object 'trav_order' · field 'po_number' requiredWhen",
+      consequence: 'REFUSES every write',
+    },
+    {
+      slot: 'readonlyWhen',
+      fields: { discount: { type: 'number', label: 'Discount', readonlyWhen: "record.account.tier == 'gold'" } },
+      where: "object 'trav_order' · field 'discount' readonlyWhen",
+      consequence: 'REFUSES every update',
+    },
+    {
+      slot: 'option visibleWhen',
+      fields: { plan: premium("record.account.tier == 'enterprise'") },
+      where: "object 'trav_order' · field 'plan' option 'premium' visibleWhen",
+      consequence: 'fail-OPEN',
+    },
+  ])('$slot reading `record.account.tier`', ({ slot, fields, where, consequence }) => {
+    it('is ONE error, located at the slot, naming the slot, the reference and the related field', () => {
+      const found = errorsOf(order(fields));
+      expect(found).toHaveLength(1);
+      expect(found[0].where).toBe(where);
+      expect(found[0].message.startsWith(`\`${slot}\` reads \`tier\` through \`record.account\`, a \`lookup\` field`))
+        .toBe(true);
+    });
+
+    it("carries this slot's consequence and the `validations[]` `script` prescription", () => {
+      const [issue] = errorsOf(order(fields));
+      expect(issue.message).toContain(consequence);
+      expect(issue.message).toContain('Express the check as a `validations[]` `script` rule');
+    });
+  });
+
+  it('names every related field read through the same reference, and one error per reference', () => {
+    const found = errorsOf(order({
+      po_number: { type: 'text', label: 'PO', requiredWhen: "record.account.tier == 'x' && record.account.name != '' && record.owner.email != ''" },
+    }));
+    expect(found.map((i) => i.message.slice(0, i.message.indexOf(', a `')))).toEqual([
+      '`requiredWhen` reads `name`, `tier` through `record.account`',
+      // `user` is a reference type too — its target is fixed by the type.
+      '`requiredWhen` reads `email` through `record.owner`',
+    ]);
+  });
+
+  it('refuses the null-safe spellings too — they read through the reference all the same', () => {
+    for (const source of ["has(record.account.tier)", "record.account['tier'] == 'x'"]) {
+      const found = errorsOf(order({ po_number: { type: 'text', label: 'PO', requiredWhen: source } }));
+      expect(found, source).toHaveLength(1);
+      expect(found[0].message, source).toContain('through `record.account`');
+    }
+  });
+
+  it('`previous` — refused, and NOT sent to a `validations[]` rule, which does not hydrate it either', () => {
+    const found = errorsOf(order({
+      discount: { type: 'number', label: 'Discount', readonlyWhen: "previous.account.tier == 'gold'" },
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].message.startsWith('`readonlyWhen` reads `tier` through `previous.account`')).toBe(true);
+    expect(found[0].message).not.toContain('Express the check as a `validations[]`');
+    expect(found[0].message).toContain('read a column this object declares');
+  });
+
+  describe('`parent` — judged against the MASTER object, and repaired on the master', () => {
+    const line = (predicate: string) => ({
+      name: 'trav_order_line',
+      label: 'Order Line',
+      fields: {
+        trav_order: { type: 'master_detail', label: 'Order', reference: 'trav_order' },
+        qty: { type: 'number', label: 'Qty', required: true, defaultValue: 1, requiredWhen: predicate },
+      },
+    });
+
+    it('a read through a reference the master declares is refused, naming the master', () => {
+      const found = errorsOf(order({}), line("parent.account.tier == 'gold'"));
+      expect(found).toHaveLength(1);
+      expect(found[0].where).toBe("object 'trav_order_line' · field 'qty' requiredWhen");
+      expect(found[0].message.startsWith('`requiredWhen` reads `tier` through `parent.account`')).toBe(true);
+      expect(found[0].message).toContain("Read a column 'trav_order' declares");
+      expect(found[0].message).not.toContain('Express the check as a `validations[]`');
+    });
+
+    it("CONTROL — the master's own column is not a traversal", () => {
+      expect(errorsOf(order({}), line("parent.status == 'closed'"))).toHaveLength(0);
+    });
+  });
+
+  describe('CONTROLS — what this must NOT refuse', () => {
+    it.each([
+      ['an own column', "record.status == 'submitted'"],
+      ['the reference compared as a value (its id)', "record.account == 'acc_1'"],
+      ['the reference tested for empty', 'record.account != null'],
+      ['an object-valued field that is not a reference', "record.ship_to.city == 'Paris'"],
+      ['`previous` reading an own column', "previous.status == 'draft'"],
+    ])('%s — `%s` on requiredWhen, readonlyWhen and an option', (_label, source) => {
+      expect(errorsOf(order({
+        po_number: { type: 'text', label: 'PO', requiredWhen: source },
+        discount: { type: 'number', label: 'Discount', readonlyWhen: source },
+        plan: premium(source),
+      }))).toHaveLength(0);
+    });
+
+    it('`current_user` in an option — the grant check and the position test are not record traversals', () => {
+      expect(errorsOf(order({
+        plan: premium("current_user.can('trav_order', 'edit') && 'admin' in current_user.positions"),
+      }))).toHaveLength(0);
+    });
+
+    it('the SAME traversal inside a `validations[]` `script` rule passes — that seam hydrates one hop', () => {
+      expect(errorsOf(order(
+        { po_number: { type: 'text', label: 'PO' } },
+        {
+          validations: [{
+            name: 'enterprise_needs_po',
+            type: 'script',
+            message: 'Enterprise orders need a PO number',
+            condition: "record.account.tier == 'enterprise' && record.po_number == ''",
+          }],
+        },
+      ))).toHaveLength(0);
+    });
   });
 });

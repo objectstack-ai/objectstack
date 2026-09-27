@@ -23,7 +23,7 @@ import {
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
 // boolean was the banner, and that was exactly the drift #4801 fixed.
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
-import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
@@ -1960,6 +1960,21 @@ export default class Serve extends Command {
       export: 'PackageServicePlugin',
       identities: ['package-service', 'PackageServicePlugin'],
     },
+    // The always-on persistence half of the `marketplace` / `package-registry`
+    // split (#17676 ruling A' items 1-2): `sys_packages` and its boot
+    // hydration, so `protocol.installPackage` / `updatePackage` find the
+    // `package` service on a stock boot. Keyed at the provider the spec's
+    // PLATFORM_CAPABILITY_PROVIDERS row declares for this token — the SAME
+    // package and plugin as `marketplace` above, because that is what the spec
+    // map says today. Repointing `marketplace` at the browse surface starts at
+    // that spec row, and this table follows it; until then an app declaring
+    // `marketplace` gets ONE PackageServicePlugin, not two — see
+    // `resolverMounted` in the capability resolver.
+    'package-registry': {
+      pkg: '@objectstack/service-package',
+      export: 'PackageServicePlugin',
+      identities: ['package-service', 'PackageServicePlugin'],
+    },
     email: {
       pkg: '@objectstack/plugin-email',
       export: 'EmailServicePlugin',
@@ -1985,11 +2000,6 @@ export default class Serve extends Command {
       pkg: '@objectstack/plugin-pinyin-search',
       export: 'PinyinSearchPlugin',
       identities: ['com.objectstack.plugin.pinyin-search', 'PinyinSearchPlugin'],
-    },
-    reports: {
-      pkg: '@objectstack/plugin-reports',
-      export: 'ReportsServicePlugin',
-      identities: ['com.objectstack.service.reports', 'ReportsServicePlugin'],
     },
     approvals: {
       pkg: '@objectstack/plugin-approvals',
@@ -2803,13 +2813,13 @@ export default class Serve extends Command {
           if (!requires.includes(cap)) requires.push(cap);
         }
       }
-      // The email + approvals + reports services schedule background work
-      // (durable retries, SLA escalation, scheduled digests). Auto-pull
+      // The email + approvals services schedule background work
+      // (durable retries, SLA escalation). Auto-pull
       // 'job' and 'queue' so plugins can opt into durable scheduling.
       // IMPORTANT: prepend, so their plugins load (and their kernel:ready
       // hooks fire) BEFORE consumers like email/approvals that subscribe
       // to queues during their own kernel:ready phase.
-      const NEEDS_JOB_OR_QUEUE = ['email', 'approvals', 'reports', 'auth'];
+      const NEEDS_JOB_OR_QUEUE = ['email', 'approvals', 'auth'];
       if (NEEDS_JOB_OR_QUEUE.some((c) => requires.includes(c))) {
         if (!requires.includes('queue')) requires.unshift('queue');
         if (!requires.includes('job')) requires.unshift('job');
@@ -4565,11 +4575,22 @@ export default class Serve extends Command {
       // the static registry + its token in the spec vocabulary (#3265).
       const CAPABILITY_PROVIDERS = Serve.CAPABILITY_PROVIDERS;
 
+      // Providers THIS resolver has already mounted, by instance. The app's
+      // own `plugins[]` alone stopped being the whole answer once two tokens
+      // named one provider: `marketplace` and `package-registry` both resolve
+      // to PackageServicePlugin, so an app declaring `marketplace` would have
+      // the always-on `package-registry` mount a second instance, which
+      // `kernel.use` answers by name with a `Plugin superseded` warn (#19387,
+      // measured). Pushed only after a successful `kernel.use`, so a provider
+      // that failed to load under one token is still attempted — with that
+      // token's own required/best-effort semantics — under the next.
+      const resolverMounted: unknown[] = [];
+
       // Exact identity comparison, NOT substring containment — a consumer named
       // after the capability it consumes must never be mistaken for its
       // provider (#7652). See Serve.providesCapability.
       const hasPluginMatching = (identities: readonly string[]) =>
-        Serve.providesCapability(plugins, identities);
+        Serve.providesCapability(plugins, identities) || Serve.providesCapability(resolverMounted, identities);
 
       for (const cap of requires) {
         const spec = CAPABILITY_PROVIDERS[cap];
@@ -4582,9 +4603,24 @@ export default class Serve extends Command {
           // declared token is a typo that was previously ignored SILENTLY
           // (#3265) — warn loudly. Warn-first: intended to become a hard error
           // once the vocabulary proves complete (Prime Directive #12).
+          //
+          // A force-appended ALWAYS_ON token must never land here, because it
+          // passes both conjuncts below and would mount nothing without a word
+          // (#19387: `package-registry` did exactly that). That is pinned before
+          // it ships rather than warned about after: every slate token keys a
+          // CAPABILITY_PROVIDERS entry or a CAPABILITY_TO_TIER tier
+          // (`serve-capability-vocabulary.test.ts`), and `@objectstack/spec` and
+          // this package release in one fixed version group.
           if (declaredRequires.has(cap) && !PLATFORM_CAPABILITY_TOKENS.includes(cap)) {
+            // A RETIRED token (e.g. `reports`, #20102) is not a typo: say what
+            // replaced it, in the same words `defineStack` refuses it with.
+            const retired = Object.prototype.hasOwnProperty.call(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, cap)
+              ? RETIRED_PLATFORM_CAPABILITY_GUIDANCE[cap]
+              : undefined;
             console.warn(chalk.yellow(
-              `  ⚠ requires: "${cap}" is not a known platform capability — check for a typo. It was ignored.`,
+              retired
+                ? `  ⚠ ${retired} It was ignored.`
+                : `  ⚠ requires: "${cap}" is not a known platform capability — check for a typo. It was ignored.`,
             ));
           }
           continue;
@@ -4650,7 +4686,9 @@ export default class Serve extends Command {
               ));
             }
           }
-          await kernel.use(arg !== undefined ? new Ctor(arg) : new Ctor());
+          const provider = arg !== undefined ? new Ctor(arg) : new Ctor();
+          await kernel.use(provider);
+          resolverMounted.push(provider);
           trackPlugin(spec.export);
 
           if (spec.extras) {
@@ -4660,7 +4698,9 @@ export default class Serve extends Command {
                 const exMod: any = await import(/* webpackIgnore: true */ ex.pkg);
                 const ExCtor = exMod[ex.export];
                 if (ExCtor) {
-                  await kernel.use(new ExCtor());
+                  const extra = new ExCtor();
+                  await kernel.use(extra);
+                  resolverMounted.push(extra);
                   trackPlugin(ex.export);
                 }
               } catch {

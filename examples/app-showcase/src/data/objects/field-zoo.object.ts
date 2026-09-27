@@ -50,7 +50,7 @@ export const FieldZoo = ObjectSchema.create({
 
     // ── Numbers ──────────────────────────────────────────────────────────
     f_number: Field.number({ label: 'Number', min: 0, max: 1000 }),
-    f_currency: Field.currency({ label: 'Currency', scale: 2, min: 0, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD', precision: 2 } }),
+    f_currency: Field.currency({ label: 'Currency', min: 0, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD', precision: 2 } }),
     f_percent: Field.percent({ label: 'Percent', min: 0, max: 100, defaultValue: 50 }),
 
     // ── Date & time ──────────────────────────────────────────────────────

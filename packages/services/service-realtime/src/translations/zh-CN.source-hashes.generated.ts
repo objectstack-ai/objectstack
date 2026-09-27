@@ -18,4 +18,6 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_presence.fields.display_title.help": "fe510885df94967c",
+  "objects.sys_presence.fields.display_title.label": "70f7aadecce647a5",
 };

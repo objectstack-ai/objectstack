@@ -57,6 +57,8 @@ These are declared in the `react-blocks.ts` overlay with a `kind` of `binding`/`
 
 ### 4. Declaration parity is a build-time baseline ratchet, not a per-PR gate
 
+> **Status: retired 2026-09-18 by maintainer ruling on #17735; the artefact stays for the CLI witness and the freshness gate.**
+
 > **Corrected by #4472 — see addendum 1.** This decision was written and implemented as "conformance": the check was named `check:react-conformance`, and its script header claimed it confirmed the components "ACTUALLY implement" the spec props. It does not and never did — it compares **two declarations**, and it was **warn-only** besides. The mechanism below is real and kept; the words for it are now `check:react-declaration-parity`, and the gate now runs `--strict`.
 >
 > **Corrected by #5960 — see addendum 2.** This section shipped saying the ratchet runs *inside `build-console.sh`*. That was true when it was written and stopped being true at #4472, which moved it into `scripts/gen-sdui-manifest.sh`; the file names below are corrected in place, because a reader who followed this ADR opened the wrong file. #5960 also answers the question this decision left open — "not every PR" never said *when*, and the answer is **at the objectui pin bump**.

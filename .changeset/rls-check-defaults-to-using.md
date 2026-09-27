@@ -24,5 +24,5 @@ The published contract has always said this. `RowLevelSecurityPolicySchema.check
 - If any applicable policy declares `check`, only the declared checks decide, exactly as before. A policy with only a `using` alongside them adds nothing to the check.
 - The platform's ownership floor (`owner_only_writes`) is part of a defaulted check only when the by-id write gate kept it for that write. A record share at edit depth, a `public_read_write` object, or a covering controlled-by-parent master gate still replaces the floor. Those writes are not refused again on the new row.
 - `select` policies never gate a write's new row.
-- Bulk updates without a single id are still scoped by the `using` where clause and are not checked row by row.
+- Bulk updates without a single id are still scoped by the `using` where clause. Their new rows are now checked row by row as well, by the separate multi-row entry (#19950).
 - The `modifyAllRecords` bypass on private and platform-global objects still skips the check.

@@ -1299,6 +1299,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
           { id: 'n5', label: 'R', type: 'report', reportName: 'r' },
           { id: 'n6', label: 'A', type: 'action', actionDef: { actionName: 'go' } },
           { id: 'n7', label: 'C', type: 'component', componentRef: 'metadata:directory' },
+          { id: 'n10', label: 'H', type: 'doc', book: 'crm_manual', doc: 'crm_lead_guide' },
           { type: 'separator', id: 'sep_1', order: 5 },
           { id: 'n8', label: 'G', type: 'group', expanded: true, children: [{ id: 'n9', label: 'X', type: 'url', url: 'https://y' }] },
         ],

@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { compile, generateDts, manifestFromConfigs } from '../index.js';
 
 // A tiny public-tier manifest, shaped exactly like getAllConfigs() output.
+// Containment is the declared `children` slot input, not `isContainer`
+// (objectui#9910) — the flag stays on the fixtures as the layout fact it is.
 const manifest = manifestFromConfigs([
   { type: 'flex', namespace: 'ui', isContainer: true, inputs: [
     { name: 'direction', type: 'enum', enum: ['row', 'col'] },
     { name: 'gap', type: 'number' },
     { name: 'wrap', type: 'boolean' },
+    { name: 'children', type: 'slot' },
   ] },
   { type: 'card', namespace: 'ui', isContainer: true, inputs: [
     { name: 'title', type: 'string' },
+    { name: 'children', type: 'slot' },
   ] },
   { type: 'object-table', namespace: 'plugin-grid', isContainer: false, inputs: [
     { name: 'object', type: 'string', required: true, binding: 'object' },

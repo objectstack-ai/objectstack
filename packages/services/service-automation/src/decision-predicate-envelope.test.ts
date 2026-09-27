@@ -102,14 +102,29 @@ describe('decision branch predicate — envelope in a `z.string()` slot (#15572)
     });
 
     /**
-     * The boundary the card states explicitly, so nobody "fixes" it: a
-     * whitespace-only STRING predicate behaves consistently on both sides —
-     * "not authored" at the ledger, `false` at the evaluator — and is left
-     * exactly as it was. Only the envelope shape moved.
+     * RE-JUDGED IN PLACE (#17493, ruling A 5651023407) — not deleted, because
+     * the boundary it drew was a real decision and the reason it moved belongs
+     * next to it.
+     *
+     * What it pinned: "The boundary the card states explicitly, so nobody
+     * 'fixes' it: a whitespace-only STRING predicate behaves consistently on
+     * both sides — 'not authored' at the ledger, `false` at the evaluator — and
+     * is left exactly as it was. Only the envelope shape moved." So
+     * `decisionFlow('str_ws', '   ')` was asserted to register.
+     *
+     * Why it moved: the ground is still TRUE — the two sides do agree — and
+     * was ruled insufficient. A blank branch predicate is an author who meant
+     * to write a rule; the parser skipping it and the evaluator answering
+     * `false` only proves the platform did not crash, while the branch is never
+     * taken and nothing says so. The ruling is the third instance of one rule
+     * (#17322's `config.condition`, #15811's evaluated `source`), so the blank
+     * string is now refused here too — by `FlowSchema.parse` inside
+     * `registerFlow`, under this slot's own sentence. A non-blank string and an
+     * absent predicate still register, exactly as this test always said.
      */
-    it('leaves string predicates alone — including the whitespace-only one', () => {
+    it('leaves non-blank string predicates alone — and refuses the whitespace-only one (#17493)', () => {
         expect(() => engine.registerFlow('str_ok', decisionFlow('str_ok', 'record.rating >= 4'))).not.toThrow();
-        expect(() => engine.registerFlow('str_ws', decisionFlow('str_ws', '   '))).not.toThrow();
+        expect(() => engine.registerFlow('str_ws', decisionFlow('str_ws', '   '))).toThrow(PREDICATE_SLOT_STRING_REFUSAL);
         expect(() => engine.registerFlow('str_absent', decisionFlow('str_absent', undefined))).not.toThrow();
     });
 

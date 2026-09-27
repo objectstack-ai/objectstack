@@ -1767,15 +1767,18 @@ function selfTest() {
         env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui },
       },
     );
-    // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
-    // ratchet — no workflow produces `sdui.manifest.json`, by ruling — so the
-    // procedure's second half lives in this script's output. Prose alone is
-    // deletable in silence; pinning it here is what makes "the procedure gained a
-    // line" a fact a gate can lose. Asserted on the `--no-commit` path on purpose:
-    // that path moved the pin too, and it is the one that returns early.
+    // #5960: the pin bump is what makes the committed `sdui.manifest.json` stale,
+    // and no workflow regenerates it — so the procedure's second half lives in
+    // this script's output. Prose alone is deletable in silence; pinning it here
+    // is what makes "the procedure gained a line" a fact a gate can lose. The
+    // step it names is the one producer, which reads the pin's BUILT tree (ruling
+    // 丙 on #17735). Asserted on the `--no-commit` path on purpose: that path moved
+    // the pin too, and it is the one that returns early.
     check(
-      '#5960 a bump prints the `pnpm sdui:manifest` step (the ratchet has no other trigger)',
-      bumpStdout.includes('pnpm sdui:manifest') && bumpStdout.includes('NEXT STEP'),
+      '#5960 a bump prints the manifest-regeneration step (gen-sdui-manifest-node.mjs over the built tree)',
+      bumpStdout.includes('node scripts/gen-sdui-manifest-node.mjs')
+        && bumpStdout.includes('pnpm objectui:build')
+        && bumpStdout.includes('NEXT STEP'),
       bumpStdout,
     );
     const written = join(fwRun, '.changeset', `console-${head.slice(0, 12)}.md`);
@@ -3030,8 +3033,8 @@ function selfTest() {
     // fresh --no-tags clone of objectui, 2026-08-21: 941 remote branches, 118
     // branch tips not reachable from main, 291 commits present and not on main.
     // The release cut re-asks the question and fails closed (#9450 / PR #10494),
-    // but only at RC time — so in between a non-main pin merges and
-    // `pnpm sdui:manifest` ratchets spec↔registry parity against it.
+    // but only at RC time — so in between a non-main pin merges and the
+    // committed SDUI manifest is regenerated against it.
     //
     // The producer half is a WARNING, not a gate: the script is deliberately
     // usable offline and `origin/main` is only as fresh as the last fetch. So

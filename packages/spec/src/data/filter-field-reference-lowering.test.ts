@@ -98,7 +98,22 @@ describe('[#7597] equality triples with a `{ $field }` comparand', () => {
     expect(parseFilterAST(['amount', '=', 5])).toEqual({ amount: 5 });
     expect(parseFilterAST(['stage', 'equals', 'won'])).toEqual({ stage: 'won' });
     expect(parseFilterAST(['stage', '=', null])).toEqual({ stage: null });
-    expect(parseFilterAST(['stage', '=', ['a', 'b']])).toEqual({ stage: ['a', 'b'] });
+    // ⚠️ An ARRAY literal used to be pinned here lowering to `{ stage: ['a', 'b'] }`.
+    // Since the 2026-09-23 ruling (#19757) the shared face refuses an array in
+    // the equality slot, so the lowering is no longer observable as a return
+    // value — re-judged rather than dropped, because what this row proved still
+    // holds: the array is NOT promoted to `$eq` the way a reference is. The
+    // refusal names the IMPLICIT slot (`where.stage`), never `$eq`.
+    let refusal: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      parseFilterAST(['stage', '=', ['a', 'b']]);
+    } catch (e) {
+      refusal = e as Error & { code?: string; status?: number };
+    }
+    expect(refusal?.code).toBe('INVALID_FILTER');
+    expect(refusal?.status).toBe(400);
+    expect(refusal?.message).toMatch(/^The implicit-equality comparand on field "stage"/);
+    expect(refusal?.message).toContain('at where.stage.');
   });
 
   it('an object comparand that is NOT a field reference keeps implicit equality', () => {

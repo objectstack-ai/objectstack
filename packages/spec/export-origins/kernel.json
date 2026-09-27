@@ -342,6 +342,7 @@
     "PublicAuthFeatureName": "src/kernel/public-auth-features.ts#PublicAuthFeatureName (type)",
     "PublicAuthFeatureSemantics": "src/kernel/public-auth-features.ts#PublicAuthFeatureSemantics (type)",
     "PublicAuthFeatureSurface": "src/kernel/public-auth-features.ts#PublicAuthFeatureSurface (type)",
+    "RETIRED_PLATFORM_CAPABILITY_GUIDANCE": "src/kernel/platform-capabilities.ts#RETIRED_PLATFORM_CAPABILITY_GUIDANCE (const)",
     "RealTimeNotificationConfig": "src/kernel/events/integrations.zod.ts#RealTimeNotificationConfig (type)",
     "RealTimeNotificationConfigParsed": "src/kernel/events/integrations.zod.ts#RealTimeNotificationConfigParsed (type)",
     "RealTimeNotificationConfigSchema": "src/kernel/events/integrations.zod.ts#RealTimeNotificationConfigSchema (const)",

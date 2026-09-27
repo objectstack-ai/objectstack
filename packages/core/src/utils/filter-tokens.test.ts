@@ -145,6 +145,72 @@ describe('resolveFilterToken — context tokens', () => {
   });
 });
 
+/**
+ * `{record_id}` — the record-context token. The server never has a record in
+ * context, so it refuses by name on every path, whatever the request carries.
+ * The refusal is the same envelope as a session token the request has no value
+ * for (`FILTER_TOKEN_UNRESOLVED` / 400): the spelling is right, the context is
+ * missing, and `token` names which context.
+ */
+describe('resolveFilterTokens — the record-context token refuses by name', () => {
+  // A FULL context on purpose: the refusal must not depend on what the
+  // request happens to carry.
+  const full = { now: NOW, userId: 'usr_1', orgId: 'org_9', timezone: 'UTC' };
+
+  function refusal(filter: unknown): UnresolvedFilterTokenError {
+    let err: unknown;
+    try {
+      resolveFilterTokens(filter, full);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnresolvedFilterTokenError);
+    return err as UnresolvedFilterTokenError;
+  }
+
+  it.each([
+    ['a MongoDB-style condition', { assignee: '{record_id}' }],
+    ['an operator comparand', { assignee: { $eq: '{record_id}' } }],
+    ['the `${…}` spelling', { assignee: '${record_id}' }],
+    ['a rule-array filter', [{ field: 'assignee', operator: 'equals', value: '{record_id}' }]],
+    ['a logical branch beside a resolvable token', { $and: [{ owner: '{current_user_id}' }, { account: '{record_id}' }] }],
+  ])('%s: FILTER_TOKEN_UNRESOLVED / 400, the token named', (_label, filter) => {
+    const err = refusal(filter);
+    expect(err.code).toBe('FILTER_TOKEN_UNRESOLVED');
+    expect(err.status).toBe(400);
+    expect(err.name).toBe('UnresolvedFilterTokenError');
+    expect(err.token).toBe('record_id');
+    expect(err.message).toContain('{record_id}');
+  });
+
+  it('resolveFilterToken refuses it directly too — never `undefined`, never the literal', () => {
+    expect(() => resolveFilterToken('record_id', full)).toThrow(UnresolvedFilterTokenError);
+  });
+
+  it('lit control — a session token in the same request still resolves', () => {
+    expect(resolveFilterTokens({ owner: '{current_user_id}' }, full)).toEqual({ owner: 'usr_1' });
+  });
+
+  it.each([
+    ['{recordid}', 'recordid'],
+    ['{record-id}', 'record-id'],
+    ['{recordId}', 'recordId'],
+  ])('near miss %s stays FILTER_TOKEN_UNKNOWN, with {record_id} suggested', (value, token) => {
+    let err: unknown;
+    try {
+      resolveFilterTokens({ assignee: value }, full);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnknownFilterTokenError);
+    const e = err as UnknownFilterTokenError;
+    expect(e.code).toBe('FILTER_TOKEN_UNKNOWN');
+    expect(e.status).toBe(400);
+    expect(e.token).toBe(token);
+    expect(e.suggestion).toBe('record_id');
+  });
+});
+
 describe('resolveFilterTokens — tree walk', () => {
   const ctx = { now: NOW, userId: 'usr_1', orgId: 'org_9' };
 

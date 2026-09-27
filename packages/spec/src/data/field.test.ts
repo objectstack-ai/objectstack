@@ -173,7 +173,8 @@ describe('CurrencyValueSchema', () => {
 
 // ===========================================================================
 // #8163 — field-level `currency` is rejected with no pointer to the
-// declarable nested form (`currencyConfig.defaultCurrency`). Same
+// declarable nested form (`currencyConfig.defaultCurrency`, under
+// `currencyMode: 'fixed'` — the only mode that reads it). Same
 // `unrecognized_keys`-probing pattern as
 // `shared/visible-when-alias-guidance.test.ts`: this is prose (`guidance`),
 // not a rename (`aliases`) — the target is a NESTED key a flat rename cannot
@@ -282,10 +283,13 @@ describe('FieldSchema', () => {
 
   describe('Number Field Constraints', () => {
     it('should accept number field with precision and scale', () => {
+      // `type: 'number'`, as the title says: this fixture spelled `currency`
+      // until `scale` was retired from the currency type (refused at parse —
+      // pinned in field-currency-scale-refused.test.ts).
       const numberField: Field = {
         name: 'amount',
         label: 'Amount',
-        type: 'currency',
+        type: 'number',
         precision: 10,
         scale: 2,
         min: 0,

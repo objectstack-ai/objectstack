@@ -407,6 +407,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "身份链接 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：提供方及其签发的账号 ID（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -498,6 +502,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "验证记录 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：正在验证的标识符（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -606,6 +614,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：成员，以及已记录时的角色（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -667,6 +679,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "邀请 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：受邀的电子邮件地址（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -815,6 +831,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "团队成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：用户及其所在团队（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -932,6 +952,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：用户及其被分配到的业务单元（读取时计算）"
+      },
       business_unit_id: {
         label: "业务单元"
       },
@@ -1048,6 +1072,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "双因素认证 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：该凭据所属的用户（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -2091,6 +2119,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：预配的用户及其所在组（读取时计算）"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：投射的角色及被授予该角色的用户（读取时计算）"
       },
       connection_id: {
         label: "Connection ID"
@@ -2601,130 +2637,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       customized: {
         label: "Customized",
         help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
-      },
-      created_at: {
-        label: "创建时间"
-      },
-      updated_at: {
-        label: "更新时间"
-      }
-    }
-  },
-  sys_saved_report: {
-    label: "保存的报表",
-    pluralLabel: "保存的报表",
-    description: "持久化的 ObjectQL 报表定义——可重复运行并可调度",
-    fields: {
-      id: {
-        label: "报表 ID"
-      },
-      name: {
-        label: "名称"
-      },
-      description: {
-        label: "描述"
-      },
-      object_name: {
-        label: "对象",
-        help: "该报表查询的短对象名"
-      },
-      query_json: {
-        label: "查询",
-        help: "ObjectQL 查询封装——{ filter, fields, orderBy, limit, groupBy }"
-      },
-      format: {
-        label: "格式",
-        help: "IReportService.run() 和邮件摘要使用的渲染格式",
-        options: {
-          csv: "CSV",
-          json: "JSON",
-          html_table: "HTML 表格"
-        }
-      },
-      owner_id: {
-        label: "所有者",
-        help: "拥有该报表定义的用户（决定共享）"
-      },
-      last_run_at: {
-        label: "上次运行时间",
-        help: "由 IReportService.run() 在成功执行时写入"
-      },
-      last_row_count: {
-        label: "上次行数"
-      },
-      created_at: {
-        label: "创建时间"
-      },
-      updated_at: {
-        label: "更新时间"
-      }
-    }
-  },
-  sys_report_schedule: {
-    label: "报表计划",
-    pluralLabel: "报表计划",
-    description: "通过邮件周期性投递 sys_saved_report",
-    fields: {
-      id: {
-        label: "计划 ID"
-      },
-      report_id: {
-        label: "报表"
-      },
-      name: {
-        label: "名称",
-        help: "摘要的可选标签——用于邮件主题"
-      },
-      interval_minutes: {
-        label: "间隔（分钟）",
-        help: "发送频率（1440 = 每日，10080 = 每周）"
-      },
-      cron_expression: {
-        label: "Cron 表达式",
-        help: "可选 5/6 段 Cron——存在时覆盖 interval_minutes"
-      },
-      timezone: {
-        label: "时区"
-      },
-      active: {
-        label: "启用"
-      },
-      recipients: {
-        label: "收件人",
-        help: "以逗号分隔的邮箱地址"
-      },
-      format: {
-        label: "格式",
-        help: "渲染格式——csv 作为附件，html_table 内嵌在正文中",
-        options: {
-          csv: "CSV",
-          html_table: "HTML 表格"
-        }
-      },
-      subject_template: {
-        label: "主题模板",
-        help: "邮件主题；会替换 {{name}} / {{date}} / {{rows}}"
-      },
-      owner_id: {
-        label: "所有者"
-      },
-      next_run_at: {
-        label: "下次运行时间",
-        help: "调度器会加载 next_run_at <= now 的计划"
-      },
-      last_sent_at: {
-        label: "上次发送时间"
-      },
-      last_status: {
-        label: "最近状态",
-        options: {
-          ok: "成功",
-          failed: "失败",
-          skipped: "已跳过"
-        }
-      },
-      last_error: {
-        label: "最近错误"
       },
       created_at: {
         label: "创建时间"

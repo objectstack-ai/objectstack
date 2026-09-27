@@ -7,7 +7,6 @@ import {
   ExecutionErrorSchema,
   CheckpointSchema,
   ConcurrencyPolicySchema,
-  ScheduleStateSchema,
   FlowRunSummarySchema,
   FlowRunNodeSummarySchema,
   ExecutionStepMetricsSchema,
@@ -713,86 +712,5 @@ describe('ConcurrencyPolicySchema', () => {
 
   it('should reject maxConcurrent less than 1', () => {
     expect(() => ConcurrencyPolicySchema.parse({ maxConcurrent: 0 })).toThrow();
-  });
-});
-
-// ==========================================
-// Schedule State
-// ==========================================
-
-describe('ScheduleStateSchema', () => {
-  it('should accept a valid schedule state', () => {
-    const state = ScheduleStateSchema.parse({
-      id: 'sched_001',
-      flowName: 'daily_report',
-      // `cronExpression` was deleted outright (#16320) — the strip is pinned in
-      // `cron-typed-positions-retirement.test.ts`.
-      timezone: 'America/New_York',
-      status: 'active',
-      nextRunAt: '2026-02-03T14:00:00Z',
-      lastRunAt: '2026-01-31T14:00:00Z',
-      lastExecutionId: 'exec_100',
-      lastRunStatus: 'completed',
-      totalRuns: 42,
-      consecutiveFailures: 0,
-      startDate: '2026-01-01T00:00:00Z',
-      endDate: '2026-12-31T23:59:59Z',
-      maxRuns: 365,
-      createdAt: '2025-12-01T00:00:00Z',
-      updatedAt: '2026-01-31T14:00:05Z',
-      createdBy: 'user_admin',
-    });
-    expect(state.id).toBe('sched_001');
-    expect(state).not.toHaveProperty('cronExpression');
-    expect(state.totalRuns).toBe(42);
-    expect(state.timezone).toBe('America/New_York');
-  });
-
-  it('should apply defaults', () => {
-    const state = ScheduleStateSchema.parse({
-      id: 'sched_002',
-      flowName: 'weekly_sync',
-      createdAt: '2026-01-01T00:00:00Z',
-    });
-    expect(state.timezone).toBe('UTC');
-    expect(state.status).toBe('active');
-    expect(state.totalRuns).toBe(0);
-    expect(state.consecutiveFailures).toBe(0);
-  });
-
-  it('should accept all valid schedule statuses', () => {
-    const valid = ['active', 'paused', 'disabled', 'expired'];
-    valid.forEach((v) => {
-      const state = ScheduleStateSchema.parse({
-        id: 'sched_test',
-        flowName: 'test',
-        createdAt: '2026-01-01T00:00:00Z',
-        status: v,
-      });
-      expect(state.status).toBe(v);
-    });
-  });
-
-  it('should reject missing required fields', () => {
-    expect(() => ScheduleStateSchema.parse({
-      flowName: 'test',
-      createdAt: '2026-01-01T00:00:00Z',
-    })).toThrow(); // missing id
-
-    expect(() => ScheduleStateSchema.parse({
-      id: 'sched_003',
-      createdAt: '2026-01-01T00:00:00Z',
-    })).toThrow(); // missing flowName
-
-    // `cronExpression` was the third required key until #16320 deleted it, so
-    // the requiredness left with the key: a state without it now PARSES. The
-    // positive half lives here so the former "missing cronExpression" refusal
-    // cannot quietly come back; the authored-value strip is pinned in
-    // `cron-typed-positions-retirement.test.ts`.
-    expect(() => ScheduleStateSchema.parse({
-      id: 'sched_004',
-      flowName: 'test',
-      createdAt: '2026-01-01T00:00:00Z',
-    })).not.toThrow();
   });
 });

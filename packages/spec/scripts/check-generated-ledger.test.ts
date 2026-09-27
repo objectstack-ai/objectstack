@@ -84,25 +84,17 @@ describe('check:generated --reconcile-only', () => {
     expect(output).toContain('1 explicit manual-only generators');
   });
 
-  it('files the gate whose input this repo cannot produce as EXTERNAL_INPUT_REQUIRED (#4690)', () => {
-    // NO_GENERATOR would say "runnable, deliberately not run here" — which is what
-    // `check:react-declaration-parity` said while it was wired into no workflow and
-    // skipping by default, i.e. while running nowhere at all. The classification has
-    // to carry the two facts a reader needs instead: WHICH input is missing, and WHO
-    // supplies it.
+  it('carries an EMPTY EXTERNAL_INPUT_REQUIRED bucket once its only gate retired (#4690, ADR-0082 D4)', () => {
+    // The bucket's one entry, `check:react-declaration-parity`, retired with
+    // ADR-0082 D4 (maintainer ruling on #17735). The script is gone from
+    // package.json, so the reconciliation would red on a surviving ledger row
+    // ("names `…`, which package.json no longer has") — this pins both halves
+    // where the reading is legible: no script, and the bucket reports zero.
+    expect(scripts['check:react-declaration-parity']).toBeUndefined();
     const { status, output } = runReconcile();
     expect(status, output).toBe(0);
-    expect(output).toContain('1 needing an external input');
-    expect(output).toContain('cannot run here: check:react-declaration-parity');
-    expect(output).toContain('MANIFEST');
-    expect(output).toContain('scripts/gen-sdui-manifest.sh');
-    // And the claim is not free: `runBy` must still invoke the gate. The
-    // reconciliation fails otherwise (a gate classified as "runs elsewhere" while
-    // running nowhere is the hole this category exists to make visible), so this
-    // asserts the same fact where the failure message is legible.
-    const runner = path.resolve(SPEC, '..', '..', 'scripts/gen-sdui-manifest.sh');
-    expect(fs.existsSync(runner)).toBe(true);
-    expect(fs.readFileSync(runner, 'utf8')).toContain('check:react-declaration-parity');
+    expect(output).toContain('0 needing an external input');
+    expect(output).not.toContain('cannot run here:');
   });
 
   it('covers the test-layer typecheck gate and its writer (#5286)', () => {

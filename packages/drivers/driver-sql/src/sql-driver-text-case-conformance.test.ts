@@ -72,7 +72,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import {
   DIALECT_CELLS,
@@ -165,8 +165,15 @@ function declareTextCaseSweep(cell: DialectCell): void {
     for (const testCase of FILTER_TEXT_CASES) {
       it(testCase.name, async () => {
         if (testCase.expectRejection) {
+          // [#20020] The case-set's refusals name the operator and its
+          // replacement — which this driver discloses only for a predicate the
+          // caller is known to have written (the #8220 contract). So the
+          // filter is handed over marked 'author', as a read-scope merge
+          // boundary marks a caller's own predicate, on a shallow COPY so the
+          // shared case constant itself is never marked.
+          const where = markFilterSubtreeProvenance({ ...testCase.filter }, 'author');
           const err = await driver
-            .find(TEXT_OBJECT, { where: testCase.filter }, BYPASS)
+            .find(TEXT_OBJECT, { where }, BYPASS)
             .then(() => null, (e: unknown) => e as WireBearingError);
           expect(err, 'the case-set requires this filter REFUSED, not answered').toBeInstanceOf(Error);
           // `code` AND `status`: a refusal outside the ADR-0112 envelope reaches
@@ -205,14 +212,22 @@ describe('[#6518] the per-dialect construct, compiled', () => {
 
   const probe = (config: SqlDriverConfig) => new CompilerProbeDriver(config);
 
-  it('sqlite: GLOB, case-exact, with no ESCAPE clause', () => {
+  /**
+   * [#20024] `contains` compiles to `instr()`, which reads the whole stored
+   * value where `GLOB` cut it at its first U+0000; `starts` keeps `GLOB`. Both
+   * are case-exact, and neither takes an `ESCAPE` clause.
+   */
+  it('sqlite: instr() for contains and GLOB for starts, case-exact, with no ESCAPE clause', () => {
     const d = probe({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
     const contains = d.compileWhere({ name: { $contains: 'acme' } });
-    expect(contains).toMatch(/GLOB/);
-    expect(contains).not.toMatch(/LIKE|ESCAPE|lower\(/);
+    expect(contains).toMatch(/instr\(/);
+    expect(contains).not.toMatch(/LIKE|GLOB|ESCAPE|lower\(/);
     const icontains = d.compileWhere({ name: { $icontains: 'acme' } });
-    expect(icontains).toMatch(/lower\(.*\)\s+GLOB\s+lower\(/);
-    expect(icontains).not.toMatch(/ESCAPE/);
+    expect(icontains).toMatch(/instr\(lower\(.*\), lower\(/);
+    expect(icontains).not.toMatch(/GLOB|ESCAPE/);
+    const startsWith = d.compileWhere({ name: { $startsWith: 'acme' } });
+    expect(startsWith).toMatch(/GLOB/);
+    expect(startsWith).not.toMatch(/LIKE|ESCAPE|lower\(/);
   });
 
   it('postgres: LIKE unchanged, and the fold is translate() — never LOWER()', () => {
@@ -281,15 +296,16 @@ describe('[#6518] the per-dialect construct, compiled', () => {
         for (const op of ['$contains', '$startsWith', '$endsWith', '$icontains', '$like', '$ilike'] as const) {
           const sql = d.compileWhere({ score: { [op]: '5' } } as FilterCondition);
           expect(sql, op).toMatch(/where 1 = 0/);
-          expect(sql, op).not.toMatch(/LIKE|GLOB|lower\(|translate\(|CAST\(/);
+          // [#20024] `instr(` is the SQLite `contains` construct now.
+          expect(sql, op).not.toMatch(/LIKE|GLOB|instr\(|lower\(|translate\(|CAST\(/);
         }
         const not = d.compileWhere({ score: { $notContains: '5' } });
         expect(not).toMatch(/where 1 = 1/);
-        expect(not).not.toMatch(/LIKE|GLOB|IS NULL/);
+        expect(not).not.toMatch(/LIKE|GLOB|instr\(|IS NULL/);
         // A boolean column is the same class: its stored value is never text.
         expect(d.compileWhere({ flag: { $contains: 'true' } })).toMatch(/where 1 = 0/);
         // …and the text column beside it is untouched by the gate.
-        expect(d.compileWhere({ name: { $contains: '5' } })).toMatch(/LIKE|GLOB/);
+        expect(d.compileWhere({ name: { $contains: '5' } })).toMatch(/LIKE|GLOB|instr\(/);
       });
     }
 

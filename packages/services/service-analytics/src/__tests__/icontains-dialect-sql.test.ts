@@ -24,8 +24,9 @@
  * ## Why the pins are per dialect, and what each cell's evidence is
  *
  *   - **sqlite → EXECUTED.** Every assertion below that names row ids ran on
- *     sql.js. The construct is `lower(col) GLOB lower(?)`, and SQLite's
- *     `lower()` is ASCII-only — measured, `lower('CAFÉ')` is `cafÉ` — which is
+ *     sql.js. The construct is `instr(lower(col), lower(?)) > 0` ([#20025];
+ *     it was `lower(col) GLOB lower(?)` until the arm took `driver-sql`'s
+ *     U+0000-safe constructs), and SQLite's `lower()` is ASCII-only — measured, `lower('CAFÉ')` is `cafÉ` — which is
  *     exactly the #4706 Q1 = A boundary this operator is ruled to.
  *   - **postgres → byte-identical text.** `translate()` is correct there today,
  *     so the correct diff is no diff: the emitted SQL and params are asserted
@@ -246,20 +247,24 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     });
   });
 
-  it('sqlite compiles lower() over GLOB — one bound value, no ESCAPE clause', async () => {
+  it('sqlite compiles lower() on both sides of instr() — one bound value, no ESCAPE clause', async () => {
+    // [#20025] `instr()` rather than `GLOB`, because `glob()` cuts the pattern
+    // and the stored value at their first U+0000 (`driver-sql`'s table since
+    // #19999 / #20024). The fold is the same `lower()` on both sides, and the
+    // comparand binds raw: `instr()` has no pattern language to escape.
     const out = await nativeSql({ name: { $icontains: 'acme' } }, 'sqlite');
-    expect(out.sql).toContain('WHERE lower(name) GLOB lower($1)');
+    expect(out.sql).toContain('WHERE instr(lower(name), lower($1)) > 0');
     expect(out.sql).not.toMatch(/translate\(/);
-    expect(out.sql).not.toMatch(/ESCAPE/);
-    expect(out.params).toEqual(['*acme*']);
+    expect(out.sql).not.toMatch(/ESCAPE| GLOB /);
+    expect(out.params).toEqual(['acme']);
 
     const echo = await echoSql({ name: { $icontains: 'acme' } }, 'sqlite');
-    expect(echo.sql).toContain('lower(name) GLOB lower($1)');
+    expect(echo.sql).toContain('instr(lower(name), lower($1)) > 0');
     expect(echo.sql).not.toMatch(/translate\(/);
-    expect(echo.params).toEqual(['*acme*']);
+    expect(echo.params).toEqual(['acme']);
 
     expect(compileScopedFilterToSql({ name: { $icontains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
-      .toEqual({ sql: 'lower("t"."name") GLOB lower(?)', params: ['*acme*'] });
+      .toEqual({ sql: 'instr(lower("t"."name"), lower(?)) > 0', params: ['acme'] });
   });
 
   it('mysql compiles the nested-REPLACE binary fold — TEXT ONLY, NOT MEASURED on a server', async () => {
@@ -290,10 +295,12 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     // The mirror of the control #15684 wrote for `$icontains`: the two families
     // must not collapse onto one path. If the fold ever leaks into these rows,
     // `$contains` gets back the case-insensitivity #4706 Q2 = A took away.
+    // [#20025] `instr()` on SQLite since the arm left `GLOB` for `contains`;
+    // what this control guards — no fold on the case-EXACT row — is unchanged.
     const sqlite = await nativeSql({ name: { $contains: 'acme' } }, 'sqlite');
-    expect(sqlite.sql).toContain('WHERE name GLOB $1');
+    expect(sqlite.sql).toContain('WHERE instr(name, $1) > 0');
     expect(sqlite.sql).not.toMatch(/lower\(/);
-    expect(sqlite.params).toEqual(['*acme*']);
+    expect(sqlite.params).toEqual(['acme']);
     const pg = await nativeSql({ name: { $contains: 'acme' } }, 'postgres');
     expect(pg.sql).toContain('WHERE name LIKE $1 ESCAPE $2');
     expect(pg.sql).not.toMatch(/translate\(/);
@@ -455,8 +462,9 @@ describe('[#15780] the three compilers, EXECUTED on a real SQLite engine', () =>
         getReadScope: (object: string) => (object === 'rows' ? (c.filter as FilterCondition) : null),
       } as DatasetScopedStrategyContext;
       const { sql, params } = await new NativeSQLStrategy().generateSql(query(undefined), scoped);
-      expect(sql, c.name).toMatch(/GLOB/);
-      expect(sql, c.name).not.toMatch(/translate\(/);
+      // [#20025] The SQLite fold construct, named exactly rather than by `/GLOB/`.
+      expect(sql, c.name).toMatch(/instr\(lower\([^)]*\), lower\(\$\d+\)\) > 0/);
+      expect(sql, c.name).not.toMatch(/translate\(| LIKE /);
       expect(run(sql, params), c.name).toEqual([...c.expected]);
     }
   });
@@ -465,8 +473,8 @@ describe('[#15780] the three compilers, EXECUTED on a real SQLite engine', () =>
     for (const c of NAME_ICONTAINS) {
       const echo = await new ObjectQLStrategy().generateSql(query(c.filter), sqliteCtx);
       const native = await new NativeSQLStrategy().generateSql(query(c.filter), sqliteCtx);
-      expect(echo.sql, c.name).toMatch(/GLOB/);
-      expect(echo.sql, c.name).not.toMatch(/translate\(/);
+      expect(echo.sql, c.name).toMatch(/instr\(lower\([^)]*\), lower\(\$\d+\)\) > 0/);
+      expect(echo.sql, c.name).not.toMatch(/translate\(| LIKE /);
       expect(echo.params, c.name).toEqual(native.params);
       expect(run(echo.sql, echo.params), `echo of ${c.name}`).toEqual([...c.expected]);
     }

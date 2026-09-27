@@ -36,7 +36,10 @@ describe('validateJsxPages (ADR-0080 build gate)', () => {
 describe('validateJsxPages — full validation with a manifest', () => {
   const manifest = {
     components: {
-      flex: { type: 'flex', namespace: 'ui', isContainer: true, inputs: [] },
+      // Containment is the declared `children` input, not `isContainer`
+      // (objectui#9910, ported to the save gate by #19969) — the flag stays as
+      // the layout fact it is.
+      flex: { type: 'flex', namespace: 'ui', isContainer: true, inputs: [{ name: 'children', type: 'slot' }] },
       'object-table': { type: 'object-table', namespace: 'plugin-grid', inputs: [{ name: 'object', type: 'string', required: true }] },
     },
   };

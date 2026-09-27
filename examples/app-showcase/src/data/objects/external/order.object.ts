@@ -21,7 +21,7 @@ export const ExternalOrder = ObjectSchema.create({
   external: { remoteName: 'orders' },
   fields: {
     customer_id: Field.text({ label: 'Customer ID' }),
-    amount: Field.currency({ label: 'Amount', scale: 2 }),
+    amount: Field.currency({ label: 'Amount' }),
     status: Field.text({ label: 'Status' }),
     placed_on: Field.date({ label: 'Placed On' }),
   },

@@ -144,7 +144,8 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
         has_guard: { type: 'text', readonlyWhen: 'has(parent.status)' },
         // [#6457] The #4649 line, unmoved: materialisation covers the master's
         // DECLARED fields only, so an author typo on the header stays
-        // unevaluable — and therefore fail-OPEN — instead of reading as null.
+        // unevaluable — and therefore REFUSED since ADR-0137 D2 (fail-OPEN
+        // before it) — instead of reading as null.
         typo_guard: { type: 'text', readonlyWhen: 'parent.stauts == null' },
       },
     } as any);
@@ -276,11 +277,11 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
 
   it('ROW 1 (header carries the key): evaluates as it always did, verdict unchanged', async () => {
     // INV-1003 carries `status: 'paid'`, so `parent.status == null` is FALSE and
-    // the field is writable. No fault ⇒ nothing on the fail-open channel.
+    // the field is writable. No fault ⇒ nothing on the refusal channel.
     const warns = await warningsDuring(() =>
       engine.update('showcase_invoice_line', { id: 'line_paid', locked_until_status: 'written' }));
     expect(line('line_paid')).toMatchObject({ locked_until_status: 'written' });
-    expect(warns.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(false);
+    expect(warns.some((w) => w.includes('readonlyWhen could not be evaluated'))).toBe(false);
   });
 
   it('ROW 2 — THE FIX: a header missing the key now LOCKS instead of failing open', async () => {
@@ -292,9 +293,9 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
     const warns = await warningsDuring(() =>
       engine.update('showcase_invoice_line', { id: 'line_sparse', locked_until_status: 'forged' }));
     expect(line('line_sparse')).toMatchObject({ locked_until_status: 'kept' });
-    // The verdict came from an EVALUATION: the fail-open exit is not on the
-    // channel at all…
-    expect(warns.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(false);
+    // The verdict came from an EVALUATION: the fault exit (a refusal since
+    // ADR-0137 D2) is not on the channel at all…
+    expect(warns.some((w) => w.includes('readonlyWhen could not be evaluated'))).toBe(false);
     expect(warns.some((w) => w.includes("Field 'locked_until_status' is read-only (readonlyWhen)"))).toBe(true);
     // …and it is NOT #4889's unbound-root exit either — `parent` IS bound here.
     // This is the assertion that keeps ROW 2 and ROW 3 distinguishable.
@@ -331,7 +332,7 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
     const warns = await warningsDuring(() =>
       engine.update('showcase_invoice_line', { id: 'line_sparse', quantity: 42 }));
     expect(line('line_sparse')).toMatchObject({ quantity: 42 });
-    expect(warns.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(false);
+    expect(warns.some((w) => w.includes('readonlyWhen could not be evaluated'))).toBe(false);
   });
 
   it('CONSEQUENCE: `has(parent.<declared>)` is uniformly TRUE — it locks even on a sparse header', async () => {
@@ -342,13 +343,28 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
     expect(line('line_sparse')).toMatchObject({ has_guard: 'kept' });
   });
 
-  it('BOUNDARY: an UNDECLARED key on the header stays unevaluable — fail-OPEN (#4649 unmoved)', async () => {
+  it('BOUNDARY: an UNDECLARED key on the header stays unevaluable — and is REFUSED (#4649 unmoved, ADR-0137 D2)', async () => {
     // `parent.stauts` is a typo, not a sparse column. Materialising it would
-    // paper over the bug; it must stay reportable.
-    const warns = await warningsDuring(() =>
-      engine.update('showcase_invoice_line', { id: 'line_sparse', typo_guard: 'written' }));
-    expect(line('line_sparse')).toMatchObject({ typo_guard: 'written' });
-    expect(warns.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+    // paper over the bug; it must stay reportable — and since ADR-0137 D2 the
+    // report is a refused write naming the field and the rule, not a change
+    // let through with a log line.
+    let err: any;
+    const warns = await warningsDuring(async () => {
+      try {
+        await engine.update('showcase_invoice_line', { id: 'line_sparse', typo_guard: 'written' });
+      } catch (e) {
+        err = e;
+      }
+    });
+    expect(err?.name).toBe('ValidationError');
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toContainEqual(expect.objectContaining({
+      field: 'typo_guard',
+      code: 'rule_violation',
+      constraint: expect.objectContaining({ rule: 'readonlyWhen', reason: 'unevaluable', missingKey: 'stauts' }),
+    }));
+    expect(line('line_sparse')).toMatchObject({ typo_guard: 'kept' });
+    expect(warns.some((w) => w.includes("Field 'typo_guard' readonlyWhen could not be evaluated"))).toBe(true);
   });
 
   it('does NOT mutate the stored header row — the materialised copy stays local', async () => {

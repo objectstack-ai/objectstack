@@ -30,6 +30,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeStacks } from '@objectstack/spec';
+import { applyProtection } from '@objectstack/spec/shared';
 
 import { resolveArtifactCollections, packageOwnedCollectionKeys } from './artifact-collections';
 
@@ -183,6 +184,53 @@ describe('resolveArtifactCollections', () => {
         const resolved = resolveArtifactCollections(roundTripped) as typeof additive;
         expect(resolved.translations).toHaveLength(1);
         expect(resolved.requires).toEqual(['platform']);
+    });
+
+    it('claims a nameless item whose package-body copy registration has already STAMPED', () => {
+        // Boot registration (`registerApp` -> `registerItem` -> `applyProtection`)
+        // writes `_packageId` / `_provenance` onto the package body's copy IN
+        // PLACE and never touches the flattened top level, and `AppPlugin`
+        // resolves its collections after that. A nameless item is claimed by
+        // value, so the stamps alone used to turn one definition into two.
+        const additive = JSON.parse(JSON.stringify({
+            data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+            datasourceMapping: [{ datasource: 'primary', default: true }],
+            packages: packagesOf({
+                data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+                datasourceMapping: [{ datasource: 'primary', default: true }],
+            }),
+        }));
+        // `data` is the kind boot registration really stamps; `datasourceMapping`
+        // is a second nameless kind, so the claim is shown to be the identity
+        // rule's and not a special case for seeds.
+        const core = additive.packages[1].manifest;
+        for (const key of ['data', 'datasourceMapping']) {
+            applyProtection(core[key][0], { packageId: 'com.example.core', packageVersion: '1.0.0' });
+        }
+        // The precondition, measured on the fixture rather than assumed: the two
+        // copies really do differ now, and only by the envelope.
+        expect(core.data[0]).toMatchObject({ _packageId: 'com.example.core', _provenance: 'package' });
+        expect(additive.data[0]._packageId).toBeUndefined();
+
+        const resolved = resolveArtifactCollections(additive) as typeof additive;
+        expect(resolved.data).toHaveLength(1);
+        expect(resolved.datasourceMapping).toHaveLength(1);
+        // The top level is taken whole, so the copy handed on is the unstamped one.
+        expect(resolved.data).toBe(additive.data);
+    });
+
+    it('still contributes a body item that differs in what the AUTHOR wrote, stamped or not', () => {
+        // The control for the case above: only the registration envelope is left
+        // out of identity. A dataset whose records differ is a second
+        // definition, and it still arrives.
+        const additive = JSON.parse(JSON.stringify({
+            data: [{ object: 'account', mode: 'insert', records: [{ name: 'top' }] }],
+            packages: packagesOf({ data: [{ object: 'account', mode: 'insert', records: [{ name: 'body' }] }] }),
+        }));
+        applyProtection(additive.packages[1].manifest.data[0], { packageId: 'com.example.core' });
+
+        const resolved = resolveArtifactCollections(additive) as typeof additive;
+        expect(resolved.data.map((d: any) => d.records[0].name)).toEqual(['top', 'body']);
     });
 
     it('claims by NAME too, so a merged top-level object is not joined by its unmerged halves', () => {

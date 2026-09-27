@@ -5,9 +5,10 @@
  * answering "no drift".
  *
  * `SqlDriver.detectManagedDrift` reads the physical schema through Knex, and a
- * remote `TursoDriver` is built with a placeholder `:memory:` Knex connection
- * that holds none of the datasource's tables. Before the refusal, the remote
- * answer was `[]` for every database. That is the answer the artifact-pinned
+ * remote `TursoDriver` was then built with a placeholder `:memory:` Knex
+ * connection that held none of the datasource's tables (since #20054 it is
+ * built with no Knex connection at all). Before the refusal, the remote answer
+ * was `[]` for every database. That is the answer the artifact-pinned
  * boot gate of `os serve` reads as "never drifted", so a gate whose job is to
  * refuse a boot on destructive drift let every remote-Turso boot through.
  *
@@ -35,9 +36,14 @@
  *    database while refusing.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { replicaFiles } from './replica-file.testkit.js';
+
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+const replicaFileUrls = replicaFiles();
+afterAll(() => replicaFileUrls.removeAll());
 
 interface WireBearingError extends Error {
   code?: string;
@@ -134,7 +140,7 @@ describe('controls — the Knex detector still reports the extra column', () => 
     // keeps the (stubbed) sync target out of the measurement.
     const stub = makeLibsqlSqliteStub();
     const driver = new TursoDriver({
-      url: ':memory:',
+      url: replicaFileUrls.next(),
       syncUrl: 'libsql://drift.turso.io',
       client: record(stub).client as never,
       sync: { onConnect: false },

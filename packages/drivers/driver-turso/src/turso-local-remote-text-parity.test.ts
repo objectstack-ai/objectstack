@@ -52,7 +52,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
@@ -159,9 +159,24 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
   for (const testCase of FILTER_TEXT_CASES) {
     it(testCase.name, async () => {
       if (testCase.expectRejection) {
+        // [#20039] What a WITHHELD answer may still name is the refusal's class
+        // statement — read here off the LOCAL face's answer to the same filter
+        // UNMARKED, which is the withheld sentence every non-author caller gets
+        // (`$icontains`, for the comparand rows: one operator, one class). A
+        // mention that sentence does not carry is the predicate's, and a
+        // withheld remote answer must carry none of those.
+        const classOnly = await local
+          .find(TEXT_OBJECT.name, { where: { ...testCase.filter } } as DriverQuery)
+          .then(() => '', (e: unknown) => String((e as Error).message));
         for (const [face, driver] of [['local', local], ['remote', remote]] as const) {
+          // [#20020] The case-set's refusals name the operator and its
+          // replacement, which both compilers disclose only for a predicate the
+          // caller is known to have written (the #8220 contract) — so each face
+          // gets its own shallow COPY marked 'author', and the shared case
+          // constant itself is never marked.
+          const where = markFilterSubtreeProvenance({ ...testCase.filter }, 'author');
           const err = await driver
-            .find(TEXT_OBJECT.name, { where: testCase.filter } as DriverQuery)
+            .find(TEXT_OBJECT.name, { where } as DriverQuery)
             .then(() => null, (e: unknown) => e as WireBearingError);
           expect(err, `${face} compiled a filter the case-set requires refused`).not.toBeNull();
           // `code` AND `status`, never a bare rejection: this driver's whole
@@ -169,8 +184,19 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
           // 400-class error rather than an opaque 500 (ADR-0112).
           expect(err!.code, face).toBe(testCase.code);
           expect(err!.status, face).toBe(400);
+          // [#20020] On the REMOTE face `TursoDriver.toRemoteFilter` rebuilds
+          // every node before the transport sees it, so no author mark survives
+          // and a door that reads the mark answers its withheld wording — the
+          // fail-closed direction. Such an answer must then name NONE of the
+          // mentions (a half-redaction is none), and the author-facing text is
+          // pinned on the transport itself.
+          const withheld = face === 'remote' && err!.message.includes('withheld from the message');
           for (const mention of testCase.mustMention) {
-            expect(err!.message, `${face} — ${mention}`).toContain(mention);
+            if (withheld && !classOnly.includes(mention)) {
+              expect(err!.message, `${face} — ${mention}`).not.toContain(mention);
+            } else {
+              expect(err!.message, `${face} — ${mention}`).toContain(mention);
+            }
           }
         }
         return;

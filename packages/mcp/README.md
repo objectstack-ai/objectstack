@@ -122,14 +122,16 @@ apply):
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run
 'run_action'           // Invoke an action by name with { recordId, params }
+'resume_run'           // Continue a run paused on a screen with { runId, values }
 ```
 
-`aggregate_records` is registered only when the bridge implements `aggregate`;
-a bridge without that seam serves the rest and advertises nothing it cannot do.
+`aggregate_records` is registered only when the bridge implements `aggregate`,
+and `resume_run` only when it implements `resumeRun`; a bridge without those
+seams serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
 list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
-`actions:execute` covers `list_actions` / `run_action`. A tool outside the grant
+`actions:execute` covers `list_actions` / `run_action` / `resume_run`. A tool outside the grant
 is **not registered at all**, so the SDK rejects it as an unknown tool — the
 grant doubles as dispatch-time enforcement.
 
@@ -141,7 +143,10 @@ listed, declared `requiredPermissions` (ADR-0066 D4) are enforced, and
 action by name and dispatches it through the framework's own action mechanism
 (`engine.executeAction` / automation flow runner), so a BYO-AI MCP client
 (Claude Code, Cursor, …) can trigger real business logic — e.g. "complete this
-task", "convert this lead".
+task", "convert this lead". When a flow action stops on a screen, `run_action`
+answers `status: 'paused'` with a `runId` and the `screen`, and `resume_run`
+submits that screen's values to continue the run. The runtime's bridge admits
+it only for the caller's own run, behind the same gates as `run_action`.
 
 > **Security model (#2849):** gating happens at *invoke* time (`ai.exposed` +
 > capability gate + record-context loads under the caller's RLS). Once invoked,
@@ -252,7 +257,7 @@ await runtime.start();
 `grantedScopes`. `McpDataBridge` is the data seam (`listObjects`,
 `describeObject`, `query`, `get`, `create`, `update`, `remove`, and the optional
 `aggregate` / `listObjectsDiagnosed`); `McpActionBridge` adds `listActions` and
-`runAction`; `McpSkillBridge` is a single `listSkills`.
+`runAction` (plus the optional `resumeRun`); `McpSkillBridge` is a single `listSkills`.
 
 Also exported for hosts that render the skill surface themselves:
 `renderSkillMarkdown`, `listSkillPrompts`, `projectSkillPrompt`,

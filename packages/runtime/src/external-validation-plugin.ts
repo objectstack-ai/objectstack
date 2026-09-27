@@ -236,9 +236,11 @@ export class ExternalValidationPlugin implements Plugin {
    * and this class's own only caller was `scheduleDriftChecks()` re-arming
    * itself — so every armed `setInterval` below was STILL ARMED after
    * `await kernel.shutdown()` had RESOLVED. That is #9371's mechanism
-   * verbatim, and this plugin is one of only two `Plugin` implementations in
-   * the tree that own `setInterval` at all (`ReportsServicePlugin` is the
-   * other, repaired under #10371).
+   * verbatim. This plugin is the only `Plugin` implementation in the tree that
+   * calls `setInterval` itself (measured over non-test sources: 14 files call
+   * it, and every other enclosing class is a service, driver, adapter or
+   * helper); `ReportsServicePlugin`, the other one, was repaired under #10371
+   * and later retired whole with the saved-report stack.
    *
    * The timers are `unref`'d, so a long-lived host process still exits and
    * nothing complains in production — the bill lands in a vitest worker, which

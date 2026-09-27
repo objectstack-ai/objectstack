@@ -87,6 +87,8 @@
     "DatasetMeasureSchema": "ui/DatasetMeasure",
     "DatasetSchema": "ui/Dataset",
     "DerivedMeasureOp": "ui/DerivedMeasureOp",
+    "DocNavItem": "ui/DocNavItem",
+    "DocNavItemSchema": "ui/DocNavItem",
     "ElementButtonPropsSchema": "ui/ElementButtonProps",
     "ElementDataSource": "ui/ElementDataSource",
     "ElementDataSourceSchema": "ui/ElementDataSource",

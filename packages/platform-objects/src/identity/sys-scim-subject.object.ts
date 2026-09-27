@@ -30,6 +30,14 @@ export const SysScimSubject = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Per-user SCIM provisioning link — one row per user any SCIM connection provisions',
+  // [ADR-0079] Single-field title: `titleFormat` names one field, so the
+  // pointer names that field directly, as the `titleFormat` describe
+  // prescribes (the same shape as `sys_session`). With no pointer declared,
+  // the registry's designate-only pass stamped `nameField: 'id'`, so a
+  // renderer honouring ADR-0079's order drew the raw id as the H1.
+  // `identity-display-title.test.ts` pins the pointer.
+  displayNameField: 'user_id',
+  nameField: 'user_id', // [ADR-0079] canonical primary-title pointer (single-field titleFormat)
   titleFormat: '{user_id}',
   highlightFields: ['user_id', 'profile_source_id', 'updated_at'],
 

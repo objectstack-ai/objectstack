@@ -10,19 +10,30 @@ Automation API Protocol
 Defines REST CRUD endpoint schemas for managing automation flows,
 triggering executions, and querying execution history.
 
-Base path: /api/automation
+Base path: /api/v1/automation
+
+The wire paths the platform serves: the dispatcher mounts this door at its
+`prefix` (default `/api/v1`, the one `objectstack serve` uses) plus
+`/automation`. A drift pin in `@objectstack/runtime`
+(`automation-api-contract-mounts.test.ts`) holds every `path` in
+`AutomationApiContracts` to that mount table.
+
+The flow LIST is not on this door. Flows are metadata (ADR-0106), and the
+governed read of them is `GET /api/v1/meta/flow` (`client.meta.getItems`);
+the former `GET /api/v1/automation` list route, its request/response schemas
+and `client.automation.list` are retired (ADR-0087 semantic entry
+`automation-flow-list-route-retired`).
 
 **Endpoints**
 ```
-GET    /api/automation                         — List flows
-GET    /api/automation/:name                   — Get flow
-POST   /api/automation                         — Create flow
-PUT    /api/automation/:name                   — Update flow
-DELETE /api/automation/:name                   — Delete flow
-POST   /api/automation/:name/trigger           — Trigger flow execution
-POST   /api/automation/:name/toggle            — Enable/disable flow
-GET    /api/automation/:name/runs              — List execution runs
-GET    /api/automation/:name/runs/:runId       — Get single execution run
+GET    /api/v1/automation/:name                — Get flow
+POST   /api/v1/automation                      — Create flow
+PUT    /api/v1/automation/:name                — Update flow
+DELETE /api/v1/automation/:name                — Delete flow
+POST   /api/v1/automation/:name/trigger        — Trigger flow execution
+POST   /api/v1/automation/:name/toggle         — Enable/disable flow
+GET    /api/v1/automation/:name/runs           — List execution runs
+GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
 ```
 
 <Callout type="info">
@@ -32,8 +43,8 @@ GET    /api/automation/:name/runs/:runId       — Get single execution run
 ## TypeScript Usage
 
 ```typescript
-import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, FlowSummarySchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListFlowsRequestSchema, ListFlowsResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
-import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, FlowSummary, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListFlowsRequest, ListFlowsResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
+import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
+import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AutomationApiErrorCode.parse(data);
@@ -293,24 +304,6 @@ const result = AutomationApiErrorCode.parse(data);
 
 ---
 
-## FlowSummary
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Flow machine name |
-| **label** | `string` | ✅ | Flow display label |
-| **type** | `string` | ✅ | Flow type |
-| **status** | `string` | ✅ | Flow deployment status |
-| **version** | `integer` | ✅ | Flow version number |
-| **enabled** | `boolean` | ✅ | Whether the flow is enabled for execution |
-| **nodeCount** | `integer` | optional | Number of nodes in the flow |
-| **lastRunAt** | `string` | optional | Last execution timestamp |
-
-
----
-
 ## GetFlowRequest
 
 ### Properties
@@ -455,66 +448,6 @@ const result = AutomationApiErrorCode.parse(data);
 
 ---
 
-## ListFlowsRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Filter by flow status |
-| **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | optional | Filter by flow type |
-| **limit** | `integer` | optional (default: `50`) | Maximum number of flows to return |
-| **cursor** | `string` | optional | Cursor for pagination |
-
-
----
-
-## ListFlowsResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ flows: object[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
-
-### Nested Shape: `ListFlowsResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `ListFlowsResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `ListFlowsResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **flows** | `{ name: string; label: string; type: string; status: string; … }[]` | ✅ | Flow summaries |
-| **total** | `integer` | optional | Total matching flows |
-| **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more flows are available |
-
-
----
-
 ## ListRunsRequest
 
 ### Properties
@@ -524,7 +457,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
 | **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Filter by execution status |
 | **limit** | `integer` | optional (default: `20`) | Maximum number of runs to return |
-| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and the only ordering this door has is a required but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
+| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and the only ordering this door has is a required but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
 
 
 ---

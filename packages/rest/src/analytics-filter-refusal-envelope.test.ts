@@ -194,9 +194,17 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       message: /carries a field constraint with zero operators/,
     },
     {
+      // [#20010] RE-WORDED, same verdict: still a real normalizer refusal,
+      // still 400 INVALID_FILTER through this seam. PR #20032 hands every field
+      // entry of an object-form `where` to the shared comparand-shape face
+      // (`assertListComparandShapes`) before any node is built, and the face's
+      // own rule answers first — a list operator takes a list, `$between` a
+      // two-element [min, max] (#5869, moved to the face by #9228). So the
+      // message is the face's, the same bytes the FilterArray spelling gets;
+      // the analytics "needs a two-element" sentence is no longer reached.
       name: 'a $between with one bound',
       runtimeFilter: { amount: { $between: [10] } },
-      message: /needs a two-element \[min, max\] array/,
+      message: /Operator "\$between" on field "amount" requires a \[min, max\] value array/,
     },
     {
       name: 'an unsupported top-level operator',

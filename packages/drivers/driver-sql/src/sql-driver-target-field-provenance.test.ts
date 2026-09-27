@@ -285,14 +285,21 @@ describe('[#8197] target-field refusals × filter-subtree provenance', () => {
   });
 
   describe('the refusals outside this family are untouched', () => {
-    it('an UNDECLARED operator still names its operator and field — it was never in the family', async () => {
-      // The card's boundary: this refusal names the target too, and closing it
-      // was NOT ruled here. Pinned so a later widening is a deliberate act with
-      // a failing test in front of it, rather than a silent drift.
-      const err = await refusalOf({ stage: { $overlaps: ['x'] } });
-      expect(err.code).toBe('INVALID_FILTER');
-      expect(err.message).toContain('$overlaps');
-      expect(err.message).toContain('stage');
+    it('[#20020] an UNDECLARED operator joined the withhold by its own card — named for an author only', async () => {
+      // This pin used to hold the opposite: this refusal names the target too,
+      // closing it was NOT ruled by #8197, and the pin stood so that a later
+      // widening would be a deliberate act with a failing test in front of it.
+      // #20020 is that act — the undeclared-operator refusal reads the #8220
+      // mark like this family does — so the pin now holds both halves of it,
+      // and the family's own table above is unchanged.
+      const unmarked = await refusalOf({ stage: { $overlaps: ['x'] } });
+      expect(unmarked.code).toBe('INVALID_FILTER');
+      expect(unmarked.message).not.toContain('$overlaps');
+      expect(unmarked.message).not.toContain('stage');
+      const authored = await refusalOf(markFilterSubtreeProvenance({ stage: { $overlaps: ['x'] } }, 'author'));
+      expect(authored.code).toBe('INVALID_FILTER');
+      expect(authored.message).toContain('$overlaps');
+      expect(authored.message).toContain('stage');
     });
 
     it('a filter that compiles is still compiled — the gate adds no refusal', async () => {
