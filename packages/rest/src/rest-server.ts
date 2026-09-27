@@ -3461,8 +3461,10 @@ export class RestServer {
 
     /**
      * [#20156] The policy of the doors that serve STORED versions for authoring
-     * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
-     * the two cannot come to disagree about the `app` row.
+     * — the layered view (`/layers`, `?layers=`), `/diff` and [#20290] the
+     * plain read's `?state=draft` branch (the pending draft row, which Studio's
+     * designers merge over the layered view and save back). One constant, so
+     * they cannot come to disagree about the `app` row.
      *
      * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
      * 5856866273): a caller who may write the app ({@link metaSaveVerdict},
@@ -6916,13 +6918,31 @@ export class RestServer {
                             // exemption (ruling 5856774816, see
                             // `MetaReadGatePolicy.app`).
                             //
+                            // [#20290] Save its `?state=draft` branch, which serves
+                            // a STORED version — the pending draft row, never the
+                            // rendered world (that is `?preview=draft`, which keeps
+                            // the policy above) — and so reads under the
+                            // stored-version doors' policy
+                            // ({@link STORED_VERSION_DOOR_POLICY}). Studio's
+                            // designers merge this answer over the layered view
+                            // and save the result back, so a draft pruned for an
+                            // author deleted what it withheld: whoever may save
+                            // the app reads its draft whole, every other caller
+                            // pruned per caller (ruling 5856774816's rule, the
+                            // carrier triage decided in 5859504238). And no
+                            // per-DEPLOYMENT gate: a nav entry or a widget whose
+                            // service is merely off here is part of the stored
+                            // draft, for every caller, as on `/layers`.
+                            //
                             // [plural-spelling commit 83a3b1f2e] (the original
                             // card no longer resolves) Judged on the NORMALIZED
                             // `metaType`, like every gate here: `/meta/books/:name`
                             // is the canonical plural spelling (Prime Directive #3).
+                            const readPolicy: MetaReadGatePolicy = stateParam === 'draft'
+                                ? RestServer.STORED_VERSION_DOOR_POLICY
+                                : { arms: 'all', app: 'gate' };
                             const verdict = await this.metaItemReadGate(
-                                environmentId, req, p, metaType, req.params.name, [visible],
-                                { arms: 'all', app: 'gate' },
+                                environmentId, req, p, metaType, req.params.name, [visible], readPolicy,
                             )(visible);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
