@@ -454,8 +454,10 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
    * without the guard a consumer would have to resolve the combination by
    * picking one field and silently ignoring the rest, and a mirror that
    * copies an ordering from this docblock instead of chaining the guard ends
-   * up accepting what this schema refuses (#16714). The guard's own docblock
-   * names the one legacy combination it tolerates (`recordId` + `viewName`).
+   * up accepting what this schema refuses — objectui's hand-written mirror
+   * did exactly that, which is why commit 4cfc93b802 took the ordering out of
+   * this docblock. The guard's own docblock names the one legacy combination
+   * it tolerates (`recordId` + `viewName`).
    */
   filters: z.record(z.string(), z.string()).optional().describe(
     'URL filter conditions — targets the /:objectName/data bare surface via filter[<field>]=<value> params instead of a saved view. Values support template vars {current_user_id}, {current_org_id}. Mutually exclusive with recordId/viewName.',
@@ -501,8 +503,8 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
  * tolerated: it predates this guard and is documented as "viewName is
  * ignored when recordId is set".
  *
- * EXPORTED (#16714), one function per refinement, the same posture as the
- * `check*` exports of #16489: a hand-written mirror of the object nav item
+ * EXPORTED (commit 4cfc93b802), one function per refinement, the same posture
+ * as the `check*` exports of #16489: a hand-written mirror of the object nav item
  * chains this very function in its own `superRefine` instead of restating
  * the rule from prose — a restatement is what drifts. Its one mount in this
  * module is the `type: 'object'` branch of {@link NavigationItemSchema}; the
