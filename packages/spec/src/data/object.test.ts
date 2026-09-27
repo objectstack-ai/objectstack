@@ -11,6 +11,7 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 import { projectPublishedJsonSchema } from '../../scripts/lib/refinement-projection';
 import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements';
 import { Field } from './field.zod';
+import { isMaskedOnReadFieldType } from './masked-field-types';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -2458,6 +2459,38 @@ describe('ObjectSchema.create() password-field author warning (ADR-0100)', () =>
     });
     const msg = warn.mock.calls[0]?.[0] as string;
     expect(msg).toContain('ackPlaintextMasking');
+  });
+
+  // [#20141] The warning's exemption is the masked-on-read declaration's, not a
+  // second copy: for every `managedBy` bucket (and none), an un-acknowledged
+  // `password` field warns exactly when `isMaskedOnReadFieldType('password', …)`
+  // says the read mask applies. If `MASKED_ON_READ_FIELD_TYPES.password
+  // .exemptManagedBy` changes, this stays green only because the warning follows;
+  // a warning that hard-codes its own bucket goes red here.
+  describe('[#20141] the exemption is read from MASKED_ON_READ_FIELD_TYPES', () => {
+    const buckets = (
+      ObjectSchema.shape.managedBy as unknown as { unwrap(): { options: readonly string[] } }
+    ).unwrap().options;
+    const PW_WARNING = "use type 'password' on a non-auth object";
+    const warnsFor = (managedBy: string | undefined): boolean => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      ObjectSchema.create({
+        name: `adr0100_decl_${(managedBy ?? 'absent').replace(/-/g, '_')}`,
+        ...(managedBy === undefined ? {} : { managedBy: managedBy as never }),
+        fields: { pw: { type: 'password' } },
+      });
+      const fired = warn.mock.calls.some((c) => String(c[0]).includes(PW_WARNING));
+      warn.mockRestore();
+      return fired;
+    };
+
+    it('warns on exactly the buckets where the declaration masks password (the agreement)', () => {
+      expect(buckets.length).toBeGreaterThan(1); // the enum really was read
+      for (const managedBy of [undefined, ...buckets]) {
+        expect(warnsFor(managedBy), `managedBy ${managedBy ?? '(absent)'}`)
+          .toBe(isMaskedOnReadFieldType('password', managedBy));
+      }
+    });
   });
 });
 

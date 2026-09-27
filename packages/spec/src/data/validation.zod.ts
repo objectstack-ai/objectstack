@@ -375,53 +375,53 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  * {
  *   type: 'conditional',
  *   name: 'enterprise_approval_required',
- *   when: 'account_type = "enterprise"',
+ *   when: "record.account_type == 'enterprise'",
  *   message: 'Enterprise validation',
  *   then: {
  *     type: 'script',
  *     name: 'require_approval',
  *     message: 'Enterprise accounts require manager approval',
- *     condition: 'approval_status = null'
+ *     condition: 'record.approval_status == null'
  *   }
  * }
  * ```
- * 
+ *
  * ### 2. Conditional Field Requirements
  * Require certain fields only when specific conditions are met.
  * ```typescript
  * {
  *   type: 'conditional',
  *   name: 'shipping_address_when_required',
- *   when: 'requires_shipping = true',
+ *   when: 'record.requires_shipping == true',
  *   message: 'Shipping validation',
  *   then: {
  *     type: 'script',
  *     name: 'shipping_address_required',
  *     message: 'Shipping address is required for physical products',
- *     condition: 'shipping_address = null OR shipping_address = ""'
+ *     condition: "record.shipping_address == null || record.shipping_address == ''"
  *   }
  * }
  * ```
- * 
+ *
  * ### 3. Amount-Based Validation
  * Apply different rules based on transaction amount.
  * ```typescript
  * {
  *   type: 'conditional',
  *   name: 'high_value_approval',
- *   when: 'order_total > 10000',
+ *   when: 'record.order_total > 10000',
  *   message: 'High value order validation',
  *   then: {
  *     type: 'script',
  *     name: 'manager_approval_required',
  *     message: 'Orders over $10,000 require manager approval',
- *     condition: 'manager_approval_id = null'
+ *     condition: 'record.manager_approval_id == null'
  *   },
  *   otherwise: {
  *     type: 'script',
  *     name: 'standard_validation',
  *     message: 'Payment method is required',
- *     condition: 'payment_method = null'
+ *     condition: 'record.payment_method == null'
  *   }
  * }
  * ```
@@ -432,19 +432,19 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  * {
  *   type: 'conditional',
  *   name: 'regional_compliance',
- *   when: 'region = "EU"',
+ *   when: "record.region == 'EU'",
  *   message: 'EU compliance validation',
  *   then: {
  *     type: 'script',
  *     name: 'gdpr_consent',
  *     message: 'GDPR consent is required for EU customers',
- *     condition: 'gdpr_consent_given = false'
+ *     condition: 'record.gdpr_consent_given == false'
  *   },
  *   otherwise: {
  *     type: 'script',
  *     name: 'tos_acceptance',
  *     message: 'Terms of Service acceptance required',
- *     condition: 'tos_accepted = false'
+ *     condition: 'record.tos_accepted == false'
  *   }
  * }
  * ```
@@ -455,53 +455,53 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  * {
  *   type: 'conditional',
  *   name: 'country_state_validation',
- *   when: 'country = "US"',
+ *   when: "record.country == 'US'",
  *   message: 'US-specific validation',
  *   then: {
  *     type: 'conditional',
  *     name: 'california_validation',
- *     when: 'state = "CA"',
+ *     when: "record.state == 'CA'",
  *     message: 'California-specific validation',
  *     then: {
  *       type: 'script',
  *       name: 'ca_tax_id_required',
  *       message: 'California requires a valid tax ID',
- *       condition: 'tax_id = null OR NOT(REGEX(tax_id, "^\\d{2}-\\d{7}$"))'
+ *       condition: 'record.tax_id == null || !matches(record.tax_id, "^[0-9]{2}-[0-9]{7}$")'
  *     }
  *   }
  * }
  * ```
- * 
+ *
  * ### 6. Tax Validation for Taxable Items
  * Only validate tax fields when the item is taxable.
  * ```typescript
  * {
  *   type: 'conditional',
  *   name: 'tax_field_validation',
- *   when: 'is_taxable = true',
+ *   when: 'record.is_taxable == true',
  *   message: 'Tax validation',
  *   then: {
  *     type: 'script',
  *     name: 'tax_code_required',
  *     message: 'Tax code is required for taxable items',
- *     condition: 'tax_code = null OR tax_code = ""'
+ *     condition: "record.tax_code == null || record.tax_code == ''"
  *   }
  * }
  * ```
- * 
+ *
  * ### 7. Role-Based Validation
  * Apply validation based on user role.
  * ```typescript
  * {
  *   type: 'conditional',
  *   name: 'role_based_approval_limit',
- *   when: 'user_role = "manager"',
+ *   when: "record.user_role == 'manager'",
  *   message: 'Manager approval limits',
  *   then: {
  *     type: 'script',
  *     name: 'manager_limit',
  *     message: 'Managers can approve up to $50,000',
- *     condition: 'approval_amount > 50000'
+ *     condition: 'record.approval_amount > 50000'
  *   }
  * }
  * ```
@@ -525,11 +525,11 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  * {
  *   type: 'conditional',
  *   name: 'enterprise_high_value',
- *   when: 'type = "enterprise"',
+ *   when: "record.type == 'enterprise'",
  *   then: {
  *     type: 'cross_field',
  *     name: 'amount_approval',
- *     condition: 'amount > 100000 AND approval = null',
+ *     condition: 'record.amount > 100000 && record.approval == null',
  *     fields: ['amount', 'approval']
  *   }
  * }
