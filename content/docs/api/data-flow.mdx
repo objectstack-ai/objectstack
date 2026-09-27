@@ -180,10 +180,8 @@ flowchart LR
     end
 
     subgraph "Build Time"
-        C -->|"generate"| D[JSON Schema]
         C -->|"generate"| E[TypeScript Types]
-        D -->|"feed"| F[IDE Autocomplete]
-        E -->|"feed"| F
+        E -->|"feed"| F[IDE Autocomplete]
     end
 
     subgraph "Runtime"
@@ -197,7 +195,6 @@ flowchart LR
 
 | Output | Used By | Purpose |
 |:---|:---|:---|
-| JSON Schema | VS Code, IntelliJ | Autocomplete and validation for `objectstack.config.ts` (via `os generate schema`) |
 | TypeScript Types | Plugin developers | Type-safe access to object definitions |
 | Manifest | Kernel | Runtime metadata for query validation and execution |
 | Metadata API | Client SDK | Dynamic object/field discovery |
