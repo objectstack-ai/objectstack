@@ -44,7 +44,7 @@ A column-less list overlay that names a `type` (`{ viewKind: 'list', type: 'kanb
 
 Two classes of column-less, type-less `viewKind: 'list'` bodies go from refused to accepted:
 
-- **W2** — a list-legal value under a key both members declare with different schemas: `aria` (the form member carries a retirement tombstone there), an i18n `description` (the form member takes a plain string only), and the list `sharing` block (the form member's is the public-link block). Measured: `{ name, object, viewKind: 'list', aria: { ariaLabel: 'Leads' } }` was refused, and is accepted. This is the change working: a list body is judged by list rules.
+- **W2** — a list-legal value under a key both members declare with different schemas: `aria` (the form member carries a retirement tombstone there), an i18n `description` (the form member takes a plain string only), the list `sharing` block (the form member's is the public-link block), and a valid legacy `options` bag (the form member pins `options` absent). Measured: `{ name, object, viewKind: 'list', aria: { ariaLabel: 'Leads' } }` was refused, and is accepted. This is the change working: a list body is judged by list rules.
 - **W1** — an invalid value under one of the 19 form-only keys (`layout`, `sections`, `title`, …). Measured: `{ name, object, viewKind: 'list', isPinned: true, layout: 'diagonal' }` was refused (the form member judged `layout`), and is accepted with `layout` dropped unread. That is the list member's existing handling of a key it does not declare: a list overlay WITH `columns` and `layout: 'diagonal'` was already accepted the same way. It is a named residual, not a contract.
 
 ## Census

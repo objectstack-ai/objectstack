@@ -35,7 +35,8 @@
  * refused to accepted (`Clause-②: yes (narrowing)`):
  *
  * - **W2** — a list-legal value under a key both arms declare with different
- *   schemas (`aria`, an i18n `description`, list-style `sharing`). The form arm
+ *   schemas (`aria`, an i18n `description`, list-style `sharing`, a valid
+ *   legacy `options` bag). The form arm
  *   used to judge those keys by FORM rules; the list arm now judges them by the
  *   list rules they belong to. Pinned ACCEPT below: it is the ruling working.
  * - **W1** — an invalid value under a form-only key (`layout: 'diagonal'`),
@@ -186,6 +187,7 @@ describe('#20186 W2 — a list-legal value under a key both arms declare differe
     ['`aria` (the list view ARIA block; the form arm carries a retirement tombstone)', { aria: { ariaLabel: 'Leads' } }],
     ['an i18n `description` (the form arm takes a plain string only)', { description: { en: 'All leads' } }],
     ['list-style `sharing` (the form arm\'s is the public-link block)', { sharing: { type: 'personal' } }],
+    ['a valid legacy `options` bag (the form arm pins `options` absent)', { options: { map: { locationField: 'address' } } }],
   ])('%s', (_label, extra) => {
     expect(acceptance({ ...LIST, ...extra }).branch).toBe('listOverlay');
   });
