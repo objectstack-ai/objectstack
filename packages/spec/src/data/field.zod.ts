@@ -28,11 +28,6 @@ import {
   suggestDefaultValueToken,
 } from './default-value-shape';
 import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
-// #7918 — the ISO 4217 / CLDR fraction-digit contradiction check (maintainer
-// ruling 2026-08-12, Option A), read by `CurrencyConfigSchema.precision`'s
-// anchor. The FIELD-level `precision` key is total digits and is not compared
-// against the currency (#20011 — see the note in `FieldSchema`'s superRefine).
-import { currencyPrecisionContradiction } from './currency-fraction-digits';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
 
 /**
@@ -413,6 +408,58 @@ export const LocationCoordinatesSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Why `currencyConfig` has no decimal-places key — the one reason, shared by the
+ * tombstone for the removed key and the answers for its two natural spellings.
+ */
+const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
+  'a currency amount\'s decimal places are its currency\'s ISO 4217 minor unit (2 for USD, '
+  + '0 for JPY, 3 for KWD), which every display face derives from the currency itself, so '
+  + 'there is no decimal-places setting to declare. Do not move the number to the '
+  + 'field-level `precision`: that key is the amount\'s TOTAL digit count (a DECIMAL(18,2) '
+  + 'amount declares `precision: 18`), not its decimal places.';
+
+/**
+ * Prescriptions for the decimal-places spellings this surface refuses.
+ *
+ * #19992 (ADR-0049 enforce-or-remove, triage direction REMOVE under ruling 乙 on
+ * #19910 — 「a currency's decimal places are the currency's, not a setting」):
+ * `precision` was a declared, validated key that no renderer or runtime ever
+ * read. objectui's `CurrencyField` derives the width from the currency's ISO
+ * 4217 minor unit (`currencyFractionDigits(currency)`, the same line at the
+ * `.objectui-sha` pin and at objectui `main`), and no code read the key at all —
+ * measured with a lit control (`currencyConfig.currencyMode` IS read) over
+ * objectstack `packages/**` + `examples/**`, objectui at the pin and at `main`,
+ * and cloud `main`. Its only reader was
+ * its own ISO 4217 contradiction check (#7918), which policed a width nothing
+ * applied; that check, the `.overwrite()` that baked a default `2` into parse
+ * output (#11423), and the `decimals` / `scale` → `precision` aliases all left
+ * with the key. Stored rows and built artifacts carrying the baked `2` are
+ * stripped on rehydration by the ADR-0087 conversion
+ * `currency-config-precision-removed`.
+ *
+ * `decimals` and `scale` were never keys here — they were `aliases` pointing an
+ * author at `precision`. With the target gone the alias would point at a
+ * refusal, so each gets the same answer as the tombstone instead of a bare
+ * unknown-key report (the edit-distance fallback reaches neither).
+ */
+const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> = {
+  precision:
+    '`currencyConfig.precision` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) '
+    + '— no renderer or runtime ever read it: '
+    + CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS
+    + ' Delete the key. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  decimals:
+    '`currencyConfig.decimals` is not a currency configuration key, and nothing replaces it: '
+    + CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS
+    + ' Delete the key.',
+  scale:
+    '`currencyConfig.scale` is not a currency configuration key, and nothing replaces it: '
+    + CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS
+    + ' Delete the key.',
+};
+
+/**
  * Currency Configuration Schema
  * Configuration for currency field type supporting multi-currency
  * 
@@ -421,97 +468,24 @@ export const LocationCoordinatesSchema = lazySchema(() => z.object({
  * - Cryptocurrency codes (BTC, ETH, etc.)
  * - Custom business-specific codes
  * Stricter validation can be implemented at the application layer based on business requirements.
+ *
+ * There is no decimal-places key: a currency's decimal places are its ISO 4217
+ * minor unit (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
+ * removed `precision`).
  */
 export const CurrencyConfigSchema = lazySchema(() => strictObject({
   surface: 'this currency configuration',
   history: FIELD_HISTORY,
-  aliases: { decimals: 'precision', scale: 'precision', mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
+  aliases: { mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
+  guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
-  /**
-   * #7918 — `.default(2)` moved off this property and into the `.overwrite()`
-   * below, and this placement is load-bearing. A property-level default
-   * materializes AT PARSE, so a refinement over the parsed object cannot tell
-   * an authored `precision: 2` from an untouched one — and a rule firing on
-   * the baked default would refuse every untouched JPY currencyConfig (the
-   * permanently-noisy shape the ruling forbids). Declared `.optional()`, the
-   * authored-vs-absent distinction survives to the `.superRefine` below;
-   * the `.overwrite` then materializes the same `2` AFTER the check, so parse
-   * OUTPUT is byte-identical to the `.default(2)` era. The `default: 2`
-   * annotation states the contract default to schema consumers without
-   * touching parse order — the `autonumberFormat` pattern below.
-   */
-  precision: z.number().int().min(0).max(10).optional().meta({
-    description: 'Decimal precision (default: 2)',
-    default: 2,
-  }),
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
   defaultCurrency: z.string().length(3).default('CNY').describe('Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR)'),
-}).superRefine((config, ctx) => {
-  // #7918 (maintainer ruling 2026-08-12, Option A): an AUTHORED `precision`
-  // that contradicts the statically-known currency's ISO 4217 / CLDR fraction
-  // digits is a publish-time error — `precision: 2` on a fixed-JPY config asks
-  // for two digits of a minor unit the yen does not have; `precision: 2` on
-  // fixed-KWD silently drops the third fils digit that exists.
-  //
-  // Deliberately partial, per the ruling: only `currencyMode: 'fixed'` pins a
-  // single currency to check against — `dynamic` mode is out of reach BY
-  // DESIGN (do not "improve" it), and codes outside CLDR `currencyData`
-  // (crypto/custom) fail OPEN. `config.precision` here is pre-`.overwrite`,
-  // so `undefined` means "not authored" — the defaulted 2 on an untouched
-  // fixed-JPY config never fires. `defaultCurrency` and `currencyMode` keep
-  // their property defaults: in authored-`fixed` mode the (possibly defaulted)
-  // `defaultCurrency` IS the field's one currency, so an authored `precision`
-  // contradicting it is judged even when the code itself was defaulted.
-  if (config.precision === undefined || config.currencyMode !== 'fixed') return;
-  const contradiction = currencyPrecisionContradiction(config.defaultCurrency, config.precision);
-  if (contradiction !== undefined) {
-    ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
-  }
-}).overwrite((config) => {
-  // #7918 — the relocated `.default(2)`, applied AFTER the check above.
-  // `.overwrite()` rather than `.transform()` per the measured #6926 precedent
-  // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this schema a
-  // `ZodObject` (a pipe has no `.extend` and answers shape introspection with
-  // an empty set), and checks run in attachment order, so the superRefine
-  // above always sees the pre-materialized value. Rebuilt in shape order so
-  // the output is byte-identical to the `.default(2)` era:
-  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number
-  // — except on the guarded combination below. The one accepted cost, same as
-  // #6926's: the INFERRED output type still declares `precision?` even though
-  // a parsed config normally carries it (ADR-0122 forbids hand-narrowing
-  // `CurrencyConfigParsed`); the runtime contract is the enforced one.
-  //
-  // #11423 (maintainer ruling on #9689, 2026-08-24, routed to this twin —
-  // 「The same principle prescribes the fix for the #7918 currency twin
-  // (#11423) — the spec seat should route it under this ruling.」): NEVER
-  // materialize a default the schema itself would refuse as authored. The
-  // superRefine above rejects an AUTHORED `precision: 2` on a fixed
-  // zero-/three-fraction-digit currency (JPY/KRW/KWD class), and the two
-  // spellings are indistinguishable to any later parse BY DESIGN — so baking
-  // `2` onto a bare fixed-JPY config made parse output self-rejecting on
-  // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
-  // MAINLINE app-build path (measured: `parse(parse(x))` threw at
-  // `currencyConfig.precision` for accepted x). A bare fixed config whose
-  // currency contradicts the default 2 therefore parses to output that OMITS
-  // `precision`: renderers already derive display width from the currency
-  // when the key is absent, and built artifacts stop carrying a value the
-  // schema itself refuses. Every other combination keeps byte-identity —
-  // `dynamic` mode and unknown codes (fail-open table) can never be refused,
-  // so they keep materializing. The #9689 master_detail `deleteBehavior`
-  // conditional in `FieldSchema`'s `.overwrite()` below is the worked
-  // precedent; #11423 is its recorded currency twin.
-  if (
-    config.precision === undefined &&
-    config.currencyMode === 'fixed' &&
-    currencyPrecisionContradiction(config.defaultCurrency, 2) !== undefined
-  ) {
-    return config;
-  }
-  return {
-    precision: config.precision ?? 2,
-    currencyMode: config.currencyMode,
-    defaultCurrency: config.defaultCurrency,
-  };
+  // #19992 — no `.superRefine()` / `.overwrite()` here any more. The #7918
+  // ISO 4217 contradiction check and the #11423 default-materializing
+  // `.overwrite()` both existed only for the removed `precision` key (see
+  // CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE above), so parse output is now
+  // exactly `{ currencyMode, defaultCurrency }`.
 }));
 
 /**
@@ -1214,8 +1188,10 @@ export const FieldSchema = lazySchema(() => {
   // `scale: 2.5` silently got no enforcement at all: the declared-but-inert
   // shape that hides AI-authored metadata errors. Refuse it at the producer
   // instead (ADR-0078 declared=enforced; house pattern `z.number().int().min(0)`).
-  // ⚠️ `CurrencyConfigSchema.precision` above is a DIFFERENT surface with its
-  // own alias table (`scale → precision` there) — do not conflate.
+  // ⚠️ `currencyConfig` has NO decimal-places key: its `precision` was removed
+  // (#19992) and its `decimals` / `scale` spellings are refused with the same
+  // prescription — see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE. Do not
+  // conflate this total-digit count with a currency's decimal places.
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
   // #18972 — and an UPPER bound, for the same declared=enforced reason one
   // axis over: `scale` is unrenderable above 100 at every consumer, so a
@@ -2319,8 +2295,8 @@ export const FieldSchema = lazySchema(() => {
   // refused the ruled contract and prescribed a total-digit count of 2.
   // ⛔ Do not reinstate a comparison here, and do not add a total-digit
   // coherence rule for currency alone: no numeric type has one. The
-  // `currencyConfig.precision` twin is a DIFFERENT key ("Decimal precision")
-  // and keeps its own check inside `CurrencyConfigSchema`.
+  // `currencyConfig.precision` twin that kept its own copy of the check was
+  // removed with it (#19992): a currency's decimal places are declared nowhere.
 
   // #9689 (maintainer ruling 2026-08-19, Q1 = A): an AUTHORED
   // `deleteBehavior: 'set_null'` on a `master_detail` is a publish-time error.
@@ -2405,14 +2381,14 @@ export const FieldSchema = lazySchema(() => {
     // The TYPE-CONDITIONAL defaults of this schema — relocated key-level
     // `.default()`s, applied AFTER the checks above. `.overwrite()` rather
     // than `.transform()` per the measured #6926 precedent
-    // (`CurrencyConfigSchema` in this file is the sibling): it keeps this
+    // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this
     // schema a `ZodObject` (a pipe has no `.extend` and answers shape
     // introspection with an empty set), and checks run in attachment order, so
     // the superRefine above always sees the pre-materialized value. Each key
     // is re-inserted at its SHAPE position (Zod emits parse output in shape
     // order), so output is byte-identical to the key-level `.default()` era
     // wherever the value is unchanged. The one accepted cost, same as the
-    // currency precedent's: the INFERRED output type declares the key optional
+    // #6926 precedent's: the INFERRED output type declares the key optional
     // (`deleteBehavior?`, `unique?`) even though a parsed field carries it
     // (ADR-0122 forbids hand-narrowing the inferred type); the runtime
     // contract is the enforced one.
@@ -2455,8 +2431,8 @@ export const FieldSchema = lazySchema(() => {
     // (both resolve to `cascade` — measured in the #9689 exhaustion matrix,
     // pinned in `engine-cascade-delete.test.ts`), and built artifacts stop
     // carrying a value the schema itself refuses. Every other type keeps
-    // byte-identity, and the #7918 currency `precision` twin of this landmine
-    // is #11423 — same principle, its own card.
+    // byte-identity. (The #7918 currency `precision` twin of this landmine,
+    // #11423, went away with that key in #19992 — nothing left to materialize.)
     //
     // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
     // has no meaning on a non-reference field: the engine's

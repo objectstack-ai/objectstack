@@ -1,229 +1,200 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7918 (maintainer ruling 2026-08-12, Option A) — publish-time rejection of a
- * declared `currencyConfig.precision` that contradicts the currency's ISO 4217
- * / CLDR fraction digits, when the currency is statically known
- * (`currencyConfig.currencyMode: 'fixed'`).
+ * A currency's decimal places are the currency's — pinned from both keys that
+ * ever claimed otherwise (ruling 5805782503, letter 乙: 「a currency's decimal
+ * places are the currency's, not a setting」).
  *
- * #20011 — the FIELD-level `precision` key is NOT judged by this rule. It is
- * "Total digits" (the `p` of a DECIMAL(p, s) amount), and a currency's decimal
- * places are the currency's, not a setting (ruling 5805782503, letter 乙). The
- * field-level block below pins that it parses whatever the currency.
+ * #19992 — `currencyConfig.precision` is REMOVED (ADR-0049 enforce-or-remove).
+ * It was declared, validated against ISO 4217 by the #7918 rule, and baked to
+ * `2` into parse output by the #11423 `.overwrite()` — and read by nothing:
+ * objectui's `CurrencyField` derives the width from the currency's ISO 4217
+ * minor unit. The #7918 / #11423 blocks that used to open this file pinned a
+ * rule over a key nobody honoured; they are replaced below by the retirement's
+ * own pins (the refusal, its two alias spellings, the parse output, and the
+ * ADR-0087 conversion at rest).
  *
- * The rule is deliberately partial: `dynamic` currencyMode has no single
- * currency to check against and is out of reach BY DESIGN; codes outside CLDR
- * `currencyData` (crypto/custom) fail OPEN. The rule fires ONLY on an AUTHORED
- * `precision` — the materialized `.default(2)` on an untouched fixed-JPY
- * config must never fire (the permanently-noisy shape the ruling forbids),
- * which is what the pre-default anchoring inside `CurrencyConfigSchema` (its
- * `.superRefine` before the `.overwrite` that materializes the default)
- * exists to deliver.
+ * #20011 — the FIELD-level `precision` key is "Total digits" (the `p` of a
+ * DECIMAL(p, s) amount) and is never judged against the currency. Its block
+ * below is unchanged except for the two cases that used to pin the
+ * currencyConfig twin's check, which now pin the twin's refusal.
  *
- * Key-vs-value note: these are VALUE verdicts (a declared width judged against
- * the currency), so the assertions demand full `safeParse` outcomes — not mere
- * key reachability.
+ * Key-vs-value note: the retirement pins judge a KEY (refused whatever its
+ * value), so they assert the `unrecognized_keys` envelope — code, path, the
+ * offending key and the prescription. The #20011 block judges VALUES (a
+ * total-digit count on each currency class), so it demands full `safeParse`
+ * outcomes.
  */
 
 import { describe, expect, it } from 'vitest';
-import { CurrencyConfigSchema, FieldSchema } from './field.zod';
+import { CurrencyConfigSchema, Field, FieldSchema } from './field.zod';
 import { ObjectSchema } from './object.zod';
-import {
-  CURRENCY_FRACTION_DIGITS,
-  currencyFractionDigits,
-  currencyPrecisionContradiction,
-} from './currency-fraction-digits';
+import { CURRENCY_FRACTION_DIGITS } from './currency-fraction-digits';
+import { applyConversionsToStoredItem } from '../conversions/stored';
 
-/** The one custom-issue the rule emits, or undefined when the parse passed. */
+/** The first issue, or undefined when the parse passed. */
 function firstIssue(result: { success: boolean; error?: { issues: Array<{ code: string; path: PropertyKey[]; message: string }> } }) {
   return result.success ? undefined : result.error!.issues[0];
 }
 
-describe('#7918 — currencyConfig-level anchor (pre-default, inside CurrencyConfigSchema)', () => {
-  it('rejects an authored precision contradicting a 0-digit currency (JPY + 2)', () => {
+/** The prescription's first clause — the retirement statement itself. */
+const RETIREMENT_LEAD =
+  '`currencyConfig.precision` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove)';
+
+describe('#19992 — `currencyConfig.precision` is removed: refused with the prescription, whatever its value', () => {
+  it('refuses the key with the full envelope — code, path, offending key, and the prescription\'s clauses', () => {
     const result = CurrencyConfigSchema.safeParse({
-      precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY',
+      precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD',
     });
     expect(result.success).toBe(false);
-    const issue = firstIssue(result)!;
-    expect(issue.code).toBe('custom');
-    expect(issue.path).toEqual(['precision']);
-    // The ruling's message shape: both numbers, named.
-    expect(issue.message).toContain('currency JPY has 0 fraction digits');
-    expect(issue.message).toContain('`precision: 2` contradicts it');
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    const issue = issues[0] as { code: string; path: PropertyKey[]; keys?: string[]; message: string };
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.path).toEqual([]);
+    expect(issue.keys).toEqual(['precision']);
+    // The message IS the author's migration doc — its clauses are the contract.
+    expect(issue.message).toContain(RETIREMENT_LEAD);
+    expect(issue.message).toContain('no renderer or runtime ever read it');
+    expect(issue.message).toContain(
+      "a currency amount's decimal places are its currency's ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD)",
+    );
+    expect(issue.message).toContain('Do not move the number to the field-level `precision`');
+    expect(issue.message).toContain('Delete the key.');
+    expect(issue.message).toContain(
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    );
   });
 
-  it('rejects an authored precision contradicting a 3-digit currency (KWD + 2)', () => {
-    const result = CurrencyConfigSchema.safeParse({
-      precision: 2, currencyMode: 'fixed', defaultCurrency: 'KWD',
-    });
+  it('refuses an AGREEING value exactly like a contradicting one — the verdict is on the key, not on the width', () => {
+    // #7918 accepted USD + 2 and refused JPY + 2 (a `custom` issue naming both
+    // digit counts). Both are now the same unknown-key refusal, and the
+    // fraction-digit sentence is gone from every outcome.
+    const cases: Array<Record<string, unknown>> = [
+      { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+      { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
+      { precision: 3, currencyMode: 'fixed', defaultCurrency: 'KWD' },
+      { precision: 8, currencyMode: 'fixed', defaultCurrency: 'BTC' },
+      { precision: 2, currencyMode: 'dynamic', defaultCurrency: 'JPY' },
+      { precision: 2 },
+    ];
+    for (const input of cases) {
+      const result = CurrencyConfigSchema.safeParse(input);
+      expect(result.success, JSON.stringify(input)).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues, JSON.stringify(input)).toHaveLength(1);
+      expect(issues[0]!.code).toBe('unrecognized_keys');
+      expect(issues[0]!.message).toContain(RETIREMENT_LEAD);
+      expect(issues[0]!.message).not.toContain('fraction digits;');
+    }
+  });
+
+  it('the former alias spellings `decimals` / `scale` get the same answer — never a rename to the removed key', () => {
+    // They were `aliases` pointing an author at `precision`. With the target
+    // gone, each is answered with the reason instead, and nothing suggests a
+    // key to move the number to.
+    for (const key of ['decimals', 'scale'] as const) {
+      const result = CurrencyConfigSchema.safeParse({ currencyMode: 'fixed', defaultCurrency: 'JPY', [key]: 2 });
+      expect(result.success, key).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues, key).toHaveLength(1);
+      const issue = issues[0] as { code: string; path: PropertyKey[]; keys?: string[]; message: string };
+      expect(issue.code).toBe('unrecognized_keys');
+      expect(issue.path).toEqual([]);
+      expect(issue.keys).toEqual([key]);
+      expect(issue.message).toContain(
+        `\`currencyConfig.${key}\` is not a currency configuration key, and nothing replaces it`,
+      );
+      expect(issue.message).toContain("ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD)");
+      expect(issue.message).toContain('Delete the key.');
+      expect(issue.message).not.toContain('Did you mean');
+      // Never keys: no conversion strips them, so the message names no command.
+      expect(issue.message).not.toContain('os migrate meta');
+    }
+  });
+
+  it('the surviving aliases still suggest their surviving keys (the table lost two rows, not its job)', () => {
+    const result = CurrencyConfigSchema.safeParse({ mode: 'fixed' });
     expect(result.success).toBe(false);
-    expect(firstIssue(result)!.message).toContain('currency KWD has 3 fraction digits');
-    expect(firstIssue(result)!.message).toContain('`precision: 2` contradicts it');
+    expect(result.error!.issues[0]!.message).toContain('Did you mean `mode` → `currencyMode`?');
   });
 
-  it('THE noisy-shape guard: an untouched fixed-JPY config (defaulted precision) parses clean', () => {
-    // The default 2 "contradicts" JPY's 0 digits — but it was never authored,
-    // so the rule must not fire. This is the assertion that proves the
-    // pre-default anchoring; with a property-level `.default(2)` it goes red
-    // (measured in this card's reverse verification). Since #11423 the default
-    // is also no longer MATERIALIZED on this combination (the schema would
-    // refuse it as authored — see the idempotency block below), so the parsed
-    // output omits `precision` rather than carrying 2.
-    const result = CurrencyConfigSchema.safeParse({
-      currencyMode: 'fixed', defaultCurrency: 'JPY',
-    });
-    expect(result.success).toBe(true);
-    expect(result.data!.precision).toBeUndefined();
-  });
-
-  it('dynamic currencyMode is out of reach by design (JPY + 2 + dynamic passes)', () => {
-    const result = CurrencyConfigSchema.safeParse({
-      precision: 2, currencyMode: 'dynamic', defaultCurrency: 'JPY',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('defaulted currencyMode (dynamic) is equally out of reach', () => {
-    expect(CurrencyConfigSchema.safeParse({ precision: 2, defaultCurrency: 'JPY' }).success).toBe(true);
-  });
-
-  it('unknown codes fail open (fixed BTC + 8 passes — the open-set contract)', () => {
-    const result = CurrencyConfigSchema.safeParse({
-      precision: 8, currencyMode: 'fixed', defaultCurrency: 'BTC',
-    });
-    expect(result.success).toBe(true);
-    expect(result.data!.precision).toBe(8);
-  });
-
-  it('authored precision in fixed mode is judged against the DEFAULTED currency too (CNY + 0)', () => {
-    // `currencyMode: 'fixed'` with no code pins the schema default CNY as the
-    // field's one currency; an authored `precision: 0` contradicts its 2.
-    // The precision was authored, so this is not the noisy shape.
-    const result = CurrencyConfigSchema.safeParse({ currencyMode: 'fixed', precision: 0 });
-    expect(result.success).toBe(false);
-    expect(firstIssue(result)!.message).toContain('currency CNY has 2 fraction digits');
-    expect(firstIssue(result)!.message).toContain('`precision: 0` contradicts it');
-  });
-
-  it('a lowercased code cannot dodge the check (Intl-style case folding)', () => {
-    const result = CurrencyConfigSchema.safeParse({
-      precision: 2, currencyMode: 'fixed', defaultCurrency: 'jpy',
-    });
-    expect(result.success).toBe(false);
-    expect(firstIssue(result)!.message).toContain('currency JPY has 0 fraction digits');
-  });
-
-  it('agreeing combos parse byte-identically to the `.default(2)` era', () => {
-    // Measured on origin/main (37b82ed5b) before this change — same shape
-    // order, same materialized default, byte for byte. The one #11423 flip is
-    // deliberately NOT in this battery: a bare fixed-JPY config now omits
-    // `precision` (the schema would refuse the materialized 2 as authored —
-    // pinned in the idempotency block below); every combination here either
-    // authored its precision or cannot be refused, so byte-identity holds.
+  it('parse output carries exactly the two currency keys — the baked `precision: 2` is gone, on every combination', () => {
+    // Byte-exact. Before #19992 the `.overwrite()` wrote `"precision":2` in
+    // front on every row except the #11423 guarded class (bare fixed JPY/KRW/
+    // KWD), which is why stored rows carry it without anyone writing it.
     const cases: Array<[Record<string, unknown>, string]> = [
-      [{ precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
-        '{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}'],
-      [{ precision: 0, currencyMode: 'fixed', defaultCurrency: 'JPY' },
-        '{"precision":0,"currencyMode":"fixed","defaultCurrency":"JPY"}'],
-      [{ precision: 3, currencyMode: 'fixed', defaultCurrency: 'KWD' },
-        '{"precision":3,"currencyMode":"fixed","defaultCurrency":"KWD"}'],
-      [{ currencyMode: 'fixed', defaultCurrency: 'USD' },
-        '{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}'],
-      [{ currencyMode: 'fixed', defaultCurrency: 'JPY' },
-        '{"currencyMode":"fixed","defaultCurrency":"JPY"}'],
-      [{}, '{"precision":2,"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
+      [{}, '{"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
+      [{ currencyMode: 'fixed', defaultCurrency: 'USD' }, '{"currencyMode":"fixed","defaultCurrency":"USD"}'],
+      [{ currencyMode: 'fixed', defaultCurrency: 'JPY' }, '{"currencyMode":"fixed","defaultCurrency":"JPY"}'],
+      [{ currencyMode: 'fixed', defaultCurrency: 'KWD' }, '{"currencyMode":"fixed","defaultCurrency":"KWD"}'],
+      [{ defaultCurrency: 'JPY' }, '{"currencyMode":"dynamic","defaultCurrency":"JPY"}'],
     ];
     for (const [input, expected] of cases) {
-      expect(JSON.stringify(CurrencyConfigSchema.parse(input))).toBe(expected);
+      const once = CurrencyConfigSchema.parse(input);
+      expect(JSON.stringify(once)).toBe(expected);
+      // parse(parse(x)) stays idempotent — the property #11423 had to guard
+      // by hand now holds by construction (nothing is materialized).
+      expect(JSON.stringify(CurrencyConfigSchema.parse(JSON.parse(JSON.stringify(once))))).toBe(expected);
     }
   });
 
-  it('the `decimals`/`scale` alias spellings funnel into the canonical key (strict rejection + suggestion)', () => {
-    // `strictObject` aliases are rejection-with-suggestion, not renames: an
-    // alias spelling cannot silently carry a contradicting width past the
-    // check — the author is pointed at `precision`, where the check waits.
-    for (const alias of ['decimals', 'scale'] as const) {
-      const result = CurrencyConfigSchema.safeParse({
-        currencyMode: 'fixed', defaultCurrency: 'JPY', [alias]: 2,
-      });
-      expect(result.success).toBe(false);
-      const messages = result.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain(alias);
-      expect(messages).toContain('precision');
-    }
+  it('crosses the object door, located at the field — and `tsc` refuses the literal at the Field.currency factory', () => {
+    // The tsc channel: the key is off `CurrencyConfig`'s input type, so a
+    // literal in a typed position does not compile (TS2353). This is the
+    // instrument that found the three showcase objects that wrote the key.
+    const amount = Field.currency({
+      label: 'Amount',
+      // @ts-expect-error — `precision` is not a CurrencyConfig key (#19992)
+      currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+    });
+    // The parse channel, for sources `tsc` never sees (JSON, YAML, stored
+    // bodies through a write door): the closed shape refuses it, located.
+    const result = ObjectSchema.safeParse({ name: 'invoice', label: 'Invoice', fields: { amount } });
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('unrecognized_keys');
+    expect(issues[0]!.path).toEqual(['fields', 'amount', 'currencyConfig']);
+    expect(issues[0]!.message).toContain(RETIREMENT_LEAD);
   });
 });
 
-// [#11423] (maintainer ruling routed from #9689, 2026-08-24, idempotent
-// materialization): the `.overwrite()` never materializes a default the schema
-// itself would refuse as authored. Baking `precision: 2` onto a bare fixed
-// zero-/three-digit-currency config (JPY/KRW/KWD class) made parse output
-// self-rejecting on re-parse — `parse(parse(x))` threw for accepted x, and the
-// re-parse chain is the mainline authoring path (`ObjectSchema.create()`
-// returns parse output; `objectstack build`'s defineStack parses it again).
-// Same one-conditional shape as the #9689 master_detail guard in field.zod.ts.
-describe('#11423 — the materialized precision default is never one the schema itself refuses', () => {
-  it('a bare fixed-JPY config parses green and OMITS precision — parse(parse(x)) is idempotent', () => {
-    // The card's measured break: parse #1 baked `precision: 2`, parse #2
-    // rejected it at `currencyConfig.precision` ("currency JPY has 0 fraction
-    // digits; `precision: 2` contradicts it"). Absent is the honest spelling.
-    const once = CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'JPY' });
-    expect(once.precision).toBeUndefined();
-    expect('precision' in once).toBe(false);
-    const again = CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once)));
-    expect(again.success).toBe(true);
-    expect(JSON.stringify(again.data)).toBe(JSON.stringify(once));
-  });
+describe('#19992 — data at rest: a stored row carrying the baked `precision: 2` is served canonical', () => {
+  // The ADR-0087 conversion `currency-config-precision-removed` is retired from
+  // the load path (authors are refused, above) and replayed by the stored-row
+  // seam, which is what keeps rows written under the old `.overwrite()`
+  // loadable. The registry's own fixture test proves the transform in
+  // isolation; this pins the seam an operator's data actually goes through.
+  const storedRow = {
+    name: 'invoice',
+    label: 'Invoice',
+    fields: {
+      amount: { label: 'Amount', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } },
+      tax: { label: 'Tax', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'dynamic', defaultCurrency: 'CNY' } },
+      qty: { label: 'Qty', type: 'number', precision: 10, scale: 0 },
+    },
+  };
 
-  it('parse is IDEMPOTENT through the mainline create() → defineStack chain (the chain that carried the defect)', () => {
-    const field = FieldSchema.parse({
-      name: 'amount', label: 'Amount', type: 'currency',
-      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
-    });
-    expect(FieldSchema.safeParse(JSON.parse(JSON.stringify(field))).success).toBe(true);
-    const obj = ObjectSchema.create({
-      name: 'invoice', label: 'Invoice',
-      fields: { amount: { label: 'Amount', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' } } },
-    });
-    expect(ObjectSchema.safeParse(obj).success).toBe(true);
-  });
-
-  it('an AUTHORED contradictory precision is still rejected with the named message (the guard narrows materialization, not the rule)', () => {
-    const result = CurrencyConfigSchema.safeParse({
-      precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY',
-    });
+  it('the row as stored is refused by today\'s object door — so the seam is load-bearing, not cosmetic', () => {
+    const result = ObjectSchema.safeParse(storedRow);
     expect(result.success).toBe(false);
-    const issue = firstIssue(result)!;
-    expect(issue.code).toBe('custom');
-    expect(issue.path).toEqual(['precision']);
-    expect(issue.message).toContain('currency JPY has 0 fraction digits');
-    expect(issue.message).toContain('`precision: 2` contradicts it');
+    expect(result.error!.issues.every((i) => i.code === 'unrecognized_keys')).toBe(true);
   });
 
-  it('a bare fixed-USD config still materializes precision 2 byte-identically (the default keeps baking where it is legal — #7918 relocation intact)', () => {
-    expect(JSON.stringify(CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'USD' })))
-      .toBe('{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}');
-  });
-
-  it('the whole refused class skips materialization — 0-digit (KRW) and 3-digit (KWD) fixed currencies omit precision and re-parse green', () => {
-    for (const code of ['KRW', 'KWD']) {
-      const once = CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: code });
-      expect('precision' in once).toBe(false);
-      expect(CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once))).success).toBe(true);
-    }
-  });
-
-  it('combinations the superRefine cannot refuse keep materializing — dynamic mode and unknown fixed codes', () => {
-    // dynamic + JPY: no single currency to check against, baked 2 re-parses
-    // green (the superRefine only judges `fixed`); unknown fixed code: the
-    // digit table fails OPEN, so 2 is never refused.
-    expect(CurrencyConfigSchema.parse({ defaultCurrency: 'JPY' }).precision).toBe(2);
-    expect(CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'BTC' }).precision).toBe(2);
-    for (const input of [{ defaultCurrency: 'JPY' }, { currencyMode: 'fixed', defaultCurrency: 'BTC' }]) {
-      const once = CurrencyConfigSchema.parse(input);
-      expect(CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once))).success).toBe(true);
-    }
+  it('applyConversionsToStoredItem strips the key from every currencyConfig, leaves the field-level precision, and the result parses', () => {
+    const notices: string[] = [];
+    const converted = applyConversionsToStoredItem('object', storedRow, {
+      onNotice: (n) => notices.push(`${n.conversionId}@${n.path}`),
+    });
+    expect(converted.fields.amount.currencyConfig).toEqual({ currencyMode: 'fixed', defaultCurrency: 'USD' });
+    expect(converted.fields.tax.currencyConfig).toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
+    // The FIELD-level total-digit count is a different key and survives.
+    expect(converted.fields.qty).toEqual({ label: 'Qty', type: 'number', precision: 10, scale: 0 });
+    expect(notices.filter((n) => n.startsWith('currency-config-precision-removed@'))).toHaveLength(2);
+    expect(ObjectSchema.safeParse(converted).success).toBe(true);
+    // Copy-on-write: the stored input is not mutated.
+    expect(storedRow.fields.amount.currencyConfig).toHaveProperty('precision', 2);
   });
 });
 
@@ -306,20 +277,23 @@ describe('#20011 — field-level `precision` is total digits, never judged again
     expect(reparsed.data!.fields.amount.precision).toBe(18);
   });
 
-  it('the currencyConfig-level check still reaches through the FieldSchema door (a different key; unchanged)', () => {
+  it('flipped (#19992): the currencyConfig twin no longer judges a width — it refuses the key itself, at the FieldSchema door', () => {
+    // Was: a `custom` issue at ['currencyConfig', 'precision'] naming both
+    // fraction-digit counts. The twin key is gone, so the refusal is the
+    // closed shape's, located at the config object, carrying the prescription.
     const result = FieldSchema.safeParse({
       ...base,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
     });
     expect(result.success).toBe(false);
     const issue = firstIssue(result)!;
-    expect(issue.code).toBe('custom');
-    expect(issue.path).toEqual(['currencyConfig', 'precision']);
-    expect(issue.message).toContain('currency JPY has 0 fraction digits');
-    expect(issue.message).toContain('Declare `precision: 0`');
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.path).toEqual(['currencyConfig']);
+    expect(issue.message).toContain(RETIREMENT_LEAD);
+    expect(issue.message).not.toContain('fraction digits;');
   });
 
-  it('with both keys authored, only the currencyConfig anchor fires — the field-level key raises nothing', () => {
+  it('flipped (#19992): with both keys authored, only the removed twin is refused — the field-level key still raises nothing', () => {
     const result = FieldSchema.safeParse({
       ...base, precision: 2,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
@@ -327,34 +301,57 @@ describe('#20011 — field-level `precision` is total digits, never judged again
     expect(result.success).toBe(false);
     const issues = result.error!.issues;
     expect(issues).toHaveLength(1);
-    expect(issues[0].code).toBe('custom');
-    expect(issues[0].path).toEqual(['currencyConfig', 'precision']);
-    expect(issues[0].message).toContain('currency JPY has 0 fraction digits');
-    expect(issues[0].message).toContain('Declare `precision: 0`');
+    expect(issues[0].code).toBe('unrecognized_keys');
+    expect(issues[0].path).toEqual(['currencyConfig']);
+    expect(issues[0].message).toContain(RETIREMENT_LEAD);
   });
 });
 
-describe('#7918 — the digit table itself', () => {
-  it("carries the card's measured anchors", () => {
+describe('the CLDR digit table — kept for the `iso_4217_currency` value domain, which reads its key set', () => {
+  it("carries the #7918 card's measured anchors", () => {
     // 0: JPY/KRW/CLP/ISK/VND — 2: USD/EUR/CNY/GBP — 3: KWD/BHD/OMR/TND
-    for (const c of ['JPY', 'KRW', 'CLP', 'ISK', 'VND']) expect(currencyFractionDigits(c)).toBe(0);
-    for (const c of ['USD', 'EUR', 'CNY', 'GBP']) expect(currencyFractionDigits(c)).toBe(2);
-    for (const c of ['KWD', 'BHD', 'OMR', 'TND']) expect(currencyFractionDigits(c)).toBe(3);
+    for (const c of ['JPY', 'KRW', 'CLP', 'ISK', 'VND']) expect(CURRENCY_FRACTION_DIGITS[c]).toBe(0);
+    for (const c of ['USD', 'EUR', 'CNY', 'GBP']) expect(CURRENCY_FRACTION_DIGITS[c]).toBe(2);
+    for (const c of ['KWD', 'BHD', 'OMR', 'TND']) expect(CURRENCY_FRACTION_DIGITS[c]).toBe(3);
   });
 
-  it('answers undefined for codes outside CLDR (the fail-open contract)', () => {
-    for (const c of ['BTC', 'ETH', 'ZZZ']) expect(currencyFractionDigits(c)).toBeUndefined();
+  it('has no entry for codes outside CLDR (crypto/custom)', () => {
+    for (const c of ['BTC', 'ETH', 'ZZZ']) expect(Object.prototype.hasOwnProperty.call(CURRENCY_FRACTION_DIGITS, c)).toBe(false);
   });
 
   it('is a full CLDR snapshot, not a hand-typed subset', () => {
     // CLDR 48.0 currencyData carries 162 codes (see the module's provenance
-    // block). A shrunk table silently widens the fail-open surface.
+    // block). A shrunk table silently narrows the value domain's member set.
     expect(Object.keys(CURRENCY_FRACTION_DIGITS).length).toBe(162);
   });
-
-  it('the shared verdict names both numbers and stays silent on agreement/unknown', () => {
-    expect(currencyPrecisionContradiction('JPY', 2)).toContain('currency JPY has 0 fraction digits');
-    expect(currencyPrecisionContradiction('JPY', 0)).toBeUndefined();
-    expect(currencyPrecisionContradiction('BTC', 8)).toBeUndefined();
-  });
 });
+
+/*
+ * ⭐ ON THE ABSENCE HALF — why this retirement has no tree-scoped TEXT pin, and
+ * what stands in its place (the `dashboard-chart-structure-refusal.test.ts`
+ * precedent). The retirement playbook's default is a tree-scoped absence pin;
+ * a reader who finds none here must not conclude one was forgotten.
+ *
+ * A text sweep works when the retired key's NAME leaves the tree. `precision`
+ * does not leave: it stays authorable as the FIELD-level total-digit count on
+ * every numeric field, and appears thousands of times across this repository
+ * as that key and as prose. What is retired is a key IN A POSITION —
+ * `fields.<name>.currencyConfig.precision` — which a grep either matches
+ * everywhere or, scoped down by hand, matches only the sites its author
+ * already knew about: the file-scoped failure the tree-scoped rule exists to
+ * prevent, wearing a tree-scoped costume.
+ *
+ * The instruments that DO cover the position, both repo-wide and both already
+ * required in CI:
+ *
+ *  1. `tsc`. The key is off `CurrencyConfig`'s input type, so every object
+ *     literal that writes it in a typed position fails to compile — the
+ *     `@ts-expect-error` in the object-door case above holds that from this
+ *     side, and the three `examples/app-showcase` objects that wrote the key
+ *     were found by the example's own `typecheck`, not by grep.
+ *  2. The parse door. `CurrencyConfigSchema` is a closed `strictObject`, so an
+ *     authored key that reaches any parse — `objectstack validate`, the
+ *     metadata-protocol publish gate, `defineStack` — is refused with the
+ *     prescription, in JSON and YAML sources `tsc` never sees. Stored rows and
+ *     built artifacts go through the conversion seam pinned above instead.
+ */

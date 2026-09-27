@@ -5291,7 +5291,15 @@ const step18: MigrationStep = {
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
     + 'a page selects — as it does every filter of a component whose rows are inline, which '
     + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
-    + 'the door and taught the array; the stored-row seams and this chain replay it.',
+    + 'the door and taught the array; the stored-row seams and this chain replay it. '
+    + 'It also removes `currencyConfig.precision` (#19992, ADR-0049 enforce-or-remove): '
+    + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
+    + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+    + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
+    + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
+    + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
+    + 'built artifacts carry it without anyone having written it. Retired from the load path; '
+    + 'an authored key is refused with the prescription.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5328,6 +5336,7 @@ const step18: MigrationStep = {
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
+    'currency-config-precision-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
