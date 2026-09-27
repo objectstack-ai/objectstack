@@ -5290,7 +5290,18 @@ const step18: MigrationStep = {
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
     + 'a page selects — as it does every filter of a component whose rows are inline, which '
     + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
-    + 'the door and taught the array; the stored-row seams and this chain replay it.',
+    + 'the door and taught the array; the stored-row seams and this chain replay it. '
+    + 'It also retires a `joined` report\'s `chart` at both coordinates (#20161, ADR-0049 '
+    + 'enforce-or-remove): the joined renderer draws each block as a table and returns before '
+    + 'the one container `chart` read, and no renderer reads a block\'s `chart` at all, so a '
+    + 'chart on a joined report parsed, passed the chart-bindings lint, and plotted nothing. '
+    + 'The key leaves `JoinedReportBlockSchema`\'s closed shape (its `guidance` table carries '
+    + 'the prescription) and the joined arm of `ReportSchema`\'s refinement refuses a '
+    + 'container `chart`; `chart` stays live on every non-joined report. The D2 conversion '
+    + '`report-joined-chart-removed` strips both as a pure lossless delete — neither ever had '
+    + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
+    + 'offered a block `chart` input until this change); it is retired from the load path, so '
+    + 'authors are refused at parse rather than rewritten.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5327,6 +5338,7 @@ const step18: MigrationStep = {
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
+    'report-joined-chart-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -18058,6 +18070,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #20161 (ADR-0049 enforce-or-remove). `JoinedReportBlock.chart` declared an
+    // inline chart on one block of a `joined` report, and no renderer ever drew it:
+    // at the `.objectui-sha` pin `f8a9d0fb0596`, `DatasetReportRenderer`'s joined
+    // branch draws each block as a table and has no read of a block's `chart` at
+    // all, so the chart parsed, passed `validate-chart-bindings`, and plotted
+    // nothing. The block shape is `.strict()`, so the key is removed from it and
+    // its prescription is served from the block schema's `guidance` table. A
+    // joined report's container `chart` is refused by `ReportSchema`'s refinement
+    // in the same change; `chart` stays live on every non-joined report. D2:
+    // `report-joined-chart-removed`.
+    'ui/JoinedReportBlock:chart',
     // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
     // batch #107 item 1, verbatim 「撤」). `ListView.pageName` named the published
     // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever
