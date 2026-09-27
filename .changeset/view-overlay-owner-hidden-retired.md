@@ -12,6 +12,12 @@ enforce-or-remove; triage direction, verbatim: 「follow #20085's disposition fo
 the same key pair」. This completes the family: the view item record's `owner` /
 `hidden` are retired in this same release by its own entry, with the same texts.
 
+⚠️ **This supersedes one sentence of the view item retirement's note in this same
+release.** That note says the flattened overlay's own `owner` / `hidden` are
+untouched and that a `{ object, viewKind, hidden: true }` overlay still parses.
+True of that change alone; after this one, such an overlay is refused too. Read the
+two notes together: after this release, neither door accepts either key.
+
 Clause-②: no (narrowing)
 
 The overlay door declared both keys separately from the view item's pair. A bound
