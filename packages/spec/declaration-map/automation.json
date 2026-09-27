@@ -109,8 +109,6 @@
     "ParallelConfigSchema": "automation/ParallelConfig",
     "ScheduleOrganization": "automation/ScheduleOrganization",
     "ScheduleOrganizationSchema": "automation/ScheduleOrganization",
-    "ScheduleState": "automation/ScheduleState",
-    "ScheduleStateSchema": "automation/ScheduleState",
     "ScreenConfig": "automation/ScreenConfig",
     "ScreenConfigSchema": "automation/ScreenConfig",
     "ScreenFieldConfig": "automation/ScreenFieldConfig",

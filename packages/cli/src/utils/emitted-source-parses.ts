@@ -11,7 +11,7 @@
  * straight into a binding position:
  *
  *     os generate object foo.bar          exit 0
- *     src/objects/foo.bar.object.ts   ->  const foo.bar: Data.ServiceObject = {
+ *     src/objects/foo.bar.object.ts   ->  const foo.bar = ObjectSchema.create({
  *     src/objects/index.ts            ->  export { default as foo.bar } from './foo.bar.object';
  *
  * Two files, neither of them TypeScript, and a command that reported success.
