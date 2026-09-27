@@ -66,6 +66,8 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
+// [#20157] The judge-only filter-admission member's verdict and options.
+import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -1084,6 +1086,101 @@ function lowerWhereFilterArray<T extends object | undefined>(
   assertTemporalComparandsInterpretable(object, operation, schema, condition);
   lowered.where = condition;
   return lowered as T;
+}
+
+/**
+ * [#20157] Stage 2 of `where` admission: expand the filter placeholders
+ * (`{current_user_id}`, date macros) against the execution context.
+ *
+ * The one spelling of that step. Execution reaches it through
+ * `ObjectQL.resolveWhereTokens` (the read verbs) and `ObjectQL.withResolvedWhere`
+ * (`update` / `delete`), and the judge ({@link judgeWhereAdmission}) calls it
+ * directly. So "what execution resolves" and "what the judge resolves" cannot
+ * drift. An unknown placeholder throws `FILTER_TOKEN_UNKNOWN`; a known one the
+ * context carries no value for throws `FILTER_TOKEN_UNRESOLVED`. Neither ever
+ * resolves to `null` (see `@objectstack/core`'s `filter-tokens.ts`).
+ *
+ * Returns the input by reference when it holds no placeholder.
+ */
+function resolveWhereFilterTokens<W>(
+  where: W,
+  context: Parameters<typeof filterTokenContextFrom>[0],
+): W {
+  return resolveFilterTokens(where, filterTokenContextFrom(context));
+}
+
+/**
+ * [#20157] Is this thrown value a door's DIAGNOSTIC (the ADR-0112 envelope:
+ * a string `code` and a numeric `status`), or something else?
+ *
+ * Every `where` door raises the envelope: `invalidFilterError`, the
+ * materializable door's `INVALID_FIELD`, spec's shape and type faces, and
+ * core's `FILTER_TOKEN_*` errors. A throw without it is not a verdict about the
+ * filter. It is a fault (the "unreachable by construction" branch of
+ * {@link lowerWhereFilterArray}, a bug), and the judge re-throws it rather than
+ * dressing it up as one.
+ */
+function admissionRefusalOf(
+  thrown: unknown,
+): Extract<EngineFilterJudgement, { ok: false }> | null {
+  if (!(thrown instanceof Error)) return null;
+  const { code, status } = thrown as Error & { code?: unknown; status?: unknown };
+  if (typeof code !== 'string' || typeof status !== 'number') return null;
+  return { ok: false, code, status, message: thrown.message };
+}
+
+/**
+ * [#20157] Judge a `where` against an object WITHOUT executing it: the engine
+ * side of `IObjectQLEngine.judgeFilter` (#19995 ruling C).
+ *
+ * ## The pipeline it runs is the one every verb runs
+ *
+ * Every verb that takes a `where` (`find`, `findOne`, `count`, `aggregate`,
+ * `update`, `delete`) admits it in the same two stages, in the same order:
+ *
+ * 1. {@link lowerWhereFilterArray}: the shape gate, then (object form)
+ *    `assertListComparandShapes` → `assertFilterIsMaterializable` (the dotted,
+ *    then the virtual-field verdict) → `assertTextOperatorTargetsAreStringCapable`
+ *    → `assertTemporalComparandsInterpretable` → `normalizeFilterComparandTypes`,
+ *    or (array form) `isFilterAST` → `parseFilterAST` → the same three
+ *    field-map doors on the lowered condition.
+ * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
+ *
+ * What differs by verb sits BETWEEN or AROUND those stages and judges
+ * something other than `where`: option-key folding and refusal, the driver
+ * lookup (`getDriver`, before stage 1 on the writes and between the stages on
+ * the reads), `orderBy` / projection doors on `find`, and the per-aggregation
+ * and `having` doors on `aggregate`. None of those is part of this judgement.
+ * The judge calls the two stage functions themselves, so the doors have one
+ * implementation and one order. It never calls a second copy of a walk.
+ *
+ * ## What it reads
+ *
+ * The `where` value, the object's declared field map (`schema`, the
+ * registry's), and the execution context (for stage 2). No driver, no data,
+ * no hook, no middleware. Execution's own stages read nothing more, measured
+ * door by door on #20157.
+ *
+ * A thrown door diagnostic becomes the returned refusal, with the same `code`,
+ * `status` and `message` execution raises. Anything else is re-thrown
+ * ({@link admissionRefusalOf}).
+ */
+function judgeWhereAdmission(
+  object: string,
+  operation: string,
+  where: unknown,
+  schema: unknown,
+  context: Parameters<typeof filterTokenContextFrom>[0],
+): EngineFilterJudgement {
+  try {
+    const admitted = lowerWhereFilterArray(object, operation, { where }, schema);
+    resolveWhereFilterTokens(admitted.where, context);
+    return { ok: true };
+  } catch (thrown) {
+    const refusal = admissionRefusalOf(thrown);
+    if (refusal) return refusal;
+    throw thrown;
+  }
 }
 
 /**
@@ -8673,6 +8770,32 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#20157] `IObjectQLEngine.judgeFilter`: judge whether `where` can run
+   * against `objectName`, without running it (#19995 ruling C). The contract
+   * docblock states the semantics; {@link judgeWhereAdmission} records the
+   * pipeline and why it is the same one every verb runs.
+   *
+   * The object name resolves exactly as the verbs resolve it, and the field map
+   * is the one they read, so the verdict (and the object name inside its
+   * message) is the one execution would give. It stops before `getDriver`:
+   * nothing is resolved from or sent to a datasource.
+   */
+  judgeFilter(
+    objectName: string,
+    where: EngineQueryOptions['where'],
+    options?: EngineFilterJudgementOptions,
+  ): EngineFilterJudgement {
+    const object = this.resolveObjectName(objectName);
+    return judgeWhereAdmission(
+      object,
+      options?.operation ?? 'find',
+      where,
+      this._registry.getObject(object),
+      options?.context,
+    );
+  }
+
+  /**
    * Name of the dedicated datasource lifecycle-classed system data prefers
    * when one is registered (ADR-0057 §3.6 / P3). Purely opt-in by the
    * datasource's existence — no `telemetry` driver registered ⇒ resolution
@@ -10872,7 +10995,8 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
     if (!ast || ast.where == null) return;
-    ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
+    // [#20157] Through the stage function the judge also calls.
+    ast.where = resolveWhereFilterTokens(ast.where, execCtx);
   }
 
   /**
@@ -10890,7 +11014,8 @@ export class ObjectQL implements IObjectQLEngine {
     options: T,
   ): T {
     if (!options || options.where == null) return options;
-    const resolved = resolveFilterTokens(options.where, filterTokenContextFrom(options.context));
+    // [#20157] Through the stage function the judge also calls.
+    const resolved = resolveWhereFilterTokens(options.where, options.context);
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
