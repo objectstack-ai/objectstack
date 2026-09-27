@@ -803,8 +803,11 @@ describe('[#4579] the OpenApi31 block schemas are not exported from any entry po
   });
 
   // v17 dual-source cleanup (#4572): the bare names WebhookEvent(Schema) /
-  // WebhookConfig(Schema) belong to @objectstack/spec/integration alone
-  // (connector event enum + connector webhook config). The ./api pair was the
+  // WebhookConfig(Schema) belonged to @objectstack/spec/integration alone
+  // (connector event enum + connector webhook config — both since retired with
+  // the connector-nested `webhooks`, ADR-0049, so today NO entry publishes
+  // them; `integration/connector-resilience-keys-retirement.test.ts` pins
+  // that). The ./api pair was the
   // #4411-style trap: same names, different concepts, different forms
   // (z.object here vs z.enum there). WebhookConfig(Schema) on ./api was dead
   // and removed; WebhookEvent(Schema) was first renamed OpenApiWebhookEvent(Schema)

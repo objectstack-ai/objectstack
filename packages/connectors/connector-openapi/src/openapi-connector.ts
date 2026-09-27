@@ -237,7 +237,8 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
         authentication: auth,
         // Defaulted by ConnectorSchema; set explicitly so the literal satisfies
         // the (post-parse) Connector output type (mirrors connector-rest/mcp).
-        status: 'active',
+        // (`status: 'active'` stood here until the spec key was retired —
+        // ADR-0049: nothing ever read it.)
         enabled: true,
         requestTimeoutMs: config.requestTimeoutMs ?? 30000,
         ...(config.retryConfig === undefined ? {} : { retryConfig: config.retryConfig }),

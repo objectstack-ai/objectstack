@@ -70,7 +70,6 @@
     "app/branding",
     "app/contextSelectors.optionsSource",
     "book/groups.pages",
-    "connector/webhooks",
     "dashboard/dateRange",
     "dashboard/globalFilters",
     "dashboard/header",

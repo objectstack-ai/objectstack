@@ -129,18 +129,18 @@ upgrade guide project.
 
 ### Purpose
 
-Complete, production-grade integration with external systems. Includes authentication, security, webhooks, retry policies, and full lifecycle management.
+Complete, production-grade integration with external systems. Includes authentication, security, retry policies, and full lifecycle management.
 
 ### Key Features
 
 - ✅ **Authentication**: OAuth2, JWT, SAML, API Key, Basic Auth
-- ✅ **Webhooks**: Bidirectional event notifications
-- ✅ **Retry Policies**: Exponential backoff, circuit breaker
+- ✅ **Retry Policies**: Exponential backoff and the rest of `retryConfig` — executed; see below
 - ✅ **Field Mapping**: `dataType` target type and `syncMode` per-field direction —
   **no value transformation**; see below
 - ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
 - ✅ **Security**: Signature verification, encryption
-- ✅ **Monitoring**: Health checks, metrics, logging
+- ❌ **Health checks and circuit breaking**: **not provided** — the `health` block was retired; see below
+- ❌ **Webhooks on the connector**: **not provided** — declare webhooks in the stack's top-level `webhooks:` collection; see below
 - ❌ **Outbound rate limiting**: **not provided** — at this or any other level; see below
 
 > **There is no outbound rate limiting.** This list used to carry a ticked
@@ -173,10 +173,21 @@ Complete, production-grade integration with external systems. Includes authentic
 > advice above is unchanged: throttle at the connector provider or upstream
 > gateway.
 >
-> ⛔ **One key on this surface is still inert, and still `dead` in
-> `packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
-> sub-key is unread and no breaker ever opens; implement circuit breaking in the
-> connector provider.
+> **There is no health probe, no circuit breaker, no authored status and no
+> connector-owned webhook.** This list used to tick "**Monitoring**: Health
+> checks, metrics, logging", "**Webhooks**: Bidirectional event notifications"
+> and a circuit breaker beside the retry policy. `connector.health` (the
+> `healthCheck` probe and the `circuitBreaker`), `connector.status` and the
+> connector-nested `webhooks` were removed in `@objectstack/spec` 17 (ADR-0049
+> enforce-or-remove) — sixteen keys that nothing read: no loop ever polled a
+> connector endpoint or tripped a breaker, nothing read an authored status, and a
+> webhook nested in a connector was never registered, so it was never
+> delivered. Put probes and circuit breaking in the connector provider or an
+> upstream gateway. Whether a registered connector can be dispatched is the
+> computed `state` (`ready` / `degraded`) that `GET /api/v1/automation/connectors`
+> reports, and a webhook that is actually delivered is declared in the stack's
+> top-level `webhooks:` collection (`src/automation/webhook.zod.ts`). Already
+> authored one of them? `os migrate meta --from 17` lists the mechanical edits.
 >
 > `connectionTimeoutMs` was the second and is **removed** (ADR-0049, the
 > narrower second decision it was owed). It was carried to a provider factory
@@ -219,11 +230,10 @@ Complete, production-grade integration with external systems. Includes authentic
 
 > **The bare `Connector` is the AUTHOR shape.** It is `z.input` of
 > `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
-> `status`, `requestTimeoutMs`, all of `syncConfig`'s
+> `requestTimeoutMs`, all of `syncConfig`'s
 > `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
-> `batchSize` / `deleteMode`, a mapping's `required` / `syncMode`, a webhook's
-> `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` — is optional when
-> you write a connector. (`syncConfig.schedule`, the cron slot the schema used
+> `batchSize` / `deleteMode`, and a mapping's `required` / `syncMode` — is
+> optional when you write a connector. (`syncConfig.schedule`, the cron slot the schema used
 > to wrap into an envelope, was retired at #16320 under ADR-0049: nothing ever
 > evaluated it.) Annotate the **result** of
 > `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
@@ -306,23 +316,9 @@ const sapConnector: Connector = {
     }
   ],
 
-  // Webhooks for Real-time Events
-  webhooks: [
-    {
-      name: 'order_created_webhook',
-      url: 'https://api.objectstack.com/webhooks/sap/orders',
-      events: ['record.created', 'record.updated'],
-      secret: process.env.WEBHOOK_SECRET!,
-      signatureAlgorithm: 'hmac_sha256',
-      // (`retryPolicy` sat here until #3494 retired it — webhook delivery
-      // retries are owned by the messaging outbox on a fixed schedule, and the
-      // authored policy was never read. There is no replacement, and it is a
-      // different thing from `retryConfig` below, which governs the calls this
-      // connector MAKES.)
-      timeoutMs: 30000,
-      isActive: true
-    }
-  ],
+  // (`webhooks` sat here until ADR-0049 retired it — a webhook nested in a
+  // connector was never registered, so it was never delivered. Declare
+  // webhooks in the stack's top-level `webhooks:` collection, which is.)
 
   // (`rateLimitConfig` sat here until #4911 retired it — no outbound
   // rate-limiting engine ever existed. Throttle at the provider/gateway.)
@@ -349,7 +345,8 @@ const sapConnector: Connector = {
   // did. Authoring it is now a tsc error and a parse error carrying the
   // prescription; bound the connect phase at a provider or gateway.
   requestTimeoutMs: 60000,
-  status: 'active',
+  // (`status: 'active'` sat here until ADR-0049 retired the key — nothing read
+  // it. `enabled` is what takes a declarative instance in or out of service.)
   enabled: true
 };
 ```
@@ -376,8 +373,10 @@ const sapConnector: Connector = {
   retry is not a throttle: it spaces out calls you already made rather than
   capping the rate. The throttling stays the provider's to implement
 - **Error Handling**: Implement comprehensive retry logic with exponential backoff
-- **Monitoring**: Set up health checks and alerting for connector failures
-- **Testing**: Test authentication, sync, and webhook flows thoroughly
+- **Monitoring**: Set up health checks and alerting for connector failures at the
+  connector provider or upstream gateway — the connector shape declares no probe
+  and no breaker
+- **Testing**: Test authentication and sync flows thoroughly
 - **Documentation**: Document field mappings and business logic
 
 ---
@@ -395,9 +394,9 @@ mostly answers "which surface", and — for the two questions that used to route
 | Do you need to convert a value per field on import? | **Yes** → the import mapping's `fieldMapping[].transform` (`data/mapping.zod.ts`), applied row by row by the REST import path. **Not** L3: a connector's `fieldMappings` declares `dataType` and `syncMode` and performs no value transformation (#5552) |
 | Do you need joins, aggregations or custom-SQL stages? | **No surface provides this.** It was L2's headline claim and L2 had no executor (#6414). Do it in the destination system, or in a `flow` / job you write. Do not author a shape hoping it runs |
 | Do you need multi-source aggregation? | **Same answer**, and for the same reason — see [Retired: L2 ETL Pipeline](#retired-l2-etl-pipeline-v17) |
-| Do you need real-time webhooks? | **Yes** → L3 (Connector) |
+| Do you need real-time webhooks? | **Outbound:** the stack's top-level `webhooks:` collection (`src/automation/webhook.zod.ts`) — **not** L3: a connector's nested `webhooks` was never delivered and is retired (ADR-0049) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
-| Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — every `health.circuitBreaker` sub-key is still `dead` in `packages/spec/liveness/connector.json` and no breaker ever opens; implement it in the connector provider. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
+| Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — `health.circuitBreaker` was retired (ADR-0049) because no breaker ever opened; implement it in the connector provider or an upstream gateway. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
 | Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
 | Are you building a data warehouse pipeline? | The extraction half is L3 (`syncConfig`); the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
@@ -409,7 +408,7 @@ mostly answers "which surface", and — for the two questions that used to route
 ```
 ObjectStack ↔ Enterprise Connector ↔ SAP
                     ↓
-               Webhooks, Auth, Retry / Circuit Breaker
+               Auth, Retry
 ```
 Use **L3 Enterprise Connector** for production-grade integrations — including
 straightforward point-to-point sync, via a connector instance with simple `auth`
