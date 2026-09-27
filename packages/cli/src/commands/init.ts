@@ -613,9 +613,32 @@ export const SCAFFOLD_WIRED_REQUIRES: readonly string[] = [
   ...new Set(GENERATOR_SCAFFOLD_TARGETS.flatMap((t) => t.requires)),
 ];
 
-/** The import lines, one per wired barrel, bound under its stack key. */
+/**
+ * The import lines, one per wired barrel, bound under its stack key, and the
+ * one helper the collection keys read them through.
+ *
+ * ## Why `exportsOf` and not `Object.values`
+ *
+ * `Object.values(barrel)` is the idiom the example apps use, and it is right
+ * for a barrel that exports something. For an EMPTY barrel it does not
+ * type-check: with no export to infer from, TypeScript takes the element type
+ * from `defineStack`'s own collection type, whose name-keyed map branch makes
+ * `name` optional, and the list it then infers is assignable to neither
+ * branch — measured, `tsc --noEmit` refused the `actions`, `flows`,
+ * `dashboards` and `apps` keys of a fresh project (TS2322), while `views` and
+ * `skills`, which have no map form, passed. `exportsOf` takes its element type
+ * from the barrel alone: `never[]` while the barrel exports nothing, and the
+ * exported type once it does, so a fresh project passes its own `typecheck`
+ * and a filled one is checked exactly as strictly as before.
+ */
 function renderWiredImports(): string {
-  return SCAFFOLD_WIRED_BARRELS.map((b) => `import * as ${b.stackKey} from './${b.dir}';`).join('\n');
+  return [
+    ...SCAFFOLD_WIRED_BARRELS.map((b) => `import * as ${b.stackKey} from './${b.dir}';`),
+    '',
+    '// Every value a barrel exports, as the list a stack key takes: typed by what',
+    '// the barrel exports, and an empty list while it exports nothing yet.',
+    'const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);',
+  ].join('\n');
 }
 
 /** The `requires` entry and the collection keys inside `defineStack({ … })`. */
@@ -635,15 +658,15 @@ function renderWiredStackKeys(): string {
     `  // and one export line, and the view is part of this stack with no edit to`,
     `  // this file. A directory that is not wired here is never loaded, and`,
     `  // \`objectstack validate\` neither counts nor checks what it holds.`,
-    ...SCAFFOLD_WIRED_BARRELS.map((b) => `  ${b.stackKey}: Object.values(${b.stackKey}),`),
+    ...SCAFFOLD_WIRED_BARRELS.map((b) => `  ${b.stackKey}: exportsOf(${b.stackKey}),`),
   ].join('\n');
 }
 
 /**
  * The barrel `os init` writes for a wired directory its template puts nothing
  * in. `export {}` makes it a module, so the config's `import * as` resolves to
- * an empty namespace and `Object.values` to `[]` — a key `os validate` counts
- * at zero rather than an import that fails.
+ * an empty namespace and `exportsOf` to `[]` — a key `os validate` counts at
+ * zero rather than an import that fails.
  */
 function renderEmptyWiredBarrel(stackKey: string, type: string): string {
   return `// The ${stackKey} in this directory. \`objectstack generate ${type} NAME\` writes one
