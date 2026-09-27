@@ -746,9 +746,20 @@ describe('docsPackageRefs', () => {
     ]);
   });
 
-  it('is empty for anything that is not an array', () => {
+  it('is empty for an absent `packages`, and refuses a present non-array one', () => {
     expect(docsPackageRefs(undefined)).toEqual([]);
-    expect(docsPackageRefs({})).toEqual([]);
+    // #19925: `{}` is malformed, not absent (ruling A on #15293). This row used
+    // to pin `[]` for it, which was the silent answer that card removes. The
+    // full `{}` / `0` / `'x'` set is pinned in
+    // `test/non-array-packages-readers.test.ts`.
+    let refusal: { code?: unknown; status?: unknown } | undefined;
+    try {
+      docsPackageRefs({});
+    } catch (error) {
+      refusal = error as { code?: unknown; status?: unknown };
+    }
+    expect(refusal?.code).toBe('INVALID_ARTIFACT_PACKAGES');
+    expect(refusal?.status).toBe(422);
   });
 });
 
