@@ -63,12 +63,12 @@
  *   The census that sent it to its own card found the faces disagreeing: the
  *   cell renderer resolved absence to "no fixed width" (minimum 0 digits,
  *   maximum 20) while the grid summary footer and the metric widget resolved
- *   it to `0`. The ruling makes the cell's answer the protocol's: those two
- *   faces drop their private `?? 0` and read the width through
- *   {@link resolveFieldScale}, and a computed result over a no-fixed-width
- *   column rounds to the widest decimal count among the values that entered
- *   it — derived from the data, ⛔ never a constant. That consumer half is
- *   objectui#9843. Grouping is not this key's to decide:
+ *   it to `0`. The ruling makes the cell's answer the protocol's, and its
+ *   consumer half is objectui#9843: the footer and the widget drop their
+ *   private `?? 0` and read the width through {@link resolveFieldScale}, and a
+ *   computed result over a no-fixed-width column rounds to the widest decimal
+ *   count among the values that entered it — derived from the data, ⛔ never a
+ *   constant. Grouping is not this key's to decide:
  *   `FieldSchema.useGrouping` decides, and the renderer's interim heuristic
  *   for an absent `useGrouping` reads the DECLARED `scale` only — a declared
  *   `scale: 0` marks a discrete integer (a year, a fiscal period, an ordinal)
