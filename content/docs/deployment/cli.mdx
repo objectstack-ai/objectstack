@@ -1402,16 +1402,48 @@ either. A name in the legacy `<namespace>__<name>` form (`order__line`) is
 refused, because no prefix makes it one `os validate` accepts. The namespace is
 read from the loaded config, the same place `os validate` reads it from. If a
 config exists but does not load, the command refuses and writes nothing.
-Without a `namespace` (or without a config), nothing is prefixed. Nothing else a
-scaffold names (a view's, flow's or app's own `name`) is prefixed.
+Without a `namespace` (or without a config), nothing is prefixed. A view's own
+`name` is the object it binds to, prefix included, because the server registers
+a view under that object and refuses one whose `name` says otherwise. Nothing
+else a scaffold names (an action's, flow's or app's own `name`) is prefixed.
+
+**Every scaffold reaches the stack, or the command says it does not.** The
+`objectstack.config.ts` that `os init` writes for the `app` and `plugin`
+templates wires every directory in the table below: it imports each
+`src/<dir>/index.ts` barrel and hands its exports to `defineStack` under the key
+in the **Collected as** column, so a file `os g` writes there is part of the
+stack with no edit to the config. It also declares
+`requires: ['automation', 'triggers']`, which a flow needs to load and to run.
+After writing, `os g` loads the config again and says which of these holds:
+
+- **Reached**: the stack carries the new item, so `os validate` counts and
+  checks it.
+- **Not wired**: the config loads and its stack does not carry the item, or
+  there is no config. This is what happens with a config that imports
+  `./src/objects` alone, as `os init` projects from earlier releases and the
+  `npm create objectstack` starter do. The file is written, the config is left
+  as it was, and the command prints the import and the `defineStack` key that
+  wire the directory.
+- **Cannot run**: the stack carries a flow, and its `requires` lacks
+  `automation`. The config loads and the server never runs the flow. The
+  command prints the whole `requires` list to use.
+- **Refused**: the config loaded before the command wrote anything and no
+  longer loads with the new file in place, because the stack refuses it. Two
+  examples are an action or app bound to an object nobody declared, and a flow
+  in a stack without `triggers`. The command removes what it wrote, so the
+  project is as it was, and exits 1 with the stack's own reason. Generate the
+  object first (`os g object customer`), then what binds to it.
+
+`os g` never edits `objectstack.config.ts`: the config is yours, and the
+command only loads it.
 
 ```bash
 os g object customer        # Generate a Customer object
 os g view customer          # Generate a Customer list view
-os g action approve         # Generate an action
-os g flow customer          # Generate an automation flow
+os g action customer        # Generate an action on Customer records
+os g flow customer          # Generate a flow that runs when a Customer changes
 os g dashboard sales        # Generate a dashboard
-os g app crm                # Generate an app definition
+os g app customer           # Generate an app whose navigation opens Customer
 os g skill lead_qual        # Generate an AI skill
 
 os g object task -d lib/    # Override target directory
@@ -1420,15 +1452,15 @@ os g object task --dry-run  # Preview without writing
 
 **Available types:**
 
-| Type | Default Directory | Written as | Description |
-|------|------------------|------------|-------------|
-| `object` | `src/objects/` | `NAME.object.ts` | Business data object with fields |
-| `view` | `src/views/` | `NAME.view.ts` | List or form view definition |
-| `action` | `src/actions/` | `NAME.action.ts` | Button or batch action |
-| `flow` | `src/flows/` | `NAME.flow.ts` | Automation flow |
-| `dashboard` | `src/dashboards/` | `NAME.dashboard.ts` | Analytics dashboard |
-| `app` | `src/apps/` | `NAME.app.ts` | Application navigation |
-| `skill` | `src/skills/` | `NAME.skill.ts` | AI skill — the ADR-0063 extension primitive |
+| Type | Default Directory | Written as | Collected as | Description |
+|------|------------------|------------|--------------|-------------|
+| `object` | `src/objects/` | `NAME.object.ts` | `objects` | Business data object with fields |
+| `view` | `src/views/` | `NAME.view.ts` | `views` | List or form view definition |
+| `action` | `src/actions/` | `NAME.action.ts` | `actions` | Button or batch action |
+| `flow` | `src/flows/` | `NAME.flow.ts` | `flows` | Automation flow |
+| `dashboard` | `src/dashboards/` | `NAME.dashboard.ts` | `dashboards` | Analytics dashboard |
+| `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
+| `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -2164,10 +2196,10 @@ os g object account
 os g object contact
 os g object opportunity
 
-# 3. Add business logic
-os g flow lead_qualification
+# 3. Add business logic: a flow that runs when an opportunity changes
+os g flow opportunity
 
-# 4. Validate everything
+# 4. Validate everything: each file `os g` wrote is counted and checked
 os validate
 
 # 5. Start development with Console UI
