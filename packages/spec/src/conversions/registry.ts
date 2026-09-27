@@ -10467,6 +10467,41 @@ function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined
 }
 
 /**
+ * Does this component render INLINE rows — rows carried on the node — rather
+ * than query an object? Then none of its filters is rewritten.
+ *
+ * Measured at the `.objectui-sha` pin `f8a9d0fb`: `object-map`
+ * (`ObjectMap.tsx:831-833`), `object-tree` (`ObjectTree.tsx:835-837`),
+ * `object-calendar` (`ObjectCalendar.tsx:645-647`) and `object-gantt`
+ * (`resolveDataSource.ts:70`, then `ObjectGantt.tsx:865`) hand `schema.filter`
+ * UNLOWERED to an in-memory `ValueDataSource` when their rows are inline, and
+ * `ValueDataSource.find` (`ValueDataSource.ts:1093-1105`) reads an OBJECT
+ * `$filter` in the record dialect but an ARRAY one as an AST, whose matcher
+ * refuses a rule object (`:564-597`, `:70-73`) and so excludes EVERY row. A
+ * converted filter there would take a block from its filtered rows to none —
+ * the silent selection change the ruling excluded. The binding goes with its
+ * component: `ElementDataSourceGate` composes `dataSource.filter` into that
+ * same `schema.filter` (`plugin-map/src/index.tsx:38-41`, `filter: true`).
+ *
+ * Read by SHAPE, on every component type, rather than by the four types
+ * measured: the other inline-row renderers at the pin ignore `filter` for
+ * inline rows (`object-grid`, `object-kanban`) or issue no query at all
+ * (`object-timeline`), so leaving their filter as stored changes nothing they
+ * select, and a type list would go stale the day a fifth renderer starts
+ * filtering its own rows. The three shapes are the record-source ladder's
+ * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
+ * `data` the spec declares on the kanban, calendar and timeline blocks:
+ * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
+ */
+function rendersInlineRows(properties: unknown): boolean {
+  if (!isDict(properties)) return false;
+  const { data, staticData } = properties;
+  if (Array.isArray(data)) return true;
+  if (isDict(data) && data.provider === 'value') return true;
+  return Boolean(staticData);
+}
+
+/**
  * [#17321] The record-form and single-level AST `filter` values the converged
  * rule-array doors refuse become the `ViewFilterRule` array, wherever that
  * mapping is lossless — the D2 half of the one-filter-orthography convergence
@@ -10495,7 +10530,10 @@ function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined
  * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
  * an array or object comparand in equality position, and any rule the door
  * would refuse. All-or-nothing per filter: converting part of an AND-list
- * widens it. ⛔ A combinator is never flattened into the AND list — for `$or`
+ * widens it. And every filter of a component that renders INLINE rows
+ * ({@link rendersInlineRows}): the pin's in-memory `ValueDataSource` matches
+ * the record form and excludes every row for a rule array, so there the
+ * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
  * does not validate) and is refused at its door on its next save, with the
@@ -10537,8 +10575,9 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     'a record-form or single-level AST filter at a converged rule-array door becomes the '
     + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
-    + 'filter carrying `$and` / `$or` / `$not`, or any part with no lossless rule spelling, is '
-    + 'left exactly as stored and is refused at its door on its next save (one filter '
+    + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
+    + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
+    + 'array, `staticData`) is left exactly as stored and is refused at its door on its next save (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
   apply(stack, emit) {
     const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
@@ -10551,6 +10590,10 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     };
 
     return mapPageComponents(stack, (component, path) => {
+      // Inline rows: every filter of this node stays as stored, the binding's
+      // included. Its children are separate nodes and are judged on their own.
+      if (rendersInlineRows(component.properties)) return component;
+
       let next = component;
 
       const dataSource = next.dataSource;
@@ -10605,6 +10648,17 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
+                  },
+                },
+                // Inline rows: a mappable filter, left byte-identical, because
+                // the renderer matches it against those rows in the record
+                // dialect and would exclude every row for a rule array.
+                {
+                  type: 'object-map',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
+                    filter: { stage: 'open' },
                   },
                 },
                 // Already the rule array: untouched.
@@ -10672,6 +10726,14 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
+                  },
+                },
+                {
+                  type: 'object-map',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
+                    filter: { stage: 'open' },
                   },
                 },
                 {

@@ -11,7 +11,9 @@
  *
  *  §1  every ruled shape converts to the exact rule array, at every door kind;
  *  §2  a combinator — record key or AST group — is left byte-identical, and so
- *      is every other shape with no lossless rule spelling;
+ *      is every other shape with no lossless rule spelling, and every filter of
+ *      a component whose rows are inline (the renderer's in-memory matcher reads
+ *      the record form and excludes every row for a rule array);
  *  §3  an already-converged rule array is the identity, and a second replay is
  *      a no-op;
  *  §4  LOSSLESS is a measured property, not a claim: for every operator the
@@ -254,6 +256,69 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
     const { stack, notices } = convert(before);
     expect((componentOf(stack).properties as Dict).filter).toEqual({ a: 1 });
     expect(notices).toEqual([]);
+  });
+
+  describe('a component whose rows are INLINE keeps every filter as stored', () => {
+    // Measured at the objectui pin `f8a9d0fb`: object-map / -tree / -calendar /
+    // -gantt hand `filter` UNLOWERED to an in-memory ValueDataSource when their
+    // rows are inline, and ValueDataSource matches the record form but excludes
+    // EVERY row for a rule array. So there the rewrite is not lossless — and the
+    // binding is composed into that same `filter`, so it stays as stored too.
+    const INLINE: ReadonlyArray<readonly [string, string, Dict]> = [
+      ['object-map', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-tree', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-gantt', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-calendar', '`staticData`', { staticData: [{ stage: 'open' }] }],
+      ['object-map', 'an EMPTY `staticData` (still the value rung)', { staticData: [] }],
+      ['object-kanban', 'a bare `data` array', { data: [{ stage: 'open' }] }],
+    ];
+
+    it.each(INLINE)('%s with %s', (type, _shape, inline) => {
+      const before = pageWith({
+        type,
+        dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
+        properties: { objectName: 'deal', ...inline, filter: { stage: 'open' } },
+      });
+      const { stack, notices } = convert(before);
+      const component = componentOf(stack);
+      expect((component.properties as Dict).filter).toEqual({ stage: 'open' });
+      expect((component.dataSource as Dict).filter).toEqual({ owner_id: 'u1' });
+      expect(notices).toEqual([]);
+      const frozen = structuredClone(before);
+      expect(collectConversionNotices(frozen, { includeRetired: true }).stack).toBe(frozen);
+    });
+
+    it('`defaultFilters` on an inline-row grid stays as stored too', () => {
+      const { value, notices } = (() => {
+        const { stack, notices: n } = convert(pageWith({
+          type: 'object-grid',
+          properties: { data: { provider: 'value', items: [] }, defaultFilters: { stage: 'open' } },
+        }));
+        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n };
+      })();
+      expect(value).toEqual({ stage: 'open' });
+      expect(notices).toEqual([]);
+    });
+
+    it('control: the same filter on an object-bound block of the same type converts', () => {
+      for (const data of [undefined, { provider: 'object', object: 'deal' }]) {
+        const { stack, notices } = convert(
+          pageWith({
+            type: 'object-map',
+            dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
+            properties: { objectName: 'deal', ...(data ? { data } : {}), filter: { stage: 'open' } },
+          }),
+        );
+        const component = componentOf(stack);
+        expect((component.properties as Dict).filter).toEqual([
+          { field: 'stage', operator: 'equals', value: 'open' },
+        ]);
+        expect((component.dataSource as Dict).filter).toEqual([
+          { field: 'owner_id', operator: 'equals', value: 'u1' },
+        ]);
+        expect(notices).toHaveLength(2);
+      }
+    });
   });
 
   it('`defaultFilters` is converted on the grid only', () => {

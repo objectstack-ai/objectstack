@@ -5288,7 +5288,8 @@ const step18: MigrationStep = {
     + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
     + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
-    + 'a page selects. It is retired from the load path, so authors are still refused at '
+    + 'a page selects — as it does every filter of a component whose rows are inline, which '
+    + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
     + 'the door and taught the array; the stored-row seams and this chain replay it.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
@@ -7838,7 +7839,12 @@ const step18: MigrationStep = {
         + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
         + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
         + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
-        + 'equality position, or an AST `and` / `or` group. Such a row keeps loading unchanged '
+        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
+        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
+        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
+        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
+        + 'their own rows in an in-memory data source that reads the record form and excludes '
+        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
         + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
         + 'contract) and is refused at the `filter` door on its next save — for a combinator '
         + 'record, a refusal that names the combinator and says why no rule spells it. '
@@ -10819,8 +10825,10 @@ const step18: MigrationStep = {
         + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
         + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
         + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
-        + 'combinator, a null value, an operator the rule vocabulary does not spell, and the bare '
-        + 'string or number this key also took — and RE-SAVING such a node is refused at the '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
+        + 'string or number this key also took, and any filter on a grid whose rows are inline '
+        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'RE-SAVING such a node is refused at the '
         + 'defaultFilters path, with the same conversion table the filter door gives, computed '
         + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
       acceptanceCriteria:

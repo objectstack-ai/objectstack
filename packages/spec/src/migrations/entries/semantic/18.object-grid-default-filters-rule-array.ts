@@ -53,8 +53,10 @@ export const entry: SemanticMigration = {
     + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
     + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
     + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
-    + 'combinator, a null value, an operator the rule vocabulary does not spell, and the bare '
-    + 'string or number this key also took — and RE-SAVING such a node is refused at the '
+    + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
+    + 'string or number this key also took, and any filter on a grid whose rows are inline '
+    + '(data with provider value, or staticData), for the reason its sibling gives — and '
+    + 'RE-SAVING such a node is refused at the '
     + 'defaultFilters path, with the same conversion table the filter door gives, computed '
     + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
   acceptanceCriteria:

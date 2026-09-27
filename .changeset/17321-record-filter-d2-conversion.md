@@ -40,7 +40,12 @@ selects. So is any filter with a part that has no lossless rule spelling — a `
 renderer skips that key today, where a rule would test IS NULL), `$null` / `$exists`, an AST
 `like` / `ilike`, an array or object comparand in equality position, an AST `and` / `or` group.
 Conversion is all-or-nothing per filter: converting the mappable keys and dropping the rest
-would widen the filter. Such a page keeps loading and rendering unchanged and is refused at its
+would widen the filter. And every filter — the binding's included — of a component whose rows
+are **inline** (`data: { provider: 'value', … }`, a `data` array, or `staticData`) is left as
+stored: the `object-map`, `object-tree`, `object-calendar` and `object-gantt` renderers match
+that filter against their own rows in an in-memory data source that reads the record form but
+excludes every row for a rule array, so a rewrite there would empty the block. The same filter
+on a block that queries an object converts. Such a page keeps loading and rendering unchanged and is refused at its
 `filter` door on its next save — and for a combinator record that refusal no longer renders the
 combinator as a field (`{ field: '$or', … }`); it names the combinator and says why no rule
 spells it. `os migrate meta --stored` does not list these rows yet: a row the conversion leaves
