@@ -4,7 +4,7 @@
 
 fix(spec)!: `scale` is refused on a `currency` inline grid column, and the column's `prefix` no longer promises a default symbol (#20045)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention for accept-set narrowings. An `inlineColumns` entry that declares `type: 'currency'` and `scale` — any value, `scale: 0` included, computed or not — no longer parses. The hand-migration prescription is registered under protocol major 18 as `inline-grid-column-currency-scale-refused`.
 
