@@ -1,20 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The filter slot of every ANALYTICS carrier — a filter that is charted through
- * the analytics `where` door — declared once: `FilterConditionSchema` plus the
- * nested-relation walk that door's reach needs (see {@link analyticsCarrierFilter}).
+ * The filter slot of every ANALYTICS carrier — a stored filter that is charted
+ * through the analytics `where` door — declared once: `FilterConditionSchema`
+ * plus the nested-relation walk that door's reach needs (see
+ * {@link analyticsCarrierFilter}). Three carriers declare it: `DatasetSchema`'s
+ * `filter` and `DatasetMeasureSchema`'s `filter` (`./dataset.zod.ts`, #20080),
+ * and a dashboard widget's `filter` (`./dashboard.zod.ts`, #20116), which the
+ * dataset executor ANDs into the same query as the selection's
+ * `runtimeFilter`.
  *
- * A module of its own, and outside the `ui` barrel, so the carriers in
- * `./dataset.zod.ts` and `./dashboard.zod.ts` share one declaration without it
- * becoming published API.
+ * A module of its own, and outside the `ui` barrel, so the carriers share one
+ * declaration without it becoming published API. It moved here verbatim from
+ * `./dataset.zod.ts` when the widget became its second file's carrier; the two
+ * dataset carriers' published JSON Schema did not move with it.
  */
 
 import type { z } from 'zod';
 import { FieldOperatorsSchema, FilterConditionSchema } from '../data/filter.zod';
 import { reportQueryFaceRefusals } from '../data/filter-save-door-refusals';
 
-// ── [#20080] The analytics door's reach, on the two analytics carriers ──────
+// ── [#20080] The analytics door's reach, on the analytics carriers ──────────
 
 /**
  * A node the analytics `where` door walks: a plain object, not `null`, not an
@@ -39,7 +45,21 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
 }
 
 /**
- * [#20080] Refuse, when a dataset or measure filter is SAVED, the list the
+ * [#20116] A field value the analytics door hands to the query faces as the
+ * COMPARAND of an implicit equality: anything but a PLAIN object (prototype
+ * `Object.prototype` or `null`), the comparand-type face's own structure test.
+ * A plain object that reaches this question carries a `$` key — one with none
+ * is a nested relation, taken first — and is an operator map; a `Map`, a class
+ * instance, a `Date`, an array or a scalar is a comparand.
+ */
+function isAnalyticsComparand(spec: unknown): boolean {
+  if (!isAnalyticsFilterObject(spec)) return true;
+  const proto = Object.getPrototypeOf(spec);
+  return proto !== Object.prototype && proto !== null;
+}
+
+/**
+ * [#20080] Refuse, when an analytics carrier's filter is SAVED, the list the
  * analytics `where` door refuses when that filter is CHARTED: an ARRAY in the
  * EQUALITY slot of a field inside a NESTED-RELATION condition —
  * `{ account: { region: ['a'] } }` and `{ account: { region: { $eq: ['a'] } } }`.
@@ -114,6 +134,15 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
  * lists (`$in: []` / `$nin: []` included), and the null predicate, a
  * `{ $field }` reference as the whole comparand and every scalar pass, because
  * the face passes them.
+ *
+ * The analytics door hands the same entry to the comparand-TYPE face too, so
+ * that function asks it as well: a plain object where a literal belongs, a
+ * `Map` or a class instance, `undefined`, a function, a Symbol or a bigint
+ * beyond ±2^53 inside a relation is refused here as on chart. Which values
+ * are comparands is that face's classification — anything but a PLAIN object
+ * ({@link isAnalyticsComparand}) — so a `Map` in a field's value position is
+ * judged as the implicit comparand it is, never walked as an operator map with
+ * no operators.
  */
 function refuseNestedRelationComparands(
   node: unknown,
@@ -142,33 +171,37 @@ function refuseNestedRelationComparands(
     if (!insideRelation) continue; // `FilterConditionSchema` judges this entry itself
     // [#20116] Every slot the analytics door hands to the query faces, asked of
     // the one function `FilterConditionSchema`'s own walk asks: an implicit
-    // comparand, or each operator of an operator map.
-    if (!isAnalyticsFilterObject(spec)) {
+    // comparand, or each operator of an operator map (with the whole map, which
+    // the type face classifies before it judges an operator).
+    if (isAnalyticsComparand(spec)) {
       reportQueryFaceRefusals(ctx, [...path, key], key, undefined, spec, FieldOperatorsSchema);
       continue;
     }
     for (const [op, comparand] of Object.entries(spec)) {
       if (!op.startsWith('$')) continue;
-      reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema);
+      reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema, spec);
     }
   }
 }
 
 /**
- * The optional filter both analytics carriers declare — `DatasetSchema.filter`
- * and `DatasetMeasureSchema.filter` — which is `FilterConditionSchema` plus
- * {@link refuseNestedRelationComparands}. Every other schema that carries a
- * `FilterCondition` keeps the shared schema's reach.
+ * The optional filter every analytics carrier declares — `DatasetSchema.filter`,
+ * `DatasetMeasureSchema.filter` and `DashboardWidgetSchema.filter` — which is
+ * `FilterConditionSchema` plus {@link refuseNestedRelationComparands}. Every
+ * other schema that carries a `FilterCondition` keeps the shared schema's
+ * reach. A report's `runtimeFilter` (`ReportSchema`, `JoinedReportBlockSchema`)
+ * is charted through the same door and is not a carrier yet; adopting this is
+ * one line per slot.
  *
  * The check sits on the OPTIONAL wrapper, not on `FilterConditionSchema`
  * itself: refining the recursive schema would clone it, and the published JSON
  * Schema would then inline a second copy of the condition beside the `$ref` it
  * carries today. On the wrapper the condition keeps its identity, so the
- * published body of `ui/Dataset` and `ui/DatasetMeasure` is unchanged, and the
- * new rule is recorded as a dropped refinement at each carrier's `filter` in
- * `dropped-refinements.baseline.json` (`z.toJSONSchema()` has no projection for
- * it). An absent filter reaches the check as `undefined`, which the walk
- * passes.
+ * published body of `ui/Dataset`, `ui/DatasetMeasure` and `ui/DashboardWidget`
+ * is unchanged, and the rule is recorded as a dropped refinement at each
+ * carrier's `filter` in `dropped-refinements.baseline.json`
+ * (`z.toJSONSchema()` has no projection for it). An absent filter reaches the
+ * check as `undefined`, which the walk passes.
  */
 export function analyticsCarrierFilter() {
   return FilterConditionSchema.optional().superRefine((filter, ctx) =>
