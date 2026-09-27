@@ -23,17 +23,19 @@ import { registerCurrentUserEndpoints } from './current-user-endpoints';
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
 const USER = 'usr_admin';
 
-/** The sets the resolver hands back — a super-user wildcard beside an explicit deny, and a plain grant. */
+/**
+ * The sets the resolver hands back — a super-user wildcard, and a second set whose explicit denies it
+ * folds over. [#20136] The denies sit in the OTHER set on purpose: a super-user set's own explicit
+ * entry is that set's whole answer for the object, so the fold never reaches it.
+ */
+const SUPER_WILDCARD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true };
 const RESOLVED = [
+    { name: 'ops_admin', objects: { '*': SUPER_WILDCARD }, fields: {} },
     {
-        name: 'ops_admin',
-        objects: {
-            '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
-            sys_member: { allowRead: true, allowEdit: false },
-        },
+        name: 'sales',
+        objects: { deal: { allowRead: true, allowEdit: false }, sys_member: { allowRead: true, allowEdit: false } },
         fields: {},
     },
-    { name: 'sales', objects: { deal: { allowRead: true, allowEdit: false } }, fields: {} },
 ];
 
 /**
@@ -144,6 +146,26 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         // …while a public object the plain `'*'` covers keeps its whole closure, export included.
         expect(body.objects.deal).not.toHaveProperty('apiOperations');
         expect(body.objects.report.apiOperations).toContain('export');
+    });
+
+    it('[#20136] a super-user set\'s OWN narrower entry is served as that set\'s answer — the same bytes', async () => {
+        // The walled org admin's shape: the set carrying the super-user `'*'` names `report` read-only itself.
+        const walled = [
+            { name: 'org_admin', objects: { '*': SUPER_WILDCARD, report: { allowRead: true, allowEdit: false } }, fields: {} },
+        ];
+        const body: any = await (await mount(walled).request(`http://localhost${ME_PERMISSIONS}`)).json();
+        const expected = buildEffectiveObjectPermissions(walled, {
+            allSchemas: () => ql.registry.getAllObjects(),
+            schemaOf: (name) => ql.getSchema(name),
+        });
+        expect(JSON.stringify(body.objects)).toBe(JSON.stringify(expected));
+        // The server answers that set with its explicit entry, so no write is granted on it…
+        expect(body.objects.report).toMatchObject({ allowRead: true, allowEdit: false });
+        expect(body.objects.report.allowCreate).not.toBe(true);
+        expect(body.objects.report.allowDelete).not.toBe(true);
+        expect(body.objects.report.allowTransfer).not.toBe(true);
+        // …while an object it does not name takes its wildcard, every bit the wildcard grants.
+        expect(body.objects.deal).toMatchObject({ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true });
     });
 
     it('keeps the rest of the envelope on its own merges', async () => {
