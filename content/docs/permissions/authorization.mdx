@@ -106,8 +106,14 @@ implementation detail:
    Keys never collide across packages because object api names are
    package-namespaced.
 3. **RLS: OR within an object, AND with tenant-global.** Multiple row policies
-   for the same object/operation OR-combine; the tenant wall (Layer 0, ADR-0095
-   D1) is a separate always-first AND conjunct, not an OR-mergeable policy.
+   for the same object/operation OR-combine their `using` on reads and on the
+   rows a write may target. The `check` on the rows an insert or update writes
+   is chosen per operation first: when any applicable policy declares `check`,
+   only the declared checks decide (OR-combined) and a USING-only policy adds
+   nothing; otherwise each `using` stands in (OR-combined) — see
+   [the fail-closed contract](/docs/permissions/rls#the-fail-closed-contract).
+   The tenant wall (Layer 0, ADR-0095 D1) is a separate always-first AND
+   conjunct, not an OR-mergeable policy.
    `viewAllRecords` / `modifyAllRecords` (super-user bypass, posture-gated)
    short-circuit the object's *business* RLS. Crossing the **tenant wall**,
    though, requires the **`PLATFORM_ADMIN` posture** (ADR-0099 D1). That posture

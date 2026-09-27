@@ -1,10 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0058 D4] A policy that declares no `check` holds the write post-image to
- * its `using`, which is what `RowLevelSecurityPolicySchema.check` publishes:
- * "defaults to USING clause if not specified". It is also PostgreSQL's rule for
- * a policy without `WITH CHECK`.
+ * [ADR-0058 D4] When no applicable policy for a write declares `check`, each
+ * applicable policy's `using` stands in as its check on the written row. The
+ * default is decided once per write operation across the applicable policies,
+ * not per policy, as `RowLevelSecurityPolicySchema.check` states (read it
+ * there; a quote here would go stale). Its starting point is PostgreSQL's rule
+ * for a policy without `WITH CHECK`; the composition across policies is not
+ * (see `writeCheckPolicies` in `security-plugin.ts`).
  *
  * ## What was measured before the change
  *
