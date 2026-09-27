@@ -16,7 +16,25 @@ export type {
 } from '@objectstack/spec/contracts';
 
 import type { FilterCondition } from '@objectstack/spec/data';
-import type { StrategyContext } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
+
+/**
+ * [#19995] The engine's judge-only `where` admission, as the contract declares
+ * it: `IObjectQLEngine.judgeFilter` (#20157). Derived from the contract rather
+ * than re-declared, so a change to the member's signature reaches this
+ * package's hook as a compile error instead of as drift (#4251).
+ */
+type EngineJudgeFilter = NonNullable<IObjectQLEngine['judgeFilter']>;
+
+/**
+ * [#19995] A host's answer to "would the ENGINE admit this `where`?": the
+ * engine's own verdict, or `undefined` when the host cannot answer. The
+ * arguments are `judgeFilter`'s own; only the `undefined` answer is added,
+ * which is this package's "cannot answer, do not block" tier.
+ */
+export type ReadScopeFilterJudge = (
+  ...args: Parameters<EngineJudgeFilter>
+) => ReturnType<EngineJudgeFilter> | undefined;
 
 /**
  * The semantic scope a compiled DATASET carries beside its Cube (#10298).
@@ -95,4 +113,29 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * know the hook keeps the behaviour it had — "cannot answer, do not block".
    */
   sqlDialect?(objectName: string): string | undefined;
+  /**
+   * [#19995] The ENGINE's own `where` admission verdict for `objectName`,
+   * `IObjectQLEngine.judgeFilter` (#20157), or `undefined` when the host
+   * cannot answer (no data engine wired, an engine without the member, or an
+   * `executeAggregate` this package did not bridge to that engine).
+   *
+   * The one question the ObjectQL face cannot answer from a read scope alone.
+   * The engine refuses some scope shapes through doors that read the object's
+   * declared field map: a text operator over a field that never holds a
+   * string, a temporal comparand the field's storage rule cannot read, a
+   * filter on a virtual field or through a dotted path. Those refusals are
+   * the engine's 400, and their message names the policy. So
+   * `ObjectQLStrategy` asks the engine about the scope, alone, before it
+   * composes it with the caller's filter, and refuses in the withheld
+   * `READ_SCOPE_COMPILE_FAILED` / 500 (#5367).
+   *
+   * `AnalyticsService` answers it from `AnalyticsServiceConfig.judgeFilter`,
+   * which `AnalyticsServicePlugin` fills from the data engine its own
+   * `executeAggregate` auto-bridge executes on, so the judge is the executor.
+   * Declared HERE rather than on the spec's {@link StrategyContext} for the
+   * reason `declaredFieldType` is: nothing about it is an authorable surface,
+   * and a strategy that does not know the hook keeps the behaviour it had.
+   * "Cannot answer, do not block".
+   */
+  judgeFilter?: ReadScopeFilterJudge;
 }

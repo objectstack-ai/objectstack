@@ -49,7 +49,7 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
 // member has one home rather than being inlined at the enrichment site.
 import { measureResultType } from './measure-result-type.js';
-import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
@@ -748,6 +748,28 @@ export interface AnalyticsServiceConfig {
    * "cannot answer, do not block".
    */
   sqlDialect?: (object: string) => AcceptedSqlDialect | undefined;
+  /**
+   * [#19995, ruling C] The data engine's judge-only `where` admission,
+   * `IObjectQLEngine.judgeFilter` (#20157): would the engine admit this
+   * `where` on this object, without running it? `undefined` when this host
+   * cannot answer.
+   *
+   * `ObjectQLStrategy` asks it about each object's read scope, alone, before it
+   * composes the scope into the `where` it hands `executeAggregate`. A scope the
+   * engine refuses is then refused in the withheld `READ_SCOPE_COMPILE_FAILED` /
+   * 500 (#5367), instead of coming back as the engine's 400 whose message names
+   * the policy's fields and comparands.
+   *
+   * ⚠️ It must be the judgement of the engine `executeAggregate` executes on. A
+   * judge that disagrees with the executor would refuse scopes the executor
+   * serves. `AnalyticsServicePlugin` wires it only when it bridges
+   * `executeAggregate` itself, and then to the same engine.
+   *
+   * A host that wires nothing keeps the behaviour it had: this package's own
+   * read-scope guards still refuse the shapes they can judge, and the service
+   * says once, in its log, that the rest reach the engine unjudged.
+   */
+  judgeFilter?: ReadScopeFilterJudge;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -868,6 +890,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
+  /** [#19995] One-shot flag for the {@link reportUnjudgedReadScope} warning. */
+  private warnedUnjudgedReadScope = false;
   /**
    * [#16206] The out-of-contract `sqlDialect` answers this service has already
    * diagnosed — the dedupe key for {@link diagnoseSqlDialectAnswer}.
@@ -973,6 +997,17 @@ export class AnalyticsService implements IAnalyticsService {
         this.diagnoseSqlDialectAnswer(object, answered);
         return answered;
       },
+      // [#19995, ruling C] The engine's own admission verdict on a read scope,
+      // asked by `ObjectQLStrategy` at its engine-bound merges. The host's
+      // answer is passed through untouched, `undefined` included. A host that
+      // wired no judge at all is told once, here, where that absence arrives.
+      judgeFilter: (objectName, where, options) => {
+        if (typeof config.judgeFilter !== 'function') {
+          this.reportUnjudgedReadScope(objectName);
+          return undefined;
+        }
+        return config.judgeFilter(objectName, where, options);
+      },
     };
 
     // Build strategy chain (built-in + custom, sorted by priority)
@@ -1045,6 +1080,36 @@ export class AnalyticsService implements IAnalyticsService {
       `text operators compile the dialect-blind construct instead of this dialect's — same rows a host that wired ` +
       `no hook at all would get. Answer one of the accepted names, or undefined if this host cannot say. ` +
       `Reported once per distinct unrecognised answer.`,
+    );
+  }
+
+  /**
+   * [#19995, ruling C] Tell a host that composed a read scope into an ObjectQL
+   * aggregate with no `judgeFilter` wired that the engine did not judge it.
+   *
+   * That host keeps the behaviour it had, which is the ruling's bar for it: this
+   * package's own read-scope guards still refuse, with the policy withheld, the
+   * shapes they can judge. The rest reach the engine unjudged, and a refusal
+   * there is the engine's 400, whose message names the policy. The line says
+   * that once, with the remedy.
+   *
+   * `warn`, not `error`, by AGENTS.md's one question: every query is answered
+   * as it was before this hook existed, and nothing that claims to be persisted
+   * fails to land. Once per service instance, on the first scoped merge that
+   * goes unjudged: a host that never composes a scope is never told.
+   */
+  private reportUnjudgedReadScope(objectName: string): void {
+    if (this.warnedUnjudgedReadScope) return;
+    this.warnedUnjudgedReadScope = true;
+    this.logger.warn(
+      `[Analytics] The row-level read scope for "${objectName}" was composed into an ObjectQL aggregate without ` +
+      `the engine judging it first: this AnalyticsService was configured with no judgeFilter. Scope shapes this ` +
+      `package can judge itself are still refused with the policy withheld (READ_SCOPE_COMPILE_FAILED / 500). A scope ` +
+      `the engine refuses through a door that reads the object's fields (a text operator on a non-text field, a date ` +
+      `comparand the field cannot read, a formula field, a dotted path) comes back as the engine's 400 instead, and ` +
+      `that message names the policy's field and comparand. Supply judgeFilter from the engine that executeAggregate ` +
+      `runs on (IObjectQLEngine.judgeFilter); AnalyticsServicePlugin wires it when it bridges executeAggregate itself. ` +
+      `Reported once.`,
     );
   }
 
