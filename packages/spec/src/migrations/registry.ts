@@ -6,7 +6,8 @@
  * One {@link MigrationStep} per protocol major that carried a break. Each step's
  * mechanical transforms are the D2 conversions that graduated into it (referenced
  * by id, so the transform + fixture pair are never duplicated), and its
- * `semantic` list is the non-lossless residue D2 could not express.
+ * `semantic` list carries one entry per retirement family, even when a lossless
+ * D2 conversion also exists for it — D2 carries the mechanical data repair only.
  *
  * The chain is a **forever artifact**: every step back to
  * {@link MIGRATION_SUPPORT_FLOOR} stays replayable, and CI replays the full chain
