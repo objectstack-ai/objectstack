@@ -90,13 +90,25 @@ const GENERATORS: Record<string, {
      * `os init` templates, and this emits the SAME value with the same
      * explanation, so the two doors an author can arrive through agree. If
      * that template's value ever moves, this one moves with it.
+     *
+     * The same parity covers the DECLARATION SHAPE. Both doors declare the
+     * object through `ObjectSchema.create({ … })`, the one authorised shape
+     * for a `*.object.ts` (ruling 5644350230, decision batch #122 item 1): the
+     * factory parses the declaration against `ObjectSchema` when the file is
+     * evaluated, so a mistake surfaces where it was written instead of at a
+     * build the author may never run. `ObjectSchema` is imported as a VALUE —
+     * a type-only import is erased at compile time, and the emitted module
+     * would then throw on its first evaluation. The binding stays the file's
+     * default export because the barrel line below re-exports `default` for
+     * every generator. `scaffold-object-declaration-shape.test.ts` pins both
+     * doors to one shape, so neither can move alone.
      */
-    generate: (name: string) => `import * as Data from '@objectstack/spec/data';
+    generate: (name: string) => `import { ObjectSchema } from '@objectstack/spec/data';
 
 /**
  * ${toTitleCase(name)} Object
  */
-const ${toCamelCase(name)}: Data.ServiceObject = {
+const ${toCamelCase(name)} = ObjectSchema.create({
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
@@ -119,7 +131,7 @@ const ${toCamelCase(name)}: Data.ServiceObject = {
   // authored decision rather than an accident. The other values, and how to
   // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
-};
+});
 
 export default ${toCamelCase(name)};
 `,
@@ -961,9 +973,9 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     //
     // This command ran no name validation at all, so a name that is legal as a
     // NAME but not as an IDENTIFIER was interpolated straight into a binding
-    // position and written out under `exit 0` — `const foo.bar:
-    // Data.ServiceObject = {`, plus a matching barrel line: two files that are
-    // not TypeScript, from a command that reported success.
+    // position and written out under `exit 0` — `const foo.bar =
+    // ObjectSchema.create({` in today's emission, plus a matching barrel line:
+    // two files that are not TypeScript, from a command that reported success.
     //
     // The criterion is PARSEABILITY, not a charset. `findEmissionParseFailures`
     // asks the compiler about the bytes above and about nothing else, which is

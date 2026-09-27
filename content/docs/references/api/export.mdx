@@ -7,13 +7,19 @@ description: Export protocol schemas
 
 Data Export & Import Protocol
 
-Defines schemas for streaming data export, import validation,
-template-based field mapping, and scheduled export jobs.
+Defines the export file formats, import validation, template-based field
+mapping, and the asynchronous import-job contracts.
 
 Industry alignment: Salesforce Data Export, Airtable CSV Export,
 Dynamics 365 Data Management.
 
-Base path: /api/v1/data/\{object\}/export
+The export the platform serves is the synchronous streaming door
+`GET /api/v1/data/:object/export`, which answers the file itself as CSV,
+JSON or XLSX. The asynchronous export-job API that used to be
+declared here (export jobs, their progress / download / list shapes,
+scheduled exports and `ExportApiContracts`) was never served by any route and
+was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove); a recurring
+export is a `Job` whose handler you write.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/export.zod.ts`
@@ -22,84 +28,12 @@ Base path: /api/v1/data/\{object\}/export
 ## TypeScript Usage
 
 ```typescript
-import { CreateExportJobRequestSchema, CreateExportJobResponseSchema, CreateImportJobRequestSchema, CreateImportJobResponseSchema, DeduplicationStrategy, ExportFormat, ExportImportTemplateSchema, ExportJobProgressSchema, ExportJobStatus, ExportJobSummarySchema, FieldMappingEntrySchema, GetExportJobDownloadRequestSchema, GetExportJobDownloadResponseSchema, ImportJobProgressSchema, ImportJobResultsSchema, ImportJobStatus, ImportJobSummarySchema, ImportMappingSchema, ImportRequestSchema, ImportResponseSchema, ImportRowResultSchema, ImportValidationConfigSchema, ImportValidationMode, ImportValidationResultSchema, ImportWriteMode, ListExportJobsRequestSchema, ListExportJobsResponseSchema, ListImportJobsRequestSchema, ListImportJobsResponseSchema, ScheduleExportRequestSchema, ScheduleExportResponseSchema, ScheduledExportSchema, UndoImportJobResponseSchema } from '@objectstack/spec/api';
-import type { CreateExportJobRequest, CreateExportJobResponse, CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListExportJobsRequest, ListExportJobsResponse, ListImportJobsRequest, ListImportJobsResponse, ScheduleExportRequest, ScheduleExportResponse, ScheduledExport, UndoImportJobResponse } from '@objectstack/spec/api';
+import { CreateImportJobRequestSchema, CreateImportJobResponseSchema, DeduplicationStrategy, ExportFormat, ExportImportTemplateSchema, FieldMappingEntrySchema, ImportJobProgressSchema, ImportJobResultsSchema, ImportJobStatus, ImportJobSummarySchema, ImportMappingSchema, ImportRequestSchema, ImportResponseSchema, ImportRowResultSchema, ImportValidationConfigSchema, ImportValidationMode, ImportValidationResultSchema, ImportWriteMode, ListImportJobsRequestSchema, ListImportJobsResponseSchema, UndoImportJobResponseSchema } from '@objectstack/spec/api';
+import type { CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, FieldMappingEntry, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListImportJobsRequest, ListImportJobsResponse, UndoImportJobResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = CreateExportJobRequestSchema.parse(data);
+const result = CreateImportJobRequestSchema.parse(data);
 ```
-
----
-
-## CreateExportJobRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
-| **fields** | `string[]` | optional | Specific fields to include (omit for all fields) |
-| **filter** | `Record<string, any>` | optional | Filter criteria for records to export |
-| **sort** | `{ field: string; direction: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for exported records |
-| **limit** | `integer` | optional | Maximum number of records to export |
-| **includeHeaders** | `boolean` | optional (default: `true`) | Include header row (CSV/XLSX) |
-| **encoding** | `string` | optional (default: `"utf-8"`) | Character encoding for the export file |
-| **templateId** | `string` | optional | Export template ID for predefined field mappings |
-
-### Nested Shape: `CreateExportJobRequest.sort[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to sort by |
-| **direction** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Sort direction |
-
-
----
-
-## CreateExportJobResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; estimatedRecords?: integer; createdAt: string }` | ✅ |  |
-
-### Nested Shape: `CreateExportJobResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `CreateExportJobResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `CreateExportJobResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobId** | `string` | ✅ | Export job ID |
-| **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>` | ✅ | Initial job status |
-| **estimatedRecords** | `integer` | optional | Estimated total records |
-| **createdAt** | `string` | ✅ | Job creation timestamp |
-
 
 ---
 
@@ -212,93 +146,6 @@ const result = CreateExportJobRequestSchema.parse(data);
 
 ---
 
-## ExportJobProgress
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; totalRecords?: integer; … }` | ✅ |  |
-
-### Nested Shape: `ExportJobProgress.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `ExportJobProgress.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `ExportJobProgress.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobId** | `string` | ✅ | Export job ID |
-| **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>` | ✅ | Current job status |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | ✅ | Export format |
-| **totalRecords** | `integer` | optional | Total records to export |
-| **processedRecords** | `integer` | ✅ | Records processed so far |
-| **percentComplete** | `number` | ✅ | Export progress percentage |
-| **fileSize** | `integer` | optional | Current file size in bytes |
-| **downloadUrl** | `string` | optional | Presigned download URL (available when status is "completed") |
-| **downloadExpiresAt** | `string` | optional | Download URL expiration timestamp |
-| **error** | `{ code: string; message: string }` | optional | Error details if job failed |
-| **startedAt** | `string` | optional | Processing start timestamp |
-| **completedAt** | `string` | optional | Completion timestamp |
-
-
----
-
-## ExportJobStatus
-
-### Allowed Values
-
-* `pending`
-* `processing`
-* `completed`
-* `failed`
-* `cancelled`
-* `expired`
-
-
----
-
-## ExportJobSummary
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobId** | `string` | ✅ | Export job ID |
-| **object** | `string` | ✅ | Object name that was exported |
-| **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>` | ✅ | Current job status |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | ✅ | Export file format |
-| **totalRecords** | `integer` | optional | Total records exported |
-| **fileSize** | `integer` | optional | File size in bytes |
-| **createdAt** | `string` | ✅ | Job creation timestamp |
-| **completedAt** | `string` | optional | Completion timestamp |
-| **createdBy** | `string` | optional | User who initiated the export |
-
-
----
-
 ## FieldMappingEntry
 
 ### Properties
@@ -311,66 +158,6 @@ const result = CreateExportJobRequestSchema.parse(data);
 | **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
 | **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
-
-
----
-
-## GetExportJobDownloadRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobId** | `string` | ✅ | Export job ID |
-
-
----
-
-## GetExportJobDownloadResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ jobId: string; downloadUrl: string; fileName: string; fileSize: integer; … }` | ✅ |  |
-
-### Nested Shape: `GetExportJobDownloadResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `GetExportJobDownloadResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `GetExportJobDownloadResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobId** | `string` | ✅ | Export job ID |
-| **downloadUrl** | `string` | ✅ | Presigned download URL |
-| **fileName** | `string` | ✅ | Suggested file name |
-| **fileSize** | `integer` | ✅ | File size in bytes |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | ✅ | Export file format |
-| **expiresAt** | `string` | ✅ | Download URL expiration timestamp |
-| **checksum** | `string` | optional | File checksum (SHA-256) |
 
 
 ---
@@ -681,65 +468,6 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 ---
 
-## ListExportJobsRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **object** | `string` | optional | Filter by object name |
-| **status** | `Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>` | optional | Filter by job status |
-| **limit** | `integer` | optional (default: `20`) | Maximum number of jobs to return |
-| **cursor** | `string` | optional | Pagination cursor from a previous response |
-
-
----
-
-## ListExportJobsResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ jobs: object[]; nextCursor?: string; hasMore: boolean }` | ✅ |  |
-
-### Nested Shape: `ListExportJobsResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `ListExportJobsResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `ListExportJobsResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **jobs** | `{ jobId: string; object: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; … }[]` | ✅ | List of export jobs |
-| **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more jobs are available |
-
-
----
-
 ## ListImportJobsRequest
 
 ### Properties
@@ -779,127 +507,6 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back |
 | **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
-
-
----
-
-## ScheduleExportRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Schedule name (snake_case) |
-| **label** | `string` | optional | Human-readable label |
-| **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
-| **fields** | `string[]` | optional | Fields to include |
-| **filter** | `Record<string, any>` | optional | Record filter criteria |
-| **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ timezone: string }` | ✅ | Schedule timing configuration |
-| **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
-
-### Nested Shape: `ScheduleExportRequest.schedule`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
-
-### Nested Shape: `ScheduleExportRequest.delivery`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `Enum<'email' \| 'storage' \| 'webhook'>` | ✅ | How to deliver the export file |
-| **recipients** | `string[]` | optional | Email recipients (for email delivery) |
-| **storagePath** | `string` | optional | Storage path (for storage delivery) |
-| **webhookUrl** | `string` | optional | Webhook URL (for webhook delivery) |
-
-
----
-
-## ScheduleExportResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ id: string; name: string; enabled: boolean; nextRunAt?: string; … }` | ✅ |  |
-
-### Nested Shape: `ScheduleExportResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `ScheduleExportResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `ScheduleExportResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Scheduled export ID |
-| **name** | `string` | ✅ | Schedule name |
-| **enabled** | `boolean` | ✅ | Whether the schedule is active |
-| **nextRunAt** | `string` | optional | Next scheduled execution |
-| **createdAt** | `string` | ✅ | Creation timestamp |
-
-
----
-
-## ScheduledExport
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | optional | Scheduled export ID |
-| **name** | `string` | ✅ | Schedule name (snake_case) |
-| **label** | `string` | optional | Human-readable label |
-| **object** | `string` | ✅ | Object name to export |
-| **format** | `Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>` | optional (default: `"csv"`) | Export file format |
-| **fields** | `string[]` | optional | Fields to include |
-| **filter** | `Record<string, any>` | optional | Record filter criteria |
-| **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ timezone: string }` | ✅ | Schedule timing configuration |
-| **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
-| **enabled** | `boolean` | optional (default: `true`) | Whether the scheduled export is active |
-| **lastRunAt** | `string` | optional | Last execution timestamp |
-| **nextRunAt** | `string` | optional | Next scheduled execution |
-| **createdAt** | `string` | optional | Creation timestamp |
-| **createdBy** | `string` | optional | User who created the schedule |
-
-### Nested Shape: `ScheduledExport.schedule`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
-
-### Nested Shape: `ScheduledExport.delivery`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `Enum<'email' \| 'storage' \| 'webhook'>` | ✅ | How to deliver the export file |
-| **recipients** | `string[]` | optional | Email recipients (for email delivery) |
-| **storagePath** | `string` | optional | Storage path (for storage delivery) |
-| **webhookUrl** | `string` | optional | Webhook URL (for webhook delivery) |
 
 
 ---

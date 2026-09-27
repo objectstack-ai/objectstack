@@ -2149,7 +2149,7 @@ export class ObjectStackClient {
     /**
      * ADR-0033: promote a single item's pending draft overlay to live —
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
-     * 404 [no_draft] when there is nothing to publish. [#12195] The name is
+     * 404 `NO_DRAFT` when there is nothing to publish. The name is
      * percent-encoded, like `getItem` — this line used to promise unencoded
      * pass-through for compound names, whose arity is now retired.
      *
@@ -2513,14 +2513,19 @@ export class ObjectStackClient {
      * as either stage, which is the right answer for it — the key such a guess
      * would read is not there.)
      *
-     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is a KNOWN GAP
-     * rather than a design: `InstalledPackageAtEitherStageSchema.safeParse()`
-     * refuses a `manifest` belonging to neither stage, while that same row
-     * COMPILES against this declaration. Tracked as #19324, whose root cause is
-     * the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at
-     * `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a
-     * declaration-chunk ceiling); ⛔ not something this declaration can fix, and
-     * ⛔ not a licence to relax either runtime branch to match the type.
+     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is the ACCEPTED
+     * static contract, not a gap waiting to close:
+     * `InstalledPackageAtEitherStageSchema.safeParse()` refuses a `manifest`
+     * belonging to neither stage, while that same row COMPILES against this
+     * declaration. The index signature comes from the deliberate
+     * `z.ZodType<Record<string, unknown>, …>` annotation on
+     * `RecordStagePackageBodySchema` in `@objectstack/spec` (the #14513 pattern —
+     * TS7056 and a declaration-chunk ceiling), and the maintainer ruled on
+     * #19324 (letter 丙) to keep it: the runtime Zod schema is the enforced
+     * contract, so narrow by parsing, as above. The precise form, A2, is
+     * recorded beside `RecordStagePackageBodySchema` for the day the schema
+     * depth allows it. ⛔ Not something this declaration can fix, and ⛔ not a
+     * licence to relax either runtime branch to match the type.
      */
     list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
         const route = this.getRoute('packages');

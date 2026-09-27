@@ -1450,8 +1450,57 @@ export type ArtifactStagePackageBodyParsed = z.infer<typeof ArtifactStagePackage
  * ⛔ Never widen this to `z.unknown()` to make a row fit. A row that parses
  * through neither this stage nor the authoring one is a producer defect, and
  * this is the declaration that has to keep saying so.
+ *
+ * ## Its published type is deliberately an index signature
+ *
+ * This schema is declared `z.ZodType<Record<string, unknown>, Record<string,
+ * unknown>>`, so the published type of a record-stage body is an index
+ * signature: any object assigns to it. It is the `manifest` of
+ * `AssembledInstalledPackageSchema` (`@objectstack/spec/api-assembled`), so an
+ * authoring-stage `InstalledPackage` assigns to `AssembledInstalledPackage`,
+ * and a row whose `manifest` belongs to neither stage type-checks as an
+ * `InstalledPackageAtEitherStage`. That is the accepted static contract — the
+ * maintainer ruling on #19324 (letter 丙) — not a gap to tighten in passing.
+ *
+ * The RUNTIME schema is the enforced contract. It carries the manifest's every
+ * field, every collection's full declaration and the two lowered members
+ * above, so `.parse()` refuses a wrong-shaped body member by member. Narrow a
+ * record-stage body by parsing it, never by trusting its static type.
+ *
+ * Why not inferred: the body is the whole metadata vocabulary, and `tsc`
+ * refuses to print it into the declarations that embed it — TS7056, 「The
+ * inferred type of this node exceeds the maximum length the compiler will
+ * serialize」. #14513 measured that on the assembled body; for this stage,
+ * dropping this annotation, the artifact stage's and the cast below fails the
+ * declaration build with TS7056 at `PackageApiContracts` (measured on #19324
+ * at `d1ca8741dd` and again at `3bd28e2b2e`). Why not a named type: #14513
+ * measured that an alias declared in this module turns `stack.zod` into a
+ * shared declaration chunk its embedders import, and recorded the heap failure
+ * that followed beside {@link AssembledPackageBodySchema}; for this stage that
+ * reading is inherited, not re-measured.
+ *
+ * The precise form, if the schema depth ever allows it, is the one #19324
+ * measured as A2: infer this stage and the artifact stage (drop both
+ * annotations and the cast), and give compact `typeof`-based annotations to
+ * the four declarations that embed the body — `PackageApiContracts`,
+ * `InstalledPackageAtEitherStageSchema`, `ListInstalledPackagesResponseSchema`
+ * and `GetInstalledPackageResponseSchema`. At `d1ca8741dd` it built, turned
+ * all five of the gap's measured type readings into compile errors, and left
+ * the runtime bundles byte-identical. Its cost is declaration size: +20,209
+ * lines in the then `./api` entry (one expansion of this stage) and +44,342 in
+ * the root entry (this stage and the artifact stage). The heaviest type-check
+ * program under CI's heap ceiling, `qa/http-conformance`'s, was not measured
+ * under it.
  */
-/* ANNOTATED structurally — see the note on the artifact stage above. */
+/*
+ * ANNOTATED structurally — see the note on the artifact stage above, and the
+ * section of this docblock on the published type for what that costs a
+ * consumer. The `as unknown as z.ZodObject<z.ZodRawShape>` cast below is that
+ * annotation's price: the artifact stage's declared type no longer says it is
+ * an object, so `.extend()` is reached through a cast. The cast is type-only
+ * and emits nothing; at runtime `.extend()` runs on the artifact stage's
+ * object schema.
+ */
 export const RecordStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
   lazySchema(() =>
     (ArtifactStagePackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
