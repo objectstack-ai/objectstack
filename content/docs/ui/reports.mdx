@@ -103,9 +103,20 @@ panels over one domain — "open / completed", "new / qualified / closed" — wh
 is a different slice rather than a different subject.
 
 A block is a sub-report, so it takes the same `dataset` / `rows` / `columns` / `values` /
-`runtimeFilter` / `order` vocabulary. Four things are **container-level only** and are
-rejected on a block: nested `blocks` (no recursion — a block's `type` enum excludes
-`joined`), `drilldown`, `protection`, and — as below — `order` on a `joined` container.
+`runtimeFilter` / `order` vocabulary, and each block is drawn as a table. Three keys are
+**container-level only** and are rejected on a block: nested `blocks` (no recursion — a
+block's `type` enum excludes `joined`), `drilldown` and `protection`.
+
+The container selects nothing itself, so a `joined` report refuses every top-level key that
+selects or orders data and points it onto `blocks[]`: `dataset`, and a non-empty `rows`,
+`columns`, `values` or `order`. The container keys a `joined` report does read are
+`runtimeFilter` (ANDed into every block's own) and `drilldown`.
+
+**A `joined` report draws no chart.** `chart` on the container is refused with *a `joined`
+report draws no chart — it draws each block as a table and never reads `chart`, on the
+container or on a block*, and `blocks[].chart` was removed in `@objectstack/spec` 17.5.0:
+nothing ever drew either one. To plot one of these slices, give it a report of its own with
+a [`chart`](#an-embedded-chart).
 
 {/* os:check */}
 ```typescript
@@ -174,9 +185,10 @@ second rejection — write `drilldown: true` / `false` if you mean the report.
 
 ## An embedded chart
 
-A report may carry one `chart`. Its `xAxis` and `yAxis` name the **bound dataset's**
-dimension and measure — not raw object fields — and are plotted from a second dataset
-query, so the chart and the grid cannot disagree.
+A non-`joined` report may carry one `chart` (a `joined` report refuses it — see above). Its
+`xAxis` and `yAxis` name the **bound dataset's** dimension and measure — not raw object
+fields — and are plotted from a second dataset query, so the chart and the grid cannot
+disagree.
 
 {/* os:check */}
 ```typescript

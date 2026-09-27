@@ -195,7 +195,14 @@ describe('validateChartBindings — report charts', () => {
     expect(findings[0].hint).toContain('Did you mean "task_metrics"?');
   });
 
-  it('checks a joined report block chart against the block dataset', () => {
+  // #20161 — a joined report draws no chart: `ReportSchema` refuses a container
+  // `chart` on one and a block has no `chart` key, and the renderer reads
+  // neither. Until then this rule resolved a block chart's axes against the
+  // block's dataset, telling the author the chart was well-bound when it would
+  // never plot. It is silent about them now — while the SAME block's own
+  // selection is still resolved, which is what makes the silence a decision
+  // about the chart rather than a block the walk stopped reaching.
+  it('does NOT check a joined block\'s chart — nothing draws it — while the block\'s own selection is still resolved', () => {
     const findings = validateChartBindings({
       ...baseStack(),
       reports: [
@@ -206,15 +213,54 @@ describe('validateChartBindings — report charts', () => {
             {
               name: 'b1',
               dataset: 'task_metrics',
+              rows: ['status_nope'],
               values: ['task_count'],
-              chart: { type: 'pie', xAxis: 'ghost_dim', yAxis: 'task_count' },
+              chart: { type: 'pie', xAxis: 'ghost_dim', yAxis: 'ghost_measure' },
             },
           ],
         },
       ],
     });
-    expect(findings).toHaveLength(1);
-    expect(findings[0].path).toBe('reports[0].blocks[0].chart.xAxis');
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [CHART_DIMENSION_UNKNOWN, 'reports[0].blocks[0].rows[0]'],
+    ]);
+  });
+
+  it('does NOT check a joined container\'s chart either — the joined renderer never reads it', () => {
+    const findings = validateChartBindings({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'joined',
+          type: 'joined',
+          chart: { type: 'bar', xAxis: 'ghost_dim', yAxis: 'ghost_measure' },
+          blocks: [{ name: 'b1', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] }],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('…and the same unresolvable axes on a NON-joined report still gate — the chart there is drawn', () => {
+    // The control for both silences above: identical axis names, one level
+    // up, on the report type whose chart the renderer plots.
+    const findings = validateChartBindings({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'r',
+          type: 'summary',
+          dataset: 'task_metrics',
+          rows: ['status'],
+          values: ['task_count'],
+          chart: { type: 'bar', xAxis: 'ghost_dim', yAxis: 'ghost_measure' },
+        },
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_DIMENSION_UNKNOWN, 'reports[0].chart.xAxis', 'error'],
+      [CHART_MEASURE_UNKNOWN, 'reports[0].chart.yAxis', 'error'],
+    ]);
   });
 
   it('checks report series names as measures', () => {
