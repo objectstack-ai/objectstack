@@ -510,7 +510,7 @@ export type ConcurrencyPolicy = z.input<typeof ConcurrencyPolicySchema>;
 
 /*
  * `ScheduleStateSchema` (and its `ScheduleState` / `ScheduleStateParsed`
- * aliases) was DELETED here in @objectstack/spec 18 (ADR-0049
+ * aliases) was DELETED here in @objectstack/spec 17 (ADR-0049
  * enforce-or-remove; ruled with the export-job family on #17158, item 2:
  * "retired with the family unless a live consumer is measured" — none was, in
  * objectstack, objectui at the pinned sha or cloud). It described the runtime

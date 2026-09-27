@@ -17,7 +17,7 @@ import { BaseResponseSchema } from './contract.zod';
  * the `ExportFormat` formats. The asynchronous export-job API that used to be
  * declared here (export jobs, their progress / download / list shapes,
  * scheduled exports and `ExportApiContracts`) was never served by any route and
- * was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove); a recurring
+ * was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove); a recurring
  * export is a `Job` whose handler you write.
  */
 
@@ -44,7 +44,7 @@ export type ExportFormat = z.input<typeof ExportFormat>;
 // ==========================================
 
 /*
- * The export-job API family was DELETED here in @objectstack/spec 18 (ADR-0049
+ * The export-job API family was DELETED here in @objectstack/spec 17 (ADR-0049
  * enforce-or-remove; maintainer ruling A on #17158, landing route A). It
  * declared an asynchronous export API — `ExportJobStatus`,
  * `CreateExportJobRequest` / `CreateExportJobResponse`, `ExportJobProgress`,
