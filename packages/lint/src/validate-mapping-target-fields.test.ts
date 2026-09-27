@@ -103,15 +103,30 @@ describe('validateMappingTargetFields', () => {
     expect(validateMappingTargetFields(stack)).toEqual([]);
   });
 
+  it('CONTROL — `packages: undefined` (absent) stays silent — the only value this reader treats as absent', () => {
+    // `full_name`, not `sla_tier`: `sla_tier` only resolves via the
+    // `objectExtensions` a package supplies (the test above) — with
+    // `packages` genuinely absent this control needs a field `contact`
+    // declares on its own, so a real finding can't masquerade as the
+    // reader silently accepting the shape.
+    expect(validateMappingTargetFields({
+      objects: [contact],
+      packages: undefined,
+      mappings: [mapping([{ source: 'Name', target: 'full_name' }])],
+    })).toEqual([]);
+  });
+
   // [#20206, ruling A on #15293 `5634034754`] This reader was added by #20208
   // after the ruling's own site census (`origin/main` `1c8b320`) — a fifth
   // copy of the same `recordsOf(stack.packages)` fall-through the ruling
   // closes elsewhere in this package. A PRESENT non-array `packages` is
   // malformed, not absent; only `undefined` stays silent. `null` joins this
   // set in rework round 1 (ruling A on #19926, `5805260775`): it is present,
-  // not absent.
+  // not absent. A keyed object (the shape `recordsOf` read as a map) joins in
+  // rework round 3, alongside the explicit `undefined` control above, so this
+  // validator pins the same shape classes the other two validators do.
   it('refuses a PRESENT non-array `packages` instead of silently ignoring it', () => {
-    for (const packages of [{}, 0, 'x', null]) {
+    for (const packages of [{}, 0, 'x', null, { a: { manifest: {} } }]) {
       expect(() => validateMappingTargetFields({
         objects: [contact],
         packages,

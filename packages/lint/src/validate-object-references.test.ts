@@ -309,8 +309,8 @@ describe('validateObjectReferences — artifact packages[] as resolution context
   // malformed, not absent, and every reader refuses it. `null` joins this set
   // in rework round 1 (ruling A on #19926, `5805260775`): it is present, not
   // absent, so it is no longer a control. `{}` and a keyed object join in
-  // rework round 2, so this validator pins the same set `packagesOf` and the
-  // other two validators do.
+  // rework round 2, so this validator pins the same shape classes `packagesOf`
+  // and the other two validators do.
   it('refuses a PRESENT non-array `packages` instead of silently ignoring it', () => {
     for (const packages of [null, 42, 'core', {}, { a: { manifest: {} } }]) {
       expect(() => validateObjectReferences(perPackageStack(ORDERS_BODY, packages))).toThrow(
