@@ -451,7 +451,8 @@ function isFieldReferenceShape(value: unknown): boolean {
  * [#19949] Does this field constraint compare against a `{ $field }` reference
  * in a position this translator would otherwise emit as a literal value?
  *
- * - the whole constraint — the bare `{ field: { $field: … } }` form;
+ * - the whole constraint, in the implicit-equality position — the bare
+ *   `{ field: { $field: … } }` form, or a list holding a reference;
  * - any operator's comparand — `{ field: { $ne: { $field: … } } }`, an
  *   `addDays` offset included;
  * - any member of a list comparand — `$in` / `$nin` members, `$between`
@@ -459,17 +460,23 @@ function isFieldReferenceShape(value: unknown): boolean {
  *
  * Only `$`-prefixed keys are read as operators, exactly as the emitter reads
  * them: `{ field: { nested: { $field: … } } }` has no operator and stays the
- * nested-document exact match it always was.
+ * nested-document exact match it always was. A list WITHOUT a reference is
+ * not this gate's business either way — the equality slot's array is ruled to
+ * the shared comparand-shape face, and `$ne`'s is refused just below.
  */
 function carriesFieldReference(spec: unknown): boolean {
-  if (isFieldReferenceShape(spec)) return true;
+  if (holdsFieldReference(spec)) return true;
   if (!isFilterNode(spec)) return false;
   for (const [op, comparand] of Object.entries(spec)) {
-    if (!op.startsWith('$')) continue;
-    if (isFieldReferenceShape(comparand)) return true;
-    if (Array.isArray(comparand) && comparand.some(isFieldReferenceShape)) return true;
+    if (op.startsWith('$') && holdsFieldReference(comparand)) return true;
   }
   return false;
+}
+
+/** [#19949] A `{ $field }` reference, or a list with one among its members. */
+function holdsFieldReference(comparand: unknown): boolean {
+  if (isFieldReferenceShape(comparand)) return true;
+  return Array.isArray(comparand) && comparand.some(isFieldReferenceShape);
 }
 
 /**
