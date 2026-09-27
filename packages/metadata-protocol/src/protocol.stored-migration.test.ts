@@ -767,7 +767,11 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
             grid({ stage: 'open' }),
             { type: 'object-kanban', dataSource: { object: 'deal', filter: COMBINATOR }, properties: { objectName: 'deal' } },
         ]);
-        const { engine, tables } = makeStubEngine([mixedPage, bindingMixed]);
+        // The third door: `defaultFilters` on the grid, the same open bag.
+        const defaultsMixed = pageRow('deal_grid', [
+            { type: 'object-grid', properties: { objectName: 'deal', filter: { stage: 'open' }, defaultFilters: COMBINATOR } },
+        ]);
+        const { engine, tables } = makeStubEngine([mixedPage, bindingMixed, defaultsMixed]);
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         const report = await protocol.migrateStoredMetadata({ apply: true });
@@ -778,6 +782,11 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
         const binding = report.rows.find((r) => r.name === 'deal_room')!;
         expect(binding.outcome).toBe('failed');
         expect(binding.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].dataSource.filter']);
+        const defaults = report.rows.find((r) => r.name === 'deal_grid')!;
+        expect(defaults.outcome).toBe('rewritten');
+        expect(defaults.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
+        const storedDefaults = JSON.parse(metaRows(tables).find((r) => r.name === 'deal_grid')!.metadata);
+        expect(storedDefaults.regions[0].components[0].properties.defaultFilters).toEqual(COMBINATOR);
 
         // The rewritten row persisted its lossless half; the combinator is byte-identical.
         const stored = JSON.parse(metaRows(tables).find((r) => r.name === 'deal_desk')!.metadata);
