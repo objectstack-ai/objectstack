@@ -9,8 +9,10 @@ import {
   Report,
   JoinedReportBlockSchema,
   reportSelectionOrder,
+  defineReport,
 } from './report.zod';
 import { strictObjectDeclarations } from '../shared/strict-object';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 /**
  * ADR-0021 single-form: a report binds a `dataset` and selects `rows`
@@ -96,6 +98,124 @@ describe('Joined reports', () => {
   it('JoinedReportBlockSchema parses a dataset-bound block', () => {
     const b = JoinedReportBlockSchema.parse({ name: 'blk_x', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['task_count'] });
     expect(b.dataset).toBe('tasks');
+  });
+});
+
+/**
+ * A `joined` container selects nothing itself: each block binds its own
+ * dataset and picks its own dimensions and measures, and the renderer's joined
+ * branch returns before it reads any top-level selection key. Until this
+ * refinement, a container `dataset` / `rows` / `columns` / `values` parsed
+ * green and was then dropped without a word — while `order`, one key over, was
+ * already refused for exactly that reason.
+ *
+ * Every refusal below asserts the envelope a schema door owes: the issue
+ * `code`, its `path`, and the prescription (the key moves onto `blocks[]`).
+ */
+describe('Joined reports refuse top-level selection keys', () => {
+  const BLOCK = { name: 'open_block', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['task_count'] } as const;
+  const JOINED = { name: 'overview', label: 'Overview', type: 'joined', blocks: [BLOCK] } as const;
+  const PRESCRIPTION = (key: string) =>
+    `a \`joined\` report selects per block — move \`${key}\` onto \`blocks[]\`, or delete it; on the container it selects nothing.`;
+  const ORDER_MESSAGE = 'a `joined` report orders per block — move `order` onto `blocks[]`.';
+
+  /** A NON-EMPTY value the key accepts on a plain report, so only the joined arm can refuse it. */
+  const SELECTION: ReadonlyArray<readonly [string, unknown]> = [
+    ['dataset', 'tasks'],
+    ['rows', ['status']],
+    ['columns', ['priority']],
+    ['values', ['task_count']],
+  ];
+
+  it.each(SELECTION)('`%s` on a joined container is refused at its own path, pointing at `blocks[]`', (key, value) => {
+    const r = ReportSchema.safeParse({ ...JOINED, [key]: value });
+    expect(r.success, `a joined report carrying \`${key}\` parsed green — the key would be silently dropped`).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path, message: i.message }))).toEqual([
+      { code: 'custom', path: [key], message: PRESCRIPTION(key) },
+    ]);
+  });
+
+  it('refuses all four at once, one issue per key — and the `order` refusal beside them is unchanged', () => {
+    const r = ReportSchema.safeParse({
+      ...JOINED,
+      dataset: 'tasks', rows: ['status'], columns: ['priority'], values: ['task_count'],
+      order: [{ by: 'task_count' }],
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path, message: i.message }))).toEqual([
+      ...SELECTION.map(([key]) => ({ code: 'custom', path: [key], message: PRESCRIPTION(key) })),
+      { code: 'custom', path: ['order'], message: ORDER_MESSAGE },
+    ]);
+  });
+
+  it('the authoring factory refuses it too — `defineReport` throws the same prescription', () => {
+    expect(() => defineReport({ ...JOINED, values: ['task_count'] } as never)).toThrow(PRESCRIPTION('values'));
+  });
+
+  it('the metadata save door refuses it — the registry\'s `report` schema is the same schema', () => {
+    const saveDoor = getMetadataTypeSchema('report');
+    expect(saveDoor, 'the `report` metadata type must resolve a schema').toBeDefined();
+    const r = saveDoor!.safeParse({ ...JOINED, dataset: 'tasks' });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path, message: i.message }))).toEqual([
+      { code: 'custom', path: ['dataset'], message: PRESCRIPTION('dataset') },
+    ]);
+  });
+
+  it('taking the advice parses — each key is accepted on a block', () => {
+    const r = ReportSchema.safeParse({
+      ...JOINED,
+      blocks: [{ ...BLOCK, type: 'matrix', dataset: 'tasks', rows: ['status'], columns: ['priority'], values: ['task_count'] }],
+    });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+    expect(r.data!.blocks![0]).toMatchObject({ dataset: 'tasks', rows: ['status'], columns: ['priority'], values: ['task_count'] });
+  });
+
+  it('an EMPTY list selects nothing, so it is not refused — the same threshold as `order`', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, rows: [], columns: [], values: [], order: [] });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  it('the container keys a joined report DOES read still parse — `runtimeFilter` and `drilldown`', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, runtimeFilter: { done: false }, drilldown: false });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+    expect(r.data!.runtimeFilter).toEqual({ done: false });
+    expect(r.data!.drilldown).toBe(false);
+  });
+
+  it('a non-joined report is untouched — the same four keys are its selection', () => {
+    const r = ReportSchema.safeParse({
+      name: 'hours_matrix', label: 'Hours', type: 'matrix',
+      dataset: 'tasks', rows: ['status'], columns: ['priority'], values: ['task_count'],
+    });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  /**
+   * The alias tables route an author ONTO these keys (`measures` → `values`,
+   * `dataSet` → `dataset`). On a joined report the prescribed key is itself
+   * refused, with the pointer onto `blocks[]` — the same two-step answer an
+   * author already gets for `sort` → `order`. The refusal must still be reached
+   * after the rename; this pins it end to end, both spellings.
+   */
+  it.each([
+    ['measures', 'values', ['task_count']],
+    ['dataSet', 'dataset', 'tasks'],
+  ] as const)('the alias `%s` → `%s` still ends at the joined refusal, and then at `blocks[]`', (alias, target, value) => {
+    const aliased = ReportSchema.safeParse({ ...JOINED, [alias]: value });
+    expect(aliased.success).toBe(false);
+    const unknown = aliased.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown, `\`${alias}\` must be refused as an unknown key`).toBeDefined();
+    expect(unknown!.message).toContain(`Did you mean \`${alias}\` → \`${target}\`?`);
+
+    const renamed = ReportSchema.safeParse({ ...JOINED, [target]: value });
+    expect(renamed.success, `taking the rename put \`${target}\` on a joined container and it parsed green`).toBe(false);
+    expect(renamed.error!.issues.map((i) => ({ code: i.code, path: i.path, message: i.message }))).toEqual([
+      { code: 'custom', path: [target], message: PRESCRIPTION(target) },
+    ]);
+
+    const moved = ReportSchema.safeParse({ ...JOINED, blocks: [{ ...BLOCK, [target]: value }] });
+    expect(moved.success, JSON.stringify(moved.error?.issues ?? [])).toBe(true);
   });
 });
 
