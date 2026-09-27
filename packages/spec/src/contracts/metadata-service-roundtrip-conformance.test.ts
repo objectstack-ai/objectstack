@@ -28,7 +28,7 @@
  * compiles, optional members are optional) and its own inline round-trip. This
  * file pins the table. Neither subsumes the other.
  *
- * Refs #7223, #6725.
+ * Refs #7223; commit 1507ba356 (the facade object-write split this table exists to catch).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -215,7 +215,7 @@ describe('IMetadataService round-trip conformance — contract reference double'
     });
 
     it('covers both an object-typed and a non-object-typed round-trip', () => {
-        // The asymmetry that produced #6725: `object` reads are special-cased in
+        // The asymmetry behind the split commit 1507ba356 fixed: `object` reads are special-cased in
         // SchemaRegistry and the generic types are not. A table that lost one of
         // the two sides would still look full.
         const readable = METADATA_ROUNDTRIP_CASES.filter((c) => c.expected.kind === 'readable');

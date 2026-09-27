@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#6430 / #6206 ruling A] Share-link contract pins — the enforcement/401 line.
+// [#6430 / full-envelope ruling, commit d7e0b4212] Share-link contract pins — the enforcement/401 line.
 //
 // ## What the ruling decided
 //
@@ -130,7 +130,7 @@ describe('share-link contract — enforcement takes the full ExecutionContext (#
         tenantId: 'org_plant_a',
         positions: ['sales'],
         permissions: ['standard_user'],
-        // The five dimensions the trimmed envelope dropped (#6206):
+        // The five dimensions the trimmed envelope dropped (restored by commit 8e13ca876):
         accessible_org_ids: ['org_plant_a', 'org_plant_b'],
         org_user_ids: ['usr_1', 'usr_2'],
         systemPermissions: ['manage_sharing'],

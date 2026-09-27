@@ -19,7 +19,7 @@ describe('RuntimeMode', () => {
     expect(() => RuntimeMode.parse('staging')).toThrow();
     expect(() => RuntimeMode.parse('debug')).toThrow();
     expect(() => RuntimeMode.parse('')).toThrow();
-    // 'preview' was RETIRED (#11846) — the full prescription pins live in
+    // 'preview' was RETIRED (commit 0c2334f6c) — the full prescription pins live in
     // preview-mode-retirement.test.ts; this list only records the narrowing.
     expect(() => RuntimeMode.parse('preview')).toThrow();
   });
@@ -92,7 +92,7 @@ describe('KernelContextSchema', () => {
   });
 
   it('should accept all runtime modes in context', () => {
-    // 'preview' left this list in #11846 — see preview-mode-retirement.test.ts.
+    // 'preview' left this list in commit 0c2334f6c — see preview-mode-retirement.test.ts.
     const modes = ['development', 'production', 'test', 'provisioning'] as const;
     modes.forEach(mode => {
       const parsed = KernelContextSchema.parse({ ...validContext, mode });

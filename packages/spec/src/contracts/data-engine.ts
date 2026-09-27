@@ -164,7 +164,7 @@ export interface WriteObservabilityOptions {
    * reinstating legacy record numbers (#3493) exempts the runtime-owned strip
    * only, and a non-system create that asks for it still has its static
    * `readonly` fields stripped, with a `warn` saying the exemption is
-   * UPDATE-only (#6640) — see `FieldSchema.readonly`.
+   * UPDATE-only (commit 2ab1257c9 narrowed it so) — see `FieldSchema.readonly`.
    * `ReadonlyFieldRejectedError`'s own doc records the same contract from the
    * error's side: "Thrown by `engine.update` — and, since #5503, by
    * `engine.insert`".
@@ -246,9 +246,9 @@ export interface IDataEngine {
    * exactly the erasure this issue is sweeping. `query.context` remains
    * supported; when both are given, `options.context` wins.
    *
-   * [#6300] `query` is the AUTHOR state (`z.input`, ADR-0122): a key with a
+   * [commit 74155c735] `query` is the AUTHOR state (`z.input`, ADR-0122): a key with a
    * declared `.default()` — `orderBy[].order` — is optional to write, exactly
-   * as on `count`'s `EngineCountOptions`. #6083 had pinned these two methods
+   * as on `count`'s `EngineCountOptions`. ADR-0122 phase 2 (commit 53068c130) had pinned these two methods
    * back to the parsed state because the engine built its `QueryAST` by spread
    * without filling any default; the engine now runs each defaulting node
    * through its own schema before the AST is built (ObjectQL's
@@ -271,7 +271,7 @@ export interface IDataEngine {
    * No ordering is imposed when the caller supplies none: `findOne` promises
    * *a* matching record, never a position in a sequence (#4363).
    *
-   * [#6300] `query` is the author state (`z.input`), same as `find` above.
+   * [commit 74155c735] `query` is the author state (`z.input`), same as `find` above.
    */
   findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<Record<string, any> | null>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
@@ -362,7 +362,7 @@ export interface IDataEngine {
    * that owns datasource routing can answer; test fakes and remote/virtual
    * engines simply omit it, and callers probe with `?.`.
    *
-   * [#12248] Declared under the [#4251]/[#11493] evidence bar, per the
+   * [commit 8425c17cc] Declared under the [#4251]/[#11493] evidence bar, per the
    * 2026-08-25 maintainer ruling on #11833 (fork 1, option A): ObjectQL has
    * implemented this method since #5288, and `service-analytics` reads it
    * off the data engine for datasource-capability tiering — while this
@@ -379,7 +379,7 @@ export interface IDataEngine {
    * Optional exactly like {@link getDriverByName}: only an engine that owns a
    * named-driver registry can resolve an object to a driver.
    *
-   * [#12248] Declared under the same evidence bar, per the same #11833
+   * [commit 8425c17cc] Declared under the same evidence bar, per the same #11833
    * ruling (fork 1, option A): ObjectQL implements it, and three packages
    * already consume it cross-package through structural re-declarations or
    * `any` — `service-analytics` (ADR-0053 temporal storage-form coercion,
@@ -397,9 +397,9 @@ export interface IDataEngine {
    * datasource registry (the same population as the driver-registry pair
    * above). All three are consumed today by `service-datasource`'s
    * `DatasourceConnectionService`, which drives the engine through the
-   * `'data'` slot and, until [#12248], could name these members only through
+   * `'data'` slot and, until commit 8425c17cc, could name these members only through
    * its consumer-local structural `ConnectionEngineLike` re-declaration —
-   * the third such type the #11833 sweep measured (#12010), adjudicated onto
+   * the third such type the #11833 sweep measured, adjudicated onto
    * the contract by the 2026-08-25 ruling's item 4.
    *
    * Register a datasource *definition* (ADR-0015) — the declarative
@@ -475,8 +475,8 @@ export interface IDataEngine {
    * (`engine.syncObjectSchema?.(name)` / `typeof === 'function'`).
    *
    * [#12482] Declared under the [#4251]/[#11493] evidence bar, per the
-   * 2026-08-25 #11833 ruling's item-4 precedent as executed by #12248 —
-   * the member #12010's inventory left "not verified", verified now:
+   * 2026-08-25 #11833 ruling's item-4 precedent as executed by commit 8425c17cc —
+   * the member that sweep's `ConnectionEngineLike` inventory left "not verified", verified now:
    * ObjectQL has implemented it since the ADR-0015 federation work, and
    * two service packages already consume it cross-package, each through
    * consumer-local structural recovery. `service-datasource`'s

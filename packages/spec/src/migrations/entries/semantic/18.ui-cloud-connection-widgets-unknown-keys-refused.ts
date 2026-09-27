@@ -13,10 +13,15 @@ export const entry: SemanticMigration = {
     + 'not renamed. Node-level keys (`visibleWhen`, `id`, `style`, …) stay on the component '
     + 'node, where the page runtime reads them.',
   reason:
-    'These were two more instances of the #8691/#8744 class: console-registered widgets on '
+    'These were two more instances of the class already closed for `record:reference_rail` '
+    + 'and then for `record:alert` / `record:quick_actions` / `record:history`, each by '
+    + 'declaring a strict `ComponentPropsMap` row measured from the renderer\'s read points: '
+    + 'console-registered widgets on '
     + '`@objectstack/cloud-connection`\'s published Setup pages, reachable through the '
     + 'component type union\'s open string arm, with registered renderers but no '
-    + '`ComponentPropsMap` row — so the #5068 props gate\'s dispatch skipped them as '
+    + '`ComponentPropsMap` row — so the props gate\'s dispatch (it parses `properties` '
+    + 'against the type\'s row at publish and lint time, and skips a type with no row because '
+    + 'the type union is open) skipped them as '
     + 'unregistered and any authored key rode through every validator in silence. The new '
     + 'rows are strict and EMPTY, measured from the renderers\' actual read points at the '
     + 'objectui pin (not from the registrations\' declared-input lists): both registrations '

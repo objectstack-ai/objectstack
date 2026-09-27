@@ -23,7 +23,7 @@ export * from './events.zod';
 export * from './manifest.zod';
 // metadata-customization.zod (MetadataOverlaySchema, FieldChangeSchema, the
 // three-layer overlay / 3-way-merge protocol) was REMOVED per ADR-0049
-// enforce-or-remove (#13135, re-charter of #12057; ADR-0126 §6 wall 4
+// enforce-or-remove (commit 9e0ba21a1, re-charter of #12057; ADR-0126 §6 wall 4
 // supersedes it as a matter of record — "nothing may build against it").
 // Zero reachable consumers: the only implementation was `packages/metadata`'s
 // manager limb, served by no route and called only by its own unit tests. The
@@ -50,7 +50,7 @@ export * from './metadata-authoring-lint';
 // re-declare) `UnknownAuthoringKeyFinding` from `../data/authoring-key-lint`,
 // so the `export *` above does not carry it — the finding type its lint
 // functions return was unnameable from this entry. Same invariant (maintainer
-// ruling recorded on #11350), same repair: re-export from the declaring
+// ruling 2026-08-23, recorded in commit ece4dad31), same repair: re-export from the declaring
 // module, which is already public on `/data`.
 export type { UnknownAuthoringKeyFinding } from '../data/authoring-key-lint';
 export * from './package-artifact.zod';

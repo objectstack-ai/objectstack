@@ -103,6 +103,33 @@
  *   read as before. The #8690 ruling scoped THAT change to strings; it did not
  *   rule non-strings out of this door.
  *
+ * ## [#20263] The third position: `having`
+ *
+ * `engine.aggregate` evaluates `having` itself, over the aggregated rows, so no
+ * driver ever reads it and nothing in front of it judged its comparands. A
+ * comparand the column's storage rule cannot read was compared as written:
+ * `{ last_placed: { $lt: 'not-a-date' } }` on `max(placed_on)` kept every
+ * group with a 200, while the same bound on `where` answered 400. Measured on
+ * InMemoryDriver, SqlDriver on SQLite and on PostgreSQL, through
+ * `engine.aggregate` and `POST /data/:object/query`, on both `having` paths.
+ *
+ * {@link assertHavingTemporalComparandsInterpretable} runs the same walk and
+ * the same predicate, so a rule `@objectstack/core` changes reaches all three
+ * positions at once. Two things differ, and each is the position's own fact:
+ *
+ * - **The kind comes from the aggregated column's class**, the one #20127
+ *   derives off the query and the declaration (`aggregatedRowColumnClasses`):
+ *   `min` / `max` of a temporal field keeps its kind, a groupBy projection
+ *   takes its field's, a `day` bucket is a `date`; `count` / `sum` / `avg`, a
+ *   coarser bucket and every other column are not temporal and are not judged.
+ * - **The text operators are not judged.** On `where` a text operator aimed at
+ *   a temporal field never reaches this door: the text-operator declared-type
+ *   door refuses it one step earlier, because "not a date value" is the wrong
+ *   thing to tell an author whose operator no comparand could make runnable
+ *   (#15661). That door does not front `having`, and by its ruling the row
+ *   beneath it stays answered there, so this door steps over those operators
+ *   rather than answer them in the words #15661 retired.
+ *
  * @see `@objectstack/core`'s `temporal-comparand.ts` — the value-half predicate,
  *   shared with the analytics raw-SQL decline so one rule cannot exist twice.
  * @see https://github.com/objectstack-ai/objectstack/issues/8690
@@ -113,10 +140,13 @@ import {
   temporalComparandKind,
   type TemporalComparandKind,
 } from '@objectstack/core';
+import { isTextFilterOperator } from '@objectstack/spec/data';
 import { invalidFilterError } from './filter-comparand-shape.js';
+import { temporalKindOf, type AggregatedColumnClass } from './having-filter.js';
 
 /** What the door found, for the message and for the analytics-side decline. */
 export interface UninterpretableTemporalComparand {
+  /** The filter key: a declared field, or [#20263] a `having` column. */
   field: string;
   kind: TemporalComparandKind;
   /**
@@ -124,8 +154,18 @@ export interface UninterpretableTemporalComparand {
    * whose UTC year falls outside 0..9999.
    */
   value: unknown;
-  /** The `where.…` key path the offending comparand sits at. */
+  /** The `where.…` (or `having.…`) key path the offending comparand sits at. */
   path: string;
+}
+
+/**
+ * [#20263] What one filter position supplies to the walk: the storage kind of
+ * the column a KEY names (`null` = not temporal, or not known), and whether an
+ * operator's comparands are judged at all.
+ */
+interface WalkScope {
+  kindOf: (key: string) => TemporalComparandKind | null;
+  judgesOperator: (op: string) => boolean;
 }
 
 /**
@@ -172,30 +212,51 @@ export function findUninterpretableTemporalComparand(
   // see — the same early return `assertFilterIsMaterializable` makes.
   const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
   if (!fields || typeof fields !== 'object') return null;
-  if (depth > 32) return null;
-  if (!isFilterNode(where)) return null;
+  return walkCondition(
+    {
+      kindOf: (key) => temporalComparandKind((fields[key] as { type?: unknown } | undefined)?.type),
+      judgesOperator: () => true,
+    },
+    where,
+    path,
+    depth,
+  );
+}
 
-  for (const [key, value] of Object.entries(where)) {
+/**
+ * The walk itself, shared by every position: the node structure is judged the
+ * same way wherever the condition sits; only the {@link WalkScope} differs.
+ */
+function walkCondition(
+  scope: WalkScope,
+  node: unknown,
+  path: string,
+  depth: number,
+): UninterpretableTemporalComparand | null {
+  if (depth > 32) return null;
+  if (!isFilterNode(node)) return null;
+
+  for (const [key, value] of Object.entries(node)) {
     const here = `${path}.${key}`;
     if (key === '$and' || key === '$or') {
       if (Array.isArray(value)) {
         for (const [index, arm] of value.entries()) {
-          const hit = findUninterpretableTemporalComparand(schema, arm, `${here}[${index}]`, depth + 1);
+          const hit = walkCondition(scope, arm, `${here}[${index}]`, depth + 1);
           if (hit) return hit;
         }
       }
       continue;
     }
     if (key === '$not') {
-      const hit = findUninterpretableTemporalComparand(schema, value, here, depth + 1);
+      const hit = walkCondition(scope, value, here, depth + 1);
       if (hit) return hit;
       continue;
     }
     if (key.startsWith('$')) continue;
     if (key.includes('.')) continue;
-    const kind = temporalComparandKind((fields[key] as { type?: unknown } | undefined)?.type);
+    const kind = scope.kindOf(key);
     if (!kind) continue;
-    const hit = judgeFieldComparands(kind, key, value, here);
+    const hit = judgeFieldComparands(kind, key, value, here, scope.judgesOperator);
     if (hit) return hit;
   }
   return null;
@@ -207,6 +268,7 @@ function judgeFieldComparands(
   field: string,
   spec: unknown,
   path: string,
+  judgesOperator: (op: string) => boolean,
 ): UninterpretableTemporalComparand | null {
   // Not filter structure → an implicit-equality comparand, judged at this path.
   if (!isFilterNode(spec)) return judgeComparand(kind, field, spec, path);
@@ -218,6 +280,7 @@ function judgeFieldComparands(
   if (isFieldReference(spec)) return null;
   for (const op of keys) {
     if (!op.startsWith('$')) continue;
+    if (!judgesOperator(op)) continue;
     const comparand = spec[op];
     // Every MEMBER of a list operator is a comparand in its own right — the
     // same split the #7872 type door makes at the shared compile face.
@@ -319,5 +382,89 @@ export function assertTemporalComparandsInterpretable(
     + 'this platform can interpret. It would reach the driver as written, compare false for '
     + 'EVERY row, and return 200 with an empty result — indistinguishable from "there is no '
     + `data". The filter was NOT applied. ${REMEDY[hit.kind]}`,
+  );
+}
+
+/**
+ * [#20263] The remedy on a `having` column. No relative-date placeholder: the
+ * engine does not resolve filter placeholders in `having` (only in `where` and
+ * a per-aggregation `filter`), so naming `{30_days_ago}` here would send the
+ * author to a spelling `having` compares as the literal text it is.
+ */
+const HAVING_REMEDY: Record<TemporalComparandKind, string> = {
+  datetime:
+    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z"), a bare "YYYY-MM-DD" '
+    + '(read as midnight UTC), or epoch milliseconds.',
+  date: 'Write a "YYYY-MM-DD" calendar day.',
+  time: REMEDY.time,
+};
+
+/**
+ * [#20263] Which aggregated column a `having` key names, in the words the
+ * author wrote it: `max(placed_on)`, `the day bucket of opened_at`, `the
+ * groupBy field placed_on`. For the message only — the column's CLASS comes
+ * from `aggregatedRowColumnClasses`, which reads an aggregation alias after the
+ * groupBy projections, so an aggregation is looked up first here too.
+ */
+function havingColumnSource(column: string, groupBy: unknown, aggregations: unknown): string {
+  for (const a of Array.isArray(aggregations) ? aggregations : []) {
+    const agg = a as { alias?: unknown; function?: unknown; field?: unknown } | null;
+    if (agg?.alias === column) return `${String(agg.function)}(${String(agg.field)})`;
+  }
+  for (const g of Array.isArray(groupBy) ? groupBy : []) {
+    if (g === column) return `the groupBy field ${column}`;
+    const item = g as { alias?: unknown; field?: unknown; dateGranularity?: unknown } | null;
+    if ((item?.alias ?? item?.field) !== column) continue;
+    return item?.dateGranularity == null
+      ? `the groupBy field ${String(item?.field)}`
+      : `the ${String(item.dateGranularity)} bucket of ${String(item?.field)}`;
+  }
+  return 'an aggregated column';
+}
+
+/**
+ * [#20263] Refuse every `having` comparand its aggregated column's storage rule
+ * cannot read, before any driver is asked for a row.
+ *
+ * The same walk and the same `@objectstack/core` predicate as `where` — see
+ * the module note's `having` section for the two differences: the kind is the
+ * column's CLASS (`classes`, #20127's `aggregatedRowColumnClasses`, handed in
+ * rather than derived again), and the text operators are stepped over.
+ * `ObjectQL.aggregate` calls it on the caller's own `having`, after every
+ * other `having` door, so a clause those refuse keeps their refusal.
+ */
+export function assertHavingTemporalComparandsInterpretable(
+  object: string,
+  having: unknown,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  query: { groupBy?: unknown; aggregations?: unknown },
+): void {
+  const hit = walkCondition(
+    {
+      kindOf: (key) => temporalKindOf(classes.get(key)) ?? null,
+      judgesOperator: (op) => !isTextFilterOperator(op),
+    },
+    having,
+    'having',
+    0,
+  );
+  if (!hit) return;
+  const column = `\`having\` on '${hit.field}' (${havingColumnSource(hit.field, query.groupBy, query.aggregations)}, `
+    + `a ${hit.kind} column)`;
+  // The `date` year class, in its own words, as on `where` (#20240).
+  if (typeof hit.value !== 'string') {
+    throw invalidFilterError(
+      `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, an `
+      + 'instant whose UTC calendar day falls outside the years 0000 to 9999, the only years a '
+      + '"YYYY-MM-DD" day can spell, so it is not a date value this platform can interpret. Compared '
+      + 'with each group, it would order as no day does and keep the wrong groups. The `having` was '
+      + `NOT applied. ${DATE_YEAR_REMEDY}`,
+    );
+  }
+  throw invalidFilterError(
+    `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
+    + `which is not a ${hit.kind} value this platform can interpret. Compared with each group as `
+    + 'written, it would keep no group or every group, a 200 indistinguishable from a real answer. '
+    + `The \`having\` was NOT applied. ${HAVING_REMEDY[hit.kind]}`,
   );
 }

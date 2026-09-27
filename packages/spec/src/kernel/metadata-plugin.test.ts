@@ -313,7 +313,7 @@ describe('MetadataPluginProtocol', () => {
           rootDir: '/metadata',
         },
         // `additionalTypes` was retired by #8586, and `customizationPolicies`
-        // / `mergeStrategy` by #13135 (both ADR-0049) — authoring any of them
+        // / `mergeStrategy` by commit 9e0ba21a1 (both ADR-0049) — authoring any of them
         // is now a parse error; see additional-types-retirement.test.ts and
         // metadata-customization-retirement.test.ts for the pins.
         enableEvents: true,

@@ -15,7 +15,9 @@ export const entry: SemanticMigration = {
     + '`related` → `entries`; `object` → `objectName`; `label` → `title`; a `title` locale map '
     + '→ a literal string, or omit it to keep the localized object label)',
   reason:
-    'The rail was the `record:*` component the #4001/#5068 gate could not reach: it had a '
+    'The rail was the `record:*` component the component-props unknown-key gate (an '
+    + 'authorable surface refuses a key it does not declare; for a component\'s `properties`, '
+    + 'by parsing them against the type\'s `ComponentPropsMap` row) could not reach: it had a '
     + 'registered renderer and a `PageComponentType` entry but no `ComponentPropsMap` row, so '
     + 'the props gate\'s dispatch skipped it as unregistered and every authored key rode '
     + 'through. Measured on 17.0.0 GA end to end: a planted entry `filter` passed tsc, '

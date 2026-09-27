@@ -130,7 +130,7 @@ describe('ManifestSchema', () => {
       expect(() => ManifestSchema.parse(manifest)).not.toThrow();
     });
 
-    // The `extensions` acceptance pin was removed with the key (#11332): the
+    // The `extensions` acceptance pin was removed with the key (commit dce5cd4f0): the
     // untyped catch-all had zero readers, so accepting it pinned a silent
     // no-op. The rejection is pinned with the dead-container retirement below.
   });
@@ -161,7 +161,7 @@ describe('ManifestSchema', () => {
           './objects/contact.object.ts',
           './objects/campaign.object.ts',
         ],
-        // `extensions` retired (#11332) — nothing ever read the container.
+        // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(crmManifest)).not.toThrow();
@@ -190,7 +190,7 @@ describe('ManifestSchema', () => {
       expect(() => ManifestSchema.parse(biPlugin)).not.toThrow();
     });
 
-    // `contributes.commands` acceptance pins removed with the key (#10724):
+    // `contributes.commands` acceptance pins removed with the key (commit be21955ba):
     // the CLI never resolved commands from the declaration (oclif
     // auto-discovery is the enforced channel — `cli-extension.zod.ts`). The
     // rejection is pinned with its eight retired siblings below.
@@ -206,7 +206,7 @@ describe('ManifestSchema', () => {
           'system.auth.configure',
           'system.user.create',
         ],
-        // `extensions` retired (#11332) — nothing ever read the container.
+        // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(authPlugin)).not.toThrow();
@@ -222,7 +222,7 @@ describe('ManifestSchema', () => {
         permissions: [
           'system.datasource.manage',
         ],
-        // `extensions` retired (#11332) — nothing ever read the container.
+        // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(dbDriver)).not.toThrow();
@@ -286,7 +286,7 @@ describe('ManifestSchema', () => {
         type: 'adapter',
         name: 'Express Adapter',
         description: 'Express.js HTTP server adapter for ObjectStack runtime',
-        // `configuration` retired (#11332) — the settings block had no reader;
+        // `configuration` retired (commit dce5cd4f0) — the settings block had no reader;
         // a plugin is configured by its host at composition time.
       };
 
@@ -382,7 +382,7 @@ describe('ManifestSchema', () => {
 });
 
 describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, not deleted)', () => {
-  // Nine members had zero readers monorepo-wide (#10627's controlled census,
+  // Nine members had zero readers monorepo-wide (the controlled census commit be21955ba records,
   // completed on cloud 2026-08-24). When they were retired `ManifestSchema` and
   // the `contributes` object were NOT `.strict()`, so a plain deletion would
   // have silently stripped the keys; both are `strictObject` now, and the keys
@@ -436,8 +436,8 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
 
 describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled Option B 2026-08-22)', () => {
   // The one `contributes` member split onto its own card: zero readers like
-  // its nine #10724 siblings (#10627's controlled census, cloud leg closed
-  // clean by #10812), but four published surfaces taught it as THE way to
+  // its nine siblings retired by commit be21955ba (that commit's controlled census, cloud leg closed
+  // clean on 2026-08-24), but four published surfaces taught it as THE way to
   // serve a code-handler endpoint, so removal needed its own ruling. The
   // removal is a `retiredKey()` tombstone (it carries the prescription, which
   // the since-closed block's bare unknown-key refusal would not); the pin
