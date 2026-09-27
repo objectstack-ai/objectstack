@@ -28,7 +28,12 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
+
+/** The `where` type every verb (and the judge) accepts. */
+type Where = EngineQueryOptions['where'];
 
 const DEAL = 'judge_deal';
 const ACCOUNT = 'judge_account';
@@ -61,16 +66,15 @@ type Verb = NonNullable<EngineFilterJudgementOptions['operation']>;
 const VERBS: readonly Verb[] = ['find', 'findOne', 'count', 'aggregate', 'update', 'delete'];
 
 /** Run `where` through one verb's EXECUTION on `object`. */
-function execute(engine: ObjectQL, verb: Verb, object: string, where: unknown, context?: Record<string, unknown>) {
-  const w = where as any;
+function execute(engine: ObjectQL, verb: Verb, object: string, where: Where, context?: ExecutionContext) {
   switch (verb) {
-    case 'find': return engine.find(object, { where: w }, { context } as any);
-    case 'findOne': return engine.findOne(object, { where: w }, { context } as any);
-    case 'count': return engine.count(object, { where: w }, { context } as any);
+    case 'find': return engine.find(object, { where }, { context });
+    case 'findOne': return engine.findOne(object, { where }, { context });
+    case 'count': return engine.count(object, { where }, { context });
     case 'aggregate':
-      return engine.aggregate(object, { where: w, aggregations: [{ function: 'count', alias: 'n' }] } as any, { context } as any);
-    case 'update': return engine.update(object, { title: 'x' }, { where: w, multi: true, context } as any);
-    case 'delete': return engine.delete(object, { where: w, multi: true, context } as any);
+      return engine.aggregate(object, { where, aggregations: [{ function: 'count', alias: 'n' }] }, { context });
+    case 'update': return engine.update(object, { title: 'x' }, { where, multi: true, context });
+    case 'delete': return engine.delete(object, { where, multi: true, context });
   }
 }
 
@@ -113,7 +117,7 @@ function makeRecordingDriver() {
  * The five classes the ruling names, each with the envelope its door raises.
  * `where` is a factory so no case can edit a filter another case judges.
  */
-const CLASSES: ReadonlyArray<{ name: string; where: () => unknown; code: string; status: number; mentions: string }> = [
+const CLASSES: ReadonlyArray<{ name: string; where: () => Where; code: string; status: number; mentions: string }> = [
   {
     name: 'a text operator over a non-text field',
     where: () => ({ amount: { $contains: '5' } }),
@@ -169,7 +173,7 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
     for (const c of CLASSES) {
       for (const verb of VERBS) {
         it(`${c.name}, on ${verb}`, async () => {
-          const verdict = refused(engine.judgeFilter(DEAL, c.where() as any, { operation: verb }));
+          const verdict = refused(engine.judgeFilter(DEAL, c.where(), { operation: verb }));
           expect(calls).toEqual([]);
 
           const thrown = await refusalOf(execute(engine, verb, DEAL, c.where()));
@@ -185,24 +189,28 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
     }
 
     it('the default operation is find', () => {
-      const bare = refused(engine.judgeFilter(DEAL, { amount: { $contains: '5' } } as any));
-      const asFind = refused(engine.judgeFilter(DEAL, { amount: { $contains: '5' } } as any, { operation: 'find' }));
+      const bare = refused(engine.judgeFilter(DEAL, { amount: { $contains: '5' } }));
+      const asFind = refused(engine.judgeFilter(DEAL, { amount: { $contains: '5' } }, { operation: 'find' }));
       expect(bare).toEqual(asFind);
       expect(bare.message.startsWith(`find('${DEAL}')`)).toBe(true);
     });
 
     it('the filter-array sugar is judged through the same lowering execution runs', async () => {
-      const where = [['amount', 'contains', '5']];
-      const verdict = refused(engine.judgeFilter(DEAL, where as any));
-      const thrown = await refusalOf(engine.find(DEAL, { where: where as any }));
+      // Input-only sugar: off the `where` type on purpose, as a caller holding
+      // a `FilterArray` passes it.
+      const where = [['amount', 'contains', '5']] as unknown as Where;
+      const verdict = refused(engine.judgeFilter(DEAL, where));
+      const thrown = await refusalOf(engine.find(DEAL, { where }));
       expect({ code: verdict.code, status: verdict.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
     });
 
     it('a where that is not a filter object gets the shape gate\'s diagnostic', async () => {
-      const verdict = refused(engine.judgeFilter(DEAL, 'status = open' as any));
-      const thrown = await refusalOf(engine.find(DEAL, { where: 'status = open' as any }));
+      // Off-contract on purpose: the shape gate is what refuses it.
+      const where = 'status = open' as unknown as Where;
+      const verdict = refused(engine.judgeFilter(DEAL, where));
+      const thrown = await refusalOf(engine.find(DEAL, { where }));
       expect({ code: verdict.code, status: verdict.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
     });
@@ -211,25 +219,25 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
   describe('a runnable filter', () => {
     it('returns ok, and execution admits it and reaches the driver', async () => {
       const where = { title: 'Acme', amount: { $gt: 5 }, closes_on: { $gte: '{30_days_ago}' } };
-      expect(engine.judgeFilter(DEAL, where as any)).toEqual({ ok: true });
+      expect(engine.judgeFilter(DEAL, where)).toEqual({ ok: true });
       expect(calls).toEqual([]);
 
       // Positive control: the same filter executes, so the spy is live.
-      await engine.find(DEAL, { where: where as any });
+      await engine.find(DEAL, { where });
       expect(calls).toContain('find');
     });
 
     it('an absent, null or empty where is ok', () => {
       expect(engine.judgeFilter(DEAL, undefined)).toEqual({ ok: true });
-      expect(engine.judgeFilter(DEAL, null as any)).toEqual({ ok: true });
+      expect(engine.judgeFilter(DEAL, null as unknown as Where)).toEqual({ ok: true });
       expect(engine.judgeFilter(DEAL, {})).toEqual({ ok: true });
-      expect(engine.judgeFilter(DEAL, [] as any)).toEqual({ ok: true });
+      expect(engine.judgeFilter(DEAL, [] as unknown as Where)).toEqual({ ok: true });
     });
 
     it('leaves the caller\'s filter untouched', () => {
       const where = { owner_id: '{current_user_id}', closes_on: { $gte: '{30_days_ago}' } };
       const before = JSON.stringify(where);
-      expect(engine.judgeFilter(DEAL, where as any, { context: { userId: 'u_1' } })).toEqual({ ok: true });
+      expect(engine.judgeFilter(DEAL, where, { context: { userId: 'u_1' } })).toEqual({ ok: true });
       expect(JSON.stringify(where)).toBe(before);
     });
   });
@@ -237,8 +245,8 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
   describe('nothing executes', () => {
     it('no driver method is called and no driver is resolved, for a refusal or an ok', async () => {
       const getDriver = vi.spyOn(engine as any, 'getDriver');
-      for (const c of CLASSES) engine.judgeFilter(DEAL, c.where() as any);
-      engine.judgeFilter(DEAL, { title: 'Acme' } as any);
+      for (const c of CLASSES) engine.judgeFilter(DEAL, c.where());
+      engine.judgeFilter(DEAL, { title: 'Acme' });
       expect(calls).toEqual([]);
       expect(getDriver).not.toHaveBeenCalled();
 
@@ -253,8 +261,8 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
       engine.registerHook('beforeFind', hook, { object: DEAL });
       engine.registerMiddleware(middleware);
 
-      engine.judgeFilter(DEAL, { title: 'Acme' } as any);
-      engine.judgeFilter(DEAL, { is_open: true } as any);
+      engine.judgeFilter(DEAL, { title: 'Acme' });
+      engine.judgeFilter(DEAL, { is_open: true });
       expect(hook).not.toHaveBeenCalled();
       expect(middleware).not.toHaveBeenCalled();
 
@@ -267,18 +275,18 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
 
   describe('order: the diagnostic execution gives when a filter has two defects', () => {
     it('the door stage runs before the placeholder stage', async () => {
-      const where = () => ({ owner_id: '{bogus_token}', amount: { $contains: '5' } });
-      const verdict = refused(engine.judgeFilter(DEAL, where() as any));
-      const thrown = await refusalOf(engine.find(DEAL, { where: where() as any }));
+      const where = (): Where => ({ owner_id: '{bogus_token}', amount: { $contains: '5' } });
+      const verdict = refused(engine.judgeFilter(DEAL, where()));
+      const thrown = await refusalOf(engine.find(DEAL, { where: where() }));
       expect(verdict.code).toBe('INVALID_FILTER');
       expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
     });
 
     it('inside the door stage, the materializable door answers before the text-operator door', async () => {
-      const where = () => ({ amount: { $contains: '5' }, is_open: true });
-      const verdict = refused(engine.judgeFilter(DEAL, where() as any));
-      const thrown = await refusalOf(engine.find(DEAL, { where: where() as any }));
+      const where = (): Where => ({ amount: { $contains: '5' }, is_open: true });
+      const verdict = refused(engine.judgeFilter(DEAL, where()));
+      const thrown = await refusalOf(engine.find(DEAL, { where: where() }));
       expect(verdict.code).toBe('INVALID_FIELD');
       expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'INVALID_FIELD', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
@@ -288,8 +296,8 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
   describe('placeholders resolve against the supplied context, never to null', () => {
     it('a context placeholder with no context is refused, as execution refuses it', async () => {
       const where = { owner_id: '{current_user_id}' };
-      const verdict = refused(engine.judgeFilter(DEAL, where as any));
-      const thrown = await refusalOf(engine.find(DEAL, { where: where as any }));
+      const verdict = refused(engine.judgeFilter(DEAL, where));
+      const thrown = await refusalOf(engine.find(DEAL, { where }));
       expect({ code: verdict.code, status: verdict.status }).toEqual({ code: 'FILTER_TOKEN_UNRESOLVED', status: 400 });
       expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'FILTER_TOKEN_UNRESOLVED', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
@@ -297,8 +305,8 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
 
     it('the same placeholder with the context execution would get is ok, and execution sends the resolved value', async () => {
       const where = { owner_id: '{current_user_id}' };
-      expect(engine.judgeFilter(DEAL, where as any, { context: { userId: 'u_1' } })).toEqual({ ok: true });
-      await engine.find(DEAL, { where: where as any }, { context: { userId: 'u_1' } } as any);
+      expect(engine.judgeFilter(DEAL, where, { context: { userId: 'u_1' } })).toEqual({ ok: true });
+      await engine.find(DEAL, { where }, { context: { userId: 'u_1' } });
       expect(reads.at(-1)?.ast.where).toEqual({ owner_id: 'u_1' });
     });
   });
@@ -306,11 +314,11 @@ describe('[#20157] ObjectQL.judgeFilter: judge a where without executing it', ()
   describe('an object the registry does not know', () => {
     it('the field-map doors answer nothing and the schema-free doors still judge, as at execution', async () => {
       // A virtual-field verdict needs the field map; with none, it is ok.
-      expect(engine.judgeFilter('judge_unregistered', { is_open: true } as any)).toEqual({ ok: true });
+      expect(engine.judgeFilter('judge_unregistered', { is_open: true })).toEqual({ ok: true });
       // The list-comparand shape gate needs no field map.
-      const where = () => ({ status: { $in: 'open' } });
-      const verdict = refused(engine.judgeFilter('judge_unregistered', where() as any));
-      const thrown = await refusalOf(engine.find('judge_unregistered', { where: where() as any }));
+      const where = (): Where => ({ status: { $in: 'open' } });
+      const verdict = refused(engine.judgeFilter('judge_unregistered', where()));
+      const thrown = await refusalOf(engine.find('judge_unregistered', { where: where() }));
       expect({ code: verdict.code, status: verdict.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect({ code: thrown!.code, status: thrown!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
       expect(verdict.message).toBe(thrown!.message);
