@@ -15,7 +15,8 @@ which object its views belong to, and it is the key the runtime indexes views by
 (`getViewsByObject()` / `GET /meta/view?object=`). The schema declares it `z.string()`, and
 nothing resolved it: `defineStack`'s cross-reference check reads a container's
 `list.data` / `form.data` bindings, never the container's own key. So a container bound to a
-name no object carries passed all three commands with no finding of any severity, and at
+name no object carries passed: `os validate` printed "Validation passed" and exited 0,
+saying nothing about the view, and `os build` / `os lint` run the same rule table. At
 runtime none of its views was found for any object. The common case is not a typo but a
 missing namespace prefix — `object: 'order_line'` in a project whose object is
 `my_app_order_line` — which is exactly what `os generate view` wrote in every namespaced

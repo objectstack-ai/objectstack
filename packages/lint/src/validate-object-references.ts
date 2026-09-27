@@ -340,8 +340,9 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   // runtime indexes by — `getViewsByObject()` / `GET /meta/view?object=` match a
   // view's `object` against the object asked for — so a container bound to a
   // name no object carries is never found for ANY object. Measured at the
-  // public door before this leg: `os validate` exited 0, with no finding of any
-  // severity, on `object: 'order_line'` in a project whose object is
+  // public door with this leg disabled: `os validate` printed "Validation
+  // passed" and exited 0, saying nothing about the view, on
+  // `object: 'order_line'` in a project whose object is
   // `my_app_order_line`. That is exactly the shape `os generate view` wrote in
   // every namespaced project until its template learned the prefix, and any
   // hand or AI author can still write it.
