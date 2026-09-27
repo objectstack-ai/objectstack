@@ -27,6 +27,7 @@ import {
   INVITATION_PLACEMENT_SERVICE,
   createInvitationPlacementService,
 } from './invitation-placement.js';
+import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -3769,6 +3770,19 @@ export class SecurityPlugin implements Plugin {
     });
 
     ctx.logger.info('Security middleware registered on ObjectQL engine');
+
+    // [ADR-0057 D4 / ADR-0112] A `sys_user_position` write whose `position`
+    // names no `sys_position` catalog row is refused (`400 VALIDATION_FAILED`,
+    // `reference_not_found` at `position`) instead of answering 201 over an
+    // assignment that resolves to nothing. Registered AFTER the security
+    // middleware, so it runs INSIDE it: the delegated-admin gate and the CRUD
+    // check have both passed before the catalog is consulted, and a caller who
+    // may not write the table is refused on authority, never on the value.
+    // Scope, predicate and stand-downs: `position-catalog-refusal.ts`.
+    ql.registerMiddleware(
+      createPositionCatalogRefusal({ ql, logger: ctx.logger }),
+      { object: POSITION_ASSIGNMENT_OBJECT },
+    );
 
     // [ADR-0094] Data-door write-through: every non-system CRUD write on
     // `sys_permission_set` is redirected into the metadata store (the ONE
