@@ -498,6 +498,13 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
     ]);
     // What the door hands the strict parse now boots.
     expect(issuePaths(result.definition)).toEqual([]);
+    // The door names what opened it: each retirement this runtime enforces past
+    // the floor, with the release it retired after — never a default flip.
+    const replayed = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
+    expect(replayed.get('page-assigned-profiles-removed')).toBe('17.4.0');
+    expect(replayed.get('dashboard-widget-chart-config-structure-removed')).toBe('17.4.0');
+    expect(replayed.has('flow-decision-mode-inclusive-explicit')).toBe(false);
+    expect([...new Set(replayed.values())]).toEqual(['17.4.0']);
   });
 
   // Pin (3): the boundary the per-entry rule must keep.
@@ -507,6 +514,7 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
 
     expect(result.verdict).toBe('authored-current');
     expect(result.notices).toEqual([]);
+    expect(result.replayedRetirements).toEqual([]);
     expect(result.definition).toBe(def);
     // The strict parse the door feeds refuses every retired site, tombstones included.
     expect(issuePaths(result.definition)).toEqual(RETIRED_SITES);
@@ -515,6 +523,8 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
   it('after the release (label 17.5.0) the same ^17.4.0 artifact converts through the label half — the rule reduces to the old one', () => {
     const result = applyArtifactForwardConversions(builtBy174('^17.4.0'), { runtimeSpecVersion: '17.5.0' });
     expect(result.verdict).toBe('converted-forward');
+    // The label half names no per-entry reason: the whole chain replays on one.
+    expect(result.replayedRetirements).toEqual([]);
     expect(byConversion(result.notices)).toEqual({
       'page-assigned-profiles-removed': 1,
       'dashboard-widget-chart-config-structure-removed': 3,

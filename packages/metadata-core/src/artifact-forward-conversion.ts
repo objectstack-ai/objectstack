@@ -218,6 +218,22 @@ export interface ArtifactForwardConversionResult<T> {
   runtimeSpecVersion: string | null;
   /** Every notice the replay emitted (empty when nothing converted). */
   notices: ArtifactConversionNotice[];
+  /**
+   * Under `'converted-retired-after'` only: the retirements this runtime
+   * enforces past the artifact's floor, which the per-entry half of the window
+   * replayed — each with the `retiredAfter` the floor is at or below. Empty for
+   * every other verdict: the label half replays the whole chain on one reason
+   * for all of it, and a closed window replays nothing.
+   */
+  replayedRetirements: ArtifactReplayedRetirement[];
+}
+
+/** One retirement the per-entry half of the window replayed (see `'converted-retired-after'`). */
+export interface ArtifactReplayedRetirement {
+  /** The conversion id (`MetadataConversion.id`). */
+  conversionId: string;
+  /** Its `retiredAfter`: the last spec release whose authoring surface still accepted the old shape. */
+  retiredAfter: string;
 }
 
 /**
@@ -342,25 +358,31 @@ const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
 ];
 
 /**
- * The per-entry half of the window, for a floor at or above the runtime label:
- * the ids the door must NOT replay — {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}
+ * The per-entry half of the window, for a floor at or above the runtime label.
+ * `closed` is the ids the door must NOT replay — {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}
  * (read first, whatever an entry's version says), every live entry, and every
- * retired entry whose `retiredAfter` the floor exceeds. `null` when that is
- * every entry, i.e. the floor predates no retirement the runtime enforces.
+ * retired entry whose `retiredAfter` the floor exceeds; `opened` is the rest,
+ * each a retirement this runtime enforces past the floor. `null` when nothing
+ * opens, i.e. the floor predates no retirement the runtime enforces.
  *
  * A `retiredAfter` this cannot read closes its entry: the strict parse and its
  * tombstone stay the authority, which is the loud direction.
  */
-function idsTheFloorPostdates(floor: [number, number, number]): string[] | null {
+function idsTheFloorPostdates(
+  floor: [number, number, number],
+): { closed: string[]; opened: ArtifactReplayedRetirement[] } | null {
   const closed = [...DEFAULT_FLIPS_NOT_REPLAYED_HERE];
-  let open = 0;
+  const opened: ArtifactReplayedRetirement[] = [];
   for (const conversion of ALL_CONVERSIONS) {
     if (DEFAULT_FLIPS_NOT_REPLAYED_HERE.includes(conversion.id)) continue;
     const retiredAfter = conversion.retiredFromLoadPath === true ? parseVersion(conversion.retiredAfter) : null;
-    if (retiredAfter && compareTriples(floor, retiredAfter) <= 0) open += 1;
-    else closed.push(conversion.id);
+    if (retiredAfter && compareTriples(floor, retiredAfter) <= 0) {
+      opened.push({ conversionId: conversion.id, retiredAfter: retiredAfter.join('.') });
+    } else {
+      closed.push(conversion.id);
+    }
   }
-  return open > 0 ? closed : null;
+  return opened.length > 0 ? { closed, opened } : null;
 }
 
 /**
@@ -381,7 +403,7 @@ export function applyArtifactForwardConversions<T>(
       : resolveInstalledSpecVersion();
 
   if (definition === null || typeof definition !== 'object' || Array.isArray(definition)) {
-    return { definition, verdict: 'not-an-object', authoredFloor: null, runtimeSpecVersion, notices: [] };
+    return { definition, verdict: 'not-an-object', authoredFloor: null, runtimeSpecVersion, notices: [], replayedRetirements: [] };
   }
 
   const manifest = (definition as { manifest?: unknown }).manifest;
@@ -394,27 +416,29 @@ export function applyArtifactForwardConversions<T>(
 
   const runtime = runtimeSpecVersion ? parseVersion(runtimeSpecVersion) : null;
   if (!runtime) {
-    return { definition, verdict: 'runtime-version-unknown', authoredFloor, runtimeSpecVersion, notices: [] };
+    return { definition, verdict: 'runtime-version-unknown', authoredFloor, runtimeSpecVersion, notices: [], replayedRetirements: [] };
   }
 
   let verdict: ArtifactForwardConversionVerdict;
   let excludeConversionIds: readonly string[] = DEFAULT_FLIPS_NOT_REPLAYED_HERE;
+  let replayedRetirements: ArtifactReplayedRetirement[] = [];
   if (!floor) {
     verdict = 'converted-undeclared';
   } else if (compareTriples(floor, runtime) < 0) {
     verdict = 'converted-forward';
   } else {
-    const closed = idsTheFloorPostdates(floor);
-    if (closed === null) {
-      return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [] };
+    const perEntry = idsTheFloorPostdates(floor);
+    if (perEntry === null) {
+      return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [], replayedRetirements: [] };
     }
     verdict = 'converted-retired-after';
+    replayedRetirements = perEntry.opened;
     // The per-entry half of the window: every entry the floor does NOT predate
     // stays with the strict parse. Each id's reason is the same, read off the
     // registry rather than written here — the floor is at or above the runtime
     // label AND above the entry's own `retiredAfter` (or the entry is live, and
     // a live entry has no retirement for the floor to predate).
-    excludeConversionIds = closed;
+    excludeConversionIds = perEntry.closed;
   }
 
   const notices: ArtifactConversionNotice[] = [];
@@ -427,5 +451,5 @@ export function applyArtifactForwardConversions<T>(
     },
   }) as T;
 
-  return { definition: converted, verdict, authoredFloor, runtimeSpecVersion, notices };
+  return { definition: converted, verdict, authoredFloor, runtimeSpecVersion, notices, replayedRetirements };
 }

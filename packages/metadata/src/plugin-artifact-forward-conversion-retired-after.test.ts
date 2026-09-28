@@ -40,6 +40,11 @@ function loadFixture(): any {
     return JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
 }
 
+/** A fresh fixture carrying a fresh copy of the given `views`. */
+function loadFixtureWith(views: unknown): any {
+    return { ...loadFixture(), views: JSON.parse(JSON.stringify(views)) };
+}
+
 function fakeCtx() {
     return {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -106,6 +111,47 @@ describe('[#20390] artifact door — a 17.4.0-built artifact boots on unreleased
         expect(warns.get('dashboard-widget-chart-config-structure-removed')![0]).toContain('3 site(s)');
         expect(warns.get('page-assigned-profiles-removed')).toHaveLength(1);
         expect(warns.get('page-assigned-profiles-removed')![0]).toContain('1 site(s)');
+        // Under the per-entry half the floor is not below the runtime's label,
+        // so the line must not claim the artifact "predates" a runtime printed
+        // at the same version — it names the retirement that opened it instead.
+        for (const line of [...warns.values()].flat()) expect(line).not.toContain("predates this runtime's spec");
+    });
+
+    /**
+     * #12915 scope C rides the same window. The unbound-root notice is read off
+     * the forward-conversion pass's own verdict, so on unreleased `main` a
+     * 17.4.0-built artifact is "old" for it exactly as it is for the replay —
+     * the notice must not wait for the package label to move.
+     */
+    it('announces a bare-root form predicate once — the #12915 notice follows the per-entry window', async () => {
+        const views = [{
+            form: {
+                type: 'simple',
+                data: { provider: 'object', object: 'fwd_deal' },
+                sections: [{
+                    name: 'deal',
+                    fields: [
+                        { field: 'stage' },
+                        // Bare root: `stage`, not `record.stage` — unbound where it evaluates.
+                        { field: 'amount', required: true, visibleWhen: { dialect: 'cel', source: 'stage == "won"' } },
+                    ],
+                }],
+            },
+        }];
+        expect(loadFixtureWith(views).manifest.engines.protocol).toBe('^17.4.0');
+
+        const plugin = newPlugin();
+        const ctx = fakeCtx();
+        await plugin._parseAndRegisterArtifact(ctx, loadFixtureWith(views), 'forward-probe-17.4-bare-root');
+        // The HMR watcher replays the same artifact: still once.
+        await plugin._parseAndRegisterArtifact(ctx, loadFixtureWith(views), 'forward-probe-17.4-bare-root');
+
+        const unbound = (ctx.logger.warn.mock.calls as [string][])
+            .map(([line]) => String(line))
+            .filter((line) => line.includes('root identifier is NOT bound'));
+        expect(unbound).toHaveLength(1);
+        expect(unbound[0]).toContain("'stage'");
+        expect(unbound[0]).toContain('1 view(s): fwd_deal');
     });
 });
 
