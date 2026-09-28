@@ -55,6 +55,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run {
   code: number;
@@ -161,7 +162,9 @@ const ordersViews = [
   },
 ];
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [...ordersObjects, ...coreObjects],
   apps: [...coreApps],
@@ -170,7 +173,7 @@ export default {
     { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -180,7 +183,9 @@ export default {
  * cards' worth of parity files.
  */
 const CONFIG_SINGLE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: {
     id: 'com.example.ppsingle', name: 'ppsingle', namespace: 'ps',
     version: '1.0.0', type: 'app', engines: { protocol: '^17' },
@@ -196,7 +201,7 @@ export default {
     name: 'ps_app', label: 'PS App',
     navigation: [{ id: 'nav_things', type: 'object', objectName: 'ps_thing', label: 'Things' }],
   }],
-};
+}, { strict: false });
 `;
 
 const dirs = { flip: '', single: '' };
@@ -205,6 +210,7 @@ function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-lintpp-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, 'objectstack.config.ts'), config, 'utf8');
+  linkSpec(dir);
   writeFileSync(
     join(dir, 'package.json'),
     JSON.stringify({ name: 'lintpp-fixture', private: true, type: 'module' }, null, 2),

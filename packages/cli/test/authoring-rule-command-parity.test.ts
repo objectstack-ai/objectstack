@@ -30,6 +30,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHORING_COMMANDS, runAuthoringRules, type AuthoringCommand } from '@objectstack/lint';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -179,12 +180,14 @@ describe('every authoring command reaches the same verdict (#4409)', () => {
   it('the broken approval flow now exits non-zero on all three commands', () => {
     const dir = mkdtempSync(join(tmpdir(), 'os-authoring-parity-'));
     try {
-      // A plain literal config: no imports, so it resolves without a
-      // node_modules next to it.
+      // A `defineStack` config (#20367 ruling B: the doors refuse any other
+      // shape), `strict: false` so the rule under test is judged by each
+      // command rather than by the producer at load; spec is linked in.
       writeFileSync(
         join(dir, 'objectstack.config.mjs'),
-        `export default ${JSON.stringify(CASES[0].stack, null, 2)};\n`,
+        defineStackSource(CASES[0].stack, { strict: false }),
       );
+      linkSpec(dir);
 
       for (const command of ['lint', 'validate', 'build']) {
         let exitCode = 0;
