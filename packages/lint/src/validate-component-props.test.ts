@@ -232,6 +232,58 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * The waiver above covers a MISSING `object` only — no key, or `undefined`.
+   * A present value the row rejects is the author's own, and the binding
+   * supplies nothing in its place, so the row's verdict on it must reach the
+   * author exactly as it does with no binding at all. Each case is judged
+   * twice, beside the binding and without it, and the two answers must be the
+   * same finding: equality rather than wording, so the pin measures that the
+   * waiver lets the row's issue through unchanged.
+   */
+  it.each([
+    ['a number', 7],
+    ['null', null],
+  ])('reports a present-but-wrong `object` (%s) beside a `dataSource` binding, as it does without one', (_label, value) => {
+    const component = { type: 'element:number', properties: { object: value, aggregate: 'count' } };
+    const withBinding = validateComponentProps(
+      stackWith([{ ...component, dataSource: { object: 'contact' } }]),
+    );
+    const without = validateComponentProps(stackWith([component]));
+
+    // Control first: with nothing supplying `object`, the row reports it.
+    expect(without.map((f) => [f.rule, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
+    ]);
+    // The binding does not silence it.
+    expect(withBinding.map((f) => [f.rule, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
+    ]);
+    expect(withBinding).toEqual(without);
+  });
+
+  it('still waives `object: undefined` beside a binding — an explicit undefined is a missing value', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:number',
+          dataSource: { object: 'contact' },
+          properties: { object: undefined, aggregate: 'count' },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+
+    // …and the same bag with no binding is reported, so the silence above is
+    // the waiver and not the row accepting `undefined`.
+    const without = validateComponentProps(
+      stackWith([{ type: 'element:number', properties: { object: undefined, aggregate: 'count' } }]),
+    );
+    expect(invalid(without).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.object',
+    ]);
+  });
+
+  /**
    * #5775 — the retirement's author-facing channel. `displayField` was the
    * picker's REQUIRED prop and no renderer ever read it, so the tombstone's
    * prescription has to reach whoever is still writing it. It arrives through

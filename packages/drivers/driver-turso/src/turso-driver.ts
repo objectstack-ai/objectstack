@@ -123,11 +123,17 @@ export interface TursoDriverConfig {
    * `url` or `:memory:` the constructor refuses it (`VALIDATION_ERROR` / 400):
    * there is no local file for the replica to live in, so the local engine
    * would run on a private in-memory database. For a remote database, drop
-   * `syncUrl` and keep the remote `url`.
+   * `syncUrl` and keep the remote `url`. Under a forced `mode: 'remote'` it is
+   * refused too (`VALIDATION_ERROR` / 400): the remote client never receives
+   * it, so no sync would ever run.
    */
   syncUrl?: string;
 
-  /** Sync configuration for embedded replica mode (requires `syncUrl`) */
+  /**
+   * Sync configuration for embedded replica mode. Requires `syncUrl`: without
+   * one the constructor refuses it (`VALIDATION_ERROR` / 400), in any mode,
+   * because nothing would read it.
+   */
   sync?: {
     /** Periodic sync interval in seconds (0 = manual only). Default: 60 */
     intervalSeconds?: number;
@@ -1047,6 +1053,72 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
   throw err;
 }
 
+// ── Sync keys the driver would ignore — refused, in the contract's own words ──
+
+/**
+ * [#20200] `syncUrl` under a forced `mode: 'remote'` — refused at construction.
+ *
+ * Remote mode sends every read and write straight to `url` through the client
+ * {@link createRemoteClient} builds, and that builder forwards no `syncUrl`; no
+ * sync interval is started on the remote arm either. Measured on the built
+ * driver before this refusal (`url: 'libsql://…'` or a `file:` url, forced
+ * `mode: 'remote'`, `syncUrl`, `sync: { intervalSeconds: 60 }`): it constructed
+ * and connected, `isSyncEnabled()` answered `true`, no interval started, and
+ * `sync()` rejected with `SYNC_NOT_SUPPORTED` (`SyncNotSupported("File")` on
+ * the `file:` url). A declared replica the runtime never runs, reported as
+ * enabled: the declared-but-not-enforced shape ADR-0049 does not ship.
+ *
+ * Only a FORCED remote mode reaches this: a remote url beside `syncUrl` with no
+ * `mode` is classified `replica` by {@link TursoDriver.detectMode} and refused
+ * on its own grounds by `localEngineDefect`.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `syncUrl`,
+ * byte for byte, so a datasource hears the same sentence at authoring and at
+ * boot. The spec keeps it module-local and this package does not grow the
+ * spec's published surface for one string (the ruling on #20200), so it is a
+ * copy here, held equal to the schema's issue by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first, then
+ * here, never here alone.
+ */
+const REMOTE_MODE_SYNC_URL_REFUSAL =
+  "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write " +
+  'straight to `url` and builds no replica: the turso driver refuses this configuration when ' +
+  'it starts. For a remote database, drop `syncUrl` (and `sync`). For an embedded replica, drop ' +
+  "`mode` and point `url` at a local file beside `syncUrl`: `url: 'file:./data/replica.db'`.";
+
+/**
+ * [#20200] `sync` with no `syncUrl` — refused at construction, in every mode.
+ *
+ * `sync` configures the embedded-replica sync, and `connect()` reads it only
+ * inside the `syncUrl` arm: without `syncUrl` no sync client is built, no
+ * interval is started, and `sync()` returns without doing anything, whatever
+ * `intervalSeconds` / `onConnect` say (measured on the built driver in local,
+ * forced-replica and remote mode). Same ADR-0049 shape as the `syncUrl` refusal
+ * above.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `sync`, byte
+ * for byte, held equal by the same parity test. Edit it there first.
+ */
+const SYNC_WITHOUT_SYNC_URL_REFUSAL =
+  '`sync` configures embedded-replica syncing, which only runs when `syncUrl` names the ' +
+  'remote to replicate from. Set `syncUrl`, or remove `sync` — on its own it configures ' +
+  'nothing.';
+
+/**
+ * Throw one of the two sync refusals above as the ADR-0112 envelope.
+ *
+ * Raised BEFORE `super()`, AFTER the three refusals above it in the
+ * constructor, so no configuration those already refuse changes which message
+ * it gets. ⛔ The messages carry no url and no internal issue id: they reach an
+ * operator's boot log and Studio's datasource form.
+ */
+function refuseIgnoredSyncKey(message: string): never {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
 // ── The local engine: a file, or a declared `:memory:` — never a silent one ───
 
 /**
@@ -1467,6 +1539,19 @@ export class TursoDriver extends SqlDriver {
     // `undefined` alike.
     if (mode === 'remote' && timeoutMs !== undefined && config.client !== undefined && config.client !== null) {
       refuseSuppliedClientTimeout(timeoutMs);
+    }
+    // [#20200] Sync keys this configuration would ignore are refused here too,
+    // in `@objectstack/spec`'s own words: `syncUrl` under a forced remote mode
+    // (the remote client never receives it and no sync runs), and `sync` with
+    // no `syncUrl` in any mode (nothing reads it). The presence tests are the
+    // ones `detectMode`, `connect()` and `sync()` already use — a `syncUrl` is
+    // set when truthy, so an empty one is unset — and the same the spec's
+    // refinement applies. See `REMOTE_MODE_SYNC_URL_REFUSAL`.
+    if (mode === 'remote' && config.syncUrl) {
+      refuseIgnoredSyncKey(REMOTE_MODE_SYNC_URL_REFUSAL);
+    }
+    if (config.sync && !config.syncUrl) {
+      refuseIgnoredSyncKey(SYNC_WITHOUT_SYNC_URL_REFUSAL);
     }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);
