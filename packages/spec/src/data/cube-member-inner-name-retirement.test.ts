@@ -589,7 +589,7 @@ describe('tree-scoped absence: no cube member inside the declared radius still c
 
   it('the matcher finds a member authoring and ignores every neighbouring shape (anti-vacuity)', () => {
     // Offenders — the member spelling, in each syntax the walk reads.
-    expect(offendersIn('.ts', "measures: { count: { name: 'count', label: 'C', type: 'count', sql: '*' } }")).toEqual([1]);
+    expect(offendersIn('.ts', "({ measures: { count: { name: 'count', label: 'C', type: 'count', sql: '*' } } })")).toEqual([1]);
     expect(offendersIn('.ts', "defineCube({\n  name: 'o',\n  sql: 'o',\n  dimensions: {\n    status: {\n      name: 'status',\n      type: 'string',\n      sql: 'status',\n    },\n  },\n});")).toEqual([9]);
     expect(offendersIn('.ts', "const measures: Record<string, any> = { total: { name: 'total', type: 'sum', sql: 'amount' } };")).toEqual([1]);
     expect(offendersIn('.json', '{ "measures": { "count": { "name": "count", "type": "count", "sql": "*" } } }')).toEqual([1]);
