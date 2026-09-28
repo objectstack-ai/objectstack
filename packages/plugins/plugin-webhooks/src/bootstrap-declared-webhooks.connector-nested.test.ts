@@ -32,14 +32,17 @@
  *
  * ## The direction this pins is the DECLARED one
  *
- * ⛔ A red here is not a licence to widen the seeder. `packages/spec` declares
- * the connector surface unenforced in two places — `automation/webhook.zod.ts`
- * ("(Connector `webhooks` remain NOT-yet-enforced — see #3197.)") and
- * `WebhookConfigSchema` in `integration/connector.zod.ts` ("declared but
- * ignored at registration ... parse and are stored, but no runtime dispatches,
- * emits, or filters on them"). If #3197 ever builds that bridge, this file and
- * the docblock it guards are part of that card's diff — which is the point:
- * the prose can no longer drift out from under the behaviour on its own.
+ * ⛔ A red here is not a licence to widen the seeder. `packages/spec` RETIRED
+ * the connector surface under ADR-0049 enforce-or-remove: `connector.webhooks`
+ * is a `retiredKey()` tombstone and the `WebhookConfig` shape left whole
+ * (`integration/connector.zod.ts`, "REMOVED: `health`, `status` and the nested
+ * `webhooks`"), so every authoring door refuses the nested array. This file
+ * drives `registerApp` BELOW that parse on purpose — it pins what the registry
+ * does with a document that reaches it anyway (an artifact built before the
+ * retirement) — and the answer must stay "not hoisted". Resurrecting a
+ * delivered nested array would be a new decision, and this file and the
+ * docblock it guards would be part of that diff — which is the point: the
+ * prose can no longer drift out from under the behaviour on its own.
  *
  * ⚠️ `@objectstack/objectql` is NOT aliased to source by this package's
  * `vitest.config.ts` — the ledger in `scripts/check-test-source-alias.mjs`

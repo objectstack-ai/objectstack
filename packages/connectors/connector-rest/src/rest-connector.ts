@@ -129,7 +129,8 @@ export function createRestConnector(opts: RestConnectorOptions): RestConnectorBu
         authentication: auth,
         // Defaulted by ConnectorSchema; set explicitly so the literal satisfies
         // the (post-parse) Connector output type.
-        status: 'active',
+        // (`status: 'active'` stood here until the spec key was retired —
+        // ADR-0049: nothing ever read it.)
         enabled: true,
         requestTimeoutMs: opts.requestTimeoutMs ?? 30000,
         ...(opts.retryConfig === undefined ? {} : { retryConfig: opts.retryConfig }),

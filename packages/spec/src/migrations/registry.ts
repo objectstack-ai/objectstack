@@ -5444,6 +5444,26 @@ const step18: MigrationStep = {
     + 'actions and object-nested actions as a pure lossless delete, retired from the load path '
     + 'so authors are refused at parse; its D3 record is the semantic entry '
     + '`action-aria-retired`. '
+    + 'It also retires the connector resilience family (ADR-0049 enforce-or-remove, one batch): '
+    + '`connector.health` — the `healthCheck` probe (eight keys) and the `circuitBreaker` (six) — '
+    + '`connector.status` and the connector-nested `webhooks`, sixteen authorable keys with no '
+    + 'reader outside the spec package. No loop ever polled a connector endpoint or tripped a '
+    + 'breaker; nothing read an authored `status` (the runtime publishes a computed `state`, and '
+    + 'participation is `enabled`); and a webhook nested in a connector was never registered as a '
+    + '`webhook` item, so it was never materialized or delivered — the top-level `webhooks:` '
+    + 'collection is the delivered one. The three carrier keys are retiredKey tombstones on '
+    + '`ConnectorBaseSchema`, registered under both carrier defs; `status`, defaulted '
+    + '`\'inactive\'`, joins `connectionTimeoutMs` in the retired-default residue stage, because '
+    + 'every 17.x parse emitted it into every connector. Seven defs leave whole — '
+    + '`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`, `ConnectorStatus`, '
+    + '`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm` — and the D2 conversion '
+    + '`connector-resilience-keys-removed` strips the three keys from `connectors[]` and stored '
+    + 'rows as a pure lossless delete (the nested webhooks are stripped, never moved: moving them '
+    + 'would start deliveries that never happened). It ABSORBS the breaker half of the duration '
+    + 'rename above: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` is no longer '
+    + 'converted, because the whole block it lived in is now removed, and '
+    + '`connector-health-and-trigger-durations-unit-in-key` keeps only `triggers[].interval` → '
+    + '`intervalSeconds`. '
     + 'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
     + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
     + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
@@ -5482,6 +5502,7 @@ const step18: MigrationStep = {
     'api-endpoint-cache-ttl-to-cache-ttl-seconds',
     'dashboard-refresh-interval-to-refresh-interval-seconds',
     'connector-health-and-trigger-durations-unit-in-key',
+    'connector-resilience-keys-removed',
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
@@ -7274,35 +7295,94 @@ const step18: MigrationStep = {
     // unit in its NAME) — the D3 entry of the
     // `connector-health-and-trigger-durations-unit-in-key` family (ruling B on
     // #17152: one D3 entry per retirement family, even when D2 is lossless). The
-    // two keys share one authored document and one conversion, so they share one
-    // entry. Both renamed keys are still unread (the liveness ledger records each
-    // as dead, `liveness/connector.json`): the rename is an honesty fix to the
-    // declaration, and the entry says so rather than implying a live engine.
+    // family was two keys in one authored document and one conversion:
+    // `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
+    // `triggers[].interval` → `intervalSeconds`.
+    //
+    // ⚠️ Reconciled with the connector resilience retirement (ADR-0049, the same
+    // unreleased protocol step): the whole `health` block was then removed, so the
+    // breaker half of this rename was ABSORBED — the renamed key is itself retired,
+    // and the conversion now carries only the trigger half. This entry says so,
+    // rather than prescribing a rename to a key the parse refuses next; the
+    // removal's own judgement is the D3 entry `connector-resilience-keys-retired`.
+    // `triggers[].interval` is still unread (the liveness ledger records it dead,
+    // `liveness/connector.json`): the rename is an honesty fix to the declaration,
+    // and the entry says so rather than implying a live engine.
     {
       id: 'connector-resilience-durations-unit-in-key',
-      surface: 'connector.health.circuitBreaker.monitoringWindow and connector.triggers[].interval — '
-        + 'the two connector durations whose name carried no unit',
-      replacement: '`monitoringWindowMs` (milliseconds) and `intervalSeconds` (seconds) — rename each '
-        + 'key; both values are unchanged.',
-      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames both keys '
-        + 'in `connectors[]` and on stored connector rows, keeping each value, with a separate notice '
-        + 'per key so an operator sees which of its own keys moved; the rename is lossless because '
-        + 'each key always meant the unit its new name states. Two judgments remain. First, the units '
-        + 'were easy to get wrong in opposite directions: `monitoringWindow` (milliseconds) sat one '
-        + 'key below `resetTimeoutMs`, and the bare token `interval` means MILLISECONDS elsewhere in '
-        + 'this same spec while a trigger interval meant SECONDS — so a trigger written '
-        + '`interval: 60000` for one minute asked for once every sixteen hours or so, and the rename '
-        + 'keeps 60000. Second, neither key drives an engine today: no polling loop reads a trigger '
-        + 'interval, and no circuit breaker exists for connectors, so nothing reads the monitoring '
-        + 'window. An author who relied '
-        + 'on either for behaviour has not been getting it, before or after this rename.',
-      acceptanceCriteria: 'No connector carries `health.circuitBreaker.monitoringWindow` or '
-        + '`triggers[].interval`; the parse refuses both with the rename. Every `monitoringWindowMs` '
-        + 'value is the window the author intends in milliseconds and every `intervalSeconds` value '
-        + 'the cadence the author intends in seconds — a trigger meant to poll every minute reads '
-        + '`intervalSeconds: 60`. No part of the deployment\'s design depends on a connector polling '
-        + 'on that interval or tripping on that window: where it did, the author has moved that need '
-        + 'to a mechanism that runs.',
+      surface: 'connector.triggers[].interval — the connector duration whose name carried no unit '
+        + '(and, until the whole `health` block was retired, connector.health.circuitBreaker.monitoringWindow)',
+      replacement: '`intervalSeconds` (seconds) — rename the key; the value is unchanged. There is no '
+        + 'replacement for `monitoringWindow`: its renamed spelling `monitoringWindowMs` was retired with '
+        + 'the rest of `connector.health` — delete the block (see `connector-resilience-keys-retired`).',
+      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames '
+        + '`triggers[].interval` in `connectors[]` and on stored connector rows, keeping the value; the '
+        + 'rename is lossless because the key always meant seconds. It used to rename the breaker\'s '
+        + '`monitoringWindow` too, but that half was absorbed by `connector-resilience-keys-removed`, '
+        + 'which strips the whole `health` block — so an author holding either `monitoringWindow` or '
+        + '`monitoringWindowMs` ends with no key at all, and must not re-add `monitoringWindowMs`: the '
+        + 'parse refuses the block. Two judgments remain for the trigger. First, the unit was easy to '
+        + 'get wrong: the bare token `interval` means MILLISECONDS elsewhere in this same spec while a '
+        + 'trigger interval meant SECONDS — so a trigger written `interval: 60000` for one minute asked '
+        + 'for once every sixteen hours or so, and the rename keeps 60000. Second, the key drives no '
+        + 'engine today: no polling loop reads a trigger interval, so an author who relied on it for '
+        + 'behaviour has not been getting it, before or after this rename.',
+      acceptanceCriteria: 'No connector carries `triggers[].interval`; the parse refuses it with the '
+        + 'rename, and every `intervalSeconds` value is the cadence the author intends in seconds — a '
+        + 'trigger meant to poll every minute reads `intervalSeconds: 60`. No connector carries '
+        + '`health` in any spelling (`monitoringWindow` or `monitoringWindowMs` included). No part of '
+        + 'the deployment\'s design depends on a connector polling on that interval or tripping on a '
+        + 'breaker window: where it did, the author has moved that need to a mechanism that runs.',
+    },
+    // ADR-0049 enforce-or-remove — the D3 entry of the connector resilience family:
+    // `connector.health` (the `healthCheck` probe and the `circuitBreaker`),
+    // `connector.status` and the connector-nested `webhooks`, sixteen authorable keys
+    // retired as one batch. One D3 entry per retirement family, even when D2 is
+    // lossless (ruling B on #17152): the D2 conversion
+    // `connector-resilience-keys-removed` repairs the data, and this entry carries
+    // what only the author can judge. It also names the CHAIN through the same
+    // protocol step: `connector-health-and-trigger-durations-unit-in-key` used to
+    // rename `health.circuitBreaker.monitoringWindow` to `monitoringWindowMs`, and
+    // that half was absorbed here — the renamed key is itself removed.
+    {
+      id: 'connector-resilience-keys-retired',
+      surface: 'connector.health (healthCheck / circuitBreaker), connector.status and connector.webhooks — '
+        + 'on a connector and on a stack connectors[] entry',
+      replacement: '(removed — nothing replaces the probe, the breaker or an authored status.) '
+        + 'Participation is `enabled` (and `provider` on a declarative instance); whether a registered '
+        + 'connector can be dispatched is the computed `state` (`ready` / `degraded`) on '
+        + '`GET /api/v1/automation/connectors`; a webhook that is actually delivered is declared in '
+        + 'the top-level `webhooks:` collection; probes and circuit breaking belong in the connector '
+        + 'provider or an upstream gateway.',
+      reason: 'The D2 conversion `connector-resilience-keys-removed` deletes `health`, `status` and '
+        + '`webhooks` from every connector, stack entry and stored connector row, one notice per key, '
+        + 'and the delete is lossless: no loop ever polled a connector endpoint, counted failures or '
+        + 'tripped a breaker, no code read an authored status, and a webhook nested in a connector '
+        + 'was never registered, materialized or delivered. Three judgements remain. First, a probe '
+        + 'or breaker the author believed was protecting a flaky upstream never was — if that '
+        + 'protection matters, it has to be built where calls are made (the connector provider) or '
+        + 'in front of the upstream (a gateway). Second, `status` values like `active` or `error` '
+        + 'gated nothing; an author who used `status` to switch a connector off needs `enabled: '
+        + 'false` on the declarative entry instead. Third, the nested webhooks are STRIPPED, not '
+        + 'moved: redeclaring one in the top-level `webhooks:` collection STARTS deliveries that '
+        + 'never happened before, so which of them should exist is the author\'s call — and their '
+        + '`events` (`sync.completed`, `auth.expired` and the rest) and `signatureAlgorithm` have no '
+        + 'counterpart there. The chain: in this same protocol step, '
+        + '`connector-health-and-trigger-durations-unit-in-key` no longer renames '
+        + '`health.circuitBreaker.monitoringWindow` to `monitoringWindowMs` — the whole block that '
+        + 'key lived in is removed, so an author holding either spelling ends with no key at all; '
+        + 'that conversion\'s `triggers[].interval` to `intervalSeconds` rename is unaffected.',
+      acceptanceCriteria: 'No connector and no stack connector entry carries `health`, `status` or '
+        + '`webhooks`; the parse refuses each with its prescription (a stored `status: \'inactive\'` '
+        + 'default is accepted and stripped as inert residue), and no code imports ConnectorHealth, '
+        + 'HealthCheckConfig, CircuitBreakerConfig, ConnectorStatus, WebhookConfig, WebhookEvent or '
+        + 'WebhookSignatureAlgorithm. Every connector dispatches exactly as it did before the '
+        + 'upgrade. Each declarative connector instance the author meant to be switched off carries '
+        + '`enabled: false` and is observed absent from `GET /api/v1/automation/connectors`; each '
+        + 'nested webhook that is still wanted '
+        + 'is declared in the top-level `webhooks:` collection and observed delivering; and each '
+        + 'probe or breaker the author relied on is provided by the connector provider or a gateway '
+        + 'and observed tripping against a failing upstream.',
     },
     {
       id: 'cube-join-sql-and-relationship-retired',
@@ -18112,6 +18192,16 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the D2 conversion `connector-health-and-trigger-durations-unit-in-key`:
     // `connectors:` is a stack collection and a published connector row lands whole
     // in `sys_metadata`, so the chain has a seam that sees it.
+    //
+    // ⚠️ Superseded in the same unreleased step: the whole `health` block was then
+    // retired under ADR-0049 (the connector resilience family), so
+    // `integration/CircuitBreakerConfig` left whole (`RETIRED_DEFS_BY_MAJOR[18]`) and
+    // this tombstone left with it. The row STAYS — the whole-def removal steady
+    // state gate (b3) exempts — because it is still the record that the bare
+    // `monitoringWindow` spelling was retired. The rename's breaker half was absorbed
+    // by `connector-resilience-keys-removed`, which strips the block an author
+    // holding either spelling still carries; the `health` tombstone's prescription
+    // names both spellings.
     'integration/CircuitBreakerConfig:monitoringWindow',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.connectionTimeoutMs`
     // (maintainer ruling 2026-09-22, letter A — the narrower SECOND decision this
@@ -18236,6 +18326,91 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #12497 / #13823 grading).
     'integration/Connector:errorMapping',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.health` — the connector
+    // resilience family (one batch with `status` and the nested `webhooks`), retired
+    // by the maintainer's criterion for a declared-but-unenforced family: does the
+    // mainstream platform offer the capability? Author-configured health probes and
+    // circuit breakers are not connector metadata anywhere in the mainstream
+    // (Salesforce Named Credentials, Power Platform custom connectors, Retool /
+    // Appsmith resources); breakers live in API-gateway infrastructure.
+    //
+    // Measured on `origin/main` before the removal: the fourteen keys under the block
+    // — `healthCheck.{enabled, intervalMs, timeoutMs, endpoint, method,
+    // expectedStatus, unhealthyThreshold, healthyThreshold}` and
+    // `circuitBreaker.{enabled, failureThreshold, resetTimeoutMs,
+    // halfOpenMaxRequests, monitoringWindowMs, fallbackStrategy}` — have ZERO reads
+    // outside `packages/spec` (lit control in the same scan: `retryConfig`, the
+    // executed sibling policy, read 17 times in `packages/connectors` and
+    // `packages/services/service-automation`). Nothing polled, counted or tripped.
+    //
+    // Tombstoned with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`,
+    // so a bare deletion would be a silent strip (ADR-0104). The shapes behind it
+    // leave whole — `integration/ConnectorHealth`, `integration/HealthCheckConfig`,
+    // `integration/CircuitBreakerConfig` in `RETIRED_DEFS_BY_MAJOR[18]`. The key
+    // carried no default of its own, so there is no residue window for it (its
+    // sub-keys' defaults were only materialized inside an authored block). Sources
+    // and stored rows are rewritten by the D2 conversion
+    // `connector-resilience-keys-removed`; the family's judgement is the D3 entry
+    // `connector-resilience-keys-retired`.
+    //
+    // Registered under 18, not 17: the removal ships on the 17.x line
+    // (launch-window convention: accept-set narrowings ride minor releases) and the
+    // prescription lives at the major boundary where `migrate meta` users look — the
+    // disposition `18.integration__Connector__errorMapping.ts` records for the same
+    // schema.
+    'integration/Connector:health',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.status` — part of the connector
+    // resilience family batch (see `18.integration__Connector__health.ts`). The key
+    // was `ConnectorStatusSchema` (`active` / `inactive` / `error` / `configuring`)
+    // with a `.default('inactive')`, and NOTHING read it. Measured at `origin/main`
+    // 3f86dc52f2 with one member-read pattern over the connector packages, the
+    // automation service, rest, runtime, metadata and objectql: 38 `.status` reads,
+    // every one on an HTTP answer, an error case or a flow-run entry, none on a
+    // connector def — while the same pattern finds `requestTimeoutMs`, the lit
+    // control, read off a connector entry or provider context five times.
+    // The runtime's dispatchability answer is a DIFFERENT field: the computed
+    // `state` (`ready` / `degraded`) that `GET /api/v1/automation/connectors`
+    // publishes and no authored value can set. Participation is `enabled` (and
+    // `provider` on a declarative instance). The only non-spec occurrences were
+    // WRITES — `status: 'active'` in the four shipped connector packages and
+    // `status: 'error'` on the automation service's degraded husk — read back by
+    // nothing; they were deleted in the same change.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104); the orphaned
+    // `integration/ConnectorStatus` enum leaves via `RETIRED_DEFS_BY_MAJOR[18]`.
+    //
+    // ⭐ RETIRED-DEFAULT RESIDUE: owed and adopted — `{ status: 'inactive' }` joins
+    // `{ connectionTimeoutMs: 30000 }` in `CONNECTOR_RETIRED_KEY_RESIDUE` on both
+    // carriers (#12840's class rule, `shared/retired-key.ts`). The discriminator is
+    // whether a released toolchain MATERIALIZED the default into something that is
+    // later re-parsed, and it did: every 17.x parse emitted `status: 'inactive'`
+    // into every connector — authored or not — and `registerConnector` re-parses a
+    // def built in code, where no conversion runs. Any other value keeps the
+    // refusal. Sources and stored rows are rewritten by the D2 conversion
+    // `connector-resilience-keys-removed`.
+    'integration/Connector:status',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.webhooks` — part of the
+    // connector resilience family batch (see `18.integration__Connector__health.ts`).
+    // A connector's NESTED webhook array is not the collection anything delivers:
+    // the stack decomposition registers a `connectors:` entry WHOLE, so a webhook
+    // nested in it never becomes a `webhook` metadata item, and
+    // `@objectstack/plugin-webhooks` materializes `sys_webhook` rows only from those
+    // items (the top-level `webhooks:` collection). Measured on `origin/main`: zero
+    // reads of a connector's own `webhooks` outside `packages/spec`, while
+    // `stack.webhooks` — the lit control, same scan — is read five times; the one
+    // test that authors a nested array
+    // (`bootstrap-declared-webhooks.connector-nested.test.ts`) exists to pin that it
+    // is NOT hoisted. And no code path emits a connector lifecycle event
+    // (`sync.completed`, `auth.expired`, …) for its `events` to subscribe to.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104). The nested shape
+    // leaves whole — `integration/WebhookConfig`, `integration/WebhookEvent`,
+    // `integration/WebhookSignatureAlgorithm` in `RETIRED_DEFS_BY_MAJOR[18]`. The key
+    // carried no default, so no residue window. The D2 conversion
+    // `connector-resilience-keys-removed` STRIPS the array and never moves it to the
+    // top-level collection: that would start deliveries the connector never made —
+    // the author's decision, carried by the D3 entry `connector-resilience-keys-retired`.
+    'integration/Connector:webhooks',
     // #15680 (stack card 5/6 of #14478) — ruling B. `ConnectorTrigger.interval`
     // said "Polling interval in seconds" in prose and nothing else. A polling
     // cadence is exactly the number a reader guesses at, and the bare name `interval`
@@ -18283,6 +18458,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
     // See `18.integration__Connector__errorMapping.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:errorMapping',
+    // The same `health` tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` are SIBLINGS: each
+    // wraps the shared private `ConnectorBaseSchema` in the retired-default residue
+    // stage, so the tombstone is carried by the shape that `stack.connectors[]`
+    // (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def. See
+    // `18.integration__Connector__health.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:health',
+    // The same `status` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse, which
+    // also carries the `'inactive'` residue stage (both carriers wrap
+    // `ConnectorBaseSchema` with the same `CONNECTOR_RETIRED_KEY_RESIDUE`). One
+    // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__status.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:status',
+    // The same `webhooks` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse. One
+    // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__webhooks.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:webhooks',
     // #18669 — maintainer ruling A (2026-09-17, decision batch #151 item 4):
     // `CompatibilityMatrixEntry.estimatedMigrationTime` said "Estimated migration
     // time in hours" in a source JSDoc and carried no `.describe()` at all, so the
@@ -21667,6 +21865,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'identity/ApiKey',
+    // `integration/CircuitBreakerConfig` (`enabled`, `failureThreshold`,
+    // `resetTimeoutMs`, `halfOpenMaxRequests`, `monitoringWindowMs`,
+    // `fallbackStrategy`, and the `monitoringWindow` rename tombstone) leaves with
+    // `integration/ConnectorHealth`, whose `circuitBreaker` was its only carrier. No
+    // state machine ever opened, half-opened or closed a breaker, and none of the
+    // four `fallbackStrategy` behaviours was implemented. Its `monitoringWindow`
+    // tombstone leaves with it: the `RETIRED_KEYS_BY_MAJOR[18]` row
+    // `integration/CircuitBreakerConfig:monitoringWindow` stays, which is the
+    // whole-def removal steady state gate (b3) of `scripts/build-schemas.ts`
+    // deliberately exempts. See `retired-keys/18.integration__Connector__health.ts`
+    // for the retirement record.
+    'integration/CircuitBreakerConfig',
     // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
     // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
     // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
@@ -21680,6 +21890,22 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
     // record.
     'integration/ConnectorErrorCategory',
+    // `integration/ConnectorHealth` (`healthCheck`, `circuitBreaker`) leaves with its
+    // only carrier, `ConnectorSchema.health`, tombstoned in this same major under
+    // ADR-0049 enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the
+    // declaring file ever parsed or constructed one, and an exported value schema
+    // with no consumer reads as a capability (#3950). See
+    // `retired-keys/18.integration__Connector__health.ts` for the retirement record.
+    'integration/ConnectorHealth',
+    // `integration/ConnectorStatus` (`active` / `inactive` / `error` /
+    // `configuring`) leaves with its only carrier, `ConnectorSchema.status`,
+    // tombstoned in this same major under ADR-0049 enforce-or-remove. Nothing read a
+    // connector's `status`; the runtime's dispatchability answer is the computed
+    // `ConnectorState` (`ready` / `degraded`, `integration/connector-descriptor.ts`),
+    // which is a TypeScript type and not a published def, so nothing replaces this
+    // one. See `retired-keys/18.integration__Connector__status.ts` for the
+    // retirement record.
+    'integration/ConnectorStatus',
     // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
     // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
     // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
@@ -21703,6 +21929,38 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // rename. See `retired-keys/18.integration__Connector__errorMapping.ts` for the
     // retirement record.
     'integration/ErrorMappingRule',
+    // `integration/HealthCheckConfig` (`enabled`, `intervalMs`, `timeoutMs`,
+    // `endpoint`, `method`, `expectedStatus`, `unhealthyThreshold`,
+    // `healthyThreshold`) leaves with `integration/ConnectorHealth`, whose
+    // `healthCheck` was its only carrier. No loop ever polled a connector endpoint:
+    // the only `healthCheck` code outside `packages/spec` is the kernel's PLUGIN
+    // health contract — a different shape on a different subject. Its four
+    // `.default()`s were only ever materialized INSIDE an authored block, so there
+    // is no residue window on the carrier. See
+    // `retired-keys/18.integration__Connector__health.ts` for the retirement record.
+    'integration/HealthCheckConfig',
+    // `integration/WebhookConfig` — the canonical `webhook` shape `.extend()`ed with
+    // `events` and `signatureAlgorithm` — leaves with its only carrier,
+    // `ConnectorSchema.webhooks`, tombstoned in this same major under ADR-0049
+    // enforce-or-remove. A webhook nested in a connector was never registered,
+    // materialized or delivered; the delivered shape is `automation/Webhook`, which
+    // is unaffected. See `retired-keys/18.integration__Connector__webhooks.ts` for
+    // the retirement record.
+    'integration/WebhookConfig',
+    // `integration/WebhookEvent` (`record.created` / `record.updated` /
+    // `record.deleted` / `sync.started` / `sync.completed` / `sync.failed` /
+    // `auth.expired` / `rate_limit.exceeded`) leaves with `integration/WebhookConfig`,
+    // whose `events` was its only carrier. No code path emits any of the connector
+    // lifecycle events it names. See
+    // `retired-keys/18.integration__Connector__webhooks.ts` for the retirement record.
+    'integration/WebhookEvent',
+    // `integration/WebhookSignatureAlgorithm` (`hmac_sha256` / `hmac_sha512` /
+    // `none`) leaves with `integration/WebhookConfig`, whose `signatureAlgorithm` was
+    // its only carrier. A delivered webhook (the top-level `webhooks:` collection) is
+    // signed by the messaging outbox from its `secret`; nothing ever read this
+    // choice. See `retired-keys/18.integration__Connector__webhooks.ts` for the
+    // retirement record.
+    'integration/WebhookSignatureAlgorithm',
     // #11825 — kernel/plugin-lifecycle-advanced.zod.ts
     // `AdvancedPluginLifecycleConfigSchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-25, route 2). The aggregating

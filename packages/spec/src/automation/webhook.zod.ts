@@ -67,7 +67,9 @@ export type WebhookTriggerType = z.input<typeof WebhookTriggerType>;
  * webhooks re-seed every boot as `managed_by: 'package'`, but a row an admin has
  * edited in Setup (`customized: true`) is never clobbered — a deactivated noisy
  * webhook survives redeploys. Authoring `webhooks:` is therefore live, not a
- * no-op. (Connector `webhooks` remain NOT-yet-enforced — see #3197.)
+ * no-op. (A connector's NESTED `webhooks` array never was — it was never
+ * registered as a `webhook` item — and was retired under ADR-0049; declare
+ * every webhook here.)
  *
  * **NAMING CONVENTION:**
  * Webhook names are machine identifiers and must be lowercase snake_case.
@@ -164,21 +166,15 @@ export const WebhookSchema = lazySchema(() => strictObject({
     'Until this shape was closed, these were dropped silently — the webhook still parsed and still ' +
     'materialized, so a subscription scoped or secured with a key we do not declare ' +
     'shipped listening to the wrong thing, or to everything.',
-  // `WebhookConfigSchema` (integration/connector.zod.ts) is this shape
-  // `.extend()`ed, and zod carries BOTH the strictness and this error map onto
-  // the extension — verified against real zod, not assumed. Naming the
-  // extension's own key keeps a typo of it fixable on that surface.
-  //
-  // Its SIBLING key `events` is deliberately NOT listed here even though the
-  // extension declares it, because it is an alias target above: listing it
-  // would make a base-surface typo suggest `events`, and writing `events` would
-  // then suggest `triggers` — an author walked through two rejections to a key
-  // the base does not accept. That is finding 7 (the `triggerPhrase` →
-  // `triggerPhrases` → tombstone chain) arriving from a new direction:
-  // `acceptsNothing` guards the shape-derived candidates, and nothing guards
-  // hand-written `extraKeys`. On the connector surface `events` is declared, so
-  // it is never the unrecognized key there anyway.
-  extraKeys: ['signatureAlgorithm'],
+  // No `extraKeys`. This shape used to name `signatureAlgorithm` here because
+  // `WebhookConfigSchema` (integration/connector.zod.ts) `.extend()`ed it, and a
+  // typo of the extension's own key was worth a suggestion on that surface. The
+  // extension was retired with the connector-nested `webhooks` (ADR-0049), so
+  // no surface accepts `signatureAlgorithm` any more — keeping it would point a
+  // typo on THIS shape at a key this shape refuses, the finding-7 chain
+  // (`triggerPhrase` → `triggerPhrases` → tombstone) that `acceptsNothing`
+  // guards for shape-derived candidates and nothing guards for hand-written
+  // `extraKeys`.
 }, {
   // [#8554] "unique per organization", not bare "unique". This `describe()` is
   // the SOURCE of the generated reference page
