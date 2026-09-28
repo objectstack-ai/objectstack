@@ -2,8 +2,8 @@
   "number": 20269,
   "kind": "issue",
   "title": "[finding] lint-startup-registry-verdict corpus test walks packages/ with a bare readdir-then-stat inside @objectstack/lint#test, so tsup's transient bundled config fails it with ENOENT (measured 4 of 8)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T17:35:57Z",
-  "updated_at": "2026-09-27T19:56:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T22:01:53Z",
+  "closed_at": "2026-09-27T22:00:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20269",
   "body": "Filing gate: **① a defect with a repro**, finding class **(a)**. A required CI check can go red on a diff that did not cause it.\n- `reach:` named producer, measured. tsup 8.5.1 loads its config through bundle-require 5.1.0, which writes `packages/*/tsup.config.bundled_<id>.mjs` next to the config, imports it and unlinks it. That happens in the same turbo run as `@objectstack/lint#test` (CI `Test Core`: `pnpm turbo run test test:repo`, whose test tasks depend on `^build`).\n- Measured by the objectstack#20225 dev (report on objectstack#20225, PR objectstack#20267, `out_of_scope_findings[0]`), at `1c249be6`:\n  - `collectSourceFiles` was extracted verbatim from the test file, transpiled with esbuild, and run over the real `packages/` while a sibling process looped create and unlink of `packages/spec/tsup.config.bundled_probe.mjs`;\n  - 4 of 8 runs threw `ENOENT … stat '…/packages/spec/tsup.config.bundled_probe.mjs'`, and the other 4 read 2688 files.\n  - ⛔ Not re-run by this seat. The source reading below is this seat's own, on `main` `4d7e740d`.\n\nFound by the `os-dev` round on objectstack#20225. Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## The defect\n\n`packages/lint/src/lint-startup-registry-verdict.corpus.test.ts:77`:\n\n```ts\nfunction collectSourceFiles(dir: string, out: string[] = []): string[] {\n  for (const entry of readdirSync(dir)) {\n    if (SKIP_DIRS.has(entry)) continue;\n    const full = join(dir, entry);\n    if (statSync(full).isDirectory()) collectSourceFiles(full, out);\n```\n\nThis is the same shape as `scripts/check-error-status-conformance.mjs` `walk()` (#20225, fixed by PR #20267). `readdirSync` lists the entry, and a bare `statSync` then runs on it before the `.ts` filter. So a transient `.mjs` that the filter would drop anyway takes the whole file down during collection.\n\n## The fix, for the dispatch to confirm\n\n- Apply the rule PR #20267 pins: skip only an entry whose `stat` AND `lstat` both answer `ENOENT` (it vanished). A dangling symlink, `ENOTDIR`, `EACCES` and a missing root still throw.\n- Or list with `withFileTypes: true`, so no stat runs per plain file.\n- ⛔ No retry wrap of the test.\n- **Family census (enumeration nail).** Other test files that walk a repo-rooted path with readdir-then-stat. Enumerate them with `git grep -l readdirSync -- 'packages/**/*.test.ts' | xargs grep -l statSync`. At `4d7e740d` that includes:\n  - `packages/cli/src/commands/migrate/multi-value-columns.no-auto-run.test.ts`, `packages/cli/src/utils/console-route-ledger.conformance.test.ts`, `packages/cli/src/utils/port-contract-single-source.test.ts`;\n  - `packages/core/src/security/authz-store-unavailable.test.ts`, `packages/core/src/security/operation-private-keys.pin.test.ts`;\n  - `packages/plugins/plugin-email/src/transports/smtp-port-contract.test.ts`;\n  - `packages/spec/src/data/api-methods-batch-conformance.test.ts`, `packages/spec/src/shared/retired-key-migrate-sentence.test.ts`, `packages/spec/src/system/constants/platform-object-names.test.ts`.\n\n  The dev counted 12 such files and did not probe them. For each, the claimant says whether it walks a tree a concurrent build writes to (a package root or `dist/`), and fixes the ones that do.\n\n## Dedupe\n\nLocal scan of the titles and bodies of every open and recently closed objectstack issue and PR for `lint-startup-registry-verdict|tsup.config.bundled|collectSourceFiles|readdir…stat…(race|ENOENT)`: 6 hits, all the error-status walker. Those are #20225 (open, fixed by PR #20267), #19667 (open, a duplicate of #20225; pointer posted there) and #19916 (closed). None names this file."

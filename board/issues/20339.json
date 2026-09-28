@@ -1,0 +1,33 @@
+{
+  "number": 20339,
+  "kind": "issue",
+  "title": "text: three sentences still say onSuccess / flows.screens have no reader after #20296's ledger flips (reconciliation-test omit reason, cli i18n-extract docblock, flow-liveness-gate header)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "documentation",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T23:44:14Z",
+  "updated_at": "2026-09-28T00:26:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20339",
+  "body": "Filing gate: **① stale author- and agent-facing text contradicted by a measured ledger verdict.** PR #20328 (#20296) flips `action.onSuccess.navigate`, `action.onSuccess.openIn` and `translation.flows.screens` to `live`, citing mounted objectui readers at the `.objectui-sha` pin `f8a9d0fb`. Three sentences outside that PR's bounded list still state the opposite.\n- `reach:` named sites. They were found by the #20296 dev (report `5860905097`) and confirmed by the seat's ACCEPT `5860916647`.\n  1. `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`: the `action` `onSuccess` omit entry, in the 「Declared, not enforced yet」 group. Its `why` says 「both of its children (navigate, openIn) carry the liveness verdict planned: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate」. The premise is false once #20328 lands.\n  2. `packages/cli/src/utils/i18n-extract.ts`, the `authorWarnedTranslationGroups` docblock: 「no shipped runner reads the group, so a translated wizard string really is stored and never shown」. That is now half-true, because `flows.screens` is read. The gating it describes is unchanged and still correct; only the stated reason is stale.\n  3. `packages/cli/test/i18n-flow-liveness-gate.test.ts`, the header prose: the same stale reason.\n\nFiled by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. Site 1 lands in `packages/spec` (a test data string); sites 2 and 3 land in `packages/cli`. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- Text only, after #20328 lands:\n  - site 1: re-word the `why` to 「enforced (`live`, objectui `ActionRunner` `navigateOnSuccess`); not offered in the form pending a ruling」, and keep the omission;\n  - sites 2 and 3: restate the reason. The group stays author-warned because `flows.FLOW.label` is unread (#20318), not because nothing reads the group.\n- ⛔ No gating change: #20318's ENFORCE is what lifts the `flows` warn.\n\n## A question this card records but does not rule\n\nShould the Studio action metadata form now OFFER `onSuccess`? The omit entry itself defers that to 「a ruling for the enforcement」. It is a form-surface (capability) question, on the form-offer axis (#19332 / #19333); it is not text. The #20296 dev's measurement: no example or app produces `onSuccess` today.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `authorWarnedTranslationGroups|metadata-form-zod-reconciliation…onSuccess|onSuccess…(offer|form)|i18n-flow-liveness-gate` found no card carrying these sites."
+}

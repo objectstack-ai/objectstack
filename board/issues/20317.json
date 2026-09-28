@@ -1,0 +1,30 @@
+{
+  "number": 20317,
+  "kind": "issue",
+  "title": "[finding] a loop node with no config.collection registers and validates clean, then fails at run time with 'loop config does not satisfy the loop contract'",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T20:35:23Z",
+  "updated_at": "2026-09-27T22:19:55Z",
+  "closed_at": "2026-09-27T22:19:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20317",
+  "body": "Filing gate: **① a required node-config key admitted at build and refused at run**, class **(b)**.\n- `reach:` measured by the objectstack#19961 dev on the PR #20315 head (independent of that PR):\n  - `objectstack validate --json` answers `valid: true`, exit 0, and `registerFlow` (with the builtins installed) registers a `loop` node that has `iteratorVariable` and a one-node body but **no `config.collection`**;\n  - the run fails at the node: `Node l failed: loop config does not satisfy the loop contract, config.collection: Invalid input`, from `packages/services/service-automation/src/builtin/loop-node.ts` `parseNodeConfig`;\n  - the expression-path ledger's reconciliation shows the channel schemas REQUIRE `loop.collection` and `map.collection`, but no build door refuses their absence;\n  - `map` was NOT measured.\n\nA sibling of #19961's family: a required key the runtime contract enforces is admitted by every build door. Found by the `os-dev` round on #19961 (report on #19961, `out_of_scope_findings[2]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- Measure `map` too. Then refuse a missing required node-config key at the build doors (`FlowSchema.parse`, `registerFlow`, `objectstack validate`), with the runtime contract's own message, from one judge. The ledger already knows which keys are required per channel.\n- Census the node kinds whose runtime `parseNodeConfig` requires a key that the build doors do not, so that one card covers the family rather than one card per node kind.\n- Producer census: examples, packages, cloud `main`, and objectui's flow designer defaults.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `loop…collection…(absent|missing|registers)|LoopConfigSchema|map…collection…(absent|missing)|parseNodeConfig` finds 1 hit: PR #20180, unrelated. None carries this defect."
+}

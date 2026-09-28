@@ -1,0 +1,33 @@
+{
+  "number": 20349,
+  "kind": "issue",
+  "title": "metadata forms: one row each for object.access, object.highlightFields, object.requiredPermissions, object.searchableFields and permission.adminScope (#19332 flight G1a)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T01:06:24Z",
+  "updated_at": "2026-09-28T01:07:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20349",
+  "body": "Part of #19332 — flight **G1a** of ruling `5861442317` (batch #229 item 3, letter A, maintainer 「同意」).\n\nFiled by the `domain:spec` seat 4 (`session_01CiCTczDo7tGhafXjf61dUJ`, seat post #18917). It is an in-scope sub-issue of an in-flight card, so it inherits the parent's `domain:spec` and `priority:p2`. The parent carries the ledger flight (claim `5861529325`). This card exists so that flight G1a can run beside the ledger flight under its own claim.\n\n## What\n\nAn author who opens the Studio form for an object or a permission set cannot see or set five live settings that the platform honours once they are written in code. Each gets **one form row**, mirroring a row a registered form already has, with the four-locale catalogue rows in the same PR.\n\n| key | form |\n|:--|:--|\n| `object.access` | `packages/spec/src/data/object.form.ts` |\n| `object.highlightFields` | `object.form.ts` |\n| `object.requiredPermissions` | `object.form.ts` |\n| `object.searchableFields` | `object.form.ts` |\n| `permission.adminScope` | `packages/spec/src/security/permission.form.ts` |\n\n## The ruling, quoted (G1)\n\n> **G1 (21 keys …) — one form row each**, mirroring a row a registered form already has (code/expression, json, string-tags, composite, textarea, plain), with the four-locale catalogue rows in the same PR. Union-typed values take `json`, never `string-tags` (which reads a stored map as an empty array and overwrites it); field-name lists are free text and a misspelling is refused loudly at parse.\n\n> Execution parameters: G1 and G2 land as form-row flights (G1: object + permission, then field + action; …) … Every flight is `Clause-②: no` (form face and ledger text). Confidence gaps carried: `action.description`'s authors NOT MEASURED; no browser run of the objectui repeater face …\n\n> The objectui widget bounds (`string-tags` reads a non-array as `[]`; `field-multi` binds nothing on an object draft) are the dev's reading at the `.objectui-sha` pin and are carried as the premise the first flight re-checks.\n\nThis is the first form flight, so it re-checks that premise.\n\n## Acceptance\n\n- Each of the five keys has exactly one row, whose control mirrors an existing same-shape row. The per-key shapes are in the analysis round's table, dev report `5859943900` on #19332.\n- The four-locale catalogue rows are in the same PR, generated the way #19673 (`408ca2e36`) generated them.\n- The reconciliation gate's zod-only residue drops by exactly these five.\n- `Clause-②: no`. The precedent is `408ca2e36`.\n\n## Order\n\nG1b (`field.*` and `action.*`, 16 keys) follows this flight. G2's two flights and #19333 item 2 follow as the parent's ruling orders them.\n\nDedupe words: `metadata form row object.access highlightFields searchableFields` · `permission.adminScope form row`"
+}

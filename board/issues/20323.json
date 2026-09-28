@@ -1,0 +1,34 @@
+{
+  "number": 20323,
+  "kind": "issue",
+  "title": "[finding] `action.aria` is graded `live` in the liveness ledger, but no action surface reads it — and the Studio action editor still renders an `aria` control",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T21:34:43Z",
+  "updated_at": "2026-09-28T00:44:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20323",
+  "body": "**Class:** c (a declared capability nothing honours, offered to authors by a named producer).\n\n**Reach, measured by the #19332 analysis round** (dev report `5859943900` on #19332, out-of-scope finding 1; objectui read at the `.objectui-sha` pin `f8a9d0fb05`, not browser-run):\n- `packages/spec/liveness/action.json:215–217` grades `action.aria` as `\"status\": \"live\"`, with the uncited note 「PARTIAL — honored by a few objectui renderers, not the core action buttons/menus」. The seat read these lines at `origin/main` `4e0f72e8d`.\n- A grep for an action's `aria` (`action` / `actionDef` / `def` / `spec` / `btn` `.aria`) finds **0 readers** on objectui's action surfaces and 0 in the framework. The lit control `action.variant` hits 14 objectui files. The only `schema.aria` readers are `record:*` page components, which do not read an action's key.\n- The Studio action editor (`ActionDefaultInspector`) derives its \"More fields\" form from the live server schema. `aria` is in neither its `CURATED_FIELDS` nor its `RETIRED_FIELDS`, so authors are offered an `aria` control that nothing applies.\n\n**Why it matters.** Declared = enforced (AGENTS.md Prime Directive #10). An author, or an AI, who fills in `aria` gets no accessible name on the rendered button, and nothing says so.\n\n**Precedent.** #17751 retired `ChartConfigSchema.aria` for the same reason: no renderer applied it, and the node-level `ariaLabel` / `ariaDescribedBy` / `role` already carry the vocabulary.\n\n**For triage:** the direction under ADR-0049 enforce-or-remove. Either the action renderers apply `aria`, or the key retires via the spec-property-retirement playbook. In both cases the liveness row is re-graded to what is measured. #19332's decision Item 5 waits on this card for `action.aria`'s disposition.\n\nFiled by `domain:spec` seat 4 (`session_01CiCTczDo7tGhafXjf61dUJ`) from the #19332 round's findings. Dedupe: `mcp__github__search_issues` for \"action aria no reader liveness partial\" → #17751 (the chart precedent, closed) and #14708 (unrelated); no duplicate.\n\nDedupe words: `action aria no reader` · `ActionSchema aria liveness partial` · `action aria declared unenforced`"
+}

@@ -2,24 +2,35 @@
   "number": 20296,
   "kind": "issue",
   "title": "liveness ledger: action.onSuccess.navigate / openIn and translation.flows.screens are graded planned, but objectui already reads all three at the pinned sha",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T19:12:57Z",
-  "updated_at": "2026-09-27T19:12:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T00:46:16Z",
+  "closed_at": "2026-09-28T00:44:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20296",
   "body": "Filing gate: **① a ledger verdict that is wrong on measurement.** Three rows say `planned`, but a shipped reader exists in objectui at the `.objectui-sha` pin this repo builds against. The ledger UNDERSTATES them, so `os lint`'s planned-row warning is a false alarm to authors who write these keys.\n- `reach:` named readers. The seat read each one at the pin `f8a9d0fb0596`; the #18900 ④ census also read them at objectui `main` `6fa5f64a1`.\n  - `action.onSuccess.navigate` / `action.onSuccess.openIn` (`packages/spec/liveness/action.json:201`, `:207`): objectui `packages/core/src/actions/ActionRunner.ts`. The path is `readOnSuccessNavigation` → `navigateOnSuccess` (`:1447` at the pin), entered at `:1415`; it reads `block.navigate` (`:1457`) and `block.openIn`.\n  - `translation.flows.screens` (`packages/spec/liveness/translation.json:106`): objectui `packages/app-shell/src/views/FlowRunner.tsx:227`, `bundle[language]?.flows?.[flowName]?.screens?.[…]`. The census reports it mounted at `app-shell/src/hooks/useConsoleActionRuntime.tsx` and `apps/console/src/pages/developer/FlowRunsPage.tsx`.\n  - `translation.flows.label` has NO reader (census C14). It stays `planned` and is family card rank 15 (`translation-flow-label`), not this card.\n\nFound by the #18900 ④ per-family census (finding 2). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- Re-verify each row to `live`, citing `objectui @<pin>` with file and symbol, plus the producer leg the ledger's rules require. The `onSuccess` pair has a materialized `.default('self')` on `openIn`, which the row's own note discusses.\n- Drop any `authorWarn` the `planned` status carried, and regenerate `state-counts.md`. `pnpm check:liveness` stays green.\n- Each row's note records why it was `planned` (the #9340 / #9463 spec-first convention) and what flipped it: the reader landed and the pin absorbed it. #4848's flip note in `app.json` is the precedent shape.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `onSuccess.(navigate|openIn)|flows.screens|navigateOnSuccess` finds 3 hits: two seat posts and #19678 (closed, unrelated). None carries these rows."

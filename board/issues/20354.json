@@ -1,0 +1,34 @@
+{
+  "number": 20354,
+  "kind": "issue",
+  "title": "[finding] spec-property-retirement §0 says benign display metadata (`description`, `tags`, `icon`) is never retired, which contradicts the maintainer's #18900 ④ criterion (retire by mainstream capability) that triage applies to every family card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T01:51:32Z",
+  "updated_at": "2026-09-28T02:32:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20354",
+  "body": "Filing gate: **① a rule-text conflict with a named landing site**. `.claude/skills/spec-property-retirement/SKILL.md` §0 contradicts a maintainer ruling that the lane executes every day. Per SKILL.md 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」, this card is filed rather than the text edited in a code PR.\n\nFound by the `os-dev` round on #20321 (PR #20353; report `out_of_scope_findings[1]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. It lands on a governed surface (`.claude/**`, Tier S), so it is the skills lane's. ⛔ Not a claim.\n\n## The two texts\n\n- **The skill** (`.claude/skills/spec-property-retirement/SKILL.md` §0, on `main`), verbatim: 「良性展示元数据(`description`、`tags`、`icon`)永远谈不上「误导」;不要标 `authorWarn`,也不要退役它。」\n- **The maintainer's ruling** (#18900 `5727134555`, ruling A′ item ④), verbatim: 「每族该问的是:主流平台有没有这个能力」. The ruling adds: 「a family is judged by whether mainstream platforms in the domain have the capability, ⛔ not by whether anything in this repo reads the key」.\n\n## `reach:` (measured on the board)\n\n- Triage graded #20321 `rowLevelSecurity[].tags` **RETIRE** by that criterion (`5860425529`: 「Row-level policies carry no tag attribute in the mainstream」).\n- The dev followed the ruling over the skill and said so. PR #20353 retires a `tags` key, which the skill's text forbids.\n- Every #18900 ④ family card that holds a `description` / `tags` / `icon` member meets the same fork. An agent that reads the skill first will refuse, or ask, on a card triage has already graded.\n\n## What the fix is (for the dispatch to confirm)\n\n- Amend §0 so it defers to the #18900 ④ criterion for declared-but-unenforced keys. Keep the documentation-shaped exemption (`hook.label` / `flow.description` record intent for the next reader) where the mainstream platforms carry the same capability.\n- One rule text, citing the ruling id, with no new gate.\n- Count the other skill and agent texts that restate the old exemption, and fix the family in one PR.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `spec-property-retirement.*(§0|benign|display metadata)|benign display metadata|良性展示元数据|never retire.*(tags|description)` finds 3 hits: PR #20353, PR #20350 and PR #20302. They are retirement PRs and a ledger re-point; none carries the skill text.\n\nDedupe words: `spec-property-retirement benign display metadata` · `retire tags description icon skill contradiction` · `18900 mainstream capability criterion skill §0`"
+}

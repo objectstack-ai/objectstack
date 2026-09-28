@@ -2,9 +2,9 @@
   "number": 20256,
   "kind": "pull_request",
   "title": "docs(skills): dashboards.md conditions the measure-currency chain on currencyMode 'fixed' and cites the spec describe",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/xs",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T16:16:03Z",
-  "updated_at": "2026-09-27T16:24:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-28T02:20:02Z",
+  "closed_at": "2026-09-28T02:20:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-28T02:20:01Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20256",

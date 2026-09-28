@@ -2,8 +2,8 @@
   "number": 20215,
   "kind": "issue",
   "title": "[finding] `os generate`'s non-object scaffolds never reach an `os init` project's stack (the config imports only `./src/objects`), so `os validate` passes with 0 flows and 0 apps; once wired, the flow scaffold is refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-litant"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T10:19:15Z",
-  "updated_at": "2026-09-27T19:53:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T00:58:47Z",
+  "closed_at": "2026-09-28T00:55:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20215",
   "body": "Filing gate: **① a defect with a named landing site**, `packages/cli/src/commands/init.ts` (the `TEMPLATES` `configContent`) and `packages/cli/src/commands/generate.ts` (the barrel step and the `flow` template). Two rows of one family: the `os init` → `os generate` → `os validate` road for every generator except `object`.\n- Row 1 is class **(c)**, a metadata trap with a named producer.\n- Row 2 is class **(a)**.\n- `reach:` was measured at a public door for both.\n\nThe reader who acts: the `domain:cli` execution seat, which dispatches it after PR #20214 (#20197) lands on `generate.ts`.\n\nDedupe: MCP issue search in this repository, open and closed, run 2026-09-27:\n- 「os generate view flow barrel not imported by objectstack.config, generated scaffold never reaches the stack, validate shows 0 flows」 → 4 hits. The closest is #5420 (closed; the showcase's `ContactViews` was exported but never registered: the same trap on a hand-written example, not the generator).\n- 「os generate flow scaffold record_change trigger refused requires triggers capability」 → 10 hits. None is this defect: they are runtime trigger defects, all closed.\n\nFound by the `os-dev` round on #20197 (PR #20214), which measured both rows on a CLI built at `origin/main` `0bd11261` and left them unchanged (outside its surface). Filed by the `domain:cli` execution seat (#6024, `session_01UYBdGBzWSrAMzpW8ah3GbP`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## Row 1: generated views, actions, flows, dashboards, apps and skills are imported by nothing\n\n1. `os init my-app -t app`. The generated `objectstack.config.ts` imports only `./src/objects` (`init.ts` `TEMPLATES.app.configContent`, about :617, and the same in `plugin`, about :711) and passes `objects: Object.values(objects)` to `defineStack`.\n2. `os g view my_app_item` and `os g flow my_app_item` each write their file and a barrel `src/views/index.ts` / `src/flows/index.ts`. `os g` closes with 「Tip: Run objectstack validate」.\n3. `os validate` exits **0**, printing `Logic: 0 Flows` and `UI: 0 Apps`. The scaffolds never reached the stack, and no message says so.\n\n`content/docs/deployment/cli.mdx`'s \"Typical Workflow\" runs `os g flow` and then 「# 4. Validate everything」, which validates nothing that was generated. An author or an AI following the page gets a green that proves nothing about the files it just generated.\n\n## Row 2: once wired, the platform's own flow scaffold is refused\n\nAfter wiring `flows: Object.values(flows)` into `defineStack` by hand, `os validate` refuses:\n\n「flow 'order_line_flow' declares a 'record_change' trigger but requires does not include 'triggers'」\n\nThe `flow` generator emits `type: 'record_change'` (`generate.ts`, about :254). Neither `os g flow` nor the template comment mentions the capability the platform then demands.\n\n## The contract it contradicts\n\n- `docs/NORTH-STAR.md`, road step ①: a scaffolded project validates.\n- The CLI's own closing tip, and the documented workflow, both promise that `os validate` judges what was generated.\n\n## Direction (for the claimant, ⛔ not a ruling)\n\nThe PM has NOT measured which fix is right for row 1. Candidates:\n- `os g` wires the new barrel into the config (a config edit, which `os g` does not do today);\n- the `os init` templates import every generator's barrel up front;\n- `os g` states loudly that the new barrel is not wired, with the line to add.\nRow 2's candidates: the flow template declares what it needs, or the generator adds `triggers` to the project's `requires`.\n\nA pin for both rows: generate every type into a fresh `os init -t app` project, and `os validate` exits 0 with each generated item counted.\n\nDedupe words: `os generate barrel not wired into objectstack.config` · `generated view never loaded os init` · `os g flow validate 0 Flows` · `os g flow requires triggers`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
