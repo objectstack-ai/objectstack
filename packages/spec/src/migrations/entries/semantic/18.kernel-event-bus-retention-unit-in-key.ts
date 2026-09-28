@@ -12,7 +12,10 @@ export const entry: SemanticMigration = {
   replacement: 'retentionDays on both — rename each key; both values are unchanged, and so is '
     + 'the 365 default on EventSourcingConfig',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'What makes these two one entry rather than two is the neighbour they share and the one '
     + 'they do not. Both hang off EventBusConfig, so an author configuring a bus met the same '
     + 'bare word twice and had to learn the unit twice; and on EventSourcingConfig the bare '
@@ -27,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'never a stored sys_metadata row, and the conversion chain has no seam that would see '
     + 'one. That is what ruling B prescribes for a key that is not authorable metadata, and '
     + 'the disposition the epoch-instant renames on this same kernel took '
-    + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+    + '(epoch-instant-keys-renamed). ADR-0087.',
   acceptanceCriteria:
     'Every EventPersistenceSchema.parse(…) / EventSourcingConfigSchema.parse(…) site and every '
     + 'literal handed to an event bus spells retentionDays; authoring either old spelling fails '

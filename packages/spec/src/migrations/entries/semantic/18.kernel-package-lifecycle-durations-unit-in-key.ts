@@ -13,7 +13,10 @@ export const entry: SemanticMigration = {
   replacement: 'estimatedDurationSeconds, resolvedInMs and durationMs — rename each key; every '
     + 'value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'These three are one entry because they are one story told to one audience — a package '
     + 'being planned, resolved and rolled out — and because the group is precisely where the '
     + 'unit SPLITS: estimatedDuration is SECONDS while resolvedIn and rollout.duration are '
@@ -28,8 +31,7 @@ export const entry: SemanticMigration = {
     + 'PackageDependencyResolutionResult is emitted by a resolution run, and MultiVersionSupport '
     + 'is a version-routing argument a host constructs — none is a stack collection member or '
     + 'a stored sys_metadata row, so the conversion chain has no seam that would see one. That '
-    + 'is what ruling B prescribes for a key that is not authorable metadata. #15678, #14478, '
-    + 'ADR-0087.',
+    + 'is what ruling B prescribes for a key that is not authorable metadata. ADR-0087.',
   acceptanceCriteria:
     'Every IPackageService.planUpgrade() implementation returns estimatedDurationSeconds and '
     + 'every caller reads it under that name; every dependency-resolution producer returns '

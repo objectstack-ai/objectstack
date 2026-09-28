@@ -12,7 +12,10 @@ export const entry: SemanticMigration = {
   replacement: 'timeoutMs, durationMs and totalDurationMs — rename each key; every value is '
     + 'unchanged, and so is the 30000 default on StartupOptions',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'These three are one entry because they are one boundary: a host passes StartupOptions '
     + 'in, and the orchestrator hands PluginStartupResult and StartupOrchestrationResult back '
     + 'from the same call. The file already contained its own counter-example — '
@@ -27,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'sys_metadata row and the conversion chain has no seam that would see one — the same '
     + 'disposition HealthStatus.timestamp took on this very file '
     + '(epoch-instant-keys-renamed), and what ruling B prescribes for a runtime-emitted key. '
-    + '#15678, #14478, ADR-0087.',
+    + 'ADR-0087.',
   acceptanceCriteria:
     'Host boot code calling orchestrateStartup(plugins, options) spells timeoutMs; every '
     + 'implementation that BUILDS a PluginStartupResult spells durationMs and every one that '

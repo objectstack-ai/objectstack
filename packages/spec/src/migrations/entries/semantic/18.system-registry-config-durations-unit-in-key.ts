@@ -10,7 +10,10 @@ export const entry: SemanticMigration = {
   replacement: 'syncIntervalSeconds, timeoutMs and cache.ttlSeconds — rename each key; every '
     + 'value, the 30000 timeout default and the 3600 TTL default are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'The three are one entry because they are one file and, for the first two, one object: '
     + 'RegistryUpstream declared a SECONDS interval and a MILLISECONDS timeout twenty-five '
     + 'lines apart, both bare. That pair carries the clearest demonstration in this card of '
@@ -21,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'are not strict, so a bare deletion would strip in silence. Why a semantic entry and '
     + 'not a D2 conversion: stack.zod.ts declares no registry collection, and a registry '
     + 'config is host configuration read at startup rather than a stored sys_metadata row, so '
-    + 'the conversion chain has no seam that would see it. #15679, #14478, ADR-0087.',
+    + 'the conversion chain has no seam that would see it. ADR-0087.',
   acceptanceCriteria:
     'Every upstream declaration spells syncIntervalSeconds and timeoutMs, and every registry '
     + 'cache block spells ttlSeconds. Authoring any old spelling fails to compile (input type '

@@ -10,20 +10,24 @@ export const entry: SemanticMigration = {
   replacement: 'idleTimeoutMs and snapshot.intervalMs — rename each key; both values and the '
     + '300000 idle-timeout default are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'idleTimeout is the collision that got this whole population ruled rather than merely '
     + 'noted: it is MILLISECONDS here, while the tenant surface carried its own idleTimeout '
     + 'in SECONDS at the same time — so the identical bare name meant five minutes on one '
     + 'shape and three and a half days on the other, a 1000x divergence no parse could catch '
-    + 'because both readings are positive integers. The tenant half was already renamed '
-    + '(#15626); this is the half that remained. snapshot.interval rides in the same entry '
+    + 'because both readings are positive integers. The tenant half was already renamed, in '
+    + 'the same change that landed the duration gate itself; this is the half that remained. '
+    + 'snapshot.interval rides in the same entry '
     + 'because it is the same object graph and the same authoring session — leaving one bare '
     + 'beside the other would have preserved exactly the ambiguity the rename removes. Both '
     + 'are retiredKey() tombstones; the shapes are not strict, so a bare deletion would strip '
     + 'in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares no '
     + 'collaboration collection, and a session config is a runtime call argument rather than '
     + 'a stored sys_metadata row, so the conversion chain has no seam that would see it. '
-    + '#15679, #14478, ADR-0087.',
+    + 'ADR-0087.',
   acceptanceCriteria:
     'Every caller that opens a collaboration session spells idleTimeoutMs, and every snapshot '
     + 'block spells intervalMs. Authoring either old spelling fails to compile (input type '
