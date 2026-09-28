@@ -18,13 +18,14 @@ export const entry: SemanticMigration = {
   reason:
     'A `${…}` placeholder in authored datasource config is resolved by NOTHING — it is ' +
     'stored verbatim in `sys_metadata` and handed verbatim to the database client at connect ' +
-    '(#7990 census, measured during #8078), so the connection fails, or connects somewhere ' +
+    '(measured by the credential census while the inline-credential refusal was being built), ' +
+    'so the connection fails, or connects somewhere ' +
     'unintended, with no error naming the unresolved placeholder — the masked-failure shape. ' +
     'The syntax looked supported: it parsed green, stored fine, and failed at a distance; two ' +
-    'shipped refusal messages (#8078 inline credentials, #8082 URL userinfo) had to warn ' +
-    '"do NOT substitute a placeholder" around the broken escape. Maintainer-ruled direction 2 ' +
-    'on #8336 (2026-08-13): refuse the syntax loudly at publish; implementing real resolution ' +
-    'was explicitly rejected — a new capability with an env-exfiltration security surface and ' +
+    'shipped refusal messages (the inline-credential refusal and the URL-userinfo refusal) had ' +
+    'to warn "do NOT substitute a placeholder" around the broken escape. The maintainer ruled ' +
+    'on 2026-08-13 for the second of two directions: refuse the syntax loudly at publish; ' +
+    'implementing real resolution was explicitly rejected — a new capability with an env-exfiltration security surface and ' +
     'zero measured pull for actual substitution. There is no mechanical rewrite: the ' +
     'placeholder names a value that exists only in the author\'s intended deployment ' +
     'environment, which a source-file transform cannot know — substituting anything would ' +

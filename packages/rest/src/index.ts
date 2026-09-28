@@ -106,14 +106,23 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // caller's `/meta` request is scoped to — the VETTED one on its execution
 // context (`metaCallerOrganizationId`, and `metaReadOrganizationId` for a read
 // of one type).
+//
+// [#20478] …and the layered view's, on both of its spellings: its post-read
+// chain (`createMetaLayeredAnswer` — the per-caller gate on every layer under
+// the stored-version doors' policy, the object mask and its cache posture), the
+// deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
+// is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
+// transport's, scoped by `metaReadOrganizationId`.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
     createMetaItemReadGate,
+    createMetaLayeredAnswer,
     createMetaListReadGate,
     createMetaListAnswer,
     isPublicAudienceRead,
     metaCallerOrganizationId,
+    metaItemLayersDeprecationHeaders,
     metaReadOrganizationId,
     metaRequestLocale,
     projectMetaObjectSchema,
@@ -121,6 +130,7 @@ export {
     STORED_VERSION_DOOR_POLICY,
     translateMetaEnvelope,
     translateMetaList,
+    wantsMetaItemLayers,
 } from './meta-item-read-gate.js';
 export type {
     MetaBookTreeAnswer,
@@ -131,6 +141,8 @@ export type {
     MetaItemReadRefusal,
     MetaItemReadVerdict,
     MetaItemRequest,
+    MetaLayeredAnswer,
+    MetaLayeredRequest,
     MetaListAnswer,
     MetaListAnswerSources,
     MetaListRequest,

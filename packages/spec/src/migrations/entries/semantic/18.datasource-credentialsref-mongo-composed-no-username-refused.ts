@@ -13,10 +13,11 @@ export const entry: SemanticMigration = {
     '`url` and names no `username`',
   replacement: 'decide what the datasource is meant to do, then make the two halves agree: ' +
     'add `username` to `config` so the bound secret is interpolated beside it into the ' +
-    'composed connection URI at connect (#8696) — or, for a datasource genuinely meant to ' +
+    'composed connection URI at connect — or, for a datasource genuinely meant to ' +
     'connect unauthenticated, remove the `external.credentialsRef` binding (and unbind the ' +
     'orphaned `sys_secret` row via the Setup → Datasources form). Authoring a `config.url` ' +
-    'that names a user is a third valid shape, judged by the sibling #9041 prescription.',
+    'that names a user is a third valid shape, judged by the prescription of the sibling ' +
+    'URL-branch entry, `datasource-credentialsref-mongo-url-no-user-refused`.',
   reason:
     'The pair cannot work as written, and until protocol 18 it was accepted in silence at ' +
     'every door it passed. With no `config.url` the driver factory COMPOSES the connection ' +
@@ -30,14 +31,17 @@ export const entry: SemanticMigration = {
     'authenticate from a password alone — the same measured asymmetry behind the sibling ' +
     'URL-branch refusal. Both branches had always agreed on this input, so this inherits that ' +
     'ruling rather than re-opening it, and lands at the same authoring/publish door — the one ' +
-    'place both halves are visible at once — as the "absence must be loud" half of the ' +
-    '#7314/#7385/#8152/#8875/#8696 family. Deliberately NOT refused, each measured: a ' +
-    'discrete `username` that is present and non-empty (the secret is live there — that is ' +
-    'the branch #8696 already works on), an empty-string `credentialsRef` (not a binding — ' +
-    'the connect path resolves under a truthy check), a non-string `username` (the driver ' +
-    'config gate already reports the type error), and every other driver arm (the postgres ' +
-    'equivalent is re-judged after #8873, never inherited — `pg` receives the bound password ' +
-    'regardless of the DSN naming a user). An EMPTY-STRING `username` IS refused, unlike the ' +
+    'place both halves are visible at once — as the "absence must be loud" half of the family ' +
+    'of driver-factory arms, closed one driver at a time, that each dropped something declared ' +
+    'without a word: the optional-driver arms that answered a missing package with no remedy, ' +
+    'the turso arm that never read its bound secret, and the mysql and mongo DSN branches that ' +
+    'discarded one. Deliberately NOT refused, each measured: a ' +
+    'discrete `username` that is present and non-empty (the secret is live there — the ' +
+    'composed branch has always interpolated it), an empty-string `credentialsRef` (not a ' +
+    'binding — the connect path resolves under a truthy check), a non-string `username` (the ' +
+    'driver config gate already reports the type error), and every other driver arm (the ' +
+    'postgres equivalent is judged on its own client\'s measurement, never inherited — `pg` ' +
+    'receives the bound password regardless of the DSN naming a user). An EMPTY-STRING `username` IS refused, unlike the ' +
     'sibling entry\'s present-but-empty userinfo carve-out: there MongoClient itself throws ' +
     '(`URI contained empty userinfo section`) so the shape is already loud, while here ' +
     '`username: \'\'` composes the same userinfo-free URI and connects — silently. There is ' +
@@ -48,5 +52,5 @@ export const entry: SemanticMigration = {
     'Every mongodb datasource that binds `external.credentialsRef` and authors no `config.url` ' +
     'names a non-empty `config.username` and connects authenticated as that user; every ' +
     'datasource meant to connect anonymously carries no `credentialsRef`; no datasource parse ' +
-    'reports the #9147 refusal.',
+    'reports this composed-branch refusal.',
 };

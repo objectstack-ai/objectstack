@@ -17,9 +17,11 @@ export const entry: SemanticMigration = {
     'key: … }` next to `driver`) instead of file-path query parameters',
   reason:
     "`PostgresConfigSchema.url`'s own describe text documents the postgres URL grammar, but " +
-    'until protocol 18 the value was only string-scanned for credentials (#8082/#8337) and ' +
-    'placeholders (#8336) — deliberately so at the SHARED helper, whose refusal to parse is ' +
-    "load-bearing for mongo's multi-host/`+srv` forms (#8696). For postgres that leniency " +
+    'until protocol 18 the value was only string-scanned for credentials (the URL userinfo ' +
+    'password and credential query parameters) and `${…}` placeholders — deliberately so at ' +
+    'the SHARED helper, whose refusal to parse is load-bearing for mongo\'s multi-host/`+srv` ' +
+    'forms (`new URL()` rejects the multi-host form outright, and the mongo arm hands the ' +
+    'authored URL to its client untouched). For postgres that leniency ' +
     'was no check at all: `pg@8.22.0` does not implement libpq\'s multi-host DSN — both ' +
     "`pg-connection-string`'s `parse` and `pg`'s `ConnectionParameters` throw " +
     '`TypeError [ERR_INVALID_URL]` on `postgresql://app@h1:5432,h2:5433/app` (measured) — ' +
