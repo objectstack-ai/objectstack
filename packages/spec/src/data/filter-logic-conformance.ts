@@ -59,7 +59,8 @@
  *
  * The predicates are deliberately boring: string equality, `$in` / `$nin`,
  * `$ne`, `$gte` / `$lt` on lexicographic strings, `$notContains` over plain
- * substrings, and the value-presence pair `$null` / `$exists`. Dates, numeric
+ * substrings, the value-presence pair `$null` / `$exists`, and (since #20444)
+ * the staged emptiness flag `$empty` on the same nullable column. Dates, numeric
  * coercion, `LIKE` escaping and case sensitivity are still out — those
  * legitimately differ between a SQL engine and a JS matcher, and folding them
  * in would make the table unpassable rather than more useful. Keep it that way: a case belongs here only if
@@ -73,6 +74,28 @@
  * cross-backend answer and belongs to the standard like any other. The
  * {@link FilterLogicRow.d} column carries it, and the eight `d`-column cases
  * below enforce it on every backend.
+ *
+ * **`$empty` is IN, as of #20444, and its rows measure less than they look
+ * like.** The flag is answered by the field's DECLARED row of the ruled
+ * 「is empty」 table (text-like: null or `''`; multi-value: null or `[]`; every
+ * other type: null only — `expandEmptyOperator`, `./filter-empty-operator.ts`)
+ * on the faces that hold declarations, and by value (`isEmptyFilterValue`) on
+ * the ones that do not. This fixture stores neither `''` nor `[]`, so on it
+ * every row of the table and the by-value reading give ONE answer — which is
+ * what makes the rows below enrollable on every backend, and also why they do
+ * NOT pin the per-type rows: those are each face's own suite, over a text, a
+ * multi-value and a scalar column. What these rows DO pin is that every face
+ * has an arm (a face without one refuses, and the case goes red), that `$not`
+ * over it is total (no row lost to UNKNOWN), and that it composes with the
+ * combinators and with a sibling operator on the same field like any other
+ * predicate.
+ *
+ * ⚠️ A declared-type face REFUSES `$empty` on a field whose declaration it does
+ * not hold — there is no row to compile without one. So every harness must
+ * DECLARE the fixture's columns (any string type: `text` takes the text row,
+ * the driver-internal `string` the null-only row, and both answer this fixture
+ * identically); a harness that builds its table outside the driver's
+ * registration has to register the declaration beside it.
  *
  * ⚠️ That answer — the INCLUDE direction — was reversed by a ruling on
  * 2026-08-10 and RE-AFFIRMED the same day, once the reversal's full cost had
@@ -520,6 +543,56 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     filter: { d: { $exists: false } },
     expected: ['3', '4'],
     note: 'The direction the ruling called the hardest live harm: a key-presence reading returns NOTHING here, silently emptying every "field is not set" scope. Enrolled beside its twin so a single-direction blind spot cannot rebuild.',
+  },
+
+  // ── The staged emptiness flag `$empty` (#20444) ───────────────────────────
+  //
+  // Ruling A on #20399 (record 5865693155): `$empty: boolean`, answered by the
+  // field's declared row of the ruled table on the faces that hold field
+  // declarations and by value on the ones that do not. `d` stores a value or
+  // NULL and never `''` / `[]`, so every row of the table agrees here — see
+  // this file's header for what that does and does not pin. Staged: the
+  // engine's front door refuses the operator until its flip card adds it to
+  // `FILTER_OPERATORS`, so these cases reach each face directly.
+  {
+    name: '$empty true selects exactly the no-value rows',
+    filter: { d: { $empty: true } },
+    expected: ['3', '4'],
+    note: '#20444: null is empty on every row of the ruled table. A face with no arm refuses, which is red here, never a silent answer.',
+  },
+  {
+    name: '$empty false selects exactly the valued rows',
+    filter: { d: { $empty: false } },
+    expected: ['1', '2'],
+    note: '#20444: the exact complement, so `$empty` is pinned as a partition of the table rather than one half of one.',
+  },
+  {
+    name: '$not over $empty true returns the valued rows',
+    filter: { $not: { d: { $empty: true } } },
+    expected: ['1', '2'],
+    note: '#20444: `$empty` spells its NULL case out, so it is never UNKNOWN; a three-valued `NOT (d IS NULL OR …)` that dropped a row would fail here.',
+  },
+  {
+    name: '$not over $empty false returns the no-value rows',
+    filter: { $not: { d: { $empty: false } } },
+    expected: ['3', '4'],
+    note: '#20444: the negation of the complement is the empty partition, rows 3-4 — the rows an unguarded `NOT (d IS NOT NULL AND …)` loses to UNKNOWN.',
+  },
+  {
+    name: '$empty inside a $or branch OR-s with its sibling branch',
+    filter: { $or: [{ b: 'y' }, { d: { $empty: false } }] },
+    expected: ['1', '2', '3'],
+  },
+  {
+    name: '$empty inside a $and ANDs with its sibling',
+    filter: { $and: [{ b: 'zz' }, { d: { $empty: true } }] },
+    expected: ['4'],
+  },
+  {
+    name: '$empty ANDs with a sibling operator on the same field',
+    filter: { d: { $empty: false, $ne: 'v1' } },
+    expected: ['2'],
+    note: '#20444: a face that lowers `$empty` beside the field\'s other operators must not let either overwrite the other.',
   },
 
   // ── Shapes read scopes are actually written in ────────────────────────────

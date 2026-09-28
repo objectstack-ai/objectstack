@@ -107,6 +107,10 @@ describe('NativeSQLStrategy — filter logic conformance', () => {
 
     ctx = {
       getCube: (name: string) => (name === 'logic' ? CUBE : undefined),
+      // [#20444] The fixture's columns, declared: every one a `text` field.
+      // The table's `$empty` rows are answered by the field's DECLARED row,
+      // which this strategy reads from this hook and refuses without.
+      declaredValueShape: () => ({ type: 'text' }),
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
       // The strategy binds `$1`-style placeholders in ascending order, each
       // pushed immediately before it is referenced, so a positional rewrite to
