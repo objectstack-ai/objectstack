@@ -1715,9 +1715,38 @@ out are **deselected**: not run, counted on the summary
 and never counted as passed. A listed tag that no loaded scenario carries is named
 on the summary, since a typo narrows the run without failing it, and an empty entry
 (`--tags smoke,`) is refused before anything runs. Without the flag every scenario
-runs. A scenario's `requires` block is **not checked**: a scenario that names a
-plugin the target does not load still runs, and the unmet requirement surfaces
-only as whatever failure it causes, if any — the scenario can still pass.
+runs.
+
+**A scenario's `requires` is checked before its first step.** Two keys, each
+judged against something `os test` can observe:
+
+- `requires.params` — environment variables that must be set to a non-empty
+  value **in the process running `os test`** (not on the target server, which a
+  suite cannot see): `"params": ["BILLING_SANDBOX_KEY"]`.
+- `requires.services` — service keys the target must declare in its discovery
+  document as `enabled` with status `available`, read from the same discovery
+  request the runner already makes once per run: `"services": ["ai", "analytics"]`.
+  The keys are the discovery service names (`auth`, `automation`, `storage`, …),
+  and a misspelled one is refused when the suite loads.
+
+A scenario with an unmet entry is **skipped**: none of its steps runs — `setup`
+included — and its line says why, naming every unmet entry and, for a service,
+the services the target does declare available:
+
+```text
+  ⏭️  Scenario: Summarise an account with the AI service [ai-summary] (skipped)
+     Skipped: requires.services 'ai' is not available on the target (enabled: false, status: unavailable). The target declares available: auth, data, metadata.
+```
+
+A skipped scenario is counted on its own —
+`SUCCESS: 3 scenarios passed. 1 skipped (not run, not counted as passed).` — and
+is never counted as passed. Skips alone do not fail a run, but a run in which
+**every** selected scenario was skipped proved nothing: it prints
+`No scenario ran: all 2 selected scenarios were skipped on unmet requirements.`
+instead of `SUCCESS`, exits **0**, and exits **1** under `--fail-on-empty`. The
+retired `requires.plugins` is refused when the suite loads, with the plugin →
+service mapping in its message: no served surface lists loaded plugins, so it
+was never checkable, and `requires.services` asks the question it stood for.
 
 **A pattern that matches no suite is not a failure by default.** The run prints
 `Found 0 test suites.` — the same machine-readable line a full run prints, so a

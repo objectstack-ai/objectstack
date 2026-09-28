@@ -37,8 +37,9 @@ export const entry: SemanticMigration = {
     + 'with a list. The null predicate itself, a { $field } reference as a whole comparand, '
     + 'an empty $in or $nin list and a whitespace endpoint are untouched',
   reason:
-    'The save door narrows to exactly what the query faces already refuse (#20116, the '
-    + 'collector for its family; the $ne member is route A, the same reach and the same one '
+    'The save door narrows to exactly what the query faces already refuse (the family of '
+    + 'comparand shapes the save door accepted and the query faces refused; the $ne member is '
+    + 'route A, the same reach and the same one '
     + 'sentence as the equality slot of filter-equality-array-comparand-refused-at-save). The '
     + 'shared comparand-shape face refuses on every query a null ordering comparand (ruled '
     + '2026-09-01), a non-list $in / $nin and a malformed $between range, a null list member or '

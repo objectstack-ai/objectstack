@@ -365,11 +365,13 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 // was withdrawn on 2026-08-08 in favour of enforce. Governing it here is the
 // half of that ruling that keeps the surface honest going forward: the runner
 // reads a real, measured subset of the declared keys, and a key nothing reads is
-// recorded as such instead of being invisible. `suite.name` and `scenario.tags`
-// were two of those and have since gained readers in `os test` (the suite
-// heading; the `--tags` selection); `scenario.requires` is the one still unread —
-// declared, NOT CHECKED, and its row stays dead. Like `query`, there is no
-// registry to fold it back onto — the override IS its governance.
+// recorded as such instead of being invisible. `suite.name`, `scenario.tags`
+// and `scenario.requires` were three of those and have since gained readers
+// (the suite heading and the `--tags` selection in `os test`; the TestRunner's
+// precondition judgement, which skips a scenario whose `params` or `services`
+// do not hold — `requires.plugins`, which nothing could judge, is a tombstone).
+// Like `query`, there is no registry to fold it back onto — the override IS its
+// governance.
 // `manifest` is the THIRD category the override has had to reach, and the one
 // that showed the escape hatch was load-bearing rather than a webhook special
 // case. `ManifestSchema` (src/kernel/manifest.zod.ts) is what an author writes

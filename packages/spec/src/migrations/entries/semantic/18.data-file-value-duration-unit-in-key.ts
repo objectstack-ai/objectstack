@@ -9,7 +9,8 @@ export const entry: SemanticMigration = {
   replacement: 'durationSeconds — rename the key; the value is unchanged, and a fractional '
     + 'second is still legal',
   reason:
-    'Maintainer ruling A on #18669 (2026-09-17, decision batch #151 item 4): rename the key and '
+    'Maintainer ruling A of 2026-09-17 on the last two duration keys no closed duration type '
+    + 'could express: rename the key and '
     + 'record an ADR-0087 conversion-layer entry, with no new closed type and no narrowing of '
     + 'anything already stored. '
     + 'This key declared its unit in NO channel at all — no `.describe()`, no JSDoc, no unit '
@@ -31,9 +32,11 @@ export const entry: SemanticMigration = {
     + 'surfaces that state one fact cannot drift apart. '
     + 'The value type is deliberately UNCHANGED at `z.number().optional()`: a fractional second '
     + 'is the ordinary shape of a media length, so the closed `DurationSeconds` type '
-    + '(`.int().nonnegative()`, #18122) was considered and REFUSED by the ruling, and so was an '
-    + '`.int()` floor. That refusal is the load-bearing half — this row is one of the six the '
-    + '#18122 unit set was derived from, and it is the one that takes a NAME instead of a TYPE. '
+    + '(`.int().nonnegative()`, published beside `EpochMs` as a closed duration type) was '
+    + 'considered and REFUSED by the ruling, and so was an '
+    + '`.int()` floor. That refusal is the load-bearing half — this row is one of the six '
+    + 'genuine durations the closed types\' unit set was derived from, and it is the one that '
+    + 'takes a NAME instead of a TYPE. '
     + 'Tombstoned with retiredKey(); FileValueSchema is the one deliberate z.looseObject in this '
     + 'file, so a bare deletion would wave the old spelling through as an unrecognised extra key '
     + 'and the prescription would never be spoken. '
@@ -42,7 +45,7 @@ export const entry: SemanticMigration = {
     + 'FileReferenceIdValueSchema, an opaque string — so a file value is never authored as this '
     + 'shape and never persisted as a sys_metadata row, and the conversion chain has no seam '
     + 'that would ever see one. '
-    + '#18669, #14478, #18122, ADR-0104, ADR-0087.',
+    + 'ADR-0104, ADR-0087.',
   acceptanceCriteria:
     'Every producer that BUILDS an expanded file value spells durationSeconds, and every '
     + 'consumer that reads a media length reads durationSeconds. Authoring duration fails to '

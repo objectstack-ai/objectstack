@@ -29,7 +29,9 @@ export const entry: SemanticMigration = {
     + 'arrays, empty lists included; every scalar equality comparand, null above all (the '
     + 'has-no-value predicate), is untouched; and $ne is NOT judged by this entry',
   reason:
-    'Maintainer ruling on #19757 (record 5793368540, batch 217 item 3, letter 乙, 「217 同意」): '
+    'Maintainer ruling of 2026-09-23 (option 乙 — rather than declaring an array equality the '
+    + 'SQL-family backends would have to invent, or documenting a divergence that stays silent '
+    + 'on one backend): '
     + 'an array in the implicit-equality slot is refused at the shared face, for every driver at '
     + 'once — no alias, no grace window. The comparand-shape face declared that moving a rule '
     + 'to it 「closes that door for every driver at once」, and before this change it judged '
