@@ -73,7 +73,6 @@ describe('SelectOptionSchema', () => {
 describe('CurrencyConfigSchema', () => {
   it('should accept valid currency config with all fields', () => {
     const validConfig: CurrencyConfig = {
-      precision: 2,
       currencyMode: 'dynamic',
       defaultCurrency: 'USD',
     };
@@ -81,28 +80,31 @@ describe('CurrencyConfigSchema', () => {
     expect(() => CurrencyConfigSchema.parse(validConfig)).not.toThrow();
   });
 
-  it('should apply default values', () => {
+  it('should apply default values — and materialize no decimal-places key (#19992)', () => {
     const config = CurrencyConfigSchema.parse({});
-    
-    expect(config.precision).toBe(2);
-    expect(config.currencyMode).toBe('dynamic');
-    expect(config.defaultCurrency).toBe('CNY');
+
+    // Byte-exact: the removed `.overwrite()` used to bake `precision: 2` in
+    // front of these two keys.
+    expect(JSON.stringify(config)).toBe('{"currencyMode":"dynamic","defaultCurrency":"CNY"}');
   });
 
-  it('should accept precision from 0 to 10', () => {
-    const validPrecisions = [0, 2, 4, 8, 10];
-    
-    validPrecisions.forEach(precision => {
-      expect(() => CurrencyConfigSchema.parse({ precision })).not.toThrow();
-    });
-  });
-
-  it('should reject invalid precision values', () => {
-    const invalidPrecisions = [-1, 11, 15, 1.5];
-    
-    invalidPrecisions.forEach(precision => {
-      expect(() => CurrencyConfigSchema.parse({ precision })).toThrow();
-    });
+  it('#19992 — refuses `precision` at EVERY value, in range or not: the key was removed, not re-bounded', () => {
+    // Before #19992: 0..10 parsed, and -1 / 11 / 15 / 1.5 were refused by the
+    // key's own number bounds (too_small / too_big / invalid_type). Now the
+    // key is not on the shape, so every value is refused the same way — as an
+    // unrecognized key carrying the removal prescription, never a range error.
+    for (const precision of [0, 2, 4, 8, 10, -1, 11, 15, 1.5]) {
+      const result = CurrencyConfigSchema.safeParse({ precision });
+      expect(result.success, `precision: ${precision}`).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('unrecognized_keys');
+      expect(issues[0]!.path).toEqual([]);
+      expect((issues[0] as { keys?: string[] }).keys).toEqual(['precision']);
+      expect(issues[0]!.message).toContain(
+        '`currencyConfig.precision` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove)',
+      );
+    }
   });
 
   it('should accept both currency modes', () => {
@@ -350,17 +352,32 @@ describe('FieldSchema', () => {
         }
       });
 
-      it('does NOT touch CurrencyConfigSchema.precision — a different surface with its own bounds', () => {
-        // The currency config keeps its own `.int().min(0).max(10)` contract
-        // and its `scale → precision` alias table (#7501-thread trap): `10` is
-        // legal there, and `scale` under currencyConfig renames to precision
-        // rather than being judged by Field.scale's contract.
-        const result = FieldSchema.safeParse({
-          name: 'price', label: 'Price', type: 'currency',
-          currencyConfig: { precision: 10 },
-        });
-        expect(result.success).toBe(true);
-        if (result.success) expect(result.data.currencyConfig?.precision).toBe(10);
+      it('does NOT reach under currencyConfig — whose decimal-places spellings are refused as unknown keys there (#19992)', () => {
+        // This card judges the FIELD-level digit counts. `currencyConfig` has
+        // its own answer, and since #19992 it is a refusal, not a bound: its
+        // `precision` was removed and its `scale` / `decimals` spellings (once
+        // aliases pointing at it) are refused with the same prescription. A
+        // well-formed `10` is refused exactly like a malformed one would be —
+        // as an unknown key, never by Field.precision/scale's number contract.
+        const cases: Array<[key: 'precision' | 'scale' | 'decimals', lead: string]> = [
+          ['precision', '`currencyConfig.precision` was removed in @objectstack/spec 17.5.0'],
+          ['scale', '`currencyConfig.scale` is not a currency configuration key'],
+          ['decimals', '`currencyConfig.decimals` is not a currency configuration key'],
+        ];
+        for (const [key, lead] of cases) {
+          const result = FieldSchema.safeParse({
+            name: 'price', label: 'Price', type: 'currency',
+            currencyConfig: { [key]: 10 },
+          });
+          expect(result.success, key).toBe(false);
+          const issues = result.error!.issues;
+          expect(issues, key).toHaveLength(1);
+          expect(issues[0]!.code).toBe('unrecognized_keys');
+          expect(issues[0]!.path).toEqual(['currencyConfig']);
+          expect(issues[0]!.message).toContain(lead);
+          // No rename is offered: the alias to `precision` went with the key.
+          expect(issues[0]!.message).not.toContain('Did you mean');
+        }
       });
     });
 
@@ -1639,7 +1656,6 @@ describe('Field Factory Helpers', () => {
         name: 'price',
         label: 'Price',
         currencyConfig: {
-          precision: 2,
           currencyMode: 'dynamic',
           defaultCurrency: 'USD',
         },
@@ -1648,7 +1664,6 @@ describe('Field Factory Helpers', () => {
       expect(currencyField.type).toBe('currency');
       expect(currencyField.currencyConfig?.currencyMode).toBe('dynamic');
       expect(currencyField.currencyConfig?.defaultCurrency).toBe('USD');
-      expect(currencyField.currencyConfig?.precision).toBe(2);
     });
 
     it('should create currency field with fixed currency mode', () => {
@@ -1656,7 +1671,6 @@ describe('Field Factory Helpers', () => {
         name: 'salary',
         label: 'Salary',
         currencyConfig: {
-          precision: 2,
           currencyMode: 'fixed',
           defaultCurrency: 'CNY',
         },
@@ -1673,7 +1687,6 @@ describe('Field Factory Helpers', () => {
         label: 'Revenue',
         type: 'currency' as const,
         currencyConfig: {
-          precision: 4,
           currencyMode: 'dynamic' as const,
           defaultCurrency: 'EUR',
         },
@@ -1682,7 +1695,6 @@ describe('Field Factory Helpers', () => {
       const result = FieldSchema.safeParse(validField);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.currencyConfig?.precision).toBe(4);
         expect(result.data.currencyConfig?.currencyMode).toBe('dynamic');
         expect(result.data.currencyConfig?.defaultCurrency).toBe('EUR');
       }
@@ -1697,33 +1709,25 @@ describe('Field Factory Helpers', () => {
       };
 
       const result = FieldSchema.parse(field);
-      expect(result.currencyConfig?.precision).toBe(2);
-      expect(result.currencyConfig?.currencyMode).toBe('dynamic');
-      expect(result.currencyConfig?.defaultCurrency).toBe('CNY');
+      // #19992: exactly the two keys — no baked `precision: 2` any more.
+      expect(result.currencyConfig).toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
     });
 
-    it('should reject invalid precision values', () => {
-      const invalidField = {
-        name: 'amount',
-        label: 'Amount',
-        type: 'currency' as const,
-        currencyConfig: {
-          precision: -1,
-        },
-      };
-
-      expect(() => FieldSchema.parse(invalidField)).toThrow();
-
-      const tooHighPrecision = {
-        name: 'amount',
-        label: 'Amount',
-        type: 'currency' as const,
-        currencyConfig: {
-          precision: 11,
-        },
-      };
-
-      expect(() => FieldSchema.parse(tooHighPrecision)).toThrow();
+    it('#19992 — refuses a currencyConfig `precision` of any value as an unknown key, not as a bad number', () => {
+      // -1 and 11 used to be refused by the key's own 0..10 bounds; 2 used to
+      // parse. All three now meet the same refusal: the key is not declared.
+      for (const precision of [-1, 11, 2]) {
+        const result = FieldSchema.safeParse({
+          name: 'amount', label: 'Amount', type: 'currency' as const,
+          currencyConfig: { precision },
+        });
+        expect(result.success, `precision: ${precision}`).toBe(false);
+        const issues = result.error!.issues;
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.code).toBe('unrecognized_keys');
+        expect(issues[0]!.path).toEqual(['currencyConfig']);
+        expect(issues[0]!.message).toContain('Delete the key.');
+      }
     });
 
     it('should reject invalid currency codes', () => {
@@ -1781,7 +1785,6 @@ describe('Field Factory Helpers', () => {
         readonly: false,
         description: 'Total budget for the project',
         currencyConfig: {
-          precision: 2,
           currencyMode: 'dynamic',
           defaultCurrency: 'USD',
         },
@@ -1793,21 +1796,23 @@ describe('Field Factory Helpers', () => {
       expect(currencyField.description).toBe('Total budget for the project');
     });
 
-    it('should support high precision for cryptocurrency', () => {
+    it('accepts a cryptocurrency code as a fixed currency — with no decimal-places key to declare (#19992)', () => {
+      // Codes are validated by length only, so BTC is legal under `fixed`.
+      // Before #19992 this test declared `precision: 8` for the satoshi; that
+      // key was never read by any renderer and is now refused. The field
+      // parses with exactly the two currency keys.
       const cryptoField = Field.currency({
         name: 'btc_balance',
         label: 'Bitcoin Balance',
         currencyConfig: {
-          precision: 8,  // Bitcoin uses 8 decimal places
           currencyMode: 'fixed',
           defaultCurrency: 'BTC',
         },
       });
       
       expect(cryptoField.type).toBe('currency');
-      expect(cryptoField.currencyConfig?.precision).toBe(8);
-      expect(cryptoField.currencyConfig?.currencyMode).toBe('fixed');
-      expect(cryptoField.currencyConfig?.defaultCurrency).toBe('BTC');
+      const parsed = FieldSchema.parse(cryptoField);
+      expect(parsed.currencyConfig).toEqual({ currencyMode: 'fixed', defaultCurrency: 'BTC' });
     });
   });
 

@@ -57,7 +57,7 @@ export const SemanticZoo = ObjectSchema.create({
     // guessed symbol.
     budget: Field.currency({
       label: 'Budget',
-      currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
       group: 'money',
     }),
     notes: Field.textarea({ label: 'Notes' }),

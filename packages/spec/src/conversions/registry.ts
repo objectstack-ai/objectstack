@@ -6480,8 +6480,9 @@ const actionGlobalNavLocationRemoved: MetadataConversion = {
  * (`Number.isInteger` is false for both). A WELL-FORMED count (`0`, `2`, any
  * non-negative integer) is untouched.
  *
- * ⚠️ `CurrencyConfigSchema.precision` (under `currencyConfig`) is a different
- * surface with its own bounds and alias table — deliberately not walked.
+ * ⚠️ `currencyConfig.precision` (under `currencyConfig`) is a different key —
+ * deliberately not walked here; it was removed outright later in this major by
+ * `currency-config-precision-removed` below.
  */
 const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
   id: 'field-malformed-scale-precision-removed',
@@ -11613,6 +11614,113 @@ const formLayoutInlineGridToVertical: MetadataConversion = {
   },
 };
 
+/**
+ * `currencyConfig.precision` — a declared, validated key no renderer or runtime
+ * ever read (#19992, ADR-0049 enforce-or-remove; triage direction REMOVE under
+ * ruling 乙 on #19910, 「a currency's decimal places are the currency's, not a
+ * setting」). objectui's `CurrencyField` derives an amount's decimal places from
+ * the currency's ISO 4217 minor unit and never looked at the key; its only
+ * reader was its own #7918 ISO 4217 contradiction check, which policed a width
+ * nothing applied.
+ *
+ * The strip is a pure lossless delete: the key never had an effect to lose.
+ * It matters for data AT REST more than for authors, because the schema's
+ * `.overwrite()` (#7918/#11423) BAKED `precision: 2` into the parse output of
+ * nearly every `currencyConfig` — so stored `sys_metadata` object rows and
+ * built artifacts carry it without anyone having written it. The stored-row
+ * and artifact seams replay this entry (`includeRetired`), so those rows are
+ * served canonical instead of being refused by the now-closed shape.
+ *
+ * `retiredFromLoadPath`: `CurrencyConfigSchema` is a `strictObject`, so an
+ * authored `precision` is refused with the prescription
+ * (`CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE`, data/field.zod.ts) rather than
+ * silently rewritten. The never-legal `decimals` / `scale` spellings are NOT
+ * walked: the closed shape always refused them, so no stored row carries them
+ * and there is nothing to convert. Fields are a RECORD keyed by name and
+ * `currencyConfig` sits one level below the field, so the top-level-only
+ * `stripKeys` runs per field config (pattern of
+ * `object-tenancy-organization-field-removed`); objects and object extensions
+ * carry the same `FieldSchema`, so both are walked.
+ */
+const currencyConfigPrecisionRemoved: MetadataConversion = {
+  id: 'currency-config-precision-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'object.fields.*.currencyConfig.precision',
+  summary:
+    "currency field key 'currencyConfig.precision' removed (#19992, ADR-0049 — no renderer or "
+    + 'runtime ever read it: an amount\'s decimal places are its currency\'s ISO 4217 minor unit, '
+    + 'derived from the currency itself. Its ISO 4217 contradiction check and the default `2` '
+    + 'baked into parse output went with it; the field-level `precision` is a total digit count '
+    + 'and is untouched)',
+  apply(stack, emit) {
+    const stripOn = (input: Dict, collection: string): Dict =>
+      mapCollection(input, collection, (owner, path) => {
+        const fields = owner.fields;
+        if (!isDict(fields)) return owner;
+        let changed = false;
+        const next: Dict = {};
+        for (const [name, def] of Object.entries(fields)) {
+          if (!isDict(def) || !isDict(def.currencyConfig)) {
+            next[name] = def;
+            continue;
+          }
+          const stripped = stripKeys(
+            def.currencyConfig,
+            ['precision'],
+            emit,
+            `${path}.fields.${name}.currencyConfig`,
+          );
+          if (stripped === def.currencyConfig) {
+            next[name] = def;
+            continue;
+          }
+          next[name] = { ...def, currencyConfig: stripped };
+          changed = true;
+        }
+        return changed ? { ...owner, fields: next } : owner;
+      });
+    return stripOn(stripOn(stack, 'objects'), 'objectExtensions');
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'billing_invoice',
+        label: 'Invoice',
+        fields: {
+          // Authored in the source: the shape the showcase examples carried.
+          amount: {
+            type: 'currency',
+            currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+          },
+          // The baked default on a dynamic config — what a stored row carries
+          // without anyone having written it.
+          tax: { type: 'currency', currencyConfig: { precision: 2, currencyMode: 'dynamic', defaultCurrency: 'CNY' } },
+          // No `precision` under `currencyConfig`: untouched, reference kept.
+          fee: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' } },
+          // The FIELD-level `precision` (total digits) is a different key and
+          // is never walked.
+          quantity: { type: 'number', precision: 10, scale: 0 },
+        },
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'billing_invoice',
+        label: 'Invoice',
+        fields: {
+          amount: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
+          tax: { type: 'currency', currencyConfig: { currencyMode: 'dynamic', defaultCurrency: 'CNY' } },
+          fee: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' } },
+          quantity: { type: 'number', precision: 10, scale: 0 },
+        },
+      }],
+    },
+    // One per stripped key — `fee` and `quantity` are untouched.
+    expectedNotices: 2,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -11724,6 +11832,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     reportJoinedChartRemoved,
     viewOverlayOwnerHiddenRemoved,
     formLayoutInlineGridToVertical,
+    currencyConfigPrecisionRemoved,
     viewListTabsRemoved,
   ],
 };

@@ -2364,8 +2364,10 @@ class StackHierarchyScopeCapabilityRequiredError extends StackRefusalError {
 
 /**
  * [ADR-0112 · #15963] An auto-launched flow is declared while `requires` omits
- * `triggers` — {@link validateTriggerCapability}, the declared-capability class
- * that fails SILENT. Same `_REQUIRED` spelling as its hierarchy sibling.
+ * `triggers`, `automation`, or both — the pair that installs its trigger
+ * (#20332) — {@link validateTriggerCapability}, the declared-capability class
+ * that fails SILENT. One code for every arm: which token is missing is in the
+ * finding, not in the code. Same `_REQUIRED` spelling as its hierarchy sibling.
  */
 class StackTriggerCapabilityRequiredError extends StackRefusalError {
   readonly code = 'STACK_TRIGGER_CAPABILITY_REQUIRED';
@@ -3257,34 +3259,61 @@ function validateHierarchyScopeCapability(data: unknown): string[] {
  * Auto-launched flows are an ENFORCED capability class, exactly like the
  * hierarchy scopes above: the trigger that fires a `record_change` /
  * `schedule` / `time_relative` / `api` flow ships in `@objectstack/trigger-*`
- * and is installed by ONE token, `requires: ['triggers']`
- * (`PLATFORM_CAPABILITY_PROVIDERS.triggers`). A stack that declares such a
- * flow while `requires` omits the token registers the flow, validates, builds
- * — and never fires it. The automation engine's boot audit names it after
- * deploy (`declares a '…' trigger but is NOT bound`), and nothing before that.
- * That is the fail-SILENT half of the pair: a hierarchy scope without its
- * capability fails closed (a user notices the missing rows); an autolaunched
- * flow without its trigger fails silent (the automation simply does not
- * happen). Refuse it here, at authoring, in the boot audit's own words — one
- * vocabulary, moved from post-deploy to author time.
+ * and is installed by the PAIR `requires: ['automation', 'triggers']`.
+ * `triggers` mounts the trigger plugins
+ * (`PLATFORM_CAPABILITY_PROVIDERS.triggers`); each of them installs its
+ * trigger INTO the automation service at `kernel:ready`, and without that
+ * service installs nothing — `RecordChangeTriggerPlugin`,
+ * `ScheduleTriggerPlugin`, `TimeRelativeTriggerPlugin` and `ApiTriggerPlugin`
+ * each warn `automation service not available — … trigger NOT installed` and
+ * return. `automation` mounts that service (`@objectstack/service-automation`,
+ * the engine that runs the flow). Neither token implies the other on any
+ * runtime's resolver: `os serve` expands neither, and cloud's
+ * `resolveCapabilityDependencies` pulls `queue` / `job` / `messaging` for
+ * `triggers`, never `automation`. So all four kinds need both tokens.
  *
- * An ABSENT `requires` counts as omitting the token: the CLI reads it as `[]`
- * and appends only the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`),
+ * A stack that declares such a flow while `requires` omits either token
+ * registers the flow, validates, builds — and never fires it. The automation
+ * engine's boot audit names the missing `triggers` after deploy (`declares a
+ * '…' trigger but is NOT bound`); the missing `automation` is named only by
+ * the trigger plugin's warn and the CLI banner's `the automation engine is
+ * not enabled — they will never run`, and nothing before that. That is the
+ * fail-SILENT half of the pair: a hierarchy scope without its capability fails
+ * closed (a user notices the missing rows); an autolaunched flow without its
+ * trigger fails silent (the automation simply does not happen). Refuse it
+ * here, at authoring, in the boot audit's own words — one vocabulary, moved
+ * from post-deploy to author time. ⛔ `triggers` never IMPLIES `automation`
+ * here either: that would switch on a service the author did not name.
+ *
+ * One line per offending flow, and its prescription is the WHOLE fix for the
+ * `requires` it was given, so following it once is enough:
+ *
+ *   `automation` present, `triggers` missing → add `'triggers'` (the message
+ *                                              this refusal has always said);
+ *   `triggers` present, `automation` missing → add `'automation'`;
+ *   neither                                  → add both, `['automation', 'triggers']`
+ *                                              — never `['triggers']` alone,
+ *                                              which the arm above would refuse.
+ *
+ * An ABSENT `requires` counts as omitting both tokens: the CLI reads it as
+ * `[]` and appends only the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`),
  * which carries neither `automation` nor `triggers`, so a stack that declares
  * nothing gets no trigger either (measured on `serve`'s capability resolver).
  *
  * Flows whose `status` disables them (`obsolete` / `invalid`) are skipped —
  * the engine never binds those, its boot audit skips them for the same
  * reason, and a stack that deliberately retired a triggered flow owes no
- * capability for it. The kind is `resolveFlowTriggerKind`, shared with
- * `@objectstack/lint`, so the two authoring surfaces cannot disagree on which
- * flows auto-launch.
+ * capability for it. A stack with no auto-launched flow owes neither token.
+ * The kind is `resolveFlowTriggerKind`, shared with `@objectstack/lint`, so the
+ * two authoring surfaces cannot disagree on which flows auto-launch.
  */
 function validateTriggerCapability(data: unknown): string[] {
   const errors: string[] = [];
   const d = data as { requires?: unknown; flows?: unknown };
   const requires = Array.isArray(d?.requires) ? (d.requires as string[]) : [];
-  if (requires.includes('triggers')) return errors;
+  const hasTriggers = requires.includes('triggers');
+  const hasAutomation = requires.includes('automation');
+  if (hasTriggers && hasAutomation) return errors;
   const flows = Array.isArray(d?.flows) ? (d.flows as unknown[]) : [];
   for (const flow of flows) {
     const f = flow as { name?: unknown; status?: unknown } | null;
@@ -3292,11 +3321,29 @@ function validateTriggerCapability(data: unknown): string[] {
     const kind = resolveFlowTriggerKind(flow);
     if (!kind) continue;
     const name = typeof f?.name === 'string' ? f.name : '?';
-    errors.push(
-      `flow '${name}' declares a '${kind}' trigger but \`requires\` does not include 'triggers' — ` +
-        `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
-        `Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*).`,
-    );
+    const subject = `flow '${name}' declares a '${kind}' trigger but \`requires\` does not include`;
+    if (!hasTriggers && hasAutomation) {
+      errors.push(
+        `${subject} 'triggers' — ` +
+          `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
+          `Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*).`,
+      );
+    } else if (hasTriggers) {
+      errors.push(
+        `${subject} 'automation' — ` +
+          `'triggers' installs the '${kind}' trigger into the automation service, and without it no '${kind}' ` +
+          `trigger would be registered, so the flow would never auto-launch. ` +
+          `Add 'automation' to requires: ['automation', 'triggers'] ` +
+          `(@objectstack/service-automation runs the flow; @objectstack/trigger-* only fires it).`,
+      );
+    } else {
+      errors.push(
+        `${subject} 'automation' or 'triggers' — ` +
+          `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
+          `Add requires: ['automation', 'triggers'] (record_change/schedule/time_relative/api ship in ` +
+          `@objectstack/trigger-* and install into @objectstack/service-automation — 'triggers' alone installs nothing).`,
+      );
+    }
   }
   return errors;
 }

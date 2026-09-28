@@ -52,7 +52,7 @@ fields: {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
-| `currency` | Monetary amounts | `currencyConfig` (precision, currencyMode, defaultCurrency) |
+| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency) |
 | `percent` | Percentage values (0-100) | `min`, `max`, `precision` |
 
 ## Date & Time
@@ -172,13 +172,12 @@ Stored as JSON on the parent row — no separate table / FK:
 }
 ```
 
-### Currency with Precision
+### Currency
 
 ```typescript
 {
   type: 'currency',
   currencyConfig: {
-    precision: 2,
     currencyMode: 'fixed',   // 'fixed' = the column is pinned to
                              // defaultCurrency; 'dynamic' = tenant default
     defaultCurrency: 'USD',  // ISO 4217
