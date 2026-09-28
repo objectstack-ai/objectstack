@@ -504,12 +504,14 @@ export const objectForm = defineForm({
         // (`name`, `fields`, `unique`); `type` and `partial` are tombstones and
         // need no row.
         //
-        // `fields` is a free-text list, the `highlightFields` row's face. No
-        // authoring door judges its names: not the schema parse, not the publish
-        // door, not `os validate` (`validate-object-field-refs` leaves it to the
-        // storage layer by design). The SQL driver's `syncDeclaredIndexes` skips
-        // an index naming a column the table does not have, logging a warning,
-        // so the help text claims that and no refusal.
+        // `fields` is a free-text list, the `highlightFields` row's face. The
+        // schema parse, so a draft save, does not judge its names. Publishing and
+        // `os validate` refuse one that is not a field of this object
+        // (`object-field-ref-unknown`, `error`, since #20432). The SQL driver's
+        // `syncDeclaredIndexes` skips an index naming a column the table does
+        // not have, logging a warning, which is what still befalls a real field
+        // that is not a stored column (a formula). The help text claims exactly
+        // those three.
         //
         // `unique` is a select over `global` / `organization` ONLY, as the
         // ruling says. The node is `boolean | 'global' | 'organization'`: a
@@ -526,7 +528,7 @@ export const objectForm = defineForm({
           helpText: 'Database indexes on this object\'s table. The SQL driver creates each one the table lacks when it syncs the table; a sync never drops an index.',
           fields: [
             { field: 'name', label: 'Name', type: 'text', helpText: 'Physical index name. Unset: generated from the table and the columns (e.g. idx_task_status).' },
-            { field: 'fields', label: 'Fields', widget: 'string-tags', required: true, helpText: 'Column names of this object, in key order (e.g. status, owner). Nothing checks them when you save or publish: a name that is not a stored column makes the SQL driver skip the whole index, with a warning in the server log.' },
+            { field: 'fields', label: 'Fields', widget: 'string-tags', required: true, helpText: 'Column names of this object, in key order (e.g. status, owner). Saving does not check them; publishing and os validate refuse a name that is not a field of this object. A field that is not a stored column (a formula, say) makes the SQL driver skip the whole index, with a warning in the server log.' },
             { field: 'unique', label: 'Unique', type: 'select', helpText: 'Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope.', options: [
               { label: 'Global — one holder across the installation, over exactly these columns', value: 'global' },
               { label: 'Organization — one holder per organization (the driver prepends the organization column)', value: 'organization' },
