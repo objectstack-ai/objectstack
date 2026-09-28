@@ -82,18 +82,16 @@ const ROWS: readonly Row[] = [
   ...[1, 1, 1, 1, 1, 1, 1, 2, 2].map((stars, i) => ({ id: `n${i}`, g: 'nine', stars })),
 ];
 
-const agg = (fn: string, field: string, alias: string) => ({ function: fn, field, alias });
+type Aggregation = NonNullable<DriverQuery['aggregations']>[number];
+const agg = (fn: Aggregation['function'], field: string, alias: string): Aggregation => ({ function: fn, field, alias });
 
 function declareCell(cell: DialectCell): void {
   describe(`[#20387] driver-sql — sum / avg accumulate in double (${cell.label})`, () => {
     let driver: SqlDriver;
 
-    async function answer(g: string, aggregations: Array<Record<string, unknown>>) {
-      const rows = (await driver.aggregate(TABLE, {
-        where: { g },
-        groupBy: ['g'],
-        aggregations,
-      } as DriverQuery)) as Array<Record<string, unknown>>;
+    async function answer(g: string, aggregations: Aggregation[]) {
+      const query: DriverQuery = { where: { g }, groupBy: ['g'], aggregations };
+      const rows = (await driver.aggregate(TABLE, query)) as Array<Record<string, unknown>>;
       expect(rows, `one group for ${g}`).toHaveLength(1);
       return rows[0];
     }
