@@ -46,7 +46,7 @@ async function freePages(driver: SqliteWasmDriver, rows: number): Promise<void> 
     const batch = Array.from({ length: Math.min(100, rows - i) }, (_, j) => ({ id: `r${i + j}`, body }));
     await driver.bulkCreate('bulk', batch);
   }
-  await driver.deleteMany('bulk', { where: { id: { $ne: '' } } } as any);
+  await driver.deleteMany('bulk', { where: { id: { $ne: '' } } });
   await driver.flush();
 }
 
