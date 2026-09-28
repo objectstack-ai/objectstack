@@ -8002,6 +8002,7 @@ const cubeMemberInnerNameRemoved: MetadataConversion = {
   id: 'cube-member-inner-name-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name',
   summary:
     "cube member key 'name' removed from measures and dimensions (ADR-0049 enforce-or-remove — nothing read it: "
