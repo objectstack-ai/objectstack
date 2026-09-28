@@ -9,7 +9,9 @@
 // `flow` coverage bucket, new in #11615, harvested `flows.<f>.label`,
 // `flows.<f>.screens.<n>.title` and the per-field `label`/`placeholder`. The
 // `flows` row of `@objectstack/spec/liveness/translation.json` is
-// `status: planned` + `authorWarn: true` — no shipped runner reads the group.
+// `status: planned` + `authorWarn: true` — only part of the group is read: the
+// console's screen-flow runner reads `screens`, but the flow's own `label` is
+// read by nothing yet (#20318).
 //
 // Measured on one stack before the fix:
 //
@@ -22,10 +24,11 @@
 // restored. Under `--i18n-strict` the demand side is an ERROR, so a project
 // could be forced to author keys it is then warned for.
 //
-// ⛔ The warn side is NOT the bug and is not softened here. Nothing reads the
-// group, so a translated wizard string really is stored and never shown —
-// the failure mode `validationMessages` was removed in 17.0.0 for. The demand
-// is the premature half, and it is what is gated.
+// ⛔ The warn side is NOT the bug and is not softened here. The flow's own
+// `label` is read by nothing yet (#20318), so a translated flow label really is
+// stored and never shown — the failure mode `validationMessages` was removed in
+// 17.0.0 for. The warn is group-level, so it still covers the whole group. The
+// demand is the premature half, and it is what is gated.
 //
 // ## What is pinned
 //
@@ -165,9 +168,9 @@ describe('the liveness gate on the i18n coverage walk', () => {
     expect(flowWarnings(app(false))).toEqual([]);
 
     expect(flowDemands(app(true))).toEqual([]);
-    // ⛔ The warning is true and stays: nothing reads the group, so this copy is
-    // stored and never shown. Its rule id says `planned`, i.e. "keep it", not
-    // "remove it".
+    // ⛔ The warning is true and stays: the flow's own `label` is read by
+    // nothing yet, so its translated copy is stored and never shown. Its rule
+    // id says `planned`, i.e. "keep it", not "remove it".
     const warned = flowWarnings(app(true));
     expect(warned.length).toBeGreaterThan(0);
     for (const f of warned) expect(f.rule).toBe('liveness-planned-property');
