@@ -5397,6 +5397,14 @@ const step18: MigrationStep = {
     + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
     + '`columns` untouched) on `object-form` page components, on every form payload a view '
     + 'carries, and on the assembled-manifest `viewItems` channel. '
+    + 'It also removes `currencyConfig.precision` (#19992, ADR-0049 enforce-or-remove): '
+    + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
+    + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+    + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
+    + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
+    + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
+    + 'built artifacts carry it without anyone having written it. Retired from the load path; '
+    + 'an authored key is refused with the prescription. '
     + 'It also retires the connector resilience family (ADR-0049 enforce-or-remove, one batch): '
     + '`connector.health` — the `healthCheck` probe (eight keys) and the `circuitBreaker` (six) — '
     + '`connector.status` and the connector-nested `webhooks`, sixteen authorable keys with no '
@@ -5458,6 +5466,7 @@ const step18: MigrationStep = {
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
     'form-layout-inline-grid-to-vertical',
+    'currency-config-precision-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -7366,6 +7375,48 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+    },
+    // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」) — the D3 entry of the `currency-config-precision-removed` family
+    // (ruling B on #17152: one D3 entry per retirement family, even when D2 is
+    // lossless). Registered key: `data/CurrencyConfig:precision`; the never-accepted
+    // `decimals` / `scale` spellings are answered by the same prescription and have
+    // no stored form to convert. The delete changes no rendered amount; what it
+    // leaves is a width belief, and code outside the platform that may have read the
+    // served key.
+    {
+      id: 'currency-config-precision-retired',
+      surface: 'object.fields.*.currencyConfig.precision — the decimal-places key of a currency '
+        + 'field\'s configuration, and its never-accepted `decimals` / `scale` spellings',
+      replacement: '(removed — nothing replaces it.) A currency amount\'s decimal places are its '
+        + 'currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD), derived from the '
+        + 'currency itself and declared nowhere. Delete the key. Do not move the number to the '
+        + 'field-level `precision`: that key is the amount\'s total digit count, not its decimal '
+        + 'places, and it is unchanged.',
+      reason: 'The D2 conversion `currency-config-precision-removed` deletes the key from every '
+        + 'field\'s `currencyConfig` on objects and object extensions — in author sources, in stored '
+        + 'object rows and in built artifacts, which can carry a `2` the old schema wrote into parse '
+        + 'output without anyone authoring it — and the delete is lossless: no renderer or runtime '
+        + 'ever read the key. Every display face derives the width from the currency. Two judgments '
+        + 'remain, and neither is a rewrite. First, a width that never applied: the old contradiction '
+        + 'check judged an authored value only on a `fixed` field whose code has a known ISO 4217 '
+        + 'minor unit, so on a `dynamic` field, and on a `fixed` field whose code has none (a crypto '
+        + 'or custom code), an author could declare a width other than the one the field displays — '
+        + 'and read amounts as if it applied. Whether the displayed width is acceptable for that '
+        + 'field is the author\'s call. Second, code the chain cannot reach: a plugin, integration or '
+        + 'export of your own that read `currencyConfig.precision` from served object metadata now '
+        + 'finds no key, and must derive the width from the field\'s currency the way the platform\'s '
+        + 'renderers always did.',
+      acceptanceCriteria: 'No field\'s `currencyConfig` carries `precision`, `decimals` or `scale` — '
+        + 'in sources, in stored object rows or in built artifacts; the parse refuses each by name '
+        + 'with the prescription, and a stored row or artifact written before the upgrade loads '
+        + 'without a refusal over it. No code of your own reads `currencyConfig.precision`; where it '
+        + 'needed a width, it derives one from the field\'s currency. Every currency field renders '
+        + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
+        + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
+        + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+        + 'apply them by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -17665,6 +17716,28 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carries the judgement the strip cannot: an author who wrote a non-FK
     // condition wanted a join this runtime does not perform.
     'data/CubeJoin:sql',
+    // #19992 — ADR-0049 enforce-or-remove (triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」). `currencyConfig.precision` was declared and validated against
+    // ISO 4217 (#7918) but read by NOTHING — measured with a positive control
+    // (`currencyConfig.currencyMode` IS read) over objectstack, objectui at the
+    // `.objectui-sha` pin and at `main`, and cloud `main`. objectui's
+    // `CurrencyField` derives decimal places from the currency's ISO 4217 minor
+    // unit and never read the key; its own contradiction check was its only
+    // reader. The `decimals` / `scale` aliases that pointed authors at it went
+    // with it (they now answer with the same prescription).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. `CurrencyConfigSchema` is
+    // `strictObject`, so the route is strict deletion + a `guidance` entry carrying
+    // the prescription (no retiredKey tombstone — the key is out of the walked
+    // shape entirely). Sources and stored rows are rewritten by the D2 conversion
+    // `currency-config-precision-removed`, which strips the key from every field's
+    // `currencyConfig` on objects and object extensions — including the `2` the
+    // old `.overwrite()` baked into parse output.
+    'data/CurrencyConfig:precision',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
