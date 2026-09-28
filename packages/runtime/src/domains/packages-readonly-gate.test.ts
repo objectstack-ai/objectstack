@@ -129,11 +129,16 @@ function make() {
     return { dispatcher: new HttpDispatcher(kernel), registry, protocol };
 }
 
-/** Authorized under #7033 — holds the write capability on every call below. */
+/**
+ * Authorized under #7033 — holds the write capability on every call below.
+ * [#20492] Acting in the organization that owns the writable base: an
+ * uninstall that names no organization is refused before the registry is
+ * touched, so an org-less admin would never reach the allowed delete below.
+ */
 const admin = (): any => ({
     request: {},
     environmentId: 'pkg-readonly-gate-test',
-    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata'] },
+    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata'], tenantId: 'org_acme' },
 });
 /** Engine self-invocation. Read-only is about the package, not the caller. */
 const system = (): any => ({

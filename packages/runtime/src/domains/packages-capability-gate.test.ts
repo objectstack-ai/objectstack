@@ -41,10 +41,11 @@ const ctx = (executionContext?: any): any => ({
 const anon = () => ctx();
 /** Identity resolved but sessionless (no `userId`) — also anonymous. */
 const anonResolved = () => ctx({ isSystem: false, positions: [], permissions: [], systemPermissions: [] });
-/** Authenticated, holding exactly `caps`. */
-const authed = (caps: string[] = []) => ctx({ userId: 'u_portal', isSystem: false, systemPermissions: caps });
+/** Authenticated, holding exactly `caps` — in `tenantId` when one is given. */
+const authed = (caps: string[] = [], tenantId?: string) =>
+    ctx({ userId: 'u_portal', isSystem: false, systemPermissions: caps, ...(tenantId ? { tenantId } : {}) });
 /** Engine self-invocation — never settable from the wire. */
-const system = () => ctx({ isSystem: true });
+const system = (tenantId?: string) => ctx({ isSystem: true, ...(tenantId ? { tenantId } : {}) });
 
 // ── fake kernel ──────────────────────────────────────────────────────────────
 function make(overrides: { protocol?: any; metadata?: any; registry?: any } = {}) {
@@ -140,7 +141,12 @@ describe('/packages — anonymous-deny floor (#7033/#7023)', () => {
 // 2. Write gate — `manage_metadata` on every state-changing route
 // ══════════════════════════════════════════════════════════════════════════════
 
-type WriteCase = { name: string; path: string; method: string; body?: any; query?: any; target: (p: any, r: any) => any };
+type WriteCase = {
+    name: string; path: string; method: string; body?: any; query?: any;
+    /** The organization the ALLOW-path callers act in, for a route that refuses a caller with none. */
+    tenantId?: string;
+    target: (p: any, r: any) => any;
+};
 const WRITE_ROUTES: WriteCase[] = [
     // `overwrite` so the allow-path clears the 409 duplicate guard (the shared
     // registry double answers `getPackage` truthy for any id); the write gate
@@ -158,7 +164,11 @@ const WRITE_ROUTES: WriteCase[] = [
     { name: 'POST /:id/adopt-orphans', path: '/pkg-a/adopt-orphans', method: 'POST', target: (p) => p.reassignOrphanedMetadata },
     { name: 'POST /:id/duplicate', path: '/pkg-a/duplicate', method: 'POST', body: { targetPackageId: 'pkg-b' }, target: (p) => p.duplicatePackage },
     { name: 'PATCH /:id (manifest)', path: '/pkg-a', method: 'PATCH', body: { name: 'renamed' }, target: (p) => p.updatePackage },
-    { name: 'DELETE /:id', path: '/pkg-a', method: 'DELETE', target: (p) => p.deletePackage },
+    // [#20492] The uninstall's allow-path acts in an organization: the door
+    // refuses one that names none before anything else runs, as the persisted
+    // delete itself does, so an org-less caller never reaches the target.
+    // Pinned in `packages-uninstall-refuse-before-mutate.test.ts`.
+    { name: 'DELETE /:id', path: '/pkg-a', method: 'DELETE', tenantId: 'org_a', target: (p) => p.deletePackage },
 ];
 
 describe('/packages — write gate: every state-changing route demands `manage_metadata`', () => {
@@ -182,7 +192,7 @@ describe('/packages — write gate: every state-changing route demands `manage_m
         it(`lets a manage_metadata caller through on ${wc.name}`, async () => {
             const protocol = fullProtocol();
             const { dispatcher, registry } = make({ protocol });
-            const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata']));
+            const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata'], wc.tenantId));
             expect(r.response?.status).not.toBe(403);
             expect(r.response?.status).not.toBe(401);
             expect(wc.target(protocol, registry)).toHaveBeenCalled();
@@ -191,7 +201,7 @@ describe('/packages — write gate: every state-changing route demands `manage_m
         it(`lets an isSystem caller through on ${wc.name}`, async () => {
             const protocol = fullProtocol();
             const { dispatcher, registry } = make({ protocol });
-            const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, system());
+            const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, system(wc.tenantId));
             expect(r.response?.status).not.toBe(403);
             expect(wc.target(protocol, registry)).toHaveBeenCalled();
         });

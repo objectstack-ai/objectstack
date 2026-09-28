@@ -250,7 +250,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **documentation** | `{ title: string; description?: string; version?: string; termsOfService?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **documentation** | `{ title?: string; description?: string; termsOfService?: string; contact?: object; … }` | optional | Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version |
 | **responseFormat** | `never` | optional | [REMOVED] `api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses and the served /openapi.json describes, so no configuration changes them. |
 
 ### Nested Shape: `RestApiConfig.documentation`
@@ -258,12 +258,12 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `never` | optional | [REMOVED] `api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling `api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; `api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` viewer unmounted. |
-| **title** | `string` | optional (default: `"ObjectStack API"`) | API documentation title |
-| **description** | `string` | optional | API description |
-| **version** | `string` | optional | Documentation version |
-| **termsOfService** | `string` | optional | Terms of service URL |
-| **contact** | `{ name?: string; url?: string; email?: string }` | optional |  |
-| **license** | `{ name: string; url?: string }` | optional |  |
+| **title** | `string` | optional | Title of the served OpenAPI document (`info.title`); unset keeps the bundled title |
+| **description** | `string` | optional | Description of the served OpenAPI document (`info.description`); unset keeps the bundled description. Your app's own release number belongs here |
+| **version** | `never` | optional | [REMOVED] `api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it, and the served OpenAPI document's `info.version` has one source: the protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, which no deployment configuration overrides. Delete the key. To publish your app's own release number, write it into `api.documentation.description`, which the served `info.description` carries. |
+| **termsOfService** | `string` | optional | Terms-of-service URL of the served OpenAPI document (`info.termsOfService`); unset serves none |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | Contact of the served OpenAPI document; replaces the bundled `info.contact` whole, so a member left out is absent rather than inherited. Unset keeps the bundled contact |
+| **license** | `{ name: string; url?: string }` | optional | License of the served OpenAPI document; replaces the bundled `info.license` whole, so a license without `url` serves no URL. Unset keeps the bundled license |
 
 
 ---
@@ -298,7 +298,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **documentation** | `{ title: string; description?: string; version?: string; termsOfService?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **documentation** | `{ title?: string; description?: string; termsOfService?: string; contact?: object; … }` | optional | Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version |
 | **responseFormat** | `never` | optional | [REMOVED] `api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses and the served /openapi.json describes, so no configuration changes them. |
 
 ### Nested Shape: `RestServerConfig.crud`

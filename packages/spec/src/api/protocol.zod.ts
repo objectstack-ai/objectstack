@@ -1779,7 +1779,9 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
 
 /**
  * `GET /meta/:type/:name/diff` — structural diff between two history
- * versions (`from`/`to`; omit both for previous-vs-current).
+ * versions (`from`/`to`). An omitted `to` is the active version; an omitted
+ * `from` is the nearest earlier version whose body differs from the `to`
+ * side's (a deletion counts as an empty body).
  *
  * Transcribed from `diffMetaItem`'s declared return
  * (`@objectstack/metadata-protocol` `protocol.ts`).

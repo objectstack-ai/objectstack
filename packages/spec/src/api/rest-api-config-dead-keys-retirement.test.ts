@@ -5,6 +5,14 @@
  * ADR-0049 enforce-or-remove; triage's grade, verbatim: 「Verdict: **RETIRE**
  * the 4 keys, by the maintainer's criterion」.
  *
+ * [#20294] `api.documentation.version` RETIRED too, by ruling B on #20359:
+ * the block's eight identity members are ENFORCED (they overlay the served
+ * OpenAPI `info`, pinned in `packages/rest`'s
+ * `rest-openapi-info-overlay.test.ts`) and `version` alone retires, because
+ * the served `info.version` is the protocol version (#11646). The same ruling
+ * made `documentation.title` `.optional()` — its never-served
+ * `'ObjectStack API'` default is gone — which the CONTROL block below pins.
+ *
  * Both sat on `RestApiConfigSchema` (the `api` sub-object of the REST
  * server's construction argument), were parsed, defaulted and copied into
  * `RestServer`'s config by `normalizeConfig` — and were read by nothing
@@ -51,6 +59,8 @@ const RESPONSE_FORMAT_PRESCRIPTION =
   /`api\.responseFormat` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*nothing ever read it.*`envelope: false` unwrapped no response.*Delete the key\..*Response shapes are fixed, not a server-wide option/s;
 const DOCS_ENABLED_PRESCRIPTION =
   /`api\.documentation\.enabled` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*nothing ever read it.*decided by the sibling `api\.enableOpenApi`.*Delete the key; `api\.enableOpenApi: false` is the switch/s;
+const DOCS_VERSION_PRESCRIPTION =
+  /`api\.documentation\.version` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*nothing ever read it.*`info\.version` has one source: the protocol version.*`@objectstack\/spec` package.*Delete the key\. To publish your app's own release number, write it into `api\.documentation\.description`/s;
 
 describe('rest_api retirement — `api.responseFormat`, at every door that parses the api block', () => {
   // Every former spelling is refused: the old defaults, the one that "meant"
@@ -135,6 +145,55 @@ describe('rest_api retirement — `api.documentation.enabled`, a tombstone insid
   });
 });
 
+describe('rest_api retirement — `api.documentation.version` (#20294), a second tombstone inside the live block', () => {
+  // The old authored spellings: a release number, a semver-looking protocol
+  // version, and an empty string.
+  for (const version of ['2.3.0', '17.4.0', '']) {
+    it(`RestApiConfigSchema refuses \`documentation.version: ${JSON.stringify(version)}\` at its path, with the prescription`, () => {
+      const r = RestApiConfigSchema.safeParse({ documentation: { title: 'Acme Orders API', version } });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const issue = r.error.issues.find((i) => i.path.join('.') === 'documentation.version');
+      expect(issue, 'the refusal must locate `documentation.version`').toBeDefined();
+      expect(issue!.code).toBe('invalid_type');
+      expect(issue!.path).toEqual(['documentation', 'version']);
+      expect(issue!.message).toMatch(DOCS_VERSION_PRESCRIPTION);
+      // House convention 1: the fully-qualified key, in backticks, opens it.
+      expect(issue!.message.startsWith('`api.documentation.version` was removed')).toBe(true);
+      // Only the retired member is diagnosed — the enforced `title` beside it parses.
+      expect(r.error.issues.map((i) => i.path.join('.'))).toEqual(['documentation.version']);
+    });
+  }
+
+  it('the whole-config door refuses it THROUGH `api`, located at `api.documentation.version`', () => {
+    const r = RestServerConfigSchema.safeParse({ api: { documentation: { version: '2.3.0' } } });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const issue = r.error.issues.find((i) => i.path.join('.') === 'api.documentation.version');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.message).toMatch(DOCS_VERSION_PRESCRIPTION);
+  });
+
+  it('fails tsc at the authoring site: the input type is `never`', () => {
+    const authored: RestApiConfig = {
+      documentation: {
+        title: 'Acme Orders API',
+        // @ts-expect-error — `documentation.version` is a retiredKey() tombstone: its input type is `never`.
+        version: '2.3.0',
+      },
+    };
+    expect(() => RestApiConfigSchema.parse(authored)).toThrow(DOCS_VERSION_PRESCRIPTION);
+  });
+
+  it('`api.version` — the route identifier, a different key — is untouched by the tombstone', () => {
+    const r = RestApiConfigSchema.safeParse({ version: 'v2', documentation: { title: 'Acme Orders API' } });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.version).toBe('v2');
+  });
+});
+
 describe('rest_api retirement — CONTROL: the live keys are untouched', () => {
   it('a config without the retired keys parses; the replacement switch and the block\'s siblings keep their values', () => {
     const r = RestApiConfigSchema.safeParse({
@@ -142,7 +201,6 @@ describe('rest_api retirement — CONTROL: the live keys are untouched', () => {
       documentation: {
         title: 'ObjectStack API',
         description: 'd',
-        version: '1.0.0',
         termsOfService: 'https://example.com/terms',
         contact: { name: 'API Support', email: 'api@example.com' },
         license: { name: 'MIT' },
@@ -152,11 +210,11 @@ describe('rest_api retirement — CONTROL: the live keys are untouched', () => {
     if (!r.success) return;
     // The switch the prescription names is live and keeps an authored `false`.
     expect(r.data.enableOpenApi).toBe(false);
-    // `documentation`'s other members parse byte-identically to before.
+    // `documentation`'s enforced members parse byte-identically to before
+    // (`version` left them in #20294 — its refusal is pinned above).
     expect(r.data.documentation).toEqual({
       title: 'ObjectStack API',
       description: 'd',
-      version: '1.0.0',
       termsOfService: 'https://example.com/terms',
       contact: { name: 'API Support', email: 'api@example.com' },
       license: { name: 'MIT' },
@@ -169,8 +227,15 @@ describe('rest_api retirement — CONTROL: the live keys are untouched', () => {
     expect(empty.enableOpenApi, 'the live switch still defaults on').toBe(true);
     // A present `documentation` block no longer grows `enabled: true`.
     const doc = RestApiConfigSchema.parse({ documentation: {} }).documentation;
-    expect(doc).toEqual({ title: 'ObjectStack API' });
     expect(doc).not.toHaveProperty('enabled');
+    // [#20294] ...nor `title: 'ObjectStack API'`: `title` is `.optional()`,
+    // because the served `info` is overlaid from this block and that default
+    // was never the served title (the bundled one, 'ObjectStack REST API',
+    // is). An empty block parses to an empty block — nothing authored,
+    // nothing overlaid.
+    expect(doc).toEqual({});
+    expect(doc).not.toHaveProperty('title');
+    expect(RestApiConfigSchema.parse({ documentation: { description: 'd' } }).documentation).toEqual({ description: 'd' });
   });
 });
 
@@ -187,6 +252,16 @@ describe('rest_api retirement — ADR-0087 registration', () => {
     // rewrite — the #14691 / `openApi31` shape. A conversion id naming either
     // key would be a strip with nothing to strip.
     expect(step.conversionIds.filter((id) => /response-format|documentation-enabled/.test(id))).toEqual([]);
+  });
+
+  it('[#20294] declares `documentation.version` under major 18 with its own family D3 entry, and no D2 conversion', () => {
+    expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('api/RestApiConfig:documentation.version');
+    const step = MIGRATIONS_BY_MAJOR[18]!;
+    const entry = step.semantic.find((e) => e.id === 'rest-api-documentation-version-retired');
+    expect(entry, 'the family D3 entry must be registered in the step-18 chain').toBeDefined();
+    expect(entry!.surface).toBe('restServer.api.documentation.version');
+    expect(entry!.replacement).toContain('`api.documentation.description`');
+    expect(step.conversionIds.filter((id) => /documentation-version/.test(id))).toEqual([]);
   });
 });
 
@@ -208,7 +283,9 @@ describe('rest_api retirement — ADR-0087 registration', () => {
 // is an object literal (or YAML mapping) that is the VALUE of a
 // `responseFormat` key and carries one of the retired members
 // (`envelope` / `includeMetadata` / `includePagination`), or the value of a
-// `documentation` key that carries `enabled`. Nothing else.
+// `documentation` key that carries `enabled` or (since #20294) `version`.
+// Nothing else — the route identifier `api.version` is a sibling of
+// `documentation`, never inside it, so it does not match.
 //
 // The bound, stated: a block assembled by SPREAD or computed keys, and a YAML
 // flow mapping (`responseFormat: { envelope: false }` on one YAML line), are
@@ -246,9 +323,12 @@ describe('tree-scoped absence: no `api` block inside the declared radius still a
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
 
+  /** [#20294] `version` joined `enabled` as a retired `documentation` member. */
+  const DOCUMENTATION_RETIRED_MEMBERS = ['enabled', 'version'];
+
   const isOffender = (parentKey: string | undefined, keys: Set<string>): boolean =>
     (parentKey === 'responseFormat' && RESPONSE_FORMAT_MEMBERS.some((k) => keys.has(k)))
-    || (parentKey === 'documentation' && keys.has('enabled'));
+    || (parentKey === 'documentation' && DOCUMENTATION_RETIRED_MEMBERS.some((k) => keys.has(k)));
 
   /**
    * One pass over JS/TS/JSON text: a stack of bracket frames, each `{` frame
@@ -402,6 +482,10 @@ describe('tree-scoped absence: no `api` block inside the declared radius still a
     expect(offendersIn('.json', '{ "api": { "responseFormat": { "includePagination": false } } }')).toEqual([1]);
     expect(offendersIn('.yaml', 'api:\n  documentation:\n    title: X\n    enabled: false\n')).toEqual([2]);
     expect(offendersIn('.yaml', 'api:\n  responseFormat:\n    includeMetadata: false\n')).toEqual([2]);
+    // [#20294] the retired `documentation.version`, in the three syntaxes.
+    expect(offendersIn('.ts', "createRestApiPlugin({ api: { api: { documentation: { title: 'X', version: '2.3.0' } } } } as never)")).toEqual([1]);
+    expect(offendersIn('.json', '{ "api": { "documentation": { "version": "1.0.0" } } }')).toEqual([1]);
+    expect(offendersIn('.yaml', 'api:\n  documentation:\n    title: X\n    version: 1.0.0\n')).toEqual([2]);
     expect(offendersIn('.md', 'Prose.\n\n```ts\nnew RestServer(s, p, { api: { responseFormat: { envelope: false } } });\n```\n')).toEqual([4]);
     // Neighbours that must NOT match.
     // The agent alias map spells `responseFormat` with a STRING value.
@@ -420,6 +504,10 @@ describe('tree-scoped absence: no `api` block inside the declared radius still a
     expect(offendersIn('.ts', 'const s = "{ responseFormat: { envelope: false } }";')).toEqual([]);
     // A YAML `documentation` mapping whose `enabled` belongs to a nested block.
     expect(offendersIn('.yaml', 'documentation:\n  title: X\n  contact:\n    enabled: true\n')).toEqual([]);
+    // [#20294] the route identifier `api.version` sits BESIDE `documentation`, not in it.
+    expect(offendersIn('.ts', "({ api: { version: 'v1', documentation: { title: 'X' } } })")).toEqual([]);
+    // The enforced members alone are not an authoring of a retired key.
+    expect(offendersIn('.ts', "({ documentation: { title: 'X', description: 'd', license: { name: 'MIT' } } })")).toEqual([]);
   });
 
   it('a path that VANISHES mid-walk is not a finding, and every other read fault still is', () => {
@@ -433,7 +521,7 @@ describe('tree-scoped absence: no `api` block inside the declared radius still a
     expect(vanished.length).toBe(before + 1);
   });
 
-  it('no `api` block authoring `responseFormat` or `documentation.enabled` survives inside the declared radius', () => {
+  it('no `api` block authoring `responseFormat`, `documentation.enabled` or `documentation.version` survives inside the declared radius', () => {
     const offenders: string[] = [];
     let visited = 0;
     let bearing = 0;

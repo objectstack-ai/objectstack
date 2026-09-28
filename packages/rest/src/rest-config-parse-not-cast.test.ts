@@ -334,22 +334,33 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
         expect(normalizedApi(rest).enableSearch).toBe(false);
     });
 
-    it('THE BOUNDED DELTA: an authored `documentation` now carries its own declared inner defaults', () => {
+    it('THE BOUNDED DELTA: an authored `documentation` arrives as the parse outputs it', () => {
         // The single measured behaviour change of #14366, pinned rather than
         // left to be rediscovered. The deleted `??` chain copied this object
         // through untouched (`documentation: api.documentation`), so a partial
-        // one stayed partial; the parse fills the inner `.default()`s.
-        // `documentation` has ZERO read sites outside this block (the #14369
-        // census), so nothing observes it today — which is exactly why it needs
-        // a pin: an unobserved change is the kind that gets reverted by
-        // accident.
+        // one stayed partial; the parse fills the inner `.default()`s — of
+        // which, since #20294 (`title` → `.optional()`) and #20295 (`enabled`
+        // retired), there are none, so a partial block stays partial again,
+        // now by the schema's word rather than by a cast. Since #20294 this
+        // block HAS a reader — `registerOpenApiEndpoints` overlays the served
+        // `info` from it — which is why an invented member here would be
+        // observable, and why the pin stays.
         const doc = normalizedApi(construct({ documentation: { description: 'd' } }))
             .documentation as Record<string, unknown>;
         expect(doc).toEqual(
             (declaredApi().parse({ documentation: { description: 'd' } }) as { documentation: unknown }).documentation,
         );
         expect(doc.description, 'the authored key survives').toBe('d');
-        expect(doc.title, 'and the declared inner default arrives with it').toBe('ObjectStack API');
+        // [#20294] REVERSED by design, not by regression: `documentation.title`
+        // is `.optional()` now, not `.default('ObjectStack API')`. That default
+        // was never served, and the served `info` is overlaid from this block
+        // (`registerOpenApiEndpoints`), so materializing it would retitle the
+        // document of a host that wrote only `description`. The block now
+        // carries exactly what was authored — its declared inner defaults are
+        // none — and an unset title keeps the bundled one
+        // (`rest-openapi-info-overlay.test.ts`).
+        expect(doc, 'no title is invented for a host that did not write one').not.toHaveProperty('title');
+        expect(doc, 'the block is exactly what was authored').toEqual({ description: 'd' });
         // [#20295] REVERSED by design, not by regression: `documentation.enabled`
         // is a retired tombstone, so the parse no longer materializes its old
         // `.default(true)` — the block carries only its live members.
