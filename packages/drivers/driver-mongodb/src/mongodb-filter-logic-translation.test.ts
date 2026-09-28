@@ -47,7 +47,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, type FilterLogicRow } from '@objectstack/spec/data';
-import { translateFilter } from './mongodb-filter.js';
+import { translateFilter, type ValueShapeResolver } from './mongodb-filter.js';
+
+/**
+ * [#20444] The fixture's columns as the driver would hold them after
+ * `syncSchema`: every column a declared `text` field. The table's `$empty` rows
+ * are answered by the field's DECLARED row, and `translateFilter` refuses the
+ * operator when it is handed no declaration — the standalone call's default.
+ */
+const FIXTURE_SHAPES: ValueShapeResolver = () => ({ type: 'text' });
 
 // ── A deliberately strict reader of the emitted document ────────────────────
 
@@ -207,7 +215,7 @@ function documentLevelNots(doc: unknown, path = '$'): string[] {
 describe('translateFilter — filter logic conformance, without a server (#4405)', () => {
   for (const c of FILTER_LOGIC_CASES) {
     it(c.name, () => {
-      const doc = translateFilter(c.filter) as Record<string, unknown>;
+      const doc = translateFilter(c.filter, undefined, FIXTURE_SHAPES) as Record<string, unknown>;
       expect(select(doc), `${c.note ?? ''}\nemitted: ${JSON.stringify(doc)}`).toEqual([
         ...c.expected,
       ]);
@@ -220,7 +228,7 @@ describe('translateFilter — filter logic conformance, without a server (#4405)
 describe('translateFilter — the shapes MongoDB spells differently', () => {
   it('never emits a document-level $not: the server rejects it outright', () => {
     for (const c of FILTER_LOGIC_CASES) {
-      const doc = translateFilter(c.filter) as Record<string, unknown>;
+      const doc = translateFilter(c.filter, undefined, FIXTURE_SHAPES) as Record<string, unknown>;
       expect(documentLevelNots(doc), `${c.name} emitted ${JSON.stringify(doc)}`).toEqual([]);
     }
   });

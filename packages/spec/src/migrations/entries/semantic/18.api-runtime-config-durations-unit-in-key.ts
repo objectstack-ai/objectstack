@@ -10,7 +10,7 @@ export const entry: SemanticMigration = {
   replacement: 'cacheTtlSeconds (seconds) and timeoutMs (milliseconds) — rename each key; both '
     + 'values are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B of 2026-09-02 on duration-shaped keys: the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
     + 'Two keys on two shapes, in one entry because they share a disposition and an audience: '
     + 'both are api-layer runtime configuration a host or plugin builds in code, and neither is '
     + 'part of a published metadata document. DataLoaderConfig.cacheTtl named seconds only in its '
@@ -24,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'chain has no seam that would run on them (the kernel/Manifest:loading precedent). Worth '
     + 'knowing while grepping: packages/runtime declares its OWN local RouteDefinition interface '
     + 'for the ai:routes hook payload — a different type with no duration key at all, untouched by '
-    + 'this rename. #15677, #14478, ADR-0087.',
+    + 'this rename. ADR-0087.',
   acceptanceCriteria:
     'Every DataLoaderConfigSchema.parse(…) and RouteDefinitionSchema.parse(…) site spells '
     + '`cacheTtlSeconds` / `timeoutMs`; authoring either old spelling fails to compile (input type '

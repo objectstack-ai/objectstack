@@ -10,7 +10,7 @@ export const entry: SemanticMigration = {
     + 'and ship it through `publishPackage`',
   reason:
     'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
-    + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
+    + 'honoured it. Measured on a real showcase boot: `PUT /api/v1/meta/api/'
     + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
     + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
     + 'line, because the endpoint was never in the index to be excluded from. The serving '
@@ -24,19 +24,22 @@ export const entry: SemanticMigration = {
     + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
     + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
     + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
-    + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
+    + 'them at runtime; showcase uses the artifact route, and its declared endpoints serve '
+    + 'live). '
     + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
     + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
     + 'authorable one, and the artifact route it points authors toward is untouched — a '
     + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
     + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
     + 'Studio callers rather than a stack conversion — the same disposition '
-    + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
-    + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
+    + '`BatchOptions.validateOnly` takes. Consequently `gateApiDraftsForPublish` '
+    + 'is retired with it: it gated a promotion into a state the matcher can '
     + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
-    + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
-    + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
-    + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
+    + 'Re-entry is recorded in the ruling: if the Studio metadata-coverage work promotes `apis` '
+    + 'to a registered type WITH A REAL CONSUMPTION PATH, the flag flips back then — '
+    + 'implementation first, '
+    + 'declaration second. The same refusal closes the direct-active write too, which had been a '
+    + 'third path past the endpoint namespace and duplicate-path gates. ADR-0049 / ADR-0121.',
   acceptanceCriteria:
     'No caller creates or updates an `api` item through the runtime metadata API. '
     + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
@@ -45,8 +48,8 @@ export const entry: SemanticMigration = {
     + 'as well as direct-active, because the gate runs before the draft/publish branch and '
     + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
     + 'point of the change: a stack declaring `apis:` still compiles, still passes '
-    + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
-    + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
+    + '`validateApiEndpointDeclarations` at publish (`publishPackage`) and at load '
+    + '(`buildEndpointIndex`), and its endpoints still SERVE — that route was '
     + 'always the only one that served. An operator who genuinely needs the runtime door '
     + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
     + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '

@@ -39,8 +39,10 @@ export const entry: SemanticMigration = {
     + 'and `false` is authoring intent rather than a veto, because permission sets are '
     + 'additive capability containers (ADR-0090). The super-user bits no longer confer it: '
     + '`viewAllRecords` / `modifyAllRecords` are "may see all data", not "may take a bulk '
-    + 'copy". Registered by the #6350 stock reconciliation; #3544 / #3710 predate the #6148 '
-    + 'completeness gate. ADR-0087, #3544 / #3710 (backfilled #6350).',
+    + 'copy". Registered (backfilled) by the stock reconciliation that compared the breaking '
+    + 'changesets already on the v17 release train against this ledger: the export axis, and its '
+    + 'extension to the CSV attachments scheduled reports mail out, both predate the gate that makes '
+    + 'a breaking changeset state its ADR-0087 disposition. ADR-0087.',
   acceptanceCriteria:
     'Every environment-authored permission set has been READ and decided, not just parsed: '
     + 'each object entry whose holders should keep exporting carries `allowExport: true`, and '

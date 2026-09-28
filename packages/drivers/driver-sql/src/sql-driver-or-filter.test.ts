@@ -95,6 +95,18 @@ function declareFilterLogicSweep(cell: DialectCell): void {
         t.string('parent_id');
       });
       await knexInstance(FILTER_TABLE).insert([...FILTER_LOGIC_ROWS]);
+      // [#20444] The table is built through knex, so the driver holds no field
+      // declaration for it — and the table's `$empty` rows are answered by the
+      // field's DECLARED row, refused without one. Register the declaration
+      // (metadata only, no DDL) the way a real object reaches the driver.
+      driver.registerObjectMetadata([
+        {
+          name: FILTER_TABLE,
+          fields: Object.fromEntries(
+            ['a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'].map((f) => [f, { type: 'text' }]),
+          ),
+        },
+      ]);
     });
 
     afterAll(async () => {
