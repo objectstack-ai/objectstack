@@ -1283,15 +1283,24 @@ describe('#19403 round 10 — ⚠️⚠️ the phantom-translation trap, asserte
   });
 
   it('⭐ the near-twin that was LOOKED UP AND REFUSED is asserted to be a fill, not a decision', () => {
-    // `Access Token TTL` is byte-identical in all three locales and reads like a
-    // standing decision to keep TTL verbatim. It is an unauthored fill in every
-    // locale — including zh-CN — and the provenance tables say so. Asserted so
-    // that no later round leans on it.
+    // `Access Token TTL` was byte-identical in all three locales and read like a
+    // standing decision to keep TTL verbatim. It was an unauthored fill in every
+    // locale, and the provenance tables said so. Asserted so that no later round
+    // leans on it. #20462 then AUTHORED the zh-CN leaf (访问令牌 TTL): the
+    // concept is rendered and the initialism survives, the same treatment the
+    // lifecycle rows give TTL. ja-JP and es-ES are still fills.
     const key = 'sys_oauth_resource.fields.access_token_ttl.label';
     const en = FLAT_OBJECTS.get('en')!.get(key);
     expect(en).toBe('Access Token TTL');
     for (const [locale, table] of PROVENANCE) {
-      expect(FLAT_OBJECTS.get(locale)!.get(key), `${locale} ${key}`).toBe(en);
+      const value = FLAT_OBJECTS.get(locale)!.get(key);
+      if (locale === 'zh-CN') {
+        expect(value, `${locale} ${key} reads its en source again`).not.toBe(en);
+        expect(carriesToken(value!, 'TTL'), `${locale} dropped the machine token`).toBe(true);
+        expect(table[`objects.${key}`], `${locale} still records the authored ${key} as a fill`).toBeUndefined();
+        continue;
+      }
+      expect(value, `${locale} ${key}`).toBe(en);
       expect(
         table[`objects.${key}`],
         `${locale} no longer records ${key} as a fill — if a translator authored it, this ledger note is stale`,
@@ -1308,7 +1317,9 @@ describe('#19403 round 10 — the SECOND WITNESS, over the `metadataForms.`-pref
       // exists exactly while the leaf IS a byte copy of the source revision, so
       // a leaf this round authored must have lost its row.
       const keys = Object.keys(table);
-      expect(keys.length, 'the provenance table is empty — the witness cannot testify').toBeGreaterThan(300);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(keys.length, 'the provenance table is empty — the witness cannot testify').toBeGreaterThan(0);
       const metadataFormRows = keys.filter((k) => k.startsWith('metadataForms.'));
       // The reading: NOTHING under the metadataForms. prefix is a fill any more.
       expect(metadataFormRows, `${locale} still records a metadata-form leaf as an unauthored fill`).toEqual([]);
@@ -1333,7 +1344,9 @@ describe('#19403 round 10 — the SECOND WITNESS, over the `metadataForms.`-pref
       const loc = FLAT_OBJECTS.get(locale)!;
       const echoing = [...en].filter(([k, v]) => loc.get(k) === v).map(([k]) => k);
       const authored = [...en].filter(([k, v]) => loc.get(k) !== undefined && loc.get(k) !== v).map(([k]) => k);
-      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(50);
+      // At least one of each is what makes a positive AND a negative; since
+      // #20462 zh-CN's echoing objects leaves are its 42 declared English ones.
+      expect(echoing.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(0);
       expect(authored.length, `${locale} has no authored objects leaf to sample`).toBeGreaterThan(50);
       expect(
         echoing.filter((k) => table[`objects.${k}`] === undefined),

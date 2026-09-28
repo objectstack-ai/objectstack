@@ -569,7 +569,9 @@ describe('#19403 round 2 — the provenance table agrees these leaves are now au
     it(`${locale}: no decided leaf is still recorded as an extractor fill`, () => {
       // Lit — the table really loaded, so "no entry" cannot pass by the import
       // having come back empty.
-      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(0);
       const stillFilled = DECISIONS.filter((d) => table[provenanceKey(d)] !== undefined).map(
         (d) => `page.${d.scope}.${d.key}.${d.prop}`,
       );
