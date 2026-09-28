@@ -247,9 +247,32 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     await expectHavingRefusal(() => ({ d: { $gt: Y10000 } }), [{ field: 'opened_at', dateGranularity: 'day', alias: 'd' }]);
   });
 
-  it('the remedy names no placeholder: having resolves none, so it would send the author to a literal', async () => {
-    for (const having of [{ last_placed: { $lt: 'x' } }, { first_opened: { $lt: 'x' } }]) {
-      expect(await expectHavingRefusal(() => having)).not.toContain('{30_days_ago}');
+  // [#20334] `having` resolves placeholders through `where`'s resolver, so its
+  // remedy is `where`'s: it names the relative-date placeholder that a caller
+  // holding a preset name (`last_30_days`) needs, on the two kinds that take one.
+  it('the remedy names the placeholder the resolver knows, in the where twin\'s words', async () => {
+    const CASES: ReadonlyArray<readonly [Record<string, unknown>, Record<string, unknown>, string]> = [
+      [{ last_placed: { $lt: 'last_30_days' } }, { placed_on: { $lt: 'last_30_days' } },
+        "`having` on 'last_placed' (max(placed_on), a date column) compares against \"last_30_days\" at "
+        + 'having.last_placed.$lt, which is not a date value this platform can interpret.'],
+      [{ first_opened: { $lt: 'last_30_days' } }, { opened_at: { $lt: 'last_30_days' } },
+        "`having` on 'first_opened' (min(opened_at), a datetime column) compares against \"last_30_days\" at "
+        + 'having.first_opened.$lt, which is not a datetime value this platform can interpret.'],
+    ];
+    const after = (message: string, marker: string): string => {
+      expect(message).toContain(marker);
+      return message.slice(message.indexOf(marker) + marker.length);
+    };
+    for (const [having, where, firstSentence] of CASES) {
+      // INVALID_FILTER / 400 on both paths, empty or populated, no read.
+      const message = await expectHavingRefusal(() => having);
+      expect(message.startsWith(`aggregate('${OBJECT}'): ${firstSentence} `)).toBe(true);
+      const remedy = after(message, 'The `having` was NOT applied. ');
+      expect(remedy).toContain('"{30_days_ago}"');
+      const twin = await whereTwinOf(where);
+      expect(twin.err?.code).toBe('INVALID_FILTER');
+      expect(twin.err?.status).toBe(400);
+      expect(remedy).toBe(after(twin.err!.message, 'The filter was NOT applied. '));
     }
   });
 });
@@ -306,7 +329,6 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['a string on count — not temporal', { n: { $gt: 'not-a-date' } }, []],
     ['a string on avg — not temporal', { mean: { $gt: 'not-a-date' } }, []],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
-    ['an unknown {placeholder} too', { last_placed: { $gte: '{not_a_token}' } }, []],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],
     ['$exists', { last_placed: { $exists: true } }, ['c1', 'c2', 'c3', 'c4']],
@@ -324,6 +346,19 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
       expect(await keptGroups(having)).toEqual(kept);
     });
   }
+
+  // [#20334] An unknown one is stepped around by this door too, and is then
+  // refused one layer down by the token resolver, in its own code, as on
+  // `where` (it kept no group with a 200 before `having` resolved tokens).
+  it('an unknown {placeholder} is not this door\'s verdict: FILTER_TOKEN_UNKNOWN from the resolver, before any read', async () => {
+    for (const path of ['native', 'rows'] as const) {
+      const { engine, reads } = await makeEngine(path, ROWS);
+      const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { last_placed: { $gte: '{not_a_token}' } })));
+      expect(err?.code, path).toBe('FILTER_TOKEN_UNKNOWN');
+      expect(err?.status, path).toBe(400);
+      expect(reads, path).toEqual({ aggregate: 0, find: 0 });
+    }
+  });
 
   it('a coarser bucket is a text label, and is not judged', async () => {
     const kept = await keptGroups(

@@ -14,7 +14,11 @@ export const entry: SemanticMigration = {
   replacement: 'timeoutMs, tokenExpirationSeconds, retentionDays and responseTimeHours — '
     + 'rename each key; every value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'These four are one entry because they are one document — everything here hangs off a '
     + 'PluginSecurityManifest — and because together they are this rule\'s clearest case in '
     + 'the whole spec: FOUR durations on one manifest carried FOUR DIFFERENT units '
@@ -37,8 +41,9 @@ export const entry: SemanticMigration = {
     + 'milliseconds"), a channel the gate does not read: it reads `.describe()` and '
     + '`.meta({ description })`, and that key\'s describe ("Maximum execution time") names '
     + 'none. So the gate lists it among the duration-shaped keys without judging it — neither '
-    + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap is '
-    + '#15939. #15678, #14478, ADR-0087.',
+    + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap '
+    + 'was filed as a finding of its own and is closed for this key by '
+    + 'kernel-runtime-config-timeout-unit-in-key. ADR-0087.',
   acceptanceCriteria:
     'Every SandboxConfigSchema.parse(…), KernelSecurityPolicySchema.parse(…) and '
     + 'PluginSecurityManifestSchema.parse(…) site, and every literal handed to a plugin '

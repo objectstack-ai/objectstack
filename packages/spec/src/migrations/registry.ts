@@ -2376,9 +2376,11 @@ const step17: MigrationStep = {
         + 'upgrade guide or release note. So this entry does not record a declared surface '
         + 'being withdrawn; it records a LENIENCY being withdrawn, which is why it is here '
         + 'rather than behind a tombstone. The only writers in this repository were the two '
-        + 'driver packages\' own fixtures — #4984\'s family, where a fixture spelling the alias '
-        + 'keeps the tolerant limb green forever and no test in existence can go red on its '
-        + 'deletion — so ADR-0049 enforce-or-remove applies once those are re-spelt. ⚠️ Do '
+        + 'driver packages\' own fixtures — the family of the org-axis red-line gate that read '
+        + 'only rejected aliases while its own fixtures spelt them, so its tests stayed green '
+        + 'and the rule stayed dead: a fixture spelling the alias keeps the tolerant limb green '
+        + 'forever and no test in existence can go red on its deletion — so ADR-0049 '
+        + 'enforce-or-remove applies once those are re-spelt. ⚠️ Do '
         + 'NOT read this across to `dashboard`/`page` measures: `aggregate` IS the canonical '
         + 'key there and `func` IS a declared, loudly-suggesting alias (`DatasetMeasureSchema`, '
         + 'ui/dataset.zod.ts). That neighbouring vocabulary is untouched, and it is the most '
@@ -2391,8 +2393,14 @@ const step17: MigrationStep = {
         + 'no enforced channel at all, which is exactly why this ledger entry has to exist: '
         + 'the generated upgrade guide is the only way such a reader learns of the rename. '
         + 'Same disposition, and the same reason, as `data-driver-find-stream-retired` '
-        + '(#4484), `storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` '
-        + '(#6011). ADR-0049 / ADR-0087, #6321 (PR #6404).',
+        + '(`IDataDriver.findStream`, removed with no tombstone because nothing parses a driver '
+        + 'object), `storage-service-list-retired` (the zero-consumer `IStorageService.list`, '
+        + 'whose two adapters answered differently and both incompletely) and '
+        + '`actor-user-roles-to-positions` (the `ctx.user` `roles` alias, closed at once on the '
+        + 'maintainer\'s word rather than given a window). The removal ran in a fixed order — '
+        + 'the fixtures re-spelt first, the two alias branches deleted second, the parameter '
+        + 'narrowed to `DriverQuery` last — because the reverse order yields red nobody can '
+        + 'explain. ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'No caller passes `aggregate:` to a driver\'s `aggregate()`, and no aggregation entry '
         + 'spells its function `func:`; both are written `aggregations:` / `function:`. An '
@@ -2428,8 +2436,10 @@ const step17: MigrationStep = {
         + 'presence cannot carry the signal are `queryDateGranularity`, `autonumber` and '
         + '`batchSchemaSync`)',
       reason:
-        'The #4484 findStream close-out found `DriverCapabilities.streaming` pointing at a '
-        + 'capability the contract no longer declares, and the follow-up audit (#4634) checked '
+        'Retiring `IDataDriver.findStream` (it had no production caller, and two of its three '
+        + 'implementations read the whole result set into memory before yielding a row) left '
+        + '`DriverCapabilities.streaming` pointing at a capability the contract no longer '
+        + 'declares, and the follow-up audit checked '
         + 'every bit in the record the same way, across objectstack and cloud (objectui '
         + 'confirmed clean): of 34 declared bits, THREE have a decision-making reader — '
         + '`queryDateGranularity` (engine aggregate dispatch + checkDateBucketParity), '
@@ -2448,14 +2458,15 @@ const step17: MigrationStep = {
         + 'stack metadata — `supports` literals live in driver classes and '
         + '`DriverConfig.capabilities` is plugin TS configuration, neither ever a '
         + '`sys_metadata` shape (the stack-tree neighbour, `datasource.capabilities`, was '
-        + 'retired separately in #4583) — so there is no source for the D2 chain to rewrite '
+        + 'retired separately, as a whole block nothing read) — so there is no source for the '
+        + 'D2 chain to rewrite '
         + 'and this entry is the D3 record. The keys are tombstoned rather than deleted '
         + 'because `DriverCapabilitiesSchema` is not `.strict()` and IS parsed '
         + '(DriverConfigSchema / SQLDriverConfigSchema / NoSQLDriverConfigSchema embed it): '
         + 'a plain delete would silently strip a vendor\'s authored bit, replacing one '
         + 'silent no-op with another. `batchSchemaSync` also drops its `.default(false)` '
         + 'for `.optional()` — absence already meant false at both readers, and the default '
-        + 'forced every capability object to spell out 30+ bits. ADR-0049 / ADR-0078, #4634.',
+        + 'forced every capability object to spell out 30+ bits. ADR-0049 / ADR-0078.',
       acceptanceCriteria:
         'No `supports` literal or `DriverConfig.capabilities` object authors any of the 31 '
         + 'retired bits — a driver class that still writes one fails tsc against '
@@ -2478,7 +2489,9 @@ const step17: MigrationStep = {
       reason:
         'This entry records a TYPE being added, not a surface being withdrawn, and it says '
         + 'so up front because the distinction decides who has to do anything. `distinct` is '
-        + 'not declared on `IDataDriver`, so #5181 / #6075 never reached it and it kept '
+        + 'not declared on `IDataDriver`, so neither the narrowing of `IDataDriver`\'s query '
+        + 'parameters to `DriverQuery` nor the follow-through that brought five drivers\' '
+        + 'implementations in line ever reached it, and it kept '
         + '`filters?: any` while its body said something far more specific — '
         + '`applyFilters(builder, filters)` is handed the ARGUMENT ITSELF, never a `.where` '
         + 'off it. ⚠️ RUNTIME BEHAVIOUR IS UNCHANGED by this entry\'s change: not one '
@@ -2491,9 +2504,9 @@ const step17: MigrationStep = {
         + 'orders" answered with EVERY product, silently. That spelling is now TS2345 at the '
         + 'call site. This is a driver CALL ARGUMENT — code, never stack metadata — so there '
         + 'is no source for the D2 chain to rewrite and deliberately no schema tombstone, the '
-        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
-        + '(#5540), `actor-user-roles-to-positions` (#6011) and '
-        + '`driver-aggregate-undeclared-key-aliases-removed` (#6321) already carry. ⚠️ It '
+        + 'disposition `data-driver-find-stream-retired`, `storage-service-list-retired`, '
+        + '`actor-user-roles-to-positions` and '
+        + '`driver-aggregate-undeclared-key-aliases-removed` already carry. ⚠️ It '
         + 'differs from those four in ONE measured way a reader should not have to infer: '
         + 'because nothing changed at run time, an untyped JS caller is not affected BY THE '
         + 'UPGRADE at all. The entry is here for a different reason — such a caller is exactly '
@@ -2506,9 +2519,11 @@ const step17: MigrationStep = {
         + 'valid filter — one constraining columns named `object` and `where` — and so is a '
         + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
         + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
-        + 'BARE spelling returns the unfiltered set in silence — stayed open under the #5499 '
-        + 'freeze, which was lifted on 2026-08-11; it is still open, now unexcused rather than '
-        + 'deferred (#6320). ADR-0087, #6320.',
+        + 'BARE spelling returns the unfiltered set in silence — stayed open under the '
+        + 'maintainer\'s 2026-08-05 investment freeze on driver-memory, which was lifted on '
+        + '2026-08-11; it is still open, now unexcused rather than deferred (the measurement '
+        + 'that found the two drivers reading this argument differently split the fix: the sql '
+        + 'half is this entry, and the memory half was held back by that freeze). ADR-0087.',
       acceptanceCriteria:
         'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
         + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '
@@ -5405,6 +5420,16 @@ const step18: MigrationStep = {
     + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
     + 'built artifacts carry it without anyone having written it. Retired from the load path; '
     + 'an authored key is refused with the prescription. '
+    + 'It also retires the RLS policy\'s `tags` (#20321, ADR-0049 enforce-or-remove; graded '
+    + 'RETIRE by the maintainer\'s criterion — no mainstream platform tags a row-level policy): '
+    + 'the key promised categorization and reporting for governance and compliance, and nothing '
+    + 'ever read it — the RLS compiler never consulted it and no preview rendered it. It is a '
+    + '`retiredKey()` tombstone on `RowLevelSecurityPolicySchema` (the `priority` posture one key '
+    + 'over), and the D2 conversion `permission-rls-tags-removed` strips it from every policy in '
+    + '`permissions[].rowLevelSecurity` as a lossless delete, so a stored permission row that '
+    + 'still carries it replays clean. It is retired from the load path, so authors are refused '
+    + 'at parse rather than rewritten. Its D3 record is the semantic entry '
+    + '`permission-rls-tags-retired`. '
     + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
     + 'key parsed and was stored at every list-view door and drew nothing: a list view\'s own '
     + '`tabs` has no reader, the one component that would draw it has no production mount, '
@@ -5458,6 +5483,7 @@ const step18: MigrationStep = {
     'view-overlay-owner-hidden-removed',
     'form-layout-inline-grid-to-vertical',
     'currency-config-precision-removed',
+    'permission-rls-tags-removed',
     'view-list-tabs-removed',
   ],
   semantic: [
@@ -8217,7 +8243,7 @@ const step18: MigrationStep = {
       surface: '`DriverOptions.timeout` (data/driver.zod.ts) — the per-call options argument of every `IDataDriver` method',
       replacement: '`DriverOptions.timeoutMs` (milliseconds) — rename the key; the value is unchanged',
       reason:
-        'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
+        'Maintainer ruling 2026-09-02 on duration units (ruled B — no grandfathered baseline): the unit of a '
         + 'duration-shaped `z.number()` key lives in the key NAME, never only in the description. '
         + '`timeout` said "Timeout in ms" in prose and nothing else. Tombstoned with retiredKey '
         + '(`DriverOptionsSchema` is not strict, so a bare deletion would strip the old key in '
@@ -8247,8 +8273,9 @@ const step18: MigrationStep = {
         + 'is no spelling of an unresolvable column that means "match nothing", which is '
         + 'exactly what the old empty list was mistaken for',
       reason:
-        'One predicate had two answers. `SqlDriver.findRows()` carries the #3821 unknown-'
-        + 'column recovery ladder, whose rungs are all built from `buildBase()` — and '
+        'One predicate had two answers. `SqlDriver.findRows()` carries the unknown-column '
+        + 'recovery ladder (an unsortable query loses its ORDER BY, not its rows), whose rungs '
+        + 'are all built from `buildBase()` — and '
         + '`buildBase()` always re-applies `query.where`. So the ladder can drop a projection '
         + 'and can drop an ORDER BY, but it can never drop the clause that failed when the '
         + 'unresolvable column is in the WHERE: both rungs raise the same error and the method '
@@ -8264,25 +8291,27 @@ const step18: MigrationStep = {
         + 'agent reads "no matching records" and writes its next query on that belief. The '
         + "thrown half was no better — the dialect's own `code`, no `status` (an unclassified "
         + '5xx at the REST boundary rather than a caller mistake), and the statement\'s bound '
-        + 'literals inlined in the message, the same predicate-text disclosure shape #7929 '
-        + 'redacted elsewhere.\n\n'
-        + 'Ruled 2026-08-15 on #8790: refuse BOTH halves with `INVALID_FILTER` / 400, naming '
-        + 'the column. The envelope is not minted here — it is what every sibling refusal on '
+        + 'literals inlined in the message, the same predicate-text disclosure shape the '
+        + 'driver\'s field-reference filter refusals had already been made to stop echoing '
+        + '(the full diagnostic goes to the server log, never the response).\n\n'
+        + 'Ruled by the maintainer on 2026-08-15: refuse BOTH halves with `INVALID_FILTER` / '
+        + '400, naming the column. The envelope is not minted here — it is what every sibling '
+        + 'refusal on '
         + 'this path already answers, required on both SQL drivers by '
         + '`cross-field-conformance-cases.ts` and pinned by `sql-driver-boolean-identity.test.ts` '
         + 'and `sql-driver-cross-field-conformance.test.ts` — so what closes is a declared-vs-'
-        + 'enforced gap, not a new posture. Recover-both was excluded by the card\'s own '
-        + 'argument: dropping a WHERE returns rows the caller explicitly excluded, and #3821\'s '
-        + '"rows matter more than their order" is an argument about how rows are PRESENTED, '
-        + 'which does not transfer to a predicate. The ladder KEEPS both of its recoveries — '
+        + 'enforced gap, not a new posture. Recover-both was excluded by the ruling\'s own '
+        + 'argument: dropping a WHERE returns rows the caller explicitly excluded, and the '
+        + 'ladder\'s own premise — rows matter more than their order — is an argument about '
+        + 'how rows are PRESENTED, which does not transfer to a predicate. The ladder KEEPS both of its recoveries — '
         + 'only the WHERE-failure terminal became a refusal.\n\n'
         + 'Reach, stated rather than assumed: the refusal fires on the wordings the ladder has '
         + 'always recognised — SQLite (`no such column: x`) and Postgres (`column "x" does not '
         + "exist`). MySQL spells it `Unknown column 'x' in 'where clause'`, which neither arm "
         + 'matches, so on MySQL this condition still travels out as the raw dialect error; '
-        + 'widening that predicate would also hand MySQL the #3821 recoveries it has never had, '
+        + 'widening that predicate would also hand MySQL the ladder\'s recoveries it has never had, '
         + 'which is an accept-set change in the opposite direction and is filed separately.\n\n'
-        + 'Addendum 2026-08-16 (#8926, landed by PR #9061). The paragraph above is kept as the '
+        + 'Addendum 2026-08-16. The paragraph above is kept as the '
         + 'state at registration; this amends it. MySQL joined the one shared predicate, so the '
         + 'reach is now all three dialects this driver speaks, and a MySQL reader must NOT '
         + 'conclude the migration does not apply — it applies exactly as it does on SQLite and '
@@ -8292,9 +8321,9 @@ const step18: MigrationStep = {
         + 'recoveries — was considered and refused). (1) THE ENVELOPE: an unresolvable WHERE '
         + 'column now refuses with the same `INVALID_FILTER` / 400 naming the column, instead of '
         + "travelling out as the raw `ER_BAD_FIELD_ERROR` with the statement's bound literals "
-        + 'inlined — the #7929 disclosure shape closed on the last dialect that still had it. '
-        + '(2) THE RECOVERIES: MySQL also gained the #3821 projection and ORDER-BY recoveries it '
-        + 'had never had, so an unresolvable column in a projection or an ORDER BY now returns '
+        + 'inlined — that disclosure shape closed on the last dialect that still had it. '
+        + '(2) THE RECOVERIES: MySQL also gained the ladder\'s projection and ORDER-BY '
+        + 'recoveries it had never had, so an unresolvable column in a projection or an ORDER BY now returns '
         + 'recovered rows where it used to throw. The two halves arrive together because '
         + '`ER_BAD_FIELD_ERROR` spells every clause position with one sentence — '
         + "`Unknown column 'x' in 'where clause'` / `'field list'` / `'order clause'` — so all "
@@ -8303,7 +8332,9 @@ const step18: MigrationStep = {
         + 'The widening can never drop a predicate: every ladder rung is rebuilt from '
         + '`buildBase()`, which unconditionally re-applies `query.where`. Unchanged by the '
         + 'ruling: a DOTTED filter key is still classified per dialect (Postgres raises '
-        + 'undefined_table, which neither arm matches), the axis #8371 owns. The entry id, '
+        + 'undefined_table, which neither arm matches), the axis owned by the dotted-filter '
+        + 'verdict, which refuses a dotted key whose head is a relation, a formula or a plain '
+        + 'column at the protocol and engine doors. The entry id, '
         + 'surface and prescription are unchanged — this is a text amendment, not a new '
         + 'migration.\n\n'
         + 'This is a CODE-path API, not stored metadata, so — like '
@@ -8311,7 +8342,7 @@ const step18: MigrationStep = {
         + 'is no `sys_metadata` row for the D2 chain to rewrite and this entry is the '
         + 'notification channel. No mechanical rewrite exists: the platform cannot know which '
         + 'real column a mistyped filter key meant, and guessing one would answer with rows the '
-        + 'caller never asked for. #8790, #3821, #7929, #8371, ADR-0112.',
+        + 'caller never asked for. ADR-0112.',
       acceptanceCriteria:
         'No saved report `query.filter`, flow condition, sharing/permission rule or hook '
         + 'filters on a name the queried object has no column for. Reads and counts complete '
@@ -8339,9 +8370,10 @@ const step18: MigrationStep = {
       reason:
         'MySQL\'s only merge statement is `ON DUPLICATE KEY UPDATE`, which carries NO conflict '
         + 'target: knex drops the named keys before the statement leaves the process, so the '
-        + 'merge lands on whichever UNIQUE index the row collides with first. #8621 closed the '
-        + 'half where nothing backed a caller-named target and #8755 the half where a rival key '
-        + 'could absorb a caller-named one. This entry closes the residue those two left by '
+        + 'merge lands on whichever UNIQUE index the row collides with first. Two earlier '
+        + 'pre-flight refusals closed the half where no unique index backed a caller-named '
+        + 'target and the half where a rival unique key could absorb a caller-named one. This '
+        + 'entry closes the residue those two left by '
         + 'construction: the `conflictKeys`-less call and the `[\'id\']` call, which compile '
         + 'byte-identically and which no pre-flight can judge, because neither names anything.\n\n'
         + 'Measured on live MySQL 8.0.46 through the same knex + `mysql2` path `upsert` takes, '
@@ -8351,7 +8383,8 @@ const step18: MigrationStep = {
         + 'row, the SEEDED one, its `email` rewritten `d@b.com` -> `e@b.com`. The id the caller '
         + 'was handed back was in no row at all. The identical pair on SQLite raises `UNIQUE '
         + 'constraint failed: ….tax_id` and leaves the seeded row untouched.\n\n'
-        + 'Ruled 2026-08-15 on #8807, as a contract principle rather than a MySQL detail: *an '
+        + 'Ruled by the maintainer on 2026-08-15, as a contract principle rather than a MySQL '
+        + 'detail: *an '
         + '`upsert` must never modify a row whose identity the caller did not supply and whose '
         + 'conflict key it did not name.* Enforcement was delegated to the drivers lane with '
         + 'blanket refusal excluded by name — refusing every `conflictKeys`-less upsert on any '
@@ -8362,7 +8395,9 @@ const step18: MigrationStep = {
         + 'made a pre-flight refusal proportionate for a caller-named target does not exist '
         + 'here.\n\n'
         + 'So the enforcement is a post-hoc identity check instead, and it is exact rather than '
-        + 'heuristic: `id` is insert-only on the merge path since #8622, so a row merged on the '
+        + 'heuristic: `id` is insert-only on the merge path (made so once a merge on a '
+        + 'non-primary conflict key was measured rewriting the existing row\'s primary key), '
+        + 'so a row merged on the '
         + 'primary key always still carries the id the call supplied, and a row merged on any '
         + 'other key never does. Absence of that row after the statement is therefore a '
         + 'biconditional for "this landed on a row the caller never identified", which is why the '
@@ -8375,7 +8410,7 @@ const step18: MigrationStep = {
         + 'the D2 chain to rewrite and this entry is the notification channel. No mechanical '
         + 'rewrite exists: the platform cannot know which business key an unnamed merge meant, '
         + 'and guessing one would merge onto a row the caller never named, which is the defect. '
-        + '#8807, #8755, #8621, #8622, #8592, ADR-0112.',
+        + 'ADR-0112.',
       acceptanceCriteria:
         'On MySQL deployments only. For every object whose rows are written with `upsert` and '
         + 'whose table carries a UNIQUE key besides the primary key, confirm the writer either '
@@ -8397,7 +8432,8 @@ const step18: MigrationStep = {
         + 'has always read; nothing selects a WASM build of libSQL, and a runtime that cannot load native '
         + 'bindings uses the remote arm (`libsql://` / `https://`), which needs none',
       reason:
-        'ADR-0049 enforce-or-remove, ruled per key on the card that measured them (#16024): both keys '
+        'ADR-0049 enforce-or-remove, ruled per key by the maintainer on 2026-09-06, once all three '
+        + 'of this package\'s unread config keys had been measured: both keys '
         + 'were declared on the package schema with a describe promising behaviour ("Local file path for '
         + 'embedded replica", "Use WASM build for edge/browser environments") and were read by no code '
         + '— the driver names the replica file via `url`, and no mechanism picks a WASM build. Forwarding '
@@ -8408,7 +8444,7 @@ const step18: MigrationStep = {
         + 'carry them, and a value that never did anything has no lossless rewrite — the key is deleted by '
         + 'hand. Both stay declared on the package schema as `z.never()` tombstones (the shape is a plain '
         + 'z.object, so a bare deletion would strip in silence) carrying this prescription. The third key '
-        + 'the same card measured, `TursoDriverConfig.timeout`, was forwarded rather than removed and '
+        + 'the same measurement found, `TursoDriverConfig.timeout`, was forwarded rather than removed and '
         + 'needs no entry. ADR-0049, ADR-0087.',
       acceptanceCriteria:
         'No `TursoConfigSchema.parse(…)` input spells `localPath` or `wasm`; authoring either fails to '
@@ -11054,11 +11090,13 @@ const step18: MigrationStep = {
       replacement: 'estimatedMigrationTimeHours — rename the key AND state the unit in the '
         + 'describe; the value (hours) is unchanged',
       reason:
-        'Maintainer ruling A on #18669 (2026-09-17, decision batch #151 item 4): rename the key and '
+        'Maintainer ruling A of 2026-09-17 on the last two duration keys no closed duration type '
+        + 'could express (this one in hours, the other in fractional seconds): rename the key and '
         + 'record an ADR-0087 conversion-layer entry, with no new closed type and no narrowing of '
         + 'anything already stored. '
         + 'The key said "Estimated migration time in hours" in a source JSDoc and carried no '
-        + '.describe() at all — the JSDoc-channel shape #15939 was filed on, one def over. The JSDoc '
+        + '.describe() at all — the JSDoc-channel shape (a unit stated only in a source comment '
+        + 'the reference page never prints), one def over. The JSDoc '
         + 'stops at the source file; .describe() is what content/docs/references/** renders, so the '
         + 'published page printed a bare number directly beside migrationComplexity, whose scale IS '
         + 'named (trivial/simple/moderate/complex/major). A reader comparing "major" with "40" had '
@@ -11066,8 +11104,9 @@ const step18: MigrationStep = {
         + 'The remedy is BOTH halves, and the second is not optional: renaming alone would leave the '
         + 'two channels that name the unit — the key name and a source comment — agreeing about '
         + 'something the published page does not print, which check:duration-unit-keys refuses as '
-        + 'unit-in-jsdoc-not-in-describe (ruled an offence 2026-09-18, decision batch #158 item 5, '
-        + 'letter A). So the unit moves INTO the describe and the key name carries it too. '
+        + 'unit-in-jsdoc-not-in-describe (that agreement shape — a unit in the key name and the '
+        + 'JSDoc, none in the describe — was ruled an offence on 2026-09-18). So the unit moves '
+        + 'INTO the describe and the key name carries it too. '
         + 'HOURS is kept rather than converted to seconds: the value is unchanged, the ruling '
         + 'forbade narrowing, and an effort estimate is authored in hours by the human who writes '
         + 'the plugin manifest. Tombstoned with retiredKey(): CompatibilityMatrixEntrySchema is a '
@@ -11076,7 +11115,7 @@ const step18: MigrationStep = {
         + 'Why a semantic entry and not a D2 conversion: a compatibility matrix is a plugin-published '
         + 'version manifest — stack.zod.ts declares no collection of them and it is not a registered '
         + 'metadata kind stored as a sys_metadata row — so the chain has no seam that sees one. '
-        + '#18669, #14478, #15939, ADR-0087.',
+        + 'ADR-0087.',
       acceptanceCriteria:
         'Every plugin manifest that declares a migration estimate spells estimatedMigrationTimeHours '
         + 'and every consumer reads that key. Authoring estimatedMigrationTime fails to compile '
@@ -11110,12 +11149,11 @@ const step18: MigrationStep = {
         + 'as it is — deployment ROUTING (widening the trusted-origin list for '
         + 'preview subdomains), unrelated to identity. If a preview experience '
         + 'becomes a product capability it re-declares fresh, with the '
-        + 'production-posture hard-refusal as the first-landed half (#11846 '
-        + 'ruling record)',
+        + 'production-posture hard-refusal as the first-landed half (as the '
+        + 'removal ruling recorded)',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 on #11846 '
-        + '(decision-inbox batch 2, Option A: remove — all four decision facets '
-        + 'pointed the same way). The declaration was the sharpest '
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 '
+        + '(Option A: remove). The declaration was the sharpest '
         + 'declared-≠-enforced shape on a SECURITY surface: the schema promised '
         + '"bypass auth, simulate admin identity" and named a production guard '
         + '"the runtime must enforce", and NO code path implemented either half. '
@@ -11124,11 +11162,11 @@ const step18: MigrationStep = {
         + "non-declaration hits for RuntimeMode or mode === 'preview' are the "
         + 'schema unit test, a type-alias pin and a measurement-test comment '
         + '(re-verified at dispatch, 2026-08-27, origin/main 15bf9e8). objectui — '
-        + 'the #11846 card records the measurement. cloud — cloud#1651 (closed '
-        + '2026-08-26): previewMode appears only as a local variable for '
-        + 'OS_PREVIEW_MODE whose effect is adding preview-domain wildcards to '
-        + "better-auth's CSRF trusted origins; RuntimeMode has zero hits "
-        + 'repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
+        + 'zero consumers, measured when the removal was ruled. cloud — a census '
+        + 'closed 2026-08-26: OS_PREVIEW_MODE there is a routing-only switch '
+        + "(the same switch this repository's serve.ts reads only to add "
+        + "preview-domain wildcards to better-auth's trusted origins); RuntimeMode "
+        + 'has zero hits repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
         + 'predicted preview auto-login would live if it existed) has 20+ hits '
         + 'and never touches previewMode. An author — very often an AI (ADR-0033) '
         + '— could write the six-key block per the reference docs, parse cleanly, '
@@ -11145,8 +11183,7 @@ const step18: MigrationStep = {
         + 'source to rewrite: a kernel context is constructed by host code at '
         + 'boot — not a stack collection member, never stored as a sys_metadata '
         + 'row — so the conversion chain has no seam that would ever see one '
-        + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087, '
-        + '#11846.',
+        + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         "No host constructs a kernel context with mode: 'preview' or a "
         + 'previewMode block: both now fail tsc at the authoring site and fail '
@@ -11178,7 +11215,11 @@ const step18: MigrationStep = {
       replacement: 'retentionDays on both — rename each key; both values are unchanged, and so is '
         + 'the 365 default on EventSourcingConfig',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'What makes these two one entry rather than two is the neighbour they share and the one '
         + 'they do not. Both hang off EventBusConfig, so an author configuring a bus met the same '
         + 'bare word twice and had to learn the unit twice; and on EventSourcingConfig the bare '
@@ -11193,7 +11234,7 @@ const step18: MigrationStep = {
         + 'never a stored sys_metadata row, and the conversion chain has no seam that would see '
         + 'one. That is what ruling B prescribes for a key that is not authorable metadata, and '
         + 'the disposition the epoch-instant renames on this same kernel took '
-        + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+        + '(epoch-instant-keys-renamed). ADR-0087.',
       acceptanceCriteria:
         'Every EventPersistenceSchema.parse(…) / EventSourcingConfigSchema.parse(…) site and every '
         + 'literal handed to an event bus spells retentionDays; authoring either old spelling fails '
@@ -11215,8 +11256,11 @@ const step18: MigrationStep = {
       replacement: 'intervalMs, timeoutMs and debounceDelayMs — rename each key; all three values '
         + '(milliseconds) and their 30000 / 5000 / 1000 defaults are unchanged',
       reason:
-        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
-        + 'batch #115), executing the #14478 rule per file. Each key named milliseconds in its JSDoc '
+        'Director-seat ruling A of 2026-09-11 on the JSDoc-channel finding, carrying the '
+        + 'maintainer\'s 「同意」: a duration key whose JSDoc names a unit its describe does not is '
+        + 'refused, and the keys in that shape are remediated per file before that refusal lands — '
+        + 'the duration-unit rule (the unit lives in the key name or its value type, never in prose '
+        + 'alone) executed file by file. Each key named milliseconds in its JSDoc '
         + '— "Health check interval in milliseconds", "Timeout for health check in milliseconds", '
         + '"Debounce delay before reloading (milliseconds)" — and the JSDoc above a key is NOT what '
         + '`content/docs/references/**` renders; `.describe()` is. Measured on this tree by the '
@@ -11235,12 +11279,16 @@ const step18: MigrationStep = {
         + 'Ttl-versus-TTL question the sibling round had to settle, there is no competing family '
         + 'spelling to choose between. All three old spellings are retiredKey() tombstones: neither '
         + 'PluginHealthCheckSchema nor HotReloadConfigSchema is .strict(), so a bare deletion would '
-        + 'be a SILENT STRIP (#3733, ADR-0104) — and here the stripped value lands on a setInterval '
+        + 'be a SILENT STRIP (ADR-0104; an earlier field-key prune measured exactly that — the '
+        + 'parse succeeded and the removed key was dropped without a word) — and here the '
+        + 'stripped value lands on a setInterval '
         + 'period, a race deadline and a setTimeout delay. Why a semantic entry and not a D2 '
         + 'conversion: the conversion chain walks a normalized STACK, and neither def is an '
         + 'authorable surface — no metadata-type binding, stack collection or manifest embed carries '
         + 'either, and both are library parameters a host passes to PluginHealthMonitor / '
-        + 'HotReloadManager in TypeScript (the #4914 / #11825 keep) — so a conversion would be a '
+        + 'HotReloadManager in TypeScript (kept twice: as the hot-reload vocabulary that had an '
+        + 'implementation when the manifest-side copy was removed, and as a host-driven library '
+        + 'when the declarative lifecycle config container was retired) — so a conversion would be a '
         + 'transform with no seam that ever runs. That is the same disposition '
         + 'plugin-auto-restart-never-reinitialised and hot-reload-watch-placeholder-retired recorded '
         + 'for keys on these two defs. The registration-time refusals in '
@@ -11267,8 +11315,10 @@ const step18: MigrationStep = {
         + 'Behaviour is unchanged: the same milliseconds, the same 30000 / 5000 / 1000 defaults and '
         + 'the same min bounds (1000 / 100 / 0), and the published describes now name milliseconds. '
         + 'The sibling shutdownTimeout on HotReloadConfig is deliberately NOT renamed with them: its '
-        + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the #14519 '
-        + 'unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.',
+        + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the '
+        + 'unit-nowhere shape (no unit in the name or in the published describe, first measured on '
+        + 'two tenant timeouts) that the duration-unit gate leaves outside its verdict, not part of '
+        + 'this row set.',
     },
     {
       id: 'kernel-package-lifecycle-durations-unit-in-key',
@@ -11281,7 +11331,11 @@ const step18: MigrationStep = {
       replacement: 'estimatedDurationSeconds, resolvedInMs and durationMs — rename each key; every '
         + 'value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These three are one entry because they are one story told to one audience — a package '
         + 'being planned, resolved and rolled out — and because the group is precisely where the '
         + 'unit SPLITS: estimatedDuration is SECONDS while resolvedIn and rollout.duration are '
@@ -11296,8 +11350,7 @@ const step18: MigrationStep = {
         + 'PackageDependencyResolutionResult is emitted by a resolution run, and MultiVersionSupport '
         + 'is a version-routing argument a host constructs — none is a stack collection member or '
         + 'a stored sys_metadata row, so the conversion chain has no seam that would see one. That '
-        + 'is what ruling B prescribes for a key that is not authorable metadata. #15678, #14478, '
-        + 'ADR-0087.',
+        + 'is what ruling B prescribes for a key that is not authorable metadata. ADR-0087.',
       acceptanceCriteria:
         'Every IPackageService.planUpgrade() implementation returns estimatedDurationSeconds and '
         + 'every caller reads it under that name; every dependency-resolution producer returns '
@@ -11318,7 +11371,11 @@ const step18: MigrationStep = {
         + '(kernel/plugin-lifecycle-advanced.zod.ts)',
       replacement: 'uptimeMs and responseTimeMs — rename each key; both values are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'uptime is the case this rule was written for, and this repo had already paid for it in '
         + 'documentation: the platform serves a SECONDS-valued uptime on GET /health and stores a '
         + 'MILLISECONDS-valued uptime on this report, so the protocol lifecycle page carried a '
@@ -11336,7 +11393,7 @@ const step18: MigrationStep = {
         + '(packages/core/src/health-monitor.ts) and kept in memory — never authored into a '
         + 'metadata document, never a stored sys_metadata row — so the conversion chain has no '
         + 'seam that would see one, the same disposition HealthStatus.timestamp took '
-        + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+        + '(epoch-instant-keys-renamed). ADR-0087.',
       acceptanceCriteria:
         'Every producer of a PluginHealthReport spells uptimeMs and responseTimeMs — concretely '
         + 'packages/core/src/health-monitor.ts, the one production writer, whose metrics block now '
@@ -11361,7 +11418,11 @@ const step18: MigrationStep = {
       replacement: 'timeoutMs, tokenExpirationSeconds, retentionDays and responseTimeHours — '
         + 'rename each key; every value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These four are one entry because they are one document — everything here hangs off a '
         + 'PluginSecurityManifest — and because together they are this rule\'s clearest case in '
         + 'the whole spec: FOUR durations on one manifest carried FOUR DIFFERENT units '
@@ -11384,8 +11445,9 @@ const step18: MigrationStep = {
         + 'milliseconds"), a channel the gate does not read: it reads `.describe()` and '
         + '`.meta({ description })`, and that key\'s describe ("Maximum execution time") names '
         + 'none. So the gate lists it among the duration-shaped keys without judging it — neither '
-        + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap is '
-        + '#15939. #15678, #14478, ADR-0087.',
+        + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap '
+        + 'was filed as a finding of its own and is closed for this key by '
+        + 'kernel-runtime-config-timeout-unit-in-key. ADR-0087.',
       acceptanceCriteria:
         'Every SandboxConfigSchema.parse(…), KernelSecurityPolicySchema.parse(…) and '
         + 'PluginSecurityManifestSchema.parse(…) site, and every literal handed to a plugin '
@@ -11407,24 +11469,27 @@ const step18: MigrationStep = {
       surface: 'RuntimeConfig resourceLimits.timeout (kernel/plugin-security-advanced.zod.ts)',
       replacement: 'resourceLimits.timeoutMs — rename the key; the value (milliseconds) is unchanged',
       reason:
-        'This entry COMPLETES what #15678 deliberately left alone, and the two are meant to be read '
-        + 'as a sequence. #15678 renamed the four plugin-security durations on this same file '
+        'This entry COMPLETES what the kernel-directory duration renames deliberately left alone, '
+        + 'and the two are meant to be read as a sequence. That round renamed the four '
+        + 'plugin-security durations on this same file '
         + '(`kernel-plugin-security-durations-unit-in-key`) and recorded, accurately, that one key was '
         + 'out of its scope: RuntimeConfig.resourceLimits.timeout named its unit only in the JSDoc '
         + 'above it ("Execution timeout in milliseconds"), a channel check:duration-unit-keys does not '
         + 'read — it reads `.describe()` and `.meta({ description })` — and that key\'s describe '
         + '("Maximum execution time") named none, so the gate listed it among the duration-shaped keys '
         + 'without judging it, neither an offender nor an exemption. That JSDoc-channel gap was filed '
-        + 'as #15939, and #15678\'s statement about its own scope stays true. #15939 is now ruled and '
-        + 'this is its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s '
-        + '「同意」 (decision batch #115), which remediates the 21-row JSDoc-channel population per file '
-        + 'and lands the widened gate (#17635) last, into a tree already clean. So the reader who most '
+        + 'as a finding of its own, and that round\'s statement about its own scope stays true. The '
+        + 'finding is now ruled and this is its remediation: director-seat ruling A, 2026-09-11, '
+        + 'carrying the maintainer\'s 「同意」, which keeps the refusal of a duration key whose JSDoc '
+        + 'names a unit its describe does not, remediates the 21-row JSDoc-channel population per '
+        + 'file, and lands that widened gate last, into a tree already clean. So the reader who most '
         + 'needs the unit — the reader of the published reference page, who never sees the source '
         + 'JSDoc — got a bare integer on '
         + 'content/docs/references/kernel/plugin-security-advanced.mdx and could not tell 60000 '
         + 'milliseconds from 60000 seconds. The key is renamed and the describe is corrected in the '
-        + 'same stroke, because under the #14478 rule moving the unit into the describe alone is '
-        + 'itself a violation (unit in prose, none in the name). Spelled Ms, the same token '
+        + 'same stroke, because under the duration-unit rule (the unit lives in the key name or a '
+        + 'unit-carrying value, never in the describe prose alone) moving the unit into the '
+        + 'describe alone is itself a violation (unit in prose, none in the name). Spelled Ms, the same token '
         + 'SandboxConfig.process.timeoutMs on this very file already carries: counted on this tree, '
         + 'the suffixed family spells it that way in every member (29 key-position `timeoutMs` '
         + 'declarations across packages/spec/src/**/*.zod.ts, 40 distinct *Ms keys) and there is no '
@@ -11434,7 +11499,8 @@ const step18: MigrationStep = {
         + 'RuntimeConfig is the engine block of the SandboxConfig a host or a plugin security manifest '
         + 'constructs — stack.zod.ts declares no sandbox, security-policy or runtime-config collection '
         + 'and it is not a stored sys_metadata row — so the conversion chain has no seam that runs on '
-        + 'it; the same reading #15678 recorded for the four keys it renamed. Measured on 146c291943: '
+        + 'it; the same reading the kernel-directory round recorded for the four keys it renamed. '
+        + 'Measured on 146c291943: '
         + 'no in-repo runtime reads the key — packages/core/src/security/sandbox-runtime.ts, the one '
         + 'consumer of this shape, reads resourceLimits.maxCpu (3 occurrences of resourceLimits) and '
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
@@ -11445,8 +11511,7 @@ const step18: MigrationStep = {
         + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
         + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
-        + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
-        + '#14478, ADR-0087.',
+        + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
       acceptanceCriteria:
         'Every RuntimeConfigSchema.parse(…) site, and every literal handed to a plugin sandbox as its '
         + 'runtime block, spells resourceLimits.timeoutMs; authoring resourceLimits.timeout fails to '
@@ -11469,7 +11534,11 @@ const step18: MigrationStep = {
       replacement: 'timeoutMs, durationMs and totalDurationMs — rename each key; every value is '
         + 'unchanged, and so is the 30000 default on StartupOptions',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These three are one entry because they are one boundary: a host passes StartupOptions '
         + 'in, and the orchestrator hands PluginStartupResult and StartupOrchestrationResult back '
         + 'from the same call. The file already contained its own counter-example — '
@@ -11484,7 +11553,7 @@ const step18: MigrationStep = {
         + 'sys_metadata row and the conversion chain has no seam that would see one — the same '
         + 'disposition HealthStatus.timestamp took on this very file '
         + '(epoch-instant-keys-renamed), and what ruling B prescribes for a runtime-emitted key. '
-        + '#15678, #14478, ADR-0087.',
+        + 'ADR-0087.',
       acceptanceCriteria:
         'Host boot code calling orchestrateStartup(plugins, options) spells timeoutMs; every '
         + 'implementation that BUILDS a PluginStartupResult spells durationMs and every one that '
@@ -12929,6 +12998,36 @@ const step18: MigrationStep = {
         + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
         + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
         + 'names the mechanism it actually uses instead.',
+    },
+    // #20321 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `permission-rls-tags-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). The strip changes no access
+    // decision; what it leaves is whatever process was built on the belief that a
+    // policy's tags were read.
+    {
+      id: 'permission-rls-tags-retired',
+      surface: 'permission.rowLevelSecurity[].tags — the free-form categorization tags on a row-level '
+        + 'security policy',
+      replacement: '(removed — no mainstream platform tags a row-level policy, and nothing here ever '
+        + 'read one.) A policy is identified by its `name` and its `object`, and reported by those and '
+        + 'its predicate; its purpose belongs in `description`. Whom a policy applies to is decided by '
+        + '`positions`, never by a tag.',
+      reason: 'The D2 conversion `permission-rls-tags-removed` deletes `tags` from every row-level '
+        + 'security policy in author sources and in stored permission rows, and the delete is '
+        + 'lossless: the RLS compiler never consulted the key and nothing else acted on it — no '
+        + 'report, audit filter or review queue selected on it — so no access decision changes. '
+        + 'The judgment is about what people '
+        + 'believed. An admin who tagged a policy `gdpr` or `pci` may have expected a compliance '
+        + 'report, an audit filter or a review queue to pick it up; none ever did. An author who '
+        + 'wrote a tag such as `managers_only` may have believed it scoped the policy; it never did '
+        + '— only `positions` narrows whom a policy applies to. Any report, runbook or control that '
+        + 'relies on either belief needs another path, and choosing that path is a governance '
+        + 'decision no conversion can make.',
+      acceptanceCriteria: 'No authored or stored row-level security policy carries `tags`; the parse '
+        + 'refuses the key with the prescription. Access decisions are unchanged: every policy admits '
+        + 'and refuses exactly the rows it did before the upgrade. Every policy whose tag expressed an '
+        + 'audience has that audience in `positions`, and every compliance report, audit filter or '
+        + 'review process that assumed policy tags names the mechanism it actually uses instead.',
     },
     {
       id: 'platform-timezone-columns-iana-domain-refused',
@@ -14731,7 +14830,11 @@ const step18: MigrationStep = {
       replacement: 'ttlSeconds and resetTimeoutSeconds — rename each key; both values, the 300 '
         + 'TTL default and the 30 reset default are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These two are one entry because they are one file and one authoring session: a '
         + 'cache tier and the avalanche-prevention block that protects it. Each sat beside a '
         + 'number in a DIFFERENT unit with nothing at the authoring site to separate them — '
@@ -14743,7 +14846,7 @@ const step18: MigrationStep = {
         + 'the unknown-key error could not carry the rename. Why a semantic entry and not a D2 '
         + 'conversion: stack.zod.ts declares no cache collection, and neither a cache tier nor '
         + 'an avalanche-prevention block is a registered metadata kind stored as a sys_metadata '
-        + 'row, so the conversion chain has no seam that would see one. #15679, #14478, ADR-0087.',
+        + 'row, so the conversion chain has no seam that would see one. ADR-0087.',
       acceptanceCriteria:
         'Every author of a CacheTier spells ttlSeconds and every author of a '
         + 'CacheAvalanchePrevention spells circuitBreaker.resetTimeoutSeconds. Authoring either '
@@ -14763,20 +14866,25 @@ const step18: MigrationStep = {
       replacement: 'idleTimeoutMs and snapshot.intervalMs — rename each key; both values and the '
         + '300000 idle-timeout default are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'idleTimeout is the collision that got this whole population ruled rather than merely '
         + 'noted: it is MILLISECONDS here, while the tenant surface carried its own idleTimeout '
         + 'in SECONDS at the same time — so the identical bare name meant five minutes on one '
         + 'shape and three and a half days on the other, a 1000x divergence no parse could catch '
-        + 'because both readings are positive integers. The tenant half was already renamed '
-        + '(#15626); this is the half that remained. snapshot.interval rides in the same entry '
+        + 'because both readings are positive integers. The tenant half was already renamed, in '
+        + 'the same change that landed the duration gate itself; this is the half that remained. '
+        + 'snapshot.interval rides in the same entry '
         + 'because it is the same object graph and the same authoring session — leaving one bare '
         + 'beside the other would have preserved exactly the ambiguity the rename removes. Both '
         + 'are retiredKey() tombstones; the shapes are not strict, so a bare deletion would strip '
         + 'in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares no '
         + 'collaboration collection, and a session config is a runtime call argument rather than '
         + 'a stored sys_metadata row, so the conversion chain has no seam that would see it. '
-        + '#15679, #14478, ADR-0087.',
+        + 'ADR-0087.',
       acceptanceCriteria:
         'Every caller that opens a collaboration session spells idleTimeoutMs, and every snapshot '
         + 'block spells intervalMs. Authoring either old spelling fails to compile (input type '
@@ -14795,7 +14903,11 @@ const step18: MigrationStep = {
       replacement: 'healthCheckIntervalSeconds — rename the key; the value and the 30 default '
         + 'are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because its file has exactly one offender left — and because the key '
         + 'directly beside it is the counter-example that shows where the line falls. '
         + 'FailoverConfig.dns.ttl is also a bare-named duration in seconds, and it is NOT renamed: '
@@ -14805,7 +14917,7 @@ const step18: MigrationStep = {
         + 'repo, so the exemption does not reach it. Tombstoned with retiredKey(); the shape is '
         + 'not strict, so a bare deletion would strip in silence. Why a semantic entry and not a '
         + 'D2 conversion: stack.zod.ts declares no disasterRecovery collection and a failover '
-        + 'config is host configuration, never a stored sys_metadata row. #15679, #14478, ADR-0087.',
+        + 'config is host configuration, never a stored sys_metadata row. ADR-0087.',
       acceptanceCriteria:
         'Every FailoverConfig author spells healthCheckIntervalSeconds; authoring '
         + 'healthCheckInterval fails to compile (input type `never`) and fails to parse with the '
@@ -14828,16 +14940,18 @@ const step18: MigrationStep = {
       reason:
         'This entry FINISHES what system-metrics-window-durations-unit-in-key started on this file, '
         + 'and the two are meant to be read as a sequence — this one does not amend that record, '
-        + 'which stays a true account of what #15679 did. #15679 renamed the three metrics window '
+        + 'which stays a true account of what the system-directory duration round did. That round '
+        + 'renamed the three metrics window '
         + 'and period lengths whose describe named no unit, and recorded that the error-budget '
         + 'burn-rate window was "outside this rename, not outside the gate population", naming the '
-        + 'JSDoc-channel gap #15939 as where it would be settled. #15939 is now ruled and this is '
-        + 'its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s 「同意」 '
-        + '(decision batch #115), which remediates the 21-row JSDoc-channel population per file and '
-        + 'lands the widened gate (#17635) last, into a tree already clean. ⚠️ One consequence for '
+        + 'JSDoc-channel gap as where it would be settled. That gap is now ruled and this is '
+        + 'its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s 「同意」, '
+        + 'which keeps the refusal of a duration key whose JSDoc names a unit its describe does not, '
+        + 'remediates the 21-row JSDoc-channel population per file, and lands that widened gate '
+        + 'last, into a tree already clean. ⚠️ One consequence for '
         + 'readers of the older entry: its acceptanceCriteria says the burn-rate window keeps its '
         + 'name and that a sweep renaming it has over-applied the rule. That sentence was true of '
-        + '#15679 and is superseded here, by the ruling it itself pointed at; the other key it '
+        + 'that round and is superseded here, by the ruling it itself pointed at; the other key it '
         + 'names, the exporter batch size, is a COUNT of records and still does not move. All five '
         + 'keys here share one defect: the unit (seconds) was stated in the JSDoc above the key, a '
         + 'channel check:duration-unit-keys does not read — it reads .describe() and '
@@ -14846,11 +14960,14 @@ const step18: MigrationStep = {
         + 'reference page, got a bare integer: 600, 3600, 60, 15 and 604800 are each a plausible '
         + 'number of seconds and a plausible number of milliseconds, and nothing on the page decided '
         + 'it. Each key is renamed and its describe corrected in the same stroke, because under the '
-        + '#14478 rule moving the unit into the describe alone is itself a violation. Three of the '
+        + 'duration-unit rule (the unit lives in the key name or a unit-carrying value, never in the '
+        + 'describe prose alone) moving the unit into the describe alone is itself a violation. '
+        + 'Three of the '
         + 'five spellings are not the mechanical suffix, and each departure has a reason this file '
         + 'already supplied: burnRateWindows[].window becomes durationSeconds, not windowSeconds, '
         + 'because the enclosing array is already called burnRateWindows so the key would stutter — '
-        + 'the objection #15679 recorded against window.windowSeconds — and because on this tree '
+        + 'the objection the system-directory round recorded against window.windowSeconds — and '
+        + 'because on this tree '
         + 'windowSeconds is not an authorable key at all, its only key-position occurrence being an '
         + 'alias-map entry in ServerRateLimitConfigSchema that maps the spelling AWAY to windowMs; '
         + 'retention.period becomes durationSeconds, not periodSeconds, because period is calendar '
@@ -14871,7 +14988,8 @@ const step18: MigrationStep = {
         + 'would strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts '
         + 'declares no metrics collection, and none of a metric definition, an SLO, an export config '
         + 'or a metrics config is a registered metadata kind stored as a sys_metadata row — the same '
-        + 'reading #15679 recorded for the three keys it renamed. Measured on fc28c1d38: no in-repo '
+        + 'reading the system-directory round recorded for the three keys it renamed. Measured on '
+        + 'fc28c1d38: no in-repo '
         + 'code consumer reads any of the five — outside packages/spec the only occurrences of every '
         + 'distinctive key on these shapes (burnRateWindows, errorBudget, downsampling, '
         + 'collectionInterval, cardinalityLimits, maxLabelCombinations, ageBuckets) are in the '
@@ -14884,7 +15002,7 @@ const step18: MigrationStep = {
         + 'files at that sha, against lit controls window 3581, timeout 1096, period 171, '
         + 'interval 179 and metrics 326 on that same corpus and sha (0 across 8303, against 3526 / '
         + '1086 / 170 / 179 / 324, at 62597c588), so no pin bump is owed. '
-        + '#15939, #15679, #14478, ADR-0087.',
+        + 'ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
         + 'spells durationSeconds, every metric export config spells intervalSeconds, and every '
@@ -14908,7 +15026,11 @@ const step18: MigrationStep = {
       replacement: 'window.durationSeconds, window.durationSeconds and period.durationSeconds — '
         + 'rename each key; every value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'The three are one entry because they are one measurement expressed three times on one '
         + 'file: how long a window or period is. The new name is deliberately NOT the mechanical '
         + 'sizeSeconds the gate prints. size means a byte or row count everywhere else in this '
@@ -14924,7 +15046,7 @@ const step18: MigrationStep = {
         + 'deletion would strip in silence. Why a semantic entry and not a D2 conversion: '
         + 'stack.zod.ts declares no metrics collection, and none of an aggregation config, an SLI '
         + 'or an SLO is a registered metadata kind stored as a sys_metadata row. '
-        + '#15679, #14478, ADR-0087.',
+        + 'ADR-0087.',
       acceptanceCriteria:
         'Every aggregation window and SLI window spells durationSeconds, and every SLO period '
         + 'spells durationSeconds. Authoring window.size or period.duration fails to compile '
@@ -14938,7 +15060,7 @@ const step18: MigrationStep = {
         + 'key\'s describe ("Window size") names none. So the gate lists it among the '
         + 'duration-shaped keys without judging it — neither an offender nor an exemption — and '
         + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
-        + '#15939; '
+        + 'filed as a finding of its own; '
         + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
         + 'to carry. Both keep their names. '
         // Pointer, not a rewrite (Prime Directive #13): the sentence above is #15679's, left
@@ -14947,7 +15069,8 @@ const step18: MigrationStep = {
         + 'One of those two moves after all, in this same protocol step: the error-budget '
         + 'burn-rate window is renamed to durationSeconds by '
         + 'system-metrics-jsdoc-durations-unit-in-key, the remediation of the JSDoc-channel gap '
-        + '#15939 named just above. Read that entry with this one; the exporter batch size is '
+        + 'named just above (ruled: a duration key whose JSDoc names a unit its describe does not '
+        + 'is refused). Read that entry with this one; the exporter batch size is '
         + 'still a COUNT of records and still does not move.',
     },
     {
@@ -14957,7 +15080,11 @@ const step18: MigrationStep = {
         + '(system/object-storage.zod.ts)',
       replacement: 'maxAgeSeconds and timeoutMs — rename each key; both values are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'AccessControlConfig.maxAge is the one key in this stack where the two structural '
         + 'exemptions and the rename look alike from a distance, so the reasoning is recorded '
         + 'rather than assumed. It was CONSIDERED for an externalVocabulary marker and demoted on '
@@ -14972,7 +15099,7 @@ const step18: MigrationStep = {
         + 'Both are retiredKey() tombstones; the shapes are not strict, so a bare deletion would '
         + 'strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
         + 'no objectStorage collection, and neither shape is a registered metadata kind stored as '
-        + 'a sys_metadata row. #15679, #14478, ADR-0087.',
+        + 'a sys_metadata row. ADR-0087.',
       acceptanceCriteria:
         'Every bucket access-control block spells maxAgeSeconds and every storage connection '
         + 'spells timeoutMs. Authoring either old spelling fails to compile (input type `never`) '
@@ -14991,7 +15118,11 @@ const step18: MigrationStep = {
       replacement: 'syncIntervalSeconds, timeoutMs and cache.ttlSeconds — rename each key; every '
         + 'value, the 30000 timeout default and the 3600 TTL default are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'The three are one entry because they are one file and, for the first two, one object: '
         + 'RegistryUpstream declared a SECONDS interval and a MILLISECONDS timeout twenty-five '
         + 'lines apart, both bare. That pair carries the clearest demonstration in this card of '
@@ -15002,7 +15133,7 @@ const step18: MigrationStep = {
         + 'are not strict, so a bare deletion would strip in silence. Why a semantic entry and '
         + 'not a D2 conversion: stack.zod.ts declares no registry collection, and a registry '
         + 'config is host configuration read at startup rather than a stored sys_metadata row, so '
-        + 'the conversion chain has no seam that would see it. #15679, #14478, ADR-0087.',
+        + 'the conversion chain has no seam that would see it. ADR-0087.',
       acceptanceCriteria:
         'Every upstream declaration spells syncIntervalSeconds and timeoutMs, and every registry '
         + 'cache block spells ttlSeconds. Authoring any old spelling fails to compile (input type '
@@ -15027,18 +15158,22 @@ const step18: MigrationStep = {
         + 'key; all four values (milliseconds) and their 10000 / 30000 / 5000 / 5000 defaults are '
         + 'unchanged',
       reason:
-        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
-        + 'batch #115), executing the #14478 rule per file. It follows '
+        'Director-seat ruling A of 2026-09-11 on the JSDoc-channel finding, carrying the '
+        + 'maintainer\'s 「同意」: a duration key whose JSDoc names a unit its describe does not is '
+        + 'refused, and the keys in that shape are remediated per file before that refusal lands — '
+        + 'the duration-unit rule (the unit lives in the key name or its value type, never in prose '
+        + 'alone) executed file by file. It follows '
         + 'system-tracing-span-duration-unit-in-key on this same file and does not amend it: that '
         + 'entry retired Span.duration under ruling B, whose population was the describe channel, '
-        + 'and these four keys were never in it — they are the JSDoc-only channel #15939 opened, '
-        + 'which is why one file carries two rounds. Each key named milliseconds in its JSDoc — '
+        + 'and these four keys were never in it — they are the JSDoc-only channel that finding '
+        + 'opened, which is why one file carries two rounds. Each key named milliseconds in its JSDoc — '
         + '"Timeout in milliseconds", "Export timeout in milliseconds", "Scheduled delay in '
         + 'milliseconds", "Background export interval in milliseconds" — and the JSDoc above a key '
         + 'is NOT what content/docs/references/** renders; .describe() is. Measured on this tree: '
         + 'all four carried NO .describe() at all, so the published reference row for each was a '
         + 'bare integer with no unit anywhere on the page — a strictly worse channel than the '
-        + 'unit-in-prose shape #14478 already refuses, since here the reference reader had no prose '
+        + 'unit-in-prose shape the duration-unit rule already refuses, since here the reference '
+        + 'reader had no prose '
         + 'to misread. The magnitudes make the guess plausible in both directions: 10000, 30000, '
         + '5000 and 5000 are all defensible as seconds and as milliseconds, and an operator who '
         + 'reads seconds sets an exporter deadline 1000x short. The suffix is the family spelling, '
@@ -15060,7 +15195,9 @@ const step18: MigrationStep = {
         + '(exporter.timeoutMs vs exporter.batch.exportTimeoutMs). All four old spellings are '
         + 'retiredKey() tombstones: neither OpenTelemetryCompatibilitySchema nor TracingConfigSchema '
         + 'nor any object nested inside them is .strict(), so a bare deletion would be a SILENT '
-        + 'STRIP (#3733, ADR-0104) — and the stripped value lands on an export deadline and a '
+        + 'STRIP (ADR-0104; an earlier field-key prune measured exactly that — the parse succeeded '
+        + 'and the removed key was dropped without a word) — and the stripped value lands on an '
+        + 'export deadline and a '
         + 'background export period. Why a semantic entry and not a D2 conversion: the conversion '
         + 'chain walks a normalized STACK, and neither def is an authorable surface — stack.zod.ts '
         + 'declares no tracing collection, no metadata-type binding or manifest embed carries '
@@ -15100,7 +15237,11 @@ const step18: MigrationStep = {
         + '(system/tracing.zod.ts)',
       replacement: 'durationMs — rename the key; the value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because it is the only offender on its file and the only one in this '
         + 'card that is a pure runtime-emitted measurement: a span is written by an exporter and '
         + 'read by a backend, never authored by hand. That is also why it is a rename and not an '
@@ -15114,7 +15255,7 @@ const step18: MigrationStep = {
         + 'spelling would lose the value without an error. Why a semantic entry and not a D2 '
         + 'conversion: an emitted span is never a stack collection member and never a stored '
         + 'sys_metadata row — the same disposition every runtime-emitted measurement in this '
-        + 'stack has taken. #15679, #14478, ADR-0087.',
+        + 'stack has taken. ADR-0087.',
       acceptanceCriteria:
         'Every exporter that BUILDS a Span spells durationMs, and every consumer that reads a '
         + 'span length reads durationMs. Authoring duration fails to compile (input type `never`) '
@@ -15130,7 +15271,11 @@ const step18: MigrationStep = {
         + 'no unit (system/worker.zod.ts)',
       replacement: 'durationMs — rename the key; the value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
+        + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because it is the only offender left on its file, and the file itself '
         + 'is what makes it a drift rather than a convention: TaskResult.durationMs, declared '
         + 'ninety lines earlier in the SAME source, already spelled the identical measurement '
@@ -15141,7 +15286,7 @@ const step18: MigrationStep = {
         + 'without an error. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
         + 'jobs, not queues, so a QueueConfig is worker host configuration rather than a stack '
         + 'collection member or a stored sys_metadata row, and the conversion chain has no seam '
-        + 'that would see it. #15679, #14478, ADR-0087.',
+        + 'that would see it. ADR-0087.',
       acceptanceCriteria:
         'Every queue declaration spells rateLimit.durationMs. Authoring rateLimit.duration fails '
         + 'to compile (input type `never`) and fails to parse with the rename prescription rather '
@@ -19126,6 +19271,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #20321 (ADR-0049 enforce-or-remove; graded RETIRE by the maintainer's
+    // criterion for declared-but-unenforced families — does a mainstream platform
+    // have the capability?). `RowLevelSecurityPolicy.tags` promised categorization
+    // and reporting for governance and compliance, and nothing ever read it: the
+    // RLS compiler never consults it, objectui's permission preview renders only
+    // the policy count and its policy editor neither seeds nor reads the key, and
+    // cloud has no reader. No mainstream platform tags a row-level policy. The
+    // policy shape is `strictObject`, but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture one key over): the key stays in the walked shape
+    // as `[RETIRED]`, and authoring it is a tsc error and a parse error carrying
+    // the prescription. D2: `permission-rls-tags-removed`; D3:
+    // `permission-rls-tags-retired`.
+    'security/RowLevelSecurityPolicy:tags',
     // #15679 (stack card 4/6 of #14478) — ruling B. `AccessControlConfig.maxAge` said
     // "CORS preflight cache duration in seconds" in prose and nothing else.
     // ⚠️ This key is deliberately a RENAME and not an `externalVocabulary` marker,
