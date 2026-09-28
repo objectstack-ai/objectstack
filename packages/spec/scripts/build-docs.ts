@@ -61,7 +61,7 @@ import {
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { formatSplitEntryCoverage, splitEntryCoverage } from './lib/split-entries';
-import { renderSchemaSection } from './lib/schema-section';
+import { renderSchemaSection, rendersPropertiesTable } from './lib/schema-section';
 import {
   categoryIndexDescription,
   modulePageDescription,
@@ -517,10 +517,17 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   descriptionSources[description.from]++;
 
   // The search-facing title follows the docs title rule; `zodTitle`, the title
-  // this page carried before it, stays the sidebar label as `navTitle`.
+  // this page carried before it, stays the sidebar label as `navTitle`. A page
+  // is called a `property reference` only when one of its sections renders a
+  // `### Properties` table — the renderer's own condition, asked of the same
+  // schemas the loop below renders.
   const titles = pageTitleOrExit(() =>
     modulePageTitle(
-      { name: zodTitle, categoryTitle: CATEGORIES[category] },
+      {
+        name: zodTitle,
+        categoryTitle: CATEGORIES[category],
+        documentsProperties: schemas.some(s => rendersPropertiesTable(s.name, s.content)),
+      },
       path.relative(REPO_ROOT, path.join(DOCS_ROOT, category, `${zodFile}.mdx`)),
     ),
   );

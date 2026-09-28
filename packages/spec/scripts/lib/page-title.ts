@@ -35,6 +35,7 @@
  * the first candidate inside the band:
  *
  *   module page       `<Name> schema — <Category> property reference`   (name + category + 29)
+ *                       (offered only when the page renders a `### Properties` table)
  *                     `<Name> schema — <Category> reference`            (name + category + 20)
  *                     `<Name> — <Category> reference`                   (name + category + 13)
  *                     `<Name> — <Category>`                             (name + category + 3)
@@ -48,6 +49,18 @@
  * covers category titles of 8 to 27 characters, and the longest declared one
  * is 25. The category keeps two same-named modules apart (`Plugin` is both a
  * `kernel` and a `studio` page), so no two generated titles collide.
+ *
+ * The first module rung is CONDITIONAL. `property reference` is a claim about
+ * the page, and a page that renders no `### Properties` table — an enum-only
+ * module such as `data/feed`, whose two schemas render `### Allowed Values`
+ * only — would be misdescribed by it. So that rung is offered only when at
+ * least one of the page's schemas renders a property table
+ * (`rendersPropertiesTable` in `lib/schema-section.ts`, the renderer's own
+ * condition); otherwise the page starts at the second rung. Without the first
+ * rung the ladder covers name + category lengths from 16 to 43 rather than 7:
+ * the shortest property-less pair on the tree is 17 (`Feed` in `Data
+ * Protocol`), and a shorter one would be refused by name — the remedy is a rung
+ * here, the same as for any page no rung fits.
  *
  * A page no rung fits is REFUSED, never truncated: a cut title is an invented
  * one, and a title outside the band is the defect this module exists to end.
@@ -119,12 +132,18 @@ export interface ModuleTitleInput {
   name: string;
   /** The category's declared title — `AI Protocol`. */
   categoryTitle: string;
+  /**
+   * Whether the page renders at least one `### Properties` table — required,
+   * never defaulted: the `property reference` rung is a claim about the page,
+   * and a caller that does not know must not get it by omission.
+   */
+  documentsProperties: boolean;
 }
 
-/** The module-page ladder, longest first. */
-export function modulePageTitleCandidates({ name, categoryTitle }: ModuleTitleInput): string[] {
+/** The module-page ladder, longest first; the first rung only for a page with a property table. */
+export function modulePageTitleCandidates({ name, categoryTitle, documentsProperties }: ModuleTitleInput): string[] {
   return [
-    `${name} schema${TITLE_SEPARATOR}${categoryTitle} property reference`,
+    ...(documentsProperties ? [`${name} schema${TITLE_SEPARATOR}${categoryTitle} property reference`] : []),
     `${name} schema${TITLE_SEPARATOR}${categoryTitle} reference`,
     `${name}${TITLE_SEPARATOR}${categoryTitle} reference`,
     `${name}${TITLE_SEPARATOR}${categoryTitle}`,
