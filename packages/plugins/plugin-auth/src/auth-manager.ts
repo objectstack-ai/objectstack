@@ -2292,10 +2292,12 @@ export class AuthManager {
             // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
             //
             // We turn that shield on ourselves: a posture that permits
-            // self-registration FORCES `requireEmailVerification` on (see
-            // `createAuthInstance`), so `email_domain` and `open` sign-ups for an
-            // address that already exists answered 200 while `invite_only`
-            // answered 422 on the same population. Measured on a real ObjectQL
+            // self-registration forces `requireEmailVerification` on by default
+            // (see `createAuthInstance` — always under `email_domain`, and under
+            // `open` unless the deployment declared it off, #20389), so
+            // `email_domain` and `open` sign-ups for an address that already
+            // exists answered 200 while `invite_only` answered 422 on the same
+            // population. Measured on a real ObjectQL
             // engine with the posture held CONSTANT and only the verification flag
             // moved, so the divergence is the flag's, not the posture's: zero
             // inserts reach the engine, no `sys_account` appears, and the next

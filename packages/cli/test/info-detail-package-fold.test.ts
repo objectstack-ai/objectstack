@@ -91,7 +91,7 @@ const OBJECTS = [
 
 const VIEWS = [
   {
-    name: 'ob_order_views',
+    name: 'ob_order',
     object: 'ob_order',
     list: {
       label: 'Orders',

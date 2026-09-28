@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // END-TO-END gate: an ad-hoc query on `POST /analytics/query` or
-// `POST /analytics/sql` changes nothing another member sees unless the
-// object-level admission admitted it — and even then, a measure the caller
-// named on top of a configured cube stays that caller's (#20381).
+// `POST /analytics/sql` changes nothing another member sees — refused or
+// admitted. A measure the caller named on top of a configured cube, and a cube
+// inferred for an object no cube is configured over, stay that request's own
+// (#20381).
 //
 // ## The defect
 //
@@ -14,17 +15,21 @@
 // `GET /analytics/meta`, and a suffix measure a caller named on a configured
 // cube was appended to that cube for every member, admitted or refused. The
 // doors now run in a request scope of their own (the one the dataset door got
-// for #20356); an inferred cube is published only once the request has been
-// admitted, and an appended measure never is.
+// for #20356), and nothing minted there leaves it. An ADMITTED request's
+// inferred cube used to be published to the shared registry ("CubeRegistry
+// source 3"), so `meta` listed to every member an object someone had queried
+// and the member names they used; that source is retired (ruling A on
+// #20381), and the registry is written by configuration alone.
 //
 // ## How it is observed
 //
 // Two separate sign-ups, A and B, holding the same grant (read on
 // `admission_open` only), plus the administrator. Member A — or the admin —
 // asks; member B observes. B's observation is the whole of what B can see of
-// the analytics registry through the two doors B uses — the `meta` listing
-// and B's query of the configured cube — taken immediately before and after
-// each leg and compared for EQUALITY, so a partial rewrite cannot pass.
+// the analytics registry through the two doors B uses — the `meta` listing,
+// kept as the raw response bytes as well as parsed, and B's query of the
+// configured cube — taken immediately before and after each leg and compared
+// for EQUALITY, so neither a partial rewrite nor an added cube can pass.
 //
 // ## The legs, on each door
 //
@@ -41,12 +46,12 @@
 //
 // - A configured cube still serves: every B observation is a `200` count of
 //   B's own rows.
-// - An admitted scalar metric over an object still works on a second request
-//   — the documented "CubeRegistry source 3" path, which stays: the inferred
-//   cube is registered once the first request is admitted.
-// - That published cube widens nothing: after the administrator's admitted
-//   ad-hoc query over the walled object, B's own query of that object is still
-//   refused on both doors, and every cube B saw before is listed unchanged.
+// - An admitted scalar metric over an object is served on a second request
+//   too, with the same answer: it infers again, because nothing was
+//   published between the two, and B's view is unchanged.
+// - The administrator's admitted ad-hoc query over the walled object leaves
+//   B's `meta` byte-identical and B's configured-cube query unchanged, and B's
+//   own query of that object is still refused on both doors.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -123,7 +128,7 @@ interface Boot {
 }
 
 interface Observation {
-  meta: { status: number; body: unknown };
+  meta: { status: number; body: unknown; bytes: string };
   authored: { status: number; body: unknown };
 }
 
@@ -133,10 +138,16 @@ async function read(res: Response): Promise<{ status: number; body: unknown }> {
   return { status: res.status, body: await res.json() };
 }
 
+/** A response read as its raw bytes too — for the listing whose sameness is the pin. */
+async function readBytes(res: Response): Promise<{ status: number; body: unknown; bytes: string }> {
+  const bytes = await res.text();
+  return { status: res.status, body: JSON.parse(bytes), bytes };
+}
+
 /** Everything member B can see of the analytics registry. */
 async function observeAsB(stack: VerifyStack, tokenB: string): Promise<Observation> {
   return {
-    meta: await read(await stack.apiAs(tokenB, 'GET', '/analytics/meta')),
+    meta: await readBytes(await stack.apiAs(tokenB, 'GET', '/analytics/meta')),
     authored: await read(
       await stack.apiAs(tokenB, 'POST', '/analytics/query', {
         cube: 'open_summary',
@@ -147,9 +158,14 @@ async function observeAsB(stack: VerifyStack, tokenB: string): Promise<Observati
 }
 
 /** The listed cubes, whichever envelope the door uses. */
-function cubesOf(meta: Observation['meta']): unknown[] {
+function cubesOf(meta: { body: unknown }): unknown[] {
   const payload = (meta.body as { data?: unknown })?.data ?? meta.body;
   return Array.isArray(payload) ? payload : [];
+}
+
+/** The listed cube names. */
+function cubeNamesOf(meta: { body: unknown }): string[] {
+  return cubesOf(meta).map((c) => (c as { name: string }).name);
 }
 
 /** The single count a one-measure answer carries, whichever envelope the door uses. */
@@ -257,35 +273,50 @@ describe.each(CASES)(
       expect(await observeAsB(stack, tokenB)).toEqual(before);
     });
 
-    it('CONTROL: an admitted scalar metric over an object still works on a second request', async () => {
+    it('CONTROL: an admitted scalar metric over an object is served again on a second request, re-inferred, with the same answer', async () => {
       const { stack, tokenA, tokenB } = boots.get(key)!;
       const before = await observeAsB(stack, tokenB);
 
+      const answers: unknown[] = [];
       for (let i = 0; i < 2; i++) {
         const res = await stack.apiAs(tokenA, 'POST', door, { cube: 'admission_open', measures: ['count'] });
         expect(res.status).toBe(200);
         const body = await res.json();
         if (door === '/analytics/query') expect(countOf(body, 'count')).toBe(A_OPEN_ROWS);
         else expect(JSON.stringify(body)).toContain('admission_open');
+        answers.push(body);
+        // Between the two, not even the asker's own `meta` lists the name, so
+        // the second request cannot resolve it from the registry: it infers.
+        if (i === 0) {
+          const askersMeta = await read(await stack.apiAs(tokenA, 'GET', '/analytics/meta'));
+          expect(cubeNamesOf(askersMeta)).not.toContain('admission_open');
+        }
       }
+      expect(answers[1]).toEqual(answers[0]);
 
       const after = await observeAsB(stack, tokenB);
-      expect(after.authored).toEqual(before.authored);
-      expect(cubesOf(after.meta)).toEqual(expect.arrayContaining(cubesOf(before.meta)));
+      expect(cubesOf(after.meta)).toEqual(cubesOf(before.meta));
+      expect(after).toEqual(before);
     });
 
-    it('CONTROL: the administrator\'s admitted ad-hoc query over the walled object widens nothing for B', async () => {
+    it('CONTROL: the administrator\'s admitted ad-hoc query over the walled object leaves B\'s meta byte-identical', async () => {
       const { stack, adminToken, tokenB } = boots.get(key)!;
       const before = await observeAsB(stack, tokenB);
 
       const res = await stack.apiAs(adminToken, 'POST', door, { cube: 'admission_walled', measures: ['count'] });
       expect(res.status).toBe(200);
 
-      // B still may not read the object, whatever the registry now holds under its name.
+      // B still may not read the object.
       await expectRefused(await stack.apiAs(tokenB, 'POST', door, { cube: 'admission_walled', measures: ['count'] }));
       const after = await observeAsB(stack, tokenB);
+      // Stated first on its own, so a failure reads as the defect: B's cube list
+      // is EXACTLY what it was — nothing named after the walled object joined it.
+      expect(cubeNamesOf(after.meta)).toEqual(cubeNamesOf(before.meta));
+      expect(cubesOf(after.meta)).toEqual(cubesOf(before.meta));
+      expect(after.meta.bytes).toBe(before.meta.bytes);
+      // …and B's query of the configured cube answers as before.
       expect(after.authored).toEqual(before.authored);
-      expect(cubesOf(after.meta)).toEqual(expect.arrayContaining(cubesOf(before.meta)));
+      expect(countOf(after.authored.body, 'authored_total')).toBe(B_OPEN_ROWS);
     });
   },
 );

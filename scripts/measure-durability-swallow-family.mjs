@@ -330,6 +330,7 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['persistSeedTenancyReceiptRow', 'gate-vocabulary'],
   ['recordLog', 'gate-vocabulary'],
   ['runWideningAlters', 'gate-vocabulary'],
+  ['applyConfigPatch', 'gate-vocabulary'],
 ]);
 
 /**

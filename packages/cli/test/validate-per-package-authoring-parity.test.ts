@@ -161,13 +161,17 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
   },
 }];
+// [#20331] Each container's name IS the object it binds to: the boot registrar
+// refuses a container whose own name disagrees with that key, and os validate
+// now refuses it too, so a *_list name here would make this a stack the
+// server cannot load.
 const ordersViews = [
   {
-    name: 'pp_account_list', label: 'Account List', object: 'pp_account',
+    name: 'pp_account', label: 'Account List', object: 'pp_account',
     list: { label: 'Account List', columns: ['name', 'industry'] },
   },
   {
-    name: 'pp_order_list', label: 'Order List', object: 'pp_order',
+    name: 'pp_order', label: 'Order List', object: 'pp_order',
     list: { label: 'Order List', columns: ['name', 'account'] },
   },
 ];

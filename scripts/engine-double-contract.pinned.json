@@ -2532,6 +2532,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-where-operator-coverage.test.ts",
       "verb": "delete",
       "pinned": 1

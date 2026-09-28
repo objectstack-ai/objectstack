@@ -185,7 +185,7 @@ const TOOLTIP_ALIAS_STACK = {
   manifest: { id: 'com.example.union-probe', name: 'Union Probe', namespace: 'union_probe', version: '1.0.0', type: 'app' },
   views: [
     {
-      name: 'union_probe_view',
+      name: 'union_probe_obj',
       object: 'union_probe_obj',
       list: {
         name: 'union_probe_list',
