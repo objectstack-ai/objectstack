@@ -8031,7 +8031,7 @@ export class RestServer {
                 }
             },
             metadata: {
-                summary: 'Diff two metadata versions (from/to query params; omit for previous-vs-current)',
+                summary: 'Diff two metadata versions (from/to query params; to defaults to the active version, from to the nearest earlier version whose body differs)',
                 tags: ['metadata'],
             },
         });
