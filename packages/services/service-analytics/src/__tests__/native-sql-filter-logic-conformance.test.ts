@@ -54,7 +54,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     ['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'].map((n) => [
       n,
-      { name: n, label: n, type: 'string', sql: n },
+      { label: n, type: 'string', sql: n },
     ]),
   ),
   public: true,

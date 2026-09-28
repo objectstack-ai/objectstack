@@ -76,7 +76,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     ['id', 'stage', 'amount'].map((n) => [
       n,
-      { name: n, label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
+      { label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
     ]),
   ),
   public: true,
