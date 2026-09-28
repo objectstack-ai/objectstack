@@ -82,6 +82,12 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
+// off a field DEFINITION (text-like, multi-value, null only) plus the
+// value-level predicate for the faces with no declaration. The operator is
+// declared in filter.zod.ts and STAGED out of FILTER_OPERATORS; this module is
+// what each compile surface calls when it gains its arm.
+export * from './filter-empty-operator';
 // [#20347] The cross-field COMPARISON CLASS — which two declared columns a
 // field-to-field comparison (`{ a: { $eq: { $field: 'b' } } }` and its five
 // sibling operators) may put on either side: six classes over the existing

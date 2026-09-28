@@ -18,8 +18,9 @@
  *    names equals the set the expansion reads, so prose and code cannot drift;
  * 2. `{ tags: { $empty: true } }` parses at the schema door, and `{ tags: [] }`
  *    is still refused (ruling 乙 on #19757 untouched);
- * 3. the expansion function returns the text, multi-value and null arms for
- *    the three field kinds, and the value predicate answers each arm;
+ * 3. the expansion function (`./filter-empty-operator.ts`, published on the
+ *    data entry) returns the text, multi-value and null arms for the three
+ *    field kinds, and the value predicate answers each arm;
  * 4. `$empty` is ABSENT from `FILTER_OPERATORS`, and the lowering still emits
  *    `$null`.
  */
@@ -33,17 +34,16 @@ import {
   STRING_VALUE_TYPES,
 } from './field-value.zod';
 import { FieldType } from './field.zod';
+import { EMPTY_OPERATOR_ARMS, expandEmptyOperator, isEmptyFilterValue } from './filter-empty-operator';
 import {
-  EMPTY_OPERATOR_ARMS,
   FILTER_OPERATORS,
   FieldOperatorsSchema,
   FilterConditionSchema,
   NormalizedFilterSchema,
   SpecialOperatorSchema,
-  expandEmptyOperator,
-  isEmptyFilterValue,
   parseFilterAST,
 } from './filter.zod';
+import * as dataBarrel from './index';
 
 type Issue = { code: string; path: PropertyKey[]; message: string };
 type Parsed = { success: boolean; error?: { issues: readonly Issue[] } };
@@ -172,6 +172,12 @@ describe('#20311 §2 — { tags: { $empty: true } } parses; { tags: [] } is stil
 // ---------------------------------------------------------------------------
 
 describe('#20311 §3 — expandEmptyOperator answers the ruled arm per field definition', () => {
+  it('is published on the data entry — the one function every compile surface imports', () => {
+    expect(dataBarrel.expandEmptyOperator).toBe(expandEmptyOperator);
+    expect(dataBarrel.isEmptyFilterValue).toBe(isEmptyFilterValue);
+    expect(dataBarrel.EMPTY_OPERATOR_ARMS).toBe(EMPTY_OPERATOR_ARMS);
+  });
+
   it('returns the text, multi-value and null arms for the three kinds the ruling names', () => {
     expect(expandEmptyOperator({ type: 'text' })).toBe(EMPTY_OPERATOR_ARMS.text);
     expect(expandEmptyOperator({ type: 'tags' })).toBe(EMPTY_OPERATOR_ARMS.multi_value);
