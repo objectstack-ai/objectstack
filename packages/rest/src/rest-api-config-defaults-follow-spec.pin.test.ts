@@ -36,7 +36,8 @@
  * drives is NOT the shipped one. The complementary pins that need the REAL
  * schema — that the shipped defaults are the schema's, that `requireAuth`
  * keeps its warn-and-ignore posture, and that the parse's inner defaults now
- * reach `documentation` / `responseFormat` — live in
+ * reach `documentation` (whose retired `enabled` member, like the retired
+ * `responseFormat` block, is refused rather than defaulted since #20295) — live in
  * `rest-config-parse-not-cast.test.ts` §D, which is deliberately unmocked.
  */
 

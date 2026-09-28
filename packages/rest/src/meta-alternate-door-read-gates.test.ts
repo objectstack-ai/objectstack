@@ -18,8 +18,9 @@
  *  - **`/published` serves ONE document**, the same representation the plain
  *    read serves: it answers exactly what the plain read answers — the same
  *    refusal, or the same pruned or masked document.
- *  - **`/layers`, `?layers=true` and `/diff` serve STORED versions** — the
- *    layers side by side, or two versions compared. They carry the per-caller
+ *  - **`/layers`, `?layers=true`, `/diff` and [#20290] the plain read's
+ *    `?state=draft` serve STORED versions** — the layers side by side, two
+ *    versions compared, or the pending draft row. They carry the per-caller
  *    gates: the docs audience refuses what the plain read refuses, and the
  *    object mask projects as the plain read does (ADR-0106 D4 exempts every
  *    caller who may write a schema, so a masked version never reaches a
@@ -31,16 +32,18 @@
  *    anyone.
  *
  *    **The author exemption** (ruling 5856774816, letter B, confirmed
- *    5856866273 — `AUTHOR_EXEMPTION` below): on these three doors a caller
- *    who may WRITE the app — the one the app's save door admits — reads the
+ *    5856866273 — `AUTHOR_EXEMPTION` below): on these doors a caller who
+ *    may WRITE the app — the one the app's save door admits — reads the
  *    full stored version, and every other caller who may open it reads
  *    exactly what the plain read gives them, pruned. ADR-0106 D4's shape
  *    carried from object schemas to apps: read-to-display is pruned per
  *    user, read-to-edit is whole for whoever may edit, because Studio's
  *    designer saves back what it loaded and a pruned load would delete the
- *    withheld entries. The exemption is a CALLER property, honoured by these
- *    three doors and by no other: the plain read and `/published` still
- *    prune for an author.
+ *    withheld entries. [#20290] The draft is such a load: the designers
+ *    merge `?state=draft` over the layered view and save the result back.
+ *    The exemption is a CALLER property, honoured by these four doors and by
+ *    no other: the rendered plain read (`?preview=draft` included) and
+ *    `/published` still prune for an author.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
@@ -48,10 +51,10 @@
  *
  * The dashboard widget gate (ADR-0057 D10) is NOT a per-caller gate — it asks
  * which optional services this deployment registered, and answers every caller
- * alike. The single-document doors keep it (they answer what the plain read
- * answers); the stored-version doors serve the stored dashboard, so a designer
- * never loads — and saves back — a dashboard minus a widget whose service is
- * merely off in this deployment.
+ * alike. The rendered single-document doors keep it (they answer what the plain
+ * read answers); the stored-version doors — the draft read among them — serve
+ * the stored dashboard, so a designer never loads — and saves back — a
+ * dashboard minus a widget whose service is merely off in this deployment.
  *
  * ## The door list is read off the route table
  *
@@ -315,13 +318,21 @@ const text = (res: any): string => JSON.stringify(res.body ?? null);
 // ── The doors, and what each owes ─────────────────────────────────────────────
 
 type DoorKind = 'document' | 'stored' | 'events' | 'exempt';
-interface Door { kind: DoorKind; suffix: string; query?: Record<string, string>; reason?: string }
+/**
+ * `serves` — what a `stored` door's body holds: the three `layers` side by
+ * side, a `diff` of two versions, or the pending `draft` in the plain read's
+ * envelope (its `item`).
+ */
+interface Door { kind: DoorKind; suffix: string; query?: Record<string, string>; reason?: string; serves?: 'layers' | 'diff' | 'draft' }
 
 const DOORS: Record<string, Door> = {
-    '?layers=true': { kind: 'stored', suffix: '', query: { layers: 'true' } },
-    '/layers': { kind: 'stored', suffix: '/layers' },
+    '?layers=true': { kind: 'stored', suffix: '', query: { layers: 'true' }, serves: 'layers' },
+    '/layers': { kind: 'stored', suffix: '/layers', serves: 'layers' },
+    // [#20290] The plain read's draft branch: the pending draft ROW, a stored
+    // version — not the rendered world, which is `?preview=draft`.
+    '?state=draft': { kind: 'stored', suffix: '', query: { state: 'draft' }, serves: 'draft' },
     '/published': { kind: 'document', suffix: '/published' },
-    '/diff': { kind: 'stored', suffix: '/diff' },
+    '/diff': { kind: 'stored', suffix: '/diff', serves: 'diff' },
     '/history': { kind: 'events', suffix: '/history' },
     '/audit': { kind: 'events', suffix: '/audit' },
     '/references': {
@@ -342,17 +353,25 @@ const DOORS: Record<string, Door> = {
  * `savesApps` above, checked against that door below), and these three doors
  * are the only ones that honour it.
  *
+ * [#20290] And on the plain read's `?state=draft` branch — the carrier
+ * triage decided in 5859504238 under the same ruling's words: 「whoever can
+ * save it must see it whole, or a save drops entries silently」. A draft is a
+ * stored version, not a rendered one: Studio's designers merge it over the
+ * layered view and save the result back.
+ *
  * So on an exempt cell the door owes the STORED app whole where the plain
  * read would prune it — and nothing else changes: an app the plain read
  * refuses WHOLE is refused there too, author or not. Tests below hold the
  * exemption to exactly the author's partial `app` cells of exactly these
- * three doors: widening it to a fourth door, to a rendered door, to a
+ * four doors: widening it to another door, to a rendered door, to a
  * non-author, or to a whole refusal fails them rather than passing silently.
  */
 const AUTHOR_EXEMPTION = Object.freeze({
     ruling: '5856774816',
+    /** [#20290] The draft read's carrier decision, under the same ruling. */
+    draftCarrier: '5859504238',
     type: 'app',
-    doors: Object.freeze(['?layers=true', '/layers', '/diff']),
+    doors: Object.freeze(['?layers=true', '/layers', '/diff', '?state=draft']),
 });
 const authorExempt = (type: string, doorName: string, callerName: CallerName): boolean =>
     type === AUTHOR_EXEMPTION.type && AUTHOR_EXEMPTION.doors.includes(doorName)
@@ -492,14 +511,19 @@ describe('[#20156] the plain read answers what the census declares', () => {
 const LAYERS = ['code', 'overlay', 'effective'] as const;
 const bucketPaths = (diff: any): string[][] =>
     (['added', 'removed', 'changed'] as const).map((b) => (diff?.[b] ?? []).map((e: any) => e.path));
+/** The stored versions a `layers` or `draft` door served, each as the gate served it. */
+const servedVersions = (door: Door, res: any): any[] =>
+    (door.serves === 'draft' ? [plainItem(res)] : LAYERS.map((layer) => res.body?.[layer]));
+const servedLabels = (door: Door): string[] => (door.serves === 'draft' ? ['draft'] : [...LAYERS]);
 
-describe(`[#20156] ruling ${AUTHOR_EXEMPTION.ruling} — the author exemption is declared, and no wider than the author's partial app cells of three doors`, () => {
-    it('it names exactly /layers, ?layers=true and /diff — every stored-version door, and no other', () => {
+describe(`[#20156 · #20290] ruling ${AUTHOR_EXEMPTION.ruling} — the author exemption is declared, and no wider than the author's partial app cells of four doors`, () => {
+    it('it names exactly /layers, ?layers=true, /diff and ?state=draft — every stored-version door, and no other', () => {
         expect(AUTHOR_EXEMPTION.ruling).toBe('5856774816');
+        expect(AUTHOR_EXEMPTION.draftCarrier).toBe('5859504238');
         expect(AUTHOR_EXEMPTION.type).toBe('app');
         // Literal, not derived from `DOORS`: a door is exempted by a deliberate
         // edit here, never by inheriting a kind.
-        expect([...AUTHOR_EXEMPTION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true']);
+        expect([...AUTHOR_EXEMPTION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true', '?state=draft']);
         // ...and the literal is every stored-version door: none is left
         // pruning an author, none that renders is exempted.
         const storedDoors = Object.entries(DOORS).filter(([, d]) => d.kind === 'stored').map(([n]) => n);
@@ -524,6 +548,7 @@ describe(`[#20156] ruling ${AUTHOR_EXEMPTION.ruling} — the author exemption is
             '/diff app/crm × author',
             '/layers app/crm × author',
             '?layers=true app/crm × author',
+            '?state=draft app/crm × author',
         ]);
         // The whole refusals it does NOT lift — each is held to the plain
         // read's refusal by its census row below.
@@ -534,6 +559,8 @@ describe(`[#20156] ruling ${AUTHOR_EXEMPTION.ruling} — the author exemption is
             '/layers app/payroll × author',
             '?layers=true app/launchpad × author',
             '?layers=true app/payroll × author',
+            '?state=draft app/launchpad × author',
+            '?state=draft app/payroll × author',
         ]);
     });
 
@@ -573,6 +600,13 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                         protocol.getMetaItem.mockClear();
                         const res = await drive(rest, door.suffix, subject.type, subject.name, door.query);
                         const stored = find(subject.type, subject.name);
+                        if (door.serves === 'draft' && CALLERS[callerName].ctx) {
+                            // [#20290] The cell measured the draft branch: the
+                            // protocol was asked for the draft row. (An anonymous
+                            // caller is refused by the `/meta` auth gate before
+                            // any read, on every door alike.)
+                            expect(protocol.getMetaItem.mock.calls.map(([r]: any[]) => r?.state)).toContain('draft');
+                        }
 
                         if (exempt) {
                             // A caller who may write the app reads what is STORED —
@@ -580,10 +614,10 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                             // included, so a save of what they loaded keeps them.
                             expect(res.statusCode).toBe(200);
                             for (const s of subject.secrets) expect(text(res)).toContain(s);
-                            if (door.suffix === '/diff') {
+                            if (door.serves === 'diff') {
                                 expect(res.body).toEqual(await protocol.diffMetaItem.mock.results.at(-1)?.value);
                             } else {
-                                for (const layer of LAYERS) expect(res.body?.[layer]).toEqual(stored);
+                                for (const version of servedVersions(door, res)) expect(version).toEqual(stored);
                             }
                             return;
                         }
@@ -623,21 +657,21 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                             // are kept and whose VALUES are the pruned ones.
                             for (const s of subject.secrets) expect(text(res)).not.toContain(s);
                             const expected = navIds(plainItem(plain));
-                            if (door.suffix === '/diff') {
+                            if (door.serves === 'diff') {
                                 const raw = await protocol.diffMetaItem.mock.results.at(-1)?.value;
                                 expect(bucketPaths(res.body)).toEqual(bucketPaths(raw));
                                 const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
                                 expect(navIds({ navigation })).toEqual(expected);
                             } else {
-                                for (const layer of LAYERS) expect(navIds(res.body?.[layer])).toEqual(expected);
+                                for (const version of servedVersions(door, res)) expect(navIds(version)).toEqual(expected);
                             }
                             return;
                         }
                         if (want.kind === 'masked') {
                             for (const s of subject.secrets) expect(text(res)).not.toContain(s);
-                            if (door.suffix !== '/diff') {
-                                for (const layer of LAYERS) {
-                                    expect(fieldNames(res.body?.[layer])).toEqual(fieldNames(plainItem(plain)));
+                            if (door.serves !== 'diff') {
+                                for (const version of servedVersions(door, res)) {
+                                    expect(fieldNames(version)).toEqual(fieldNames(plainItem(plain)));
                                 }
                             }
                             return;
@@ -645,13 +679,16 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                         if (want.kind === 'deployment-pruned') {
                             // Not a per-caller gate: the stored dashboard, widget and all.
                             expect(text(res)).toContain('w_org_kpi');
+                            if (door.serves !== 'diff') {
+                                for (const version of servedVersions(door, res)) expect(widgetIds(version)).toEqual(widgetIds(stored));
+                            }
                             return;
                         }
                         // whole
                         for (const s of subject.secrets) expect(text(res)).toContain(s);
-                        if (door.suffix !== '/diff') {
-                            for (const layer of LAYERS) {
-                                expect(res.body?.[layer]).toEqual(stored);
+                        if (door.serves !== 'diff') {
+                            for (const version of servedVersions(door, res)) {
+                                expect(version).toEqual(stored);
                             }
                         }
                     });
@@ -742,11 +779,14 @@ describe('[#20156] edges', () => {
             const res = await drive(rest, door.suffix, 'app', 'crm', door.query);
             expect(res.statusCode, doorName).toBe(200);
             for (const s of ['nav_finance_ledger', 'nav_admin_runbook']) expect(text(res), doorName).not.toContain(s);
-            if (door.suffix === '/diff') {
+            if (door.serves === 'diff') {
                 const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
                 expect(navIds({ navigation }), doorName).toEqual(expected);
             } else {
-                for (const layer of LAYERS) expect(navIds(res.body?.[layer]), `${doorName} ${layer}`).toEqual(expected);
+                const labels = servedLabels(door);
+                servedVersions(door, res).forEach((version, i) => {
+                    expect(navIds(version), `${doorName} ${labels[i]}`).toEqual(expected);
+                });
             }
         }
     });
