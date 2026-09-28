@@ -300,6 +300,12 @@ describe('tree-scoped absence: no RLS policy inside the declared radius still ca
     'packages/spec/json-schema/',
     // Release-owned prose records the removal; never edited by a code PR.
     'content/docs/releases/',
+    // The liveness ledgers key one row per schema PROPERTY, so the RLS block of
+    // `permission.json` carries `operation`, `using`, `check` and the retired
+    // `tags` row side by side — a classification of the shape, not an
+    // authoring (measured: the one hit before this exclusion, and the row the
+    // tombstone route requires to STAY).
+    'packages/spec/liveness/',
   ];
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
