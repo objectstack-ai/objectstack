@@ -493,9 +493,15 @@ const DISPATCHER_DOMAINS = {
   // document while nothing was deleted. The restored guard answers 405, and it
   // must carry `Allow:` to name what is allowed to a machine, which
   // `deps.error` cannot express — the same reason `mcp.ts` hand-rolls its 405.
+  //
+  // [#20320] Was 1. The `/meta/:type` list answer now varies by
+  // `Accept-Language` — the list chain it shares with `RestServer` translates
+  // it and collapses each doc to the request's locale — so it must carry
+  // `Vary: Accept-Language`, as `RestServer`'s list does, and `deps.success`
+  // takes no headers. Its body is still `deps.success`'s envelope, spread.
   'meta.ts': {
-    handBuilt: 1,
-    note: 'one 405 on /metadata/:type/:name that must carry an `Allow:` header (`deps.error` takes none); the body is the declared envelope and its code is derived from the status',
+    handBuilt: 2,
+    note: 'one 405 on /metadata/:type/:name that must carry an `Allow:` header (`deps.error` takes none), and the /meta/:type list answer that must carry `Vary: Accept-Language` (`deps.success` takes none); both bodies are the declared envelope, the 405 code derived from the status',
   },
 
   // Kinds 1 and 2 together.
