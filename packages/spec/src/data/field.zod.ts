@@ -903,11 +903,11 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
     hidden: 'defaultHidden',
   },
 }, {
-  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.'),
-  label: z.string().optional().describe("Column header; defaults to the child field's label via hydration."),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself."),
-  width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).'),
-  required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.'),
+  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
+  label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
+  required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
     surface: 'this inline grid column option',
     history: INLINE_GRID_COLUMN_HISTORY,
@@ -915,21 +915,21 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`."),
+  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
   // renderer no longer has.
-  prefix: z.string().optional().describe("Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's."),
-  step: z.number().positive().optional().describe('Input step for numeric cells.'),
-  reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`."),
-  displayField: z.string().optional().describe('Label field shown for a picked lookup record.'),
-  idField: z.string().optional().describe('Id field stored for a picked lookup record.'),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.'),
-  accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything."),
-  defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden."),
-  computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.'),
-  expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here."),
+  prefix: z.string().optional().describe("Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's.").meta({ title: 'Prefix' }),
+  step: z.number().positive().optional().describe('Input step for numeric cells.').meta({ title: 'Step' }),
+  reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
+  displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
+  idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
+  defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
+  computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
+  expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here.").meta({ title: 'Expression' }),
   // #18972 — the upper bound is the SAME platform ceiling as `FieldSchema.scale`
   // below, reached by a different primitive: this key is the one objectui's
   // `computeRow` hands to `Number(v.toFixed(scale))`, which throws above 100.
@@ -937,10 +937,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // `type: 'currency'` by the `.superRefine` below (ruling B carried to this
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
-  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
-  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
-  requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
+    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
 }).superRefine((column, ctx) => {
   // #20045 — ruling B (5791803339) on #19629 retired `scale` from the currency
   // FIELD type; triage read this card as inherited from that ruling and from

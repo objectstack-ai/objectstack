@@ -258,6 +258,19 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'collapsed',
     why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), the other half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'collapsed' on its own), and this repeater offers the canonical `collapse` select",
   },
+  // ── The `inlineColumns` repeater (ruling record 5861442317, #19332) ──
+  //
+  // The `object.fields` subset precedent at the top of this ledger, on the
+  // field form: a curated repeater over four of `InlineGridColumnSchema`'s
+  // twenty keys. Unlike `object.fields` there is no fuller editor to defer to,
+  // so the long tail is authored in source, and the reason says why that is
+  // the right place for each group of keys left out.
+  {
+    kind: 'subset',
+    type: 'field',
+    path: 'inlineColumns',
+    why: "a curated inline-grid column (ruling record 5861442317, #19332): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+  },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
   // Three reasons, each read off the key's own `describe()` or its liveness
