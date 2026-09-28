@@ -82,6 +82,15 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// [#20336] The NUMBER-comparand declared-type door — the contract half of the
+// triage direction: a non-numeric STRING compared against a field whose
+// declared type is numeric (`NUMERIC_VALUE_TYPES`, by reference; `formula` by
+// its returnType) is refused at the engine's field-aware seam with
+// INVALID_FILTER 400, and a numeric one is narrowed to its number. Also the
+// platform's one numeric grammar for a string (a JSON number literal, finite),
+// which the record validator's number arm reads on the write side. The engine
+// door is its own card; this module is the contract only.
+export * from './filter-number-comparand-declared-type';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result
