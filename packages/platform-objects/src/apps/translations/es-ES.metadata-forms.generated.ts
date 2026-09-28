@@ -967,37 +967,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtros de usuario",
         helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
-      tabs: {
-        label: "Pestañas",
-        helpText: "Pestañas de filtro en la vista: cada pestaña aplica sus propias reglas de filtro"
-      },
-      "tabs.name": {
-        label: "Nombre"
-      },
-      "tabs.label": {
-        label: "Etiqueta"
-      },
-      "tabs.icon": {
-        label: "Icono"
-      },
-      "tabs.view": {
-        label: "Vista de lista"
-      },
-      "tabs.filter": {
-        label: "Filtro"
-      },
-      "tabs.order": {
-        label: "Orden de visualización"
-      },
-      "tabs.pinned": {
-        label: "Fijada"
-      },
-      "tabs.isDefault": {
-        label: "Pestaña predeterminada"
-      },
-      "tabs.visible": {
-        label: "Visibilidad"
-      },
       appearance: {
         label: "Apariencia",
         helpText: "allowedVisualizations: qué renderizadores pueden alternar los usuarios"

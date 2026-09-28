@@ -70,8 +70,25 @@ without it.
 ### Managed databases (hosted Postgres, MongoDB Atlas, …)
 
 Use the provider's snapshot, branching, or point-in-time-restore facilities.
-Nothing ObjectStack-specific applies. (Turso/libSQL applies only to ObjectStack
-Cloud-managed environments — the open framework does not ship that driver.)
+Nothing ObjectStack-specific applies.
+
+**Turso / libSQL** (`@objectstack/driver-turso`) is a published, optional
+driver in the open framework — see
+[Turso / libSQL needs one extra install](/docs/data-modeling/drivers#url--driver-inference-table).
+Its backup path depends on which of its three
+[modes](/docs/plugins/packages#objectstackdriver-turso) a datasource runs in:
+
+- **`local`** — a plain SQLite file (or `:memory:`) via the same
+  Knex + `better-sqlite3` engine as the [SQLite section](#sqlite-single-host)
+  above. Back it up the same way.
+- **`replica`** — an embedded replica: a local SQLite file kept in sync from a
+  remote database. The durable state is that local file, so the SQLite backup
+  procedure above applies to it too; the remote side is the provider's.
+- **`remote`** — pure `@libsql/client` requests over HTTP/WebSocket, with no
+  local file. There is nothing on this host to back up; use the snapshot or
+  point-in-time-restore facilities of whatever runs the remote libSQL server
+  (Turso's managed service, or a self-hosted `sqld`), the same as any other
+  managed database above.
 
 ## Backing up uploaded files
 

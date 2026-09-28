@@ -30,6 +30,8 @@
 // enumerated tomorrow is red on the day it lands rather than a month later.
 // `view.columns` / `view.sort` / `view.tabs` joined it with #19955: #17507
 // titled their item schemas, and `view.form.ts` now enumerates their children.
+// `view.tabs` left it again with #20301: the list view's own `tabs` is a
+// retired key, and its repeater left `view.form.ts` with it.
 
 import { describe, it, expect } from 'vitest';
 
@@ -139,12 +141,18 @@ describe('#17508 — the enumerated-repeater survey itself (controls before verd
     for (const type of ['action', 'app', 'dashboard', 'dataset', 'field', 'flow', 'page', 'report', 'skill', 'view']) {
       expect(carrying.has(type), `${type} enumerates a repeater's row properties`).toBe(true);
     }
-    // Lit — the three `view` repeaters are inside the population (#19955).
-    // `view.columns` is the union case: a string-array arm beside the
+    // Lit — the two surviving `view` repeaters are inside the population
+    // (#19955). `view.columns` is the union case: a string-array arm beside the
     // object-array arm whose properties these are.
-    for (const carrier of ['view:columns', 'view:sort', 'view:tabs']) {
+    for (const carrier of ['view:columns', 'view:sort']) {
       expect(CARRIERS, `${carrier} enumerates its row properties`).toContain(carrier);
     }
+    // Dark — `view:tabs` was the third, and it is GONE: the list view's own
+    // `tabs` is a `retiredKey()` tombstone (#20301), so a form row for it would
+    // be an input for a key the parse refuses. Its reappearance is a red here,
+    // not a silent regrowth of the catalog.
+    expect(CARRIERS, 'the retired `view.tabs` repeater must not come back').not.toContain('view:tabs');
+    expect(ROW_PROPERTIES.some((p) => p.id.startsWith('view:tabs.')), 'no `view:tabs.*` row property').toBe(false);
     // Dark — forms that enumerate none contribute none. A walk that matched
     // everything, or nothing, cannot pass both halves.
     for (const type of ['agent', 'tool', 'hook', 'position']) {

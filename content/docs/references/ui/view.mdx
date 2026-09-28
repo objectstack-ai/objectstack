@@ -826,7 +826,7 @@ Map view configuration
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
@@ -1115,22 +1115,6 @@ View filter rule
 | **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
 | **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
 
-### Nested Shape: `ListView.tabs[number]`
-
-Tab configuration for multi-tab view interface
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Tab identifier (snake_case) |
-| **label** | `string \| Record<string, string>` | optional | Display label |
-| **icon** | `string` | optional | Tab icon name |
-| **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
-| **order** | `integer` | optional | Tab display order |
-| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
-| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
-| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
-
 ### Nested Shape: `ListView.addRecord`
 
 | Property | Type | Required | Description |
@@ -1234,7 +1218,7 @@ Tab configuration for multi-tab view interface
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
@@ -1513,22 +1497,6 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
 | **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
-
-### Nested Shape: `ObjectListView.tabs[number]`
-
-Tab configuration for multi-tab view interface
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Tab identifier (snake_case) |
-| **label** | `string \| Record<string, string>` | optional | Display label |
-| **icon** | `string` | optional | Tab icon name |
-| **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
-| **order** | `integer` | optional | Tab display order |
-| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
-| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
-| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
 
 ### Nested Shape: `ObjectListView.addRecord`
 
@@ -1833,7 +1801,7 @@ Tab configuration for multi-tab view interface
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
@@ -1918,7 +1886,7 @@ Tab configuration for multi-tab view interface
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
@@ -2159,7 +2127,7 @@ This schema accepts one of the following structures:
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
@@ -2335,7 +2303,7 @@ This schema accepts one of the following structures:
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
-| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
