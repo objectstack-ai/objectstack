@@ -293,6 +293,8 @@
     "data/EngineAggregateOptions:context",
     "data/EngineAggregateOptions:groupBy",
     "data/EngineAggregateOptions:having",
+    "data/EngineAggregateOptions:search",
+    "data/EngineAggregateOptions:searchFields",
     "data/EngineAggregateOptions:timezone",
     "data/EngineAggregateOptions:where",
     "data/EngineCountOptions:context",
