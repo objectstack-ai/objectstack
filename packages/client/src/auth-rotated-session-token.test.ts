@@ -41,8 +41,42 @@
 //   that header in the shared `fetch` wrapper instead of on the rotating routes
 //   would rewrite the stored credential on an ordinary write — and every
 //   assertion in ① and ② would stay green.
+// - `④ the cold start stays outside every clocked window` — pins WHERE the
+//   first scenario's one-time cost is paid (next section).
+//
+// ## [#20327] Why one throwaway scenario runs at MODULE SCOPE
+//
+// The first scenario in a worker pays a one-time cost no later one sees:
+// better-auth's lazily imported module graph, sql.js's WASM compile, and the
+// first-use costs of the sync and the sign-up. The phases are measured in
+// `auth-login-register-envelope.test.ts`, which carries the same arrangement
+// and the same fix. Every case here used to carry an explicit `60_000`
+// timeout, which WIDENED the first case's window around that cost instead of
+// moving the cost out of it: every budget a cost is moved into can be
+// exhausted by a heavier shard (`check:test-source-alias`, clocked-window
+// rule).
+//
+// So the cost is now paid by a module-scope `await`, during COLLECTION, which
+// no vitest clock covers: `@vitest/runner@4.1.11` wraps hooks and test bodies
+// in `withTimeout(...)` and awaits the file import bare. This is the repo's
+// convention: "clocked windows measure behaviour, never loading" (AGENTS.md,
+// Build & Test). The warm-up is the file's own `signedIn()`, the arrangement
+// every case runs, so no list of loads can drift from what the cases pay. With
+// the cost moved out, the `60_000`s are gone and every case runs on the
+// default `testTimeout`.
+//
+// ⛔ It shares nothing a case asserts on. Its engine and manager are its own
+// and are destroyed before any case starts. Every case still builds a fresh
+// engine, a fresh `AuthManager` and a fresh sign-up. What it leaves warm is
+// process-level: the module registry, sql.js's compiled WASM and the JIT,
+// which the first case used to leave to every later case.
+//
+// ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
+// timeout: vitest clocks a hook exactly as it clocks a test body.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createHmac } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -261,12 +295,8 @@ const signedCredentialFor = async (
   return String(signed);
 };
 
-beforeEach(() => {
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-});
-afterEach(async () => {
-  vi.restoreAllMocks();
+/** Destroy every engine a scenario opened: after each case, and after the warm-up. */
+const closeEngines = async (): Promise<void> => {
   while (engines.length) {
     const e = engines.pop();
     try {
@@ -275,6 +305,21 @@ afterEach(async () => {
       /* noop */
     }
   }
+};
+
+// [#20327] The first scenario's one-time cost, paid during COLLECTION, which
+// no vitest clock covers (header, last section). ⛔ It stays at module scope,
+// and `④` below pins that.
+await signedIn();
+await closeEngines();
+
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await closeEngines();
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -335,7 +380,7 @@ describe("#16534 ① the card's own probe, with the manual re-set deleted", () =
     // status code: after the whole sequence the client is still holding a
     // credential that resolves to the same principal.
     expect(await principalForStoredToken(manager, client)).toBe(userId);
-  }, 60_000);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -358,7 +403,7 @@ describe('#16534 ② one assertion per rotating route — all three', () => {
     expect(await principalForStoredToken(manager, client)).toBe(userId);
     // …and the one it replaced is genuinely gone.
     expect(await principalFor(manager, before)).toBeNull();
-  }, 60_000);
+  });
 
   it('changePassword WITHOUT revokeOtherSessions rotates nothing and stores nothing', async () => {
     // The other half of the same route: `token` is `null` there, and a client
@@ -374,7 +419,7 @@ describe('#16534 ② one assertion per rotating route — all three', () => {
     expect(result.token).toBeNull();
     expect(storedToken(client)).toBe(before);
     expect(await principalForStoredToken(manager, client)).not.toBeNull();
-  }, 60_000);
+  });
 
   it('twoFactor.verifyTotp on the enrolment lane — the body echoes the LIVE token', async () => {
     const { engine, manager, client, email } = await signedIn();
@@ -390,7 +435,7 @@ describe('#16534 ② one assertion per rotating route — all three', () => {
     // The row behind the replaced value was deleted, so asserting only "the
     // stored token changed" would not have been enough.
     expect(await principalFor(manager, before)).toBeNull();
-  }, 60_000);
+  });
 
   it('twoFactor.disable — the credential arrives ONLY in the `set-auth-token` header', async () => {
     // The route triage singled out: it answers `{ status: true }`, so an
@@ -410,7 +455,7 @@ describe('#16534 ② one assertion per rotating route — all three', () => {
     expect(storedToken(client)).not.toBe(before);
     expect(await principalForStoredToken(manager, client)).toBe(userId);
     expect(await principalFor(manager, before)).toBeNull();
-  }, 60_000);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -439,7 +484,7 @@ describe('#16534 ③ the negative control — a NON-rotating route changes nothi
     // Still the same live session at the end of it — the invariant is "did not
     // move", not "was emptied".
     expect(await principalForStoredToken(manager, client)).not.toBeNull();
-  }, 60_000);
+  });
 
   it("verifyBackupCode's already-logged-in lane leaves the stored credential byte-identical", async () => {
     // `/two-factor/verify-backup-code` shares `AuthTwoFactorVerificationResult`
@@ -472,5 +517,35 @@ describe('#16534 ③ the negative control — a NON-rotating route changes nothi
     expect(result.token).not.toBe(signed);
     expect(storedToken(bearerClient), 'verifyBackupCode moved the stored credential').toBe(signed);
     expect(await principalForStoredToken(manager, bearerClient)).toBe(userId);
-  }, 60_000);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+describe('#16534 ④ the cold start stays outside every clocked window', () => {
+  it('pays the first scenario at module scope, no hook carries it, and no case widens its clock', () => {
+    // [#20327] Read off this file's own text, so "do not move it into a
+    // hook" is an assertion rather than a sentence nobody reads.
+    const code = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+
+    // Exactly one warm-up call, and it opens its own line at column 0. So it
+    // sits in no function body, which is what "paid during collection"
+    // reduces to. Comment lines start with `//` and cannot match.
+    expect(code.match(/^await signedIn\(\);$/gm) ?? []).toHaveLength(1);
+
+    // ⛔ No `before*` hook may come back to carry it: vitest clocks a hook
+    // with `hookTimeout` exactly as it clocks a test body with `testTimeout`.
+    // This file's one hook is the console-spy `beforeEach`. Each hook is read
+    // up to the next column-0 `});`, so a hook indented inside a `describe`
+    // reads on to that block's close and cannot hide a scenario from this.
+    const hooks = [...code.matchAll(/^\s*before(?:All|Each)\s*\(([\s\S]*?)^\}\);$/gm)].map(
+      (m) => m[1],
+    );
+    expect(hooks).toHaveLength(1);
+    for (const body of hooks) expect(body).not.toMatch(/\b(signedIn|arrange)\(/);
+
+    // ⛔ And no case widens its own clock again. Every case here used to end
+    // `}, 60_000);`, which kept the cold start inside a wider window instead
+    // of moving it out.
+    expect(code).not.toMatch(/^\s*\},\s*[\d_]+\s*\);$/m);
+  });
 });
