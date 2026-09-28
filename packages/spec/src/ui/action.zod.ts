@@ -1608,10 +1608,13 @@ const actionObject = () => strictObject({
    * surface and defaults `'self'`; the handler convention is a shipped surface
    * and keeps new-tab.
    *
-   * The console consumer is not wired yet — the SPA navigation branch,
-   * `executeAPI` navigation handling and `${result.*}` interpolation are the
-   * downstream objectui half (Blocked-by #9566/#9474; tracked in the liveness
-   * ledger at `planned` strength with the amend-on-landing instruction).
+   * The console consumer is objectui's `ActionRunner` (`handlePostExecution`
+   * → `readOnSuccessNavigation` → `navigateOnSuccess`), read at the
+   * `.objectui-sha` pin `f8a9d0fb`. After an `api` or `script` action
+   * succeeds, it interpolates `navigate` with the `${param.*}`, `${ctx.*}` and
+   * `${result.*}` scopes and hands the URL to the console's router. It opens
+   * a new tab only on `openIn: 'newTab'`. The liveness ledger's two
+   * `onSuccess` rows are `live` and cite this reader.
    *
    * **The doubled channel is refused where the schema can see it** (#11519,
    * maintainer ruling 2026-08-24): a `type: 'script'` action declaring BOTH

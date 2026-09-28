@@ -65,6 +65,9 @@ import {
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
+  NUMERIC_VALUE_TYPES,
+  COMPUTED_VALUE_TYPES,
+  NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -516,6 +519,84 @@ export function normalizeMultiValueFields(
 }
 
 /**
+ * [#20308] A BLANK string on a non-string-typed column is that column's typed
+ * blank, `null` — the write door's one reading of it.
+ *
+ * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
+ * whitespace. "Non-string-typed" is the spec's `NON_TEXT_STORED_VALUE_TYPES` —
+ * the numeric class (`progress` and `summary` included), the boolean class,
+ * `date`, `datetime` and `time`. Read as the constant, never re-listed.
+ *
+ * ## Why the door has to say it
+ *
+ * The validator has always READ a blank as missing: `validateOne` returns on
+ * `isMissing` before any type check. Nothing WROTE it that way, so the blank
+ * went on to the driver exactly as sent — memory and SQLite stored `''` in a
+ * number, boolean, date, datetime or time column, and PostgreSQL refused the
+ * statement (`22P02` / `22007`, a `500` at REST). One clear of one field, three
+ * outcomes; objectui's date and time boxes send `''` when cleared. This makes
+ * storage agree with the platform's own reading.
+ *
+ * ## What it does NOT touch
+ *
+ * ⛔ Every string-stored column — text, lookup ids, select values. There `''`
+ * is a value, and the spec's value round-trip fixture pins it (`str_empty`:
+ * an empty string must not become null). What "empty" means for those types is
+ * a separate question, not answered here. ⛔ A non-blank value, and every
+ * non-string value, of any type: `null`, `0`, `false`, `'abc'` pass through
+ * untouched, so every type check and refusal downstream sees what it saw.
+ *
+ * ## Where it runs, and why there
+ *
+ * `ObjectQL.insert()` / `update()` apply it to the CALLER'S payload before
+ * anything else reads it — before the middleware chain, the caller-value
+ * snapshots, `defaultValue`s, the hooks, the strips and validation. So every
+ * stage agrees on one image: a `readonlyWhen` lock judges the same value it
+ * snapshots, a blank takes a declared `defaultValue` on insert exactly as an
+ * explicit `null` does (`applyFieldDefaults`, #2706), and `required` refuses
+ * it exactly as it refuses `null`. `ObjectQL.validate()` (the dry run) applies
+ * it at the same point, so a preview agrees with the write. ⛔ No driver copy:
+ * every REST, batch and import door reaches the engine through those methods.
+ *
+ * A value a `before*` hook writes AFTER the door is the hook's own, and is not
+ * normalised: a server-side producer writing `''` into a typed column is fixed
+ * at that producer.
+ *
+ * Takes one record or an array of them (the insert door's batch form). Pure:
+ * the caller's objects are never mutated — the same reference comes back when
+ * nothing changed, else a shallow copy (per row, and a copied array).
+ */
+export function normalizeBlankTypedValues<T>(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: T,
+): T {
+  const fields = objectSchema?.fields;
+  if (!fields || !data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    let rows: unknown[] | undefined;
+    for (let i = 0; i < data.length; i++) {
+      const row = normalizeBlankTypedRow(fields, data[i]);
+      if (row !== data[i]) (rows ??= data.slice())[i] = row;
+    }
+    return (rows ?? data) as T;
+  }
+  return normalizeBlankTypedRow(fields, data) as T;
+}
+
+function normalizeBlankTypedRow(fields: Record<string, FieldDef>, row: unknown): unknown {
+  if (!isPlainRecord(row)) return row;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(row)) {
+    if (typeof value !== 'string' || !isMissing(value)) continue;
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+    if (!def || !NON_TEXT_STORED_VALUE_TYPES.has(def.type)) continue;
+    (out ??= { ...row })[name] = null;
+  }
+  return out ?? row;
+}
+
+/**
  * Coerce `boolean`-typed fields from their SQL storage form (integer `0`/`1`,
  * or the strings `'0'`/`'1'`/`'true'`/`'false'`) into real JS booleans, on a
  * SHALLOW COPY of `row`. SQLite/libsql have no native boolean, so a driver
@@ -758,12 +839,36 @@ function validateOne(
     return null;
   }
 
-  // ── number types ────────────────────────────────────────────────
-  if (t === 'number' || t === 'currency' || t === 'percent' || t === 'rating' || t === 'slider') {
+  // ── number types (NUMERIC_VALUE_TYPES ∖ COMPUTED_VALUE_TYPES) ────
+  // The door is the SPEC'S numeric class minus the spec's server-computed
+  // class, both read as constants for the reason the string branch above reads
+  // `BOUNDED_STRING_FIELD_TYPES` (#11875): a type joining either set there moves
+  // this door with no second list to forget. It was a hand-list of five until
+  // #20308 — `progress`, a member of the numeric class, had no type check at
+  // all, so `'abc'` was stored verbatim in a numeric column on memory and SQLite
+  // (and failed at the driver, as a 500, on PostgreSQL).
+  //
+  // ⛔ `summary` is subtracted, by the seat ruling on #20308: it is also in
+  // `COMPUTED_VALUE_TYPES` — 「Server-computed types: never client-written;
+  // shape is producer-owned」 — so its value's shape is the roll-up producer's
+  // to decide, not this caller-value check's. Judging it here refused the
+  // producer's own write: a `max` / `min` roll-up over a temporal child field
+  // recomputes to a date string, and the child write that triggered it then
+  // failed with `ERR_SUMMARY_RECOMPUTE` on memory and SQLite. A blank on a
+  // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
+  // whole numeric class).
+  if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) {
       return fail('invalid_number');
     }
+    // [#20308] `progress` joined the TYPE check above, and only that. The
+    // bounds and `scale` below keep the five types they always read: `scale`'s
+    // own contract names the types it is enforced on (`number`, `percent`,
+    // `rating`, `slider`), and `min` / `max` on `progress` were never enforced;
+    // starting to enforce either would narrow what a caller may write, which is
+    // a separate decision from "a numeric column holds a number".
+    if (t === 'progress') return null;
     if (def.min !== undefined && n < def.min) {
       return fail('min_value', { min: def.min });
     }

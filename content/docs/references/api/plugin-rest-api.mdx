@@ -35,7 +35,7 @@ Architecture Alignment:
 // registered by plugin-hono-server; `examples/app-showcase`'s
 // recalc-endpoint is a real consumer of this exact shape). The worked
 // manifest example that used to sit here declared `contributes.routes`,
-// which was removed in @objectstack/spec 17 (#10726): nothing ever read
+// which was removed in @objectstack/spec 17 (commit bc56e1881): nothing ever read
 // it, so every route it showed parsed cleanly and served nothing.
 class RestApiPlugin {
   name = 'rest_api';

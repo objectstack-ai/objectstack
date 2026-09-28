@@ -103,9 +103,14 @@ import {
 } from '@objectstack/spec/api';
 import { z } from 'zod';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
-// [#20061 / #20062] The DECLARED request schemas two query-reading doors parse
-// their numeric parameters through — see `readDeclaredQueryNumber` below.
-import { ListImportJobsRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
+// [#20061 / #20062 / #20139] The DECLARED request schemas three query-reading
+// doors parse their numeric parameters through — see `readDeclaredQueryNumber`
+// below.
+import {
+    ListImportJobsRequestSchema,
+    HistoryMetaItemRequestSchema,
+    AuditMetaItemRequestSchema,
+} from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
@@ -670,16 +675,20 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
 ];
 
 /**
- * [#20062] The reading of a ROW-COUNT query parameter on a door whose request
- * has no declared schema (`GET /data/:object/export`, `GET /search`): a whole
- * number, and nothing about range. Range stays each door's own business — the
- * export route's `Math.max(1, …)` floor and 50000 cap, `searchAll`'s `[1, 100]`
- * clamp — because neither card this closes takes a position on bounds; it only
- * refuses a value the door cannot read as a count at all. The same rule
+ * [#20062 / #20139] The reading of a numeric query parameter on a door whose
+ * request has no declared schema: a whole number, and nothing about range.
+ * Every such parameter in this file counts or addresses whole things — rows
+ * (`GET /data/:object/export` `limit`; `GET /search` `limit` / `perObject`;
+ * `GET /approvals/requests` `limit` / `offset`) or history versions
+ * (`GET /meta/:type/:name/diff` `from` / `to`). Range stays each door's own
+ * business — the export route's `Math.max(1, …)` floor and 50000 cap,
+ * `searchAll`'s `[1, 100]` / `[1, 25]` clamps, the approvals service's
+ * `[1, 200]` — because no card this closes takes a position on bounds; it only
+ * refuses a value the door cannot read as a whole number at all. The same rule
  * `@objectstack/runtime`'s `parseIntegerParam` applies without `bounds`, which
  * this package cannot import (runtime depends on rest).
  */
-const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
+const UNDECLARED_WHOLE_NUMBER_PARAM = z.number().int().optional();
 
 /**
  * [#20061 / #20062] Read ONE numeric query parameter against the door's own
@@ -721,17 +730,28 @@ const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
  * ## The refusal
  *
  * THROWN as `validationFailure` (`@objectstack/types`), never written here:
- * every door that calls this already sends its catch through
- * `handleRouteError` / `mapDataError`, which answer `400` with the data
- * surface's `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
- * declared-schema body doors in this file answer. `fields[].code` comes from
- * `zodIssuesToFields`, so it is the ADR-0114 D3 catalog member for the failed
- * constraint (`invalid_type`, `min_value`, `max_value`), with `field` naming
- * the parameter.
+ * every door that calls this sends the throw through `handleRouteError` /
+ * `mapDataError`, which answer `400` with the data surface's
+ * `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
+ * declared-schema body doors in this file answer. A door whose own catch maps
+ * something else (`GET /approvals/requests` answers every throw
+ * `500 APPROVAL_REQUEST_LIST_FAILED`) catches the read itself and hands it to
+ * `handleRouteError`. `fields[].code` comes from `zodIssuesToFields`, so it is
+ * the ADR-0114 D3 catalog member for the failed constraint (`invalid_type`,
+ * `min_value`, `max_value`), with `field` naming the parameter.
  *
  * Call it AFTER `refuseRepeatedQueryParams` has run for `param`: that gate
  * refuses a repeated occurrence and unwraps a one-element array, so what
  * reaches this function is a single string or nothing.
+ *
+ * ## The census that keeps the family closed
+ *
+ * [#20139] `rest-server-query-number-census.test.ts` finds every numeric
+ * coercion in this file (`Number(…)`, `parseInt` / `parseFloat`, unary `+`)
+ * and fails on any it has not classified: this function's own `Number(raw)`, a
+ * value that is not a request query value, or a ledgered exemption with its
+ * reason. A new bare `Number(req.query.x)` therefore reddens its PR instead of
+ * reopening the family one door at a time.
  */
 function readDeclaredQueryNumber(
     queryParams: Record<string, unknown> | undefined,
@@ -7485,9 +7505,16 @@ export class RestServer {
                     // `?limit=` silently returned the UNLIMITED history instead
                     // of the page the caller asked for.
                     if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit'])) return;
-                    const sinceSeq = req.query?.sinceSeq !== undefined
-                        ? Number(req.query.sinceSeq)
-                        : undefined;
+                    // [#20139] `sinceSeq` is parsed through its DECLARATION
+                    // (`HistoryMetaItemRequestSchema.sinceSeq`, `z.number().optional()`),
+                    // the way `limit` is just below: `?sinceSeq=abc` used to be `NaN`,
+                    // dropped by the spread below, and answered with the log read from
+                    // the START; `?sinceSeq=` became `Number('')` = 0, a cursor the
+                    // repository applies (`event_seq <= 0` rows skipped) that the
+                    // caller never sent. Both are refused now; any finite number is
+                    // still forwarded exactly as before.
+                    const sinceSeq = readDeclaredQueryNumber(req.query, 'sinceSeq',
+                        HistoryMetaItemRequestSchema.shape.sinceSeq, { emptyIsAbsent: false });
                     // [#20062] `limit` is parsed through its DECLARATION
                     // (`HistoryMetaItemRequestSchema.limit`, `z.number().optional()`),
                     // not coerced: `?limit=abc` used to be `NaN`, dropped by the
@@ -7592,9 +7619,9 @@ export class RestServer {
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
                         ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
-                        ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
-                        // Already finite or absent — the declared parse above refuses
-                        // anything else, so no `Number.isFinite` drop is left here.
+                        // Both already finite or absent — the declared parses above
+                        // refuse anything else, so no `Number.isFinite` drop is left here.
+                        ...(sinceSeq !== undefined ? { sinceSeq } : {}),
                         ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.historyMetaItem(historyRequest);
@@ -7677,9 +7704,16 @@ export class RestServer {
                     // [#6877] Same `Number(...)` → `NaN` → dropped-limit shape as
                     // the history twin above.
                     if (refuseRepeatedQueryParams(req, res, ['limit'])) return;
-                    const limit = req.query?.limit !== undefined
-                        ? Number(req.query.limit)
-                        : undefined;
+                    // [#20139] Parsed through its DECLARATION
+                    // (`AuditMetaItemRequestSchema.limit`, `z.number().optional()`),
+                    // the history twin's reading: `?limit=abc` used to be `NaN`,
+                    // dropped by the spread below, and answered with the producer's
+                    // default 100 events; `?limit=` became `Number('')` = 0, which the
+                    // implementation clamps to ONE event. Both are refused now; any
+                    // finite number is still forwarded, and the implementation's own
+                    // `[1, 500]` clamp is unchanged.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        AuditMetaItemRequestSchema.shape.limit, { emptyIsAbsent: false });
                     // [#20156] The history twin's gate, for the same reason: the
                     // audit trail of an item the plain read refuses this caller
                     // is refused with the plain read's answer. See
@@ -7736,7 +7770,9 @@ export class RestServer {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId: ctx?.tenantId ?? null,
-                        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+                        // Already finite or absent — the declared parse above
+                        // refuses anything else.
+                        ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.auditMetaItem(auditRequest);
                     res.json(result);
@@ -7751,7 +7787,7 @@ export class RestServer {
         });
 
         // POST /meta/:type/:name/publish — promote the pending draft
-        // overlay to live. 404 [no_draft] when nothing to publish.
+        // overlay to live. 404 `NO_DRAFT` when nothing to publish.
         registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/publish`,
@@ -8084,18 +8120,28 @@ export class RestServer {
                         });
                         return;
                     }
-                    const parseV = (raw: any): number | undefined => {
-                        if (raw === undefined || raw === null || raw === '') return undefined;
-                        const n = Number(raw);
-                        return Number.isFinite(n) ? n : undefined;
-                    };
-                    // [#6877] `parseV` returns `undefined` for `NaN`, and the
-                    // spreads below then omit the bound entirely — so a repeated
-                    // `?from=` quietly diffed a different pair of versions and
-                    // answered 200.
+                    // [#6877] A repeated `?from=` became `NaN`, the spreads below
+                    // omitted the bound, and the door quietly diffed a different
+                    // pair of versions and answered 200.
                     if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
-                    const fromVersion = parseV(req.query?.from ?? req.query?.fromVersion);
-                    const toVersion = parseV(req.query?.to ?? req.query?.toVersion);
+                    // [#20139] The same drop for a SINGLE unreadable value: the
+                    // `parseV` helper that stood here answered `undefined` for
+                    // `?from=abc` (and `Infinity`), so `diffMetaItem` substituted
+                    // "the version before `to`" — or, for `?to=abc`, the CURRENT
+                    // body — and the door answered 200 with a comparison nobody
+                    // asked for; `?from=1.5` was forwarded and diffed against a
+                    // version that cannot exist. No request schema is declared for
+                    // this door, so a version reads as a whole number. The name the
+                    // caller used is the one read (and the one a refusal names):
+                    // `from` / `to` win over `fromVersion` / `toVersion` exactly as
+                    // the old `??` had it, and an empty value stays absent, as
+                    // `parseV('')` already answered.
+                    const fromParam = req.query?.from != null ? 'from' : 'fromVersion';
+                    const toParam = req.query?.to != null ? 'to' : 'toVersion';
+                    const fromVersion = readDeclaredQueryNumber(req.query, fromParam,
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    const toVersion = readDeclaredQueryNumber(req.query, toParam,
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
                     // [#20156] A diff discloses BOTH versions' values — for a
                     // doc its `content`, for an app its `navigation`, for an
                     // object its `fields` — so it owes the plain read's
@@ -9810,9 +9856,17 @@ export class RestServer {
                     // the reading is "a whole number"; the floor and the cap below
                     // are this door's own and are unchanged.
                     const limitParam = readDeclaredQueryNumber(q, 'limit',
-                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: false });
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
                     const requestedLimit = limitParam !== undefined ? Math.max(1, limitParam) : 10_000;
                     const limit = Math.min(requestedLimit, HARD_CAP);
+                    // [#20139] Deliberately NOT read through `readDeclaredQueryNumber`
+                    // — the one ledgered exemption of the family's census
+                    // (`rest-server-query-number-census.test.ts`, which also pins
+                    // why). `page` sets only the CHUNK size of the `findData` loop
+                    // below: whatever it holds, readable or not, the export streams
+                    // the same rows in the same order, so no value of it can widen or
+                    // substitute the answer, and refusing one would turn a correct
+                    // export into a `400`.
                     const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
                     // Colour cells only for xlsx within the style cap; decided up
                     // front (before streaming) since we can't know the true row
@@ -10220,12 +10274,19 @@ export class RestServer {
                     // `searchAll`'s own `[1, 100]` clamp is unchanged, and an empty
                     // `?limit=` stays absent as the old falsy guard had it.
                     const limit = readDeclaredQueryNumber(req.query, 'limit',
-                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: true });
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    // [#20139] `perObject`, the same way: `?perObject=abc` reached
+                    // `searchAll` as `NaN`, its `Math.max(1, Math.min(25, NaN))` is
+                    // `NaN`, and the per-object cap was silently gone. Whole number;
+                    // the `[1, 25]` clamp stays `searchAll`'s own, and an empty
+                    // `?perObject=` stays absent as the old falsy guard had it.
+                    const perObject = readDeclaredQueryNumber(req.query, 'perObject',
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
                     const result = await searchAll.call(p, {
                         q,
                         objects,
                         limit,
-                        perObject: req.query?.perObject ? Number(req.query.perObject) : undefined,
+                        perObject,
                         ...(context ? { context } : {}),
                     });
                     res.json(result);
@@ -12777,8 +12838,30 @@ export class RestServer {
                         .flatMap((s: any) => String(s).split(','))
                         .map((s: string) => s.trim())
                         .filter(Boolean);
-                    const limit = q.limit != null ? Number(q.limit) : undefined;
-                    const offset = q.offset != null ? Number(q.offset) : undefined;
+                    // [#20139] Read, not coerced. `?limit=abc` (or `Infinity`) was
+                    // `NaN`, dropped by an `isFinite` guard, and answered with the
+                    // UNPAGED 500-row window and no `total` — a caller asking for a
+                    // page got a different shape of answer; `?offset=abc` was dropped
+                    // to the first page. `?limit=` / `?offset=` became `Number('')` =
+                    // 0: a ONE-row page, or the service's 50-row paged mode the caller
+                    // never asked for — so empty is refused here, not read as absent.
+                    // No request schema is declared for this door, so both read as
+                    // whole numbers; the service's own `[1, 200]` clamp is unchanged.
+                    //
+                    // Caught HERE, not by the catch below: that one answers every
+                    // throw `500 APPROVAL_REQUEST_LIST_FAILED`, and a query value the
+                    // door cannot read is the caller's `400`.
+                    let limit: number | undefined;
+                    let offset: number | undefined;
+                    try {
+                        limit = readDeclaredQueryNumber(q, 'limit',
+                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                        offset = readDeclaredQueryNumber(q, 'offset',
+                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                    } catch (refusal: any) {
+                        handleRouteError(res, refusal);
+                        return;
+                    }
                     const listFilter = {
                         object: q.object,
                         recordId: q.recordId ?? q.record_id,
@@ -12786,8 +12869,8 @@ export class RestServer {
                         approverId: approverIds.length ? approverIds : undefined,
                         submitterId: q.submitterId ?? q.submitter_id,
                         q: typeof q.q === 'string' ? q.q : undefined,
-                        limit: Number.isFinite(limit) ? limit : undefined,
-                        offset: Number.isFinite(offset) ? offset : undefined,
+                        limit,
+                        offset,
                     };
                     const rows = await svc.listRequests(listFilter, context ?? {});
                     // `total` only when the caller pages — counting costs a

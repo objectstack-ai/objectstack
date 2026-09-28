@@ -247,7 +247,9 @@ describe('migration chain (ADR-0087 D3)', () => {
 
     it('finds the entry, and it still explains the #4610 orphaning (anti-vacuity)', () => {
       expect(entry()).toBeDefined();
-      expect(entry()!.reason).toMatch(/#4610/);
+      // The orphaning is stated in words, not by tracker number: the reason is
+      // printed to the author by `os migrate meta`.
+      expect(entry()!.reason).toMatch(/dual-source cleanup removed the `\.\/ui` copies/);
       expect(entry()!.reason).toMatch(/NotificationConfigSchema/);
     });
 
@@ -261,7 +263,7 @@ describe('migration chain (ADR-0087 D3)', () => {
     it('names the correction and keeps the removal itself standing', () => {
       const r = entry()!.reason;
       expect(r).toMatch(/falsified/);
-      expect(r).toMatch(/#5781/);
+      expect(r).toMatch(/objectui, which re-exported both names/);
       // ⛔ A correction to the evidence is not an un-retirement.
       expect(r).toMatch(/removal itself stands/);
     });

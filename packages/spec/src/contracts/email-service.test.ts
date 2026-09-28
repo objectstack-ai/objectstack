@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import type { SendEmailInput, SendTemplateInput } from './email-service';
 
 /**
- * #11741 (Decision 2 of #11303) — `SendEmailInput` is widened with an
+ * Commit b706af987 (Decision 2 of #11303) — `SendEmailInput` is widened with an
  * OPTIONAL `organizationId` so producers that already hold an organization
  * can thread it to `plugin-email`'s writer, which stamps
  * `sys_email.organization_id` verbatim.

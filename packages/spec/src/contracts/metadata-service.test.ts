@@ -158,7 +158,7 @@ describe('Metadata Service Contract', () => {
 
   // (The `overlay management` implementation case left with the optional
   // `getOverlay` / `saveOverlay` / `removeOverlay` / `getEffective` members —
-  // #13135, ADR-0049: they belonged to the paper customization protocol no
+  // commit 9e0ba21a1, ADR-0049: they belonged to the paper customization protocol no
   // route ever served.)
 
   it('should allow implementation with watch support', () => {

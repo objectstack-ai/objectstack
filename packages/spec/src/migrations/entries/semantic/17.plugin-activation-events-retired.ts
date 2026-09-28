@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     + 'ADR-0049 through a new ADR, with a vocabulary its executor actually honours)',
   reason:
     'Both `activationEvents` keys — and the `ActivationEventSchema` trigger vocabulary '
-    + 'they embedded (`onCommand` / `onRoute` / … / `onView` after the #4653 convergence) — '
+    + 'they embedded (`onCommand` / `onRoute` / … / `onView`, once the kernel and studio '
+    + 'copies had converged on the kernel\'s structured `{ type, pattern }` shape) — '
     + 'promised lazy plugin activation ("plugins remain dormant until an activation event '
     + 'fires") that no runtime in objectstack, cloud, cloud-v1 or objectui ever '
     + "implemented: nothing anywhere read the key, every plugin activates immediately, and "
@@ -31,8 +32,11 @@ export const entry: SemanticMigration = {
     + 'with a guidance prescription (as are its former VS Code-flavoured aliases '
     + '`activation` / `events` / `onActivate`), and the orphaned `ActivationEventSchema` / '
     + '`ActivationEvent` exports are removed from `./kernel` and `./studio` with the keys '
-    + '(#3950: an exported schema with no consumer is read as a capability). #4657. '
-    + 'SUPERSEDED ON THE KERNEL SIDE by #4834 (same unreleased major): the whole '
+    + '(the lesson of the unwired plugin sandboxing / integrity / approval config removed '
+    + 'before this: an exported schema with no consumer is read as a capability). Both keys '
+    + 'took ADR-0049\'s REMOVE answer, not ENFORCE, while protocol 17 was still unreleased. '
+    + 'SUPERSEDED ON THE KERNEL SIDE by the maintainer\'s REMOVE '
+    + 'ruling on the rest of the plugin-runtime family (same unreleased major): the whole '
     + '`DynamicLoadRequest` shape — and the rest of the plugin-runtime family with it — '
     + 'was removed, which took this key\'s `retiredKey()` tombstone with it. That is '
     + 'strictly stronger than the tombstone, not weaker: there is no longer a '
@@ -43,7 +47,8 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'No `defineStudioPlugin` input authors `activationEvents` — authoring it is an '
     + 'unknown key on the strict studio manifest and a parse error carrying the '
-    + 'prescription. On the kernel side the stronger #4834 criterion applies instead: '
+    + 'prescription. On the kernel side the stronger criterion of the plugin-runtime '
+    + 'family\'s removal applies instead: '
     + 'there is no `DynamicLoadRequest` type or schema left to author it into at all. No '
     + 'code imports `ActivationEventSchema` / `ActivationEvent` from '
     + '`@objectstack/spec/kernel` or `@objectstack/spec/studio` (TS2305 after upgrade). '

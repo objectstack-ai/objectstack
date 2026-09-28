@@ -195,7 +195,7 @@ describe('CrudOperation', () => {
   });
 });
 
-// `CrudEndpointPatternSchema` tests were removed with the schema (#14691, ADR-0049
+// `CrudEndpointPatternSchema` tests were removed with the schema (commit b3a63d32c, ADR-0049
 // enforce-or-remove): its only consumer, `crud.patterns`, is tombstoned below.
 
 describe('CrudEndpointsConfigSchema', () => {
@@ -203,7 +203,7 @@ describe('CrudEndpointsConfigSchema', () => {
     const config = CrudEndpointsConfigSchema.parse({});
 
     expect(config.dataPrefix).toBe('/data');
-    // `objectParamStyle` is a tombstone since #14691: the parsed output carries
+    // `objectParamStyle` is a tombstone since commit b3a63d32c: the parsed output carries
     // no default for it any more.
     expect(config).not.toHaveProperty('objectParamStyle');
   });
@@ -263,7 +263,7 @@ describe('MetadataEndpointsConfigSchema', () => {
 
     expect(config.prefix).toBe('/meta');
     expect(config.enableCache).toBe(true);
-    // `cacheTtl` is a tombstone since #14691: no default is materialized.
+    // `cacheTtl` is a tombstone since commit b3a63d32c: no default is materialized.
     expect(config).not.toHaveProperty('cacheTtl');
   });
 
@@ -368,7 +368,7 @@ describe('BatchEndpointsConfigSchema', () => {
 
     expect(config.maxBatchSize).toBe(200);
     expect(config.enableBatchEndpoint).toBe(true);
-    // `defaultAtomic` is a tombstone since #14691: no default is materialized.
+    // `defaultAtomic` is a tombstone since commit b3a63d32c: no default is materialized.
     expect(config).not.toHaveProperty('defaultAtomic');
   });
 

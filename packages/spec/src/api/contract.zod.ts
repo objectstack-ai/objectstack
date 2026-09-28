@@ -51,7 +51,7 @@ export const ApiErrorSchema = lazySchema(() => z.object({
   message: z.string().describe('Readable error message'),
   /**
    * The producer's user-facing refusal text, verbatim — the producer-side
-   * opt-in channel for "this exact text is addressed to the END USER" (#9934;
+   * opt-in channel for "this exact text is addressed to the END USER" (commit 79c46da90;
    * maintainer ruling 2026-08-19 on objectui#5210, option 1).
    *
    * ## The problem it solves
