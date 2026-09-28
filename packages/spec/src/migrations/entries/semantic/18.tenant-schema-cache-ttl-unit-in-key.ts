@@ -28,9 +28,10 @@ export const entry: SemanticMigration = {
     + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
     + 'and its test the only occurrences are the four generated rows in '
     + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
-    + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
-    + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
+    + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells it 0 '
+    + 'times across 9283 tracked files, against lit controls `TTL` 181 and `tenant` 1185 on the '
+    + 'same corpus (0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+    + 'and 987, at 62597c588).',
   acceptanceCriteria:
     'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
     + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '

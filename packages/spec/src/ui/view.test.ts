@@ -3646,17 +3646,12 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
     expect(listView.appearance?.allowedVisualizations).toHaveLength(3);
   });
 
-  it('should accept list view with tabs', () => {
-    const listView = ListViewSchema.parse({
-      columns: ['name', 'status'],
-      tabs: [
-        { name: 'my_customers', label: 'My Customers', isDefault: true },
-        { name: 'all_records', label: 'All Records' },
-      ],
-    });
-    expect(listView.tabs).toHaveLength(2);
-    expect(listView.tabs![0].isDefault).toBe(true);
-  });
+  // [#20301] "should accept list view with tabs" was REMOVED: the list view's
+  // own `tabs` is retired (no renderer ever drew it — the tab strip above an
+  // object's records lists its `listViews`). The refusal at every list-view
+  // door, the D2 conversion and the tree-scoped absence pin live in
+  // `view-list-tabs-retirement.test.ts`, the one place that authors the key on
+  // purpose.
 
   it('should accept list view with addRecord', () => {
     const listView = ListViewSchema.parse({
@@ -3714,10 +3709,6 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
         showDescription: true,
         allowedVisualizations: ['grid', 'gallery', 'kanban'],
       },
-      tabs: [
-        { name: 'my_customers', label: 'my customers', isDefault: true, pinned: true },
-        { name: 'all_records', label: 'All records' },
-      ],
       addRecord: {
         enabled: true,
         position: 'bottom',
@@ -3729,7 +3720,6 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
     expect(listView.name).toBe('customer_list');
     expect(listView.userActions?.sort).toBe(true);
     expect(listView.appearance?.allowedVisualizations).toHaveLength(3);
-    expect(listView.tabs).toHaveLength(2);
     expect(listView.showRecordCount).toBe(true);
     expect(listView.allowPrinting).toBe(true);
   });

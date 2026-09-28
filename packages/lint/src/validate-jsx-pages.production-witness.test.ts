@@ -31,20 +31,6 @@ import { StartHerePage } from '../../../examples/app-showcase/src/ui/pages/start
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-interface LedgerRow {
-  page: string;
-  rule: string;
-  severity: string;
-  tag: string;
-  count: number;
-}
-// readFileSync rather than a JSON module import: under NodeNext the latter
-// needs an import attribute (TS1543), which would add to this package's frozen
-// TEST_DEBT tsc count for no behavioral gain.
-const ledger = JSON.parse(readFileSync(join(HERE, 'sdui-jsx-baseline.json'), 'utf8')) as {
-  findings: LedgerRow[];
-};
-
 /** Walk up to the workspace root — the directory holding pnpm-workspace.yaml. */
 function findUp(predicate: (dir: string) => boolean): string {
   let dir = HERE;
@@ -65,11 +51,12 @@ const ARTEFACT = join(REPO, 'sdui.manifest.json');
 const manifest = JSON.parse(readFileSync(ARTEFACT, 'utf8'));
 
 describe('production witness: the checked-in manifest reaches validateTree', () => {
-  it('is the real artefact (57-component public tier, no intrinsic HTML tags)', () => {
+  it('is the real artefact (html-tier tags declared, `div` still refused)', () => {
     const keys = Object.keys(manifest.components);
     expect(keys.length).toBeGreaterThan(0);
-    // The vocabulary facts the ratchet below stands on. If a regeneration
-    // legitimately changes them, the ledger is re-derived in the same PR.
+    // The vocabulary facts the clean-run witness below stands on. If a
+    // regeneration legitimately changes them, re-check the shipped pages in the
+    // same PR.
     expect(keys).toContain('flex');
     expect(keys).toContain('html');
     expect(keys).not.toContain('div');
@@ -117,44 +104,18 @@ describe('production witness: the checked-in manifest reaches validateTree', () 
   });
 });
 
-describe('first-wiring ratchet: the shipped pages against the wired gate (ui#6779 ratchet-to-zero)', () => {
-  it('wired census over the three shipped html pages equals the ledger — both directions', () => {
+describe('first-wiring ratchet, closed: the shipped pages against the wired gate (ui#6779 ratchet-to-zero)', () => {
+  // The ratchet-to-zero ledger (sdui-jsx-baseline.json) reached zero rows and was
+  // deleted, as its header prescribed: the manifest regenerated at objectui
+  // 9f0c84a448d1 declares the html tier's intrinsic tags (a, p, h1-h6, ...), and
+  // the three pages moved their `div` wrappers to `box`, the drop-in swap the tier
+  // names now that it refuses `div`. So the census assertion inverts: the wired
+  // run over the shipped pages is clean, and any finding here is a NEW violation —
+  // fix the page (or regenerate the manifest if the vocabulary legitimately grew).
+  it('wired run over the three shipped html pages is clean', () => {
     const stack = { pages: [CapabilityMapPage, CommandCenterJsxPage, StartHerePage] };
     const findings = validateJsxPages(stack as never, { manifest });
-
-    const census = new Map<string, number>();
-    for (const f of findings) {
-      const page = /page "([^"]+)"/.exec(f.where)?.[1] ?? '(unknown page)';
-      const tag = /<([a-zA-Z0-9:_-]+)>/.exec(f.where)?.[1] ?? '(no tag)';
-      const key = `${page}|${f.rule}|${f.severity}|${tag}`;
-      census.set(key, (census.get(key) ?? 0) + 1);
-    }
-
-    const recorded = new Map<string, number>(
-      ledger.findings.map((r): [string, number] => [`${r.page}|${r.rule}|${r.severity}|${r.tag}`, r.count]),
-    );
-
-    const newViolations: string[] = [];
-    for (const [key, count] of census) {
-      const allowed = recorded.get(key) ?? 0;
-      if (count > allowed) newViolations.push(`${key} — live ${count} vs ledger ${allowed}`);
-    }
-    const stale: string[] = [];
-    for (const [key, count] of recorded) {
-      const live = census.get(key) ?? 0;
-      if (live < count) stale.push(`${key} — ledger ${count} vs live ${live}`);
-    }
-
-    expect(
-      newViolations,
-      'NEW wired-gate findings beyond the ratchet ledger. Fix the page (or regenerate the manifest ' +
-        'if the vocabulary legitimately grew) — never grow packages/lint/src/sdui-jsx-baseline.json.',
-    ).toEqual([]);
-    expect(
-      stale,
-      'STALE ledger rows — the live run no longer produces them. Ratchet-to-zero: delete these rows ' +
-        'from packages/lint/src/sdui-jsx-baseline.json in this same PR.',
-    ).toEqual([]);
+    expect(findings.map((f) => `${f.rule}|${f.severity}|${f.where}`)).toEqual([]);
   });
 
   it('parse-only over the same pages stays clean (today\'s pre-wiring behavior, pinned)', () => {

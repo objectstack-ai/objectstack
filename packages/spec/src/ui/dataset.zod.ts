@@ -214,15 +214,23 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `f8a9d0fb0`; re-derived at that pin 2026-09-24 — both files moved on this
-   * hop (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
+   * `dd3f7e1be`; re-derived at that pin 2026-09-28 — both files changed again on
+   * this hop (objectui `544aca24f`, objectui#10301, the date-time half of
+   * objectui#10026: `toDisplayDate` now refuses a date-TIME written on a day
+   * that does not exist as well, and `dataset-format.ts` rewrote the
+   * `ISO_DATETIME_RE` docblock that said such a value still rolls over, four
+   * comment lines for four, so nothing below it moved), while the style
+   * handling this record cites re-reads unchanged: `formatDate` `355-390` ->
+   * `378-413` and the ±7-day fallback `309` -> `332` MOVED byte-identical, and
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm at
+   * `:259`-`:261` did not move. At `f8a9d0fb0` (2026-09-24) both files had
+   * moved (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
    * date-only calendar day that does not exist, with the dash it renders for
    * any unparsable value, and `dataset-format.ts` rewrote
    * `formatMeasureDate`'s comment on that case), while the style handling
-   * this record cites re-reads unchanged: `formatDate` `271-306` -> `355-390`
-   * and the ±7-day fallback `225` -> `309` MOVED byte-identical, and
-   * `formatMeasureDate` is `:229-263` (one comment line shorter), its call at
-   * `:369` and its datetime arm at `:259`-`:261`. At `62597c588` (2026-09-23)
+   * re-read unchanged: `formatDate` `271-306` -> `355-390` and the ±7-day
+   * fallback `225` -> `309` MOVED byte-identical, and `formatMeasureDate` came
+   * out one comment line shorter. At `62597c588` (2026-09-23)
    * `dataset-format.ts` was byte-identical to `87af769e9`, and `date-display.ts`
    * had moved (objectui `516583b54`, +77/-4): `formatDate` parses through
    * `toDisplayDate`, so a date-only value renders the calendar day it names in
@@ -237,9 +245,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * non-numeric value through `formatMeasureDate` (`:229-263`, was `:229-264`
    * and before that `:185-198`) at `:369`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:355-390`, was `:271-306`, `:198-233`
-   * and before that `:131-164`, whose `relative` branch falls back to the absolute form
-   * beyond ±7 days at `:309`, was `:225`, `:152` and `:117` — the fallback strips the style through
+   * `formatDate` (`utils/date-display.ts:378-413`, was `:355-390`, `:271-306`,
+   * `:198-233` and before that `:131-164`, whose `relative` branch falls back to the absolute form
+   * beyond ±7 days at `:332`, was `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
    * `formatRelativeDate` (`:259`), `short` with
    * `formatDateTime(v, { locale, style: 'compact' })` (`:260`) and everything

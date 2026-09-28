@@ -781,8 +781,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/system/translations/index.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
       //   src/validate-jsx-pages.production-witness.test.ts (#12924) imports the
-      //     three shipped html pages LIVE and holds the wired gate's census over
-      //     them equal to the ratchet-to-zero ledger (sdui-jsx-baseline.json), so
+      //     three shipped html pages LIVE and holds the wired gate's run over
+      //     them clean (the ratchet-to-zero ledger reached zero and was deleted), so
       //     an edit to any page — or to the repo-root manifest whose vocabulary
       //     judges them — must re-run this package's suite. The manifest is the
       //     checked-in producer artefact `resolveSduiManifest()` picks up from

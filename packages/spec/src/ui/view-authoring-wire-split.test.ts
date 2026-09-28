@@ -244,7 +244,8 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
   it.each([
     ['flattened overlay — `sort[]`', { ...OVERLAY_BASE, sort: [CONSOLE_SORT_ROW] }],
     ['flattened overlay — `filter[]`', { ...OVERLAY_BASE, filter: [CONSOLE_FILTER_ROW] }],
-    ['flattened overlay — `tabs[].filter[]`', { ...OVERLAY_BASE, tabs: [{ name: 'won', label: 'Won', filter: [CONSOLE_FILTER_ROW] }] }],
+    // [#20301] The `tabs[].filter[]` row left with the list view's own `tabs`
+    // (retired); the surviving `ViewTabSchema` carrier is the row below.
     ['flattened overlay — `userFilters.tabs[].filter[]`', {
       ...OVERLAY_BASE,
       userFilters: { element: 'tabs', tabs: [{ name: 'won', label: 'Won', filter: [CONSOLE_FILTER_ROW] }] },
@@ -316,11 +317,13 @@ describe('#5074 — `stripViewConsoleDecorations`, the write-path mirror of `str
       ...OVERLAY_BASE,
       sort: [CONSOLE_SORT_ROW],
       filter: [CONSOLE_FILTER_ROW],
-      tabs: [{ name: 'won', filter: [CONSOLE_FILTER_ROW] }],
+      // [#20301] The tab carrier is `userFilters.tabs` — the list view's own
+      // `tabs` is retired.
+      userFilters: { element: 'tabs', tabs: [{ name: 'won', filter: [CONSOLE_FILTER_ROW] }] },
     }) as Record<string, any>;
     expect(out.sort[0]).toEqual({ field: 'estimate_hours', order: 'desc' });
     expect(out.filter[0]).toEqual({ field: 'stage', operator: 'equals', value: 'won' });
-    expect(out.tabs[0].filter[0]).not.toHaveProperty('id');
+    expect(out.userFilters.tabs[0].filter[0]).not.toHaveProperty('id');
   });
 
   it('leaves a TOP-LEVEL `id` alone — only builder ROWS are decorated', () => {

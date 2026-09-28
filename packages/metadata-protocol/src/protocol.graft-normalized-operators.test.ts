@@ -97,17 +97,28 @@ describe('graftNormalizedOperators — through the real view metadata schema', (
     expect(graftThroughSchema(authored)).toBe(authored);
   });
 
+  // [#20301] The nested carrier is the page-list preset bar, `userFilters.tabs[]`:
+  // the list view's own `tabs` is a retired key the parse now refuses, and
+  // `ViewTabSchema` — whose `filter` this leg exercises — survives only there.
   it('normalizes a tab filter, not just the view filter', () => {
     const authored = view(
       [{ field: 'status', operator: 'eq', value: 'open' }],
-      { tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'owner', operator: 'isNotNull' }] }] },
+      {
+        userFilters: {
+          element: 'tabs',
+          tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'owner', operator: 'isNotNull' }] }],
+        },
+      },
     );
     const out = graftThroughSchema(authored) as {
       filter: Array<{ operator: string }>;
-      tabs: Array<{ filter: Array<{ operator: string }> }>;
+      userFilters: { element: string; tabs: Array<{ name: string; filter: Array<{ operator: string }> }> };
     };
     expect(out.filter[0].operator).toBe('equals');
-    expect(out.tabs[0].filter[0].operator).toBe('is_not_null');
+    expect(out.userFilters.tabs[0].filter[0].operator).toBe('is_not_null');
+    // Only the operator moved: the preset bar's own keys ride through as authored.
+    expect(out.userFilters.element).toBe('tabs');
+    expect(out.userFilters.tabs[0].name).toBe('mine');
   });
 });
 

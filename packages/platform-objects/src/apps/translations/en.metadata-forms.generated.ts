@@ -967,37 +967,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "User Filters",
         helpText: "Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets"
       },
-      tabs: {
-        label: "Tabs",
-        helpText: "In-view filter tabs — each tab applies its own filter rules"
-      },
-      "tabs.name": {
-        label: "Name"
-      },
-      "tabs.label": {
-        label: "Label"
-      },
-      "tabs.icon": {
-        label: "Icon"
-      },
-      "tabs.view": {
-        label: "List View"
-      },
-      "tabs.filter": {
-        label: "Filter"
-      },
-      "tabs.order": {
-        label: "Display Order"
-      },
-      "tabs.pinned": {
-        label: "Pinned"
-      },
-      "tabs.isDefault": {
-        label: "Default Tab"
-      },
-      "tabs.visible": {
-        label: "Visible"
-      },
       appearance: {
         label: "Appearance",
         helpText: "allowedVisualizations: which renderers users may switch between"
