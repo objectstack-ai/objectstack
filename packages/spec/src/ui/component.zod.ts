@@ -2746,7 +2746,7 @@ const BUTTON_PRIMITIVE_SIZES = ['default', 'sm', 'lg', 'icon'] as const;
  *   discriminator, and the hoist refuses to copy a `properties.type` onto the
  *   node, so an executor written there is read by nothing. objectui renamed
  *   the input to `actionType` with no alias and no transition window
- *   (objectui#7415, objectstack#14490 ruling A); an author copying an
+ *   (objectui#7415); an author copying an
  *   `ActionSchema` entry, whose executor IS `type`, brings that spelling along.
  * - `visibleWhen` / `visibility` → `visible`: the `record:alert` pair. The
  *   renderer evaluates `visible` itself, so an author bringing the node
