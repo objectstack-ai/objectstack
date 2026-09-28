@@ -2,6 +2,7 @@
 '@objectstack/driver-sql': minor
 '@objectstack/spec': patch
 '@objectstack/platform-objects': patch
+'@objectstack/lint': patch
 ---
 
 fix(driver-sql): a declared index that can never be built is logged at `error` and reported in drift
@@ -51,6 +52,11 @@ to handle.
 **The object form's help text follows.** The `indexes` → Fields help in the Studio object form
 said the skip left "a warning in the server log". It now says an error, in English and in the
 zh-CN, ja-JP and es-ES translations. Nothing else in the text changes.
+
+**The lint message follows too.** `object-field-ref-unknown`, on a misspelt `indexes[].fields`
+name, said the SQL driver skips the index "with only a warning, and drift drops it too". It now
+says the skip is logged at error and `os migrate plan` reports the index as unbuildable. The rule,
+its severity and its prescription are unchanged.
 
 **Upgrade note:** on a database that already carries such an index, `os migrate plan` now
 reports one entry per index, and so does the boot's drift warning. That entry clears only when
