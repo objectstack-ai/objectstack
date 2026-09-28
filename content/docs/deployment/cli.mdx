@@ -1699,8 +1699,8 @@ and never counted as passed. A listed tag that no loaded scenario carries is nam
 on the summary, since a typo narrows the run without failing it, and an empty entry
 (`--tags smoke,`) is refused before anything runs. Without the flag every scenario
 runs. A scenario's `requires` block is **not checked**: a scenario that names a
-plugin the target does not load still runs, and fails on whatever the missing
-plugin causes.
+plugin the target does not load still runs, and the unmet requirement surfaces
+only as whatever failure it causes, if any — the scenario can still pass.
 
 **A pattern that matches no suite is not a failure by default.** The run prints
 `Found 0 test suites.` — the same machine-readable line a full run prints, so a
