@@ -21,6 +21,9 @@
  *   (`POST /analytics/sql`) refuse a hidden cube with the declared
  *   `CUBE_NOT_FOUND` / 404 envelope — never an empty result — before a strategy
  *   runs and before the registry is touched;
+ * - non-disclosure: that refusal is byte-identical (status, code, message) to
+ *   the one a name no cube and no object carries gets, so it does not confirm
+ *   that a hidden cube exists;
  * - the controls: a cube that declares `public: true`, and one that omits the
  *   key (input shape, and parsed through `CubeSchema` the way `defineCube` does),
  *   are listed and answered;
@@ -135,6 +138,40 @@ describe('analytics_cube.public — every query door refuses a hidden cube', () 
     expect(outcome).not.toHaveProperty('resolved');
     expect(outcome).toHaveProperty('rejected');
   });
+});
+
+describe('analytics_cube.public — a hidden cube is indistinguishable from a missing one', () => {
+  type Refusal = Error & { code?: string; status?: number; cube?: string };
+  const refusalOf = (run: () => Promise<unknown>): Promise<Refusal | undefined> =>
+    run().then(() => undefined, (e: unknown) => e as Refusal);
+  const envelope = (e: Refusal | undefined) => ({
+    status: e?.status,
+    code: e?.code,
+    message: e?.message,
+    cube: e?.cube,
+    keys: Object.keys(e ?? {}).sort(),
+  });
+
+  it.each(['query', 'generateSql'] as const)(
+    '`%s()`: the same name, hidden in one deployment and absent from another, answers an equal status, code and message',
+    async (door) => {
+      const secret: Cube = { name: 'secret_cube', sql: 'secret_table', measures, dimensions, public: false };
+      const hidden = makeService([secret]).service; // registered, declared public: false
+      const absent = makeService([]).service; // no such cube, and not a registered object
+      const q = { cube: 'secret_cube', measures: ['secret_cube.count'] };
+
+      const whenHidden = await refusalOf(() => hidden[door](q));
+      const whenAbsent = await refusalOf(() => absent[door](q));
+
+      expect(whenHidden).toBeInstanceOf(Error);
+      expect(whenAbsent).toBeInstanceOf(Error);
+      expect(whenHidden?.status).toBe(404);
+      expect(whenHidden?.code).toBe('CUBE_NOT_FOUND');
+      // Byte for byte: a caller who guesses a name learns nothing about whether
+      // a hidden cube stands behind it.
+      expect(envelope(whenHidden)).toEqual(envelope(whenAbsent));
+    },
+  );
 });
 
 describe('analytics_cube.public — the controls stay open', () => {

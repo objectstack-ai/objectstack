@@ -33,7 +33,7 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
-import { cubeNotPublicError, isCubePublic } from './cube-visibility.js';
+import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 // The object-level read admission asked at this door, ahead of every strategy
 // — the layer the raw-SQL path could not inherit from the engine. See that
 // module's header for the request that reached the database without it.
@@ -2032,14 +2032,15 @@ export class AnalyticsService implements IAnalyticsService {
   // ── Internal ─────────────────────────────────────────────────────
 
   /**
-   * Refuse a query against a cube declared `public: false` (the
-   * `CUBE_NOT_FOUND` / 404 envelope — `cube-visibility.ts` says why that code).
+   * Refuse a query against a cube declared `public: false` with the SAME
+   * refusal an unknown name gets — `cubeNotFoundError`, byte for byte
+   * (`cube-visibility.ts` says why).
    * A name with no registered cube passes: it is the ad-hoc path's to infer or
    * refuse (`assertInferableCube`), and every cube that path mints is visible.
    */
   private assertCubePublic(name: string): void {
     const cube = this.cubeRegistry.get(name);
-    if (cube && !isCubePublic(cube)) throw cubeNotPublicError(name);
+    if (cube && !isCubePublic(cube)) throw cubeNotFoundError(name);
   }
 
   /**
@@ -2520,9 +2521,11 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * Rejects with `status: 404` / `code: 'CUBE_NOT_FOUND'` so the HTTP boundary
    * answers "no such cube" instead of letting the name reach the driver as a
-   * table and surfacing whatever the driver says about it. The message names
-   * both ways the request could be made valid, because from here the two are
-   * genuinely indistinguishable: register a Cube, or register the object.
+   * table and surfacing whatever the driver says about it. The refusal is
+   * `cubeNotFoundError`, shared byte for byte with the hidden-cube refusal, and
+   * its message names every way the request could be made valid, because to
+   * the caller they are deliberately indistinguishable: register a Cube,
+   * register the object, or remove a `public: false` that hides the cube.
    *
    * Skips when `isRegisteredObject` was not supplied — see the config field's
    * doc for why that tier is a deliberate stand-down and not a hole.
@@ -2541,15 +2544,9 @@ export class AnalyticsService implements IAnalyticsService {
       return;
     }
     if (isRegisteredObject(name)) return;
-    const err = new Error(
-      `Cube '${name}' not found: no cube is registered under that name, and it is not a ` +
-        `registered object either (a cube can only be auto-inferred from a registered object). ` +
-        `Define a Cube in your stack, or check the object name.`,
-    ) as Error & { code?: string; status?: number; cube?: string };
-    err.code = 'CUBE_NOT_FOUND';
-    err.status = 404;
-    err.cube = name;
-    throw err;
+    // The SAME refusal a hidden cube gets (`assertCubePublic`): a caller must
+    // not be able to tell "hidden" from "absent" (`cube-visibility.ts`).
+    throw cubeNotFoundError(name);
   }
 
   /** Build a minimal Cube from the fields referenced by an AnalyticsQuery. */
