@@ -10,8 +10,8 @@
  *  3. this package's own `TursoConfigSchema` mirror (`./turso.zod.ts`).
  *
  * The two schemas used to accept every combination below, so a datasource the
- * driver refuses at construction (or constructs and ignores) was accepted at
- * authoring and failed a boot later. Each row states the constructor's verdict
+ * driver refuses at construction (or, until #20200, constructed and ignored)
+ * was accepted at authoring and failed a boot later. Each row states the constructor's verdict
  * and the schemas' verdict, and the test asserts all three against it:
  *
  *  - a row the constructor REFUSES is refused by both schemas, on the key the
@@ -224,7 +224,7 @@ describe('turso config: the constructor, the spec contract and this mirror agree
 
     it(row.refusedOn ? `the spec contract refuses it on \`${row.refusedOn}\`` : 'the spec contract accepts it', () => {
       // Authoring refuses what construction refuses, and nothing it accepts
-      // but the declared-and-ignored keys.
+      // but an `inert` row's declared-and-ignored key (none since #20200).
       expect(Boolean(row.refusedOn)).toBe(row.ctor === 'refuse' || Boolean(row.inert));
       const verdict = schemaVerdict(SpecTursoConfigSchema, row.config);
       expect(verdict.refusedOn, verdict.message).toBe(row.refusedOn);

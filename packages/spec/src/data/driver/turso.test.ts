@@ -197,8 +197,9 @@ describe('TursoConfig.timeout carries its unit (#15680)', () => {
 });
 
 // #19977 — the transport refusals: every combination `new TursoDriver` refuses
-// at construction, plus `syncUrl` under a forced `mode: 'remote'` (which it
-// constructs and ignores), refused at authoring. Asserted on the envelope — the
+// at construction (since #20200 that includes `syncUrl` under a forced
+// `mode: 'remote'`, which it used to construct and ignore), refused at
+// authoring. Asserted on the envelope — the
 // issue code, the key it sits on, and the spelling it prescribes — never on a
 // bare `success: false`, which a schema refusing for some OTHER reason (a
 // credential, a placeholder) would satisfy identically. The driver-local mirror
