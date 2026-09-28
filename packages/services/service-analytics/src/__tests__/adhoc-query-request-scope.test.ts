@@ -3,8 +3,9 @@
 /**
  * [#20381] The two ad-hoc doors — `query()` (`POST /analytics/query`) and
  * `generateSql()` (`POST /analytics/sql`) — write nothing into the registry
- * every caller shares until the request has been admitted, and the measures a
- * caller names on top of a configured cube are never written there at all.
+ * every caller shares: not the measures a caller names on top of a configured
+ * cube, and not the cube they infer for an object no cube is configured over,
+ * whether the request is refused or admitted.
  *
  * `ensureCube` records what it mints in the scope the call runs in. Both doors
  * ran it over the SHARED scope, before `callCtx` asked the object-level
@@ -17,9 +18,11 @@
  *   refused or not.
  *
  * Both doors now run in a request scope (the one `queryDataset` runs in), and
- * the ad-hoc door publishes an INFERRED cube to the shared registry only once
- * the object-level admission has admitted the request — "CubeRegistry source
- * 3", kept. An augmented cube is never published.
+ * nothing minted there leaves it. An admitted request's inferred cube used to
+ * be published to the shared registry once admitted ("CubeRegistry source 3");
+ * that source is retired (ruling A on #20381), because `getMeta` then listed,
+ * to every caller, an object someone had queried and the member names they
+ * used. The shared registry is written by configuration alone.
  *
  * ## What each case is shaped to catch
  *
@@ -30,17 +33,18 @@
  *   403) and that the driver never ran.
  * - The ADMITTED augmentation leg is the control a lazy fix loses: the
  *   caller's suffix measure still reaches the strategy.
- * - The ADMITTED inference leg pins the ORDER, not only the outcome: the
- *   admission provider reads the registry at the moment it is asked, and the
- *   inferred cube must not be there yet.
- * - CONTROL: a configured cube still serves, and an admitted scalar metric
- *   over an object still works on a second request, through the published cube.
+ * - The ADMITTED inference leg pins the outcome — the request is served from
+ *   the cube inferred for it, and the observer's view is EXACTLY what it was —
+ *   and the order: the admission provider reads the registry at the moment it
+ *   is asked, and nothing has been written by then either.
+ * - CONTROL: a configured cube still serves, and a second same-name request
+ *   infers again and gets the same answer.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { AnalyticsQuery } from '@objectstack/spec/contracts';
+import type { AnalyticsQuery, AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -102,14 +106,39 @@ const DOORS: ReadonlyArray<{ door: string; run: Door }> = [
 
 type DriverCall = { object: string; detail: unknown };
 
+/**
+ * The cube each request's strategies were handed for its name — the request
+ * scope's answer, which is the only place an inferred cube now lives. A probe
+ * ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it.
+ */
+function requestCubeProbe() {
+  const handed: Array<{ name: string; cube: Cube | undefined }> = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      handed.push({ name: query.cube!, cube: ctx.getCube(query.cube!) });
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  /** Every cube handed to a request for `name`, in request order. */
+  const cubesFor = (name: string) => handed.filter((h) => h.name === name).map((h) => h.cube);
+  return { strategy, cubesFor };
+}
+
 function makeService(
   capabilities: () => { nativeSql: boolean; objectqlAggregate: boolean; inMemory: boolean },
   onAdmission?: (object: string) => void,
 ) {
   const calls: DriverCall[] = [];
   const row = { authored_total: 3, walled_total: 4, count: 5, amount_sum: 7 };
+  const probe = requestCubeProbe();
   const svc: AnalyticsService = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     cubes: [OPEN_SUMMARY, WALLED_SUMMARY],
     queryCapabilities: capabilities,
     admitObjectRead: async (object) => {
@@ -127,7 +156,7 @@ function makeService(
       return [row];
     },
   });
-  return { svc, calls };
+  return { svc, calls, cubesFor: probe.cubesFor };
 }
 
 type Harness = ReturnType<typeof makeService>;
@@ -195,31 +224,39 @@ describe.each(STRATEGY_PATHS)('[#20381] the ad-hoc doors leave the shared regist
       expect(await observe(h)).toEqual(before);
     });
 
-    it('an ADMITTED ad-hoc query over an object publishes its inferred cube only AFTER admission (source 3)', async () => {
+    it('an ADMITTED ad-hoc query over an object is served from its own inferred cube, and leaves the shared registry as configured', async () => {
       let registryAtAdmission: string[] | undefined;
       const holder: { svc?: AnalyticsService } = {};
       const h = makeService(capabilities, (object) => {
         if (object === OTHER) registryAtAdmission = holder.svc!.cubeRegistry.names();
       });
       holder.svc = h.svc;
+      const names = h.svc.cubeRegistry.names();
       const before = await observe(h);
+      const from = h.calls.length;
 
-      await run(h.svc, { cube: OTHER, measures: ['count'] }, CALLER_A);
+      const answer = await run(h.svc, { cube: OTHER, measures: ['count'] }, CALLER_A);
 
       // The order: when the admission was asked, nothing had been written.
       expect(registryAtAdmission).toEqual(['open_summary', 'walled_summary']);
-      // The outcome: the admitted request's inferred cube is registered — the
-      // documented source 3 — with exactly the members it named.
-      expect(Object.keys(h.svc.cubeRegistry.get(OTHER)?.measures ?? {})).toEqual(['count']);
-
-      const after = await observe(h);
-      expect(after.driven).toEqual(before.driven);
-      expect(after.meta).toEqual(expect.arrayContaining(before.meta));
+      // Served, from the cube inferred for this request — over the object, with
+      // exactly the members it named — on `query` through the driver, on
+      // `generateSql` in the statement it hands back.
+      const [handed] = h.cubesFor(OTHER);
+      expect(handed).toMatchObject({ name: OTHER, sql: OTHER });
+      expect(Object.keys(handed!.measures)).toEqual(['count']);
+      expect(JSON.stringify([answer, h.calls.slice(from)])).toContain(OTHER);
+      // The outcome (#20381, registry source 3 retired): that cube stayed in
+      // its request. The registry holds the configured cubes and nothing else,
+      // and the observer's discovery and query are EXACTLY what they were.
+      expect(h.svc.cubeRegistry.names()).toEqual(names);
+      expect(h.svc.cubeRegistry.get(OTHER)).toBeUndefined();
+      expect(await observe(h)).toEqual(before);
     });
 
     it('a query that loses the admission race to a registration leaves that registration in place', async () => {
       // An embedder registers a cube under the name while the ad-hoc request is
-      // being admitted: publishing the inferred cube must not replace it.
+      // being admitted: nothing the request minted may replace it.
       const authored: Cube = { ...OPEN_SUMMARY, name: OTHER, title: 'Authored other', sql: OTHER };
       const holder: { svc?: AnalyticsService } = {};
       const h = makeService(capabilities, (object) => {
@@ -233,22 +270,40 @@ describe.each(STRATEGY_PATHS)('[#20381] the ad-hoc doors leave the shared regist
     });
   });
 
-  it('CONTROL: an admitted scalar metric over an object still works on a second request, through the published cube', async () => {
+  it('CONTROL: a second same-name request infers again and gets the same answer', async () => {
     const h = makeService(capabilities);
-    await h.svc.query({ cube: OTHER, measures: ['count'] }, CALLER_A);
-    const published = h.svc.cubeRegistry.get(OTHER);
-    expect(published).toBeDefined();
+    const q = { cube: OTHER, measures: ['count'] };
 
-    const from = h.calls.length;
-    const second = await h.svc.query({ cube: OTHER, measures: ['count', 'amount_sum'] }, CALLER_B);
-    expect(second.rows).toHaveLength(1);
-    const driven = h.calls.slice(from);
+    const firstFrom = h.calls.length;
+    const first = await h.svc.query(q, CALLER_A);
+    const firstDriven = h.calls.slice(firstFrom);
+    expect(firstDriven.map((c) => c.object)).toEqual([OTHER]);
+    // Nothing was published: the name still resolves to nothing shared.
+    expect(h.svc.cubeRegistry.get(OTHER)).toBeUndefined();
+
+    // The same caller asks again: the same driver call, the same answer.
+    const secondFrom = h.calls.length;
+    const second = await h.svc.query(q, CALLER_A);
+    expect(second).toEqual(first);
+    expect(h.calls.slice(secondFrom)).toEqual(firstDriven);
+    // Each request was handed a cube inferred for it — two equal mints, not
+    // one shared cube.
+    const [firstCube, secondCube] = h.cubesFor(OTHER);
+    expect(secondCube).toEqual(firstCube);
+    expect(secondCube).not.toBe(firstCube);
+
+    // A request naming its own suffix measure is served with it…
+    const suffixFrom = h.calls.length;
+    const withSuffix = await h.svc.query({ cube: OTHER, measures: ['count', 'amount_sum'] }, CALLER_B);
+    expect(withSuffix.rows).toHaveLength(1);
+    const driven = h.calls.slice(suffixFrom);
     expect(driven.map((c) => c.object)).toEqual([OTHER]);
     expect(JSON.stringify(driven[0].detail)).toContain('amount');
-
-    // The second request's suffix measure was its own: the published cube is
-    // the one the first request minted, untouched.
-    expect(h.svc.cubeRegistry.get(OTHER)).toBe(published);
-    expect(Object.keys(published!.measures)).toEqual(['count']);
+    // …and the measure was that request's own: the next plain request's cube
+    // is minted from its own members, `count` alone.
+    await h.svc.query(q, CALLER_A);
+    const cubes = h.cubesFor(OTHER);
+    expect(Object.keys(cubes[cubes.length - 1]!.measures)).toEqual(['count']);
+    expect(h.svc.cubeRegistry.get(OTHER)).toBeUndefined();
   });
 });

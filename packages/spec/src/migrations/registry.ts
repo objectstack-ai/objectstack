@@ -5487,7 +5487,19 @@ const step18: MigrationStep = {
     + 'asks for. BREAKING for flows stored in `sys_metadata`, by maintainer ruling: such a '
     + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
     + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
-    + 'the one-line fix where a node meant every branch.',
+    + 'the one-line fix where a node meant every branch. '
+    + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
+    + 'key parsed and was stored at every list-view door and drew nothing: a list view\'s own '
+    + '`tabs` has no reader, the one component that would draw it has no production mount, '
+    + 'and the tab strip above an object\'s records is the saved-view switcher, which renders '
+    + 'one tab per `listViews` entry and reads no `tabs` key (`userFilters.tabs`, a different '
+    + 'key of the same element type, is read and rendered, and stays). The key is a '
+    + '`retiredKey()` tombstone on the list-view shape (its '
+    + 'prescription says how to move each tab to a named `listViews` entry); `ViewTabSchema` '
+    + 'itself stays, because the page-only `userFilters.tabs` preset bar reuses it and renders. '
+    + 'The D2 conversion `view-list-tabs-removed` strips the key from every list payload in '
+    + '`stack.views[]` as a lossless delete, and is retired from the load path, so authors are '
+    + 'refused at parse rather than rewritten.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5534,6 +5546,7 @@ const step18: MigrationStep = {
     'action-aria-removed',
     'cube-member-inner-name-removed',
     'flow-decision-mode-inclusive-explicit',
+    'view-list-tabs-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -12012,6 +12025,39 @@ const step18: MigrationStep = {
         + 'string `sort`; the parse refuses one with the rewrite prescription. Every rewritten array '
         + 'names fields that exist on the view\'s object with the direction the author intends, and '
         + 'the view loads — rather than failing at the renderer — with its rows in that order.',
+    },
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion) — the D3 entry of the `view-list-tabs-removed`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). Registered keys: `ui/ListView:tabs` and `ui/ObjectListView:tabs`.
+    // The strip changes no screen — nothing ever drew the tabs — which is exactly
+    // why it cannot be the end of the migration: what the author wanted was named
+    // presets, and those are a `listViews` entry each.
+    {
+      id: 'list-view-tabs-retired',
+      surface: 'view.list.tabs / view.listViews.*.tabs — the list view\'s own tab definitions',
+      replacement: 'One named list view per tab, under the object\'s `listViews` — the saved-view '
+        + 'switcher above the object\'s records renders every entry as a tab. The tab\'s `name` '
+        + 'becomes the entry\'s key, its `label` the entry\'s `label`, and its `filter` rules join the '
+        + 'view\'s own `filter` on that entry, beside the `columns` the tab should show. A tab whose '
+        + '`view` already named a list view needs nothing more.',
+      reason: 'The D2 conversion `view-list-tabs-removed` deletes `tabs` from every list payload in '
+        + '`stack.views[]`, in all three persisted spellings, and the delete is lossless in pixels: no '
+        + 'renderer ever mounted a tab bar for the key, so a view that declared tabs has always drawn '
+        + 'without them, and it still does. The judgment the conversion cannot make is the author\'s '
+        + 'intent: each tab was a named preset the author wanted end users to switch to, and the '
+        + 'platform delivers that as a named list view, not as a sub-key of one. Which tabs deserve an '
+        + 'entry, what each should filter and show, and whether the switcher already lists an '
+        + 'equivalent, are the author\'s decisions. The tab keys with no list-view counterpart — '
+        + '`icon`, `order`, `pinned`, `isDefault`, `visible` — never had an effect either. One '
+        + 'boundary is the author\'s by construction: tabs declared under `objects[].listViews` are '
+        + 'reached by no conversion, so such an object is refused at its own door until edited by hand.',
+      acceptanceCriteria: 'No list view in `stack.views[]` or in any object `listViews` map declares '
+        + '`tabs`; the parse refuses the key by name at every list-view door. For each view that did: '
+        + 'every tab the author still wants is a `listViews` entry with its own `label`, `filter` and '
+        + '`columns`, and it appears as a tab in the switcher above the object\'s records and shows '
+        + 'the rows its filter selects; a tab nobody wants is simply gone. No page-level '
+        + '`userFilters` preset bar changes — that `tabs` is a different key, and it stays.',
     },
     {
       id: 'logging-durations-unit-in-key',
@@ -20915,6 +20961,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ListView:pageName',
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion). `ListView.tabs` declared tab definitions for
+    // a multi-tab view interface, and no renderer ever drew them: a list view's own
+    // `tabs` has no reader, and objectui's `TabBar`, the one component that would
+    // draw it, has no production mount. The tab strip above an object's records is
+    // the saved-view switcher (`ViewTabBar`), which renders one tab per `listViews`
+    // entry and reads no `tabs` key. `userFilters.tabs`, a different key of the
+    // same element type, is read and rendered, and stays. Tombstoned with
+    // `retiredKey()` beside the `pageName` tombstone already on this shape;
+    // `ViewTabSchema` stays, reused by the page-only `userFilters.tabs` preset bar.
+    // D2: `view-list-tabs-removed`.
+    'ui/ListView:tabs',
     // #16885 — the list view's `navigation.view` binding, retired under ADR-0049
     // enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
     // #126 item 4, verbatim 「同意」, option B). The key's describe promised "the
@@ -21000,6 +21058,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ObjectListView:pageName',
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion). `ObjectListView.tabs` declared tab
+    // definitions for a multi-tab view interface, and no renderer ever drew them: a
+    // list view's own `tabs` has no reader, and objectui's `TabBar`, the one
+    // component that would draw it, has no production mount. The tab strip above an
+    // object's records is the saved-view switcher (`ViewTabBar`), which renders one
+    // tab per `listViews` entry and reads no `tabs` key. `userFilters.tabs`, a
+    // different key of the same element type, is read and rendered, and stays.
+    // Tombstoned with `retiredKey()` beside the `pageName` tombstone already on
+    // this shape; `ViewTabSchema` stays, reused by the page-only `userFilters.tabs`
+    // preset bar. D2: `view-list-tabs-removed`.
+    'ui/ObjectListView:tabs',
     // ADR-0090 D2 (no Profile concept) + ADR-0049 enforce-or-remove; maintainer
     // ruling 2026-09-12, decision batch #121 item 2, verbatim 「同意」.
     // `Page.assignedProfiles` was an authorable key named for the concept ADR-0090 D2

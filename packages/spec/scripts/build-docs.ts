@@ -61,13 +61,19 @@ import {
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { formatSplitEntryCoverage, splitEntryCoverage } from './lib/split-entries';
-import { renderSchemaSection } from './lib/schema-section';
+import { renderSchemaSection, rendersPropertiesTable } from './lib/schema-section';
 import {
   categoryIndexDescription,
   modulePageDescription,
   yamlDescription,
   type DescriptionSource,
 } from './lib/page-description';
+import {
+  categoryIndexTitle,
+  modulePageTitle,
+  titleFrontmatter,
+  type GeneratedPageTitle,
+} from './lib/page-title';
 import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
@@ -464,6 +470,23 @@ const PAGE_SECTION_LEVEL = 2;
 /** Which rule of `lib/page-description.ts` produced each module page's description, tallied for the run summary. */
 const descriptionSources: Record<DescriptionSource, number> = { docblock: 0, 'docblock+schemas': 0, schemas: 0 };
 
+/**
+ * A page's `title` / `navTitle` under the docs title rule, or the build stops.
+ *
+ * The rule and its ladders live in `lib/page-title.ts` (#15403), which throws
+ * rather than emit a title outside the band; this turns that into the same
+ * named, exit-1 refusal `loadCategoryTitles` gives above instead of a stack
+ * trace from the middle of the page loop.
+ */
+function pageTitleOrExit(derive: () => GeneratedPageTitle): GeneratedPageTitle {
+  try {
+    return derive();
+  } catch (err) {
+    console.error(`\n✗ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
 function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, content: any}>, category: string): string {
   const zodTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   
@@ -493,8 +516,24 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   });
   descriptionSources[description.from]++;
 
+  // The search-facing title follows the docs title rule; `zodTitle`, the title
+  // this page carried before it, stays the sidebar label as `navTitle`. A page
+  // is called a `property reference` only when one of its sections renders a
+  // `### Properties` table — the renderer's own condition, asked of the same
+  // schemas the loop below renders.
+  const titles = pageTitleOrExit(() =>
+    modulePageTitle(
+      {
+        name: zodTitle,
+        categoryTitle: CATEGORIES[category],
+        documentsProperties: schemas.some(s => rendersPropertiesTable(s.name, s.content)),
+      },
+      path.relative(REPO_ROOT, path.join(DOCS_ROOT, category, `${zodFile}.mdx`)),
+    ),
+  );
+
   let md = `---\n`;
-  md += `title: ${zodTitle}\n`;
+  md += titleFrontmatter(titles);
   md += `description: ${yamlDescription(description.text)}\n`;
   md += `---\n\n`;
   md += AUTO_GENERATED_BANNER;
@@ -926,8 +965,14 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
     process.exit(1);
   }
 
+  // Same rule as the module pages; the category title stays the `navTitle`
+  // the footer's previous/next links show for this folder index page.
+  const titles = pageTitleOrExit(() =>
+    categoryIndexTitle(title, path.relative(REPO_ROOT, path.join(DOCS_ROOT, category, 'index.mdx'))),
+  );
+
   let mdx = `---\n`;
-  mdx += `title: ${title}\n`;
+  mdx += titleFrontmatter(titles);
   mdx += `description: ${yamlDescription(categoryIndexDescription(title, cards.length))}\n`;
   mdx += `---\n\n`;
   mdx += AUTO_GENERATED_BANNER;

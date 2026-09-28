@@ -103,7 +103,7 @@ const definitions = () => ({
   ],
   views: [
     {
-      name: 'probe_view',
+      name: 'probe_order',
       object: 'probe_order',
       list: { label: 'order list', columns: ['number'] }, // convention/label-case
     },
