@@ -47,7 +47,7 @@ which contain components.
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | Title + subtitle + breadcrumb + inline `actions: Action[]` |
+| `page:header`        | Title + subtitle + breadcrumb + `actions: string[]` (action ids) |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
@@ -87,7 +87,7 @@ export const LeadDetailPage = definePage({
             title: '{first_name} {last_name}',
             subtitle: '{company}',
             breadcrumb: true,
-            actions: [ConvertLeadAction],   // inline action buttons in header
+            actions: ['convert_lead'],   // ids of `lead`'s actions
           },
         },
         {
@@ -121,9 +121,9 @@ export const LeadDetailPage = definePage({
 > [Date Macros](../SKILL.md#date-macros--filter-placeholders) reference below — the
 > full token list is published as `DATE_MACRO_TOKENS` in `@objectstack/spec/data`.
 
-> **Actions in header** — pass full `Action` objects into
-> `page:header.properties.actions`; do **not** create a sibling action node.
-> The header renders them inline in the action slot.
+> **Actions in header** — `properties.actions` takes the **ids** of actions
+> declared on the bound object (`'convert_lead'`; no built-in id registry);
+> do **not** create a sibling action node.
 
 ### AI-authored *source* pages — `kind:'html'` and `kind:'react'` (ADR-0080/0081)
 
