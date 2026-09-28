@@ -364,10 +364,12 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 // so the grep missed an entire execution chain and the 2026-08-07 retire ruling
 // was withdrawn on 2026-08-08 in favour of enforce. Governing it here is the
 // half of that ruling that keeps the surface honest going forward: the runner
-// reads a real, measured subset of the declared keys, and the ones nothing reads
-// (`suite.name`, `scenario.tags`, `scenario.requires`) are now recorded as such
-// instead of being invisible. Like `query`, there is no registry to fold it back
-// onto — the override IS its governance.
+// reads a real, measured subset of the declared keys, and a key nothing reads is
+// recorded as such instead of being invisible. `suite.name` and `scenario.tags`
+// were two of those and have since gained readers in `os test` (the suite
+// heading; the `--tags` selection); `scenario.requires` is the one still unread —
+// declared, NOT CHECKED, and its row stays dead. Like `query`, there is no
+// registry to fold it back onto — the override IS its governance.
 // `manifest` is the THIRD category the override has had to reach, and the one
 // that showed the escape hatch was load-bearing rather than a webhook special
 // case. `ManifestSchema` (src/kernel/manifest.zod.ts) is what an author writes

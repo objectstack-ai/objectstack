@@ -544,8 +544,8 @@ The tab *is* the section, so a section's keys are the whole surface: `name`,
 `visibleWhen` — plus `pane`, which split forms alone accept. There is **no**
 per-tab `lazy`, `source`, `badge` or `badgeVariant` key, and no
 `layout: { mode: tabbed, ... }` wrapper: `FormViewSchema.layout` is a string
-enum (`vertical` / `horizontal` / `inline` / `grid`) and the form schema
-declares no `tabs` key at all. `FormViewSchema` and `FormSectionSchema`
+enum (`vertical` / `horizontal` — multi-column is the separate `columns` key,
+not a layout value) and the form schema declares no `tabs` key at all. `FormViewSchema` and `FormSectionSchema`
 (`packages/spec/src/ui/view.zod.ts`) are `.strict()`, so authoring any of them
 is a **parse failure** — a loud rejection, not a silent no-op.
 

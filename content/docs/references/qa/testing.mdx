@@ -115,7 +115,7 @@ A complete test scenario with setup, execution steps, and teardown
 | **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
 | **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
 | **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
-| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
+| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario. NOT CHECKED by `os test` or the core TestRunner: the scenario runs whether or not they hold, and an unmet requirement surfaces only as the failure it causes |
 
 ### Nested Shape: `TestScenario.setup[number]`
 
@@ -157,8 +157,8 @@ A single step in a test scenario, consisting of an action and optional assertion
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **params** | `string[]` | optional | Required environment variables or parameters |
-| **plugins** | `string[]` | optional | Required plugins that must be loaded |
+| **params** | `string[]` | optional | Environment variables or parameters the scenario needs. Declared only: nothing checks them before the scenario runs |
+| **plugins** | `string[]` | optional | Plugins the scenario needs loaded on the target. Declared only: nothing checks them before the scenario runs |
 
 
 ---
@@ -223,7 +223,7 @@ A complete test scenario with setup, execution steps, and teardown
 | **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
 | **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
 | **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
-| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
+| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario. NOT CHECKED by `os test` or the core TestRunner: the scenario runs whether or not they hold, and an unmet requirement surfaces only as the failure it causes |
 
 
 ---

@@ -458,7 +458,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       precision: {
         label: "精度",
-        helpText: "小数桁数（例: $10.50 なら 2）"
+        helpText: "総桁数"
       },
       scale: {
         label: "小数桁",

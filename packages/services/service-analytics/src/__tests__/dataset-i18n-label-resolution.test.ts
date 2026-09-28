@@ -288,10 +288,13 @@ describe('#6761 — /analytics/meta no longer publishes the machine name as a di
 
   it('stays request-independent — a zh-CN query does not leak its locale into the registry', async () => {
     const svc = sqlService();
-    // `queryDataset` re-registers the cube on every call. If the compiler baked
-    // the request locale in, this Chinese query would leave a Chinese-labelled
-    // cube behind and `/analytics/meta` — which takes no execution context at
-    // all — would answer whoever queried last.
+    // The registered cube is what `/analytics/meta` publishes, with no execution
+    // context at all. A Chinese query of the same dataset must leave it as it
+    // was: `queryDataset` compiles into its own request scope and writes nothing
+    // back (#20356), and the compiler takes no locale — so neither a
+    // re-registration nor a locale baked into the compile can make meta answer
+    // in whichever language queried last.
+    svc.registerDataset(dataset);
     await svc.queryDataset(
       dataset,
       { dimensions: ALL_DIMENSIONS, measures: ALL_MEASURES },

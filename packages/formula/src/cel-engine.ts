@@ -20,6 +20,7 @@ import type { Expression } from '@objectstack/spec';
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
 import type { PermissionBinding } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
+import type { CelRootsRefusalCode, ExpressionRefusal } from './expression-refusal';
 
 /**
  * Default execution bounds. Picked conservatively — every metadata-authored
@@ -333,12 +334,13 @@ export function firstUndeclaredReference(
  *
  * Returns `{ ok: false }` with the classifier's message when the source does
  * not parse — callers surface that as a config error, not an empty root set.
+ * The failure also carries a refusal `code` and its `params`
+ * (`expression-refusal.ts`), for a consumer that renders its own words
+ * instead of the English `error`.
  */
-export function collectCelRootIdentifiers(
-  source: string,
-): { ok: true; roots: string[] } | { ok: false; error: string } {
+export function collectCelRootIdentifiers(source: string): CelRootIdentifiersResult {
   if (typeof source !== 'string' || !source.trim()) {
-    return { ok: false, error: 'expression is empty' };
+    return { ok: false, error: 'expression is empty', code: 'empty-expression', params: {} };
   }
   try {
     // Same nullable-ternary rewrite as compile/evaluate so "what parses" agrees
@@ -358,9 +360,19 @@ export function collectCelRootIdentifiers(
     return { ok: true, roots: [...roots] };
   } catch (err) {
     const classified = classifyError(err);
-    return { ok: false, error: classified.ok === false ? classified.error.message : String(err) };
+    const detail = classified.ok === false ? classified.error.message : String(err);
+    return { ok: false, error: detail, code: 'cel-parse-failed', params: { detail } };
   }
 }
+
+/**
+ * What {@link collectCelRootIdentifiers} answers: the roots, or a refusal
+ * whose `error` is the English reason and whose `code` / `params` say the
+ * same thing for a consumer that renders its own words.
+ */
+export type CelRootIdentifiersResult =
+  | { ok: true; roots: string[] }
+  | ({ ok: false; error: string } & ExpressionRefusal<CelRootsRefusalCode>);
 
 /**
  * A parsed CEL AST node, re-exported so a consumer can name the type this

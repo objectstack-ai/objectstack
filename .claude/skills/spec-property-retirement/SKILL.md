@@ -40,11 +40,11 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       `rls.enabled` 曾是「证据错误的 live」而实际**无人读取** —— disabled 的
       policy 仍在贡献它的授权。那个键最后是**被强制执行**,不是被删除。功能存在时,强制
       执行赢。
-- [ ] **它是文档形状的吗?** `hook.label`、`hook.description`、`flow.description`
-      没有运行时消费者,但被**有意保留** —— 它们为下一个读者(按 ADR-0033,常是模
-      型)记录意图。把豁免写进台账 `note`,下次审计不再重审。良性展示元数据
-      (`description`、`tags`、`icon`)永远谈不上「误导」;不要标 `authorWarn`,也
-      不要退役它。
+- [ ] **主流平台有没有这个能力?** 声明而未执行的键每族问这句,按维护者原话(裁决评论
+      `5727134555`):「有 ⇒ 补消费端(一次做对);没有 ⇒ 退役,而不是看仓里有没有人读」。
+      文档形状的键(`hook.label`、`flow.description`)为下一个读者记录意图(ADR-0033),是「有」的
+      一例:补渲染、不退役,判定写进台账 `note`,下次审计不再重审。`description`、`tags`、`icon`
+      不自动豁免:RLS 策略的 `tags` 主流没有 ⇒ 退役。`authorWarn` 另按 README 判。
 - [ ] **有已承诺的路线图吗?** 那就是 `experimental` + `.describe()` 里的
       `[EXPERIMENTAL — not enforced]` 标记,不是删除。
 - [ ] **同 major 记账。** 同一个*未发布 major* 里更早的 conversion 改名了你现在要删
@@ -58,7 +58,7 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       `live-elsewhere` 一节。
 - [ ] **零编写实例普查要并跑一个同族已知存活的键作对照**,两读数都报;同得零即没测出。
 - [ ] **拿 `cross-repo` 行当论据,就当刻重核路径与行号**:漂了读作重新取证,⛔ 不是 `dead`。
-- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才是退役的证据。
+- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才证 `dead`。
 
 ## 1. 裁判是构建,不是台账
 

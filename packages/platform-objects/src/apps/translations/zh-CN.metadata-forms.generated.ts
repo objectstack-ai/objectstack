@@ -458,7 +458,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       precision: {
         label: "精度",
-        helpText: "小数位数（如：货币用 2 表示保留两位）"
+        helpText: "总位数"
       },
       scale: {
         label: "小数位",

@@ -90,8 +90,12 @@ export const overrideCompositeStack = defineStack({
     description: 'One object, one flow, one permanently-unstaffed position.',
   },
   // ADR-0097: a `record_change` trigger (the flow's `record-after-create`
-  // start node) only registers when the app declares it needs the capability.
-  requires: ['triggers'],
+  // start node) only registers when the app declares it needs the capability
+  // — the PAIR, since the trigger installs into the automation service and
+  // `defineStack` refuses `triggers` without `automation` (#20332). The pin
+  // that boots this stack mounts both explicitly (`automation: true` plus the
+  // trigger plugin); this line is the declaration that matches that boot.
+  requires: ['automation', 'triggers'],
   objects: [OverrideCompositeRequest],
   flows: [OverrideCompositeFlow],
 });

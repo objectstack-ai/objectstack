@@ -54,9 +54,47 @@
  * .test.ts) plus one team, deliberately not extracted: a shared harness that
  * one card's edit can reshape under another card's pins is the drift both
  * files exist to catch.
+ *
+ * ⑥ pins WHERE the first scenario's one-time cost is paid (next section).
+ *
+ * ## [#20327] Why one throwaway scenario runs at MODULE SCOPE
+ *
+ * The first scenario in a worker pays a one-time cost no later one sees:
+ * better-auth's lazily imported module graph, sql.js's WASM compile, and the
+ * first-use costs of the sync and the sign-up. The phases are measured in
+ * `auth-login-register-envelope.test.ts`, which carries the same arrangement
+ * and the same fix. Here, idle on 4 vCPU at `c74de10a9`, that cost put ① at
+ * 1245 ms against 307-411 ms for the four later cases that run `arrange()`.
+ * On the `Test Core` shard where a sibling suite went red (PR #20325's run),
+ * ① took 3599 ms here against 486-820 ms for the later cases that run
+ * `arrange()`. Under twenty-four CPU-bound busy loops on this box, the load
+ * that reproduces that red, ① timed out at vitest's 5000 ms `testTimeout` in
+ * every run.
+ *
+ * So the cost is now paid by a module-scope `await`, during COLLECTION, which
+ * no vitest clock covers: `@vitest/runner@4.1.11` wraps hooks and test bodies
+ * in `withTimeout(...)` and awaits the file import bare. This is the repo's
+ * convention: "clocked windows measure behaviour, never loading" (AGENTS.md,
+ * Build & Test; `check:test-source-alias`). The warm-up is the file's own
+ * `arrange()`, so no list of loads can drift from what the cases really pay.
+ * It needs the posture the `beforeAll` sets for the cases, so it holds that
+ * posture for itself and puts back what it found, even when it throws.
+ *
+ * ⛔ It shares nothing a case asserts on. Every case still builds a fresh
+ * engine, a fresh `AuthManager`, a fresh owner and a fresh organization. Its
+ * engine stays open, as every case's does (`arrange()` hands none back), so
+ * no case runs in a state no case ran in before: every case but the first
+ * already ran after an earlier scenario. What it leaves warm is
+ * process-level: the module registry, sql.js's compiled WASM and the JIT.
+ *
+ * ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
+ * timeout: vitest clocks a hook exactly as it clocks a test body, and a wider
+ * window only moves the cliff to a heavier shard.
  */
 
 import { describe, it, expect, expectTypeOf, vi, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuthManager } from '@objectstack/plugin-auth';
@@ -90,14 +128,17 @@ const IDENTITY_OBJECTS = Object.values(
  */
 const PRIOR_POSTURE = process.env.OS_TENANCY_POSTURE;
 
+/** Put back the posture this file found: after the warm-up, and after the file. */
+const restorePosture = (): void => {
+  if (PRIOR_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+  else process.env.OS_TENANCY_POSTURE = PRIOR_POSTURE;
+};
+
 beforeAll(() => {
   process.env.OS_TENANCY_POSTURE = 'isolated';
 });
 
-afterAll(() => {
-  if (PRIOR_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
-  else process.env.OS_TENANCY_POSTURE = PRIOR_POSTURE;
-});
+afterAll(restorePosture);
 
 let seq = 0;
 const nextEmail = (tag: string) => `os17274-${tag}-${++seq}-${Date.now()}@example.com`;
@@ -150,6 +191,13 @@ async function arrange(): Promise<Rig> {
 
   return { client, organizationId, teamId };
 }
+
+// [#20327] The first scenario's one-time cost, paid during COLLECTION, which
+// no vitest clock covers (header, last section). It holds the posture the
+// `beforeAll` above sets for the cases, and `.finally` puts back what it
+// found. ⛔ It stays at module scope, and `⑥` below pins that.
+process.env.OS_TENANCY_POSTURE = 'isolated';
+await arrange().finally(restorePosture);
 
 /** What `invitations.list` answers for one invitation — the round-trip shape. */
 type ListedInvitation = Awaited<
@@ -454,3 +502,32 @@ export async function resendTeamIdStaysDeclared17274(): Promise<void> {
   // hands to `invite`: the round trip is a type-level fact, not a convention.
   expectTypeOf<ListedInvitation['teamId']>().toExtend<InviteRequest['teamId']>();
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⑥ the cold start stays outside every clocked window
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('#17274 ⑥ the cold start stays outside every clocked window', () => {
+  it('pays the first scenario at module scope, and no hook carries it', () => {
+    // [#20327] Read off this file's own text, so "do not move it into a
+    // hook" is an assertion rather than a sentence nobody reads.
+    const code = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+
+    // Exactly one warm-up call, and it opens its own line at column 0. So it
+    // sits in no function body, which is what "paid during collection"
+    // reduces to. Comment lines start with `//` or ` *` and cannot match.
+    expect(code.match(/^await arrange\(\)\.finally\(restorePosture\);$/gm) ?? []).toHaveLength(1);
+
+    // ⛔ No `before*` hook may come back to carry it: vitest clocks a hook
+    // with `hookTimeout` exactly as it clocks a test body with `testTimeout`.
+    // This file's one hook is the posture `beforeAll`, which loads nothing.
+    // Each hook is read up to the next column-0 `});`, so a hook indented
+    // inside a `describe` reads on to that block's close and cannot hide a
+    // scenario from this.
+    const hooks = [...code.matchAll(/^\s*before(?:All|Each)\s*\(([\s\S]*?)^\}\);$/gm)].map(
+      (m) => m[1],
+    );
+    expect(hooks).toHaveLength(1);
+    for (const body of hooks) expect(body).not.toMatch(/\barrange\(/);
+  });
+});

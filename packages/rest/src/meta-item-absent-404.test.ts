@@ -178,7 +178,10 @@ describe('[#18066] §1 — a name with nothing behind it is an ERROR, not an ite
 
         // …and through the query flags that divert a type around the cache,
         // where a deployment running the default `enableCache: true` meets it.
-        const withCache = setup({}, { cached: vi.fn() });
+        // [#20338] The draft switches divert only for a caller who may read
+        // drafts (anyone else is served the plain read), so this caller holds
+        // the authoring capability `/meta/_drafts` asks.
+        const withCache = setup({}, { cached: vi.fn(), perms: ['studio.access'] });
         for (const query of [{ state: 'draft' }, { preview: 'draft' }, { package: 'pkg_x' }]) {
             const res = await getItem(withCache.rest, 'object', 'no_such_object', query);
             expect(res.statusCode).toBe(404);

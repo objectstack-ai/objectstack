@@ -142,7 +142,7 @@ const MONOREPO_ONLY = [
   // "the shallowest point a path reaches"). In THIS population the two give
   // the same answer, for a measured reason: every relative reference the
   // shipped tree carries is `./`-anchored and points DOWNWARD from the file
-  // that writes it (`./note.object.js`, `./src/objects/index.js`), so the
+  // that writes it (`./note.object.js`, `./src/objects`), so the
   // count of `../` here — escaping or merely climbing — is zero. The bare
   // anchor therefore has no correct text to redden. The leading lookbehind is
   // what keeps it that way: it refuses a `..` that is itself part of a longer
