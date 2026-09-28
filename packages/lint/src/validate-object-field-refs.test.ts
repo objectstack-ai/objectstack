@@ -324,3 +324,345 @@ describe('registry wiring', () => {
     expect(entry.runtimeTypes).toContain('object');
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#20432] The field-level name lists and `indexes[].fields`.
+//
+// A two-object stack in the showcase's own shape: an invoice whose `account`
+// lookup points at an account. The names each list may use are decided per
+// key by its runtime READER (see the module note's table), so every block
+// below pins BOTH directions of the address: a name of the object the list
+// addresses passes, and a name that exists only on the OTHER object is still
+// refused.
+// ---------------------------------------------------------------------------
+const account = (over: Record<string, unknown> = {}) => ({
+  name: 'crm_account',
+  fields: {
+    name: { type: 'text' },
+    industry: { type: 'select' },
+    status: { type: 'select' },
+    region: { type: 'text' },
+  },
+  ...over,
+});
+
+const invoice = (fields: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+  name: 'crm_invoice',
+  fields: {
+    name: { type: 'text' },
+    total: { type: 'currency' },
+    region: { type: 'text' },
+    // Owner-only field — the referenced account does not have it.
+    issued_on: { type: 'date' },
+    ...fields,
+  },
+  ...over,
+});
+
+const lookup = (over: Record<string, unknown> = {}) => ({
+  type: 'lookup',
+  reference: 'crm_account',
+  ...over,
+});
+
+const twoObjects = (fields: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+  objects: [invoice(fields, over), account()],
+});
+
+describe('validateObjectFieldRefs — relatedListColumns (addresses the OWNING object)', () => {
+  it('REFUSES a misspelt column at the exact path, naming the owning object and its fields', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ relatedListColumns: ['name', 'totl'] }),
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.account.relatedListColumns[1]',
+      where: 'object "crm_invoice" › fields.account.relatedListColumns',
+    });
+    expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
+    expect(findings[0]!.message).toContain('Did you mean "total"?');
+    // The prescription: the addressed object's field list.
+    expect(findings[0]!.hint).toContain('Fields on "crm_invoice": account, issued_on, name, region, total.');
+  });
+
+  it('passes columns that are fields of the owning object (the child whose rows the list shows)', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      account: lookup({ relatedListColumns: ['name', 'total', 'issued_on'] }),
+    }))).toEqual([]);
+  });
+
+  it('REFUSES a column that exists only on the REFERENCED object — the list shows the child\'s rows', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ relatedListColumns: ['industry'] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.relatedListColumns[0]']);
+    expect(findings[0]!.message).toContain('object "crm_invoice"');
+  });
+
+  it('keeps the family\'s path resolution: a dotted column through a real lookup resolves', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      account: lookup({ relatedListColumns: ['account.industry'] }),
+    }))).toEqual([]);
+  });
+});
+
+describe('validateObjectFieldRefs — lookupColumns (addresses the REFERENCED object)', () => {
+  it('REFUSES a misspelt name in the string arm, against the referenced object', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupColumns: ['name', 'industy'] }),
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.account.lookupColumns[1]',
+    });
+    expect(findings[0]!.message).toContain('"industy" is not a field on object "crm_account"');
+    expect(findings[0]!.message).toContain('Did you mean "industry"?');
+    expect(findings[0]!.hint).toContain('Fields on "crm_account": industry, name, region, status.');
+  });
+
+  it('REFUSES a misspelt `field` in the object arm, at `.field`', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupColumns: [{ field: 'stauts', label: 'Lifecycle' }] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.lookupColumns[0].field']);
+    expect(findings[0]!.rule).toBe(OBJECT_FIELD_REF_UNKNOWN);
+  });
+
+  it('passes both arms when every name is a field of the referenced object', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupColumns: ['name', { field: 'industry', label: 'Industry' }] }),
+    }))).toEqual([]);
+  });
+
+  it('REFUSES a name that exists only on the OWNING object — the picker lists the referenced records', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupColumns: ['issued_on'] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.lookupColumns[0]']);
+    expect(findings[0]!.message).toContain('object "crm_account"');
+  });
+
+  it('judges a dotted name as ONE name — the picker reads its columns verbatim', () => {
+    // `region` is a real field on the account; `account.region` would resolve
+    // as a PATH from the invoice, but the picker never walks one.
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupColumns: ['crm_account.region'] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.lookupColumns[0]']);
+  });
+
+  it('judges a `user` field against `sys_user`, the target its type fixes', () => {
+    const stack = {
+      objects: [
+        invoice({ approver: { type: 'user', lookupColumns: ['email', 'emial'] } }),
+        { name: 'sys_user', fields: { name: { type: 'text' }, email: { type: 'email' } } },
+      ],
+    };
+    const findings = validateObjectFieldRefs(stack);
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.approver.lookupColumns[1]']);
+    expect(findings[0]!.message).toContain('object "sys_user"');
+  });
+
+  it('stays silent when the referenced object is not in this stack (skip 1)', () => {
+    expect(validateObjectFieldRefs({
+      objects: [invoice({ owner_account: lookup({ reference: 'elsewhere', lookupColumns: ['anything'] }) })],
+    })).toEqual([]);
+  });
+
+  it('stays silent on a type with no picker: nothing reads the key there', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      notes: { type: 'text', lookupColumns: ['nope'] },
+    }))).toEqual([]);
+  });
+});
+
+describe('validateObjectFieldRefs — lookupFilters[].field (addresses the REFERENCED object)', () => {
+  it('REFUSES a misspelt filter field against the referenced object, at `.field`', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupFilters: [{ field: 'statsu', operator: 'ne', value: 'churned' }] }),
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.account.lookupFilters[0].field',
+    });
+    expect(findings[0]!.message).toContain('"statsu" is not a field on object "crm_account"');
+    expect(findings[0]!.hint).toContain('Fields on "crm_account":');
+  });
+
+  it('passes a filter over a field of the referenced object', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupFilters: [{ field: 'status', operator: 'ne', value: 'churned' }] }),
+    }))).toEqual([]);
+  });
+
+  it('REFUSES a filter over a field only the OWNING object has', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      account: lookup({ lookupFilters: [{ field: 'total', operator: 'gt', value: 0 }] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.lookupFilters[0].field']);
+  });
+});
+
+describe('validateObjectFieldRefs — dependsOn (the gate on the OWNER, the filter on the REFERENCE)', () => {
+  it('REFUSES a misspelt name in the string arm against the owning object — once, not twice', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: ['regoin'] }),
+    }));
+    // One typo, one finding: the same name is not reported again against the
+    // referenced object, since one fix answers both.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.contact.dependsOn[0]',
+    });
+    expect(findings[0]!.message).toContain('"regoin" is not a field on object "crm_invoice"');
+    expect(findings[0]!.message).toContain('stays gated for good');
+  });
+
+  it('passes a bare name that is a field on BOTH sides (the shorthand)', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: ['region'] }),
+    }))).toEqual([]);
+  });
+
+  it('REFUSES a bare name the owner has but the referenced object lacks — it is the filter key too', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: ['issued_on'] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.contact.dependsOn[0]']);
+    expect(findings[0]!.message).toContain('object "crm_account"');
+    expect(findings[0]!.hint).toContain('param');
+  });
+
+  it('object arm: judges `field` on the owner and `param` on the referenced object', () => {
+    expect(validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: [{ field: 'issued_on', param: 'region' }] }),
+    }))).toEqual([]);
+
+    const findings = validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: [{ field: 'isued_on', param: 'regon' }] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.contact.dependsOn[0].field',
+      'objects[0].fields.contact.dependsOn[0].param',
+    ]);
+    expect(findings[0]!.message).toContain('object "crm_invoice"');
+    expect(findings[1]!.message).toContain('object "crm_account"');
+  });
+
+  it('object arm without `param`: `field` is the filter key as well', () => {
+    const findings = validateObjectFieldRefs(twoObjects({
+      contact: lookup({ dependsOn: [{ field: 'total' }] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.contact.dependsOn[0].field']);
+    expect(findings[0]!.message).toContain('object "crm_account"');
+  });
+
+  it('on a type with no picker, only the gate is judged — against the owning object', () => {
+    // The cascading select: `province` gates on `country`, and its per-option
+    // `visibleWhen` is the rule. No referenced object exists to judge against.
+    const ok = { objects: [invoice({
+      country: { type: 'select' },
+      province: { type: 'select', dependsOn: ['country'] },
+    })] };
+    expect(validateObjectFieldRefs(ok)).toEqual([]);
+
+    const findings = validateObjectFieldRefs({ objects: [invoice({
+      country: { type: 'select' },
+      province: { type: 'select', dependsOn: ['contry'] },
+    })] });
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.province.dependsOn[0]']);
+    expect(findings[0]!.message).toContain('Did you mean "country"?');
+  });
+
+  it('a registry-injected column on the owner is a live gate (skip 3)', () => {
+    expect(validateObjectFieldRefs({ objects: [invoice({
+      note: { type: 'text', dependsOn: ['owner_id'] },
+    }, { ownership: 'user' })] })).toEqual([]);
+  });
+});
+
+describe('validateObjectFieldRefs — indexes[].fields (verbatim physical columns)', () => {
+  it('REFUSES a misspelt index column at the exact path, with the owning object\'s field list', () => {
+    const findings = validateObjectFieldRefs({ objects: [invoice({}, {
+      indexes: [{ fields: ['name'] }, { fields: ['region', 'totl'], unique: true }],
+    })] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].indexes[1].fields[1]',
+      where: 'object "crm_invoice" › indexes[1].fields',
+    });
+    expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
+    expect(findings[0]!.message).toContain('Did you mean "total"?');
+    expect(findings[0]!.message).toContain('`unique` index is then silently unenforced');
+    expect(findings[0]!.hint).toContain('Fields on "crm_invoice":');
+  });
+
+  it('passes authored columns and the columns the platform injects', () => {
+    expect(validateObjectFieldRefs({ objects: [invoice({}, {
+      indexes: [
+        { fields: ['region', 'total'], unique: true },
+        { fields: ['organization_id', 'created_at'] },
+        { fields: ['id'] },
+      ],
+    })] })).toEqual([]);
+  });
+
+  it('REFUSES a dotted column — an index names physical columns, never a path', () => {
+    const findings = validateObjectFieldRefs({ objects: [invoice({ account: lookup() }, {
+      indexes: [{ fields: ['account.name'] }],
+    }), account()] });
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].indexes[0].fields[0]']);
+  });
+
+  it('judges EXISTENCE only: a virtual formula column resolves here, and materialization stays with the sync', () => {
+    expect(validateObjectFieldRefs({ objects: [invoice({ margin: { type: 'formula' } }, {
+      indexes: [{ fields: ['margin'] }],
+    })] })).toEqual([]);
+  });
+
+  it('is inert on junk index entries', () => {
+    expect(validateObjectFieldRefs({ objects: [invoice({}, {
+      indexes: [null, 'x', { fields: 'name' }, { fields: [null, 3, ''] }, {}],
+    })] })).toEqual([]);
+  });
+});
+
+describe('validateObjectFieldRefs — the runtime publish door judges the new positions too', () => {
+  it('refuses an object write whose index names a column it does not have', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: obj({ indexes: [{ fields: ['name', 'helth_score'], unique: true }] }),
+      context: { objects: [] },
+    });
+    const refusal = result.errors.find((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    expect(refusal, JSON.stringify(result.errors)).toBeDefined();
+    expect(refusal!.path).toBe('objects.proj_task.indexes[0].fields[1]');
+    expect(refusal!.severity).toBe('error');
+  });
+
+  it('resolves a lookup\'s picker columns against the referenced object the context carries', () => {
+    const write = (lookupColumns: unknown[]) => runRuntimeAuthoringRules({
+      type: 'object',
+      // A publishable object in every other respect, so the only rule that
+      // can speak is the one this block is about.
+      item: invoice({ account: lookup({ lookupColumns }) }, {
+        label: 'Invoice', sharingModel: 'private', nameField: 'name',
+      }),
+      context: { objects: [account()] },
+    });
+    expect(write(['name', 'industry']).errors, 'clean').toEqual([]);
+    const refusal = write(['name', 'industy']).errors.find((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    expect(refusal).toBeDefined();
+    expect(refusal!.path).toBe('objects.crm_invoice.fields.account.lookupColumns[1]');
+  });
+});

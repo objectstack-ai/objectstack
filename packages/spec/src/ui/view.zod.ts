@@ -5060,11 +5060,11 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  */
 const ViewColumnStateSchema = z.object({
   order: z.array(z.string()).optional()
-    .describe('Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored).'),
+    .describe('Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored).'),
   widths: z.record(z.string(), z.number()).optional()
-    .describe('Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored).'),
+    .describe('Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored).'),
 }).describe(
-  'Runtime-only personalization overlay key: the per-user column layout (order/widths) the console grid '
+  'Runtime-only personalization overlay key: the column layout (order/widths) the console grid '
   + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
 );
 
@@ -5082,6 +5082,10 @@ const VIEW_ITEM_SURFACE = {
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
     // [#9933] Runtime-only overlay key — same disposition as the two above.
     columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#20456] Declared on the wire members with the switcher's other row
+    // state; named here so an author who reaches for it as access control is
+    // told what it is.
+    visibility: '`visibility` is the view switcher\'s display grouping (private / team / organization / public), which the console keeps on the stored row — it is not authored metadata and it restricts nobody: every user who can read the object can list and open the view. Remove it from authored metadata.',
   },
 } as const;
 
@@ -5124,28 +5128,87 @@ export const ViewItemSchema: z.ZodDiscriminatedUnion<[
 );
 
 /**
+ * [#20456] The switcher groups the console files a view's tab under, by
+ * `visibility`. Read off the console's own group order (private, team,
+ * organization, public). Declared ABOVE {@link viewItemWireFields} on purpose:
+ * under `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module init in
+ * file order, and a `const` below its first eager reader is a TDZ error.
+ */
+const VIEW_SWITCHER_VISIBILITY_GROUPS = ['private', 'team', 'organization', 'public'] as const;
+
+/**
+ * [#20456] The switcher's row state: the keys the console writes onto a STORED
+ * `view` row and reads back to draw the view switcher. One declaration, spread
+ * into every wire member that judges a row the console writes them on: the
+ * ViewItem record ({@link viewItemWireFields}) and the flattened LIST overlay
+ * ({@link listOverlayRoundTripFields}). The form overlay is not one of them: the
+ * switcher lists list-family views only, so no console write puts these keys on
+ * a form row.
+ *
+ * Measured, not recalled: the census on objectstack#20456 walked objectui's
+ * stored-view readers at the `.objectui-sha` pin and ran the console's write
+ * bodies through {@link ViewMetadataSchema}. Before this declaration the list
+ * overlay's `.strip()` dropped `isPinned` and `sortOrder` from the parse, and
+ * both members dropped `visibility`: `saveMetaItem` stores the request body
+ * verbatim (ADR-0005 appendix (c)), so the keys lived in the store and nowhere
+ * in the contract.
+ *
+ * None of the three is per-user. A stored `view` row is environment metadata
+ * with no per-user scope (ADR-0017, amended: per-user view scoping is a parked
+ * direction), so a pin, a position or a group applies to everyone who reads
+ * the view.
+ *
+ * ⛔ Not authorable. The authoring doors ({@link ViewItemSchema},
+ * `ListViewSchema`) do not declare them and refuse them by name.
+ */
+function viewSwitcherRowStateFields() {
+  return {
+    isPinned: z.boolean().optional()
+      .describe(
+        'Console round-trip: the view is pinned in the object\'s view switcher. Written by the '
+        + 'console\'s pin toggle through the `view` metadata API and read back to draw the pinned group. '
+        + 'Stored on the view\'s row, which has no per-user scope. Not authored.',
+      ),
+    sortOrder: z.number().int().optional()
+      .describe(
+        'Console round-trip: the view\'s position among the object\'s saved views in the switcher, '
+        + '0-based and counted over saved views only (a code-defined view carries none). Written by '
+        + 'the console\'s drag-reorder and read back to order the tabs. Not authored: `order` is the '
+        + 'authored default position.',
+      ),
+    visibility: z.enum(VIEW_SWITCHER_VISIBILITY_GROUPS).optional()
+      .describe(
+        'Console round-trip: the group the switcher files this view\'s tab under (private, team, '
+        + 'organization or public). Display grouping only, NOT access control: nothing restricts who '
+        + 'can list or open the view by this value. No console control sets it; the console carries '
+        + 'a stored value forward when it re-saves the row. Not authored.',
+      ),
+  };
+}
+
+/**
  * Auxiliary Studio round-trip keys, given an explicit DECLARED home on the wire
  * variant (#5074) instead of living implicitly on "the member nobody closed".
  *
- * These are per-user switcher state the console writes through the `view`
- * metadata API and reads back; `saveMetaItem` persists the body verbatim, so
- * they are on the wire and in the store. They are deliberately declared HERE and
- * not on {@link ViewItemSchema}: an author who writes `isPinned` in a `*.view.ts`
- * gets a named rejection pointing at `order`, while the console's own PUT parses.
+ * The console writes them through the `view` metadata API and reads them back;
+ * `saveMetaItem` persists the body verbatim, so they are on the wire and in the
+ * store. They are deliberately declared HERE and not on {@link ViewItemSchema}:
+ * an author who writes `isPinned` in a `*.view.ts` gets a named rejection
+ * pointing at `order`, while the console's own PUT parses. [#20456] The
+ * switcher's three keys come from {@link viewSwitcherRowStateFields}, the one
+ * declaration the list overlay shares.
  */
 function viewItemWireFields() {
   return {
-    isPinned: z.boolean().optional()
-      .describe('Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored).'),
-    sortOrder: z.number().int().optional()
-      .describe('Studio round-trip: position within the switcher (per-user state, written by the console — not authored).'),
-    // [#9933] Same disposition as the two keys above: per-user state the
-    // console writes through the `view` metadata API. `updateView` PUTs
+    ...viewSwitcherRowStateFields(),
+    // Same disposition as the switcher keys: console state written through
+    // the `view` metadata API ({@link ViewColumnStateSchema} carries the
+    // key's own ruling). `updateView` PUTs
     // `{ ...current, ...partial }`, so on a standalone ViewItem record the
     // key arrives at THIS member's top level; declaring it validates the
     // shape where `.strip()` used to let it ride through unchecked.
     columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)'),
+      .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
   };
 }
 
@@ -5419,7 +5482,11 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
     // AND gets its inner shape genuinely validated instead of ridden past
     // `.strip()` unchecked.
     columnState: ViewColumnStateSchema.optional(),
-    isDefault: z.boolean().optional(),
+    // [#20456] A console round-trip key (the switcher's set-default writes it
+    // and reads it back), declared here since before that census; now it
+    // carries its meaning too.
+    isDefault: z.boolean().optional()
+      .describe('Whether this is the object\'s default view in the switcher. The console\'s set-default writes it, and the console opens the default view when the URL names none.'),
     order: z.number().int().optional(),
     scope: ViewScopeSchema.optional(),
     // [#20230] RETIRED — ADR-0049 enforce-or-remove, the view item's pair
@@ -5885,6 +5952,40 @@ function listOverlayPatchFields() {
 }
 
 /**
+ * [#20456] The console's round-trip keys on a flattened LIST overlay row: the
+ * switcher's row state ({@link viewSwitcherRowStateFields}, shared with the
+ * ViewItem record) plus the settings-overlay marker, which only this row shape
+ * carries.
+ *
+ * `_isOverride` is the discriminant objectui's adapter stamps on the row it
+ * writes for a toolbar change to a CODE-DEFINED view (density, sort, hidden
+ * fields, column widths, inline edit), and the only thing that classifies a
+ * stored row as that view's settings overlay rather than a saved view of its
+ * own: the console's view list excludes a marked row from the switcher, and
+ * the merge over the source view takes only the overlay's own keys from it.
+ * The parse used to strip it. Were the parsed body ever the stored one, a
+ * toolbar change would come back as a saved view of its own (listed in the
+ * switcher, with rename and delete), and the merge over its source view would
+ * no longer be narrowed to the overlay's own keys. Spelled
+ * as the console writes it, with the leading underscore of the other
+ * platform-stamped keys (`_lock`, `_lockReason`); only `true` is ever written,
+ * and only `true` is declared.
+ */
+function listOverlayRoundTripFields() {
+  return {
+    ...viewSwitcherRowStateFields(),
+    _isOverride: z.literal(true).optional()
+      .describe(
+        'Console round-trip: `true` marks this row as the console\'s settings overlay for the '
+        + 'code-defined view it is saved under (a toolbar change: density, sort, hidden fields, '
+        + 'column widths, inline edit), not a saved view of its own. The console leaves a marked row '
+        + 'out of the view switcher and merges only the overlay\'s own keys over the source view. '
+        + 'Stamped by the console; not authored.',
+      ),
+  };
+}
+
+/**
  * [#20186] A column-less flattened list overlay that NAMES a `type` is a full
  * inline config missing its columns — refused at `columns`. Reads the input
  * side: `type` carries no default on this member (see
@@ -5992,6 +6093,9 @@ const ListViewOverlayWireSchema = lazySchema(() =>
     ...flattenedViewOverlayFields('list'),
     options: ListViewOverlayOptionsSchema.optional(),
     ...listOverlayPatchFields(),
+    // [#20456] The console's round-trip keys on this row shape, declared so
+    // the parse keeps them instead of `.strip()`ping them unread.
+    ...listOverlayRoundTripFields(),
   }).strip()
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
@@ -6065,6 +6169,49 @@ export const VIEW_METADATA_MEMBERS = {
   listOverlay: ListViewOverlayWireSchema,
   formOverlay: FormViewOverlayWireSchema,
 } as const satisfies Record<ViewMetadataBranch, z.ZodTypeAny>;
+
+/**
+ * [#20456] The console's round-trip keys on a stored `view` row: every
+ * top-level key objectui's console WRITES onto a stored row and READS BACK,
+ * mapped to the {@link VIEW_METADATA_MEMBERS} branches whose rows the console
+ * writes it on. Each is declared, with its meaning, on each of those members,
+ * so a parse of the row keeps it. This is the spec symbol the ADR-0005
+ * appendix (c) amendment cites: "every round-trip key is declared" means this
+ * record, closed by `view-console-round-trip-keys.test.ts`.
+ *
+ * Measured on objectstack#20456 against objectui at the `.objectui-sha` pin:
+ * a syntax walk of property reads in the console's stored-view readers,
+ * crossed with the console's write bodies run through
+ * {@link ViewMetadataSchema}. Keys that census found and deliberately left
+ * OFF this record, with the declared spelling each one maps to:
+ *
+ * - `objectName` / `object_name` → `object` (declared, required on both
+ *   overlays). The console stamps `objectName` onto rows it has read, and a
+ *   saved view's toolbar save writes it back; every reader already falls back
+ *   to `object`.
+ * - a top-level `id` / `_id` → `name`. The console reads them only when a row
+ *   has no `name`, and the write path stamps `name` on every row.
+ * - `filter[].id` / `sort[].id` → {@link VIEW_CONSOLE_ROW_DECORATIONS}, removed
+ *   before the parse by {@link stripViewConsoleDecorations}. The builders mint
+ *   a fresh id for a row that has none, so a parsed row loses nothing the
+ *   console shows.
+ * - a bare-array `exportOptions` → the object form, which the parse already
+ *   lifts it to and the export menu reads (`exportOptions.formats`).
+ * - `_draft` / `_diagnostics` → `METADATA_READ_DECORATIONS`
+ *   (`kernel/metadata-read-decorations.ts`): stamped on the read, stripped
+ *   before the write, never stored.
+ *
+ * ⛔ Not a registry to grow by hand. A new entry is a new console write that
+ * the census measured, declared on its members in the same change.
+ */
+export const VIEW_CONSOLE_ROUND_TRIP_KEYS = {
+  isDefault: ['viewItem', 'listOverlay'],
+  isPinned: ['viewItem', 'listOverlay'],
+  sortOrder: ['viewItem', 'listOverlay'],
+  visibility: ['viewItem', 'listOverlay'],
+  columnState: ['viewItem', 'listOverlay'],
+  _isOverride: ['listOverlay'],
+} as const satisfies Record<string, readonly ViewMetadataBranch[]>;
 
 /**
  * [#5599] The `view` vocabulary, derived once from the members on first use.
