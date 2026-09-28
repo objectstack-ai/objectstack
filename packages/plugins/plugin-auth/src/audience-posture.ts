@@ -160,21 +160,79 @@ export function resolveAudience(raw: AudienceConfig | undefined): ResolvedAudien
 }
 
 /**
+ * [#20389] Who declared the standing `emailAndPassword.requireEmailVerification`.
+ *
+ * - `deployment`: the deployment's own configuration — the manager's
+ *   constructor config (stack config / host preset), host code calling
+ *   `applyConfigPatch()`, or an `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env
+ *   override arriving through the settings namespace.
+ * - `console`: a value an administrator STORED in the `auth` settings
+ *   namespace at runtime.
+ *
+ * Only posture `open` reads it: there an explicit `false` is the deployment's
+ * opt-out, which the console can agree with but never make.
+ */
+export type VerificationDeclarant = 'deployment' | 'console';
+
+/**
+ * [#20389] THE effective email-verification requirement for a posture and a
+ * declared `requireEmailVerification` — the one function the better-auth
+ * wiring (`createAuthInstance`) and the advertisement (`getPublicConfig`) both
+ * read, so the two cannot disagree.
+ *
+ * - `email_domain`: always ON. The domain allowlist is the only gate there, so
+ *   an unverified sign-up is colleague impersonation (an explicit `false` is
+ *   refused at entry by {@link assertAudienceConfig}).
+ * - `open`: ON unless the deployment declared it OFF with an explicit `false`
+ *   (absent or `true` keeps the forced-on default).
+ * - `invite_only`: the declared value, default OFF.
+ *
+ * Callers must have passed the declaration through {@link assertAudienceConfig}:
+ * this resolves, it does not judge who declared the value.
+ */
+export function resolveEmailVerificationRequirement(
+  posture: AudiencePosture,
+  declared: boolean | undefined,
+): boolean {
+  if (posture === 'email_domain') return true;
+  if (posture === 'open') return declared !== false;
+  return declared ?? false;
+}
+
+/**
+ * [#20389] The boot warning for posture `open` running with email verification
+ * explicitly off. It names the posture and the consequence, and is logged once
+ * per boot by `AuthPlugin` after the settings namespace is applied.
+ */
+export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
+  "[auth] audience posture 'open' is running with email verification explicitly OFF " +
+  '(emailAndPassword.requireEmailVerification: false, or OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false). ' +
+  'Anyone can register an address they do not control and is signed in at once, and an organization ' +
+  'invitation sent to that address can then be accepted by that account. Keep this to a deployment ' +
+  'with no mail transport that trusts its sign-ups, such as a pre-production environment; remove the ' +
+  'explicit false to force verification back on.';
+
+/**
  * Entry validation — REFUSES an unusable audience declaration at the point it
  * enters the manager (constructor and `applyConfigPatch`), loudly, with the
  * remedy in the message. Mirrors `AudienceConfigSchema`'s predicates (the
  * schema guards the authoring surface; the runtime receives plain objects) and
- * adds the one cross-field invariant the schema cannot see:
+ * adds the one cross-field invariant the schema cannot see, on
+ * `emailAndPassword.requireEmailVerification` (verification is FORCED on by
+ * the wiring under both self-registration postures unless noted):
  *
- *   posture permits self-registration ⇒ `emailAndPassword.requireEmailVerification`
- *   must not be explicitly `false` (verification is FORCED on by the wiring;
- *   an explicit contradiction is a config that opens self-registration while
- *   disabling verification — refused, an unverified allowlisted-domain signup
- *   is colleague impersonation and makes the domain gate decorative).
+ *   - `email_domain` ⇒ must not be explicitly `false` — refused: an unverified
+ *     allowlisted-domain signup is colleague impersonation and makes the
+ *     domain gate decorative.
+ *   - `open` ⇒ an explicit `false` is honoured when the DEPLOYMENT declared it
+ *     (#20389: a pre-production deployment with no mail transport otherwise
+ *     dead-ends every sign-up at the verify page), and refused when only the
+ *     console stored it (`verificationDeclaredBy: 'console'`).
  */
 export function assertAudienceConfig(
   raw: AudienceConfig | undefined,
   emailAndPassword: EmailAndPasswordConfig | undefined,
+  options: { verificationDeclaredBy?: VerificationDeclarant } = {},
 ): void {
   if (raw === undefined || raw === null) return;
   const fail = (message: string): never => {
@@ -235,12 +293,22 @@ export function assertAudienceConfig(
       );
     }
     if (emailAndPassword?.requireEmailVerification === false) {
-      fail(
-        `posture '${posture}' opens self-registration, which FORCES email verification on — ` +
-        'emailAndPassword.requireEmailVerification: false contradicts it and is refused ' +
-        '(an unverified allowlisted-domain signup is colleague impersonation). ' +
-        "Remove the explicit false, or close the posture to 'invite_only'.",
-      );
+      if (posture === 'email_domain') {
+        fail(
+          `posture '${posture}' opens self-registration, which FORCES email verification on — ` +
+          'emailAndPassword.requireEmailVerification: false contradicts it and is refused ' +
+          '(an unverified allowlisted-domain signup is colleague impersonation). ' +
+          "Remove the explicit false, or close the posture to 'invite_only'.",
+        );
+      }
+      if ((options.verificationDeclaredBy ?? 'deployment') === 'console') {
+        fail(
+          `posture '${posture}' FORCES email verification on unless the DEPLOYMENT turns it off — ` +
+          'a requireEmailVerification: false stored in the auth settings console cannot, and is refused. ' +
+          'Set OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false (or emailAndPassword.requireEmailVerification: false ' +
+          "in the stack config) to opt out, remove the stored value, or close the posture to 'invite_only'.",
+        );
+      }
     }
   } else if (set !== undefined) {
     fail(

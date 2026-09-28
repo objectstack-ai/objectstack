@@ -20,11 +20,13 @@ reason, that no engine ever executed them: L1 "Simple Sync"
 - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 **SCOPE: Most comprehensive integration layer.**
-Includes authentication, webhooks, field mapping, bidirectional sync,
-retry policies, and complete lifecycle management.
+Includes authentication, field mapping, bidirectional sync, retry policies,
+and complete lifecycle management.
 
 This protocol supports multiple authentication strategies, bidirectional sync,
-field mapping, webhooks, and comprehensive retry and resilience policies.
+field mapping, and an executed retry policy. It declares no health probe, no
+circuit breaker, no authored status and no webhooks of its own — see "What
+this layer does NOT provide" below.
 
 ## What this layer does NOT provide
 
@@ -55,10 +57,18 @@ construction. ⚠️ Retrying a `429` is not throttling it: a retry policy
 spaces out the calls you already made, it does not cap the rate, so the
 sentence above about rate limiting stands unchanged.
 
-⛔ **One exception remains, still inert and still `dead` in
-`packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
-sub-key is unread and no breaker ever opens; implement circuit breaking in
-the connector provider.
+**There is no connector health probe and no circuit breaker.** The
+`health` block (`healthCheck` and `circuitBreaker`) was removed in
+`@objectstack/spec` 17 (ADR-0049 enforce-or-remove) together with the
+authored `status` and the nested `webhooks` array: nothing ever scheduled a
+probe, opened a breaker, read an authored status or delivered a webhook
+declared inside a connector. Implement probes and circuit breaking in the
+connector provider or an upstream gateway; whether a registered connector can
+be dispatched is the computed `state` (`ready` / `degraded`) that
+`GET /api/v1/automation/connectors` reports; and a webhook that is actually
+delivered is declared in the stack's top-level `webhooks:` collection. The
+"REMOVED: `health`, `status` and the nested `webhooks`" section below records
+the measurement.
 
 `connectionTimeoutMs` used to be the second exception and is now **removed**
 (ADR-0049, the narrower second decision that surface was owed): it was
@@ -113,12 +123,11 @@ Authentication is now imported from the canonical `auth/config.zod.ts`.
 - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
 - Complex OAuth2/SAML authentication required
 - Bidirectional sync with field mapping (`dataType` / `syncMode` per field — it moves values, it does not transform them)
-- Webhook management required
 - Full CRUD operations and data synchronization
 - Need comprehensive retry strategies and error handling
 
 **Examples:**
-- Full Salesforce integration with webhooks
+- Full Salesforce integration
 - SAP ERP connector with CDC (Change Data Capture)
 - Microsoft Dynamics 365 connector
 
@@ -153,31 +162,12 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema, SyncStrategySchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, RetryConfig, SyncStrategy } from '@objectstack/spec/integration';
 
 // Validate data
-const result = CircuitBreakerConfigSchema.parse(data);
+const result = ConnectorSchema.parse(data);
 ```
-
----
-
-## CircuitBreakerConfig
-
-Circuit breaker configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable circuit breaker |
-| **failureThreshold** | `number` | optional (default: `5`) | Failures before opening circuit |
-| **resetTimeoutMs** | `number` | optional (default: `30000`) | Time in open state before half-open |
-| **halfOpenMaxRequests** | `number` | optional (default: `1`) | Requests allowed in half-open state |
-| **monitoringWindowMs** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
-| **monitoringWindow** | `never` | optional | [REMOVED] `CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **fallbackStrategy** | `Enum<'cache' \| 'default_value' \| 'error' \| 'queue'>` | optional | Fallback strategy when circuit is open |
-
 
 ---
 
@@ -200,15 +190,15 @@ Circuit breaker configuration
 | **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions  |
 | **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
-| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations  |
+| **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `never` | optional | [REMOVED] `connector.connectionTimeoutMs` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the platform never honoured it and cannot honour it where it was declared: a connector's outbound call is a WHATWG `fetch`, whose only cancellation surface is one `AbortSignal` over the whole operation, so nothing there observes the connection phase separately, and the value only ever travelled (onto the reported def and the materialization fingerprint) without ever bounding a connect. Delete the key. Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as `resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector provider or upstream gateway on a transport that can separate the phases. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
-| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
+| **status** | `never` | optional | [REMOVED] `connector.status` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `status: 'active'` neither enabled nor advertised a connector, and `'error'` or `'configuring'` changed nothing either. Delete the key; the `ConnectorStatus` enum leaves with it. On a declarative entry, `enabled: false` is what withdraws a materialized instance or marks a catalog-only descriptor, and whether a registered connector can be dispatched is computed by the runtime and reported as `state` (`ready` or `degraded`) on `GET /api/v1/automation/connectors` — no authored value sets it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |
 | **errorMapping** | `never` | optional | [REMOVED] `connector.errorMapping` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no provider, dispatcher or materializer mapped an external error through the rules, so `unmappedBehavior` configured nothing and a rule's `userMessage` was never shown to anyone (that spelling is the live API-error channel, `ApiError.userMessage`, which a thrown HTTP error declares — not connector metadata). Delete the key; the whole shape leaves with it (`ErrorMappingConfig`, `ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, because no error-mapping engine exists: a connector's failures reach callers as the provider's own errors (ADR-0097). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
+| **health** | `never` | optional | [REMOVED] `connector.health` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no connector health probe or circuit breaker ever existed: nothing scheduled a `healthCheck` request, counted consecutive failures against a threshold, or opened, half-opened or closed a `circuitBreaker`, and no `fallbackStrategy` was ever applied, so every key in the block configured nothing. That includes `circuitBreaker.monitoringWindowMs` and the `monitoringWindow` spelling it was renamed from: the renamed key is removed with the rest. Delete the key; the whole shape leaves with it (`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`). Whether a connector can be dispatched is computed, not authored: `GET /api/v1/automation/connectors` reports each connector's `state` (`ready` or `degraded`). Put health probes and circuit breaking in the connector provider or an upstream gateway. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -327,32 +317,6 @@ Circuit breaker configuration
 | **required** | `boolean` | optional (default: `false`) | Field is required |
 | **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
 
-### Nested Shape: `Connector.webhooks[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook name, unique per organization (lowercase snake_case) |
-| **label** | `string` | optional | Human-readable webhook label |
-| **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
-| **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
-| **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
-| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
-| **secret** | `string` | optional | Signing secret for HMAC signature verification |
-| **isActive** | `boolean` | optional (default: `true`) | Whether webhook is active |
-| **description** | `string` | optional | Webhook description |
-| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this webhook. |
-| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
-| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
-| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
-| **_packageId** | `string` | optional | Owning package machine id. |
-| **_packageVersion** | `string` | optional | Owning package version. |
-| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **events** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'sync.started' \| …>[]` | optional | Connector events to subscribe to  |
-| **signatureAlgorithm** | `Enum<'hmac_sha256' \| 'hmac_sha512' \| 'none'>` | optional (default: `"hmac_sha256"`) | Webhook signature algorithm |
-
 ### Nested Shape: `Connector.retryConfig`
 
 | Property | Type | Required | Description |
@@ -365,13 +329,6 @@ Circuit breaker configuration
 | **retryableStatusCodes** | `number[]` | optional (default: `[408,429,500,502,503,504]`) | HTTP status codes to retry |
 | **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
 | **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
-
-### Nested Shape: `Connector.health`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
 
 
 ---
@@ -431,45 +388,6 @@ Conflict resolution strategy
 | **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
 | **required** | `boolean` | optional (default: `false`) | Field is required |
 | **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
-
-
----
-
-## ConnectorHealth
-
-Connector health configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
-
-### Nested Shape: `ConnectorHealth.healthCheck`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable health checks |
-| **intervalMs** | `number` | optional (default: `60000`) | Health check interval in milliseconds |
-| **timeoutMs** | `number` | optional (default: `5000`) | Health check timeout in milliseconds |
-| **endpoint** | `string` | optional | Health check endpoint path |
-| **method** | `Enum<'GET' \| 'HEAD' \| 'OPTIONS'>` | optional | HTTP method for health check |
-| **expectedStatus** | `number` | optional (default: `200`) | Expected HTTP status code |
-| **unhealthyThreshold** | `number` | optional (default: `3`) | Consecutive failures before marking unhealthy |
-| **healthyThreshold** | `number` | optional (default: `1`) | Consecutive successes before marking healthy |
-
-### Nested Shape: `ConnectorHealth.circuitBreaker`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable circuit breaker |
-| **failureThreshold** | `number` | optional (default: `5`) | Failures before opening circuit |
-| **resetTimeoutMs** | `number` | optional (default: `30000`) | Time in open state before half-open |
-| **halfOpenMaxRequests** | `number` | optional (default: `1`) | Requests allowed in half-open state |
-| **monitoringWindowMs** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
-| **monitoringWindow** | `never` | optional | [REMOVED] `CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **fallbackStrategy** | `Enum<'cache' \| 'default_value' \| 'error' \| 'queue'>` | optional | Fallback strategy when circuit is open |
 
 
 ---
@@ -601,20 +519,6 @@ Retry strategy
 
 ---
 
-## ConnectorStatus
-
-Connector status
-
-### Allowed Values
-
-* `active`
-* `inactive`
-* `error`
-* `configuring`
-
-
----
-
 ## ConnectorTrigger
 
 ### Properties
@@ -684,15 +588,15 @@ Connector type
 | **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions  |
 | **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
-| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations  |
+| **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `never` | optional | [REMOVED] `connector.connectionTimeoutMs` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the platform never honoured it and cannot honour it where it was declared: a connector's outbound call is a WHATWG `fetch`, whose only cancellation surface is one `AbortSignal` over the whole operation, so nothing there observes the connection phase separately, and the value only ever travelled (onto the reported def and the materialization fingerprint) without ever bounding a connect. Delete the key. Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as `resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector provider or upstream gateway on a transport that can separate the phases. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
-| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
+| **status** | `never` | optional | [REMOVED] `connector.status` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `status: 'active'` neither enabled nor advertised a connector, and `'error'` or `'configuring'` changed nothing either. Delete the key; the `ConnectorStatus` enum leaves with it. On a declarative entry, `enabled: false` is what withdraws a materialized instance or marks a catalog-only descriptor, and whether a registered connector can be dispatched is computed by the runtime and reported as `state` (`ready` or `degraded`) on `GET /api/v1/automation/connectors` — no authored value sets it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |
 | **errorMapping** | `never` | optional | [REMOVED] `connector.errorMapping` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no provider, dispatcher or materializer mapped an external error through the rules, so `unmappedBehavior` configured nothing and a rule's `userMessage` was never shown to anyone (that spelling is the live API-error channel, `ApiError.userMessage`, which a thrown HTTP error declares — not connector metadata). Delete the key; the whole shape leaves with it (`ErrorMappingConfig`, `ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, because no error-mapping engine exists: a connector's failures reach callers as the provider's own errors (ADR-0097). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
+| **health** | `never` | optional | [REMOVED] `connector.health` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no connector health probe or circuit breaker ever existed: nothing scheduled a `healthCheck` request, counted consecutive failures against a threshold, or opened, half-opened or closed a `circuitBreaker`, and no `fallbackStrategy` was ever applied, so every key in the block configured nothing. That includes `circuitBreaker.monitoringWindowMs` and the `monitoringWindow` spelling it was renamed from: the renamed key is removed with the rest. Delete the key; the whole shape leaves with it (`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`). Whether a connector can be dispatched is computed, not authored: `GET /api/v1/automation/connectors` reports each connector's `state` (`ready` or `degraded`). Put health probes and circuit breaking in the connector provider or an upstream gateway. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -811,32 +715,6 @@ Connector type
 | **required** | `boolean` | optional (default: `false`) | Field is required |
 | **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
 
-### Nested Shape: `DeclarativeConnectorEntry.webhooks[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook name, unique per organization (lowercase snake_case) |
-| **label** | `string` | optional | Human-readable webhook label |
-| **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
-| **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
-| **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
-| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
-| **secret** | `string` | optional | Signing secret for HMAC signature verification |
-| **isActive** | `boolean` | optional (default: `true`) | Whether webhook is active |
-| **description** | `string` | optional | Webhook description |
-| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this webhook. |
-| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
-| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
-| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
-| **_packageId** | `string` | optional | Owning package machine id. |
-| **_packageVersion** | `string` | optional | Owning package version. |
-| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **events** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'sync.started' \| …>[]` | optional | Connector events to subscribe to  |
-| **signatureAlgorithm** | `Enum<'hmac_sha256' \| 'hmac_sha512' \| 'none'>` | optional (default: `"hmac_sha256"`) | Webhook signature algorithm |
-
 ### Nested Shape: `DeclarativeConnectorEntry.retryConfig`
 
 | Property | Type | Required | Description |
@@ -849,33 +727,6 @@ Connector type
 | **retryableStatusCodes** | `number[]` | optional (default: `[408,429,500,502,503,504]`) | HTTP status codes to retry |
 | **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
 | **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
-
-### Nested Shape: `DeclarativeConnectorEntry.health`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
-
-
----
-
-## HealthCheckConfig
-
-Health check configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable health checks |
-| **intervalMs** | `number` | optional (default: `60000`) | Health check interval in milliseconds |
-| **timeoutMs** | `number` | optional (default: `5000`) | Health check timeout in milliseconds |
-| **endpoint** | `string` | optional | Health check endpoint path |
-| **method** | `Enum<'GET' \| 'HEAD' \| 'OPTIONS'>` | optional | HTTP method for health check |
-| **expectedStatus** | `number` | optional (default: `200`) | Expected HTTP status code |
-| **unhealthyThreshold** | `number` | optional (default: `3`) | Consecutive failures before marking unhealthy |
-| **healthyThreshold** | `number` | optional (default: `1`) | Consecutive successes before marking healthy |
 
 
 ---
@@ -908,76 +759,6 @@ Synchronization strategy
 * `incremental`
 * `upsert`
 * `append_only`
-
-
----
-
-## WebhookConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook name, unique per organization (lowercase snake_case) |
-| **label** | `string` | optional | Human-readable webhook label |
-| **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
-| **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
-| **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
-| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
-| **secret** | `string` | optional | Signing secret for HMAC signature verification |
-| **isActive** | `boolean` | optional (default: `true`) | Whether webhook is active |
-| **description** | `string` | optional | Webhook description |
-| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this webhook. |
-| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
-| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
-| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
-| **_packageId** | `string` | optional | Owning package machine id. |
-| **_packageVersion** | `string` | optional | Owning package version. |
-| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **events** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'sync.started' \| 'sync.completed' \| 'sync.failed' \| 'auth.expired' \| 'rate_limit.exceeded'>[]` | optional | Connector events to subscribe to  |
-| **signatureAlgorithm** | `Enum<'hmac_sha256' \| 'hmac_sha512' \| 'none'>` | optional (default: `"hmac_sha256"`) | Webhook signature algorithm |
-
-### Nested Shape: `WebhookConfig.protection`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
-| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
-| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
-
-
----
-
-## WebhookEvent
-
-Webhook event type
-
-### Allowed Values
-
-* `record.created`
-* `record.updated`
-* `record.deleted`
-* `sync.started`
-* `sync.completed`
-* `sync.failed`
-* `auth.expired`
-* `rate_limit.exceeded`
-
-
----
-
-## WebhookSignatureAlgorithm
-
-Webhook signature algorithm
-
-### Allowed Values
-
-* `hmac_sha256`
-* `hmac_sha512`
-* `none`
 
 
 ---
