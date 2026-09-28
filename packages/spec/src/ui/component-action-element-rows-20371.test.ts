@@ -79,11 +79,12 @@ describe('the six rows exist and are the exported schemas (#20371)', () => {
 describe('key sets, asserted whole — measured from the renderers\' read points', () => {
   // Forwarded to the action runner by `action:button` / `action:icon`
   // (`execute({ ...forwarded })`). `undoable` / `recordIdField` are forwarded
-  // by the button only.
+  // by the button only. `objectName` joined the forward with the pin that
+  // carries it; the four renderers forward it, the two containers per member.
   const FORWARDED = [
     'params', 'description', 'target', 'openIn', 'endpoint', 'method', 'bodyExtra', 'bodyShape',
     'operation', 'patch', 'confirmText', 'successMessage', 'errorMessage', 'refreshAfter',
-    'locations', 'toast', 'resultDialog', 'onSuccess',
+    'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
   ];
 
   it('action:button', () => {
@@ -302,6 +303,20 @@ describe('what the measurement decided, pinned', () => {
     expect(record.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'filter']]);
     const limit = issuesOf(ElementRepeaterPropsSchema.safeParse({ object: 'task', limit: 0 }));
     expect(limit.map((i) => [i.code, i.path.join('.')])).toEqual([['too_small', 'limit']]);
+  });
+
+  it('`objectName` is declared where the renderer forwards it — on the action, never on a container', () => {
+    for (const schema of [ActionButtonPropsSchema, ActionIconPropsSchema]) {
+      expect(schema.parse({ label: 'Close child', objectName: 'task' })).toEqual({ label: 'Close child', objectName: 'task' });
+    }
+    // `action:group` / `action:menu` forward each MEMBER's `objectName`: it
+    // rides the member object, which this row does not judge ...
+    for (const schema of [ActionGroupPropsSchema, ActionMenuPropsSchema]) {
+      const member = { name: 'close', label: 'Close', type: 'script', objectName: 'task' };
+      expect(schema.safeParse({ actions: [member] }).success).toBe(true);
+      // ... and a container-level one is read by nothing.
+      expect(unknownKeyIssue(schema.safeParse({ objectName: 'task' })).keys).toEqual(['objectName']);
+    }
   });
 
   it('repeater: the `object-*` family\'s `objectName` is refused and renamed to `object`', () => {

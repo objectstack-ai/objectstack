@@ -2682,9 +2682,10 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * objectui's ADR-0080 curated public vocabulary carries six blocks this map
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
- * (`core/src/registry/public-blocks.ts:109-114` at the pin this repo builds
- * against, `.objectui-sha` = `f8a9d0fb0`). The missing row failed in two
- * different ways:
+ * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
+ * against, `.objectui-sha` = `dd3f7e1be`; first measured at `.objectui-sha`
+ * pin `f8a9d0fb0`, every read point below re-derived at the current pin
+ * 2026-09-28). The missing row failed in two different ways:
  *
  *  - The four `action:*` types sit outside every namespace the
  *    `PageComponentType` enum populates, so the #5068 props gate skipped them
@@ -2730,9 +2731,14 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  *  - `data` / `context` — the host's row and execute-context channels (React
  *    props the renderers take by name), not authorable surface.
  *  - `onClick` — a function; only a code-composed schema can carry one.
- *  - `objectName` — not read at the pin. objectui's `origin/main` at the time
- *    of this measurement (`9f0c84a`) forwards it on all four renderers, so the
- *    row gains it with the pin bump that carries that read, not before.
+ *
+ * `objectName` IS declared on `action:button` / `action:icon`: absent at the
+ * first measurement, it is forwarded to the runner at the current pin
+ * (`action-button.tsx:307`, `action-icon.tsx:195`), and the console resolves
+ * its dispatch target as `action.objectName || <page object>`. On
+ * `action:group` / `action:menu` the forward is the MEMBER's
+ * (`action-group.tsx:323`, `action-menu.tsx:313`), so it rides each member
+ * object and the container rows gain no key.
  */
 
 /** What an undeclared key on one of the four `action:*` blocks met before its row. */
@@ -2796,28 +2802,35 @@ const ACTION_NODE_GUIDANCE = {
  * runner (`components/src/renderers/action/action-button.tsx` at the pin).
  * Read points, per key:
  *
- * - `name` — `:118` (the visibility-diagnostic label, `schema.name ??
- *   schema.label`) and `:188` (forwarded). OPTIONAL, as it is read: an inline
+ * - `name` — `:119` (the visibility-diagnostic label, `schema.name ??
+ *   schema.label`) and `:212` (forwarded). OPTIONAL, as it is read: an inline
  *   page button is not a registered object action, and the runner takes a
  *   nameless action on its `type` leg. `UIActionSchema` declares it required;
  *   the read does not.
- * - `label` — `:346`, placed as a React child (so a literal string: an inline
+ * - `label` — `:383`, placed as a React child (so a literal string: an inline
  *   locale map is not resolved on this path; the translation bundle's
- *   `components.<id>.label` is the localization channel); also `:118`, `:192`.
- * - `icon` — `:133`, through the shared `resolveIcon`.
- * - `actionType` — `:187`, forwarded as the runner's `type`.
- * - `variant` / `size` — `:136` / `:137`: `primary` → the primitive's
+ *   `components.<id>.label` is the localization channel); also `:119`, `:216`.
+ * - `icon` — `:134`, through the shared `resolveIcon`.
+ * - `actionType` — `:211`, forwarded as the runner's `type`.
+ * - `variant` / `size` — `:137` / `:138`: `primary` → the primitive's
  *   `default` and `md` → `default`, everything else handed to `Button` as-is.
- * - `visible` / `disabled` — `:116` + `:298` / `:129` + `:334`, evaluated
+ * - `visible` / `disabled` — `:117` + `:335` / `:130` + `:371`, evaluated
  *   against the row the host binds (`usePredicateRecordContext`).
- * - Forwarded to the runner (`:153-155`, `:187-270`): `params`, `description`,
- *   `target`, `openIn`, `endpoint`, `method`, `bodyExtra`, `bodyShape`,
- *   `operation`, `patch`, `confirmText`, `successMessage`, `errorMessage`,
- *   `refreshAfter`, `undoable`, `recordIdField`, `locations`, `toast`,
- *   `resultDialog`, `onSuccess`.
+ * - `params` — `:176-179`. An array is the input list, forwarded as
+ *   `actionParams`; the static values are read off `properties.params`
+ *   itself (`readStaticParamValues`, `static-params.ts:91-101`). On a page
+ *   node the two are one key: this row IS `properties`, and `SchemaRenderer`'s
+ *   hoist makes `schema.params` the same object, so an array here is the input
+ *   list and an object is the static values. (A node-level object `params`
+ *   outside `properties` is ignored with a development warning.)
+ * - Forwarded to the runner (`:211-307`): `description`, `target`, `openIn`,
+ *   `endpoint`, `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
+ *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
+ *   `undoable`, `recordIdField`, `locations`, `toast`, `resultDialog`,
+ *   `onSuccess`, `objectName`.
  *
- * The registration's `inputs` (`:358-379`) publish seven of these twenty-eight
- * keys; the other twenty-one are read and unpublished. It also publishes
+ * The registration's `inputs` (`:395-416`) publish seven of these twenty-nine
+ * keys; the other twenty-two are read and unpublished. It also publishes
  * `className`, which is read but is a node key.
  */
 export const ActionButtonPropsSchema = lazySchema(() => strictObject({
@@ -2868,6 +2881,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  objectName: z.string().optional()
+    .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
@@ -2883,20 +2898,21 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  * (`components/src/renderers/action/action-icon.tsx` at the pin). The same
  * runner path as `action:button`, measured separately because the two differ:
  *
- * - `size` is NOT read — `:106` pins the primitive's `icon` size — so it is
+ * - `size` is NOT read — `:107` pins the primitive's `icon` size — so it is
  *   not declared (the registration does not publish it either).
- * - `undoable` and `recordIdField` are NOT forwarded (`:119-174` lists the
+ * - `undoable` and `recordIdField` are NOT forwarded (`:134-196` lists the
  *   rest of `action:button`'s forward and not these two), so not declared.
- * - `label` is read four times: `:137` (forwarded), `:243` (`aria-label`,
- *   falling back to `name`), `:252` (its first letter when no icon resolves)
- *   and `:258` / `:264` (the tooltip). `description` is the tooltip's
- *   fallback (`:264`) as well as forwarded (`:138`).
- * - `visible` / `disabled` — `:96` + `:207` / `:101` + `:236`. `variant` —
- *   `:105`, `primary` mapped to `default`, renderer default `ghost`.
- * - Forwarded (`:132-173`): `actionType`, `name`, `target`, `openIn`,
- *   `endpoint`, `method`, `params`, `bodyExtra`, `bodyShape`, `operation`,
- *   `patch`, `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
- *   `locations`, `toast`, `resultDialog`, `onSuccess`.
+ * - `label` is read four times: `:152` (forwarded), `:265` (`aria-label`,
+ *   falling back to `name`), `:274` (its first letter when no icon resolves)
+ *   and `:280` / `:286` (the tooltip). `description` is the tooltip's
+ *   fallback (`:286`) as well as forwarded (`:153`).
+ * - `visible` / `disabled` — `:97` + `:229` / `:102` + `:258`. `variant` —
+ *   `:106`, `primary` mapped to `default`, renderer default `ghost`.
+ * - `params` — `:130-133`, routed exactly as on `action:button`.
+ * - Forwarded (`:147-195`): `actionType`, `name`, `target`, `openIn`,
+ *   `endpoint`, `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
+ *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
+ *   `locations`, `toast`, `resultDialog`, `onSuccess`, `objectName`.
  */
 export const ActionIconPropsSchema = lazySchema(() => strictObject({
   surface: 'this `action:icon`',
@@ -2946,6 +2962,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  objectName: z.string().optional()
+    .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
@@ -2968,10 +2986,13 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * `enabled`, `icon`, `variant`, `className`, `label` (falling back to `name`),
  * `tags` (a `separator-before` tag draws a divider), `name` (the React key) and
  * the runner forward — which hands the runner the member's own `type`, not
- * `actionType`: a member is an action entry, and an action entry's executor is
- * `type`. A bare string is refused here: an action NAME list is
- * `record:quick_actions`' `actionNames`, and a string member would render as an
- * unlabeled button that runs nothing.
+ * `actionType` (a member is an action entry, and an action entry's executor is
+ * `type`), its `objectName`, and its static values off the member's OWN
+ * `properties.params`, evaluated by the container
+ * (`readMemberStaticParamValues`, `static-params.ts:142-148`). A bare string
+ * is refused here: an action NAME list is `record:quick_actions`'
+ * `actionNames`, and a string member would render as an unlabeled button that
+ * runs nothing.
  */
 const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
 
@@ -2980,25 +3001,26 @@ const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
  * (`components/src/renderers/action/action-group.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:243`, then filtered by `location` through `actionRendersAt`
- *   (`:244`); members are read at `:79-132` (inline), `:164-202` (dropdown)
- *   and forwarded at `:248-287`.
- * - `display` — `:309`, `inline` unless it is `dropdown`.
- * - `label` / `icon` — `:328` / `:313`: the DROPDOWN trigger's text (default
+ * - `actions` — `:248`, then filtered by `location` through `actionRendersAt`
+ *   (`:249`); members are read at `:81-134` (inline), `:166-204` (dropdown)
+ *   and forwarded at `:274-324` (static values `:274-280`, `objectName`
+ *   `:323`).
+ * - `display` — `:346`, `inline` unless it is `dropdown`.
+ * - `label` / `icon` — `:365` / `:350`: the DROPDOWN trigger's text (default
  *   `Actions`) and icon. Inline mode renders neither.
- * - `variant` — `:319` (dropdown trigger) and `:360` (each inline member's
+ * - `variant` — `:356` (dropdown trigger) and `:397` (each inline member's
  *   fallback); no `primary` mapping at group level, so the primitive's six.
- * - `size` — `:320` maps `md` → `default` for the dropdown trigger, but `:361`
- *   hands the group size to each inline member raw, and `:89` maps only a
+ * - `size` — `:357` maps `md` → `default` for the dropdown trigger, but `:398`
+ *   hands the group size to each inline member raw, and `:91` maps only a
  *   member's OWN `md`. So `md` renders only in dropdown mode, and in the
  *   default inline mode reaches the Button primitive, which has no `md`.
  *   Declared: the primitive's four sizes. (The registration publishes
  *   `sm` / `md` / `lg`; `md` is objectui's to map on both paths or drop.)
- * - `visible` — `:233` + `:306`. `:306` tests the raw value's truthiness, so a
+ * - `visible` — `:238` + `:343`. `:343` tests the raw value's truthiness, so a
  *   literal `false` is honoured by `SchemaRenderer`'s node gate, which also
  *   evaluates the hoisted value, rather than by this check.
  *
- * NOT read: the group's own `name`. The registration publishes it (`:378`),
+ * NOT read: the group's own `name`. The registration publishes it (`:415`),
  * the renderer never reads `schema.name`, and inline mode only spreads it
  * onto the wrapping `<div>` as a DOM attribute. Refused with a prescription,
  * the `page:accordion` item `value` precedent: an author copying the
@@ -3045,17 +3067,18 @@ export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
  * (`components/src/renderers/action/action-menu.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:299`; members are read at `:78`, `:106-145` and `:360`, run
- *   through `ActionAutoTrigger` (`:320-327`), and forwarded at `:237-285`.
- * - `label` — `:341` (`aria-label`, default: the translated "More actions")
- *   and `:350-351` (trigger text; icon-only when omitted).
- * - `icon` — `:224`, default the `MoreHorizontal` glyph.
- * - `variant` / `size` — `:225` / `:226`, handed to the Button primitive
+ * - `actions` — `:328`; members are read at `:80`, `:108-147` and `:389`, run
+ *   through `ActionAutoTrigger` (`:349-356`), and forwarded at `:253-314`
+ *   (static values `:253-259`, `objectName` `:313`).
+ * - `label` — `:370` (`aria-label`, default: the translated "More actions")
+ *   and `:379-380` (trigger text; icon-only when omitted).
+ * - `icon` — `:229`, default the `MoreHorizontal` glyph.
+ * - `variant` / `size` — `:230` / `:231`, handed to the Button primitive
  *   unmapped (defaults `ghost` / `icon`): no `primary`, no `md` here.
- * - `visible` — `:219` + `:293`, fail-closed; the same truthiness note as
+ * - `visible` — `:224` + `:322`, fail-closed; the same truthiness note as
  *   `action:group`'s applies to a literal `false`.
  *
- * The registration's `inputs` (`:381-390`) publish `label`, `icon`,
+ * The registration's `inputs` (`:410-419`) publish `label`, `icon`,
  * `actions`, `variant` and `className`; `size` and `visible` are read and
  * unpublished.
  */
@@ -3097,7 +3120,7 @@ export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
  * - `columns` is compared as the NUMBER `2` (`props.columns === 2`); any other
  *   value renders one column. Declared as the literal pair `1 | 2`, which is
  *   what the Studio designer writes (a `number` control,
- *   `previews/block-config.ts:306`). The registration's enum publishes the
+ *   `previews/block-config.ts:307`). The registration's enum publishes the
  *   STRINGS `'1'` / `'2'` (`:82`), and the string `'2'` renders one column —
  *   the read wins.
  * - `items` is optional, as it is read: absent and empty both render the
@@ -3151,27 +3174,30 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
 /**
  * `element:repeater` — a data-bound, chrome-free list: one line per record
  * (`components/src/renderers/basic/data-list.tsx` at the pin, props through
- * `readProps`, `:97-107`). Read points: `object` (`:122`, `:134`), `filter`
- * (`:113`, `:131` → `$filter`), `sort` (`:132` → `$orderby`), `limit` (`:133` →
- * `$top`), `emptyText` (`:160`), `divided` (`:165`), `titleField`
- * (`:170-171`) and `fields` (`:116`, `:173-175`).
+ * `readProps`, `:97-107`). Read points: `object` (`:143`, `:155`), `filter`
+ * (`:120`, `:152` → `$filter`), `sort` (`:153` → `$orderby`), `limit` (`:154` →
+ * `$top`), `emptyText` (`:181`), `divided` (`:186`), `titleField`
+ * (`:191-192`) and `fields` (`:128`, `:194-196`).
  *
  * - `object` is REQUIRED, as `element:number`'s is: without it the renderer
- *   never queries and shows its "No records" state (`:122-125`, `:160`) —
+ *   never queries and shows its "No records" state (`:143-146`, `:181`) —
  *   indistinguishable from an object that really has no rows. The
  *   registration marks it required too.
  * - `filter` / `sort` are the family's one orthography from birth —
  *   `ViewFilterRule[]` and `SortItem[]` — and both are delivered:
  *   `ObjectStackAdapter.find` lowers a `{ field, operator, value }` array
  *   through `translateFilterArray` and serializes `{ field, order }` items
- *   through `serializeOrderBy` (`data-objectstack/src/index.ts:4793-4804`,
- *   `:759-785`). The rule-array door here is the bare one `record:related_list`
- *   declares, not a `ruleArrayFilterError` door: that prescription speaks to a
- *   door that used to take the record form, and a door wired to it joins the
- *   stored-row conversion's reach (`conversions/registry.ts`), which is not
- *   this row's to change.
+ *   through `serializeOrderBy` (`data-objectstack/src/index.ts:4782-4793`,
+ *   `:760-786`). Before the query the renderer resolves the rules' context
+ *   tokens (`{current_user_id}`, the date macros) through `useResolvedFilter`
+ *   (`data-list.tsx:119-120`), so a rule's string `value` may be one. The
+ *   rule-array door here is the bare one `record:related_list` declares, not a
+ *   `ruleArrayFilterError` door: that prescription speaks to a door that used
+ *   to take the record form, and a door wired to it joins the stored-row
+ *   conversion's reach (`conversions/registry.ts`), which is not this row's to
+ *   change.
  * - `fields` takes a bare field name or `{ field }`. The renderer reads only
- *   `field` off the object form (`:175`) — the `label` its TS type and its
+ *   `field` off the object form (`:196`) — the `label` its TS type and its
  *   registration's description both advertise is never rendered (the list has
  *   no header row), so it is refused with that reason.
  *
@@ -5369,21 +5395,21 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
-  // `f8a9d0fb0`):
+  // `dd3f7e1be`; re-measured there 2026-09-28):
   //  - registration: `@object-ui/components` registers both in the `element`
-  //    namespace (`components/src/renderers/basic/data-list.tsx:75`, `:184`);
+  //    namespace (`components/src/renderers/basic/data-list.tsx:75`, `:205`);
   //  - publication: both are `PUBLIC_BLOCKS` members
-  //    (`core/src/registry/public-blocks.ts:109-110`), which is how the
+  //    (`core/src/registry/public-blocks.ts:117-118`), which is how the
   //    tracked `sdui.manifest.json` carries both;
   //  - authorship: the Studio page designer's palette offers both
-  //    (`app-shell/src/views/metadata-admin/previews/block-types.ts:129-130`),
-  //    each with its own inspector (`previews/block-config.ts:282-316`), so
+  //    (`app-shell/src/views/metadata-admin/previews/block-types.ts:136-137`),
+  //    each with its own inspector (`previews/block-config.ts:283-317`), so
   //    stored pages hold them.
   'element:definition-list': ElementDefinitionListPropsSchema,
   'element:repeater': ElementRepeaterPropsSchema,
 
   // Actions — #20371. The same curated vocabulary's four `action:*` blocks
-  // (`core/src/registry/public-blocks.ts:111-114` at the pin), registered by
+  // (`core/src/registry/public-blocks.ts:119-122` at the pin), registered by
   // `@object-ui/components` in the `action` namespace
   // (`components/src/renderers/action/`) and taught by objectui's own
   // AGENTS.md as the node that runs an action. `action:` is not a namespace
