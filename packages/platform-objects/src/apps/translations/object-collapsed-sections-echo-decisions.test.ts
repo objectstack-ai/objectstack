@@ -905,10 +905,17 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // (`name`, `fields`, `unique`), a label and a help text each, four rows and
     // eight leaves, all twenty-four translated leaves authored by the same
     // flight. `advanced` reads 52 → 60; `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(69);
+    // 105 since #19332 flight G2b: that flight gave `advanced` three more rows —
+    // the `activityMilestones` repeater beside `validations` (four declared
+    // sub-rows), the `publicSharing` composite after `requiredPermissions` (six)
+    // and the `userActions` composite under `managedBy` (five) — eighteen rows,
+    // a label and a help text each, thirty-six leaves, all hundred and eight
+    // translated leaves authored by the same flight. `advanced` reads 60 → 96;
+    // `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(105);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(60);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(96);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {

@@ -1137,7 +1137,16 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `collapse` and `visibleWhen` sub-rows) and its `indexes` repeater (and
       // its `name`, `fields` and `unique` sub-rows) — authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(634);
+      // 657 since #19332 flight G2b: twenty-three new row labels — the object
+      // form's `activityMilestones` repeater (and its `field`, `value`,
+      // `summary` and `type` sub-rows), `publicSharing` composite (and its
+      // `enabled`, `allowedAudiences`, `allowedPermissions`, `maxExpiryDays`,
+      // `redactFields` and `eligibility` sub-rows) and `userActions` composite
+      // (and its `create`, `import`, `edit`, `delete` and `exportCsv`
+      // sub-rows), and the field form's `inlineColumns` repeater (and its
+      // `name`, `label`, `width` and `defaultHidden` sub-rows) — authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(657);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

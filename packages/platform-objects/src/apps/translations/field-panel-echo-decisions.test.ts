@@ -665,9 +665,16 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // repeater — `options`, with six children — and every one of those six
     // carried its own text in all three locales before this round. Everything
     // the existing pin could see here was fine.
-    expect(ROW_PROPERTIES.length).toBe(6);
+    //
+    // 10 since #19332 (flight G2b): that flight gave the form a second
+    // repeater, `inlineColumns`, with four declared children (`name`, `label`,
+    // `width`, `defaultHidden`), all twelve of their translated labels
+    // authored by the same flight, so the loop below still reads every one of
+    // them translated.
+    expect(ROW_PROPERTIES.length).toBe(10);
     expect(ROW_PROPERTIES).toContain('options.color');
     expect(ROW_PROPERTIES).toContain('options.visibleWhen');
+    expect(ROW_PROPERTIES).toContain('inlineColumns.defaultHidden');
     for (const [locale, forms] of TRANSLATED_LOCALES) {
       for (const key of ROW_PROPERTIES) {
         const en = (enMetadataForms as Record<string, any>).field?.fields?.[key]?.label;
@@ -726,7 +733,10 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // as round 3 measured.
     const coveredParents = new Set(ROW_PROPERTIES.map((k) => k.replace(/\.[^.]+$/, '')));
     const skippedParents = new Set(UNWALKED_CHILDREN.map((k) => k.replace(/\.[^.]+$/, '')));
-    expect([...coveredParents]).toEqual(['options']);
+    // `inlineColumns` joined in #19332 (flight G2b), after `options` in form
+    // order: a second walked parent, whose four children that flight authored.
+    // The broken five still hang off the unwalked `summaryOperations`.
+    expect([...coveredParents]).toEqual(['options', 'inlineColumns']);
     // `currencyConfig` and `storage` joined in #19332 (flight G1b), in form
     // order around it; their children were authored by that flight, so the
     // broken five still hang off `summaryOperations` alone.
