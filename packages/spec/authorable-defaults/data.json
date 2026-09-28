@@ -13,7 +13,6 @@
     "data/Cube:public = false",
     "data/CurrencyConfig:currencyMode = \"dynamic\"",
     "data/CurrencyConfig:defaultCurrency = \"CNY\"",
-    "data/CurrencyConfig:precision = 2",
     "data/DataEngineDeleteOptions:multi = false",
     "data/DataEngineInsertOptions:returning = true",
     "data/DataEngineUpdateOptions:multi = false",

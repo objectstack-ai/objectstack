@@ -68,7 +68,7 @@ const app = (name: string) => ({
   navigation: [{ id: `nav_${name}`, type: 'object' as const, label: 'Tasks', objectName: task.name }],
 });
 
-/** A `record_change` flow — auto-launched, so it owes `requires: ['triggers']`. */
+/** A `record_change` flow — auto-launched, so it owes `requires: ['automation', 'triggers']`, the pair. */
 const recordFlow = {
   name: 'task_fanout',
   label: 'task_fanout',

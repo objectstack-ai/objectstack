@@ -5397,6 +5397,24 @@ const step18: MigrationStep = {
     + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
     + '`columns` untouched) on `object-form` page components, on every form payload a view '
     + 'carries, and on the assembled-manifest `viewItems` channel. '
+    + 'It also removes `currencyConfig.precision` (#19992, ADR-0049 enforce-or-remove): '
+    + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
+    + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+    + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
+    + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
+    + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
+    + 'built artifacts carry it without anyone having written it. Retired from the load path; '
+    + 'an authored key is refused with the prescription. '
+    + 'It also retires the RLS policy\'s `tags` (#20321, ADR-0049 enforce-or-remove; graded '
+    + 'RETIRE by the maintainer\'s criterion — no mainstream platform tags a row-level policy): '
+    + 'the key promised categorization and reporting for governance and compliance, and nothing '
+    + 'ever read it — the RLS compiler never consulted it and no preview rendered it. It is a '
+    + '`retiredKey()` tombstone on `RowLevelSecurityPolicySchema` (the `priority` posture one key '
+    + 'over), and the D2 conversion `permission-rls-tags-removed` strips it from every policy in '
+    + '`permissions[].rowLevelSecurity` as a lossless delete, so a stored permission row that '
+    + 'still carries it replays clean. It is retired from the load path, so authors are refused '
+    + 'at parse rather than rewritten. Its D3 record is the semantic entry '
+    + '`permission-rls-tags-retired`. '
     + 'Finally, it removes `aria` from the action (ADR-0049 enforce-or-remove), the fourth '
     + 'member of the `aria` family after `dashboard.aria`, `dashboard.widgets[].aria` and the '
     + 'chart config\'s, and retired for the same measured reason: an ARIA block an author can '
@@ -5451,6 +5469,8 @@ const step18: MigrationStep = {
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
     'form-layout-inline-grid-to-vertical',
+    'currency-config-precision-removed',
+    'permission-rls-tags-removed',
     'action-aria-removed',
   ],
   semantic: [
@@ -7330,6 +7350,48 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+    },
+    // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」) — the D3 entry of the `currency-config-precision-removed` family
+    // (ruling B on #17152: one D3 entry per retirement family, even when D2 is
+    // lossless). Registered key: `data/CurrencyConfig:precision`; the never-accepted
+    // `decimals` / `scale` spellings are answered by the same prescription and have
+    // no stored form to convert. The delete changes no rendered amount; what it
+    // leaves is a width belief, and code outside the platform that may have read the
+    // served key.
+    {
+      id: 'currency-config-precision-retired',
+      surface: 'object.fields.*.currencyConfig.precision — the decimal-places key of a currency '
+        + 'field\'s configuration, and its never-accepted `decimals` / `scale` spellings',
+      replacement: '(removed — nothing replaces it.) A currency amount\'s decimal places are its '
+        + 'currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD), derived from the '
+        + 'currency itself and declared nowhere. Delete the key. Do not move the number to the '
+        + 'field-level `precision`: that key is the amount\'s total digit count, not its decimal '
+        + 'places, and it is unchanged.',
+      reason: 'The D2 conversion `currency-config-precision-removed` deletes the key from every '
+        + 'field\'s `currencyConfig` on objects and object extensions — in author sources, in stored '
+        + 'object rows and in built artifacts, which can carry a `2` the old schema wrote into parse '
+        + 'output without anyone authoring it — and the delete is lossless: no renderer or runtime '
+        + 'ever read the key. Every display face derives the width from the currency. Two judgments '
+        + 'remain, and neither is a rewrite. First, a width that never applied: the old contradiction '
+        + 'check judged an authored value only on a `fixed` field whose code has a known ISO 4217 '
+        + 'minor unit, so on a `dynamic` field, and on a `fixed` field whose code has none (a crypto '
+        + 'or custom code), an author could declare a width other than the one the field displays — '
+        + 'and read amounts as if it applied. Whether the displayed width is acceptable for that '
+        + 'field is the author\'s call. Second, code the chain cannot reach: a plugin, integration or '
+        + 'export of your own that read `currencyConfig.precision` from served object metadata now '
+        + 'finds no key, and must derive the width from the field\'s currency the way the platform\'s '
+        + 'renderers always did.',
+      acceptanceCriteria: 'No field\'s `currencyConfig` carries `precision`, `decimals` or `scale` — '
+        + 'in sources, in stored object rows or in built artifacts; the parse refuses each by name '
+        + 'with the prescription, and a stored row or artifact written before the upgrade loads '
+        + 'without a refusal over it. No code of your own reads `currencyConfig.precision`; where it '
+        + 'needed a width, it derives one from the field\'s currency. Every currency field renders '
+        + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
+        + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
+        + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+        + 'apply them by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -12877,6 +12939,36 @@ const step18: MigrationStep = {
         + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
         + 'names the mechanism it actually uses instead.',
     },
+    // #20321 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `permission-rls-tags-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). The strip changes no access
+    // decision; what it leaves is whatever process was built on the belief that a
+    // policy's tags were read.
+    {
+      id: 'permission-rls-tags-retired',
+      surface: 'permission.rowLevelSecurity[].tags — the free-form categorization tags on a row-level '
+        + 'security policy',
+      replacement: '(removed — no mainstream platform tags a row-level policy, and nothing here ever '
+        + 'read one.) A policy is identified by its `name` and its `object`, and reported by those and '
+        + 'its predicate; its purpose belongs in `description`. Whom a policy applies to is decided by '
+        + '`positions`, never by a tag.',
+      reason: 'The D2 conversion `permission-rls-tags-removed` deletes `tags` from every row-level '
+        + 'security policy in author sources and in stored permission rows, and the delete is '
+        + 'lossless: the RLS compiler never consulted the key and nothing else acted on it — no '
+        + 'report, audit filter or review queue selected on it — so no access decision changes. '
+        + 'The judgment is about what people '
+        + 'believed. An admin who tagged a policy `gdpr` or `pci` may have expected a compliance '
+        + 'report, an audit filter or a review queue to pick it up; none ever did. An author who '
+        + 'wrote a tag such as `managers_only` may have believed it scoped the policy; it never did '
+        + '— only `positions` narrows whom a policy applies to. Any report, runbook or control that '
+        + 'relies on either belief needs another path, and choosing that path is a governance '
+        + 'decision no conversion can make.',
+      acceptanceCriteria: 'No authored or stored row-level security policy carries `tags`; the parse '
+        + 'refuses the key with the prescription. Access decisions are unchanged: every policy admits '
+        + 'and refuses exactly the rows it did before the upgrade. Every policy whose tag expressed an '
+        + 'audience has that audience in `positions`, and every compliance report, audit filter or '
+        + 'review process that assumed policy tags names the mechanism it actually uses instead.',
+    },
     {
       id: 'platform-timezone-columns-iana-domain-refused',
       surface:
@@ -17629,6 +17721,28 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carries the judgement the strip cannot: an author who wrote a non-FK
     // condition wanted a join this runtime does not perform.
     'data/CubeJoin:sql',
+    // #19992 — ADR-0049 enforce-or-remove (triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」). `currencyConfig.precision` was declared and validated against
+    // ISO 4217 (#7918) but read by NOTHING — measured with a positive control
+    // (`currencyConfig.currencyMode` IS read) over objectstack, objectui at the
+    // `.objectui-sha` pin and at `main`, and cloud `main`. objectui's
+    // `CurrencyField` derives decimal places from the currency's ISO 4217 minor
+    // unit and never read the key; its own contradiction check was its only
+    // reader. The `decimals` / `scale` aliases that pointed authors at it went
+    // with it (they now answer with the same prescription).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. `CurrencyConfigSchema` is
+    // `strictObject`, so the route is strict deletion + a `guidance` entry carrying
+    // the prescription (no retiredKey tombstone — the key is out of the walked
+    // shape entirely). Sources and stored rows are rewritten by the D2 conversion
+    // `currency-config-precision-removed`, which strips the key from every field's
+    // `currencyConfig` on objects and object extensions — including the `2` the
+    // old `.overwrite()` baked into parse output.
+    'data/CurrencyConfig:precision',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -19051,6 +19165,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #20321 (ADR-0049 enforce-or-remove; graded RETIRE by the maintainer's
+    // criterion for declared-but-unenforced families — does a mainstream platform
+    // have the capability?). `RowLevelSecurityPolicy.tags` promised categorization
+    // and reporting for governance and compliance, and nothing ever read it: the
+    // RLS compiler never consults it, objectui's permission preview renders only
+    // the policy count and its policy editor neither seeds nor reads the key, and
+    // cloud has no reader. No mainstream platform tags a row-level policy. The
+    // policy shape is `strictObject`, but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture one key over): the key stays in the walked shape
+    // as `[RETIRED]`, and authoring it is a tsc error and a parse error carrying
+    // the prescription. D2: `permission-rls-tags-removed`; D3:
+    // `permission-rls-tags-retired`.
+    'security/RowLevelSecurityPolicy:tags',
     // #15679 (stack card 4/6 of #14478) — ruling B. `AccessControlConfig.maxAge` said
     // "CORS preflight cache duration in seconds" in prose and nothing else.
     // ⚠️ This key is deliberately a RENAME and not an `externalVocabulary` marker,
