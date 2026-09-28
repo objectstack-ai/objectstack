@@ -65,7 +65,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { FilterCondition } from '@objectstack/spec/data';
+import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import type { AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -80,15 +81,40 @@ const silentLogger = {
 const DEAL_FIELDS = ['id', 'stage', 'owner', 'amount', 'closed_at'];
 
 /**
+ * [#20381] The cube a request's strategies read for its name. An inferred cube
+ * lives only in the request that minted it — it is never registered, so
+ * `getMeta` never lists it — and this is the window onto it that remains: a
+ * probe ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it.
+ */
+function requestCubeProbe() {
+  const seen: Cube[] = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      const cube = ctx.getCube(query.cube!);
+      if (cube) seen.push(cube);
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  return { strategy, seen };
+}
+
+/**
  * A service with NO registered cube for `deal`, so every query takes the
- * auto-inference path. One service per query: `ensureCube` registers what it
- * infers, so a second query would find the cube and never infer again.
+ * auto-inference path — every query, since nothing a request infers is
+ * registered (#20381). `cubes` holds what each request's strategies read.
  */
 function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
   const sqls: string[] = [];
   const filters: unknown[] = [];
+  const probe = requestCubeProbe();
   const service = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     queryCapabilities: () => ({
       nativeSql: !!opts.native,
       objectqlAggregate: !opts.native,
@@ -105,17 +131,17 @@ function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
     isRegisteredObject: (n: string) => n === 'deal',
     getObjectFieldNames: (n: string) => (n === 'deal' ? (opts.fields ?? DEAL_FIELDS) : undefined),
   });
-  return { service, sqls, filters };
+  return { service, sqls, filters, cubes: probe.seen };
 }
 
-/** The ad-hoc cube's dimension keys, read through the public discovery API. */
+/** The ad-hoc cube's dimension keys, read from the cube the request's strategies were handed. */
 async function inferredDimensions(where: unknown, opts?: { native?: boolean; fields?: string[] }) {
-  const { service, sqls, filters } = makeService(opts);
+  const { service, sqls, filters, cubes } = makeService(opts);
   await service.query({ cube: 'deal', measures: ['count'], where } as never);
-  const [meta] = await service.getMeta('deal');
+  expect(cubes).toHaveLength(1);
   return {
-    // `getMeta` prefixes with the cube name; the KEY is what seeding produced.
-    dimensions: meta.dimensions.map((d) => d.name.replace(/^deal\./, '')).sort(),
+    // The KEY is what seeding produced.
+    dimensions: Object.keys(cubes[0].dimensions).sort(),
     sqls,
     filters,
   };
@@ -266,19 +292,19 @@ describe('[#5353] inferCubeFromQuery — the `where` spelling does not change th
   }
 
   it('seeds the `where` keys ALONGSIDE the ones `dimensions` and `measures` contribute', async () => {
-    const { service } = makeService();
+    const { service, cubes } = makeService();
     await service.query({
       cube: 'deal',
       measures: ['amount_sum'],
       dimensions: ['stage'],
       where: [['owner', '=', 'u1']],
     } as never);
-    const [meta] = await service.getMeta('deal');
+    const [cube] = cubes;
 
-    expect(meta.dimensions.map((d) => d.name).sort()).toEqual(['deal.owner', 'deal.stage']);
+    expect(Object.keys(cube.dimensions).sort()).toEqual(['owner', 'stage']);
     // The measure arm is untouched by #5353 — `amount_sum` still infers a SUM
     // over `amount` rather than becoming a dimension.
-    expect(meta.measures.map((m) => m.name).sort()).toEqual(['deal.amount_sum', 'deal.count']);
+    expect(Object.keys(cube.measures).sort()).toEqual(['amount_sum', 'count']);
   });
 });
 
