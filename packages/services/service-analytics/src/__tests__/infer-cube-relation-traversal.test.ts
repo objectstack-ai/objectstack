@@ -66,6 +66,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type { Cube } from '@objectstack/spec/data';
+import type { AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -87,9 +89,33 @@ const ACCOUNT_FIELDS = ['id', 'name', 'industry', 'region', 'owner', 'created_at
 const BASE_REGION = 'BASE-REGION';
 
 /**
+ * [#20381] The cube a request's strategies read for its name. An inferred cube
+ * lives only in the request that minted it — it is never registered, so
+ * `getMeta` never lists it — and this is the window onto it that remains: a
+ * probe ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it. A query a gate
+ * refuses inside `ensureCube` reaches no strategy, and the probe sees nothing.
+ */
+function requestCubeProbe() {
+  const seen: Cube[] = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      const cube = ctx.getCube(query.cube!);
+      if (cube) seen.push(cube);
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  return { strategy, seen };
+}
+
+/**
  * A service with NO registered cube for `crm_account`, so every query takes the
- * auto-inference path. One service per query: `ensureCube` registers what it
- * infers, so a second query on the same service would find the cube.
+ * auto-inference path — every query, since nothing a request infers is
+ * registered (#20381).
  *
  * `executeAggregate` is a two-object double. It serves the base aggregate AND
  * the FK→attribute read the ObjectQL cross-object plan issues against `owner`,
@@ -100,8 +126,10 @@ const BASE_REGION = 'BASE-REGION';
 function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
   const sqls: string[] = [];
   const calls: Array<{ object: string; groupBy?: unknown; filter?: unknown }> = [];
+  const probe = requestCubeProbe();
   const service = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     queryCapabilities: () => ({
       nativeSql: !!opts.native,
       objectqlAggregate: !opts.native,
@@ -135,12 +163,12 @@ function makeService(opts: { native?: boolean; fields?: string[] } = {}) {
     getObjectFieldNames: (n: string) =>
       n === 'crm_account' ? (opts.fields ?? ACCOUNT_FIELDS) : undefined,
   } as any);
-  return { service, sqls, calls };
+  return { service, sqls, calls, cubes: probe.seen };
 }
 
 /** Run one query and report everything it produced, however it settled. */
 async function run(query: unknown, opts: { native?: boolean; fields?: string[] } = {}) {
-  const { service, sqls, calls } = makeService(opts);
+  const { service, sqls, calls, cubes } = makeService(opts);
   let rows: unknown[] | undefined;
   let error: (Error & { code?: string; status?: number; field?: string }) | undefined;
   try {
@@ -148,16 +176,17 @@ async function run(query: unknown, opts: { native?: boolean; fields?: string[] }
   } catch (e) {
     error = e as Error & { code?: string };
   }
-  const [meta] = await service.getMeta((query as { cube: string }).cube);
-  const cubePrefix = `${(query as { cube: string }).cube}.`;
+  // The cube this request's strategies were handed — none when a gate refused
+  // the query before any strategy was asked.
+  const cube = cubes.at(-1);
   return {
     rows,
     error,
     sqls,
     calls,
-    // `getMeta` hands members out cube-prefixed; the KEY is what the mint produced.
-    dimensions: (meta?.dimensions ?? []).map((d) => d.name.replace(cubePrefix, '')).sort(),
-    measures: (meta?.measures ?? []).map((m) => m.name.replace(cubePrefix, '')).sort(),
+    // The KEY is what the mint produced.
+    dimensions: Object.keys(cube?.dimensions ?? {}).sort(),
+    measures: Object.keys(cube?.measures ?? {}).sort(),
   };
 }
 

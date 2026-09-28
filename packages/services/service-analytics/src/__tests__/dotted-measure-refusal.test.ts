@@ -62,6 +62,11 @@
  * live server. Block 2 is that half; `mintableMeasureKey` is the one rule both
  * sites call.
  *
+ * [#20381] The ad-hoc mint no longer registers what it infers — an inferred
+ * cube lives only in its own request — so ② above is cold again and meets the
+ * first site's refusal. The second site is still reached by a cube the registry
+ * holds, which is now configuration only; block 2's AUTHORED case is that path.
+ *
  * ## Reverse verification, direction predicted BEFORE running
  *
  * Restoring the blanket strip at either mint site turns blocks 1 and 2 RED, in
@@ -94,6 +99,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
+import type { AnalyticsStrategy } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 
 const silentLogger = {
@@ -122,11 +128,36 @@ type Refusal = Error & {
   measure?: string;
 };
 
+/**
+ * [#20381] The cube a request's strategies read for its name. An inferred cube
+ * lives only in the request that minted it — it is never registered, so
+ * `getMeta` never lists it — and this is the window onto it that remains: a
+ * probe ahead of every built-in strategy records `ctx.getCube(query.cube)` and
+ * declines, so the chain runs exactly as it would without it.
+ */
+function requestCubeProbe() {
+  const seen: Cube[] = [];
+  const strategy: AnalyticsStrategy = {
+    name: 'RequestCubeProbe',
+    priority: 0,
+    canHandle: (query, ctx) => {
+      const cube = ctx.getCube(query.cube!);
+      if (cube) seen.push(cube);
+      return false;
+    },
+    execute: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+    generateSql: async () => { throw new Error('RequestCubeProbe never handles a query'); },
+  };
+  return { strategy, seen };
+}
+
 function makeService(opts: { native?: boolean; cubes?: Cube[] } = {}) {
   const sqls: string[] = [];
   const calls: Array<{ object: string; aggregations?: unknown }> = [];
+  const probe = requestCubeProbe();
   const service = new AnalyticsService({
     logger: silentLogger,
+    strategies: [probe.strategy],
     ...(opts.cubes ? { cubes: opts.cubes } : {}),
     queryCapabilities: () => ({
       nativeSql: !!opts.native,
@@ -144,12 +175,12 @@ function makeService(opts: { native?: boolean; cubes?: Cube[] } = {}) {
     isRegisteredObject: (n: string) => n === 'crm_account',
     getObjectFieldNames: (n: string) => (n === 'crm_account' ? ACCOUNT_FIELDS : undefined),
   } as any);
-  return { service, sqls, calls };
+  return { service, sqls, calls, cubes: probe.seen };
 }
 
 /** Run one query on a fresh service and report everything it produced. */
 async function run(query: unknown, opts: { native?: boolean; cubes?: Cube[] } = {}) {
-  const { service, sqls, calls } = makeService(opts);
+  const { service, sqls, calls, cubes } = makeService(opts);
   let rows: unknown[] | undefined;
   let error: Refusal | undefined;
   try {
@@ -157,15 +188,16 @@ async function run(query: unknown, opts: { native?: boolean; cubes?: Cube[] } = 
   } catch (e) {
     error = e as Refusal;
   }
-  const [meta] = await service.getMeta((query as { cube: string }).cube);
-  const cubePrefix = `${(query as { cube: string }).cube}.`;
+  // The cube this request's strategies were handed — none when the mint
+  // refused the query before any strategy was asked.
+  const cube = cubes.at(-1);
   return {
     rows,
     error,
     sqls,
     calls,
     service,
-    measures: (meta?.measures ?? []).map((m) => m.name.replace(cubePrefix, '')).sort(),
+    measures: Object.keys(cube?.measures ?? {}).sort(),
   };
 }
 
@@ -274,16 +306,20 @@ describe('[#5918] a dotted measure is refused, naming the caller\'s spelling', (
 // ── 2. The second mint site: a WARM registry ─────────────────────────────────
 
 describe('[#5918] the warm registry gets the same answer as the cold one', () => {
-  it('NativeSQL — a first query registers the inferred cube; the second is still refused', async () => {
-    // The ad-hoc path registers what it infers, so request #2 arrives at
-    // `ensureCube`'s augmentation loop instead of `inferCubeFromQuery`. Before
-    // the ruling that loop still blanket-stripped, so a live server silently
-    // aggregated the wrong column from the second request onwards.
+  it('NativeSQL — a first query no longer warms the registry; the second infers again and is still refused', async () => {
+    // When #5918 landed, the ad-hoc path registered what it inferred, so
+    // request #2 arrived at `ensureCube`'s augmentation loop instead of
+    // `inferCubeFromQuery`; before the ruling that loop still blanket-stripped,
+    // so a live server silently aggregated the wrong column from the second
+    // request onwards. [#20381] retired that registration: the first request's
+    // cube lives only in that request, so request #2 is cold again and meets
+    // the inference mint's refusal. The augmentation loop is still reached by
+    // a cube the registry DOES hold — the AUTHORED case below.
     const { service, sqls } = makeService({ native: true });
 
     await service.query({ cube: 'crm_account', measures: ['count'] } as any);
     expect(sqls).toEqual(['SELECT COUNT(*) AS "count" FROM "crm_account"']);
-    expect(service.cubeRegistry.get('crm_account')).toBeDefined();
+    expect(service.cubeRegistry.get('crm_account')).toBeUndefined();
 
     const error = await service
       .query({ cube: 'crm_account', measures: ['owner.region_count_distinct'] } as any)
@@ -292,8 +328,9 @@ describe('[#5918] the warm registry gets the same answer as the cold one', () =>
     expectDottedMeasureRefusal(error, 'owner.region_count_distinct');
     // Nothing new executed…
     expect(sqls).toEqual(['SELECT COUNT(*) AS "count" FROM "crm_account"']);
-    // …and the registered cube was not augmented with the bogus measure either.
-    expect(Object.keys(service.cubeRegistry.get('crm_account')!.measures)).toEqual(['count']);
+    // …and no cube anywhere carries the bogus measure: the registry still
+    // holds nothing under the name.
+    expect(service.cubeRegistry.get('crm_account')).toBeUndefined();
   });
 
   it('ObjectQL — same', async () => {
