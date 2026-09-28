@@ -223,8 +223,11 @@ declare the registry.
 ## Accessibility
 
 `AriaProps` (`packages/spec/src/ui/i18n.zod.ts`) is the shared ARIA shape carried
-by the live UI schemas — views, pages, page components, charts and actions all
-declare an `aria:` block. The supported attributes are intentionally minimal:
+by the live UI schemas — list views, pages and page components declare an `aria:`
+block. A chart config and an action do not: both `aria` keys were retired because
+no renderer applied them. A chart's accessible name is its `description`, an
+action's is its `label`, and the region that places either is named by its own
+`aria:` block. The supported attributes are intentionally minimal:
 
 {/* os:check */}
 ```typescript

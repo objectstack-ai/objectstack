@@ -23,7 +23,7 @@ import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { I18nLabelSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
@@ -1655,8 +1655,45 @@ const actionObject = () => strictObject({
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
   }).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
+  // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
+  // `2bf6ef18d`). The ledger graded this key `live` on an uncited "PARTIAL —
+  // honored by a few objectui renderers" note, and no reader stood behind it.
+  // Measured at this checkout's `.objectui-sha` pin `f8a9d0fb05`: none of the
+  // surfaces that render an action — `action:button`, `action:icon`,
+  // `action:menu`, `action:group`, `action:bar`, the grid's row and bulk
+  // action menus, `record:quick_actions`, the declared-actions bar — reads an
+  // action's `aria`. The only `schema.aria` readers there are the PLACING
+  // nodes' own blocks (the `record:*` page components, the list view,
+  // `element:button`'s props), which never look inside an action.
+  //
+  // Remove rather than enforce: every one of those surfaces already derives the
+  // accessible name from the action's REQUIRED `label` — as the visible button
+  // or menu-item text, or as `aria-label` on the icon-only `action:icon` and
+  // the overflow-menu trigger — and the region that places the actions carries
+  // the node-level `ariaLabel` / `ariaDescribedBy` / `role`. A per-action ARIA
+  // block would be a second spelling of both, needing a precedence rule nobody
+  // has written. One node, one accessibility vocabulary.
+  //
+  // `retiredKey()` rather than a bare deletion although this is a
+  // `strictObject`: a bare delete is loud only as a generic unrecognized-key
+  // report, which cannot carry the prescription (`aria-carrier-tombstones.test.ts`
+  // pins the family). `AriaPropsSchema` is untouched — a key retirement, not a
+  // def retirement. Sources are stripped by the D2 conversion
+  // `action-aria-removed`.
+  aria: retiredKey(
+    '`action.aria` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no action ' +
+    'surface ever applied it: the button, icon, menu, group and bar renderers, the row and bulk ' +
+    'action menus and the record quick-actions toolbar all take the accessible name from the ' +
+    "action's `label` and never read this block, so ARIA attributes declared here parsed and then " +
+    'silently did not reach the DOM. Delete the key. The accessible name that IS applied is the ' +
+    "action's required `label` — the visible button or menu-item text, and the `aria-label` of an " +
+    'icon-only action — so write the name you meant there. To name the region that PLACES the ' +
+    'actions, author `ariaLabel` / `ariaDescribedBy` / `role` in the `aria` block of the placing ' +
+    'node: `page.components[].aria` (the component that renders the actions) or the list view ' +
+    '`aria`. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `action` is a registered metadata type, so `MetadataPlugin`'s loader stamps

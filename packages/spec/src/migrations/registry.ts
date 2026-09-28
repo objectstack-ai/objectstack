@@ -5385,7 +5385,21 @@ const step18: MigrationStep = {
     + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
     + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
     + 'meant. Its D3 record is the semantic entry '
-    + '`view-overlay-owner-hidden-retired`.',
+    + '`view-overlay-owner-hidden-retired`. '
+    + 'Finally, it removes `aria` from the action (ADR-0049 enforce-or-remove), the fourth '
+    + 'member of the `aria` family after `dashboard.aria`, `dashboard.widgets[].aria` and the '
+    + 'chart config\'s, and retired for the same measured reason: an ARIA block an author can '
+    + 'declare and nothing lowers to the DOM. The liveness ledger had graded it `live` on an '
+    + 'uncited "partial" note with no reader behind it; at the pinned renderer, none of the '
+    + 'surfaces that render an action — button, icon, menu, group and bar, the row and bulk '
+    + 'action menus, the record quick-actions toolbar — reads it. Remove rather than enforce, '
+    + 'because every one of them already takes the accessible name from the action\'s required '
+    + '`label` (visible text, or `aria-label` on an icon-only action), and the node that places '
+    + 'the actions carries the node-level `aria` block — a per-action block would be a second '
+    + 'spelling of both. The D2 conversion `action-aria-removed` STRIPS the key from stack '
+    + 'actions and object-nested actions as a pure lossless delete, retired from the load path '
+    + 'so authors are refused at parse; its D3 record is the semantic entry '
+    + '`action-aria-retired`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5425,6 +5439,7 @@ const step18: MigrationStep = {
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
+    'action-aria-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
