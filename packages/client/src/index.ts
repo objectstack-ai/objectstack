@@ -2192,8 +2192,9 @@ export class ObjectStackClient {
     },
 
     /**
-     * Structural diff between two history versions (`from`/`to`); omit both
-     * for previous-vs-current.
+     * Structural diff between two history versions (`from`/`to`). Omit `to`
+     * for the active version; omit `from` for the nearest earlier version
+     * whose body differs from the `to` side's.
      */
     diffItem: async (type: string, name: string, opts?: { from?: number; to?: number }): Promise<DiffMetaItemResponse> => {
         const route = this.getRoute('metadata');

@@ -412,6 +412,65 @@ function requireWritablePackage(
 }
 
 /**
+ * [#20492] `DELETE /packages/:id` — the ORGANIZATION-SCOPE refusal of the
+ * persisted delete, asked by the door before anything is mutated.
+ *
+ * ## The measurement
+ *
+ * A caller holding `manage_metadata` with no active organization sent
+ * `DELETE /api/v1/packages/:id` through `dispatch()` and was answered
+ * `400 TENANT_SCOPE_REQUIRED` — yet the package had ALREADY left the running
+ * registry (`GET /packages/:id` 200 before, 404 after; the listing empty), and
+ * its stored rows were kept. The door ran `registry.uninstallPackage(id)` first
+ * and reached `deletePackage`'s refusal second. A refused request had changed
+ * the process for everyone it serves, until a restart re-seeded the registry.
+ *
+ * ## The rule it mirrors
+ *
+ * `deletePackage` (`@objectstack/metadata-protocol`) refuses an uninstall
+ * whose request names neither `organizationId` nor `allTenants: true` — its
+ * declared request type says so ("Omitted together with `allTenants` ⇒
+ * refused"). This door never sends `allTenants`, so the request it builds is
+ * refused exactly when the caller's vetted organization is absent. That
+ * absence is the whole condition: nothing about the package or its rows enters
+ * it, so the door can decide it up front, from the SAME value it hands the
+ * protocol.
+ *
+ * ## Shape
+ *
+ * Same code and status as the protocol's refusal — `TENANT_SCOPE_REQUIRED`,
+ * `400` — so no caller sees a second vocabulary for one condition. The sentence
+ * is the door's own, for the reason {@link requireWritablePackage}'s is: the
+ * protocol's remedy ("pass organizationId … or allTenants: true") names request
+ * keys an HTTP caller cannot send. What this caller can do is select an
+ * organization; and what the door can now truthfully add is that nothing
+ * changed.
+ *
+ * ⛔ No `isSystem` bypass: the protocol refuses an org-less uninstall whoever
+ * asks, so a mirror that exempted anyone would disagree with it. Returns a
+ * refusal result to short-circuit on, or `null` to proceed. Callers MUST run
+ * it before `uninstallPackage`, and only when `deletePackage` will run.
+ */
+function requireUninstallOrganizationScope(
+    deps: DomainHandlerDeps,
+    id: string,
+    organizationId: string | undefined,
+): HttpDispatcherResult | null {
+    if (organizationId) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `Refusing to uninstall '${id}' with no organization scope: this request carries no active `
+            + `organization, and an uninstall that names none would delete every organization's rows for `
+            + `this package. Nothing was changed — select an organization you are a member of as your `
+            + `active organization, then retry.`,
+            400,
+            { code: 'TENANT_SCOPE_REQUIRED', packageId: id },
+        ),
+    };
+}
+
+/**
  * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
  *
  * ## The measurement
@@ -1954,6 +2013,27 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // listing (and with it every object the package registers) until
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
+            // [#20492] The persisted delete's organization-scope refusal, taken
+            // HERE, before `uninstallPackage` — the same "refuse before you
+            // mutate" ordering as the gate above. `deletePackage` refuses an
+            // uninstall that names no organization, and it used to be asked
+            // only AFTER the registry had already dropped the package: the
+            // caller got `400 TENANT_SCOPE_REQUIRED` while the package and every
+            // object it registers had left the running process for everyone it
+            // serves, with the stored rows still saying it was installed.
+            //
+            // ONE organization read, and it is the value handed to
+            // `deletePackage` below, so this check and the protocol's cannot
+            // disagree. Asked only when the persisted half will run: with no
+            // `deletePackage` there is no refusal to mirror, and the in-memory
+            // uninstall proceeds exactly as before. ⛔ Not a compensating
+            // re-install after the fact — nothing is touched before this.
+            // The protocol keeps its own refusal as the second line.
+            const protocol = await resolveProtocol(deps, _context);
+            const organizationId = await deps.resolveActiveOrganizationId(_context);
+            if (protocol && typeof protocol.deletePackage === 'function') {
+                const unscoped = requireUninstallOrganizationScope(deps, id, organizationId); if (unscoped) return unscoped;
+            }
             const registryRemoved = registry.uninstallPackage(id);
 
             // ⭐ [#18877 ruling item 3] A package that no longer exists has no
@@ -2009,10 +2089,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // which is optional anyway), the slot takes whatever a host registers under
             // the name, and registrants carrying no `deletePackage` are real in-tree.
             // A capability question, asked as a capability probe — not a cast.
-            const protocol = await resolveProtocol(deps, _context);
+            //
+            // [#20492] `protocol` and `organizationId` are the ones resolved above,
+            // before the registry was touched: the organization this request
+            // carries is the one the scope check already read.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
                     persisted = await protocol.deletePackage({
                         packageId: id,

@@ -62,9 +62,9 @@ for both corollaries.
 | `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
-| `rest_api` | 12 | 0 | 0 | 12 | 0 | 24 |
+| `rest_api` | 20 | 0 | 0 | 4 | 0 | 24 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 30 | 1 | 60 |
 | `analytics_cube` | 18 | 0 | 0 | 9 | 0 | 27 |
-| **total** | **941** | **5** | **1** | **147** | **9** | **1103** |
+| **total** | **949** | **5** | **1** | **139** | **9** | **1103** |
