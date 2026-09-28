@@ -259,9 +259,9 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     version: retiredKey(
       '`api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
       + 'nothing ever read it, and the served OpenAPI document\'s `info.version` has one source: the '
-      + 'protocol version of the `@objectstack/spec` that produced the document, which no deployment '
-      + 'configuration overrides. Delete the key. To publish your app\'s own release number, write it into '
-      + '`api.documentation.description`, which the served `info.description` carries.',
+      + 'protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, '
+      + 'which no deployment configuration overrides. Delete the key. To publish your app\'s own release '
+      + 'number, write it into `api.documentation.description`, which the served `info.description` carries.',
     ),
     termsOfService: z.string().optional()
       .describe('Terms-of-service URL of the served OpenAPI document (`info.termsOfService`); unset serves none'),

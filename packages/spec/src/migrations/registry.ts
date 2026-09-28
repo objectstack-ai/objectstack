@@ -14102,8 +14102,9 @@ const step18: MigrationStep = {
       id: 'rest-api-documentation-version-retired',
       surface: 'restServer.api.documentation.version',
       replacement:
-        '(removed — delete the key. The served OpenAPI document\'s `info.version` is the protocol version of '
-        + 'the `@objectstack/spec` that produced it, with no configured override. An app that wants to publish '
+        '(removed — delete the key. The served OpenAPI document\'s `info.version` is the protocol version, '
+        + 'i.e. the version of the `@objectstack/spec` package that generated the document, with no configured '
+        + 'override. An app that wants to publish '
         + 'its own release number writes it into `api.documentation.description`, which the served '
         + '`info.description` now carries.)',
       reason:
@@ -14125,7 +14126,7 @@ const step18: MigrationStep = {
         + 'that does now fails `RestServer` construction (and so the REST plugin\'s `start`) with the retirement '
         + 'prescription, naming the key and `RestApiConfigSchema`, instead of being accepted and ignored; `tsc` '
         + 'refuses the key at the authoring site (`never`). `GET {apiPath}/openapi.json` and its '
-        + 'environment-scoped twin serve `info.version` equal to the protocol version the bundled '
+        + 'environment-scoped twin serve `info.version` equal to the one the bundled '
         + '`@objectstack/spec/openapi.json` carries, whatever the config says. A release number the host still '
         + 'wants published appears in the served `info.description` after it is written into '
         + '`api.documentation.description`.',
