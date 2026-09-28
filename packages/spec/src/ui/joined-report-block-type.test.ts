@@ -24,6 +24,7 @@ import {
   JoinedReportBlockSchema,
   ReportSchema,
   type JoinedReportBlock,
+  type JoinedReportBlockParsed,
   type Report,
   type ReportParsed,
 } from './report.zod';
@@ -70,9 +71,9 @@ describe('[#19920] JoinedReportBlock is a joined-report block, not unknown', () 
     }
   });
 
-  it('a joined report typed as Report parses, and its parsed blocks are block outputs', () => {
+  it('a joined report typed as Report parses, and its parsed blocks are JoinedReportBlockParsed', () => {
     const parsed: ReportParsed = ReportSchema.parse(joined);
-    const blocks: ParsedBlock[] = parsed.blocks ?? [];
+    const blocks: JoinedReportBlockParsed[] = parsed.blocks ?? [];
     expect(blocks.map((b) => [b.name, b.type])).toEqual([
       ['open_block', 'summary'],
       ['done_block', 'tabular'],

@@ -25,6 +25,7 @@ import {
   ViewItemWireSchema,
   defineViewItem,
   type ViewItem,
+  type ViewItemParsed,
   type ViewItemWire,
   type ViewMetadata,
   type ViewMetadataParsed,
@@ -97,7 +98,7 @@ describe('[#19920] a ViewItem config is typed by its arm, not unknown', () => {
   });
 
   it("the parsed config is the arm's parsed config (the list default `type` applied)", () => {
-    const parsed = ViewItemSchema.parse({
+    const parsed: ViewItemParsed = ViewItemSchema.parse({
       name: 'crm_lead.all',
       object: 'crm_lead',
       viewKind: 'list',

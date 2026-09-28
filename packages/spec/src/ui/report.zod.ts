@@ -561,6 +561,8 @@ export const ReportSchema = lazySchema(() => strictObject({
  * refinement, not a type, so `JoinedReportBlockSchema` remains the only judge.
  */
 export type JoinedReportBlock = z.input<typeof JoinedReportBlockSchema>;
+/** Post-parse shape of {@link JoinedReportBlock} — defaults applied, transforms run (ADR-0122). */
+export type JoinedReportBlockParsed = z.infer<typeof JoinedReportBlockSchema>;
 
 /**
  * Report Types

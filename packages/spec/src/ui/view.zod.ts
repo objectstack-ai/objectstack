@@ -6713,8 +6713,12 @@ export type View = z.input<typeof ViewSchema>;
 /** Post-parse shape of {@link View} — defaults applied, transforms run (ADR-0122). */
 export type ViewParsed = z.infer<typeof ViewSchema>;
 export type ViewItem = z.input<typeof ViewItemSchema>;
+/** Post-parse shape of {@link ViewItem} — defaults applied, transforms run (ADR-0122). */
+export type ViewItemParsed = z.infer<typeof ViewItemSchema>;
 /** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
 export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
+/** Post-parse shape of {@link ViewItemWire} — defaults applied, transforms run (ADR-0122). */
+export type ViewItemWireParsed = z.infer<typeof ViewItemWireSchema>;
 /**
  * Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095) —
  * the union of the INPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
