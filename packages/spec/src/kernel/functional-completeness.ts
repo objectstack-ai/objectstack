@@ -283,7 +283,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `__PIN9__`, re-read 2026-09-28: `ObjectCalendar.tsx`
+ *   (`.objectui-sha` = `dd3f7e1be`, re-read 2026-09-28: `ObjectCalendar.tsx`
  *   changed on this hop — objectui#10866's date-only day reads and writes,
  *   the display-locale and invalidation re-reads of objectui#10668 /
  *   objectui#10572, objectui#7508's row ceiling — while `getCalendarConfig`,
@@ -299,7 +299,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `__PIN9__`, re-read
+ *   this repo builds against (`.objectui-sha` = `dd3f7e1be`, re-read
  *   2026-09-28; first measured at `87af769e9`, both files byte-identical to
  *   it at `62597c588`, and at `f8a9d0fb0` `case 'gantt'` gained the
  *   EFFECTIVE `filter` and the toolbar `search` / `searchableFields`
@@ -327,12 +327,13 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `__PIN9__`; `ObjectTimeline.tsx`, byte-identical from `87af769e9` through
+ *   `dd3f7e1be`; `ObjectTimeline.tsx`, byte-identical from `87af769e9` through
  *   `62597c588` to `f8a9d0fb0`, changed on this hop — objectui#6356's
  *   declared timeline item, objectui#10222's retired `metaFields` read,
+ *   objectui#10866's date-only day in its sort and date buckets,
  *   objectui#10530 / objectui#10663 / objectui#10684 — but its start-date
  *   chain and its `if (!hasAuthoredItems && !startDateField)` refusal arm are
- *   byte-identical, moved `:474-476` → `:533-535` and `:759` → `:842`;
+ *   byte-identical, moved `:474-476` → `:533-535` and `:759` → `:862`;
  *   `ListView.tsx`'s `case 'timeline'` changed only in a comment and
  *   `resolveTimelineDateBinding` not at all).
  *   ① `ListView.tsx`'s `case 'timeline'` resolves the axis
@@ -352,7 +353,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `__PIN9__`; `ObjectMap.tsx` changed on this hop —
+ *   pin (`.objectui-sha` = `dd3f7e1be`; `ObjectMap.tsx` changed on this hop —
  *   objectui#10664's single expanded read keyed on the query it issues,
  *   objectui#10623's invalidation re-read, objectui#7508's row ceiling among
  *   others — but `getMapConfig` and `hasCoordinateBinding` are

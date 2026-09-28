@@ -2,10 +2,13 @@
 "@objectstack/console": minor
 ---
 
-Console (objectui) refreshed to `9f0c84a448d1`. Frontend changes in this range:
+Console (objectui) refreshed to `dd3f7e1be356`. Frontend changes in this range:
 
-Derived from the changesets objectui declared over the range — 318 releasing of 339 changesets added across 318 non-merge commits; omitted: 21 release-nothing changesets, 23 commits carrying no changeset (they ship no package code).
+Derived from the changesets objectui declared over the range — 325 releasing of 348 changesets added across 328 non-merge commits; omitted: 23 release-nothing changesets, 25 commits carrying no changeset (they ship no package code).
 
+- **minor** — Show the environment admin a storage-capacity banner from the tenant runtime's own storage verdict (objectui#10439, the objectui half of cloud#2135). (objectui `4357a278b`)
+- **minor** — **BREAKING** — The metadata-admin `SchemaForm` no longer crashes on a form section that references a field group, and the form-section authoring type accepts that shape (objectui#8725). (objectui `8522396c0`)
+- **minor** — fix(auth, console): a registration started from an invitation link comes back to the invitation after email verification (objectui `7ea8118f7`)
 - **minor** — **BREAKING** — A grouped grid over a data source that declares no `queryGroupHeaders` now **refuses grouping** instead of grouping a page of rows (objectui#10881, maintainer ruling F). Grouping… (objectui `244d516df`)
 - **minor** — **BREAKING (shipped as `minor` — see below):** twelve node types now refuse both content channels by name — `object-grid`, `object-form`, `object-kanban`, `object-map`, `object-tr… (objectui `775e0795b`)
 - **minor** — `safeValidateSchema` — and so `objectui validate` — accepts twenty of the ADR-0080 public blocks, the ones whose props `@objectstack/spec` declares as a `ComponentPropsMap` row le… (objectui `6a7f24e92`)
@@ -85,7 +88,7 @@ Derived from the changesets objectui declared over the range — 318 releasing o
 - **minor** — **BREAKING** — feat(components)!: an action node's static values ride `properties.params`; `params` is only the input list (objectui `808f33986`)
 - **minor** — An incremental edit is no longer read as a whole-app build. An `apply_edit` result says `kind: 'edit'` on its envelope, and its `drafted[]` may list the `app` artifact the edit re… (objectui `e6203d756`)
 - **minor** — The form routes `/f/:slug` and `/forms/:name` render every field with the widget the shared field resolver names for it — the same widget the record form renders (objectui#10179,… (objectui `212c45175`)
-- **minor** — fix(dashboard,charts): two dashboard surfaces the spec types as translatable now resolve (objectui#10132) (objectui `061f5e829`)
+- **minor** — fix(dashboard,charts): two dashboard surfaces the spec types as translatable now resolve (objectui `061f5e829`)
 - **minor** — **BREAKING:** `@object-ui/plugin-detail` no longer exports seven components that nothing registered and nothing mounted (objectui#7192, objectui#7175). This narrows the package's… (objectui `0348bc9f1`)
 - **minor** — fix(plugin-list): a map list view requests the fields its markers are drawn from (objectui `974760adb`)
 - **minor** — The permission matrix no longer locks a tenant's own permission set as if a code package shipped it (objectui#4526). (objectui `d32824aba`)
@@ -103,15 +106,14 @@ Derived from the changesets objectui declared over the range — 318 releasing o
 - **minor** — **BREAKING** — fix(types): retire the eight `header-bar` keys the renderer never read (objectui#10387) (objectui `9b281519f`)
 - **minor** — A `dataSource` binding's own `limit` that the contract refuses is now treated as **not authored**: the row cap falls through to the named saved view's usable cap, and only when th… (objectui `97abedc98`)
 - **minor** — The four declared action renderers (`action:button`, `action:icon`, `action:group`, `action:menu`) now pass an action's `objectName` to the action runner, and `action:button`, `ac… (objectui `778138e20`)
-- **minor** — **BREAKING** — `DashboardComponentSchema.dateRange` now takes `@objectstack/spec`'s `DashboardSchema.dateRange` authoring shape by reference on both faces (objectui#10334, objectui#7759 group F). (objectui `ce6bd99a5`)
-- **minor** — **BREAKING** — fix(types): settle four mirror-vs-declaration disagreements from objectui#7759 groups C and D (objectui `a05c35063`)
-- **minor** — `ui:calendar`: the selection shape follows `mode` (objectui#10304). (objectui `ea02938cd`)
-- …and 218 more releasing changesets in this range (list capped at 100; see the objectui range below).
+- …and 225 more releasing changesets in this range (list capped at 100; see the objectui range below).
 
-⚠️ 40 of these carry a breaking change: 40 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+⚠️ 41 of these carry a breaking change: 41 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
 
-**In this console build, declared nowhere** — objectui merged 23 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+**In this console build, declared nowhere** — objectui merged 25 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
 
+- _(no changeset)_ fix(console): an injected @objectstack/client joins the vendor-objectstack chunk group (objectui#10920) (#10921) (objectui `dd3f7e1be`)
+- _(no changeset)_ docs(changeset): date-note six pending entries that PRs #10793, #10802 and #10821 made false (objectui#10877) (#10891) (objectui `733fd5ac6`)
 - _(no changeset)_ docs(skills): the plugin guide's tombstone comment lists the serializer key list with `of` (objectui#10337) (#10780) (objectui `4f38f3928`)
 - _(no changeset)_ docs(changeset): date-note two pending entries whose option-description and rows refusals spec 17.3.0 lifted (objectui#10801) (#10828) (objectui `610819c40`)
 - _(no changeset)_ ci(dependabot-gate): wait for Spec Main Shape Gate now that it is enrolled (objectui#9969) (#10796) (objectui `4785523b0`)
@@ -139,17 +141,18 @@ Derived from the changesets objectui declared over the range — 318 releasing o
 <!-- adr-0087: not-required (no-migration-prescription)
      This diff moves `.objectui-sha` and the artefacts that travel with it (this console
      changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, and the
-     re-recorded pin read-points the lockstep and pin-citation gates name). It adds,
-     removes or renames no ObjectStack-authorable key: no Zod schema, no spec declaration
-     and no stored `sys_metadata` shape moves in it, so `objectstack migrate meta` has
-     nothing here to rewrite, and this body carries no FROM/TO prescription of its own.
-     The 40 declared-breaking entries listed above are objectui's OWN package surfaces
+     re-recorded and re-measured pin read-points the lockstep and pin-citation gates
+     name). It adds, removes or renames no ObjectStack-authorable key: no Zod schema, no
+     spec declaration and no stored `sys_metadata` shape moves in it, so
+     `objectstack migrate meta` has nothing here to rewrite, and this body carries no
+     FROM/TO prescription of its own.
+     The 41 declared-breaking entries listed above are objectui's OWN package surfaces
      (`@object-ui/types`, `@object-ui/components`, the plugin node declarations and the
      designer), each already carrying its upstream record. Where one of them mirrors an
      ObjectStack-authorable key, the ledger entry belongs to the `packages/spec` PR that
      lands the mirror, never to the pin bump, whose diff contains no such key.
      Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
-     a per-entry re-measurement of the 40 upstream declared-breaking entries.
+     a per-entry re-measurement of the 41 upstream declared-breaking entries.
 -->
 
-objectui range: `f8a9d0fb0596...9f0c84a448d1`
+objectui range: `f8a9d0fb0596...dd3f7e1be356`

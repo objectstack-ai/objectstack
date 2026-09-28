@@ -214,7 +214,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `__PIN9__`; re-derived at that pin 2026-09-28 — both files changed again on
+   * `dd3f7e1be`; re-derived at that pin 2026-09-28 — both files changed again on
    * this hop (objectui `544aca24f`, objectui#10301, the date-time half of
    * objectui#10026: `toDisplayDate` now refuses a date-TIME written on a day
    * that does not exist as well, and `dataset-format.ts` rewrote the

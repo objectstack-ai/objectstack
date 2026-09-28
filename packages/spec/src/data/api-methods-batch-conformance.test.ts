@@ -61,7 +61,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `__PIN9__`, `packages/plugin-grid`; re-measured at
+  // (`.objectui-sha` = `dd3f7e1be`, `packages/plugin-grid`; re-measured at
   // that pin, 2026-09-28 — previously measured at `f8a9d0fb0`, `62597c588`,
   // `87af769e9`, `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before
   // that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
