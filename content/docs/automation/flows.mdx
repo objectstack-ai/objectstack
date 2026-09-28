@@ -1102,17 +1102,30 @@ the chain resolves from either end:
   parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
-no run is stranded as resumable-forever. **When the child's failure is a
-strand** — its resume consumed the pause and a downstream node threw — each
-ancestor's consumed pause is recorded too, and the repair verb puts the whole
-chain back in one call: `POST …/runs/{runId}/restore-suspension` on **any**
-member re-arms every member, deepest first, so the continuation re-issued on
-the run you named flows back up through the ancestors instead of completing a
-leaf into a parent that never continues. Re-arming an ancestor is all the verb
-does — an ancestor is never *stranded*, because resuming it is not what moves
-it. A cascade from a child that is **not** repairable records no ancestor
-snapshot, deliberately, so the verb never promises a chain repair it could not
-finish.
+no run is stranded as resumable-forever — that sentence is scoped to exactly
+this case, not the two below it. **When the child's failure is a strand** —
+its resume consumed the pause and a downstream node threw — each ancestor's
+consumed pause is recorded too, and the repair verb puts the whole chain back
+in one call: `POST …/runs/{runId}/restore-suspension` on **any** member
+re-arms every member, deepest first, so the continuation re-issued on the run
+you named flows back up through the ancestors instead of completing a leaf
+into a parent that never continues. Re-arming an ancestor is all the verb does
+in this case — no ancestor is stranded here, because resuming it is not what
+moves it. A cascade from a child that is **not** repairable records no
+ancestor snapshot, deliberately, so the verb never promises a chain repair it
+could not finish.
+
+**A third case is the opposite: the bubble itself is what strands an
+ancestor.** The child completes cleanly, `bubbleToParent` resumes the parent
+on the child's behalf, and the parent's own downstream node throws. There the
+bubble — not a resume the caller issued — is exactly what moves the parent, so
+the claim above does not hold for it: the parent lands on the engine's
+`'stranded'` exit, terminal, and repairable only by an operator's
+`restoreConsumedSuspension`. The child's own resume genuinely succeeded, so its
+resumer (an approvals decision door, a wait timer) is told the resume
+succeeded; as of #15556 an approval `decide()` also reports the stranded
+parent on `resumeFailure` (`{ code: 'RESUME_FAILED', runId: '<parent>',
+status: 'stranded', repairable: true }`).
 
 See the worked example pair in the showcase app:
 `showcase_project_closure` invokes the reusable `showcase_closure_signoff`
