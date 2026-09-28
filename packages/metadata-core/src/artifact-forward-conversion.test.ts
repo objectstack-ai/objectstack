@@ -619,6 +619,22 @@ describe('the artifact door never writes `mode: inclusive` onto an authored excl
     expect(Object.keys(registered.config ?? {}), 'what registration receives').not.toContain('mode');
   });
 
+  /**
+   * [#20390] The per-entry window does not reopen it either. The entry is
+   * stamped `retiredAfter: '17.4.0'`, so a ^17.4.0 floor on a runtime still
+   * labelled 17.4.0 is inside ITS per-entry window — and the door's refusal
+   * list is still read first, before any version is.
+   */
+  it('stays refused inside the per-entry window too — the refusal list is read before retiredAfter', () => {
+    const def = twoBranchDecisionDefinition('^17.4.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    // ⭐ ANTI-VACUITY: the per-entry window really is open on this input.
+    expect(result.verdict).toBe('converted-retired-after');
+    expect(verdictNodeOf(result.definition).config).toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+  });
+
   it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {
     const def = twoBranchDecisionDefinition('^99.0.0');
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });

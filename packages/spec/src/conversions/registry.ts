@@ -12038,6 +12038,7 @@ const flowDecisionModeInclusiveExplicit: MetadataConversion = {
   id: 'flow-decision-mode-inclusive-explicit',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'flow.nodes[].config.mode (decision)',
   summary:
     "edge-branched decision with two or more conditioned out-edges and no `mode`: `mode: 'inclusive'` written "
