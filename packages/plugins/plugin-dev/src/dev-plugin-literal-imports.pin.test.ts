@@ -10,28 +10,31 @@
 // specifier is rewritten when `dev-plugin.ts` is transformed, and the test's
 // `vi.mock('x')` serves it inside the worker. A VARIABLE specifier is resolved
 // at CALL time instead, by a round trip to the main vitest process, and that
-// happens on every call, not only the first. Measured at `2f122b6e4`, before
-// the fix:
+// happens on every call, not only the first. Measured with a throwaway vite
+// plugin logging every `resolveId` and `transform` the main process served,
+// around six back-to-back `init()`s with setup and account mocked absent:
 //
-//   - The setup / account app-package loop imported through `spec[0]`. Every
-//     `init()` then made two main-process round trips, and the first `init()`
-//     also made the main process transform both packages' `dist` entries. A
-//     vite plugin logging the main process's requests showed exactly those
-//     two per `init()`, and none for the twelve literal loads beside them.
-//   - With 24 CPU-bound busy loops on 4 vCPU, those two round trips cost
-//     44.5-102.0 ms per `init()`. A round-trip-free `init()` did 0.6-1.0 ms
-//     of real work. That term made CI's clocked windows depend on what the
-//     main process was doing for OTHER files. On `Test Core (6/6)` (job
-//     108779589417), the mount-refusal suite's first two cases absorbed a
-//     7.36 s stall, and the first one timed out at 5000 ms. Locally,
-//     `dev-plugin-tenancy-failfast.test.ts` case 7 (eleven `init()`s) timed
-//     out at 5048 ms.
-//   - With literal specifiers, the same log shows ZERO main-process requests
-//     in the test phase.
+//   - With the loop importing through `spec[0]` (`dev-plugin.ts` as of
+//     `0fcb10184`), the six `init()`s made the main process serve 20
+//     requests: a `resolveId` of `@objectstack/setup` and one of
+//     `@objectstack/account` on EVERY `init()`, and on the first one also the
+//     transform of both packages' `dist` entries and the resolution of their
+//     imports. The mount-refusal suite's nine `init()`s made 18 of those
+//     `resolveId`s.
+//   - With literal specifiers, the same six `init()`s made ZERO. Every
+//     specifier this file names, the twelve literal loads beside the loop
+//     included, is resolved once, when the file is transformed at collection.
+//   - The main process is one process shared by every worker in the run, so
+//     a request to it waits on whatever it is doing for OTHER files. On
+//     `Test Core (6/6)` (job 108779589417), the mount-refusal suite's first
+//     case timed out at 5026 ms and its second took 2336 ms, while its other
+//     four took 16-72 ms, in a package run that read `transform 74.29s,
+//     import 137.46s, tests 11.87s`.
 //
-// So re-introducing a variable specifier puts a load-dependent term back into
-// every clocked window that boots this plugin, whatever the suite. A timeout
-// raised to absorb it would only move the cliff to the next heavier shard.
+// So re-introducing a variable specifier puts a main-process round trip back
+// into every clocked window that boots this plugin, whatever the suite. A
+// timeout raised to absorb it would only move the cliff to the next heavier
+// shard.
 //
 // ## The one exception
 //
