@@ -46,53 +46,69 @@
 //
 // ## How it reads the file
 //
-// Off the source text, with comments masked first, so that prose mentioning
-// `await import()` is not read as code. The lit control (③) proves the scan
-// still sees literal loads, so a masking bug that hid every import cannot
-// pass ① vacuously.
+// Through the TypeScript compiler's own parser, never through the source text:
+// a dynamic import is a call node whose callee is the `import` keyword, so a
+// comment, a string or a regex that mentions `import(` is never read as one,
+// and the leading `/* webpackIgnore: true */` is trivia, not part of the
+// argument. The lit control (③) proves the walk still finds the literal
+// loads, so a walk that found nothing cannot pass ① vacuously.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import ts from 'typescript';
 
 // `__dirname`, not `import.meta.url`: this package's build config compiles
 // `src/**` as CommonJS, where `import.meta` is TS1470. Vitest's evaluator
 // provides `__dirname` to every module it runs.
 const HERE = __dirname;
-const SOURCE = readFileSync(resolve(HERE, 'dev-plugin.ts'), 'utf8');
+const FILE = resolve(HERE, 'dev-plugin.ts');
+const SOURCE = ts.createSourceFile(FILE, readFileSync(FILE, 'utf8'), ts.ScriptTarget.Latest, true);
+
+/** Every node of the parsed file, depth first. */
+function nodesOf(root: ts.Node): ts.Node[] {
+  const out: ts.Node[] = [];
+  const visit = (node: ts.Node): void => {
+    out.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return out;
+}
+
+const NODES = nodesOf(SOURCE);
+
+/** The first argument of every dynamic `import(…)` call in the file. */
+const DYNAMIC_IMPORT_ARGS: ts.Expression[] = NODES
+  .filter((n): n is ts.CallExpression => ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword)
+  .map((call) => call.arguments[0]);
 
 /**
- * The source with comments masked. Block comments go first. A `//` comment is
- * one that opens a line or follows whitespace, so a `://` inside a URL string
- * is not taken for one.
+ * Only a plain string literal counts as naming its package: it is the form the
+ * transform resolves ahead of time. Anything else is resolved at call time.
  */
-const CODE = SOURCE
-  .replace(/\/\*[\s\S]*?\*\//g, ' ')
-  .split('\n')
-  .map((line) => line.replace(/(^|\s)\/\/.*$/, '$1'))
-  .join('\n');
-
-/** The trimmed argument text of every dynamic `import(…)` in the code. */
-const DYNAMIC_IMPORT_ARGS = [...CODE.matchAll(/\bimport\s*\(([^)]*)\)/g)].map((m) => m[1].trim());
-
-/** A single- or double-quoted string literal and nothing else. */
-const LITERAL = /^(['"])[^'"]+\1$/;
+const LITERAL_ARGS = DYNAMIC_IMPORT_ARGS.filter(ts.isStringLiteral).map((arg) => arg.text);
+const VARIABLE_ARGS = DYNAMIC_IMPORT_ARGS.filter((arg) => !ts.isStringLiteral(arg)).map((arg) => arg.getText(SOURCE));
 
 describe('#20376 — dev-plugin.ts loads its packages through literal specifiers', () => {
   it('① every dynamic import names its package literally, except the organizations one', () => {
-    const variable = DYNAMIC_IMPORT_ARGS.filter((arg) => !LITERAL.test(arg));
-    expect(variable, 'a variable specifier costs a main-process round trip per call under vitest').toEqual([
+    expect(VARIABLE_ARGS, 'a variable specifier costs a main-process round trip per call under vitest').toEqual([
       'organizationsPkg',
     ]);
   });
 
   it('② the exception is the ADR-0132 package, and nothing else hides behind that name', () => {
-    expect(CODE.match(/\bconst organizationsPkg = '@objectstack\/organizations';/g) ?? []).toHaveLength(1);
+    const declarations = NODES.filter(
+      (n): n is ts.VariableDeclaration => ts.isVariableDeclaration(n) && n.name.getText(SOURCE) === 'organizationsPkg',
+    );
+    expect(declarations).toHaveLength(1);
+    const init = declarations[0].initializer;
+    expect(init !== undefined && ts.isStringLiteral(init) ? init.text : undefined).toBe('@objectstack/organizations');
   });
 
-  it('③ lit control: the scan sees the setup / account loads, and the loads beside them, as literals', () => {
+  it('③ lit control: the walk sees the setup / account loads, and the loads beside them, as literals', () => {
     for (const pkg of ['@objectstack/setup', '@objectstack/account', '@objectstack/objectql']) {
-      expect(DYNAMIC_IMPORT_ARGS, pkg).toContain(`'${pkg}'`);
+      expect(LITERAL_ARGS, pkg).toContain(pkg);
     }
   });
 });
