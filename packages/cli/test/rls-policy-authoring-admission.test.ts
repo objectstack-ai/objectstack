@@ -61,25 +61,27 @@ const deal = {
       returnType: 'boolean',
     },
     account: { type: 'lookup', label: 'Account', reference: 'account' },
+    tags: { type: 'json', label: 'Tags' },
+    watchers: { type: 'lookup', label: 'Watchers', reference: 'account', multiple: true },
   },
 };
 const account = { name: 'account', label: 'Account', fields: { region: { type: 'text', label: 'Region' } } };
 
-const permissionSet = (using: string) => ({
+const permissionSet = (using: string, policy: Record<string, unknown> = { operation: 'select', using }) => ({
   name: 'sales',
   label: 'Sales',
   objects: { deal: { allowRead: true } },
-  rowLevelSecurity: [{ name: 'p', label: 'P', object: 'deal', operation: 'select' as const, using }],
+  rowLevelSecurity: [{ name: 'p', label: 'P', object: 'deal', ...policy }],
 });
 
 const RLS = (f: { rule: string }) => f.rule.startsWith('rls-predicate-');
 
 /** `os validate` step 3, in process — see the file header. */
-function cliDoor(using: string): AuthoringFinding[] {
+function cliDoor(using: string, set = permissionSet(using)): AuthoringFinding[] {
   const config = {
     manifest: { id: 'com.example.rls', namespace: 'rls', version: '1.0.0', name: 'RLS', type: 'app' },
     objects: [deal, account],
-    permissions: [permissionSet(using)],
+    permissions: [set],
   };
   const normalized = normalizeStackInput(config as Record<string, unknown>);
   const lowering = lowerCallables(normalized as Record<string, unknown>);
@@ -126,10 +128,10 @@ interface SaveOutcome {
   issues: Array<{ rule: string; path: string; message: string }>;
 }
 
-async function runtimeDoor(using: string): Promise<SaveOutcome> {
+async function runtimeDoor(using: string, set = permissionSet(using)): Promise<SaveOutcome> {
   const { protocol } = await runtimeHost();
   try {
-    await protocol.saveMetaItem({ type: 'permission', name: 'sales', item: permissionSet(using) });
+    await protocol.saveMetaItem({ type: 'permission', name: 'sales', item: set });
     return { accepted: true, issues: [] };
   } catch (err) {
     const e = err as { code?: string; status?: number; issues?: SaveOutcome['issues'] };
@@ -234,4 +236,60 @@ describe('the judge pass binds an app-staged membership key to [] (#20158)', () 
     expect(cli[0].message).toContain('(INVALID_FILTER / 400): ');
     expect(saved.issues.map((i) => i.message)).toEqual([cli[0].message]);
   });
+});
+
+/**
+ * [#19886] A field compared with a field that holds a list or an object — a
+ * `json` field or a `multiple` lookup — is refused when it is AUTHORED, at both
+ * doors, on every clause. The lowering sees the predicate's text and the
+ * engine's admission does not judge a `{ $field }` reference against the
+ * referenced column's type, so before this arm every row below was ACCEPTED at
+ * both doors (measured) while the runtime refused it: the write check per
+ * record (400), driver-sql on the read by declared type (400), and the by-id
+ * update or delete a `using` scopes fails closed (403). The rule judges by the
+ * DECLARED type its object graph carries; the full operator × clause × class ×
+ * order table is pinned beside the rule in `@objectstack/lint`.
+ */
+describe('a field compared with a json / multiple field is refused at both doors, on every clause (#19886)', () => {
+  const ROWS: ReadonlyArray<{ label: string; clause: 'using' | 'check'; operation: string; predicate: string }> = [
+    { label: 'using on select, != a json field', clause: 'using', operation: 'select', predicate: 'record.region != record.tags' },
+    { label: 'using on all, the json field first', clause: 'using', operation: 'all', predicate: 'record.tags != record.region' },
+    { label: 'using on update, a negated == a multiple lookup', clause: 'using', operation: 'update', predicate: '!(record.owner == record.watchers)' },
+    { label: 'using on delete, == a multiple lookup', clause: 'using', operation: 'delete', predicate: 'record.owner == record.watchers' },
+    { label: 'check on insert, != a json field', clause: 'check', operation: 'insert', predicate: 'record.region != record.tags' },
+    { label: 'check on update, > a multiple lookup', clause: 'check', operation: 'update', predicate: 'record.watchers > record.owner' },
+  ];
+  const CONTROLS: ReadonlyArray<{ label: string; clause: 'using' | 'check'; operation: string; predicate: string }> = [
+    { label: 'using on select, text != text', clause: 'using', operation: 'select', predicate: 'record.region != record.owner' },
+    { label: 'check on insert, number > number', clause: 'check', operation: 'insert', predicate: 'record.amount > record.amount' },
+    { label: 'using on all, a json field null test', clause: 'using', operation: 'all', predicate: 'record.tags != null' },
+  ];
+  const setFor = (row: { clause: string; operation: string; predicate: string }) =>
+    permissionSet('', { operation: row.operation, [row.clause]: row.predicate });
+
+  for (const row of ROWS) {
+    it(`REFUSED at both doors with one sentence — ${row.label}: \`${row.predicate}\``, async () => {
+      const cli = cliDoor('', setFor(row));
+      const saved = await runtimeDoor('', setFor(row));
+
+      expect(cli.map((f) => ({ severity: f.severity, rule: f.rule, path: f.path }))).toEqual([
+        { severity: 'error', rule: UNENFORCEABLE, path: `permissions[0].rowLevelSecurity[0].${row.clause}` },
+      ]);
+      expect(cli[0].message).toContain('lowers, but compares a field with a field that holds a list or an object');
+
+      expect(saved.accepted).toBe(false);
+      expect({ code: saved.code, status: saved.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+      expect(saved.issues.map((i) => ({ rule: i.rule, path: i.path }))).toEqual([
+        { rule: UNENFORCEABLE, path: `permissions.sales.rowLevelSecurity[0].${row.clause}` },
+      ]);
+      expect(saved.issues[0].message).toBe(cli[0].message);
+    });
+  }
+
+  for (const row of CONTROLS) {
+    it(`ACCEPTED at both doors — ${row.label}: \`${row.predicate}\``, async () => {
+      expect(cliDoor('', setFor(row))).toEqual([]);
+      expect(await runtimeDoor('', setFor(row))).toEqual({ accepted: true, issues: [] });
+    });
+  }
 });
