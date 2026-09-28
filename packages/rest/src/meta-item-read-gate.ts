@@ -166,8 +166,9 @@ export function metaCallerOrganizationId(caller: unknown): string | undefined {
 
 /**
  * [#9454 · #20408] The organization a `/meta` READ of `type` carries:
- * `organizationIdForMetaRead` over the FOLDED segment (#10340 — the raw plural
- * would miss the registry's override flag) and the caller's vetted
+ * `organizationIdForMetaRead` over the FOLDED segment (folded-type commit
+ * 26f3588fb, whose card no longer resolves: the raw plural would miss the
+ * registry's override flag) and the caller's vetted
  * organization ({@link metaCallerOrganizationId}). An organization reaches the
  * read only for a type the registry declares `allowOrgOverride`, so a
  * non-overridable type never resurrects a pre-#6190 phantom org row.
@@ -1956,8 +1957,9 @@ export async function translateMetaList(
 /**
  * [#20408] Translate ONE metadata document for the request's locale — the item
  * twin of {@link translateMetaList}. `metaType` is the canonical singular (the
- * caller folds its URL segment once, #6349: the translatable set is
- * singular-only, so an unfolded plural would skip the whole localization).
+ * caller folds its URL segment once — plural-spelling commit 2443bb4c4e, whose
+ * card no longer resolves: the translatable set is singular-only, so an
+ * unfolded plural would skip the whole localization).
  *
  * Takes the DOCUMENT, never the `getMetaItem` envelope (#5563): nav and field
  * labels live on the document. A missing bundle is not a bail-out (the

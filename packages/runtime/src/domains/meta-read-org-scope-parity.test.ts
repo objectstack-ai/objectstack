@@ -145,8 +145,20 @@ function makeQl() {
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
         ],
     };
+    /**
+     * Equality plus `$in` — the two shapes the shared resolver issues — and a
+     * loud refusal of every other shape, so a combinator this double does not
+     * implement can never read as a field that happened not to match.
+     */
     const matches = (row: any, where: any): boolean => Object.entries(where ?? {}).every(([field, cond]) => {
-        if (cond !== null && typeof cond === 'object' && Array.isArray((cond as any).$in)) return (cond as any).$in.includes(row[field]);
+        if (field.startsWith('$')) throw new Error(`fixture where-matcher: unsupported combinator '${field}'`);
+        if (cond !== null && typeof cond === 'object') {
+            const ops = Object.keys(cond as object);
+            if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((cond as any).$in)) {
+                throw new Error(`fixture where-matcher: unsupported operator shape on '${field}'`);
+            }
+            return (cond as any).$in.includes(row[field]);
+        }
         return row[field] === cond;
     });
     return {

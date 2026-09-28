@@ -5785,8 +5785,9 @@ export class RestServer {
                         // and same registry gate as every other read door here.
                         const listCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(rethrowAuthzStoreUnavailable);
-                        // [#10340] FOLDED, not raw — see the PUT door's org-scope
-                        // comment for the measurement. [#20408] Asked of
+                        // [folded-type commit 26f3588fb] (the original card no
+                        // longer resolves) FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement. [#20408] Asked of
                         // `metaReadOrganizationId`, the one answer the runtime
                         // dispatcher's list asks too.
                         const listOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, listCtx);
@@ -6357,8 +6358,9 @@ export class RestServer {
                         // ⚠️ NOT a new seam: memoised per request, and this
                         // handler resolves the same context again further down.
                         // [#20338] `readCtx` is resolved above the draft switches.
-                        // [#10340] FOLDED, not raw — see the PUT door's org-scope
-                        // comment for the measurement. [#20408] Asked of
+                        // [folded-type commit 26f3588fb] (the original card no
+                        // longer resolves) FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement. [#20408] Asked of
                         // `metaReadOrganizationId`, the one answer the runtime
                         // dispatcher's item read asks too.
                         const readOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, readCtx);
