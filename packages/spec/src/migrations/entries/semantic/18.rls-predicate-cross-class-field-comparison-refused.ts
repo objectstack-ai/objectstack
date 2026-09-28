@@ -25,8 +25,9 @@ export const entry: SemanticMigration = {
   replacement:
     'a comparison between two columns of one comparison class: a number with a number (number, '
     + 'currency, percent, rating, slider, progress, summary), text with text (the string types, '
-    + 'autonumber, a single select or radio, a single lookup, master_detail or user), a boolean with '
-    + 'a boolean, a date with a date, a datetime with a datetime, a time of day with a time of day. '
+    + 'autonumber, a single select or radio, a single lookup or user, a master_detail or a tree), a '
+    + 'boolean with a boolean, a date with a date, a datetime with a datetime, a time of day with a '
+    + 'time of day. '
     + 'A file field and a formula field cannot be compared with another column at all: compare the '
     + 'field with a literal or test it for null. If the two columns do hold comparable values, one '
     + 'of them is declared with the wrong type, so correct that declaration rather than the '
@@ -34,7 +35,10 @@ export const entry: SemanticMigration = {
   reason:
     'A column-to-column comparison has one meaning only within one comparison class: across '
     + 'classes SQLite orders every TEXT above every INTEGER while the in-process evaluator coerces '
-    + '("open" > 5 is false), and a file or formula field has no stored column value to compare. '
+    + '("open" > 5 is false). A formula field is virtual, with no stored column to reference. The '
+    + 'file family is refused by name, whatever the deployment stores: during the ADR-0104 '
+    + 'dual-encoding window one media column can hold a bare id and another the JSON-quoted form of '
+    + 'the same id, so no comparison against the family is provably one answer on every path. '
     + 'driver-sql has refused such a comparison on the read since #5222, so a policy written '
     + 'record.status != record.amount (text and a number), record.status != record.photo (text and '
     + 'an image) or record.status != record.is_open (text and a formula field) got three answers, '
@@ -65,6 +69,7 @@ export const entry: SemanticMigration = {
     + 'compares two fields of different comparison classes, with both declarations. Rewrite each as '
     + 'the replacement says. A policy that never passed os validate (stored before the authoring '
     + 'arm, or written by another path) is refused at request time instead: every read it scopes '
-    + 'answers 400, and so does every insert or update its check judges, so re-check what each such '
-    + 'policy is meant to admit rather than assuming the writes it admitted before were right.',
+    + 'answers 400 on the SQL drivers, and so does every insert or update its check judges, so '
+    + 're-check what each such policy is meant to admit rather than assuming the writes it admitted '
+    + 'before were right.',
 };

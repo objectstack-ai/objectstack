@@ -246,8 +246,8 @@
  *
  * This arm refuses the comparison where it is written, by the same rule the
  * read applies: {@link crossFieldComparisonVerdict} (`@objectstack/spec/data`),
- * the classification lifted from driver-sql and held to it by a pairwise parity
- * test there. Only `comparable` passes; `cross-class` and `no-class` (a file
+ * the classification lifted from driver-sql, which now delegates to it
+ * through `crossFieldColumnVerdict`. Only `comparable` passes; `cross-class` and `no-class` (a file
  * field, a formula field) are refused, and `unjudged` — a declared type outside
  * `FieldType` — is Zod's to reject, not this arm's. A comparison either side of
  * which holds a list or an object stays the arm above's, so no comparison is
