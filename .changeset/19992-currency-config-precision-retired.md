@@ -57,7 +57,11 @@ them by hand.
   reads "Total digits", matching the key's describe and the object designer's row;
   the zh-CN / ja-JP / es-ES translations follow (`@objectstack/platform-objects`).
 - **Registry** — `RETIRED_KEYS_BY_MAJOR[18]` gains `data/CurrencyConfig:precision`;
-  the protocol-18 step gains the D2 conversion `currency-config-precision-removed`.
+  the protocol-18 step gains the D2 conversion `currency-config-precision-removed` and
+  its D3 entry `currency-config-precision-retired`, which states the two judgments the
+  strip cannot make: a width declared where the old check never looked (a `dynamic`
+  field, or a code with no known ISO 4217 minor unit) never applied, and code of your
+  own that read the served key must derive the width from the field's currency.
 
 ## What an operator with STORED metadata sees
 
