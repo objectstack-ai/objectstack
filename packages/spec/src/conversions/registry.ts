@@ -1474,9 +1474,11 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * default: the loader parses the CONVERTED flow, and `connectorConfig` requires
  * `connectorId` + `actionId` once the block exists. Unlike `eventType` there is
  * no defensible default for either, so when lifting cannot complete that pair
- * the node is left **untouched** — it keeps failing at run time with the same
- * clear refusal it produces today, rather than going from "registers, fails
- * the step" to "fails to load".
+ * the node is left **untouched** — materializing a half block would only move
+ * the refusal onto a key the author never wrote. The flow parse then refuses
+ * the node for its missing `connectorConfig` block, whose prescription names
+ * the move out of `config` (#20418); before the parse required the block, such
+ * a node registered and failed every run at the executor's guard.
  */
 function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
   return mapFlowNodes(stack, (node, path) => {
@@ -1548,7 +1550,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
             },
             // Completeness guard: no actionId anywhere, so lifting would
             // create a block the loader rejects — left untouched instead
-            // (same run-time refusal as today).
+            // (the flow parse refuses it for the missing block).
             {
               id: 'n4',
               type: 'connector_action',

@@ -88,8 +88,8 @@ const LABEL_MISSING = (path: string, found: string): string =>
 const KEY_MISSING = (nodeType: string, key: string): string =>
   `This \`${nodeType}\` node's config leaves out \`${key}\`, which the ${nodeType} contract requires. Its executor `
   + 'parses the config against that contract before it does anything else and refuses the node without it — so the '
-  + 'flow registers, and then every run that reaches this node fails there; the config is metadata, and re-running '
-  + `changes nothing. Write \`${key}\` on the node's \`config\`.`;
+  + 'flow used to register, and then every run that reached this node failed there; the config is metadata, and '
+  + `re-running changes nothing. Write \`${key}\` on the node's \`config\`.`;
 
 /** The notify contract's own words for a node with no content source — read, never re-spelled. */
 const NOTIFY_TITLE_RULE = (() => {
