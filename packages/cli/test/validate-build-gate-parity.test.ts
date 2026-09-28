@@ -123,6 +123,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // `kind:'html'` page to check. Not a registry rule: the manifest is a file
   // in the working directory, not part of the stack a rule is handed.
   'resolveJsxGateManifest',
+  // [#20367 ruling B] One authoring shape: a default export no stack producer
+  // built (`defineStack` / `composeStacks`) is refused right after load, before
+  // any other judgement — the `STACK_*` cross-field refusals run inside the
+  // producer only. Not a registry rule and it cannot become one: it judges the
+  // loaded MODULE's default export (the provenance mark `loadConfig` reads
+  // before its named-export merge), which no rule is ever handed. `os lint` is
+  // not an author-time door under the ruling and does not run it.
+  'refuseUnbuiltStack',
 ];
 
 /**

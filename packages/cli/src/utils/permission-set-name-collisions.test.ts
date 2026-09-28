@@ -45,7 +45,7 @@
 // must not pull the security plugin in to judge a stack with no collisions.
 import '@objectstack/plugin-security';
 import { describe, it, expect } from 'vitest';
-import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { composeStacks, defineStack, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import {
   PERMISSION_SET_NAME_COLLISION,
   formatPermissionSetNameCollisionDiagnostic,
@@ -117,9 +117,13 @@ const ordersStack = (permissions: Set_[]) => ({
   permissions,
 });
 
-/** Compose exactly as `examples/app-multi-package/objectstack.config.ts` does. */
+/**
+ * Compose exactly as `examples/app-multi-package/objectstack.config.ts` does —
+ * each package through `defineStack` first, which `composeStacks` requires of
+ * every input (#20367 ruling B).
+ */
 const artifact = (stacks: unknown[]): AnyRec =>
-  composeStacks(stacks as never, { manifest: 'preserve' }) as unknown as AnyRec;
+  composeStacks(stacks.map((s) => defineStack(s as never)), { manifest: 'preserve' }) as unknown as AnyRec;
 
 /** The two-package artifact, with the Module package's set name as the variable. */
 const twoPackages = (ordersName: string) =>
