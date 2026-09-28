@@ -320,7 +320,13 @@ export interface DomainHandlerDeps {
      * surface relies on field-anchored 422s).
      */
     errorFromThrown(e: any, fallbackStatus?: number): { status: number; body: any };
-    /** Active organization id from the request session (undefined if anonymous / no auth). */
+    /**
+     * The caller's VETTED active organization — the execution context's
+     * `tenantId`, never the session's stored `activeOrganizationId`, which the
+     * identity step drops under a walled posture when no membership backs it
+     * (#20477). `undefined` for anonymous, no active organization, or a dropped
+     * claim.
+     */
     resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined>;
     /**
      * Fire a kernel-context event on the request's resolved kernel (no-op
