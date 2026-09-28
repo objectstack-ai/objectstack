@@ -5665,16 +5665,57 @@ const ViewContainerWireSchema = lazySchema(() =>
  * the loud answer this derivation wants: a kind block that grows a cross-key
  * check forces a decision about how that check reads on a partial underlay,
  * instead of silently losing it.
+ *
+ * [#19920] The return type is {@link ListViewKindBlocks}, derived by the same
+ * rule at the type level. It was `Record<string, z.ZodTypeAny>`, which typed
+ * the bag as a string-keyed record of `unknown` on the list overlay member, and
+ * so on `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and
+ * `AssembledViewArtifactParsed`: `options: { foo: 1, kanban: 42 }` type-checked
+ * while this member refuses it. The loop below is unchanged; the one assertion
+ * on its result states what the two derivations share, and
+ * `view-overlay-options-type.test.ts` pins the runtime key set to the type's.
  */
-function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
+function listViewKindBlocks(): ListViewKindBlocks {
   const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
   const blocks: Record<string, z.ZodTypeAny> = {};
   for (const kind of overlayTypeValues(ListViewShapeSchema)) {
     const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
     if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
   }
-  return blocks;
+  return blocks as ListViewKindBlocks;
 }
+
+/**
+ * [#19920] What {@link listViewKindBlocks} builds for ONE kind, as a function
+ * so its return type is zod's own answer for `.unwrap().partial().optional()`
+ * rather than a hand-written copy of it. Only its type is read
+ * ({@link ListViewKindBlocks}); the loop above keeps its own duck-typed calls.
+ */
+function partialListViewKindBlock<S extends z.ZodRawShape, C extends z.core.$ZodObjectConfig>(
+  block: z.ZodOptional<z.ZodObject<S, C>>,
+) {
+  return block.unwrap().partial().optional();
+}
+
+type ListViewShapeFields = (typeof ListViewShapeSchema)['shape'];
+
+/**
+ * [#19920] The kinds that name a block, by {@link listViewKindBlocks}' own rule:
+ * a value of the shape's `type` enum that is also a key of the shape (`grid`
+ * names none).
+ */
+type ListViewKindBlockName = Extract<z.output<ListViewShapeFields['type']>, keyof ListViewShapeFields>;
+
+/**
+ * [#19920] The static type of {@link listViewKindBlocks}: per kind, the kind's
+ * own block with every key optional. A block that stopped being an optional
+ * object would read `never` here, and the pin test's never-check goes red.
+ */
+type ListViewKindBlocks = {
+  [K in ListViewKindBlockName]: ListViewShapeFields[K] extends z.ZodOptional<z.ZodObject<infer S, infer C>>
+    ? ReturnType<typeof partialListViewKindBlock<S, C>>
+    : never;
+};
 
 /**
  * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.
