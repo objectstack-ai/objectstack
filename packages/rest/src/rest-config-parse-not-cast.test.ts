@@ -313,10 +313,18 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
         // The measurement the consumption decision rests on: a key the method
         // read but the schema did not declare would be silently STRIPPED by a
         // consumed parse, which is the failure #11637 avoided by discarding.
-        const declared = Object.keys(declaredApi().shape).sort();
+        // [#20295] `responseFormat` is a `retiredKey()` tombstone that this
+        // parse RUNS (and so refuses) rather than `.omit()`s: it stays in the
+        // declared shape and is, by design, not threaded — the one declared
+        // key the normalized block does not carry.
+        const TOMBSTONES_THE_PARSE_REFUSES = ['responseFormat'];
+        const declared = Object.keys(declaredApi().shape)
+            .filter((k) => !TOMBSTONES_THE_PARSE_REFUSES.includes(k))
+            .sort();
         const normalized = Object.keys(normalizedApi(construct({}))).sort();
         expect(normalized).toEqual(declared);
         expect(declared, 'the retired tombstone stays out of the parsed shape').not.toContain('requireAuth');
+        expect(Object.keys(declaredApi().shape), 'the refused tombstone is still IN the shape the seam runs').toContain('responseFormat');
     });
 
     it('an authored value still wins over the schema default', () => {
@@ -341,16 +349,17 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
             (declaredApi().parse({ documentation: { description: 'd' } }) as { documentation: unknown }).documentation,
         );
         expect(doc.description, 'the authored key survives').toBe('d');
-        expect(doc.enabled, 'and the declared inner default arrives with it').toBe(true);
+        expect(doc.title, 'and the declared inner default arrives with it').toBe('ObjectStack API');
+        // [#20295] REVERSED by design, not by regression: `documentation.enabled`
+        // is a retired tombstone, so the parse no longer materializes its old
+        // `.default(true)` — the block carries only its live members.
+        expect(doc, 'the retired switch is not re-defaulted').not.toHaveProperty('enabled');
     });
 
-    it('THE BOUNDED DELTA: an authored `responseFormat` does the same', () => {
-        const rf = normalizedApi(construct({ responseFormat: { envelope: false } }))
-            .responseFormat as Record<string, unknown>;
-        expect(rf.envelope, 'the authored key survives').toBe(false);
-        expect(rf.includeMetadata).toBe(true);
-        expect(rf.includePagination).toBe(true);
-    });
+    // [#20295] `THE BOUNDED DELTA: an authored \`responseFormat\` does the same`
+    // used to live here. The whole block is a retired tombstone now, so the
+    // SERVER refuses it at construction instead of filling its inner defaults —
+    // pinned, with the prescription, in `rest-api-config-dead-keys-refused.test.ts`.
 
     it('an ABSENT optional object stays absent — the parse does not materialize it', () => {
         // The bound on the delta above: `.optional()` without `.default()`
@@ -358,7 +367,8 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
         // `documentation` block would change what nothing-authored means.
         const api = normalizedApi(construct({}));
         expect(api.documentation).toBeUndefined();
-        expect(api.responseFormat).toBeUndefined();
+        // [#20295] the retired `responseFormat` is not threaded at all.
+        expect(api).not.toHaveProperty('responseFormat');
         expect(api.apiPath).toBeUndefined();
     });
 

@@ -156,13 +156,14 @@ export interface MetaReadGatePolicy {
      * `all` — every gate the plain read runs, the ones that answer per
      * DEPLOYMENT included (ADR-0057 D10 `requiresService` on an app, its nav
      * entries and a dashboard's widgets; #7912 object servability). The
-     * doors that serve the document a client RENDERS: the plain read and
-     * `/published`.
+     * doors that serve the document a client RENDERS: the plain read (its
+     * `?preview=draft` included) and `/published`.
      *
      * `per-caller` — only the gates whose verdict depends on who asks. The
      * doors that serve STORED versions — the layered view, `/diff`,
-     * `/history`, `/audit`. A per-deployment gate withholds nothing from the
-     * caller, and applied to a stored version it reports the store wrongly (a
+     * `/history`, `/audit`, and [#20290] the plain read's `?state=draft`
+     * branch (the pending draft row). A per-deployment gate withholds nothing
+     * from the caller, and applied to a stored version it reports the store wrongly (a
      * widget whose service is merely off here reads as never authored — and
      * Studio's designer, which loads the layered view and saves what it
      * loaded, would delete it).
@@ -194,9 +195,11 @@ export interface MetaReadGatePolicy {
      *
      * The exemption is a CALLER property: this member says only whether a
      * door honours it, and ⛔ no route test stands here. The doors that
-     * serve STORED versions for authoring (the layered view, `/diff`) honour
-     * it; the doors that serve the document a client renders (the plain
-     * read, `/published`) and the event doors (`/history`, `/audit`) do not.
+     * serve STORED versions for authoring (the layered view, `/diff`, and
+     * [#20290] the plain read's `?state=draft` branch — Studio's designers
+     * merge the draft over the layered view and save it back) honour it; the
+     * doors that serve the document a client renders (the plain read,
+     * `/published`) and the event doors (`/history`, `/audit`) do not.
      * The census in `meta-alternate-door-read-gates.test.ts` pins both halves
      * on every door, and that the exemption reaches no other cell.
      */
@@ -1187,9 +1190,10 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
  *    `service` → the absence answer (ADR-0045 §3: an unpublished app is
  *    externally unobservable). [#7912] The servability gate and [#19790] the
  *    docs-audience entry arm ride along.
- *    [ruling 5856774816] Under `app: 'author-exempt'` — the layered view
- *    and `/diff` — a caller who may write the app is served it as stored,
- *    unpruned, and every other caller the pruned app; an app the plain read
+ *    [ruling 5856774816] Under `app: 'author-exempt'` — the layered view,
+ *    `/diff` and [#20290] the plain read's `?state=draft` — a caller who
+ *    may write the app is served it as stored, unpruned, and every other
+ *    caller the pruned app; an app the plain read
  *    refuses WHOLE is refused either way. See `MetaReadGatePolicy.app`.
  *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser}. A
  *    per-DEPLOYMENT gate (which optional services are registered), never
