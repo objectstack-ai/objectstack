@@ -378,11 +378,13 @@ A **filter position** is the exception that gates:
 //                                                                        ↑ error, not a warning
 ```
 
-An unknown column in a predicate is not a skipped column — the predicate can
-never match, the driver's "no such column" is swallowed, and the list comes back
-empty and indistinguishable from *"there is no data"*. Each position of a filter
-is judged on its own, so the field above is still checked even though `stage`
-comes from React state.
+An unknown column in a predicate is not a skipped column — the SQL drivers
+refuse it with `INVALID_FILTER` / 400, naming the column, instead of running
+the predicate. The remedy is to run schema sync so the declared field has its
+column, or to name a column the table has. Catching it here, before the page
+ships, means an author sees the mistake in the editor instead of a 400 in
+production. Each position of a filter is judged on its own, so the field above
+is still checked even though `stage` comes from React state.
 
 Skipped, to keep false positives at zero: the same set as §8 — non-static
 values, `{...spread}` usages, relationship paths, system fields, and objects

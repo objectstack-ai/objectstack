@@ -322,6 +322,15 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
 ]);
 
 /**
+ * [#20387] Whether a numeric field type's column holds FRACTIONS rather than
+ * integers: the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION` and
+ * the driver's `float` alias. Read into {@link SqlDriver.fractionalNumericFields}.
+ */
+function isFractionalNumericType(type: string): boolean {
+  return type === 'float' || numericColumnFor(type)?.kind === 'exact';
+}
+
+/**
  * The builtin audit-timestamp columns every managed object carries. They are
  * stamped to a single canonical instant format on SQLite (see
  * `stampInsertTimestamps`/`update`) and presented on read — on EVERY dialect —
@@ -1538,6 +1547,65 @@ const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'co
   avg: 'number',
   min: 'column',
   max: 'column',
+};
+
+/**
+ * [#20387] What each declared aggregate function ACCUMULATES IN on PostgreSQL
+ * and MySQL — the arithmetic half of the one-double policy
+ * {@link AGGREGATE_ANSWER_KIND} states for the answer's type.
+ *
+ * - `'double'` — `avg`, over every declared numeric or boolean aggregand.
+ * - `'double-over-fractional'` — `sum`, over a declared column whose values are
+ *   fractions (`fractionalNumericFields`: the exact-decimal family and the
+ *   driver's `float` alias). A `sum` over an integer-valued column (`rating`,
+ *   the `integer` / `int` aliases, a boolean) stays the database's exact
+ *   integer total, rounded once to the double by the presenter.
+ * - `'as-stored'` — `count` / `count_distinct` (a count is an exact integer)
+ *   and `min` / `max` (a value OF the column; no arithmetic happens).
+ *
+ * Why: the engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and
+ * SQLite add JS doubles, while PostgreSQL's `numeric` and MySQL's `DECIMAL`
+ * add exact decimals. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 over
+ * a `number` column holding `0.1` and `0.2`: `sum` answered `0.3` natively and
+ * `0.30000000000000004` on SQLite and every rows path, so
+ * `having { s: { $eq: 0.3 } }` kept the group on those two native faces only.
+ * `avg` over an INTEGER column diverged too, which is why `avg` is `'double'`
+ * whatever the column holds: MySQL rounds a `DECIMAL` average to
+ * `div_precision_increment` (4) places (`avg` of 1, 2, 2 answered `1.6667`),
+ * and PostgreSQL's `numeric` average rounds to 16 places before the presenter
+ * rounds again (`11 / 9` answered `1.2222222222222222`, JS
+ * `1.2222222222222223`; 10 of 27,962 integer pairs measured).
+ *
+ * The operand is the column's TEXT, parsed as a double —
+ * `cast(cast(x as text) as double precision)` on PostgreSQL,
+ * `cast(cast(x as char) as double)` on MySQL — because that is the value the
+ * SQL client hands `find()`, and so the value the rows path adds. For an
+ * exact-decimal column it is the plain cast (both servers convert a decimal to
+ * a double through its text); for a binary `real` / `FLOAT` column, which a
+ * table created before the exact-decimal columns still carries, the plain cast
+ * would widen the binary32 value (`0.1` → `0.10000000149011612`) where the
+ * client reads `0.1`. MySQL's `CAST(… AS DOUBLE)` needs 8.0.17 or later.
+ *
+ * ⚠️ Residual, stated: the double sums are added in scan order, one after
+ * another, as the rows path adds them. SQLite (3.43+) adds with compensated
+ * (Kahan-Babuska-Neumaier) summation, so a group of three or more fractions can
+ * still differ in the last place on SQLite's native face alone (`0.1 + 0.2 +
+ * 0.3`: SQLite `0.6`, every other face `0.6000000000000001`). Two addends
+ * cannot differ, which is why the pin is `0.1 + 0.2`.
+ *
+ * A `Record` over `AggregationFunction` for the same reason as
+ * {@link AGGREGATE_ANSWER_KIND}: a function added to the vocabulary without an
+ * answer here fails `tsc`.
+ */
+const AGGREGATE_ACCUMULATION: Readonly<
+  Record<AggregationFunction, 'double' | 'double-over-fractional' | 'as-stored'>
+> = {
+  count: 'as-stored',
+  count_distinct: 'as-stored',
+  sum: 'double-over-fractional',
+  avg: 'double',
+  min: 'as-stored',
+  max: 'as-stored',
 };
 
 /**
@@ -5440,6 +5508,79 @@ function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: nu
   return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
 }
 
+/** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
+interface BetterSqlite3Connection {
+  exec(sql: string): unknown;
+  pragma(source: string, options?: { simple: boolean }): unknown;
+}
+
+/**
+ * The better-sqlite3 arm of `SqlDriver.reclaimSpace`: return the whole freelist,
+ * and return the bytes it passes through the `-wal` sidecar too, without ever
+ * waiting on another connection. Every statement runs through the binding's
+ * `exec()` / `pragma()`, which step to completion. Synchronous by design:
+ * nothing else runs on the connection between the chunks, so the freelist
+ * only shrinks while the loop runs.
+ *
+ * Why chunks. In WAL mode one `PRAGMA incremental_vacuum` over a large
+ * freelist is one transaction whose dirty pages outgrow the page cache, so
+ * SQLite spills them into the WAL before the commit truncates them away.
+ * Measured at 25,754 free pages: the database file went to 16,384 bytes and
+ * the `-wal` sidecar to 94,430,432, held until the last connection closed. A
+ * chunk that stays inside the page cache writes only the pages its commit
+ * keeps. The chunk is a quarter of this connection's page cache — 1,000 pages
+ * at better-sqlite3's default `cache_size` (-16000 KiB) and 4 KiB pages.
+ * Readings with a reader pinning the WAL, so every frame written stays
+ * visible: 2,000-page chunks left 883 frames, 4,000 left 3,779, and one
+ * statement 22,920; with a 2 MB cache, 250-page chunks left 1,121 and
+ * 1,000-page chunks 15,491.
+ *
+ * Why these two checkpoints. A `PASSIVE` checkpoint after each chunk moves
+ * its frames into the database and lets the next chunk restart the WAL from
+ * its start; it never waits. What it cannot do is shrink the sidecar, which
+ * keeps its high-water size until something truncates it. So one
+ * `TRUNCATE` checkpoint closes the call, under a busy timeout of 0 for that
+ * one statement and the connection's own timeout put back afterwards: a
+ * `TRUNCATE` checkpoint waits for other connections' readers through the
+ * busy handler, and on this synchronous binding that wait blocks the whole
+ * process — measured at 5,333 ms against a reader in the same process, the
+ * connection's 5,000 ms timeout. When another connection is reading, the
+ * `PASSIVE` checkpoints move only the frames that reader no longer needs and
+ * the `TRUNCATE` one answers "busy" as a result row, not as an error: the
+ * pages are off the freelist, and their bytes leave the files at a later
+ * checkpoint (the next call, SQLite's own auto-checkpoint, or the last
+ * connection closing). Outside WAL mode both checkpoints are no-ops.
+ *
+ * The loop stops when the freelist is empty or a chunk frees nothing: a file
+ * whose `auto_vacuum` is still `NONE` never shrinks its freelist through
+ * this statement (one full `VACUUM` adopts INCREMENTAL, see `SqlDriver.connect`).
+ *
+ * Module-local, like {@link formatDuplicateGroups}: `SqlDriver`'s `.d.ts`
+ * carries its non-public members too, and this helper is no entry point.
+ */
+function reclaimBetterSqlite3(db: BetterSqlite3Connection): void {
+  const scalar = (pragma: string): number => Number(db.pragma(pragma, { simple: true }));
+  let free = scalar('freelist_count');
+  if (free === 0) return;
+  const cacheSize = scalar('cache_size');
+  const cachePages = cacheSize >= 0 ? cacheSize : Math.floor((-cacheSize * 1024) / scalar('page_size'));
+  const chunk = Math.max(1, Math.floor(cachePages / 4));
+  for (;;) {
+    db.exec(`PRAGMA incremental_vacuum(${chunk})`);
+    db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+    const left = scalar('freelist_count');
+    if (left === 0 || left >= free) break;
+    free = left;
+  }
+  const busyTimeout = scalar('busy_timeout');
+  db.pragma('busy_timeout = 0');
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } finally {
+    db.pragma(`busy_timeout = ${busyTimeout}`);
+  }
+}
+
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
@@ -5587,6 +5728,20 @@ export class SqlDriver implements IDataDriver {
    * originally written for actually lives.
    */
   protected numericValueFields: Record<string, string[]> = {};
+  /**
+   * [#20387] The subset of {@link numericFields} whose declared type holds
+   * FRACTIONS — the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION`
+   * (`numericColumnFor(type).kind === 'exact'`) and the driver's `float` alias,
+   * which is how an introspected decimal / floating column reaches it. What is
+   * left out is integer-valued: `rating`, and the `integer` / `int` aliases (an
+   * introspected `bigint` among them).
+   *
+   * Read by {@link SqlDriver.aggregate} only: a `sum` over one of these columns
+   * accumulates in double on PostgreSQL and MySQL, and a `sum` over an
+   * integer-valued column keeps the database's exact integer total. See
+   * `AGGREGATE_ACCUMULATION`.
+   */
+  protected fractionalNumericFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -10072,7 +10227,14 @@ export class SqlDriver implements IDataDriver {
           fieldExpr !== '*' &&
           table !== null &&
           (this.booleanFields[table]?.includes(fieldExpr) ?? false);
-        const argExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        const columnExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        // [#20387] `sum` / `avg` accumulate in double on PostgreSQL and MySQL,
+        // the arithmetic SQLite and the engine's rows path already use, so one
+        // query answers one number on every face (`AGGREGATE_ACCUMULATION`).
+        // Still one `??` binding: the wrap is SQL text around it.
+        const argExpr = fieldExpr !== '*' && this.accumulatesInDouble(funcName, table, fieldExpr)
+          ? this.doubleAccumulationOperand(columnExpr)
+          : columnExpr;
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;
@@ -10191,6 +10353,40 @@ export class SqlDriver implements IDataDriver {
       throw this.aggregateBackendFault(object, query, error);
     }
     return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
+  }
+
+  /**
+   * [#20387] Whether {@link aggregate} accumulates this aggregation's operand in
+   * double — `AGGREGATE_ACCUMULATION` read against the column's declaration.
+   *
+   * PostgreSQL and MySQL only. SQLite stores the fractional family as REAL
+   * (`ColumnCompiler_SQLite3.prototype.decimal` is `'float'`), so its `sum` /
+   * `avg` already add doubles. A column this driver has no numeric or boolean
+   * declaration for keeps the database's own arithmetic, as before.
+   */
+  protected accumulatesInDouble(func: AggregationFunction, table: string | null, field: string): boolean {
+    if (table === null || !(this.isPostgres || this.isMysql)) return false;
+    switch (AGGREGATE_ACCUMULATION[func]) {
+      case 'double':
+        return (this.numericFields[table]?.includes(field) ?? false)
+          || (this.booleanFields[table]?.includes(field) ?? false);
+      case 'double-over-fractional':
+        return this.fractionalNumericFields[table]?.includes(field) ?? false;
+      case 'as-stored':
+        return false;
+    }
+  }
+
+  /**
+   * [#20387] The operand of a double-accumulated `sum` / `avg`: the column's
+   * text, parsed as a double — the value the SQL client hands `find()`, and so
+   * the value the rows path adds. See `AGGREGATE_ACCUMULATION` for why the text
+   * and not a plain cast.
+   */
+  protected doubleAccumulationOperand(operand: string): string {
+    return this.isPostgres
+      ? `cast(cast(${operand} as text) as double precision)`
+      : `cast(cast(${operand} as char) as double)`;
   }
 
   /**
@@ -10944,6 +11140,10 @@ export class SqlDriver implements IDataDriver {
    * `knex.raw` below). knex's node-sqlite3 client runs a raw statement with
    * `Database.all()`, which reads every row too (read from knex's source; that
    * binding is not installed in this repository).
+   *
+   * On better-sqlite3 the freed bytes also leave the `-wal` sidecar, which is
+   * what a file-backed database in WAL mode (the default, see
+   * {@link applySqliteJournalMode}) needs — see `reclaimBetterSqlite3`.
    */
   async reclaimSpace(_options?: DriverOptions): Promise<void> {
     if (!this.isSqlite) return;
@@ -10951,7 +11151,7 @@ export class SqlDriver implements IDataDriver {
     if (client.driverName === 'better-sqlite3') {
       const connection = await client.acquireConnection();
       try {
-        connection.exec('PRAGMA incremental_vacuum');
+        reclaimBetterSqlite3(connection);
       } finally {
         await client.releaseConnection(connection);
       }
@@ -11297,6 +11497,7 @@ export class SqlDriver implements IDataDriver {
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
     this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
+    this.fractionalNumericFields[shard] = this.fractionalNumericFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -11425,6 +11626,7 @@ export class SqlDriver implements IDataDriver {
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
+    const fractionalCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -11449,6 +11651,8 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
+        // [#20387] See {@link fractionalNumericFields}.
+        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) fractionalCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -11463,6 +11667,7 @@ export class SqlDriver implements IDataDriver {
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
     this.numericValueFields[key] = numericValueCols;
+    this.fractionalNumericFields[key] = fractionalCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -11511,6 +11716,7 @@ export class SqlDriver implements IDataDriver {
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
+    const fractionalCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -11548,6 +11754,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericValueCols.push(name);
         }
+        // [#20387] See {@link fractionalNumericFields}.
+        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) {
+          fractionalCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -11572,6 +11782,7 @@ export class SqlDriver implements IDataDriver {
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
+    this.fractionalNumericFields[tableName] = fractionalCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry

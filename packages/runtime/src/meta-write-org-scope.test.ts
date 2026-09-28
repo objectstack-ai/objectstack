@@ -254,10 +254,20 @@ function makeDispatcher(
  * file order- and shard-independent, which is how the 403 reached CI at all:
  * the branch was cut before #7027 merged, so the gate did not exist locally.
  */
-const ctx = (): any => ({
+const ctx = (activeOrganizationId?: string): any => ({
     request: { headers: {} },
     environmentId: 'env_1',
-    executionContext: { userId: 'usr_1', systemPermissions: ['manage_metadata'] },
+    // [#20408] The execution context the identity resolver builds from the
+    // session `makeDispatcher` answers: that session's active organization rides
+    // it as `tenantId` (there is no tenancy wall here, so the claim is kept, not
+    // dropped). The dispatcher's `/meta` doors scope by THIS value — the vetted
+    // one `RestServer`'s doors read — never the claim as stored, so a case whose
+    // session has an active organization hands the same one in here.
+    executionContext: {
+        userId: 'usr_1',
+        systemPermissions: ['manage_metadata'],
+        ...(activeOrganizationId ? { tenantId: activeOrganizationId } : {}),
+    },
 });
 
 function makeStack(activeOrganizationId: string | undefined, metadataService?: unknown) {
@@ -361,7 +371,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
     it('a NON-overridable type lands env-wide even though the session has an active org', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = responseOf(await dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
+        const res = responseOf(await dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(ACTIVE_ORG), 'PUT', FLOW));
 
         expect(res.status).toBe(200);
         const row = metaRow(engine, 'flow', FLOW.name);
@@ -383,7 +393,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             fields: { subject: { type: 'text', label: 'Subject' } },
         };
 
-        const res = responseOf(await dispatcher.handleMetadata(`/object/${OBJECT.name}`, ctx(), 'PUT', OBJECT));
+        const res = responseOf(await dispatcher.handleMetadata(`/object/${OBJECT.name}`, ctx(ACTIVE_ORG), 'PUT', OBJECT));
 
         expect(res.status).toBe(200);
         expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
@@ -398,7 +408,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         const withOrg = makeStack(ACTIVE_ORG);
         const withoutOrg = makeStack(undefined);
 
-        const a = responseOf(await withOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
+        const a = responseOf(await withOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(ACTIVE_ORG), 'PUT', FLOW));
         const b = responseOf(await withoutOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
 
         expect(a.status).toBe(200);
@@ -409,7 +419,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
     it('CONTROL — an `allowOrgOverride: true` type keeps its org scoping exactly as before', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(), 'PUT', VIEW));
+        const res = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
 
         expect(res.status).toBe(200);
         // ADR-0005's per-org overlay is the point of the flag and must survive
@@ -420,7 +430,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
     it('CONTROL — the plural URL spelling of an overridable type is scoped the same way', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = responseOf(await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(), 'PUT', VIEW));
+        const res = responseOf(await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
 
         expect(res.status).toBe(200);
         expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBe(ACTIVE_ORG);
@@ -449,7 +459,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
         });
 
-        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx()));
+        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx(ACTIVE_ORG)));
 
         expect(res.status).toBe(200);
         expect(res.body.data.unhiddenApps).toEqual([APP.name]);
@@ -484,7 +494,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         });
         error.mockClear();
 
-        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx()));
+        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx(ACTIVE_ORG)));
 
         expect(res.body.data.unhiddenApps).toEqual([APP.name]);
         const flipComplaints = (error.mock.calls as unknown[][])
@@ -600,7 +610,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             // receipted 200, served by nothing.
             const viaPlural = makeStack(ACTIVE_ORG);
             const resPlural = responseOf(
-                await viaPlural.dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
+                await viaPlural.dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(ACTIVE_ORG), 'PUT', item),
             );
             expect(resPlural.status).toBe(200);
             const pluralRow = metaRow(viaPlural.engine, singular, item.name);
@@ -612,7 +622,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             // must not have moved.
             const viaSingular = makeStack(ACTIVE_ORG);
             const resSingular = responseOf(
-                await viaSingular.dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(), 'PUT', item),
+                await viaSingular.dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(ACTIVE_ORG), 'PUT', item),
             );
             expect(resSingular.status).toBe(200);
             const singularRow = metaRow(viaSingular.engine, singular, item.name);
@@ -628,10 +638,10 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
             expect(responseOf(
-                await dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
+                await dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(ACTIVE_ORG), 'PUT', item),
             ).status).toBe(200);
             expect(responseOf(
-                await dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(), 'PUT', item),
+                await dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(ACTIVE_ORG), 'PUT', item),
             ).status).toBe(200);
 
             const rows = engine.metaRows().filter(
@@ -669,7 +679,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             fields: { subject: { type: 'text', label: 'Subject' } },
         };
 
-        const res = responseOf(await dispatcher.handleMetadata(`/objects/${OBJECT.name}`, ctx(), 'PUT', OBJECT));
+        const res = responseOf(await dispatcher.handleMetadata(`/objects/${OBJECT.name}`, ctx(ACTIVE_ORG), 'PUT', OBJECT));
 
         expect(res.status).toBe(200);
         expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
@@ -695,7 +705,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             const saveMetaItem = vi.fn().mockResolvedValue({ success: true, version: 'v1', seq: 1 });
             protocol.saveMetaItem = saveMetaItem;
 
-            await dispatcher.handleMetadata(`/${spelling}/specimen`, ctx(), 'PUT', { name: 'specimen' });
+            await dispatcher.handleMetadata(`/${spelling}/specimen`, ctx(ACTIVE_ORG), 'PUT', { name: 'specimen' });
 
             expect(
                 saveMetaItem.mock.calls[0][0].organizationId,
@@ -714,7 +724,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
         const saveMetaItem = vi.fn().mockResolvedValue({ success: true, version: 'v1', seq: 1 });
         protocol.saveMetaItem = saveMetaItem;
 
-        await dispatcher.handleMetadata('/translations/zh-CN', ctx(), 'PUT', { name: 'zh-CN' });
+        await dispatcher.handleMetadata('/translations/zh-CN', ctx(ACTIVE_ORG), 'PUT', { name: 'zh-CN' });
 
         const request = saveMetaItem.mock.calls[0][0];
         expect(request.type).toBe('translations');
@@ -749,11 +759,11 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             it(`/${plural}/:name/published answers what /${singular}/:name/published answers`, async () => {
                 const viaPlural = publishedStore(singular, item.name);
                 const pluralRes = responseOf(await makeStack(ACTIVE_ORG, viaPlural.service)
-                    .dispatcher.handleMetadata(`/${plural}/${item.name}/published`, ctx(), 'GET'));
+                    .dispatcher.handleMetadata(`/${plural}/${item.name}/published`, ctx(ACTIVE_ORG), 'GET'));
 
                 const viaSingular = publishedStore(singular, item.name);
                 const singularRes = responseOf(await makeStack(ACTIVE_ORG, viaSingular.service)
-                    .dispatcher.handleMetadata(`/${singular}/${item.name}/published`, ctx(), 'GET'));
+                    .dispatcher.handleMetadata(`/${singular}/${item.name}/published`, ctx(ACTIVE_ORG), 'GET'));
 
                 // Same status and same body — before the fold the plural was a
                 // 404 for an item that IS published, the singular a 200.
@@ -775,7 +785,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             expect(canonicalMetaUrlType('webhook')).toBe('webhook');
             const store = publishedStore('webhook', 'stripe');
             const res = responseOf(await makeStack(ACTIVE_ORG, store.service)
-                .dispatcher.handleMetadata('/webhook/stripe/published', ctx(), 'GET'));
+                .dispatcher.handleMetadata('/webhook/stripe/published', ctx(ACTIVE_ORG), 'GET'));
 
             expect(res.status).toBe(200);
             expect(store.asked).toEqual([['webhook', 'stripe']]);

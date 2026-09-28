@@ -114,8 +114,10 @@ function boot(protocol: Record<string, unknown>) {
     // A RESOLVABLE execution context. Measured in #8747's pin on this same
     // route: an `undefined` context is refused by the anonymous floor
     // (`enforceAuth`) with a 401 BEFORE the handler body runs, so the branch
-    // under test would never be reached.
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', tenantId: 'org_alpha' });
+    // under test would never be reached. [#20441] And an ADMITTED one: `/audit`
+    // is an authoring door, so a caller without an authoring capability is
+    // refused 403 before the protocol is resolved, and would not reach it either.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', tenantId: 'org_alpha', systemPermissions: ['manage_metadata'] });
     rest.registerRoutes();
 
     const found = (rest as any).getRoutes().find(

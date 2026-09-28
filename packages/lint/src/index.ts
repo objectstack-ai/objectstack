@@ -497,7 +497,9 @@ export type {
 
 // [#15254] The object-level half of the same sweep: the field-name LISTS an
 // object carries about its own fields (`highlightFields`,
-// `publicSharing.redactFields`). `error`, and on the runtime publish door as
+// `publicSharing.redactFields`, and since #20432 `indexes[].fields` and the
+// field-level lists `relatedListColumns` / `lookupColumns` /
+// `lookupFilters[].field` / `dependsOn`). `error`, and on the runtime publish door as
 // well as the three commands — Studio's app builder mints no `view` items, so
 // the list-view members above have nothing to inspect on the only artifacts
 // the click path authors, and a dangling `highlightFields` reference produced
