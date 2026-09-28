@@ -1,6 +1,6 @@
 {
   "manifest": {
-    "id": "com.example.forward_probe",
+    "id": "com.example.forward-probe",
     "namespace": "fwd",
     "defaultDatasource": "default",
     "version": "1.0.0",

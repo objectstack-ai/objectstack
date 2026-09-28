@@ -424,7 +424,7 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
   /** The shape the published 17.4.0 CLI emits for a chart widget and an assigned page. */
   const builtBy174 = (protocolRange: string) => ({
     manifest: {
-      id: 'com.example.forward_probe', namespace: 'fwd', name: 'forward_probe', version: '1.0.0', type: 'app',
+      id: 'com.example.forward-probe', namespace: 'fwd', name: 'forward_probe', version: '1.0.0', type: 'app',
       engines: { protocol: protocolRange },
     },
     objects: [{

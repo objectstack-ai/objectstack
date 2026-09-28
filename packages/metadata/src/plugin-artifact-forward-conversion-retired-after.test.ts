@@ -114,7 +114,7 @@ describe('[#20390] authoring funnel — a NEW source using the retired keys is s
     // the authoring funnel never replays a retired entry, whatever the floor says.
     const source = () => ({
         manifest: {
-            id: 'com.example.forward_probe', namespace: 'fwd', name: 'forward_probe', version: '1.0.0', type: 'app',
+            id: 'com.example.forward-probe', namespace: 'fwd', name: 'forward_probe', version: '1.0.0', type: 'app',
             engines: { protocol: '^17.4.0' },
         },
         objects: [{
