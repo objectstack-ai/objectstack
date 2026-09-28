@@ -159,6 +159,9 @@ import {
   collectFlowGraphs,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
+// [#15429] The decision's `mode` contract, parsed here so `os validate` and
+// `registerFlow` refuse the same declaration with the same sentence.
+import { DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#5659] The Filter Protocol's boolean identity reduction — the same predicate
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
@@ -230,6 +233,21 @@ export const FLOW_DEFAULT_EDGE_WITH_CONDITION = 'flow-default-edge-with-conditio
 export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
 /** #4414 — `config.condition` on a node whose executor never reads it. */
 export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
+/**
+ * #15429 — a `decision` `config.mode` the spec refuses: a value outside
+ * `'exclusive' | 'inclusive'`, or a legal `mode` beside a non-empty
+ * `conditions` list (ruling A on #20168). `error`: `registerFlow` refuses the
+ * same declaration with the same sentence, so the flow can never arm.
+ */
+export const FLOW_DECISION_MODE_INVALID = 'flow-decision-mode-invalid';
+/**
+ * #15429 (ruling item 4) — a `decision` declaring `mode: 'inclusive'` with two
+ * or more conditioned out-edges: every edge whose condition holds runs, so
+ * where the conditions overlap more than one branch runs for one record.
+ * Advisory — that is exactly what the declaration asks for, and the rule
+ * cannot prove the conditions disjoint over CEL; it says what the shape does.
+ */
+export const FLOW_DECISION_INCLUSIVE_OVERLAP = 'flow-decision-inclusive-overlap';
 /**
  * #5482 — a `delete_record` / `update_record` node that declares `multi: true`
  * and bounds it with NOTHING: the whole-object write, by declaration.
@@ -752,6 +770,23 @@ function scanErrorLabelledEdges(
  *  (5) `flow-inert-node-condition` — `config.condition` on a node that never
  *      reads it. The key is the trigger gate on `start` and dead on every other
  *      builtin, so the predicate reads like a guard and gates nothing.
+ *  (6) `flow-decision-mode-invalid` (#15429) — a `config.mode` the spec's
+ *      `DecisionConfigSchema` refuses: a value outside the closed pair, or a
+ *      legal `mode` beside a non-empty `conditions` list, which is first-match
+ *      on its own so the key would be accepted and never read (ruling A on
+ *      #20168). The finding IS the schema's issue message, and `registerFlow`
+ *      refuses the same shape with the same sentence.
+ *  (7) `flow-decision-inclusive-overlap` (#15429, ruling item 4) — a decision
+ *      declaring `mode: 'inclusive'` with two or more conditioned out-edges.
+ *      An edge-branched decision is exclusive by default (the first true edge
+ *      in declaration order wins); `inclusive` takes every one that holds, and
+ *      where the conditions overlap that is more than one branch for one
+ *      record. Beside (2), not a repeat of it: (2) is about an out-edge nothing
+ *      gates, this is about gates that can all open.
+ *
+ * (6) GATES — the engine refuses the flow at registration with the same
+ * sentence, so a warning would just be a slower way of finding out. (7) stays
+ * advisory: it names what the declaration does, and the declaration is legal.
  *
  * (1) and (3) GATE — neither has a reading under which the author's metadata
  * routes what it says, on any run, so a warning would just be a slower way of
@@ -868,6 +903,59 @@ function scanBranchRouting(
         .filter(Boolean),
     );
     const edgeLabels = new Set(outs.map(edgeLabelOf).filter(Boolean));
+
+    // (6) #15429 — the decision's `mode`, judged by the spec's own contract.
+    //     Only issues rooted at `mode` are reported here: the same parse also
+    //     refuses an undeclared key, but that strictness binds at authoring by
+    //     the standing decision in `schemaless-node-config.zod.ts`, and (5)
+    //     above already owns the one such key an author reaches for. Read
+    //     before (1)/(2): a decision whose `mode` is refused never registers,
+    //     so what its branches would route is moot until the key is fixed —
+    //     but the other findings still print, so the author fixes it once.
+    const modeVerdict = DecisionConfigSchema.safeParse(cfg);
+    if (!modeVerdict.success) {
+      for (const issue of modeVerdict.error.issues) {
+        if (issue.path[0] !== 'mode') continue;
+        findings.push({
+          where: `${at} · decision '${nid}' · config.mode`,
+          message: issue.message,
+          hint:
+            `\`registerFlow\` refuses this flow with the same sentence, so it can never arm. Fix the node ` +
+            `in the flow definition: an omitted \`mode\` is exclusive (the first true out-edge wins), ` +
+            `\`mode: 'inclusive'\` takes every true out-edge, and a \`conditions\` list is first-match ` +
+            `on its own and takes no \`mode\`.`,
+          rule: FLOW_DECISION_MODE_INVALID,
+          // Gating: the engine refuses the same declaration at registration.
+          severity: 'error',
+        });
+      }
+    }
+
+    // (7) #15429 ruling item 4 — an inclusive gateway whose gates can all
+    //     open. Counted over conditioned out-edges only (a `fault` edge is error
+    //     routing and was dropped above; an `isDefault` edge opens only when
+    //     nothing else did), so one conditioned edge plus a default is not
+    //     this shape: there, inclusive and exclusive cannot differ.
+    if (cfg.mode === 'inclusive') {
+      const conditioned = outs.filter((e) => e.condition && conditionSource(e.condition).trim() !== '');
+      if (conditioned.length >= 2) {
+        findings.push({
+          where: `${at} · decision '${nid}'`,
+          message:
+            `declares \`mode: 'inclusive'\` with ${conditioned.length} conditioned out-edge(s) ` +
+            `(${conditioned.map((e) => `'${String(e.target)}'`).join(', ')}) — EVERY one whose condition ` +
+            `holds runs, one after another, so where the conditions overlap more than one branch runs ` +
+            `for one record. Nothing checks that they partition.`,
+          hint:
+            `If exactly one branch was meant, delete \`mode\`: an omitted \`mode\` is exclusive, and the ` +
+            `first out-edge whose condition holds, in declaration order, wins (mark the fallback ` +
+            `\`isDefault: true\`). Keep \`mode: 'inclusive'\` only where running every matching branch is ` +
+            `the intent. A flow migrated by \`os migrate meta --from 17\` carries this key wherever two ` +
+            `or more conditioned out-edges left a decision — delete it where the branches partition.`,
+          rule: FLOW_DECISION_INCLUSIVE_OVERLAP,
+        });
+      }
+    }
 
     // (1) a declared branch label nothing claims. `default` is the engine's own
     //     sentinel for "no declared condition matched" and is additionally

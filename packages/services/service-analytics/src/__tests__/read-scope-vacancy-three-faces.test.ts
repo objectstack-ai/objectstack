@@ -98,7 +98,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     ['id', 'owner'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const QUERY = { cube: 'deals', dimensions: ['id'], measures: ['n'] } as AnalyticsQuery;
@@ -345,7 +345,7 @@ describe('[#13926] `applyReadScope` guards the JOINED object\'s scope too', () =
     sql: 'opportunity',
     measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
     dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' } },
-    public: false,
+    public: true,
   };
 
   const ctxWith = (accountScope: unknown): StrategyContext =>

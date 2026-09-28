@@ -192,8 +192,10 @@ export interface IAnalyticsService {
     query(query: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult>;
 
     /**
-     * Get available cube metadata for discovery
-     * @param cubeName - Optional cube name to filter (returns all if omitted)
+     * Get available cube metadata for discovery. Cubes declared
+     * `public: false` are omitted, whether listed or asked for by name.
+     * @param cubeName - Optional cube name to filter (returns every cube not
+     *   declared `public: false` if omitted)
      * @returns Array of cube metadata definitions
      */
     getMeta(cubeName?: string): Promise<CubeMeta[]>;

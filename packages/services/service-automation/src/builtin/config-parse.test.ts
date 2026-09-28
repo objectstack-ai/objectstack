@@ -79,6 +79,36 @@ function flowWith(
   };
 }
 
+/**
+ * #20316 — a key the executor contract requires, LEFT OUT, is refused at the
+ * build doors now: `registerFlow` parses first, so a flow missing it no longer
+ * registers ({@link doorRefusal} pins that half). The execute-time parse this
+ * file is about is still the executor's own contract, met by a config that
+ * reaches it past the doors — so {@link runStripped} registers the node WHOLE
+ * and removes the keys from the stored flow before the run.
+ */
+function doorRefusal(type: string, config: Record<string, unknown>): string {
+  try {
+    engineWith().registerFlow('f', flowWith(type, config));
+  } catch (e) {
+    return String((e as Error).message);
+  }
+  return '';
+}
+
+async function runStripped(
+  engine: AutomationEngine,
+  type: string,
+  whole: Record<string, unknown>,
+  strip: string[],
+  extra?: { nodes?: any[]; edges?: any[]; variables?: any[] },
+) {
+  const stored = engine.registerFlow('f', flowWith(type, whole, extra));
+  const config = stored.nodes.find((n) => n.id === 'n1')!.config as Record<string, unknown>;
+  for (const key of strip) delete config[key];
+  return engine.execute('f');
+}
+
 describe('execute-time config parse (#4277)', () => {
   it('refuses a wrong-typed declared key, naming the exact path', async () => {
     const engine = engineWith();
@@ -112,10 +142,9 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('refuses a missing required key (notify without title)', async () => {
+    expect(doorRefusal('notify', { recipients: 'u1' })).toContain('A notify node needs one content source');
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('notify', { recipients: 'u1' }));
-
-    const result = await engine.execute('f');
+    const result = await runStripped(engine, 'notify', { recipients: 'u1', title: 'Hi' }, ['title']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('notify');
     expect(result.error).toContain('config.title');
@@ -177,12 +206,10 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('a structured loop (body present) IS parsed — missing collection refuses', async () => {
+    const body = { nodes: [{ id: 'b1', type: 'assignment', label: 'B', config: { x: 1 } }], edges: [] };
+    expect(doorRefusal('loop', { body })).toContain("config leaves out `collection`");
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('loop', {
-      body: { nodes: [{ id: 'b1', type: 'assignment', label: 'B', config: { x: 1 } }], edges: [] },
-    }));
-
-    const result = await engine.execute('f');
+    const result = await runStripped(engine, 'loop', { collection: [1], body }, ['collection']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('loop');
     expect(result.error).toContain('config.collection');
@@ -201,10 +228,9 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('map refuses a missing collection, naming the path', async () => {
+    expect(doorRefusal('map', { flowName: 'child' })).toContain("config leaves out `collection`");
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('map', { flowName: 'child' }));
-
-    const result = await engine.execute('f');
+    const result = await runStripped(engine, 'map', { flowName: 'child', collection: [1] }, ['collection']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('map');
     expect(result.error).toContain('config.collection');
@@ -218,10 +244,9 @@ describe('execute-time config parse (#4277)', () => {
   // always flat — it just carried a hand-written guard instead of the contract.
 
   it('script refuses a node that names no callable', async () => {
+    expect(doorRefusal('script', {})).toContain("config leaves out `function`");
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('script', {}));
-
-    const result = await engine.execute('f');
+    const result = await runStripped(engine, 'script', { function: 'recalc' }, ['function']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not satisfy the script contract');
     expect(result.error).toContain('config.function');
@@ -231,28 +256,32 @@ describe('execute-time config parse (#4277)', () => {
     const engine = engineWith();
     // `registerFlow` strips the retired keys on rehydration (#3903), so what
     // reaches the parse is a node with nothing to run. Before #4343 this was a
-    // green step that delivered no mail.
-    engine.registerFlow('f', flowWith('script', {
+    // green step that delivered no mail. Since #20316 the flow parse behind
+    // that conversion refuses the stripped node itself — it names no
+    // `function` — so the flow no longer registers; the run below meets the
+    // same stripped shape past the doors.
+    expect(doorRefusal('script', {
       actionType: 'email', template: 'task_done', recipients: ['{record.owner}'],
-    }));
-
-    const result = await engine.execute('f');
+    })).toContain("config leaves out `function`");
+    const result = await runStripped(engine, 'script', {
+      function: 'send_mail', actionType: 'email', template: 'task_done', recipients: ['{record.owner}'],
+    }, ['function']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not satisfy the script contract');
   });
 
   it('a script parse refusal is a guard — a fault edge does NOT route it', async () => {
     const engine = engineWith();
-    engine.registerFlow('f', flowWith(
+    const result = await runStripped(
+      engine,
       'script',
-      { actionType: 'slack', template: 't' },
+      { function: 'post_to_slack', actionType: 'slack', template: 't' },
+      ['function'],
       {
         nodes: [{ id: 'recover', type: 'assignment', label: 'R', config: { recovered: true } }],
         edges: [{ id: 'e3', source: 'n1', target: 'recover', type: 'fault' }],
       },
-    ));
-
-    const result = await engine.execute('f');
+    );
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not satisfy the script contract');
   });
@@ -275,10 +304,9 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('subflow refuses a missing flowName through the contract, not a hand-written check', async () => {
+    expect(doorRefusal('subflow', {})).toContain("config leaves out `flowName`");
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('subflow', {}));
-
-    const result = await engine.execute('f');
+    const result = await runStripped(engine, 'subflow', { flowName: 'child' }, ['flowName']);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not satisfy the subflow contract');
     expect(result.error).toContain('config.flowName');

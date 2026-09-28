@@ -32,12 +32,16 @@ function issuesOf(schema: { safeParse: (v: unknown) => any }, value: unknown) {
     return r.error.issues;
 }
 
-/** A flow definition that parses clean — fixtures below are one edit away. */
+/**
+ * A flow definition that parses clean — fixtures below are one edit away. The
+ * notify node carries the `recipients` and `title` its executor contract
+ * requires; the flow parse refuses a node that leaves them out (#20316).
+ */
 const WELL_FORMED_FLOW = {
     name: 'welcome_flow',
     label: 'Welcome',
     type: 'autolaunched',
-    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { message: 'hi' } }],
+    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { recipients: ['user_1'], title: 'Welcome', message: 'hi' } }],
     edges: [],
 };
 
@@ -92,7 +96,7 @@ describe('fieldsFromZodIssues — ADR-0114 D3 catalog codes, not Zod codes (#812
     });
 
     it('the optional input upgrades a missing required property to required', () => {
-        const bad = { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', config: { message: 'hi' } }] };
+        const bad = { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', config: { recipients: ['user_1'], title: 'Welcome', message: 'hi' } }] };
         const issues = issuesOf(FlowSchema, bad);
 
         // Without the input — every caller today — the D3 degradation: still a

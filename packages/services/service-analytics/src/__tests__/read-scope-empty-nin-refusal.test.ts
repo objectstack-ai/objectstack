@@ -61,7 +61,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     ['id', 'owner'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */

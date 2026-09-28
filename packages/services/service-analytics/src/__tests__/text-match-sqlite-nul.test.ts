@@ -167,7 +167,7 @@ const CUBE: Cube = {
     label: { name: 'label', label: 'Label', type: 'string', sql: 'label' },
     v: { name: 'v', label: 'V', type: 'string', sql: 'v' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const query = (where: unknown): AnalyticsQuery =>

@@ -27,6 +27,8 @@
  * that reports every row canonical is the evidence, and it costs one command.
  */
 
+import { ALL_CONVERSIONS } from '@objectstack/spec';
+
 /**
  * What a caller with a live automation engine hands back for a stored `flow`
  * body (#4454) — structurally `AutomationEngine.canonicalizeStoredFlow`'s
@@ -141,6 +143,46 @@ export interface StoredMigrationRow {
   reason?: string;
 }
 
+/**
+ * One stored `decision` node whose evaluation changed meaning at protocol 18
+ * (#15429) — LISTED for an operator to review, never rewritten.
+ *
+ * The shape: a decision with no `config.conditions` list, no `mode`, and two or
+ * more out-edges carrying a `condition`. Before protocol 18 such a node took
+ * EVERY out-edge whose condition held; it now takes the first one, in the order
+ * the flow declares its edges. By maintainer ruling (letter C on #15429) a
+ * stored row takes that new meaning on upgrade: `os migrate meta --from 17`
+ * writes `mode: 'inclusive'` onto an authored SOURCE of this shape, because the
+ * operator asserts the source's age there, and no pass writes it onto a stored
+ * row, whose age nothing can assert. So the row is on protocol as it stands
+ * — this entry is not residue, it does not make the row `pending`, and it never
+ * flips {@link storedMigrationClean}; it is the list an operator reads before
+ * and after the upgrade to find the one node in a hundred that MEANT every
+ * branch, and declares `mode: 'inclusive'` on it by hand.
+ *
+ * The predicate is not restated here: {@link collectDecisionModeReview} runs
+ * the ADR-0087 D2 entry `flow-decision-mode-inclusive-explicit` itself over the
+ * stored body and keeps only where it would write — so this list is, by
+ * construction, the set of nodes the `--from 17` chain rewrites in a source.
+ */
+export interface StoredDecisionModeReview {
+  /** `sys_metadata.id` of the flow row. */
+  id: string;
+  /** The flow's name. */
+  name: string;
+  /** `null` = the env-wide overlay bucket. */
+  organizationId: string | null;
+  /** `null` = a package-less (global) overlay row. */
+  packageId: string | null;
+  state: 'active' | 'draft';
+  /** The decision node's `id`. */
+  nodeId: string;
+  /** The node's `label`, when it has one — what the flow designer shows. */
+  nodeLabel?: string;
+  /** Where the node sits in the stored body, e.g. `nodes[3]` or `nodes[1].config.body.nodes[0]`. */
+  path: string;
+}
+
 /** The whole run. `apply: false` is a preview — it writes nothing, by construction. */
 export interface StoredMigrationReport {
   /** False = preview. A preview never writes, not even a row it would leave identical. */
@@ -159,6 +201,14 @@ export interface StoredMigrationReport {
   failed: number;
   /** Every row that is not `canonical`, in scan order. */
   rows: StoredMigrationRow[];
+  /**
+   * Stored `decision` nodes that take first-match since protocol 18 and were
+   * written before anyone had to say otherwise (#15429, ruling C) — in scan
+   * order, whatever each row's outcome, on a preview and an apply run alike.
+   * REPORT ONLY: nothing in this list is ever written, and it moves no count
+   * and no verdict. See {@link StoredDecisionModeReview}.
+   */
+  decisionModeReview: StoredDecisionModeReview[];
 }
 
 /**
@@ -191,9 +241,90 @@ export interface StoredMigrationReport {
  * does not flip this verdict. TODOs never move it in either direction: a row
  * that also converts something stays `pending` / `rewritten` / `failed` exactly
  * as it would without them.
+ *
+ * The decision review list ({@link StoredMigrationReport.decisionModeReview})
+ * is not a skip class and never moves this verdict either: a row it names is ON
+ * protocol — by ruling it takes the protocol-18 meaning as stored — so there is
+ * nothing for any run of this pass to do about it.
  */
 export function storedMigrationClean(report: StoredMigrationReport): boolean {
   return report.pending === 0 && report.failed === 0;
+}
+
+/**
+ * The ADR-0087 D2 entry whose predicate {@link collectDecisionModeReview} runs
+ * (#15429): the conversion `os migrate meta --from 17` replays over authored
+ * sources to write `mode: 'inclusive'`.
+ */
+export const DECISION_MODE_REVIEW_CONVERSION_ID = 'flow-decision-mode-inclusive-explicit';
+
+/**
+ * The decision nodes in ONE stored flow body that the review list names — see
+ * {@link StoredDecisionModeReview} for what they are and why a stored row
+ * keeps them as they are (#15429, ruling C).
+ *
+ * **One predicate, not two.** The D2 entry's own `apply` runs over
+ * `{ flows: [body] }` and only the paths it WOULD write `mode` at are kept; the
+ * stack it returns is discarded unread, so nothing here can reach a write, and
+ * the entry is copy-on-write, so the body is not touched either. The list is
+ * therefore exactly the set a `--from 17` replay rewrites in a source — regions
+ * included — with no second statement of "two or more conditioned out-edges"
+ * to drift from the first.
+ *
+ * **Read off the stored body, with no engine.** The entry renames no node type,
+ * so it needs no executor registry, and it runs before — and independently of —
+ * the flow canonicalizer: a host with no automation service (where the flow row
+ * itself is reported `skipped`) and a row that fails to canonicalize still
+ * list their decisions. No earlier conversion writes a decision's `mode` or
+ * `conditions` or an edge's `condition`, so the stored body and the canonical
+ * one give the same answer.
+ *
+ * ⛔ Throws when the entry is gone from the registry, or names a path of a
+ * shape this reader does not know: a list that silently came back empty would
+ * tell every deployment "no decision to review". The entry leaves the registry
+ * only when the chain floor passes protocol 17 — the upgrade this list serves
+ * is then outside the supported window, and the list goes with it.
+ */
+export function collectDecisionModeReview(
+  body: unknown,
+): Array<{ nodeId: string; nodeLabel?: string; path: string }> {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return [];
+  const entry = ALL_CONVERSIONS.find((c) => c.id === DECISION_MODE_REVIEW_CONVERSION_ID);
+  if (!entry) {
+    throw new Error(
+      `the decision review list runs the conversion '${DECISION_MODE_REVIEW_CONVERSION_ID}', and the ` +
+        'registry no longer carries it. Remove the review list together with the conversion.',
+    );
+  }
+  const paths: string[] = [];
+  entry.apply({ flows: [body as Record<string, unknown>] }, (detail) => {
+    paths.push(detail.path);
+  });
+  return paths.map((path) => {
+    const match = /^flows\[0\]\.(.+)\.config\.mode$/.exec(path);
+    if (!match) {
+      throw new Error(
+        `the conversion '${DECISION_MODE_REVIEW_CONVERSION_ID}' reported a path of an unknown shape ` +
+          `('${path}'), so the decision review list cannot name the node it is about.`,
+      );
+    }
+    const nodePath = match[1]!;
+    const node = readAtPath(body, nodePath) as { id?: unknown; label?: unknown } | undefined;
+    const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : undefined;
+    return { nodeId: String(node?.id ?? ''), ...(label ? { nodeLabel: label } : {}), path: nodePath };
+  });
+}
+
+/** Read `nodes[1].config.body.nodes[0]`-style paths — the spelling the conversions emit. */
+function readAtPath(root: unknown, path: string): unknown {
+  let current: unknown = root;
+  for (const step of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
+    if (current === null || typeof current !== 'object') return undefined;
+    current = step[2] !== undefined
+      ? (current as unknown[])[Number(step[2])]
+      : (current as Record<string, unknown>)[step[1]!];
+  }
+  return current;
 }
 
 /**
@@ -259,6 +390,29 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
     );
   }
 
+  // Printed on a preview and an apply run alike, and beside the "already on
+  // protocol" verdict below without contradicting it: these rows ARE on
+  // protocol — a stored decision takes the protocol-18 meaning as it stands —
+  // and the list is what an operator reviews, not what this pass owes.
+  const review = report.decisionModeReview;
+  if (review.length > 0) {
+    const flowRows = new Set(review.map((r) => r.id)).size;
+    lines.push(
+      `◆ ${review.length} decision node(s) in ${flowRows} flow row(s) take the FIRST matching branch ` +
+        'since protocol 18 — listed for review, never rewritten:',
+    );
+    for (const r of review) {
+      const label = r.nodeLabel ? ` "${r.nodeLabel}"` : '';
+      lines.push(`  • flow/${r.name} ${describeScope(r)} — decision '${r.nodeId}'${label} at ${r.path}`);
+    }
+    lines.push(
+      '  Each has two or more out-edges with a condition and no `mode`. Before protocol 18 it took ' +
+        'EVERY out-edge whose condition held; it now takes only the first one that holds, in the order ' +
+        "the flow declares its edges. Where a node meant every branch, declare `mode: 'inclusive'` on " +
+        'it; declaring `mode` either way takes it off this list. No run of this pass writes it.',
+    );
+  }
+
   if (report.scanned === 0) {
     // "Nothing to convert" and "nothing was looked at" are different claims,
     // and only the first is a pass. A run pointed at the wrong project — the
@@ -287,7 +441,7 @@ function pushTodos(lines: string[], row: StoredMigrationRow): void {
 }
 
 /** `[org=… package=… draft]` — only the parts that are not the default. */
-function describeScope(row: StoredMigrationRow): string {
+function describeScope(row: Pick<StoredMigrationRow, 'organizationId' | 'packageId' | 'state'>): string {
   const parts: string[] = [];
   parts.push(row.organizationId ? `org=${row.organizationId}` : 'env-wide');
   if (row.packageId) parts.push(`package=${row.packageId}`);

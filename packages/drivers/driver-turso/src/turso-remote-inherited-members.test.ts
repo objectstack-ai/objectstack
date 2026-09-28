@@ -39,7 +39,7 @@
  *    | the other 13 | unchanged, and true on this face | unchanged |
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -240,9 +240,15 @@ describe('members refused on the remote face, beside the local control that answ
   });
 });
 
-describe('reclaimSpace(): the local statement, sent to the remote database', () => {
-  /** A database created in INCREMENTAL auto-vacuum mode, with pages on its freelist. */
-  async function withFreePages(face: Face): Promise<{ driver: TursoDriver; freelist: () => Promise<number> }> {
+describe('reclaimSpace(): the local statement, run to completion on the remote database', () => {
+  /**
+   * A database created in INCREMENTAL auto-vacuum mode, with `rows` pages on its
+   * freelist. Every reading below comes from a SECOND client opened on the file,
+   * never from the one that issued the statement: over a libSQL `file:` client,
+   * the issuing connection used to read one page fewer while the file itself
+   * had not changed.
+   */
+  async function withFreePages(face: Face, rows = 40): Promise<{ driver: TursoDriver; file: string }> {
     const file = nextFile();
     const prep = createClient({ url: `file:${file}` });
     await prep.execute('PRAGMA auto_vacuum = INCREMENTAL');
@@ -251,34 +257,114 @@ describe('reclaimSpace(): the local statement, sent to the remote database', () 
     const driver = await seeded(face, file);
     await driver.initObjects([{ name: 'bulk', fields: { body: { type: 'text' } } }]);
     const body = 'x'.repeat(4000);
-    await driver.bulkCreate('bulk', Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, body })));
-    await driver.deleteMany('bulk', { where: { id: { $ne: '' } } });
-    const reader = createClient({ url: `file:${file}` });
-    open.push({ driver: driver, client: reader });
-    const freelist = async () =>
-      Number((await (driver.getLibsqlClient() ?? reader).execute('PRAGMA freelist_count')).rows[0][0]);
-    return { driver, freelist };
+    if (rows > 0) {
+      await driver.bulkCreate('bulk', Array.from({ length: rows }, (_, i) => ({ id: `r${i}`, body })));
+      await driver.deleteMany('bulk', { where: { id: { $ne: '' } } });
+    }
+    return { driver, file };
   }
 
-  it.each<Face>(['local', 'remote'])('%s face: resolves and returns free pages', async (face) => {
-    const { driver, freelist } = await withFreePages(face);
-    const before = await freelist();
-    expect(before).toBeGreaterThan(0);
+  /** One scalar, as a fresh second client on the file reads it. */
+  async function secondConnection(file: string, sql: string): Promise<number> {
+    const reader = createClient({ url: `file:${file}` });
+    try {
+      return Number((await reader.execute(sql)).rows[0][0]);
+    } finally {
+      reader.close();
+    }
+  }
+
+  async function pageState(file: string): Promise<{ freelist: number; pages: number }> {
+    return {
+      freelist: await secondConnection(file, 'PRAGMA freelist_count'),
+      pages: await secondConnection(file, 'PRAGMA page_count'),
+    };
+  }
+
+  it.each<Face>(['local', 'remote'])('%s face: every free page leaves the file, read from a second connection', async (face) => {
+    const { driver, file } = await withFreePages(face);
+    const before = await pageState(file);
+    expect(before.freelist).toBeGreaterThanOrEqual(30);
     await expect(driver.reclaimSpace()).resolves.toBeUndefined();
-    expect(await freelist()).toBeLessThan(before);
+    expect(await pageState(file)).toEqual({ freelist: 0, pages: before.pages - before.freelist });
   });
 
-  it('a server that refuses the statement answers DATABASE_ERROR / 500, the raw door envelope', async () => {
+  it.each<Face>(['local', 'remote'])('%s face, the control: an empty freelist resolves, and nothing changes', async (face) => {
+    const { driver, file } = await withFreePages(face, 0);
+    const before = await pageState(file);
+    expect(before.freelist).toBe(0);
+    await expect(driver.reclaimSpace()).resolves.toBeUndefined();
+    expect(await pageState(file)).toEqual(before);
+  });
+
+  it('remote face: the file shrinks on disk while the driver is still open', async () => {
+    const { driver, file } = await withFreePages('remote');
+    const pageSize = await secondConnection(file, 'PRAGMA page_size');
+    expect(statSync(file).size).toBe((await pageState(file)).pages * pageSize);
+    await driver.reclaimSpace();
+    expect(statSync(file).size).toBe((await pageState(file)).pages * pageSize);
+    expect((await pageState(file)).freelist).toBe(0);
+  });
+
+  it('remote face: a row written after the call reaches a second connection', async () => {
+    const { driver, file } = await withFreePages('remote');
+    await driver.reclaimSpace();
+    await driver.create('bulk', { id: 'after', body: 'written after reclaimSpace' });
+    expect(await secondConnection(file, "SELECT count(*) FROM bulk WHERE id = 'after'")).toBe(1);
+  });
+
+  /** A client that answers the free-page count with `freePages` and records every call. */
+  function scriptedClient(freePages: number | Error, vacuum?: Error) {
+    const calls: Array<[string, unknown]> = [];
     const client = {
-      execute: async () => {
-        throw new Error('SQLITE_AUTH: not authorized');
+      execute: async (stmt: unknown) => {
+        calls.push(['execute', stmt]);
+        if (freePages instanceof Error) throw freePages;
+        return { rows: [[freePages]] };
+      },
+      executeMultiple: async (sql: string) => {
+        calls.push(['executeMultiple', sql]);
+        if (vacuum) throw vacuum;
       },
       close: () => {},
     };
+    return { client, calls };
+  }
+
+  async function remoteOver(client: unknown): Promise<TursoDriver> {
     const driver = new TursoDriver({ url: 'libsql://probe.example.turso.io', client: client as never });
     await driver.connect();
-    const err = await refusalOf(() => driver.reclaimSpace());
+    return driver;
+  }
+
+  it('remote face: the count is read first, and nothing more is sent when the freelist is empty', async () => {
+    const empty = scriptedClient(0);
+    await (await remoteOver(empty.client)).reclaimSpace();
+    expect(empty.calls).toEqual([['execute', 'PRAGMA freelist_count']]);
+
+    const some = scriptedClient(7);
+    await (await remoteOver(some.client)).reclaimSpace();
+    expect(some.calls).toEqual([
+      ['execute', 'PRAGMA freelist_count'],
+      ['executeMultiple', 'PRAGMA incremental_vacuum'],
+    ]);
+  });
+
+  it('a server that refuses the count answers DATABASE_ERROR / 500, the raw door envelope, and sends no vacuum', async () => {
+    const { client, calls } = scriptedClient(new Error('SQLITE_AUTH: not authorized'));
+    const err = await refusalOf(async () => (await remoteOver(client)).reclaimSpace());
     expect([err.code, err.status]).toEqual(['DATABASE_ERROR', 500]);
+    expect(calls).toEqual([['execute', 'PRAGMA freelist_count']]);
+  });
+
+  it('a server that refuses the vacuum answers DATABASE_ERROR / 500, the raw door envelope', async () => {
+    const { client, calls } = scriptedClient(7, new Error('SQLITE_AUTH: not authorized'));
+    const err = await refusalOf(async () => (await remoteOver(client)).reclaimSpace());
+    expect([err.code, err.status]).toEqual(['DATABASE_ERROR', 500]);
+    expect(calls).toEqual([
+      ['execute', 'PRAGMA freelist_count'],
+      ['executeMultiple', 'PRAGMA incremental_vacuum'],
+    ]);
   });
 });
 

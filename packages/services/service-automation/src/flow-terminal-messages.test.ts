@@ -85,7 +85,7 @@ function messageFlow(
                 label: 'Start',
                 ...(opts.startCondition ? { config: { condition: opts.startCondition } } : {}),
             },
-            { id: 'work', type: 'script', label: 'Work' },
+            { id: 'work', type: 'script', label: 'Work', config: { function: 'noop' } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [
