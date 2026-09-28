@@ -5463,7 +5463,19 @@ const step18: MigrationStep = {
     + 'rename above: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` is no longer '
     + 'converted, because the whole block it lived in is now removed, and '
     + '`connector-health-and-trigger-durations-unit-in-key` keeps only `triggers[].interval` → '
-    + '`intervalSeconds`.',
+    + '`intervalSeconds`. '
+    + 'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
+    + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
+    + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
+    + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
+    + 'with two or more conditioned out-edges and no `conditions` list, so a flow written while '
+    + 'every true branch ran keeps its behaviour; it is a default flip, so it is retired from '
+    + 'the load path AND refused by the flow rehydration seam and the artifact-ingestion door, '
+    + 'and replays only here — the paired semantic entry carries the judgment the diff then '
+    + 'asks for. BREAKING for flows stored in `sys_metadata`, by maintainer ruling: such a '
+    + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
+    + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
+    + 'the one-line fix where a node meant every branch.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5508,6 +5520,7 @@ const step18: MigrationStep = {
     'currency-config-precision-removed',
     'permission-rls-tags-removed',
     'action-aria-removed',
+    'flow-decision-mode-inclusive-explicit',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5909,6 +5922,49 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    // A declared-default correction plus the enforcement that makes the key real —
+    // the shape of `17.approval-escalation-enabled-default-flip`. There is no D2
+    // conversion: no spelling moves, and a written `public: false` is a legitimate
+    // value that the chain cannot tell from a materialized old default, so the
+    // judgement is the author's. The `data/Cube:public` row of
+    // `DEFAULT_CHANGES_BY_MAJOR` records the default move itself. No backticks in
+    // `surface`: the upgrade guide renders it inside a code span and a table cell.
+    {
+      id: 'analytics-cube-public-default-visible-enforced',
+      surface:
+        'data.Cube.public — an analytics cube that declares public: false, and every cube in an '
+        + 'artifact built by os compile before this release (the compiler writes the parsed stack, so '
+        + 'it carries a materialized public: false on each cube that omitted the key)',
+      replacement:
+        'nothing, to keep a cube queryable: cubes are visible by default. Delete an authored '
+        + '`public: false` that only restated the old default, and write it only on a cube that must '
+        + 'stay out of the analytics API. Recompile every `os compile` artifact built before this '
+        + 'release',
+      reason:
+        'A DECLARED-DEFAULT CORRECTION plus the enforcement that makes the key real. The analytics '
+        + 'cube schema declared `public` with a default of `false` under an access-control comment, '
+        + 'and nothing read it: `/analytics/meta` listed every cube and every query door answered it. '
+        + 'The analytics service now reads it. A cube declared `public: false` is left out of '
+        + '`/analytics/meta`, and `/analytics/query` and `/analytics/sql` refuse it with 404 '
+        + '`CUBE_NOT_FOUND` — the same refusal, byte for byte, that an unknown cube name gets, so the '
+        + 'refusal does not confirm a hidden cube exists. Enforcing the old default as declared would '
+        + 'have hidden every cube that omits the key, so the default moves to `true` in the same '
+        + 'change, and a cube that omits the key stays visible exactly as it was. Two holdings change '
+        + 'behaviour on upgrade. An authored `public: false` — including one copied from the example '
+        + 'app, which carried it — now hides the cube and refuses its queries. And an artifact built '
+        + 'by `os compile` before this release carries a materialized `public: false` on every cube '
+        + 'that omitted the key, because the compiler writes the parsed stack with its defaults '
+        + 'applied; a host that registers cubes from such an artifact hides all of them until the '
+        + 'artifact is recompiled. The key is visibility, not row security: records stay governed by '
+        + 'object permissions and row-level security on every door, and the metadata door keeps '
+        + 'serving cube definitions.',
+      acceptanceCriteria:
+        '`GET /analytics/meta` lists every cube your dashboards and reports query, and a query naming '
+        + 'each one answers 200. For each authored `public: false`, either delete it (the cube is meant '
+        + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
+        + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
+        + '`os compile` from this release or later.',
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -10563,6 +10619,71 @@ const step18: MigrationStep = {
         + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
         + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
     },
+    {
+      id: 'flow-decision-edge-branching-first-match',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'flow.nodes[].config.mode (decision) — an OMITTED mode on a decision that branches '
+        + 'on its out-edges and carries two or more conditioned ones',
+      replacement:
+        'nothing, where the out-edge conditions partition (exactly one can hold for any '
+        + 'record): an omitted `mode` now means exclusive, the first true edge in declaration '
+        + 'order wins, and the run is what it always was. `mode: \'inclusive\'` where the flow '
+        + 'RELIES on more than one branch running for one record — the value the D2 conversion '
+        + '`flow-decision-mode-inclusive-explicit` writes onto every such decision so nothing '
+        + 'changes silently. Where the conditions overlap by accident (a `!=` guard beside a '
+        + 'later `==` branch), neither: narrow them into a partition, or mark the fallback '
+        + '`isDefault: true`, and delete the written key.',
+      reason:
+        'A DEFAULT FLIP of a shipped node type, ruled rather than patched: the schema, the docs '
+        + 'and the engine\'s own comment all called an edge-branched decision an exclusive gateway '
+        + 'while the traversal took EVERY out-edge whose condition held, one after another, and '
+        + 'reported nothing — hotcrm#1555 rendered a refusal screen AND ran the conversion in one '
+        + 'execution. The traversal now matches the declaration (BPMN exclusive gateway, '
+        + 'Salesforce Flow Decision, n8n Switch default), and the every-true-edge behaviour is the '
+        + 'BPMN inclusive gateway an author must write down. The KEY converts mechanically and '
+        + 'does: `flow-decision-mode-inclusive-explicit` writes `mode: \'inclusive\'` wherever two '
+        + 'or more conditioned out-edges leave a decision that declares no `conditions` list, so '
+        + 'the migrated source runs exactly as before. What does NOT convert is the INTENT: the '
+        + 'count cannot tell a partition (where the key is redundant) from a reliance on '
+        + 'multi-branch runs (where it is load-bearing) from an accidental overlap (where the '
+        + 'old behaviour was the bug), so the mechanical edit list the chain replay prints is '
+        + 'where that judgment is made, node by node. And the conversion replays ONLY there: it is a '
+        + 'default flip, so the authoring funnel never rewrites a source written against the '
+        + 'new contract, and the automation engine\'s flow rehydration seam and the '
+        + 'artifact-ingestion door both refuse it by id (a code-shipped flow, a REST body, a Studio '
+        + 'save and a scaffolded artifact all arrive undated). BREAKING for stored rows, by '
+        + 'maintainer ruling: the promise that a flow keeps its behaviour is kept by authored '
+        + 'sources and built artifacts only. A decision stored in `sys_metadata` '
+        + 'with no `conditions` list, no `mode` and two or more conditioned out-edges takes the new '
+        + 'meaning on upgrade — it evaluates first-match — and nothing rewrites the row: no '
+        + 'stored-row migration, no cutoff, no read-path completion, because nothing about a stored '
+        + 'row says it was saved before the flip. The one-line fix, for a stored node that meant '
+        + 'every branch, is `mode: \'inclusive\'`; `os migrate meta --stored` lists every such node, '
+        + 'report only, so an operator can review the candidates before and after the upgrade.',
+      acceptanceCriteria:
+        'Review every `flow-decision-mode-inclusive-explicit` line the chain replay lists for '
+        + 'each authored stack: (1) where the two (or more) '
+        + 'out-edge conditions partition — a predicate and its negation, `>` beside `<=`, or a '
+        + 'guard beside `isDefault: true` — delete the written `mode`; the run is unchanged either '
+        + 'way and the exclusive default is the honest declaration; (2) where the flow relies on '
+        + 'more than one branch running for one record, keep `mode: \'inclusive\'`; (3) where the '
+        + 'conditions overlap by accident, narrow them into a partition and delete the key, then '
+        + 're-run the flow on a record that satisfied both and confirm exactly one successor '
+        + 'ran — the passed-over branch now leaves a `skipped` step in the run log. `os validate` '
+        + 'reports `flow-decision-inclusive-overlap` on every decision that keeps the key with '
+        + 'two or more conditioned out-edges, so the review list is the lint output. Then each '
+        + 'deployment: `os migrate meta --stored` lists, under `decisionModeReview`, every stored '
+        + 'decision with two or more conditioned out-edges and no `mode` — each one already '
+        + 'evaluates first-match, and the pass writes none of them — so where one of those nodes '
+        + 'meant every branch, declare `mode: \'inclusive\'` on it in the designer; a node '
+        + 'that declares `mode` either way leaves the list. A decision registering with '
+        + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
+        + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
+        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
     {
@@ -10645,6 +10766,76 @@ const step18: MigrationStep = {
         + '`issues[].path` names `edges[N].condition`, and for a node the refusal carries that same '
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
+    },
+    // ONE entry for the family, not one per node type: every member is the same
+    // decision — a node config its executor cannot run is refused where the flow
+    // is built, by one judge (`flowNodeConfigRefusals`), instead of registering
+    // and failing (or, for a branch with no label, misrouting) at run time.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-node-config-required-keys-refused',
+      surface:
+        'a flow node whose config leaves out a key its executor contract requires — objectName on '
+        + 'get_record / create_record / update_record / delete_record, recipients on notify (and title '
+        + 'when there is no template), url on http, function on script, flowName on subflow, collection '
+        + 'and flowName on map, collection on a loop that has a body, branches on parallel, try on '
+        + 'try_catch, and on screen each field name, each option value and label, and a lookup field '
+        + 'reference — and a decision node whose conditions is not an array, holds a branch that is not '
+        + 'an object, or holds a branch whose label is absent, null, blank or not a string; at any depth '
+        + 'including an ADR-0031 region body. Reachable wherever a flow is authored or stored: '
+        + 'defineStack({ flows }) sources, defineFlow(), an exported stack passed to objectstack validate, '
+        + 'a flow saved from the Studio flow designer (a node added and saved before it is configured; a '
+        + 'decision branch row whose label cell is empty; a screen field row whose name cell is empty), '
+        + 'and a flow row already sitting in sys_metadata',
+      replacement:
+        'the missing key, written on the node\'s `config` — the value the node was meant to act on '
+        + '(`objectName: \'account\'`, `url: \'https://…\'`, `collection: \'{rows}\'`, …). For a decision '
+        + 'branch, the label of the out-edge the branch should take (`{ label: \'approved\', expression: '
+        + '\'record.amount > 1000\' }`, beside an out-edge labelled `approved`), `conditions` written as an '
+        + 'array of such objects, and a bare predicate string moved under `expression`. To branch on the '
+        + 'out-edges instead, delete `conditions` and put each predicate on its edge\'s `condition`. A '
+        + 'legacy flat-graph `loop` (no `body`) needs no `collection` and is untouched',
+      reason:
+        'A flow node\'s `config` is an open record, so what its executor requires was checked by no build '
+        + 'door: `FlowSchema.parse`, `AutomationEngine.registerFlow` and `objectstack validate` all admitted '
+        + 'a node missing a key its executor contract requires, and the executor\'s own contract parse then '
+        + 'refused the node on every run that reached it — the config is metadata, so no rerun could '
+        + 'succeed. A decision branch with no label was worse: it never failed, the matched branch reported '
+        + 'no label and traversal took EVERY out-edge, so the flow ran green down the wrong paths. All '
+        + 'three doors now refuse these shapes through one judge, `flowNodeConfigRefusals`, which parses '
+        + 'each builtin node\'s config against the very contract its executor parses against '
+        + '(`getBuiltinNodeConfigContracts()`, reconciled against the executors\' own parse calls) and keeps '
+        + 'only the keys left out — a present value of the wrong type and an undeclared key are judged where '
+        + 'they were before — plus the decision branch shape its executor reads raw. A key a rule of the '
+        + 'contract requires (a notify with no template needs a title; a lookup screen field needs its '
+        + 'reference) is refused in the contract\'s own words. '
+        + '⚠️ No D2 conversion: the platform cannot know the object, URL, collection, function or '
+        + 'out-edge label the author left out, and no value it could write would keep what the flow did. '
+        + '⚠️ Where such a node already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not armed, '
+        + 'while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.fields.0.name`, `nodes.N.config.conditions.0.label`, or '
+        + 'the region path `nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same '
+        + 'path, and `validateStackExpressions` phrases it as `node \'fetch\' (get_record) config.objectName`. '
+        + 'For each hit write the key the node was meant to carry, per the replacement. Two proofs. (1) For '
+        + 'a stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it (the three boot paths spell it '
+        + '`[Automation] failed to register flow`, `[Automation] flow re-sync: failed to register flow` and '
+        + '`[Automation] cold-boot flow bind: failed to register flow`) — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. A node carrying every key its contract requires parses '
+        + 'and registers byte-identically to before, a decision with no `conditions` (or `conditions: null`, '
+        + 'or an empty list) still routes by its out-edges, and a legacy `loop` with no `body` still needs '
+        + 'no `collection`.',
     },
     // The ledger `predicate` slots' half of the blank-predicate rule. A SEPARATE
     // entry from `flow-edge-condition-evaluated-slot-source-required` on purpose:

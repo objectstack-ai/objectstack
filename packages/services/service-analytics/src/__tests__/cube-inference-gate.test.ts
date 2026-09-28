@@ -40,7 +40,7 @@ const authoredCube: Cube = {
     sql: 'some_physical_table',
     measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
     dimensions: {},
-    public: false,
+    public: true,
 };
 
 /** Records which object each aggregate ran against, so we can assert none ran. */

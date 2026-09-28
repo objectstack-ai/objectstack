@@ -129,7 +129,7 @@ Type: `[string, string]`
 | **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
 | **joins** | `Record<string, { name: string }>` | optional |  |
 | **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
-| **public** | `boolean` | optional (default: `false`) |  |
+| **public** | `boolean` | optional (default: `true`) | Whether the analytics API exposes this cube. Default true (visible). false hides it from GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it (CUBE_NOT_FOUND). Visibility only: the underlying object's permissions and row-level security still govern its records on every door. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

@@ -841,6 +841,8 @@ export {
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
+  FLOW_DECISION_MODE_INVALID,
+  FLOW_DECISION_INCLUSIVE_OVERLAP,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';

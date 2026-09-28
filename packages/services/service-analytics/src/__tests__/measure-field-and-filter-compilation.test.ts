@@ -230,7 +230,7 @@ describe('[#10298] `/api/v1/analytics/query` compiles every per-measure `filter`
       // A MANIFEST cube — no dataset registry entry, so there is nothing to
       // scope by and the emitted statement must be what it always was.
       cubes: [{
-        name: 'crm_case', title: 'Cases', sql: 'crm_case', public: false,
+        name: 'crm_case', title: 'Cases', sql: 'crm_case', public: true,
         measures: {
           count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
           amount_sum: { name: 'amount_sum', label: 'Amount', type: 'sum', sql: 'amount' },

@@ -32,7 +32,10 @@ const CONDITION = 'row.shouldRun == true';
 const ENVELOPE = { dialect: 'cel', source: CONDITION };
 
 const gate = { id: 'gate', type: 'decision', label: 'Gate' };
-const write = { id: 'write', type: 'create_record', label: 'Write' };
+// `objectName` is the key the create_record executor contract requires; a
+// region fixture carries it so the flow parse judges only what these tests
+// pin (#20316 refuses a node config that leaves it out).
+const write = { id: 'write', type: 'create_record', label: 'Write', config: { objectName: 'task' } };
 /**
  * A well-formed region whose single edge carries a BARE STRING condition.
  *
@@ -239,29 +242,37 @@ describe('#4347 — collectFlowGraphs', () => {
     })).map(g => g.scope)).toEqual(['', "try_catch 'tc' try", "try_catch 'tc' catch"]);
   });
 
+  // The nested `try_catch` carries its `try` (#20316: the try_catch executor
+  // contract requires it, and the flow parse now refuses one left out), so the
+  // chain runs through BOTH of its regions.
   it('chains the scope of a nested region so a finding says where it is', () => {
     const flow = flowWith(loopWith({
       nodes: [{
         id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-        config: { catch: gatedRegion() },
+        config: { try: gatedRegion('_t'), catch: gatedRegion() },
       }],
       edges: [],
     }));
-    expect(collectFlowGraphs(flow).map(g => g.scope))
-      .toEqual(['', "loop 'loop' body", "loop 'loop' body → try_catch 'tc' catch"]);
+    expect(collectFlowGraphs(flow).map(g => g.scope)).toEqual([
+      '',
+      "loop 'loop' body",
+      "loop 'loop' body → try_catch 'tc' try",
+      "loop 'loop' body → try_catch 'tc' catch",
+    ]);
   });
 
   it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it (#16134)', () => {
     const flow = flowWith(loopWith({
       nodes: [{
         id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-        config: { catch: gatedRegion() },
+        config: { try: gatedRegion('_t'), catch: gatedRegion() },
       }],
       edges: [],
     }));
     expect(collectFlowGraphs(flow).map(g => g.path)).toEqual([
       [],
       ['nodes', 1, 'config', 'body'],
+      ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'try'],
       ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'catch'],
     ]);
     expect(collectFlowGraphs(flowWith({

@@ -141,7 +141,7 @@ export const en: PlatformTranslationData = {
         },
         audience: {
           title: 'Audience',
-          description: 'Who may become a user of this environment\'s apps. Postures other than invitation-only force email verification on. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+          description: 'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
         },
         password_policy: {
           title: 'Password policy',
@@ -171,7 +171,7 @@ export const en: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'Self-registration audience',
-          help: 'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Any posture other than invite_only forces email verification on and requires the self-registration permission set below.',
+          help: 'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Both email_domain and open require the self-registration permission set below. email_domain always forces email verification on. open forces it on unless the deployment turns it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false saved in this console is refused under open.',
           options: {
             invite_only: 'Invitation only — no self-registration (default)',
             email_domain: 'Allowlisted email domains only',

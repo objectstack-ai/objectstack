@@ -87,6 +87,7 @@ import {
 } from '@objectstack/formula';
 import {
   collectFlowGraphs,
+  flowNodeConfigRefusals,
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
   resolveFlowNodeValueSlots,
@@ -1620,6 +1621,28 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // `loop.collection`). The ledger records them regardless, so the
         // reconciliation ratchet still sees the marker.
         const nodeType = typeof node.type === 'string' ? node.type : '';
+        // [#20316] What the node's executor needs its `config` to carry — a key
+        // its contract requires, left out, and a `decision` branch list it
+        // cannot read. The spec's one judge, the same call `FlowSchema.parse`
+        // makes (and `registerFlow` meets through that parse), so a stack
+        // handed to `validateStackExpressions` without a parse in front of it
+        // is held to the same bar. `error`: the flow would register and then
+        // refuse — or, for a branch with no label, misroute — every run.
+        const configRefusals = flowNodeConfigRefusals(nodeType, node.config)
+          // A `script`'s `function` stays the callable check's below (#1870,
+          // #4343): this pass may be handed a pre-conversion source, and that
+          // check reads what such a source spells — the `functionName` alias,
+          // the retired dispatch keys — and names each, where the judge would
+          // only see `function` absent.
+          .filter((configRefusal) => !(nodeType === 'script' && configRefusal.path === 'function'));
+        for (const configRefusal of configRefusals) {
+          issues.push({
+            where: `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`,
+            message: configRefusal.message,
+            source: configRefusal.source,
+            severity: 'error',
+          });
+        }
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
           // [#15137] `value` slots are checkable too, by their own rule — see

@@ -6,12 +6,15 @@
  * `script` and `subflow` run through `service-automation`'s `parseNodeConfig()`
  * before their executors do anything, so what this file pins is not decoration:
  * a shape accepted here runs, and a shape rejected here refuses the node as a
- * guard. `decision` is the exception — it stays export-only (nothing parses it
- * at run time), so its pins below bind the authoring doors only: `tsc`, the
- * published JSON Schema and a direct parse. Its `mode` key is declared ahead of
- * the engine change that reads it (#15429), and is refused beside a non-empty
- * `conditions` list (ruling 5856786357 on #20168) — a refinement, so of those
- * doors it binds the direct parse and is declared dropped in the JSON Schema.
+ * guard. `decision` is different — no execute-time parse; its strictness binds
+ * at the authoring doors only (`tsc`, the published JSON Schema and a direct
+ * parse), while its `mode` key is ALSO judged at registration (#15429): the
+ * automation engine's `registerFlow` parses every decision's config through
+ * this schema and refuses the flow on any issue rooted at `mode`, and
+ * `os validate` reports the same as `flow-decision-mode-invalid`. `mode` is
+ * refused beside a non-empty `conditions` list (ruling 5856786357 on #20168) —
+ * a refinement, so of the authoring doors it binds the direct parse and is
+ * declared dropped in the JSON Schema; the two run-time doors carry it too.
  *
  * The structural assertions at the bottom guard the downstream walkers that a
  * union-shaped contract would have broken, which is why #4343 converged the

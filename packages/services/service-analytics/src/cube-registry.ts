@@ -167,7 +167,8 @@ export class CubeRegistry {
       sql: objectName,
       measures,
       dimensions,
-      public: false,
+      // The schema default (visible) — a hidden cube is refused by every query door.
+      public: true,
     };
 
     this.register(cube);

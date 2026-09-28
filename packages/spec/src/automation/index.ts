@@ -69,5 +69,6 @@ export * from './schedule-organization.zod';
 export * from './state-machine.zod';
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';
+export * from './flow-node-config-refusals';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

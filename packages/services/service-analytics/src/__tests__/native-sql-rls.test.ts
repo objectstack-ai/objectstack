@@ -12,7 +12,7 @@ const cube: Cube = {
   sql: 'opportunity',
   measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
   dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' } },
-  public: false,
+  public: true,
 };
 
 const query: AnalyticsQuery = {
@@ -124,7 +124,7 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
       region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' },
     },
     joins: { account: { name: 'account' } },
-    public: false,
+    public: true,
   };
 
   it('qualifies a base-table dimension with the base table when the cube has joins', async () => {
@@ -146,7 +146,7 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
       name: 'tasks', title: 'Tasks', sql: 'task',
       measures: { c: { name: 'c', label: 'Count', type: 'count', sql: '*' } },
       dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
-      public: false,
+      public: true,
     };
     const strategy = new NativeSQLStrategy();
     const ctx = ctxWith({ getCube: (n) => (n === 'tasks' ? soloCube : undefined) });
@@ -171,7 +171,7 @@ describe('NativeSQLStrategy — multi-hop joins (ADR-0071)', () => {
       account: { name: 'crm_account' },
       'account__owner': { name: 'core_user' },
     },
-    public: false,
+    public: true,
   };
   const mhQuery: AnalyticsQuery = {
     cube: 'sales',

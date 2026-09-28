@@ -141,7 +141,12 @@ describe('subflow node executor', () => {
   });
 
   it('fails with a clear error when flowName is missing', async () => {
-    engine.registerFlow('parent_flow', parentFlow({ input: {} }));
+    // #20316 — `flowName` is the key the subflow contract requires, so the
+    // node is refused at registration now…
+    expect(() => engine.registerFlow('parent_flow', parentFlow({ input: {} }))).toThrow(/leaves out `flowName`/);
+    // …and the executor still refuses one that reaches it past the doors.
+    const stored = engine.registerFlow('parent_flow', parentFlow({ input: {}, flowName: 'child_flow' }));
+    delete (stored.nodes.find((n) => n.type === 'subflow')!.config as Record<string, unknown>).flowName;
     const result = await engine.execute('parent_flow');
     expect(result.success).toBe(false);
     // #4343 — the hand-written guard became the contract parse; same guard

@@ -429,7 +429,7 @@ describe('[#10413] what the dataset filter must and must not do', () => {
         return runAggregate(ALL_ROWS, options);
       },
       cubes: [{
-        name: 'crm_opportunity', title: 'Opportunities', sql: 'crm_opportunity', public: false,
+        name: 'crm_opportunity', title: 'Opportunities', sql: 'crm_opportunity', public: true,
         measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
         dimensions: {},
       }],
