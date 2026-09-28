@@ -216,8 +216,15 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // produces the numbers rather than by a parser reading them back. No
   // `readsDist`: the gate walks `src/` Zod schemas through tsx, so a merge that
   // moved sources is all it needs to be re-run against.
+  //
+  // #20361 SHARDED it — one `<type>.md` per governed type, no committed total —
+  // for the reason the three directory rows above were sharded (#5837): this
+  // driver runs only in a local merge, and the single file's shared total row
+  // made any two in-flight liveness PRs conflict in GitHub's server-side one.
+  // Different types now touch disjoint files; a same-type pair still meets on
+  // that type's one row, and that residue is what this row still routes.
   {
-    path: 'packages/spec/liveness/state-counts.md',
+    path: 'packages/spec/liveness/state-counts/**',
     gen: 'gen:liveness-counts',
     check: 'check:liveness',
   },

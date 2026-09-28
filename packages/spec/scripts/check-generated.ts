@@ -156,10 +156,15 @@ const GATED: ReadonlyArray<{
   //
   // Last among the non-`ratchet` entries on the cheapest-first rule: it eagerly
   // loads every Zod schema and walks all 30 governed types.
+  //
+  // A DIRECTORY since #20361: one shard per governed type and no committed
+  // total, so two PRs moving different types never touch the same file — the
+  // single file's shared total row made every in-flight liveness PR conflict
+  // with the next one to land, in the server-side merge no driver reaches.
   {
     check: 'check:liveness',
     gen: 'gen:liveness-counts',
-    artifact: 'liveness/state-counts.md',
+    artifact: 'liveness/state-counts/',
   },
   // GATED by the definition above — it compares a checked-in artifact
   // (test-typecheck-debt.json) against what `tsc -p tsconfig.test.json` measures
