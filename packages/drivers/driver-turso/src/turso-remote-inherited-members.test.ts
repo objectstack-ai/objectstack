@@ -361,7 +361,10 @@ describe('reclaimSpace(): the local statement, run to completion on the remote d
     const { client, calls } = scriptedClient(7, new Error('SQLITE_AUTH: not authorized'));
     const err = await refusalOf(async () => (await remoteOver(client)).reclaimSpace());
     expect([err.code, err.status]).toEqual(['DATABASE_ERROR', 500]);
-    expect(calls.at(-1)).toEqual(['executeMultiple', 'PRAGMA incremental_vacuum']);
+    expect(calls).toEqual([
+      ['execute', 'PRAGMA freelist_count'],
+      ['executeMultiple', 'PRAGMA incremental_vacuum'],
+    ]);
   });
 });
 
