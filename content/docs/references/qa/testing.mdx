@@ -116,7 +116,7 @@ A complete test scenario with setup, execution steps, and teardown
 | **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
 | **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
 | **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
-| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario. NOT CHECKED by `os test` or the core TestRunner: the scenario runs whether or not they hold, and an unmet requirement surfaces only as the failure it causes |
+| **requires** | `{ params?: string[]; services?: Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| …>[] }` | optional | Preconditions judged before the scenario's first step (setup included). Every entry must hold, or the scenario is SKIPPED with a reason naming each unmet entry — counted separately by `os test` and never counted as passed |
 
 ### Nested Shape: `TestScenario.setup[number]`
 
@@ -158,8 +158,9 @@ A single step in a test scenario, consisting of an action and optional assertion
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **params** | `string[]` | optional | Environment variables or parameters the scenario needs. Declared only: nothing checks them before the scenario runs |
-| **plugins** | `string[]` | optional | Plugins the scenario needs loaded on the target. Declared only: nothing checks them before the scenario runs |
+| **params** | `string[]` | optional | Environment variables that must be set to a non-empty value in the process running `os test` — the runner's own environment, not the target server's. An unset or empty variable skips the scenario (SKIPPED, never passed) with a reason naming the variable |
+| **services** | `Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| …>[]` | optional | Services the target must declare in its discovery document as `enabled` with status `available` (ADR-0076 D12), read from the discovery document `os test` already fetches once per run. An entry the target does not declare that way skips the scenario (SKIPPED, never passed) with a reason naming the service and the services the target does declare available |
+| **plugins** | `never` | optional | [REMOVED] `scenarios[].requires.plugins` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever checked it: `os test` reaches its target over HTTP and no served surface lists the loaded plugins, so a scenario naming a missing plugin ran anyway. Delete the key and name the service the scenario needs in `requires.services`, which is judged against the services the target's discovery document declares enabled and available — an unmet entry skips the scenario and says why. Plugin → service: @objectstack/service-analytics → analytics, @objectstack/plugin-auth → auth, @objectstack/service-automation → automation, @objectstack/service-cache → cache, @objectstack/service-queue → queue, @objectstack/service-job → job, @objectstack/service-realtime → realtime, @objectstack/service-storage → storage, @objectstack/service-i18n → i18n, @objectstack/service-messaging → notification, @objectstack/metadata-protocol → ui. A plugin not listed fills no discovery service slot, so there is no service to require for it. |
 
 
 ---
@@ -224,7 +225,7 @@ A complete test scenario with setup, execution steps, and teardown
 | **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
 | **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
 | **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
-| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario. NOT CHECKED by `os test` or the core TestRunner: the scenario runs whether or not they hold, and an unmet requirement surfaces only as the failure it causes |
+| **requires** | `{ params?: string[]; services?: Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| …>[] }` | optional | Preconditions judged before the scenario's first step (setup included). Every entry must hold, or the scenario is SKIPPED with a reason naming each unmet entry — counted separately by `os test` and never counted as passed |
 
 
 ---
