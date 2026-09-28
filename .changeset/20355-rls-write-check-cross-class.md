@@ -3,18 +3,21 @@
 '@objectstack/formula': minor
 '@objectstack/driver-sql': patch
 '@objectstack/lint': patch
+'@objectstack/spec': patch
 ---
 
 fix(security)!: the RLS write check refuses a field-to-field comparison the read refuses — one comparison class, one answer per policy (#20355)
 
 Clause-②: yes (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) no key, value or stored shape changes; the write check now refuses at request time what the read already refused, and no shipped policy compares fields of two classes -->
+<!-- adr-0087: registered rls-predicate-cross-class-field-comparison-refused -->
 
 **BREAKING** — an accept-set narrowing on the row-level write check, shipped as `minor`
 under the launch-window convention (`check-changeset-no-major` refuses `major` until GA;
 breaking-ness is carried by this banner and the ADR-0087 disposition above, not by the
-level).
+level). The hand-migration prescription is registered under protocol major 18 as
+`rls-predicate-cross-class-field-comparison-refused`, one ADR-0087 D3 entry for the whole
+family: the authoring arm `os validate` gained in #20347 and this write-check arm.
 
 **What changed.** A row-level policy that compares two fields of no shared comparison
 class — `record.status != record.amount` (text and a number), `record.status !=

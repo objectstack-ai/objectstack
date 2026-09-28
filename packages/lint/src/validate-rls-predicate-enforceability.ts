@@ -239,11 +239,10 @@
  * comparison class, and refuses the file family and formula fields outright)
  * and a by-id update or delete it scopes `PERMISSION_DENIED` / 403; and an
  * insert their `check` judges — or their `using`, standing in as the check —
- * was ADMITTED and stored. The in-process write check has no class rule and
- * compares the two raw values, so the write answer is whatever that comparison
- * happens to give (`record.amount > record.status` was refused 403, because
- * `5 > 'open'` is false in JS): the permissive answer sits on the write side of
- * an access policy. One policy, three answers.
+ * was ADMITTED and stored. The in-process write check had no class rule then
+ * and compared the two raw values; since #20355 it refuses the comparison by
+ * the same classification (`INVALID_FILTER` / 400), so every insert or update
+ * it judges is refused and nothing is stored. One policy, three answers.
  *
  * This arm refuses the comparison where it is written, by the same rule the
  * read applies: {@link crossFieldComparisonVerdict} (`@objectstack/spec/data`),

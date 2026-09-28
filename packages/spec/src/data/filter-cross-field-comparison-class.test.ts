@@ -5,9 +5,10 @@
  * the class table and the two verdicts. What this file keeps honest is that
  * every `FieldType` member is classified exactly once, by reference to the
  * existing value-class sets, and that the pairwise verdict is the rule the
- * module header states. That driver-sql answers the same on every pair is
- * pinned in driver-sql (`sql-driver-20347-cross-field-class-parity.test.ts`),
- * which is the only place both can be run.
+ * module header states. driver-sql answers the same on every pair because it
+ * delegates to `crossFieldColumnVerdict`; the driver-internal aliases it keeps
+ * above this table are pinned in driver-sql
+ * (`sql-driver-20355-cross-field-class-driver-aliases.test.ts`).
  */
 
 import { describe, it, expect } from 'vitest';
