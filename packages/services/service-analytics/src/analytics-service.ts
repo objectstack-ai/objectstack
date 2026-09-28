@@ -697,6 +697,15 @@ export interface AnalyticsServiceConfig {
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
    * - Date bucketing: a date vs datetime dimension drills by the right bound.
+   *
+   * [#20445] `type` and `multiple` are also the field's DECLARED value shape,
+   * which the SQL compilers read through `declaredValueShape` to answer the
+   * `$empty` operator: what counts as empty is the field's row of the ruled
+   * per-type table (`expandEmptyOperator`, `@objectstack/spec/data`), and a
+   * multi-capable type (`select`, `lookup`, `user`, …) is list-valued only
+   * with `multiple: true`. Answer `multiple` as the field declares it; a host
+   * that leaves it out has every multi-capable field read as single-valued.
+   *
    * ⚠️ [#17560] `returnType` was a FOURTH member here (#16236), carried for one
    * reader: `measureResultType` translated a `formula` field's declared result
    * type into the measure column's wire word. The director ruling of decision
@@ -710,7 +719,10 @@ export interface AnalyticsServiceConfig {
    * Prime Directive #10 refuses. A host that still answers it is simply
    * ignored; ⛔ nothing here reads it.
    */
-  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
+  sourceFieldMeta?: (
+    object: string,
+    field: string,
+  ) => { type?: string; multiple?: boolean; defaultCurrency?: string; max?: number } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -1028,6 +1040,15 @@ export class AnalyticsService implements IAnalyticsService {
       // at compile time. A host that wired no hook answers `undefined`, and
       // the compilers keep the behaviour they had.
       declaredFieldType: (object: string, field: string) => config.sourceFieldMeta?.(object, field)?.type,
+      // [#20445] …and the declared value shape off the same hook, for the
+      // `$empty` operator's per-type expansion. No type, no shape: a host that
+      // cannot name the type cannot name the row, and the compilers refuse the
+      // operator rather than guess one (`empty-operator-sql.ts`).
+      declaredValueShape: (object: string, field: string) => {
+        const meta = config.sourceFieldMeta?.(object, field);
+        if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
+        return { type: meta.type, multiple: meta.multiple === true };
+      },
       // [#15684] The dialect that will run the compiled statement, so the
       // case-EXACT text family picks a construct that IS case-exact there.
       // Same tiering as the hook above: `undefined` keeps today's `LIKE`.

@@ -14,6 +14,7 @@ import {
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
+import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
@@ -655,10 +656,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // (`{current_user_id}`, `{today}`) binds the value the ObjectQL face's
     // engine resolves for this caller, on this hop, rather than its literal
     // text; one it cannot resolve is refused in the read-scope envelope.
+    // [#20445] …and so does the declared value shape, so a policy's `$empty`
+    // is answered by the field's row of the ruled per-type table.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
       context: ctx.context,
+      declaredValueShape: declaredValueShapeResolver(ctx, objectName),
     });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through
@@ -1146,6 +1150,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // so only the value comparisons take the normalised reference.
     if (operator === 'set') return `${rawCol} IS NOT NULL`;
     if (operator === 'notSet') return `${rawCol} IS NULL`;
+    // [#20445] `$empty`'s leaf, answered by the field's DECLARED row of the
+    // ruled per-type table (null or `''`, null or `[]`, null only) — the host's
+    // declared value shape expanded by the spec, compiled per dialect. Reads
+    // the column as stored, like the null predicates: emptiness is a property
+    // of the stored value, not of its temporal normalisation. Refused, before
+    // anything binds, when the host cannot name the declaration.
+    if (operator === 'empty' || operator === 'notEmpty') {
+      return whereEmptyLeafSql({
+        ctx,
+        target,
+        column: rawCol,
+        empty: operator === 'empty',
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
+    }
 
     if (operator === 'in' || operator === 'notIn') {
       if (!values || values.length === 0) return null;

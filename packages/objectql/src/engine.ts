@@ -48,6 +48,7 @@ import {
   assertTemporalComparandsInterpretable,
 } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
+import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -1013,6 +1014,14 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // hence the door steps around `{placeholder}` strings rather than judging
     // them; the token resolver refuses the unknown ones a moment later, loudly.
     assertTemporalComparandsInterpretable(object, operation, schema, where);
+    // [#20351] The NUMBER-comparand declared-type door, fifth on the same seam
+    // and fifth question about the same predicate: is this string a number the
+    // declared numeric column can be compared with. It refuses a non-numeric
+    // string (`INVALID_FILTER` / 400) and narrows a numeric one to its number,
+    // copy-on-write, by `@objectstack/spec/data`'s grammar and verdict. Before
+    // the token resolver, like the temporal door: a `{placeholder}` resolves to
+    // an id or a date, never a number, so it is refused here unresolved.
+    const numeric = narrowNumberComparands(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -1022,7 +1031,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // its pinned wording for the list-operator shapes), type door second;
     // the walk is copy-on-write, so the common path allocates nothing and a
     // narrowed bigint replaces the bag rather than editing the caller's.
-    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    const normalized = normalizeFilterComparandTypes(numeric, `${operation}('${object}')`);
     if (normalized !== where) {
       return { ...(bag as Record<string, unknown>), where: normalized } as T;
     }
@@ -1096,7 +1105,9 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // a gate on one branch would answer one mistake two ways depending on the
   // spelling.
   assertTemporalComparandsInterpretable(object, operation, schema, condition);
-  lowered.where = condition;
+  // [#20351] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['amount','>','abc']]`) names numeric fields too.
+  lowered.where = narrowNumberComparands(object, operation, schema, condition);
   return lowered as T;
 }
 
@@ -1153,9 +1164,10 @@ function admissionRefusalOf(
  * 1. {@link lowerWhereFilterArray}: the shape gate, then (object form)
  *    `assertListComparandShapes` → `assertFilterIsMaterializable` (the dotted,
  *    then the virtual-field verdict) → `assertTextOperatorTargetsAreStringCapable`
- *    → `assertTemporalComparandsInterpretable` → `normalizeFilterComparandTypes`,
- *    or (array form) `isFilterAST` → `parseFilterAST` → the same three
- *    field-map doors on the lowered condition.
+ *    → `assertTemporalComparandsInterpretable` → `narrowNumberComparands`
+ *    (#20351) → `normalizeFilterComparandTypes`, or (array form) `isFilterAST`
+ *    → `parseFilterAST` → the same four field-map doors on the lowered
+ *    condition.
  * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
  *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
@@ -16341,6 +16353,15 @@ export class ObjectQL implements IObjectQLEngine {
               assertTemporalComparandsInterpretable(
                   object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
               );
+              // [#20351] …and the NUMBER-comparand door, fifth here as it is
+              // fifth on `where`'s seam: a non-numeric string against a declared
+              // numeric field counted no row (every row under `$ne`) where its
+              // `where` twin was a 500 on PostgreSQL, and a numeric string is
+              // narrowed to its number, copy-on-write, before the in-memory
+              // evaluator compares it. Rooted at this position.
+              const numeric = narrowNumberComparands(
+                  object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
+              );
               // [#20122] …and the two doors `having` took at its own entry
               // (#20099), so a refusal here is the FILTER's, never the data's:
               //  1. the comparand-TYPE door `where` takes in
@@ -16363,7 +16384,7 @@ export class ObjectQL implements IObjectQLEngine {
               //     refused. Refused in `where`'s words for that comparison, which
               //     withhold the fields, the operator and the reason; the
               //     withheld half goes to this log, as the driver writes its own.
-              const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
+              const typed = normalizeFilterComparandTypes(numeric, `aggregate('${object}')`, `aggregations[${i}].filter`);
               assertAggregationFilterIsEvaluable(typed, i, {
                   object,
                   fields: (this._registry.getObject(object) as { fields?: unknown } | undefined)?.fields,
@@ -16465,7 +16486,14 @@ export class ObjectQL implements IObjectQLEngine {
           // that refusal's words; on the caller's own clause, before the
           // bigint narrowing, which is what `where`'s object form judges.
           assertHavingTemporalComparandsInterpretable(object, query.having, havingColumnClasses, query);
-          if (having !== query.having) query = { ...query, having };
+          // [#20351] …then the NUMBER-comparand door `where` and the
+          // per-aggregation `filter` take, over the columns #20127 classes
+          // `numeric`: a non-numeric string kept no group (every group under
+          // `$ne`) on both `applyHaving` doors, and a numeric string is narrowed
+          // to its number. On the bigint-narrowed clause, so the two
+          // narrowings compose.
+          const numeric = narrowHavingNumberComparands(object, having, havingColumnClasses);
+          if (numeric !== query.having) query = { ...query, having: numeric };
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
