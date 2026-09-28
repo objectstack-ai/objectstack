@@ -9,7 +9,7 @@
 // `sql-driver-temporal-storage-form.test.ts`). This file pins the rule itself.
 
 import { describe, it, expect } from 'vitest';
-import { temporalStorageForm } from './temporal-storage-form.js';
+import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
 
 describe('temporalStorageForm — datetime: canonical UTC ISO text', () => {
   const cases: ReadonlyArray<readonly [string, unknown, unknown]> = [
@@ -98,9 +98,10 @@ describe('temporalStorageForm — date: an epoch-ms number is the UTC calendar d
 // same day `0999-06-15`. As text `999-…` sorts above every padded day
 // (`'9' > '0'`), so over REST the number for 0999-06-15 counted `$gt` 0 /
 // `$lt` 7 on driver-memory and SQLite where its ISO string counted 6 / 0. The
-// year is now four digits. A year below 0 or above 9999 has no `YYYY-MM-DD`
-// form: it keeps the spelling it had (no ordered form is invented), and the
-// temporal-comparand door refuses it as a comparand.
+// year is now four digits. [#20264] The padding covers 0001..0999: a year
+// outside 0001..9999 — year 0 included, which this block padded to `0000-…`
+// before that card's ruling — has no `YYYY-MM-DD` form: it keeps its unpadded
+// spelling (no ordered form is invented), and the doors refuse it.
 describe('temporalStorageForm — date: the year of a Date or number is four digits', () => {
   const at = (iso: string) => Date.parse(iso);
   const cases: ReadonlyArray<readonly [string, number]> = [
@@ -108,8 +109,6 @@ describe('temporalStorageForm — date: the year of a Date or number is four dig
     ['0099-03-04', at('0099-03-04T12:00:00.000Z')],
     ['0009-03-04', at('0009-03-04T00:00:00.000Z')],
     ['0001-01-01', at('0001-01-01T00:00:00.000Z')],
-    ['0000-06-15', at('0000-06-15T00:00:00.000Z')],
-    ['0000-01-01', at('0000-01-01T00:00:00.000Z')],
     ['1000-01-01', at('1000-01-01T00:00:00.000Z')], //   already four digits — unchanged
     ['9999-12-31', at('9999-12-31T23:59:59.999Z')], //   the last millisecond of year 9999
   ];
@@ -127,11 +126,22 @@ describe('temporalStorageForm — date: the year of a Date or number is four dig
     expect([...spelled].sort()).toEqual(chronological);
   });
 
-  it('a year outside 0..9999 keeps its spelling — no ordered form is invented', () => {
+  it('a year outside 0001..9999 keeps its spelling — no ordered form is invented', () => {
     expect(temporalStorageForm(253402300800000, 'date')).toBe('10000-01-01');
     expect(temporalStorageForm(new Date(253402300800000), 'date')).toBe('10000-01-01');
     expect(temporalStorageForm(-62198755200000, 'date')).toBe('-1-01-01');
     expect(temporalStorageForm(at('-000001-12-31T23:59:59.999Z'), 'date')).toBe('-1-12-31');
+    // [#20264] Year 0 is outside too: unpadded, where #20240 padded it `0000-…`.
+    expect(temporalStorageForm(at('0000-06-15T00:00:00.000Z'), 'date')).toBe('0-06-15');
+    expect(temporalStorageForm(new Date(at('0000-01-01T00:00:00.000Z')), 'date')).toBe('0-01-01');
+  });
+
+  it('[#20264] the datetime rule stays total — it spells a year outside the range as toISOString does', () => {
+    // The doors refuse these; the write and read paths behind them are unchanged.
+    expect(temporalStorageForm(253402300800000, 'datetime')).toBe('+010000-01-01T00:00:00.000Z');
+    expect(temporalStorageForm('+010000-01-01T00:00:00.000Z', 'datetime')).toBe('+010000-01-01T00:00:00.000Z');
+    expect(temporalStorageForm(-62198755200000, 'datetime')).toBe('-000001-01-01T00:00:00.000Z');
+    expect(temporalStorageForm('0000-06-15', 'datetime')).toBe('0000-06-15T00:00:00.000Z');
   });
 });
 
@@ -176,5 +186,72 @@ describe('temporalStorageForm — total: what the rule cannot read comes back un
   it('a list is NOT mapped — a caller comparing a list maps its members', () => {
     const list = ['2026-02-01', '2026-02-02'];
     expect(temporalStorageForm(list, 'datetime')).toBe(list);
+  });
+});
+
+// [#20264] The supported years, 0001..9999, on `date` and `datetime`: the one
+// range the temporal-comparand door (a comparand) and the record validator (a
+// written value) both ask, so they cannot disagree about a year. The year is
+// the one the kind's rule reads — a `date` string's leading day, otherwise the
+// UTC year of the instant.
+describe('[#20264] isOutsideTemporalYearRange — the years a date or datetime value may name', () => {
+  const at = (iso: string) => Date.parse(iso);
+  const OUTSIDE: ReadonlyArray<readonly [string, unknown, 'date' | 'datetime' | 'both']> = [
+    ['year 10000, a number', at('+010000-01-01T00:00:00.000Z'), 'both'],
+    ['year 10000, a Date', new Date(at('+010000-01-01T00:00:00.000Z')), 'both'],
+    ['year 10000, the extended ISO string', '+010000-01-01T00:00:00.000Z', 'both'],
+    ['year -1, the extended ISO string', '-000001-01-01T00:00:00.000Z', 'both'],
+    ['year 0, a number', at('0000-06-15T00:00:00.000Z'), 'both'],
+    ['year 0, a bare day', '0000-06-15', 'both'],
+    ['year 0, an ISO instant', '0000-06-15T10:00:00.000Z', 'both'],
+    ['a number past the Date range', 8.64e15 + 1, 'both'],
+    ['year 10000 in UTC, 9999 in its zone', '9999-12-31T23:59:59-01:00', 'datetime'],
+    ['year 0 in UTC, 1 in its zone', '0001-01-01T00:00:00+08:00', 'datetime'],
+    ['epoch milliseconds for year 10000, as a string', '253402300800000', 'datetime'],
+  ];
+  const INSIDE: ReadonlyArray<readonly [string, unknown, 'date' | 'datetime' | 'both']> = [
+    ['the first instant of year 1', at('0001-01-01T00:00:00.000Z'), 'both'],
+    ['the last instant of year 9999', new Date(at('9999-12-31T23:59:59.999Z')), 'both'],
+    ['year 1, a bare day', '0001-01-01', 'both'],
+    ['year 9999, a bare day', '9999-12-31', 'both'],
+    ['year 0099', '0099-03-04T10:00:00.000Z', 'both'],
+    ['a 2026 instant (the control)', '2026-02-01T10:00:00.000Z', 'both'],
+    ['a 2026 number (the control)', 1769940000000, 'both'],
+    // A `date` takes a string's leading day, whatever instant the rest names.
+    ['year 9999 in its leading day, 10000 as an instant', '9999-12-31T23:59:59-01:00', 'date'],
+    ['year 1 in its leading day, 0 as an instant', '0001-01-01T00:00:00+08:00', 'date'],
+  ];
+  const kindsOf = (k: 'date' | 'datetime' | 'both') => (k === 'both' ? (['date', 'datetime'] as const) : [k]);
+
+  it('is true for a year outside 0001..9999, in every spelling the kind reads', () => {
+    for (const [name, value, kinds] of OUTSIDE) {
+      for (const kind of kindsOf(kinds)) expect(isOutsideTemporalYearRange(value, kind), `${kind}, ${name}`).toBe(true);
+    }
+  });
+
+  it('is false for a year inside it, the edges and a 2026 control included', () => {
+    for (const [name, value, kinds] of INSIDE) {
+      for (const kind of kindsOf(kinds)) expect(isOutsideTemporalYearRange(value, kind), `${kind}, ${name}`).toBe(false);
+    }
+  });
+
+  it('names no year for a time, or for a value that names no instant', () => {
+    for (const value of [at('+010000-01-01T00:00:00.000Z'), '0000-06-15T10:00:00.000Z']) {
+      expect(isOutsideTemporalYearRange(value, 'time')).toBe(false);
+    }
+    for (const kind of ['date', 'datetime'] as const) {
+      for (const value of [null, undefined, '', '   ', 'not-a-date', '{today}', Number.NaN, Number.POSITIVE_INFINITY, new Date(Number.NaN), true, {}]) {
+        expect(isOutsideTemporalYearRange(value, kind), `${kind} ${String(value)}`).toBe(false);
+      }
+    }
+  });
+
+  it('agrees with the date rule: a number or Date is outside exactly when the rule cannot spell it YYYY-MM-DD', () => {
+    for (const [, value] of [...OUTSIDE, ...INSIDE]) {
+      if (typeof value !== 'number' && !(value instanceof Date)) continue;
+      const spelled = temporalStorageForm(value, 'date');
+      const isDay = typeof spelled === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(spelled);
+      expect(isOutsideTemporalYearRange(value, 'date'), String(value)).toBe(!isDay);
+    }
   });
 });

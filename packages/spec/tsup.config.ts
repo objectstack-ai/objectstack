@@ -176,26 +176,59 @@ const swapServerOnlyGrammarArm: Plugin = {
  * dependency — so this pass meets the container's limit ALONE, with no
  * parallelism to cap.
  *
- * Measured on this package's DTS pass, inside a cgroup capped at 8192 MB
- * (peak anonymous RSS of the whole process tree):
+ * 6144 is the largest ceiling whose WORST case still fits: V8 cannot exceed
+ * it, and the pass's non-heap overhead measures ~250 MB, so the bound is
+ * ~6.4 GB inside an 8 GB container.
  *
- *     ceiling   result                        peak RSS   wall
- *     12288     ok, but only ~0.9 GB spare     7290 MB    132s
- *      6144     ok                             5794 MB    134s
- *      5120     ok                             5328 MB    148s
- *      4096     ERR_WORKER_OUT_OF_MEMORY          —       113s
+ * WHY THE PASS IS THIS HEAVY: ONE `ts.Program` PER ENTRY. tsup 8.5.1 runs the
+ * pass through its bundled rollup-plugin-dts 6.1.1, whose `createPrograms`
+ * groups entries by a directory key. tsup always passes the tsconfig path, and
+ * on that path every entry after the first is keyed by its OWN directory (the
+ * same code is in rollup-plugin-dts 6.5.1). So each entry above gets its own
+ * program, which parses, binds and emits its whole reachable graph again: the
+ * peak grows with entries × graph, not with the graph. ⇒ Every entry added to
+ * `entries` adds a program to this pass.
  *
- * 6144 is chosen as the largest ceiling whose WORST case still fits: V8 cannot
- * exceed it, and the pass's non-heap overhead measured ~250 MB, so the bound is
- * ~6.4 GB inside an 8 GB container. Every completing ceiling emitted a
- * byte-identical declaration tree (122 files, one sha256 over all of them), so
- * this number buys headroom and costs nothing but GC time.
+ * `noCheck`: rollup-plugin-dts forces `noEmitOnError`, which made every one of
+ * those programs also semantically CHECK each file it emitted — a type check
+ * the `typecheck` script (`tsc --noEmit` over this same tsconfig, run by the
+ * required `TypeScript Type Check` job) already performs once. `noCheck` drops
+ * only that duplicate. Syntactic, option, global and declaration diagnostics
+ * still fail the pass, so a declaration that cannot be emitted still stops the
+ * build; a plain type error in `src/` is `typecheck`'s to report, not this
+ * pass's.
+ *
+ * Measured on 8cdbe0c6e5's source, DTS pass alone at the 6144 ceiling, inside a
+ * cgroup capped at 8192 MB. Live heap is the largest heap V8 kept after a
+ * mark-compact (`--trace-gc`); peak RSS is the peak anonymous RSS of the whole
+ * process tree:
+ *
+ *     pass                              live heap   peak RSS   wall
+ *     duplicate check on (before)         5658 MB    6177 MB    181-194s
+ *     noCheck (this config)               5083 MB    5889 MB    134s
+ *     one program, grouping patched       1379 MB    3749 MB     53s
+ *     `tsc --noEmit`, whole package       1103 MB    1149 MB     18s
+ *
+ * The third row was measured with the grouping patched in a copy of tsup
+ * outside this tree. It shows what cutting the program count is worth.
+ *
+ * NOT BYTE-STABLE: this pass does not emit the same bytes twice. TypeScript
+ * prints union members, and the members of object types derived from them, in
+ * type-creation order, and that order follows emit order. Three runs of the
+ * same commit gave three different trees, and rollup's content-hashed chunk
+ * names moved with them. Once union and property-signature order are
+ * normalised, all three runs and the `noCheck` run are the same tree (128
+ * files, 30389539 bytes). ⇒ Compare two declaration trees in such an
+ * order-insensitive form, never by a byte digest.
  *
  * If this pass starts failing with `ERR_WORKER_OUT_OF_MEMORY`, the live type
  * graph has outgrown 6144 — that is a loud, actionable failure and the point of
  * the ceiling. ⛔ Do not "fix" it by raising the number past what the build
- * container has; that trades this error back for the silent exit 137. Shrink
- * the graph, or split the pass across entries.
+ * container has; that trades this error back for the silent exit 137. Cut the
+ * program count, shrink the graph, or split the pass across entries. Cutting
+ * the count moves statement order and one chunk name beyond the noise above. A
+ * split redraws the shared chunks. Either one changes what publishes, so it
+ * needs that reviewed first.
  */
 const isDts = process.env.BUILD_DTS === 'true';
 
@@ -204,7 +237,8 @@ const mainConfig: Options = {
   splitting: false,
   sourcemap: true,
   clean: !isDts, // Only clean on main build, not on DTS pass
-  dts: !isDts ? false : { only: true }, // Only generate DTS on explicit pass, without JS
+  // Only generate DTS on the explicit pass, without JS; `noCheck` per the docblock above.
+  dts: !isDts ? false : { only: true, compilerOptions: { noCheck: true } },
   format: ['esm', 'cjs'],
   target: 'es2020',
   treeshake: true,
