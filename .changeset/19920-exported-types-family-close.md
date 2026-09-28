@@ -4,7 +4,7 @@
 
 fix(spec): `ApiError.code` and a flattened list overlay's legacy `options` bag carry the shapes their doors accept (#19920)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 **BREAKING for TypeScript code that annotates with `ApiError`, with any response type built on `BaseResponseSchema` (`BaseResponse`, `BatchUpdateResponse`, `SessionResponse`, the metadata, package, storage, analytics and automation response types, and the rest), with `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` or `AssembledViewArtifactParsed`, or with the input type of a schema returned by `makeApiErrorSchema`**: a narrowing of published TYPES, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). The runtime accept set does not move at all: no schema's parse, no value and no export changes, and no export is added.
 
