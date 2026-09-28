@@ -17,27 +17,32 @@ export const entry: SemanticMigration = {
     + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
     + 'accepted and normalized on parse',
   reason:
-    'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
-    + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:number'].filter` "
+    'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
+    + 'align the element to the `ViewFilterRule` array rather than keep it the record-shaped '
+    + "exception). `ComponentPropsMap['element:number'].filter` "
     + 'was the one `filter` input in the map declared as the MongoDB-style record '
     + '(`FilterConditionSchema`) while its siblings declared the `ViewFilterRule` array, so '
     + 'the filter a list view stores and renders was refused by the KPI element beside it, '
     + 'and the objectui parity gate had to carry a reasoned exemption to look away. The '
     + 'convergence was sequenced consumer-first (ruling recorded 2026-08-25, Option A): '
-    + 'objectui#6828 made `ObjectStackAdapter.aggregate()` run the same `translateFilterArray` '
+    + 'the console adapter was changed so `ObjectStackAdapter.aggregate()` runs the same '
+    + '`translateFilterArray` '
     + 'its `find()` path runs, and the objectui pin carrying it was re-measured before this '
-    + 'entry moved — but that measurement named the wrong hop, and #15828 corrects it here. '
+    + 'entry moved — but that measurement named the wrong hop, and the runtime route\'s refusal '
+    + 'of the array corrects it here. '
     + '`translateFilterArray` yields AST tuples, which are still a `FilterArray` — input-only '
     + 'sugar — so the real path is: authored array → `translateFilterArray` → lowered by '
     + '`parseFilterAST` (`@objectstack/spec/data`, the single sink the `FilterArray` docblock '
-    + 'names, #5158 ruling C) in the adapter, BEFORE the wire → a `FilterCondition` on the '
+    + 'names, since the maintainer\'s 2026-08-04 ruling C declared the array input-only sugar '
+    + 'with one lowering seam) in the adapter, BEFORE the wire → a `FilterCondition` on the '
     + 'body. The hop that decides it is the runtime route `POST /analytics/query`, which '
     + 'parses `where` with `AnalyticsQueryRequestSchema` — a `FilterCondition` and nothing '
     + 'else — so an un-lowered array is refused there before any service code runs. '
     + '`lowerAnalyticsWhere` (`service-analytics`), where that earlier measurement stopped, '
-    + 'is the IN-PROCESS door (#5334) for callers reaching `analyticsService.query` '
+    + 'is the IN-PROCESS door (added when an array `where` was found silently dropped on the '
+    + 'analytics path) for callers reaching `analyticsService.query` '
     + "directly, not the wire's; it too still refuses a RAW rule-object array by design. "
-    + 'objectui#7752 lands the adapter-side lowering. '
+    + 'The adapter-side lowering lands in the console\'s own repository. '
     + 'The ruled migration check ran with the change: the '
     + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
     + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
@@ -53,5 +58,5 @@ export const entry: SemanticMigration = {
     + 'filter a list view renders. Downstream (objectui, after a released spec version reaches '
     + "the pin): the `element:number.filter:array` entry in `OFF_SPEC_ARM_EXEMPTIONS` "
     + '(`registry-inputs-spec-parity.test.ts`) becomes deletable, which is what closes '
-    + 'objectui#6206.',
+    + 'the console-side half of this convergence.',
 };

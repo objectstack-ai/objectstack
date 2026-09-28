@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import * as QA from '@objectstack/spec/qa';
 import { TestRunner } from './runner.js';
-import type { TestExecutionAdapter } from './adapter.js';
+import type { TargetServices, TestExecutionAdapter } from './adapter.js';
 
 /** An adapter that hands the runner one fixed result — the assertion is the unit under test. */
 class StubAdapter implements TestExecutionAdapter {
@@ -279,5 +279,169 @@ describe('TestRunner — results carry the suite and scenario names the author w
 
     expect(result.scenarioName).toBe('An account reads back');
     expect(result.suiteName).toBeUndefined();
+  });
+});
+
+// `TestScenario.requires` is ENFORCED (ADR-0049; the `qa-runner` family's fifth
+// key, ruled B). Before any step runs — setup included — `params` is judged
+// against the runner's environment and `services` against the target's
+// discovery `services`; an unmet entry makes the scenario SKIPPED with a reason,
+// its own verdict, never passed. These pin the runner half; `os test`'s printing
+// and exit posture are pinned in packages/cli/test/qa-requires-skip-run.test.ts.
+describe('TestRunner — `requires` is judged before the first step', () => {
+  const step: QA.TestStep = { name: 'step-1', action: { type: 'api_call', target: '/api/v1/health' } };
+
+  /** A discovery `services` map as both producers answer it (ADR-0076 D12). */
+  const SERVICES = {
+    data: { enabled: true, status: 'available', route: '/api/v1/data' },
+    auth: { enabled: true, status: 'available', route: '/api/v1/auth' },
+    ai: { enabled: false, status: 'unavailable', message: 'no implementation ships' },
+    metadata: { enabled: true, status: 'degraded', route: '/api/v1/meta' },
+  };
+
+  /** Records every action it runs, and answers `readTargetServices` from a canned reading. */
+  class TargetAdapter implements TestExecutionAdapter {
+    executed: string[] = [];
+    serviceReads = 0;
+    constructor(private reading: TargetServices | (() => TargetServices)) {}
+    async execute(action: QA.TestAction): Promise<unknown> {
+      this.executed.push(action.target);
+      return { ok: true };
+    }
+    async readTargetServices(): Promise<TargetServices> {
+      this.serviceReads += 1;
+      return typeof this.reading === 'function' ? this.reading() : this.reading;
+    }
+  }
+
+  const served = () => new TargetAdapter({ services: SERVICES, source: 'GET /api/v1/discovery advertised services' });
+
+  const scenario = (requires: QA.TestScenario['requires']): QA.TestScenario => ({
+    id: 'needs-things',
+    name: 'Needs things',
+    setup: [{ name: 'setup-1', action: { type: 'api_call', target: '/setup' } }],
+    steps: [step],
+    requires,
+  });
+
+  it('an unmet `services` entry skips — no step runs, setup included — and lists the declared services', async () => {
+    const adapter = served();
+    const result = await new TestRunner(adapter, { env: {} }).runScenario(scenario({ services: ['ai'] }));
+
+    expect(result.status).toBe('skipped');
+    expect(result.passed).toBe(false);
+    expect(result.steps).toEqual([]);
+    expect(adapter.executed).toEqual([]);
+    expect(result.skipped!.unmet).toEqual([
+      { key: 'services', name: 'ai', detail: expect.stringContaining('not available on the target') },
+    ]);
+    // `metadata` is declared but degraded, `ai` disabled: only the two that are
+    // enabled AND available are what the target "declares available".
+    expect(result.skipped!.availableServices).toEqual(['auth', 'data']);
+    expect(result.skipped!.reason).toContain("'ai'");
+    expect(result.skipped!.reason).toContain('auth, data');
+  });
+
+  it('a met `services` entry runs — CONTROL', async () => {
+    const adapter = served();
+    const result = await new TestRunner(adapter, { env: {} }).runScenario(scenario({ services: ['data', 'auth'] }));
+
+    expect(result.status).toBe('passed');
+    expect(result.passed).toBe(true);
+    expect(result.skipped).toBeUndefined();
+    expect(adapter.executed).toEqual(['/setup', '/api/v1/health']);
+  });
+
+  it('`enabled` alone is not enough: a degraded service is unmet, and so is one the target does not declare', async () => {
+    const result = await new TestRunner(served(), { env: {} }).runScenario(scenario({ services: ['metadata', 'search'] }));
+
+    expect(result.status).toBe('skipped');
+    expect(result.skipped!.unmet.map((u) => [u.name, u.detail])).toEqual([
+      ['metadata', expect.stringContaining('status: degraded')],
+      ['search', 'not declared by the target'],
+    ]);
+  });
+
+  it('an unmet `params` entry skips naming the variable; set and non-empty, it runs', async () => {
+    const needsToken = scenario({ params: ['OS_QA_TOKEN'] });
+
+    const unset = await new TestRunner(served(), { env: {} }).runScenario(needsToken);
+    expect(unset.status).toBe('skipped');
+    expect(unset.skipped!.unmet).toEqual([
+      { key: 'params', name: 'OS_QA_TOKEN', detail: expect.stringContaining('not set') },
+    ]);
+    expect(unset.skipped!.reason).toContain("requires.params 'OS_QA_TOKEN'");
+    // No service was required, so no service list is attached.
+    expect(unset.skipped!.availableServices).toBeUndefined();
+
+    // An unconfigured CI secret arrives as an empty string: unmet too.
+    const empty = await new TestRunner(served(), { env: { OS_QA_TOKEN: '' } }).runScenario(needsToken);
+    expect(empty.status).toBe('skipped');
+    expect(empty.skipped!.unmet[0]!.detail).toContain('empty');
+
+    const adapter = served();
+    const set = await new TestRunner(adapter, { env: { OS_QA_TOKEN: 'tok' } }).runScenario(needsToken);
+    expect(set.status).toBe('passed');
+    expect(adapter.executed).toEqual(['/setup', '/api/v1/health']);
+  });
+
+  it('every unmet entry is reported, params before services', async () => {
+    const result = await new TestRunner(served(), { env: {} }).runScenario(
+      scenario({ params: ['A', 'B'], services: ['data', 'ai'] }),
+    );
+    expect(result.skipped!.unmet.map((u) => `${u.key}:${u.name}`)).toEqual(['params:A', 'params:B', 'services:ai']);
+  });
+
+  it('asks the target only when a service is required', async () => {
+    const adapter = served();
+    await new TestRunner(adapter, { env: { X: '1' } }).runScenario(scenario({ params: ['X'] }));
+    await new TestRunner(adapter, { env: {} }).runScenario(scenario(undefined));
+    expect(adapter.serviceReads).toBe(0);
+  });
+
+  it('a target whose services cannot be read declares none: the requirement is unmet and says why', async () => {
+    const adapter = new TargetAdapter({ source: 'GET http://x/api/v1/discovery answered 404' });
+    const result = await new TestRunner(adapter, { env: {} }).runScenario(scenario({ services: ['data'] }));
+
+    expect(result.status).toBe('skipped');
+    expect(result.skipped!.unmet[0]!.detail).toContain('answered 404');
+    expect(result.skipped!.availableServices).toEqual([]);
+    expect(adapter.executed).toEqual([]);
+  });
+
+  it('an adapter that cannot report its target skips a service requirement rather than running it', async () => {
+    const result = await new TestRunner(new StubAdapter({ ok: true }), { env: {} }).runScenario(
+      scenario({ services: ['data'] }),
+    );
+    expect(result.status).toBe('skipped');
+    expect(result.skipped!.unmet[0]!.detail).toContain('does not report');
+  });
+
+  it('runSuite stamps the suite name on a skipped result too, and the verdicts stay distinct', async () => {
+    const results = await new TestRunner(served(), { env: {} }).runSuite({
+      name: 'Mixed',
+      scenarios: [
+        { id: 'runs', name: 'Runs', steps: [step] },
+        { id: 'skips', name: 'Skips', steps: [step], requires: { services: ['ai'] } },
+      ],
+    });
+    expect(results.map((r) => [r.suiteName, r.scenarioId, r.status, r.passed])).toEqual([
+      ['Mixed', 'runs', 'passed', true],
+      ['Mixed', 'skips', 'skipped', false],
+    ]);
+  });
+
+  it('a failed scenario says `failed` — skipped is not a kind of failure', async () => {
+    class ThrowingTarget extends TargetAdapter {
+      override async execute(): Promise<unknown> {
+        throw new Error('boom');
+      }
+    }
+    const result = await new TestRunner(
+      new ThrowingTarget({ services: SERVICES, source: 'x' }),
+      { env: {} },
+    ).runScenario({ id: 'f', name: 'F', steps: [step], requires: { services: ['data'] } });
+    expect(result.status).toBe('failed');
+    expect(result.skipped).toBeUndefined();
   });
 });

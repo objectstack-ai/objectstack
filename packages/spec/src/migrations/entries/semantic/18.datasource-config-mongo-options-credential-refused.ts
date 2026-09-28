@@ -12,16 +12,18 @@ export const entry: SemanticMigration = {
     'or a direct `external.credentialsRef` secrets-store reference, with the username kept in ' +
     'the URL (`mongodb://user@host/db`)',
   reason:
-    'The FOURTH spelling of the same inline secret: #7990 refused the top-level `password` ' +
-    'key, #8082 the URL userinfo, #8337 credential query parameters — and the `options` ' +
-    'passthrough stayed open one syntax over. `options: { auth: { username, password } }` ' +
+    'The FOURTH spelling of the same inline secret: earlier publish refusals closed the ' +
+    'top-level `password` key, the URL userinfo password and the credential-bearing URL query ' +
+    'parameters — and the `options` passthrough stayed open one syntax over. `options: { auth: { username, password } }` ' +
     'parsed green, persisted the password cleartext into `sys_metadata` (served back by the ' +
     'ordinary data API), and genuinely authenticated: mongodb@7.5.0 transforms the block ' +
     'into `MongoCredentials` (measured), so the workaround was live, not inert. A non-empty ' +
     'string `auth.password` is now refused at publish with the binder prescription; ' +
-    '`auth.username` alone stays writable (#8876\'s asymmetry — a username is not credential ' +
-    'material), as do all non-credential passthrough options. The bound secret wins over a ' +
-    'passthrough `auth` block at connect (#8696, measured), so the replacement changes which ' +
+    '`auth.username` alone stays writable (the asymmetry the URL grammar keeps between its ' +
+    'two userinfo halves — a username is not credential material), as do all non-credential ' +
+    'passthrough options. The bound secret wins over a passthrough `auth` block at connect ' +
+    '(measured when the bound secret was made to reach the mongo client on its URL branch), ' +
+    'so the replacement changes which ' +
     'store holds the secret, never which credential connects. There is no mechanical ' +
     'rewrite, for the same reason as the sibling entries ' +
     '`datasource-config-inline-credential-refused`, `datasource-config-url-userinfo-refused` ' +
