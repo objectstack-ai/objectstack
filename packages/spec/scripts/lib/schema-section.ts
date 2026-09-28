@@ -91,6 +91,39 @@ export function selectRootDef(schemaName: string, schema: any): any {
 }
 
 /**
+ * Whether a node renders as a `### Properties` table: an object that declares
+ * its properties. The ONE spelling of that condition — {@link renderSchemaSection}
+ * branches on it for the schema root and for each union arm, and
+ * {@link rendersPropertiesTable} asks it for the page title.
+ */
+export function declaresProperties(node: any): boolean {
+  return node?.type === 'object' && !!node.properties;
+}
+
+/**
+ * Whether {@link renderSchemaSection} gives this schema at least one
+ * `### Properties` table — at its root, or in an arm of its `### Union Options`.
+ *
+ * Read by the page title (`lib/page-title.ts`, #15403): a module page is titled
+ * a `property reference` only when one of its schemas really renders a property
+ * table. An enum-only module (`data/feed`: two string enums, `### Allowed Values`
+ * only) documents no property, and a title saying it does misdescribes the page.
+ *
+ * Same branch order as the renderer: an object root with properties renders its
+ * table; a string enum renders `### Allowed Values` and nothing else, even when
+ * it also carries a union; a union renders a table for each arm that declares
+ * properties; every other root renders one type line. `page-title.test.ts` holds
+ * this answer equal to what the renderer emits, shape by shape.
+ */
+export function rendersPropertiesTable(schemaName: string, schema: any): boolean {
+  const mainDef = selectRootDef(schemaName, schema);
+  if (declaresProperties(mainDef)) return true;
+  if (mainDef.type === 'string' && mainDef.enum) return false;
+  const variants = mainDef.anyOf || mainDef.oneOf;
+  return Array.isArray(variants) && variants.some(declaresProperties);
+}
+
+/**
  * Character budget for a default value spelled inside the Required cell.
  *
  * Over it the cell states that a default exists without printing it, and the
@@ -555,7 +588,7 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
       return t;
   };
 
-  if (mainDef.type === 'object' && mainDef.properties) {
+  if (declaresProperties(mainDef)) {
     md += renderProperties(mainDef.properties, new Set(mainDef.required || []));
 
   } else if (mainDef.type === 'string' && mainDef.enum) {
@@ -571,9 +604,7 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
      // branch below calls `renderProperties`, and only `renderProperties`
      // emits `### Nested Shape:` / `### Allowed Values:` headings. An `enum`,
      // `$ref` or scalar arm prints one line and can collide with nothing.
-     const emitsHeadings: boolean[] = variants.map(
-       (variant: any) => variant?.type === 'object' && !!variant.properties,
-     );
+     const emitsHeadings: boolean[] = variants.map(declaresProperties);
      const emitters = emitsHeadings.filter(Boolean).length;
      // Fewer than two and there is nothing to tell apart: a lone object arm's
      // headings are already unique on the page, so it keeps the exact bytes it
@@ -588,7 +619,7 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
          md += `#### ${variantTitle}\n\n`;
          if (variant.description) md += `${escapeMdxDescription(variant.description)}\n\n`;
 
-         if (variant.type === 'object' && variant.properties) {
+         if (declaresProperties(variant)) {
               if (variant.properties.type && variant.properties.type.const) {
                   md += `**Type:** \`${variant.properties.type.const}\`\n\n`;
               }

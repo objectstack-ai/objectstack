@@ -1119,7 +1119,14 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // six new row labels (the object form's `highlightFields`,
       // `searchableFields`, `access`, `access.default` and `requiredPermissions`,
       // and the permission form's `adminScope`), authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(614);
+      // 633 since #19332 flight G1b: nineteen new row labels — the field form's
+      // `accept`, `currencyConfig` (and its `currencyMode` / `defaultCurrency`),
+      // `dependsOn`, `lookupColumns`, `lookupFilters`, `relatedListColumns`,
+      // `storage` (and its `notNull`), `visibleWhen`, `readonlyWhen`,
+      // `requiredWhen` and `requiredPermissions`, and the action form's
+      // `patch`, `description`, `errorMessage`, `requiredPermissions` and
+      // `bodyExtra` — authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(633);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
