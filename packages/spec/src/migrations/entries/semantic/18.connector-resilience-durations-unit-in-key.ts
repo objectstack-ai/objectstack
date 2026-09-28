@@ -6,33 +6,42 @@ import type { SemanticMigration } from '../../types.js';
 // unit in its NAME) — the D3 entry of the
 // `connector-health-and-trigger-durations-unit-in-key` family (ruling B on
 // #17152: one D3 entry per retirement family, even when D2 is lossless). The
-// two keys share one authored document and one conversion, so they share one
-// entry. Both renamed keys are still unread (the liveness ledger records each
-// as dead, `liveness/connector.json`): the rename is an honesty fix to the
-// declaration, and the entry says so rather than implying a live engine.
+// family was two keys in one authored document and one conversion:
+// `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
+// `triggers[].interval` → `intervalSeconds`.
+//
+// ⚠️ Reconciled with the connector resilience retirement (ADR-0049, the same
+// unreleased protocol step): the whole `health` block was then removed, so the
+// breaker half of this rename was ABSORBED — the renamed key is itself retired,
+// and the conversion now carries only the trigger half. This entry says so,
+// rather than prescribing a rename to a key the parse refuses next; the
+// removal's own judgement is the D3 entry `connector-resilience-keys-retired`.
+// `triggers[].interval` is still unread (the liveness ledger records it dead,
+// `liveness/connector.json`): the rename is an honesty fix to the declaration,
+// and the entry says so rather than implying a live engine.
 export const entry: SemanticMigration = {
   id: 'connector-resilience-durations-unit-in-key',
-  surface: 'connector.health.circuitBreaker.monitoringWindow and connector.triggers[].interval — '
-    + 'the two connector durations whose name carried no unit',
-  replacement: '`monitoringWindowMs` (milliseconds) and `intervalSeconds` (seconds) — rename each '
-    + 'key; both values are unchanged.',
-  reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames both keys '
-    + 'in `connectors[]` and on stored connector rows, keeping each value, with a separate notice '
-    + 'per key so an operator sees which of its own keys moved; the rename is lossless because '
-    + 'each key always meant the unit its new name states. Two judgments remain. First, the units '
-    + 'were easy to get wrong in opposite directions: `monitoringWindow` (milliseconds) sat one '
-    + 'key below `resetTimeoutMs`, and the bare token `interval` means MILLISECONDS elsewhere in '
-    + 'this same spec while a trigger interval meant SECONDS — so a trigger written '
-    + '`interval: 60000` for one minute asked for once every sixteen hours or so, and the rename '
-    + 'keeps 60000. Second, neither key drives an engine today: no polling loop reads a trigger '
-    + 'interval, and no circuit breaker exists for connectors, so nothing reads the monitoring '
-    + 'window. An author who relied '
-    + 'on either for behaviour has not been getting it, before or after this rename.',
-  acceptanceCriteria: 'No connector carries `health.circuitBreaker.monitoringWindow` or '
-    + '`triggers[].interval`; the parse refuses both with the rename. Every `monitoringWindowMs` '
-    + 'value is the window the author intends in milliseconds and every `intervalSeconds` value '
-    + 'the cadence the author intends in seconds — a trigger meant to poll every minute reads '
-    + '`intervalSeconds: 60`. No part of the deployment\'s design depends on a connector polling '
-    + 'on that interval or tripping on that window: where it did, the author has moved that need '
-    + 'to a mechanism that runs.',
+  surface: 'connector.triggers[].interval — the connector duration whose name carried no unit '
+    + '(and, until the whole `health` block was retired, connector.health.circuitBreaker.monitoringWindow)',
+  replacement: '`intervalSeconds` (seconds) — rename the key; the value is unchanged. There is no '
+    + 'replacement for `monitoringWindow`: its renamed spelling `monitoringWindowMs` was retired with '
+    + 'the rest of `connector.health` — delete the block (see `connector-resilience-keys-retired`).',
+  reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames '
+    + '`triggers[].interval` in `connectors[]` and on stored connector rows, keeping the value; the '
+    + 'rename is lossless because the key always meant seconds. It used to rename the breaker\'s '
+    + '`monitoringWindow` too, but that half was absorbed by `connector-resilience-keys-removed`, '
+    + 'which strips the whole `health` block — so an author holding either `monitoringWindow` or '
+    + '`monitoringWindowMs` ends with no key at all, and must not re-add `monitoringWindowMs`: the '
+    + 'parse refuses the block. Two judgments remain for the trigger. First, the unit was easy to '
+    + 'get wrong: the bare token `interval` means MILLISECONDS elsewhere in this same spec while a '
+    + 'trigger interval meant SECONDS — so a trigger written `interval: 60000` for one minute asked '
+    + 'for once every sixteen hours or so, and the rename keeps 60000. Second, the key drives no '
+    + 'engine today: no polling loop reads a trigger interval, so an author who relied on it for '
+    + 'behaviour has not been getting it, before or after this rename.',
+  acceptanceCriteria: 'No connector carries `triggers[].interval`; the parse refuses it with the '
+    + 'rename, and every `intervalSeconds` value is the cadence the author intends in seconds — a '
+    + 'trigger meant to poll every minute reads `intervalSeconds: 60`. No connector carries '
+    + '`health` in any spelling (`monitoringWindow` or `monitoringWindowMs` included). No part of '
+    + 'the deployment\'s design depends on a connector polling on that interval or tripping on a '
+    + 'breaker window: where it did, the author has moved that need to a mechanism that runs.',
 };

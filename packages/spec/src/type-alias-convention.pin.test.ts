@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 784 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 781 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -930,19 +930,18 @@ export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< ty
 
 // integration/connector.zod.ts
 // [#4395] `ConnectorActionEffectSchema`, added after the generated corpus: a
-// bare `z.enum`, exactly like its `ConnectorType` / `ConnectorStatus` siblings
-// in this module — no default, no transform, so author and parsed states
-// coincide and D5 gives it no `XParsed`.
+// bare `z.enum`, exactly like its `ConnectorType` sibling in this module (and
+// `ConnectorStatus`, until ADR-0049 retired it with `connector.status`) — no
+// default, no transform, so author and parsed states coincide and D5 gives it
+// no `XParsed`. The connector-nested `WebhookEvent` / `WebhookSignatureAlgorithm`
+// pins left here with their schemas in the same retirement.
 export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
 export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
 export type Iso_integration_connector__ConnectorRetryStrategySchema = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso_integration_connector__ConnectorStatusSchema = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
 export type Iso_integration_connector__ConnectorTriggerSchema = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
 export type Iso_integration_connector__ConnectorTypeSchema = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
 export type Iso_integration_connector__SyncStrategySchema = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
-export type Iso_integration_connector__WebhookEventSchema = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
-export type Iso_integration_connector__WebhookSignatureAlgorithmSchema = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
 
 // kernel/cli-extension.zod.ts
 // Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
@@ -1668,7 +1667,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 784 isomorphic pins', () => {
+  it('still declares all 781 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2325,7 +2324,21 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso_ui_view__ViewItemWireSchema leave, and `JoinedReportBlockParsed`,
     // `ViewItemParsed` and `ViewItemWireParsed` are declared. -3 removed.
     //
-    // 783 -> 784 is #20371's `ElementDefinitionListPropsSchema` — the
+    // 783 -> 780 is the ADR-0049 retirement of the connector resilience family
+    // (`connector.health`, `connector.status` and the connector-nested
+    // `webhooks`): `ConnectorStatusSchema`, `WebhookEventSchema` and
+    // `WebhookSignatureAlgorithmSchema` left whole with their carrier keys
+    // (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so their three M78 pins
+    // leave with the schemas. The other four defs of that retirement
+    // (`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`,
+    // `WebhookConfig`) each carried an `XParsed` alias and were never on this
+    // list. The M78 slot stays occupied by the module's surviving pins.
+    // The two movements were authored in parallel off the same 786 and
+    // touch disjoint pins (M164's one and M167's two, M78's three); #19920
+    // landed first, so this entry's arrow starts from its 783. The count
+    // below was re-derived from the merged file, not added up. -3 removed.
+    //
+    // 780 -> 781 is #20371's `ElementDefinitionListPropsSchema` — the
     // `element:definition-list` row of `ComponentPropsMap` (ui/component.zod.ts,
     // module slot M170), the (RISE) case once. Isomorphism MEASURED, not
     // assumed: a strict item of one `z.string()` and one `z.unknown()`, a
@@ -2336,9 +2349,11 @@ describe('ADR-0122 type-alias convention', () => {
     // `disabled`), whose bare-string arm transforms to the canonical envelope,
     // and `element:repeater` carries `ViewFilterRuleSchema` on `filter` — so
     // each declares an `XParsed` alias instead. +1 added.
-    // Authored off 786 and re-derived on the merge with #19920's 786 -> 783,
-    // so this entry's arrow starts from its 783.
-    expect(pins).toHaveLength(784);
+    // Authored off 786 and re-derived on two merges — #19920's 786 -> 783,
+    // then the connector resilience retirement's 783 -> 780 — so this entry's
+    // arrow starts from 780. The count below was re-derived from the merged
+    // file, not added up.
+    expect(pins).toHaveLength(781);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
@@ -2392,7 +2407,11 @@ describe('ADR-0122 type-alias convention', () => {
       type: 'saas',
     });
     expect(parsedConnector.enabled).toBe(true);
-    expect(parsedConnector.status).toBe('inactive');
+    // This line read `expect(parsedConnector.status).toBe('inactive')` until
+    // ADR-0049 retired `connector.status`: the key is a tombstone now and a
+    // parse no longer emits its default. `enabled` above is the surviving
+    // defaulted key this case needs — one default supplied by the parse.
+    expect(parsedConnector).not.toHaveProperty('status');
 
     // And the flip's whole point, stated at runtime: the three keys above are
     // everything an author has to write, and the bare name is the type that
