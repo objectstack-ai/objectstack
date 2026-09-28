@@ -553,15 +553,32 @@ async function collectGrantProvenance(
  * ({@link collectGrantProvenance}), and `hasPlatformAdminGrant`, which is now
  * READ OFF the resolver's own posture verdict instead of being recomputed from
  * the grant rows.
+ *
+ * [#20515] `tenantId` is the organization the user is resolved IN, handed to
+ * the resolver exactly as enforcement hands it — the resolver applies an
+ * organization-scoped grant only while its organization is the active tenant,
+ * and with no tenant only the global grants. There is no "every organization"
+ * reading: the explainer used to get one by passing no tenant, which is the
+ * very resolution that kept a removed member's grants. Each caller passes the
+ * organization it is explaining in — the live principal's for a delegator
+ * ({@link resolveDelegatorContext}), the caller's own for the explain API.
+ * Omitted, the context is the user with NO active organization. The returned
+ * context still carries no `tenantId` of its own; a caller that needs one sets
+ * it, as {@link resolveDelegatorContext} does.
  */
-export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
+export async function buildContextForUser(
+  ql: any,
+  userId: string,
+  nowMs: number = Date.now(),
+  tenantId?: string,
+): Promise<any> {
   // [#11971] ⭐ Ruled bypass of the #11633 leg-B grants cache (maintainer
   // acceptance 2026-08-25): the explainer is the tool an administrator uses to
   // VERIFY that a revocation took effect. An explainer answering from cache
   // would explain a state that no longer exists — and would do it at exactly
   // the moment someone is checking. `explain` therefore takes the force-fresh
   // path unconditionally, whatever `OS_AUTHZ_GRANTS_CACHE_TTL_MS` says.
-  const grants = await resolveUserAuthzGrants(ql, userId, { nowMs, bypassGrantsCache: true });
+  const grants = await resolveUserAuthzGrants(ql, userId, { tenantId, nowMs, bypassGrantsCache: true });
   const { droppedGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
   return {
     userId,
@@ -614,9 +631,12 @@ export type DelegatorResolution =
  *    in the same org, so `tenantId` / `org_user_ids` carry over — delegator-side
  *    RLS that substitutes them then compiles faithfully instead of collapsing to
  *    the deny sentinel. Since #6352, `buildContextForUser` returns the resolver's
- *    own `org_user_ids`, which without a known `tenantId` is the degenerate
- *    `[delegatorId]` seed — the live principal's real org peer set is the better
- *    answer, so the assignment below overwrites it exactly as before.
+ *    own `org_user_ids`; the live principal's org peer set is the answer the
+ *    delegated request runs under, so the assignment below overwrites it
+ *    exactly as before. The delegator's GRANTS are the one tenant-scoped thing
+ *    resolved rather than copied: since #20515 they are resolved IN the live
+ *    principal's organization, so a delegator grant scoped to that organization
+ *    applies and one scoped to any other does not.
  *    `accessible_org_ids` (ADR-0105 D2) is the exception: it is resolved from
  *    the DELEGATOR's own memberships by `buildContextForUser`, never inherited,
  *    because inheriting it would widen a delegated read past the organizations
@@ -654,7 +674,16 @@ export async function resolveDelegatorContext(
     user = null;
   }
   if (!user) return { kind: 'missing', userId: String(oboId) };
-  const dctx = await buildContextForUser(ql, oboId, nowMs);
+  // [#20515] The delegator's GRANTS are resolved in the live principal's
+  // organization — the organization the delegated request runs in, which this
+  // function already hands the delegator's context below. Resolved with no
+  // tenant, the delegator leg would hold only global grants (and before the
+  // resolver's no-tenant rule, every organization's), never the grants the
+  // delegator actually holds where the request runs.
+  const liveTenantId = typeof context?.tenantId === 'string' && context.tenantId !== ''
+    ? context.tenantId
+    : undefined;
+  const dctx = await buildContextForUser(ql, oboId, nowMs, liveTenantId);
   // Inherit tenant-scoped substitution bags from the live principal (same org).
   if (context?.tenantId != null) dctx.tenantId = context.tenantId;
   if (context?.org_user_ids != null) dctx.org_user_ids = context.org_user_ids;
