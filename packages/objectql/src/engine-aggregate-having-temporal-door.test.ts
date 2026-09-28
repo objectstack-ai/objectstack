@@ -247,9 +247,32 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     await expectHavingRefusal(() => ({ d: { $gt: Y10000 } }), [{ field: 'opened_at', dateGranularity: 'day', alias: 'd' }]);
   });
 
-  it('the remedy names the literal forms only, no placeholder', async () => {
-    for (const having of [{ last_placed: { $lt: 'x' } }, { first_opened: { $lt: 'x' } }]) {
-      expect(await expectHavingRefusal(() => having)).not.toContain('{30_days_ago}');
+  // [#20334] `having` resolves placeholders through `where`'s resolver, so its
+  // remedy is `where`'s: it names the relative-date placeholder that a caller
+  // holding a preset name (`last_30_days`) needs, on the two kinds that take one.
+  it('the remedy names the placeholder the resolver knows, in the where twin\'s words', async () => {
+    const CASES: ReadonlyArray<readonly [Record<string, unknown>, Record<string, unknown>, string]> = [
+      [{ last_placed: { $lt: 'last_30_days' } }, { placed_on: { $lt: 'last_30_days' } },
+        "`having` on 'last_placed' (max(placed_on), a date column) compares against \"last_30_days\" at "
+        + 'having.last_placed.$lt, which is not a date value this platform can interpret.'],
+      [{ first_opened: { $lt: 'last_30_days' } }, { opened_at: { $lt: 'last_30_days' } },
+        "`having` on 'first_opened' (min(opened_at), a datetime column) compares against \"last_30_days\" at "
+        + 'having.first_opened.$lt, which is not a datetime value this platform can interpret.'],
+    ];
+    const after = (message: string, marker: string): string => {
+      expect(message).toContain(marker);
+      return message.slice(message.indexOf(marker) + marker.length);
+    };
+    for (const [having, where, firstSentence] of CASES) {
+      // INVALID_FILTER / 400 on both paths, empty or populated, no read.
+      const message = await expectHavingRefusal(() => having);
+      expect(message.startsWith(`aggregate('${OBJECT}'): ${firstSentence} `)).toBe(true);
+      const remedy = after(message, 'The `having` was NOT applied. ');
+      expect(remedy).toContain('"{30_days_ago}"');
+      const twin = await whereTwinOf(where);
+      expect(twin.err?.code).toBe('INVALID_FILTER');
+      expect(twin.err?.status).toBe(400);
+      expect(remedy).toBe(after(twin.err!.message, 'The filter was NOT applied. '));
     }
   });
 });

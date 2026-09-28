@@ -391,21 +391,6 @@ export function assertTemporalComparandsInterpretable(
 }
 
 /**
- * [#20263] The remedy on a `having` column: the literal forms only, no
- * relative-date placeholder, written when `having` resolved none. [#20334]
- * `having` resolves placeholders through `where`'s resolver, so
- * `{30_days_ago}` is a correct spelling here too; these words were left as
- * they were, so no refusal's text moved with that change.
- */
-const HAVING_REMEDY: Record<TemporalComparandKind, string> = {
-  datetime:
-    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z"), a bare "YYYY-MM-DD" '
-    + '(read as midnight UTC), or epoch milliseconds.',
-  date: 'Write a "YYYY-MM-DD" calendar day.',
-  time: REMEDY.time,
-};
-
-/**
  * [#20263] Which aggregated column a `having` key names, in the words the
  * author wrote it: `max(placed_on)`, `the day bucket of opened_at`, `the
  * groupBy field placed_on`. For the message only — the column's CLASS comes
@@ -471,6 +456,6 @@ export function assertHavingTemporalComparandsInterpretable(
     `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
     + `which is not a ${hit.kind} value this platform can interpret. Compared with each group as `
     + 'written, it would keep no group or every group, a 200 indistinguishable from a real answer. '
-    + `The \`having\` was NOT applied. ${HAVING_REMEDY[hit.kind]}`,
+    + `The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
   );
 }
