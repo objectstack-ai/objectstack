@@ -50,7 +50,7 @@
  * would double-insert"). So the second call presents a `publishPackageDrafts`
  * that reports the published seed without a `seedApplied` field — the exact
  * population this fallback documents itself as existing for. It also records
- * the request it received, which is §0's positive control that the session's
+ * the request it received, which is §0's positive control that the caller's
  * organization really reached this request.
  *
  * ## Sections, and which are evidence vs. which are the bound
@@ -217,18 +217,24 @@ function makeEngine() {
     return engine;
 }
 
-/** An authenticated package admin — the route's anonymous-deny + capability floor. */
-const PKG_ADMIN = (): any => ({
+/**
+ * An authenticated package admin — the route's anonymous-deny + capability
+ * floor. `organizationId` lands where `dispatch()`'s identity step puts the
+ * caller's VETTED organization, the execution context's `tenantId`: the one
+ * source the route reads (#20477), never the session claim as stored.
+ */
+const PKG_ADMIN = (organizationId?: string): any => ({
     request: { headers: {} },
     environmentId: 'env_1',
     executionContext: {
         userId: 'u_pkg_admin',
         systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        ...(organizationId ? { tenantId: organizationId } : {}),
     },
 });
 
 interface DriveOptions {
-    /** Session's active organization; `undefined` drives the one-rung branch. */
+    /** The caller's vetted active organization; `undefined` drives the one-rung branch. */
     activeOrganizationId?: string;
     /** Injection: the read-back throws this instead of answering. */
     readBackError?: () => Error;
@@ -297,13 +303,6 @@ async function publishThenRead(opts: DriveOptions = {}) {
                 fields: { name: { type: 'text' }, status: { type: 'select' } },
             }),
         },
-        auth: {
-            api: {
-                getSession: async () => (opts.activeOrganizationId
-                    ? { session: { activeOrganizationId: opts.activeOrganizationId } }
-                    : { session: {} }),
-            },
-        },
     };
     const kernel: any = {
         getServiceAsync: async (name: string) => services[name] ?? null,
@@ -312,7 +311,7 @@ async function publishThenRead(opts: DriveOptions = {}) {
     };
 
     const result = await new HttpDispatcher(kernel).handlePackages(
-        `/${PKG}/publish-drafts`, 'POST', {}, {}, PKG_ADMIN(),
+        `/${PKG}/publish-drafts`, 'POST', {}, {}, PKG_ADMIN(opts.activeOrganizationId),
     );
     expect(result.response?.status).toBe(200);
     const body: any = (result.response as any)?.body;
@@ -388,7 +387,7 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         expect(served?.item?.records).toHaveLength(2);
     });
 
-    it('the session organization really reaches this request', async () => {
+    it('the caller\'s organization really reaches this request', async () => {
         const { publishRequest } = await publishThenRead({ activeOrganizationId: ORG });
 
         // `applyPublishedSeeds` receives the SAME binding this route handed
