@@ -7,6 +7,8 @@ An analytics cube's `public` now takes effect, and it defaults to visible: `Cube
 
 Clause-②: yes (narrowing)
 
+<!-- adr-0087: registered analytics-cube-public-default-visible-enforced -->
+
 **BREAKING**: this narrows what the analytics API answers. A query or SQL dry run against a cube declared `public: false` (`POST /api/v1/analytics/query`, `POST /api/v1/analytics/sql`) was answered before this change and is now refused with `404 CUBE_NOT_FOUND`, and `GET /api/v1/analytics/meta` no longer lists that cube. The same happens to every cube in an artifact built by `os compile` before this release, which carries a materialized `public: false` from the old default. The remedy: delete `public: false` from any cube that is meant to be queried (cubes are visible by default), and recompile pre-release artifacts. It ships as `minor` under the launch-window convention; the widening half is the default moving to visible.
 
 Until this change nothing read `public`. `GET /api/v1/analytics/meta` listed a `public: false` cube and every query door answered it, so the flag withheld nothing. Its declared default, `false`, could not simply be switched on: enforcing it as declared would have hidden every cube that omits the key. The default is now the Cube.dev default (visible), and an explicit `false` is enforced:
