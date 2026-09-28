@@ -154,7 +154,7 @@ export interface UninterpretableTemporalComparand {
    * whose UTC year falls outside 0..9999.
    */
   value: unknown;
-  /** The `where.…` (or `having.…`) key path the offending comparand sits at. */
+  /** The `where.…` (or `having.…`, `aggregations[i].filter.…`) key path the offending comparand sits at. */
   path: string;
 }
 
@@ -352,14 +352,19 @@ const DATE_YEAR_REMEDY =
  * reason its neighbour records: an injected read filter is the platform's own,
  * not a declaration the caller can fix, and refusing one would turn a policy
  * into a 400 nobody can act on.
+ *
+ * [#20334] `path` roots the refusal at the position the filter sits in:
+ * `where` by default, `aggregations[i].filter` for a per-aggregation filter,
+ * the root the list-shape and comparand-type doors already name there.
  */
 export function assertTemporalComparandsInterpretable(
   object: string,
   operation: string,
   schema: unknown,
   where: unknown,
+  path = 'where',
 ): void {
-  const hit = findUninterpretableTemporalComparand(schema, where);
+  const hit = findUninterpretableTemporalComparand(schema, where, path);
   if (!hit) return;
   // [#20240] A number or `Date` is judged on a `date` field for one reason
   // only — its day's year has no four-digit spelling — so it gets words that
