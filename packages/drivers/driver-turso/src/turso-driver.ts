@@ -1590,6 +1590,14 @@ export class TursoDriver extends SqlDriver {
         this.isNonTextColumn(object, field),
       );
 
+      // [#20444] The declaration `$empty` expands, handed down the same way:
+      // `registerRemoteFieldMetadata` → `registerExternalObject` fills the SAME
+      // `valueShapeFields` registry the local compiler reads, keyed by object
+      // name, so both transports answer `$empty` by one declared row.
+      this.remoteTransport.setDeclaredValueShapeResolver((object, field) =>
+        this.declaredValueShape(object, field),
+      );
+
       // [#7929] The server-side half of a REDACTED filter refusal. The remote
       // compiler withholds the operands of a cross-field comparison for the
       // same reason the inherited local one does — an RLS rule's columns are
@@ -2543,6 +2551,9 @@ export class TursoDriver extends SqlDriver {
         case '$regex':
         case '$null':
         case '$exists':
+        // [#20444] A presence flag like the two above — its boolean is not a
+        // value of the column, so the temporal coercion keeps its hands off.
+        case '$empty':
           out[op] = raw;
           break;
         default:

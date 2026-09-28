@@ -4,7 +4,8 @@
  * `os migrate meta` — the guidance it prints for the ADR-0087 semantic entries
  * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`, `driver-*`,
  * `kernel-*`, `system-*`, `datasource-*`, `filter-*`, `action-*`, `data-*`,
- * `element-*`) states each lesson in words and carries no tracker number.
+ * `element-*`, `field-*`, `export-*`, `api-*`, `dataset-*`, `hook-*`,
+ * `metadata-*`) states each lesson in words and carries no tracker number.
  *
  * ## What this pins
  *
@@ -76,6 +77,7 @@ const TRACKER_ID = /#\d{4,5}\b/;
 const COVERED_PREFIXES = [
   'engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-',
   'datasource-', 'filter-', 'action-', 'data-', 'element-',
+  'field-', 'export-', 'api-', 'dataset-', 'hook-', 'metadata-',
 ];
 
 /**
@@ -89,12 +91,19 @@ const REWRITTEN = [
   'action-descriptor-resume-authority-default-flip',
   'action-engine-facade-find-query-envelope',
   'action-session-roles-to-positions',
+  'api-assembled-entry-split',
+  'api-error-retry-after-unit-in-key',
+  'api-runtime-config-durations-unit-in-key',
+  'api-runtime-create-withdrawn',
   'data-driver-find-stream-retired',
   'data-driver-query-omit-object',
   'data-engine-batch-retired',
   'data-field-changed-event-retired',
   'data-file-value-duration-unit-in-key',
   'data-nosql-query-options-timeout-unit-in-key',
+  'dataset-filter-nested-relation-equality-array-refused-at-save',
+  'dataset-measure-aggregate-field-type-refused',
+  'dataset-measure-selecting-aggregate-field-type-refused',
   'datasource-config-inline-credential-refused',
   'datasource-config-mongo-options-credential-refused',
   'datasource-config-placeholder-refused',
@@ -118,6 +127,16 @@ const REWRITTEN = [
   'engine-find-formula-filter-refused',
   'engine-find-formula-order-by-refused',
   'engine-update-upsert-retired',
+  'export-axis-opt-in',
+  'export-field-meta-constraints-retired',
+  'export-job-family-retired',
+  'field-currency-scale-refused',
+  'field-max-length-malformed-or-misplaced-refused',
+  'field-min-length-malformed-or-misplaced-refused',
+  'field-multiple-non-capable-type-refused',
+  'field-predicate-reference-traversal-refused',
+  'field-runtime-create-withdrawn',
+  'field-scale-precision-integer-refused',
   'filter-between-blank-endpoint-refused',
   'filter-between-field-reference-endpoint-refused',
   'filter-comparand-types-and-widget-nested-slots-refused-at-save',
@@ -129,6 +148,9 @@ const REWRITTEN = [
   'filter-query-face-comparands-refused-at-save',
   'filter-regex-options-retired',
   'filter-text-operator-declared-type-refused',
+  'hook-context-session-roles-retired',
+  'hook-register-empty-object-target-refused',
+  'hook-register-undispatched-lifecycle-event-refused',
   'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
   'kernel-context-preview-mode-retired',
   'kernel-event-bus-retention-unit-in-key',
@@ -138,6 +160,11 @@ const REWRITTEN = [
   'kernel-plugin-security-durations-unit-in-key',
   'kernel-runtime-config-timeout-unit-in-key',
   'kernel-startup-orchestrator-durations-unit-in-key',
+  'metadata-customization-protocol-retired',
+  'metadata-endpoints-switch-radius-repartitioned',
+  'metadata-manager-config-cache-ttl-unit-in-key',
+  'metadata-manager-config-inert-cache-keys-retired',
+  'metadata-plugin-additional-types-retired',
   'plugin-activation-events-retired',
   'plugin-auto-restart-never-reinitialised',
   'plugin-manifest-contributes-dead-members-retired',

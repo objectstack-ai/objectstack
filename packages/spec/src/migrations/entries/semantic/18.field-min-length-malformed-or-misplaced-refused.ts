@@ -11,7 +11,7 @@ export const entry: SemanticMigration = {
   replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
     + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
     + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
-    + '`signature`/`qrcode` joined in #11875) '
+    + '`signature`/`qrcode` joined once the write seam enforced a declared bound on them) '
     + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
     + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
     + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '
@@ -22,8 +22,10 @@ export const entry: SemanticMigration = {
     + '"at least 3"), so only the author knows the integer they MEANT — re-declare it '
     + 'deliberately if the constraint was wanted',
   reason:
-    '#11949 (maintainer ruling 2026-08-25): `minLength` carried the exact defect pair #11566 '
-    + 'closed for `maxLength`, and converges on the same template. Shape: the key was '
+    'Maintainer ruling of 2026-08-25 (option B, the lower bound at 1): '
+    + '`minLength` carried the exact defect pair the 2026-08-24 ruling closed for `maxLength` '
+    + '(`field-max-length-malformed-or-misplaced-refused`), and converges on the same template. '
+    + 'Shape: the key was '
     + '`z.number()`, so `minLength: -5` and `minLength: 2.5` parsed cleanly while describing '
     + 'no character length; it is now `z.number().int().min(1)`. The lower bound is 1 by '
     + 'ruling: `minLength: 0` is refused loudly — a vacuous always-true declaration is '

@@ -40,11 +40,13 @@ export const entry: SemanticMigration = {
     + 'judgment, so it is delegated rather than automated. The change itself is the ADR-0049 '
     + 'declared-vs-enforced defect in the direction the liveness ledger structurally cannot look: all '
     + 'three keys were genuinely live, and what had drifted was each one\'s RADIUS against its own '
-    + '`describe()` — `items` gated a migration write door while naming a listing read (#15542), and '
+    + '`describe()` — `items` gated a migration write door while naming a listing read, and '
     + '`item` gated four reads while its own `PUT` / `DELETE` and the history family answered to '
-    + '`api.enableMetadata` alone (#15854). Ruled together by the maintainer as one principle. Measured '
-    + 'population at the time of the move: ZERO — no shipped boot path constructs a `RestServerConfig` '
-    + '(#15543), so only programmatic embedders can have authored these keys at all.',
+    + '`api.enableMetadata` alone. The maintainer ruled the two together on 2026-09-06 as one '
+    + 'principle: every `endpoints.*` switch gates exactly the face its name states, and the '
+    + 'whole-store family gets a key of its own. Measured '
+    + 'population at the time of the move: ZERO — no shipped boot path constructs a `RestServerConfig`, '
+    + 'so only programmatic embedders can have authored these keys at all.',
   acceptanceCriteria:
     'For each `RestServerConfig` the consumer constructs, `new RestServer(...).registerRoutes()` followed '
     + 'by `getRoutes()` yields the route table the consumer intends — specifically: with '

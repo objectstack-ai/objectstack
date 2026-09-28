@@ -48,6 +48,9 @@ import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 // [#13524] The declared authorable field vocabulary, IN DECLARATION ORDER —
 // the canonical order `FIELD_OPERATOR_RANK` below reads.
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table, asked of the spec per translation.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -303,6 +306,16 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
   }
 
+  // [#20444] `$empty`'s comparand is a boolean by the same declaration, gated on
+  // this walk for the same evaluation-order reason as `$null` above.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$empty') &&
+    typeof value.$empty !== 'boolean'
+  ) {
+    throw nonBooleanEmptyComparandError(key, value.$empty, `${here}.$empty`);
+  }
+
   // [#6520] `$icontains`' comparand is a NON-EMPTY string, gated on the WALK for
   // the same reason `$null` is one paragraph up: a gate in the emitter fires or
   // not depending on whether a boolean identity settled the enclosing node
@@ -525,6 +538,100 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
   );
 }
 
+/**
+ * [#20444] `$empty` whose comparand is not a boolean. The leading sentence is
+ * `driver-sql`'s `nonBooleanEmptyComparandError`, verbatim — one condition,
+ * one wording (#5240).
+ */
+function nonBooleanEmptyComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+      `empty rows, false for their exact complement.`,
+  );
+}
+
+/**
+ * [#20444] `$empty` aimed at a field whose declaration this translator was not
+ * handed — an object never passed through `syncSchema`, a field its schema
+ * does not name, one declared with no `type`, or a standalone call to
+ * {@link translateFilter} with no {@link ValueShapeResolver}. What counts as
+ * empty is the field's DECLARED row of the ruled table, so there is nothing to
+ * translate without it: refused, never guessed.
+ */
+function undeclaredEmptyOperatorFieldError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" at ${path} targets a field whose declaration this ` +
+      `driver does not hold (no declared type — the object's schema was never synced, or does not ` +
+      `declare the field). What counts as empty is the field's DECLARED row of the ruled table — ` +
+      `null or '' for a text-like type, null or [] for a multi-value field, null only for every ` +
+      `other type — so the operator is refused rather than guessed. Declare the field, or use ` +
+      `"$null" for "has no value".`,
+  );
+}
+
+/**
+ * [#20444] A field's DECLARED value shape — its `type` and `multiple`, the
+ * slice the spec's `expandEmptyOperator` reads — or `undefined` when the
+ * declaration is not held. `MongoDBDriver` answers it from the declaration
+ * `syncSchema` recorded, the way it answers {@link TemporalFieldKindResolver}.
+ */
+export type ValueShapeResolver = (field: string) => ValueShapeFieldDef | undefined;
+
+/**
+ * [#20444] Translate `{ field: { $empty: true | false } }` by the field's
+ * DECLARED row of the ruled 「is empty」 table — ruling B on #20311 (record
+ * 5861435168), spelled as this operator by ruling A on #20399 (record
+ * 5865693155) — through the spec's one expansion, `expandEmptyOperator`:
+ *
+ * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+ * |---|---|---|
+ * | `null_only` | `{ f: { $eq: null } }` | `{ f: { $ne: null } }` |
+ * | `text` | `{ f: { $in: [null, ''] } }` | `{ f: { $nin: [null, ''] } }` |
+ * | `multi_value` | `{ $or: [{ f: { $eq: null } }, { f: { $size: 0 } }] }` | the same pair under `$nor` |
+ *
+ * MongoDB's `null` equality matches a missing field as well as a stored null,
+ * so both readings of "no value" are empty on every row — the answer the
+ * `$null` arm already gives. The empty list is tested with `$size: 0`, never
+ * as an equality comparand (`{ f: [] }` also matches an array HOLDING an empty
+ * array, and ruling 乙 on #19757 keeps `[]` out of the equality slot anyway).
+ *
+ * Emitted as its OWN document, AND-ed beside the field's other operators by
+ * {@link translateCondition}, rather than written into their operator map: the
+ * multi-value row is an OR over two tests no single field operator spells, and
+ * a separate conjunct can never contest a lowered key with a sibling operator
+ * (the {@link assembleLoweredWrites} clobber class). The flag's boolean shape
+ * was settled on the walk; the re-check is the totality floor.
+ */
+function translateEmptyOperator(
+  field: string,
+  flag: unknown,
+  valueShape: ValueShapeResolver | undefined,
+  path: string,
+): Filter<any> {
+  if (typeof flag !== 'boolean') throw nonBooleanEmptyComparandError(field, flag, path);
+  const shape = valueShape?.(field);
+  if (!shape) throw undeclaredEmptyOperatorFieldError(field, path);
+  const expansion = expandEmptyOperator(shape);
+  switch (expansion.arm) {
+    case 'null_only':
+      return { [field]: flag ? { $eq: null } : { $ne: null } };
+    case 'text':
+      return { [field]: flag ? { $in: [null, ''] } : { $nin: [null, ''] } };
+    case 'multi_value': {
+      const branches: Filter<any>[] = [{ [field]: { $eq: null } }, { [field]: { $size: 0 } }];
+      return flag ? { $or: branches } : { $nor: branches };
+    }
+    default: {
+      // A closed union of three rows; a fourth is a spec change this driver
+      // was not taught, and it must fail loudly rather than answer for it.
+      const unknownArm: never = expansion.arm;
+      throw unsupportedFilterError(`No $empty arm for the declared row ${JSON.stringify(unknownArm)}.`);
+    }
+  }
+}
+
 /** [#5376] Is this field spec `{}` — a field constrained by ZERO operators? */
 function isEmptyFieldConstraint(spec: unknown): boolean {
   return isFilterNode(spec) && Object.keys(spec).length === 0;
@@ -698,6 +805,10 @@ function safeShapePreview(value: unknown): string {
 export function translateFilter(
   where: unknown,
   temporalKind?: TemporalFieldKindResolver,
+  // [#20444] The declared value shape of each field, for `$empty`'s declared
+  // row. Omitted, `$empty` is refused — the pure shape translation has no
+  // declaration to read a row from.
+  valueShape?: ValueShapeResolver,
 ): Filter<any> {
   if (!where) return {};
 
@@ -717,7 +828,7 @@ export function translateFilter(
   if (verdict === 'true') return {};
   if (verdict === 'false') return matchNothing();
 
-  return translateCondition(node, temporalKind, 'filter');
+  return translateCondition(node, temporalKind, 'filter', valueShape);
 }
 
 /**
@@ -738,6 +849,8 @@ function translateCondition(
   // position it refused — the same `filter.$or[0].stage` spelling driver-sql
   // and driver-memory print.
   path = 'filter',
+  // [#20444] See {@link translateFilter}.
+  valueShape?: ValueShapeResolver,
 ): Filter<any> {
   const mongoFilter: Record<string, unknown> = {};
   const andClauses: Filter<any>[] = [];
@@ -763,7 +876,7 @@ function translateCondition(
         const branches = (value as unknown[])
           .map((sub, index) => ({ sub: sub as Record<string, unknown>, index }))
           .filter(({ sub, index }) => reduceFilterNode(sub, `${here}[${index}]`) === 'clause')
-          .map(({ sub, index }) => translateCondition(sub, temporalKind, `${here}[${index}]`));
+          .map(({ sub, index }) => translateCondition(sub, temporalKind, `${here}[${index}]`, valueShape));
         andClauses.push(key === '$and' ? { $and: branches } : { $or: branches });
         break;
       }
@@ -780,6 +893,7 @@ function translateCondition(
           value as Record<string, unknown>,
           temporalKind,
           `${path}.$not`,
+          valueShape,
         );
         // MongoDB $not applies per-field; for top-level negation use $nor
         andClauses.push({ $nor: [inner] });
@@ -792,8 +906,16 @@ function translateCondition(
 
         if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           // Check if this is an operator object (has $ keys)
-          const objValue = value as Record<string, unknown>;
+          let objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
+          // [#20444] `$empty` becomes a document of its own, AND-ed beside the
+          // field's other operators — see {@link translateEmptyOperator}.
+          if (hasOps && Object.prototype.hasOwnProperty.call(objValue, '$empty')) {
+            const { $empty: flag, ...rest } = objValue;
+            andClauses.push(translateEmptyOperator(key, flag, valueShape, `${path}.${key}.$empty`));
+            if (Object.keys(rest).length === 0) continue;
+            objValue = rest;
+          }
           if (hasOps) {
             const translated = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
             // [#13524] Lowered writes whose MongoDB key was already taken by a

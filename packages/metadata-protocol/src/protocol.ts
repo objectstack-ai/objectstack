@@ -21298,10 +21298,13 @@ export class ObjectStackProtocolImplementation implements
      * versions of a metadata item. Either side may be omitted: when
      * `toVersion` is undefined the current active body is used, labelled
      * with that active row's own `version` (`null` when there is no active
-     * row); when `fromVersion` is undefined the immediately previous history
-     * row is used. Returns `{ added, removed, changed }` keyed by JSON
-     * pointer-style paths for primitive leaves; nested objects/arrays
-     * are reported as a single change record.
+     * row); when `fromVersion` is undefined the from side is the nearest
+     * earlier history row whose body differs from the to side's by this
+     * diff's own equality, a body-less (delete) row comparing as `{}`, and
+     * absent (`null`) when no earlier row differs. An explicit version on
+     * either side is used as named. Returns `{ added, removed, changed }`
+     * keyed by JSON pointer-style paths for primitive leaves; nested
+     * objects/arrays are reported as a single change record.
      *
      * The `type` is folded to its canonical spelling at the boundary
      * ({@link canonicalizeMetaRequestType}), so the echoed `type` reports the
@@ -21511,11 +21514,40 @@ export class ObjectStackProtocolImplementation implements
             fromVersion = request.fromVersion;
             fromBody = byVersion.get(request.fromVersion) ?? null;
         } else if (toVersion !== null) {
-            // Use the version immediately preceding `toVersion`
-            const sorted = histRows.map((r) => r.version).filter((v) => v < toVersion!);
-            if (sorted.length) {
-                fromVersion = sorted[sorted.length - 1]!;
-                fromBody = byVersion.get(fromVersion) ?? null;
+            // [#20451] The default from side is the NEAREST EARLIER history row
+            // whose body DIFFERS from the to side's, not the row immediately
+            // before it. Every draft save appends a history row and a publish
+            // appends the promoted body again as the next one, so the row
+            // immediately before a published version is usually the draft save
+            // it came from, with the same body: the default answered "no
+            // changes" right after every publish, and the change the publish
+            // carried was one explicit range away.
+            //
+            // "Differs" is this diff's OWN equality — `diffShallow`'s three
+            // buckets not all empty, with an absent body compared as `{}`
+            // exactly as the comparison below compares it — never a second
+            // notion of which rows count. So a body-less row (a delete's
+            // tombstone) differs from any non-empty to side and the walk stops
+            // on it, naming the deletion: the item did not exist there.
+            // ⛔ Do not branch on `operation_type` or add a lifecycle column to
+            // tell drafts from publishes: the #20378 ruling (comment
+            // 5865708652) declined the state column, and the retriage answer
+            // on #20451 (comment 5875579209) is this equality over every row.
+            //
+            // The walk reads only `histRows`, already the item's whole history
+            // from the one `find` above, sorted by version; it adds no read and
+            // no cap. No earlier row differs ⇒ the from side is absent (`null`,
+            // everything added), the answer for an item with no earlier version.
+            const earlier = histRows.map((r) => r.version).filter((v) => v < toVersion!);
+            const rawTarget = toBody ?? {};
+            for (let i = earlier.length - 1; i >= 0; i--) {
+                const candidate = byVersion.get(earlier[i]!) ?? null;
+                const d = diffShallow(candidate ?? {}, rawTarget);
+                if (d.added.length || d.removed.length || d.changed.length) {
+                    fromVersion = earlier[i]!;
+                    fromBody = candidate;
+                    break;
+                }
             }
         }
         // [#8671] Diff RAW, then redact the EMITTED values — maintainer ruling
