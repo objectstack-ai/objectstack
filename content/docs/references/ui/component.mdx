@@ -78,6 +78,7 @@ const result = AIChatWindowProps.parse(data);
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
 | **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 
 ---
@@ -131,6 +132,7 @@ const result = AIChatWindowProps.parse(data);
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
 | **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 
 ---
