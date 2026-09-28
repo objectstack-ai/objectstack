@@ -4498,12 +4498,12 @@ describe('node config an executor requires (#20316)', () => {
     validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
 
   it.each([
-    ['loop', { collection: '{rows}', body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, 'collection'],
-    ['map', { collection: '{rows}', flowName: 'child_flow' }, 'collection'],
-    ['get_record', { objectName: 'account' }, 'objectName'],
-    ['http', { url: 'https://example.com/hook' }, 'url'],
-    ['subflow', { flowName: 'child_flow' }, 'flowName'],
-  ] as Array<[string, Record<string, unknown>, string]>)('%s without `%s` is refused; with it, nothing is', (type, whole, key) => {
+    { type: 'loop', whole: { collection: '{rows}', body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
+    { type: 'map', whole: { collection: '{rows}', flowName: 'child_flow' }, key: 'collection' },
+    { type: 'get_record', whole: { objectName: 'account' }, key: 'objectName' },
+    { type: 'http', whole: { url: 'https://example.com/hook' }, key: 'url' },
+    { type: 'subflow', whole: { flowName: 'child_flow' }, key: 'flowName' },
+  ] as Array<{ type: string; whole: Record<string, unknown>; key: string }>)('$type without `$key` is refused; with it, nothing is', ({ type, whole, key }) => {
     expect(errorsOf(stackWith({ type, config: whole }))).toHaveLength(0);
     const authored = { ...whole };
     delete authored[key];
