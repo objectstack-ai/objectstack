@@ -405,6 +405,7 @@
     "UserFilters": "src/ui/view.zod.ts#UserFilters (type)",
     "UserFiltersParsed": "src/ui/view.zod.ts#UserFiltersParsed (type)",
     "UserFiltersSchema": "src/ui/view.zod.ts#UserFiltersSchema (const)",
+    "VIEW_CONSOLE_ROUND_TRIP_KEYS": "src/ui/view.zod.ts#VIEW_CONSOLE_ROUND_TRIP_KEYS (const)",
     "VIEW_CONSOLE_ROW_DECORATIONS": "src/ui/view.zod.ts#VIEW_CONSOLE_ROW_DECORATIONS (const)",
     "VIEW_FILTER_LIST_VALUE_OPERATORS": "src/ui/view.zod.ts#VIEW_FILTER_LIST_VALUE_OPERATORS (const)",
     "VIEW_FILTER_OPERATORS": "src/ui/view.zod.ts#VIEW_FILTER_OPERATORS (const)",

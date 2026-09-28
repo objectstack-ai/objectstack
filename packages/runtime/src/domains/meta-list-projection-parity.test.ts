@@ -198,7 +198,8 @@ const singular = (type: unknown): string => pluralToSingular(String(type ?? ''))
 interface Caller {
     ctx: { userId?: string; isSystem: false; systemPermissions: string[] };
     holdings: string[];
-    readableFields: string[];
+    /** `undefined` — the field universe is unresolvable: the ADR-0106 D6 tier-2 `undetermined` posture. */
+    readableFields: string[] | undefined;
 }
 const CALLERS = {
     holder: {
@@ -224,6 +225,12 @@ const CALLERS = {
         readableFields: ['amount'],
     },
     anonymous: { ctx: { isSystem: false, systemPermissions: [] }, holdings: [], readableFields: [] },
+    /** [#20408] A member whose field visibility could not be determined (ADR-0106 D6 tier 2). */
+    undetermined: {
+        ctx: { userId: 'u_undetermined', isSystem: false, systemPermissions: [] },
+        holdings: [],
+        readableFields: undefined,
+    },
 } satisfies Record<string, Caller>;
 type CallerName = keyof typeof CALLERS;
 const LIST_CALLERS = ['holder', 'non-holder', 'builder', 'anonymous'] as const satisfies readonly CallerName[];
@@ -276,7 +283,7 @@ const endpointMatcher = {
 
 // ── The two transports ────────────────────────────────────────────────────────
 
-interface Answer { status: number; code?: string; body: any; items?: any[]; item?: any; vary?: string }
+interface Answer { status: number; code?: string; body: any; items?: any[]; item?: any; vary?: string; cacheControl?: string }
 
 const itemsOf = (data: any): any[] | undefined =>
     Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : undefined;
@@ -303,8 +310,9 @@ function bootDispatcher(callerName: CallerName, opts: Boot = {}) {
         const status = res.response?.status ?? 0;
         const body = res.response?.body;
         const vary = (res.response as any)?.headers?.Vary;
+        const cacheControl = (res.response as any)?.headers?.['Cache-Control'];
         return {
-            status, code: body?.error?.code, body, vary,
+            status, code: body?.error?.code, body, vary, cacheControl,
             items: status === 200 ? itemsOf(body?.data) : undefined,
             item: status === 200 ? body?.data?.item : undefined,
         };
@@ -355,13 +363,17 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
         const status = res.statusCode;
         return {
             status, code: res.body?.code ?? res.body?.error?.code, body: res.body, vary: res.headers.Vary,
+            cacheControl: res.headers['Cache-Control'],
             items: status === 200 ? itemsOf(res.body) : undefined,
             item: status === 200 ? res.body?.item : undefined,
         };
     };
     const read = async (path: string, query: Record<string, string> = {}, headers: Record<string, string> = {}): Promise<Answer> => {
         const [type, name, ...rest_] = path.replace(/^\/meta\//, '').split('/');
-        if (rest_.length > 0) throw new Error(`bootRest.read drives list and item reads only: ${path}`);
+        if (type === 'book' && rest_.length === 1 && rest_[0] === 'tree') {
+            return drive(`${META}/book/:name/tree`, path.replace(/^\/meta/, ''), { name }, query, headers);
+        }
+        if (rest_.length > 0) throw new Error(`bootRest.read drives list, item and book-tree reads only: ${path}`);
         return name === undefined
             ? drive(`${META}/:type`, path.replace(/^\/meta/, ''), { type }, query, headers)
             : drive(`${META}/:type/:name`, path.replace(/^\/meta/, ''), { type, name }, query, headers);
@@ -396,6 +408,8 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
     { label: '?preview=draft', param: 'preview', query: { preview: 'draft' } },
+    // [#20408] The switch's value is compared case-insensitively on `RestServer`.
+    { label: '?preview=DRAFT', param: 'preview', query: { preview: 'DRAFT' } },
 ];
 const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is string => !!p));
 
@@ -403,6 +417,9 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'flow',
+    // [#20408] A segment that names no metadata type: `RestServer` refuses it
+    // (`refuseUnknownMetaListType`) rather than listing an empty collection.
+    'totally_invented_type',
 ];
 const TYPE_AXIS = new Set(TYPE_CELLS.map(singular));
 
@@ -509,8 +526,15 @@ describe('[#20320] row A: the dispatcher lists what RestServer lists — every t
                     const same = dispatcher.status === rest.status
                         && dispatcher.code === rest.code
                         && JSON.stringify(dispatcher.items) === JSON.stringify(rest.items)
-                        && (rest.status !== 200 || dispatcher.vary === rest.vary);
-                    if (!same) mismatches.push({ who, dispatcher: { ...brief(dispatcher), vary: dispatcher.vary }, rest: { ...brief(rest), vary: rest.vary } });
+                        && (rest.status !== 200 || dispatcher.vary === rest.vary)
+                        && dispatcher.cacheControl === rest.cacheControl;
+                    if (!same) {
+                        mismatches.push({
+                            who,
+                            dispatcher: { ...brief(dispatcher), vary: dispatcher.vary, cacheControl: dispatcher.cacheControl },
+                            rest: { ...brief(rest), vary: rest.vary, cacheControl: rest.cacheControl },
+                        });
+                    }
                 }
                 expect(mismatches).toEqual([]);
             });
@@ -570,10 +594,8 @@ describe('[#20320] row B: an anonymous read of a public book or doc is served on
                 .toEqual({ status, code: status === 200 ? undefined : 'UNAUTHENTICATED' });
             expect({ status: dispatcher.status, code: dispatcher.code }).toEqual({ status: rest.status, code: rest.code });
             // The document served: its identity, label and body. (The item read's
-            // doc LOCALE collapse — `RestServer` drops a doc's `translations` map
-            // on this read, the dispatcher does not — is a divergence of the item
-            // read, not of reachability; it is reported with this card's
-            // out-of-scope findings, not pinned here.)
+            // doc LOCALE collapse — the rest of the answer — is pinned by the
+            // [#20408] item census below, every caller × query parameter.)
             const served = (a: Answer) => a.item && { name: a.item.name, label: a.item.label, content: a.item.content };
             if (status === 200) expect(served(dispatcher)).toEqual(served(rest));
             expect(text(dispatcher)).not.toContain(DOC_SECRET);
@@ -592,8 +614,11 @@ describe('[#20320] row B: an anonymous read of a public book or doc is served on
         }
     });
 
-    it('control: the exemption reaches only the dispatcher\'s own list and item reads — /published and an unrouted book path stay 401', async () => {
-        for (const path of ['/meta/book/public_guide/published', '/meta/book/public_guide/tree', '/meta/doc/public_faq/published']) {
+    it('control: the exemption reaches only the dispatcher\'s own list, item and book-tree reads — /published and an unrouted book path stay 401', async () => {
+        // [#20408] `/meta/book/:name/tree` is a route here now, and exempt as on
+        // `RestServer` (its census is below); the plural spelling is no route on
+        // either transport, so it keeps the deny.
+        for (const path of ['/meta/book/public_guide/published', '/meta/books/public_guide/tree', '/meta/doc/public_faq/published']) {
             const { read, protocol } = bootDispatcher('anonymous');
             const res = await read(path);
             expect({ status: res.status, code: res.code }, path).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
@@ -652,5 +677,237 @@ describe('[#20320] the ?state=draft row: the dispatcher\'s item read answers wha
                 expect(protocol.getMetaItem.mock.calls.map(([r]: any[]) => r).filter((r: any) => r?.state === 'draft')).toEqual([]);
             }
         });
+    }
+});
+
+// ── [#20408] The item read, the book-tree route, and the cache posture ────────
+//
+// #20320 closed the LIST. The item read and the route beside it had the same two
+// transports and the same split, measured on this file's fixtures before the
+// fix: the dispatcher's item read did not translate, did not collapse a doc to
+// the request's locale, served no `sortability` beside an object schema, read
+// `?preview=` case-sensitively and ignored `?preview=draft` on the object
+// branch; the list compared `?preview=` case-sensitively and served an empty
+// collection for a segment that names no type; `GET /meta/book/:name/tree`
+// was no route at all; and an object schema served under an UNDETERMINED field
+// visibility (ADR-0106 D6 tier 2) went out with no `Cache-Control`, where
+// `RestServer` answers `private, no-store`. Each is now a census cell, and each
+// census is derived from `RestServer`'s handler like the list's above.
+
+/**
+ * The query parameters `RestServer`'s item handler reads that the dispatcher
+ * deliberately does not answer — each one a ROUTE this transport does not
+ * serve, named here so the derivation below still fails on any OTHER new one.
+ */
+const ITEM_PARAMS_NOT_SERVED_HERE: Readonly<Record<string, string>> = {
+    // The deprecated spelling of `GET /meta/:type/:name/layers` — the layered
+    // view, a route the dispatcher does not serve (ADR-0076 item 9: the
+    // catch-all is the fallback fabric, not a second `RestServer`).
+    layers: 'the deprecated `?layers=` spelling of the /layers route, which the dispatcher does not serve',
+};
+
+const ITEM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
+    { label: '(none)', query: {} },
+    { label: '?state=draft', param: 'state', query: { state: 'draft' } },
+    { label: '?state=DRAFT', param: 'state', query: { state: 'DRAFT' } },
+    { label: '?preview=draft', param: 'preview', query: { preview: 'draft' } },
+    { label: '?preview=DRAFT', param: 'preview', query: { preview: 'DRAFT' } },
+    { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
+    { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
+];
+const ITEM_PARAM_AXIS = new Set(ITEM_PROBES.map((p) => p.param).filter((p): p is string => !!p));
+
+/** One cell per type the item read keys on (both spellings where a gate folds), per translatable type, plus absences and refusals. */
+const ITEM_CELLS: readonly string[] = [
+    '/meta/app/crm', '/meta/apps/crm',
+    // `requiredPermissions` the non-holder lacks → 403; unpublished → absent to a non-builder.
+    '/meta/app/payroll', '/meta/app/launchpad',
+    // A draft-only app, an app with no draft, and a name with nothing behind it.
+    '/meta/app/beacon', '/meta/app/helpdesk', '/meta/app/no_such_app',
+    '/meta/view/lead_all', '/meta/views/lead_all',
+    '/meta/doc/crm_intro', '/meta/docs/crm_intro', '/meta/doc/crm_admin_runbook', '/meta/doc/public_faq',
+    '/meta/book/admin_guide', '/meta/books/help_center', '/meta/book/public_guide',
+    '/meta/object/invoice', '/meta/objects/invoice',
+    '/meta/dashboard/ops', '/meta/dashboards/ops',
+    '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/flow/on_lead', '/meta/api/crm_served',
+];
+const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
+const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];
+
+/** `GET /meta/book/:name/tree` — every declared book, the implicit per-package book, and a name nothing claims. */
+const TREE_CELLS: readonly string[] = ['admin_guide', 'help_center', 'public_guide', 'crm', 'no_such_book'];
+const TREE_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
+    { label: '(none)', query: {} },
+    { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
+    { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
+];
+const TREE_PARAM_AXIS = new Set(TREE_PROBES.map((p) => p.param).filter((p): p is string => !!p));
+const TREE_CALLERS = ['holder', 'non-holder', 'builder', 'anonymous'] as const satisfies readonly CallerName[];
+
+/** The item and tree answers compared whole: the envelope (or tree) served, and the two headers either transport sets. */
+const served = (a: Answer, transport: 'dispatcher' | 'rest'): unknown =>
+    (a.status === 200 ? (transport === 'dispatcher' ? a.body?.data : a.body) : undefined);
+const sameAnswer = (dispatcher: Answer, rest: Answer): boolean =>
+    dispatcher.status === rest.status
+    && dispatcher.code === rest.code
+    && JSON.stringify(served(dispatcher, 'dispatcher')) === JSON.stringify(served(rest, 'rest'))
+    && (rest.status !== 200 || dispatcher.vary === rest.vary)
+    && dispatcher.cacheControl === rest.cacheControl;
+const mismatchOf = (who: string, dispatcher: Answer, rest: Answer) => ({
+    who,
+    dispatcher: { status: dispatcher.status, code: dispatcher.code, vary: dispatcher.vary, cacheControl: dispatcher.cacheControl, body: JSON.stringify(served(dispatcher, 'dispatcher'))?.slice(0, 400) },
+    rest: { status: rest.status, code: rest.code, vary: rest.vary, cacheControl: rest.cacheControl, body: JSON.stringify(served(rest, 'rest'))?.slice(0, 400) },
+});
+
+/**
+ * The shared functions `RestServer`'s item and tree handlers hand their answer
+ * to — read as part of the handler, so a parameter or a type the SHARED step
+ * starts reading is a derived cell too. A name absent from the module derives
+ * nothing (the handler's own reads still do).
+ */
+const SHARED_ITEM_FUNCTIONS = ['createMetaItemAnswer', 'createMetaItemReadGate', 'metaRequestLocale', 'translateMetaDocument', 'translateMetaEnvelope'];
+const SHARED_TREE_FUNCTIONS = ['createMetaBookTreeAnswer', 'resolveDocsAudience', 'metaRequestLocale'];
+
+function deriveRouteReads(routePath: string, sharedFunctions: readonly string[]): Derived {
+    const derived: Derived = { params: new Set(), types: new Set(), found: false };
+    const rest = parse(REST_SERVER_SOURCE);
+    const visit = (n: ts.Node): void => {
+        if (ts.isObjectLiteralExpression(n)) {
+            const method = propertyInitializer(rest, n, 'method');
+            const path = propertyInitializer(rest, n, 'path');
+            const handler = propertyInitializer(rest, n, 'handler');
+            if (method?.getText(rest) === "'GET'" && path?.getText(rest) === routePath && handler) {
+                derived.found = true;
+                readsUnder(rest, handler, derived);
+            }
+        }
+        ts.forEachChild(n, visit);
+    };
+    visit(rest);
+    const chain = parse(SHARED_CHAIN_SOURCE);
+    for (const s of chain.statements) {
+        if (ts.isFunctionDeclaration(s) && s.name && sharedFunctions.includes(s.name.text)) readsUnder(chain, s, derived);
+    }
+    return derived;
+}
+
+describe('[#20408] the item and book-tree census axes cover every read of RestServer\'s handlers and the shared steps', () => {
+    const item = deriveRouteReads('`${metaPath}/:type/:name`', SHARED_ITEM_FUNCTIONS);
+    const tree = deriveRouteReads('`${metaPath}/book/:name/tree`', SHARED_TREE_FUNCTIONS);
+
+    it('both handlers are found where the census looks for them', () => {
+        expect(item.found, `GET \${metaPath}/:type/:name in ${REST_SERVER_SOURCE}`).toBe(true);
+        expect(tree.found, `GET \${metaPath}/book/:name/tree in ${REST_SERVER_SOURCE}`).toBe(true);
+    });
+
+    it('every query parameter the item read reads is a census cell, or a route this transport does not serve, by name', () => {
+        const missing = [...item.params].filter((p) => !ITEM_PARAM_AXIS.has(p) && !(p in ITEM_PARAMS_NOT_SERVED_HERE)).sort();
+        expect(missing, 'an item read of a parameter this census never sends: add a probe that moves its answer').toEqual([]);
+        // The exclusions stay honest: each is still read by the handler.
+        expect(Object.keys(ITEM_PARAMS_NOT_SERVED_HERE).filter((p) => !item.params.has(p))).toEqual([]);
+    });
+
+    it('every type the item read keys on, and every translatable type, is a census cell', () => {
+        const wanted = new Set([...item.types, ...TRANSLATABLE_METADATA_TYPES]);
+        expect([...wanted].filter((t) => !ITEM_TYPE_AXIS.has(t)).sort()).toEqual([]);
+    });
+
+    it('every query parameter the book tree reads is a census cell', () => {
+        expect([...tree.params].filter((p) => !TREE_PARAM_AXIS.has(p)).sort()).toEqual([]);
+    });
+});
+
+describe('[#20408] the item read: the dispatcher answers what RestServer answers — every cell × query parameter × caller', () => {
+    for (const path of ITEM_CELLS) {
+        for (const probe of ITEM_PROBES) {
+            it(`GET ${path} ${probe.label}`, async () => {
+                const mismatches: unknown[] = [];
+                for (const who of ITEM_CALLERS) {
+                    const dispatcher = await bootDispatcher(who).read(path, probe.query, probe.headers);
+                    const rest = await bootRest(who).read(path, probe.query, probe.headers);
+                    if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
+                }
+                expect(mismatches).toEqual([]);
+            });
+        }
+    }
+});
+
+describe('[#20408] the item read: the reference moves — each probe changes RestServer\'s answer for the cell it targets', () => {
+    it('translation, the doc locale, sortability, both draft switches in any case, and the object preview all move', async () => {
+        const { read } = bootRest('holder');
+        expect((await read('/meta/app/crm', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('客户管理');
+        const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
+        expect(zhDoc.item?.label).toBe('入门');
+        expect(text(zhDoc)).not.toContain('"translations"');
+        expect(Object.keys((await read('/meta/object/invoice')).body ?? {})).toContain('sortability');
+        const builder = bootRest('builder').read;
+        expect((await builder('/meta/app/crm', { preview: 'DRAFT' })).item?.label).toBe('CRM (draft)');
+        expect((await builder('/meta/app/crm', { state: 'DRAFT' })).item?.label).toBe('CRM (draft)');
+        expect((await builder('/meta/object/invoice', { preview: 'draft' })).item?.label).toBe('Invoice (draft)');
+    });
+
+    it('the list: ?preview=DRAFT overlays the drafts, and a segment that names no type is refused', async () => {
+        expect(names((await bootRest('builder').read('/meta/app', { preview: 'DRAFT' })).items)).toContain('beacon');
+        const invented = await bootRest('holder').read('/meta/totally_invented_type');
+        expect({ status: invented.status, code: invented.code }).toEqual({ status: 400, code: 'INVALID_REQUEST' });
+    });
+});
+
+describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route RestServer serves — every book × query parameter × caller', () => {
+    for (const book of TREE_CELLS) {
+        for (const probe of TREE_PROBES) {
+            it(`GET /meta/book/${book}/tree ${probe.label}`, async () => {
+                const mismatches: unknown[] = [];
+                for (const who of TREE_CALLERS) {
+                    const dispatcher = await bootDispatcher(who).read(`/meta/book/${book}/tree`, probe.query, probe.headers);
+                    const rest = await bootRest(who).read(`/meta/book/${book}/tree`, probe.query, probe.headers);
+                    if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
+                }
+                expect(mismatches).toEqual([]);
+            });
+        }
+    }
+
+    it('the reference: the public book is served anonymously, a gated one refused, and the tree narrowed per caller', async () => {
+        const anonymous = await bootRest('anonymous').read('/meta/book/public_guide/tree');
+        expect(anonymous.status).toBe(200);
+        expect(text(anonymous)).toContain('public_faq');
+        const gated = await bootRest('anonymous').read('/meta/book/admin_guide/tree');
+        expect({ status: gated.status, code: gated.code }).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+        const member = await bootRest('non-holder').read('/meta/book/admin_guide/tree');
+        expect({ status: member.status, code: member.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(text(await bootRest('holder').read('/meta/book/admin_guide/tree'))).toContain('crm_admin_runbook');
+    });
+});
+
+describe('[#20408] an undetermined field visibility (ADR-0106 D6 tier 2) serves the object schema `private, no-store` on both transports', () => {
+    const OBJECT_PATHS = ['/meta/object', '/meta/objects', '/meta/object/invoice', '/meta/objects/invoice'];
+
+    it('the reference: RestServer serves the unmasked schema under `private, no-store`, and a determined caller\'s answer carries no such header', async () => {
+        for (const path of OBJECT_PATHS) {
+            const undetermined = await bootRest('undetermined').read(path);
+            expect({ status: undetermined.status, cacheControl: undetermined.cacheControl }, path).toEqual({ status: 200, cacheControl: 'private, no-store' });
+            expect((await bootRest('non-holder').read(path)).cacheControl, path).toBeUndefined();
+        }
+    });
+
+    for (const path of OBJECT_PATHS) {
+        const probes = path.split('/').length === 3 ? PARAM_PROBES : ITEM_PROBES;
+        for (const probe of probes) {
+            it(`GET ${path} ${probe.label} × undetermined`, async () => {
+                const dispatcher = await bootDispatcher('undetermined').read(path, probe.query, probe.headers);
+                const rest = await bootRest('undetermined').read(path, probe.query, probe.headers);
+                const list = path.split('/').length === 3;
+                const same = list
+                    ? dispatcher.status === rest.status && dispatcher.code === rest.code
+                        && JSON.stringify(dispatcher.items) === JSON.stringify(rest.items)
+                        && dispatcher.cacheControl === rest.cacheControl
+                    : sameAnswer(dispatcher, rest);
+                expect(same ? [] : [mismatchOf('undetermined', dispatcher, rest)]).toEqual([]);
+            });
+        }
     }
 });

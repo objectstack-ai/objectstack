@@ -415,7 +415,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
         name: 'showcase_task.default',
         object: 'showcase_task',
         viewKind: 'list',
-        _isOverride: true, // objectui's private marker — undeclared, rides `.strip()` as before
+        _isOverride: true, // objectui's settings-overlay marker — declared on this member since #20456
         columnState: { order: ['email', 'name'], widths: { email: 240 } },
       });
       expect(r.success).toBe(true);
