@@ -7268,6 +7268,66 @@ const step18: MigrationStep = {
         + 'fail tsc on upgrade; the fix is choosing a shipped driver, never '
         + 'widening a local mirror of the enum.',
     },
+    // The `connector_action` sibling of `wait-node-event-config-required`: a node
+    // whose one input is a SIBLING block (not `config`) owes that block, and the
+    // flow parse now refuses what the executor's own read refuses — the block
+    // absent, or an id in it empty.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'connector-action-config-required',
+      surface:
+        'The connectorConfig block of every type: \'connector_action\' flow node — the BLOCK, and its '
+        + 'connectorId and actionId once it is written. The block was optional on the node and both ids '
+        + 'were any string inside it, so a node with no block, or with connectorId or actionId empty or '
+        + 'only whitespace, parsed. That is the state of a node authored without its configuration, and '
+        + 'of a new connector node from the Studio flow designer, which seeds both ids empty. At any depth, '
+        + 'including an ADR-0031 region body. Reachable wherever a flow is authored or stored: '
+        + 'defineStack({ flows }) sources, defineFlow(), an exported stack passed to objectstack validate, '
+        + 'a flow saved from the Studio flow designer (a connector node added and saved before it is '
+        + 'configured), and a flow row already sitting in sys_metadata. Also reached: connectorId, actionId '
+        + 'or input written under the node\'s config instead of the block, where the load-time conversion '
+        + 'cannot complete the pair and leaves them there',
+      replacement:
+        'Declare what the node dispatches, on the node: `connectorConfig: { connectorId: \'slack\', '
+        + 'actionId: \'chat.postMessage\', input: { channel: \'C0WINS000\', text: \'Done\' } }` — '
+        + '`connectorId` the registered connector\'s `name`, `actionId` one of the action keys that '
+        + 'connector declares, `input` optional. Keys written under the node\'s `config` move into the '
+        + 'block. A node you cannot configure yet is deleted until you can: there is no placeholder '
+        + 'connector, and a block with empty ids names nothing to dispatch to',
+      reason:
+        'The block is the node\'s whole contract: the connector_action executor reads nothing else and '
+        + 'refuses the node when `connectorId` or `actionId` is empty. The build doors checked only the '
+        + 'block\'s shape once it was written, so `FlowSchema.parse`, `AutomationEngine.registerFlow` and '
+        + '`objectstack validate` all admitted a node with no block, or with an empty id, and every run '
+        + 'that reached the node then failed at the executor\'s guard — a guard refusal, never routed to a '
+        + '`fault` edge, and no rerun could succeed because the config is metadata. The flow parse now '
+        + 'refuses what that read refuses, in the walk that reaches every region body, so all three doors '
+        + 'answer alike. A whitespace-only id is refused with the empty one: a connector `name` is a '
+        + 'snake_case identifier, so whitespace names nothing a dispatch can reach. '
+        + '⚠️ No D2 conversion: the platform cannot know the connector or the action the author left out, '
+        + 'and no value it could write would dispatch anything. '
+        + '⚠️ Where such a node already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not armed, '
+        + 'while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.connectorConfig` for an absent block, at `nodes.N.connectorConfig.connectorId` or '
+        + '`nodes.N.connectorConfig.actionId` for an empty or whitespace-only id, or at the region path '
+        + '`nodes.N.config.body.nodes.M.connectorConfig…`, and `objectstack validate` prints the same path '
+        + 'under `flows.K.`. For each hit write the block, per the replacement. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm each '
+        + 'flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. A connector node carrying a complete block parses, '
+        + 'registers and dispatches as before, and `input` stays optional.',
+    },
     // ADR-0049 enforce-or-remove — the D3 entry of the
     // `connector-error-mapping-removed` family, which landed in commit 13c48c2a5:
     // eleven inert authorable keys, one of them spelled like the live
@@ -16029,10 +16089,11 @@ const step18: MigrationStep = {
     // The AUTHORING half of the turso driver's constructor refusals. The driver
     // refuses these configurations when it is built; this entry records that the
     // datasource contract now refuses them where they are written, together with
-    // the one combination the driver builds and then ignores. A structured TODO,
-    // not a D2 conversion: which way out an author wants — a remote database, an
-    // embedded replica on a local file, or a plain local file — is intent no
-    // artifact records.
+    // the one combination the driver used to build and then ignore (syncUrl under
+    // a forced remote mode), which the constructor refuses too since #20200. A
+    // structured TODO, not a D2 conversion: which way out an author wants — a
+    // remote database, an embedded replica on a local file, or a plain local
+    // file — is intent no artifact records.
     {
       id: 'turso-config-transport-mismatch-refused',
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -16059,16 +16120,20 @@ const step18: MigrationStep = {
         '#19977. Each key parsed on its own, so the contract accepted configurations the turso driver '
         + 'refuses when it is built (VALIDATION_ERROR / 400 from the constructor, since the #19893 '
         + 'and #19976 changes) — a datasource published clean and then failed at boot or at test '
-        + 'connection. One more it builds and then ignores: syncUrl under a forced remote mode, where '
-        + 'the remote client is created without it, no sync ever runs and the sync call fails as not '
-        + 'supported while the driver reports sync as enabled (measured on the built driver). '
-        + 'Authoring now refuses exactly the constructor\'s refused set — the same predicates, a '
-        + 'scheme matched in any letter case, the url read trimmed as both datasource loaders hand it '
-        + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
-        + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
-        + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
-        + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
-        + 'the first four shapes there already); what changes is that creating, testing or editing '
+        + 'connection. One more it built and then ignored until #20200: syncUrl under a forced remote '
+        + 'mode, where the remote client was created without it, no sync ever ran and the sync call '
+        + 'failed as not supported while the driver reported sync as enabled (measured on the built '
+        + 'driver). Authoring now refuses exactly the constructor\'s refused set — the same predicates, '
+        + 'a scheme matched in any letter case, the url read trimmed as both datasource loaders hand '
+        + 'it over — plus that key, refused at authoring first as the declared-but-not-enforced shape '
+        + 'ADR-0049 does not ship, and by the constructor too since #20200. Nothing the constructor '
+        + 'accepts is refused (at #19977 that key was the one exception; since #20200 there is none): '
+        + 'a forced remote mode keeps its url unjudged, as the constructor does. Stored datasource '
+        + 'rows are not re-parsed '
+        + 'when they load, so a stored row still reaches the constructor as written; the constructor '
+        + 'refuses the first four shapes there already and, since #20200, also refuses syncUrl under '
+        + 'a forced remote mode and sync with no syncUrl when the datasource boots. What changes here '
+        + 'is that creating, testing or editing '
         + 'its config through the datasource admin service, defineStack or os validate is refused at '
         + 'the key. Measured on this tree at the change: no example, template, published skill or '
         + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',

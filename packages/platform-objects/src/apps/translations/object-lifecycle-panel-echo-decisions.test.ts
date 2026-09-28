@@ -1132,7 +1132,12 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // (`name`, `label`, `icon`, `view`, `filter`, `order`, `pinned`,
       // `isDefault`, `visible`), ten leaves authored in all three locales, out of
       // the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(623);
+      // 634 since #19332 flight G2a: eleven new row labels — the object form's
+      // `fieldGroups` repeater (and its `key`, `label`, `icon`, `description`,
+      // `collapse` and `visibleWhen` sub-rows) and its `indexes` repeater (and
+      // its `name`, `fields` and `unique` sub-rows) — authored in all three
+      // locales.
+      expect(translated.length, `${locale} positive control`).toBe(634);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

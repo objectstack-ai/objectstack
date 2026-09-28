@@ -284,7 +284,9 @@ export function makeApiErrorSchema<const TExtra extends readonly string[]>(extra
   return ApiErrorSchema.extend({
     // The retired-spelling prescription rides this door too: `.options` above
     // carries the catalogue's members, not its error map (`retired-error-codes.ts`).
-    code: (z.enum(vocabulary as [string, ...string[]], { error: retiredStandardErrorCodeMessage }) as z.ZodType<StandardErrorCode | TExtra[number]>)
+    // [#19920] Both `z.ZodType` parameters are named, as on `ErrorCode`: naming
+    // the output alone left this schema's INPUT `code` typed `unknown`.
+    code: (z.enum(vocabulary as [string, ...string[]], { error: retiredStandardErrorCodeMessage }) as z.ZodType<StandardErrorCode | TExtra[number], StandardErrorCode | TExtra[number]>)
       .describe('Error code (StandardErrorCode ∪ the ledger this consumer registered)'),
   });
 }

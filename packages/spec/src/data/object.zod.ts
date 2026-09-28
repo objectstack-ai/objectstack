@@ -459,8 +459,8 @@ export const IndexSchema = lazySchema(() => strictObject({
       'does for `sys_metadata`).',
   },
 }, {
-  name: z.string().optional().describe('Index name (auto-generated if not provided)'),
-  fields: z.array(z.string()).describe('Fields included in the index'),
+  name: z.string().optional().describe('Index name (auto-generated if not provided)').meta({ title: 'Name' }),
+  fields: z.array(z.string()).describe('Fields included in the index').meta({ title: 'Fields' }),
   // Unique scope on a DECLARED index (ADR-0120 D1, amending #3696):
   //
   //   - `'global'` — the VERBATIM contract: materialized over exactly the
@@ -487,7 +487,7 @@ export const IndexSchema = lazySchema(() => strictObject({
   // `fields: ['organization_id', 'code']`" survives as valid legacy input,
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
-  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
+  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'").meta({ title: 'Unique' }),
 
   // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
   // Kept LAST in the shape on purpose — see the #5606 note in the block
@@ -1159,16 +1159,16 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   key: z.string().regex(FIELD_GROUP_KEY_PATTERN, {
     message: 'Field group key must be lowercase snake_case (e.g., "contact_info", "billing", "system")',
-  }).describe('Group machine key (snake_case). Referenced by Field.group, and by a layout section\'s `group`.'),
+  }).describe('Group machine key (snake_case). Referenced by Field.group, and by a layout section\'s `group`.').meta({ title: 'Key' }),
 
   /** Human-readable label displayed as the group header. */
-  label: z.string().describe('Group display label'),
+  label: z.string().describe('Group display label').meta({ title: 'Label' }),
 
   /** Optional Lucide/Material icon name for the group header. */
-  icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header'),
+  icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header').meta({ title: 'Icon' }),
 
   /** Optional description / help text shown under the group header. */
-  description: z.string().optional().describe('Optional description shown under the group header'),
+  description: z.string().optional().describe('Optional description shown under the group header').meta({ title: 'Description' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -1185,7 +1185,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
     "Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'`",
-  ),
+  ).meta({ title: 'Visible When' }),
 
   /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every
@@ -1196,18 +1196,18 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * keys the spec rejected).
    */
   collapse: z.enum(['none', 'expanded', 'collapsed']).optional().default('none')
-    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed)."),
+    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed).").meta({ title: 'Collapse' }),
 
   /**
    * @deprecated [ADR-0085 → `collapse`] Accepted as a parse-time alias:
    * `defaultExpanded: false` maps to `collapse: 'collapsed'`, `true` to
    * `'expanded'`, when `collapse` is absent. New metadata sets `collapse`.
    */
-  defaultExpanded: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'expanded', false → 'collapsed'."),
+  defaultExpanded: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'expanded', false → 'collapsed'.").meta({ title: 'Default Expanded' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsed`); mapped onto `collapse` at parse. */
-  collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum."),
+  collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum.").meta({ title: 'Collapsible' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
-  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum."),
+  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum.").meta({ title: 'Collapsed' }),
 }));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;

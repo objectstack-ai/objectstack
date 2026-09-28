@@ -350,8 +350,8 @@ export default class Validate extends Command {
       //     Right after the parse, ahead of the rule table: this is the
       //     runtime's own accept set, the same class as the schema, and
       //     nothing below it is worth reading about a stack the server will
-      //     not load. `os build` does not run it (see the ledger row in
-      //     `test/validate-build-gate-parity.test.ts`).
+      //     not load. `os build` runs the same call at its step 3a (#20393);
+      //     `test/validate-build-gate-parity.test.ts` holds both doors to it.
       const containerNameRefusals = findViewContainerNameRefusals(result.data as Record<string, unknown>);
       if (containerNameRefusals.length > 0) {
         if (flags.json) {

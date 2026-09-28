@@ -59,6 +59,49 @@ export const objectForm = defineForm({
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
         { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
         { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
+        // #19332 (flight G2a of ruling record 5861442317) — the object's field
+        // groups, the ADR-0085 layout role beside `nameField` / `highlightFields`.
+        // A repeater whose sub-rows are DECLARED, the `fields.options` repeater's
+        // face below, for two reasons:
+        //
+        //   - A derived repeater renders every key of the entry schema, and three
+        //     of its nine are the `[DEPRECATED → collapse]` aliases
+        //     (`defaultExpanded`, `collapsible`, `collapsed`). Declaring the six
+        //     canonical keys keeps the aliases off screen; each alias carries a
+        //     nested `omit` row in the reconciliation ledger.
+        //   - A declared sub-row's label and help text reach the translation
+        //     catalogs, which a schema-derived one never does.
+        //
+        // Each sub-row copies the face a registered row already gives the same
+        // node: `key` / `label` / `icon` the plain text rows above, `description`
+        // the textarea row above, `collapse` a select over an enum whose three
+        // members are all spellable option values, and `visibleWhen` the
+        // `type: 'code'` / `language: 'expression'` predicate rows of the
+        // `fields` grid. An edit merges into the stored entry, so an alias an
+        // entry already carries survives a save, and a `collapse` set here
+        // outranks it (the parse derives `collapse` from an alias only when
+        // `collapse` is absent).
+        //
+        // No field-name list lives here: a field joins a group through its own
+        // `group` key, so there is no name for a misspelling to hide in.
+        {
+          field: 'fieldGroups',
+          type: 'repeater',
+          colSpan: 2,
+          helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field\'s own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
+          fields: [
+            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped.' },
+            { field: 'label', label: 'Label', type: 'text', required: true, helpText: 'Header text of the group\'s section.' },
+            { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },
+            { field: 'description', label: 'Description', type: 'textarea', helpText: 'Text shown under the header, on the entry form and the record detail page.' },
+            { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed, on the entry form and the record detail page. Unset: none.', options: [
+              { label: 'None — always open, no toggle', value: 'none' },
+              { label: 'Expanded — collapsible, starts open', value: 'expanded' },
+              { label: 'Collapsed — collapsible, starts closed', value: 'collapsed' },
+            ] },
+            { field: 'visibleWhen', label: 'Visible When', type: 'code', language: 'expression', helpText: 'CEL predicate over the record (e.g. record.type == \'invoice\') — the entry form shows the whole group, header included, only while it is TRUE.' },
+          ],
+        },
       ],
     },
     {
@@ -423,6 +466,41 @@ export const objectForm = defineForm({
         // row's price of admission.
         { field: 'validations', widget: 'json', helpText: 'Object-level validation rules — an array of rule objects, e.g. [{ "type": "script", "name": "amount_positive", "condition": "amount > 0", "message": "Amount must be positive" }]. State-machine transition tables are declared here too (ADR-0020)' },
         { field: 'datasource', type: 'text', helpText: 'Target datasource ID (default: "default")' },
+        // #19332 (flight G2a of ruling record 5861442317) — the object's declared
+        // indexes, beside `datasource`: storage. A repeater with declared
+        // sub-rows, as `fieldGroups` above, over the three keys the driver reads
+        // (`name`, `fields`, `unique`); `type` and `partial` are tombstones and
+        // need no row.
+        //
+        // `fields` is a free-text list, the `highlightFields` row's face. No
+        // authoring door judges its names: not the schema parse, not the publish
+        // door, not `os validate` (`validate-object-field-refs` leaves it to the
+        // storage layer by design). The SQL driver's `syncDeclaredIndexes` skips
+        // an index naming a column the table does not have, logging a warning,
+        // so the help text claims that and no refusal.
+        //
+        // `unique` is a select over `global` / `organization` ONLY, as the
+        // ruling says. The node is `boolean | 'global' | 'organization'`: a
+        // derived face takes the union's first arm, the boolean, and would offer
+        // a switch that writes the deprecated bare `true`; and no option can
+        // spell a boolean anyway (`FormSelectOptionSchema.value` is a lowercase
+        // identifier). So the select writes only the two scopes the parse
+        // accepts now and after protocol 18. A stored `true` / `false` is shown
+        // by no option, and it is not rewritten: an edit merges into the stored
+        // entry, so `unique` changes only when the author picks a scope.
+        {
+          field: 'indexes',
+          type: 'repeater',
+          helpText: 'Database indexes on this object\'s table. The SQL driver creates each one the table lacks when it syncs the table; a sync never drops an index.',
+          fields: [
+            { field: 'name', label: 'Name', type: 'text', helpText: 'Physical index name. Unset: generated from the table and the columns (e.g. idx_task_status).' },
+            { field: 'fields', label: 'Fields', widget: 'string-tags', required: true, helpText: 'Column names of this object, in key order (e.g. status, owner). Nothing checks them when you save or publish: a name that is not a stored column makes the SQL driver skip the whole index, with a warning in the server log.' },
+            { field: 'unique', label: 'Unique', type: 'select', helpText: 'Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope.', options: [
+              { label: 'Global — one holder across the installation, over exactly these columns', value: 'global' },
+              { label: 'Organization — one holder per organization (the driver prepends the organization column)', value: 'organization' },
+            ] },
+          ],
+        },
         // #19331 — five more declared scalars with no control. Each enum gets an
         // explicit `options` list because the bare member reads as a word and
         // the choice it stands for is a security or lifecycle contract; the copy
