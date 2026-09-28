@@ -72,7 +72,7 @@ import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js'
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
-import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
   computeTenantLayer0Verdict,
   tenantLayer0FilterOf,
@@ -119,7 +119,12 @@ import {
   type ISeedSettlementService,
   type SeedSettlementSnapshot,
 } from '@objectstack/spec/contracts';
-import { matchesFilterCondition } from '@objectstack/formula';
+import {
+  crossFieldClassRefusalCarriedBy,
+  findCrossFieldClassRefusal,
+  matchesFilterCondition,
+  type MatchesFilterOptions,
+} from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import {
@@ -3165,8 +3170,51 @@ export class SecurityPlugin implements Plugin {
               developerMessage,
             );
           };
-          const satisfiesCheck = (image: Record<string, unknown>): boolean =>
-            checkParts.every((f) => matchesFilterCondition(image as any, f as any));
+          // [#20355] The object's declared columns go with every judgement, so
+          // the evaluator applies the spec's cross-field comparison class — the
+          // rule driver-sql's read applies to the same policy. A comparison
+          // between two columns of no shared class (text vs number, text vs a
+          // file field, anything vs a formula field) is refused `INVALID_FILTER`
+          // / 400 for every image, where it used to be answered by comparing
+          // the two raw values and the write admitted and stored. No map (a
+          // schema that cannot be loaded) judges values only, as before.
+          const checkFieldOptions = await this.writeCheckFieldOptions(opCtx.object);
+          const satisfiesCheck = (image: Record<string, unknown>): boolean => {
+            try {
+              return checkParts.every((f) => matchesFilterCondition(image as any, f as any, checkFieldOptions));
+            } catch (e) {
+              const refusal = crossFieldClassRefusalCarriedBy(e);
+              if (refusal && checkFieldOptions?.fields) {
+                // The caller's 400 names nothing from the policy; the operator
+                // reading this line is told which policy and which columns.
+                const fields = checkFieldOptions.fields;
+                const policies = checkParts.flatMap((f) => {
+                  const members = compiledPolicyNameOf(f) === undefined && Array.isArray((f as { $or?: unknown }).$or)
+                    ? ((f as { $or: unknown[] }).$or)
+                    : [f];
+                  return members
+                    .filter((m) => findCrossFieldClassRefusal(m as Record<string, unknown>, fields) !== null)
+                    .map((m) => compiledPolicyNameOf(m) ?? '(unnamed)');
+                });
+                ctx.logger.warn(
+                  `[Security] RLS check REFUSED on ${opCtx.operation} '${opCtx.object}' (INVALID_FILTER): ` +
+                    `policy ${[...new Set(policies)].map((p) => `'${p}'`).join(', ') || '(unattributed)'} — ` +
+                    `${refusal.diagnostic}. Two columns are compared only within one comparison class; the ` +
+                    `read this policy scopes is refused for the same reason.`,
+                  {
+                    operation: opCtx.operation,
+                    object: opCtx.object,
+                    policies: [...new Set(policies)],
+                    field: refusal.field,
+                    operator: refusal.operator,
+                    reference: refusal.reference,
+                    userId: opCtx.context?.userId ?? 'unknown',
+                  },
+                );
+              }
+              throw e;
+            }
+          };
           // [insert-check commit a016f08b8a] (the original card no longer resolves)
           // The judgement the engine runs: every image it hands over
           // must pass, and the first that fails refuses the whole write. The
@@ -8723,6 +8771,38 @@ export class SecurityPlugin implements Plugin {
       this.fieldNamesCache.set(objectName, result);
     }
     return result;
+  }
+
+  /**
+   * [#20355] The object's declared columns as the write check's evaluator reads
+   * them — each field's `type` and `multiple` — from the sources
+   * {@link loadObjectFieldNames} reads, in its order: ObjectQL's live
+   * SchemaRegistry first, then the metadata service.
+   *
+   * `undefined` when neither answers with a field map: the evaluator then
+   * judges values only, exactly as it did before it could judge declarations —
+   * a schema that cannot be loaded must not manufacture refusals (the field
+   * guard's rule in `rls-compiler.ts`, `RlsFieldGuard`). A field without a string `type` is
+   * left out, so it is never judged.
+   */
+  private async writeCheckFieldOptions(object: string): Promise<MatchesFilterOptions | undefined> {
+    let obj: any;
+    try {
+      obj = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
+      if (!obj || !obj.fields) obj = await this.metadata?.get?.('object', object);
+    } catch {
+      return undefined;
+    }
+    if (!obj || !obj.fields || typeof obj.fields !== 'object') return undefined;
+    const fields: Record<string, { type: string; multiple?: boolean }> = {};
+    const entries: Array<[string, any]> = Array.isArray(obj.fields)
+      ? (obj.fields as any[]).filter((f) => f?.name).map((f) => [String(f.name), f])
+      : Object.entries(obj.fields as Record<string, any>);
+    for (const [name, decl] of entries) {
+      if (!decl || typeof decl !== 'object' || typeof decl.type !== 'string') continue;
+      fields[name] = { type: decl.type, multiple: decl.multiple === true };
+    }
+    return { fields };
   }
 
   private async loadObjectFieldNames(

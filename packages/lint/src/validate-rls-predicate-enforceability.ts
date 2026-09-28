@@ -1225,23 +1225,21 @@ export const CROSS_CLASS_SENTENCE =
  * through the real plugin-security and ObjectQL on driver-sql (see this file's
  * header).
  *
- * ⚠️ The WRITE half is the in-process write check's behaviour, which the engine
- * lane moves onto the same classification: when it does, this sentence changes
- * in the same change.
+ * The WRITE half is the in-process write check's behaviour, which reads the
+ * same classification since the engine lane moved it onto
+ * `crossFieldComparisonVerdict` (#20355): it refuses where the read refuses.
  */
 function crossClassConsequence(clause: 'using' | 'check'): string {
   const write =
-    'the in-process write check has no class rule of its own, so a single-record insert or by-id update it ' +
-    'judges compares the two raw values instead, and the write is admitted and stored whenever that ' +
-    'comparison happens to hold — an answer the read path refuses to give';
+    'the in-process write check refuses the comparison by the same classification (`INVALID_FILTER` / 400), ' +
+    'so every insert or update it judges is refused and nothing is stored';
   return clause === 'using'
     ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses ' +
         'the comparison by the two columns\' declared types), and every by-id update or delete it scopes fails ' +
         'closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or `all` policy the same `using` is also ' +
         'the write check whenever no applicable policy for that operation declares a `check` (ADR-0058 D4), and ' +
         `there ${write}.`
-    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and is enforced by an ` +
-        'accident of the two values.';
+    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and admits no write at all.`;
 }
 
 /** The prescription both rules share, ahead of their per-surface alternatives. */
