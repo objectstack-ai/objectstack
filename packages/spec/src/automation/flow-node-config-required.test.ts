@@ -165,6 +165,14 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
       expect(issuesOf(flowWith(node('script', { function: '' })))).toEqual([]);
     });
 
+    it('a key missing INSIDE an authored value is not a config key left out — the value-envelope pass owns it', () => {
+      // `fields.*` is a ledger `value` slot: `{ dialect: 'cel' }` with no
+      // `source` is a malformed envelope, refused at `registerFlow` and
+      // `objectstack validate` by that pass, with its own message.
+      expect(flowNodeConfigRefusals('create_record', { objectName: 'task', fields: { total: { dialect: 'cel' } } })).toEqual([]);
+      expect(flowNodeConfigRefusals('update_record', { objectName: 'task', filter: { id: '1' }, fields: { total: { dialect: 'cel' } } })).toEqual([]);
+    });
+
     it('an undeclared key is not this rule\'s finding — no key-set closure', () => {
       expect(issuesOf(flowWith(node('http', { url: 'https://example.com', zzz_undeclared: 1 })))).toEqual([]);
     });

@@ -1433,7 +1433,7 @@ describe('AutomationEngine - Execution History', () => {
                 name: 'failing_flow',
                 nodes: [
                     { id: 'start', type: 'start' as const, label: 'Start' },
-                    { id: 'bad', type: 'script' as const, label: 'Bad' },
+                    { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
                     { id: 'end', type: 'end' as const, label: 'End' },
                 ],
                 edges: [
@@ -3167,7 +3167,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         name, label: name, type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
-            { id: 'bad', type: 'script' as const, label: 'Bad' },
+            { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
             { id: 'end', type: 'end' as const, label: 'End' },
         ],
         edges: [

@@ -19,6 +19,7 @@
 
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
+import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
 // The executor contracts. Read only inside `getBuiltinNodeConfigContracts`,
 // never at module load: `control-flow.zod.ts` sits in the flow-schema import
@@ -160,6 +161,22 @@ function insideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boole
   return (FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === path[0]);
 }
 
+/**
+ * Does an issue path descend INTO a ledger `value` slot (`fields.total.source`
+ * under `fields.*`)? Such a slot holds an authored VALUE — a literal, a
+ * `{token}` template, or an expression envelope — and a key missing inside it
+ * is a malformed value, judged at `registerFlow` and `objectstack validate` by
+ * the value-envelope pass with its own refusal, never a config key left out.
+ */
+function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+  return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
+    if (entry.nodeType !== nodeType || entry.role !== 'value') return false;
+    const segments = entry.path.split('.');
+    if (path.length <= segments.length) return false;
+    return segments.every((segment, i) => segment === '*' || segment === path[i]);
+  });
+}
+
 /** The refusal for a key a node's executor contract requires. */
 function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
   return (
@@ -186,7 +203,10 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
  * authored. That keeps the judge to one question — "would the run refuse this
  * node for a key it leaves out?" — and leaves every other contract finding
  * (a present value of the wrong type, an undeclared key) where it lives
- * today. Issues inside an ADR-0031 region are the region's own and skipped.
+ * today. Issues inside an ADR-0031 region are the region's own and skipped,
+ * and so are issues inside a ledger `value` slot (`fields.*`,
+ * `assignments.*`): a key missing inside an authored value is a malformed
+ * value, refused by the value-envelope pass, not a config key left out.
  *
  *  - A key the contract simply requires → `node-config-key-missing`, whose
  *    message names the key and the node type.
@@ -237,6 +257,7 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   for (const issue of result.error?.issues ?? []) {
     if (issue.path.length === 0) continue;
     if (insideRegion(nodeType, issue.path)) continue;
+    if (insideValueSlot(nodeType, issue.path)) continue;
     if (!absentAt(authored, issue.path)) continue;
     const key = ledgerPathOf(issue.path);
     if (seen.has(key)) continue;

@@ -304,7 +304,8 @@ describe('ADR-0126 §7.3 — disabling a flow is refused while packaged flows ca
             ...packagedFlow(name),
             nodes: [
                 { id: 'start', type: 'start', label: 'Start', config: {} },
-                { id: 'call', type: nodeType, label: 'Call', config: { flowName: target } },
+                // A `map` carries the `collection` its executor contract requires (#20316).
+                { id: 'call', type: nodeType, label: 'Call', config: { flowName: target, ...(nodeType === 'map' ? { collection: [] } : {}) } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
