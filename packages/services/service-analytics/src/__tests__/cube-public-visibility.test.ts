@@ -29,8 +29,10 @@
  *   are listed and answered;
  * - the three INTERNAL producers (`inferCubeFromQuery`, `compileDataset`,
  *   `CubeRegistry.inferFromObject`) mint visible cubes, so the ad-hoc KPI path
- *   and the dataset door — which reaches `query()` through `DatasetExecutor` —
- *   keep answering after the flag became enforced.
+ *   and the dataset door — whose `DatasetExecutor` queries run through the
+ *   same gate, asked of the call's own request scope — keep answering after
+ *   the flag became enforced, and a dataset named like a hidden cube runs as
+ *   itself rather than answering in a way that would reveal the hidden name.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -202,7 +204,7 @@ describe('analytics_cube.public — the internal producers mint visible cubes', 
     expect((await service.getMeta()).map((c) => c.name)).toEqual(['crm_account']);
   });
 
-  it('the dataset door: `queryDataset` reaches `query()` through DatasetExecutor with its compiled cube', async () => {
+  it('the dataset door: `queryDataset` runs its compiled cube through the same gate, and it answers', async () => {
     const service = new AnalyticsService({
       logger: silentLogger,
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
@@ -219,7 +221,42 @@ describe('analytics_cube.public — the internal producers mint visible cubes', 
     const result = await service.queryDataset(dataset, { dimensions: ['stage'], measures: ['total'] });
 
     expect(result.rows).toEqual([{ stage: 'won', total: 3 }]);
-    expect(service.cubeRegistry.get('pipeline')?.public).toBe(true);
+  });
+
+  it('the dataset door does not reveal a hidden name: a dataset named like a hidden cube runs as itself, exactly like any other name', async () => {
+    const secret: Cube = { name: 'pipeline', sql: 'secret_table', measures, dimensions, public: false };
+    const withHidden = new AnalyticsService({
+      logger: silentLogger,
+      cubes: [secret],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [{ stage: 'won', total: 3 }],
+    });
+    const without = new AnalyticsService({
+      logger: silentLogger,
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [{ stage: 'won', total: 3 }],
+    });
+    const dataset = DatasetSchema.parse({
+      name: 'pipeline',
+      label: 'Pipeline',
+      object: 'opportunity',
+      dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+      measures: [{ name: 'total', aggregate: 'count' }],
+    });
+    const selection = { dimensions: ['stage'], measures: ['total'] };
+
+    // The call's own compiled cube answers its name inside the request, so the
+    // gate asks about THAT cube (visible) — the same outcome as for a name no
+    // configured cube has, which is what keeps this door from being an oracle.
+    expect((await withHidden.queryDataset(dataset, selection)).rows).toEqual(
+      (await without.queryDataset(dataset, selection)).rows,
+    );
+    // …and the configured hidden cube is untouched: still omitted, still refused.
+    expect(await withHidden.getMeta('pipeline')).toEqual([]);
+    await expect(withHidden.query({ cube: 'pipeline', measures: ['pipeline.count'] })).rejects.toMatchObject({
+      code: 'CUBE_NOT_FOUND',
+      status: 404,
+    });
   });
 
   it('`compileDataset` and `CubeRegistry.inferFromObject` write the visible default', () => {

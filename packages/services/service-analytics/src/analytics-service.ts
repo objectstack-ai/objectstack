@@ -1444,9 +1444,12 @@ export class AnalyticsService implements IAnalyticsService {
     // `analytics_cube.public` — first, ahead of token resolution, cube
     // inference, admission and every strategy: a hidden cube is refused
     // whatever else the request carries, and the refusal leaves the registry
-    // exactly as it found it. This is also the dataset door's gate —
-    // `DatasetExecutor` reaches its compiled cube through this method.
-    this.assertCubePublic(queryInput.cube);
+    // exactly as it found it. Asked of `scope`, the same scope that answers
+    // the name below: a `queryDataset` call's own compiled cube (visible)
+    // answers its name there, so a dataset named like a hidden configured
+    // cube runs as itself instead of being refused — a refusal there would
+    // be an oracle for which names are hidden.
+    this.assertCubePublic(queryInput.cube, scope);
 
     // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
     // seam — before strategy selection — so every strategy compiles the same
@@ -2163,7 +2166,7 @@ export class AnalyticsService implements IAnalyticsService {
     }
     // Same gate as `query()`: the dry-run door must not hand out the
     // statement — the cube's measures, raw SQL included — of a hidden cube.
-    this.assertCubePublic(queryInput.cube);
+    this.assertCubePublic(queryInput.cube, this.sharedScope);
 
     // [#12230] Same token seam as `query()` — the dry-run door must show the
     // statement that would actually run (a resolved user id in the params, or
@@ -2188,9 +2191,13 @@ export class AnalyticsService implements IAnalyticsService {
    * (`cube-visibility.ts` says why).
    * A name with no registered cube passes: it is the ad-hoc path's to infer or
    * refuse (`assertInferableCube`), and every cube that path mints is visible.
+   *
+   * The name is resolved through `scope` — the scope the rest of the call
+   * resolves it through — never the shared registry directly, so the gate and
+   * the query can never be asking about two different cubes.
    */
-  private assertCubePublic(name: string): void {
-    const cube = this.cubeRegistry.get(name);
+  private assertCubePublic(name: string, scope: CubeScope): void {
+    const cube = scope.getCube(name);
     if (cube && !isCubePublic(cube)) throw cubeNotFoundError(name);
   }
 

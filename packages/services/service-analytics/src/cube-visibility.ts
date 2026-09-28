@@ -10,10 +10,11 @@ import type { Cube } from '@objectstack/spec/data';
  *
  * A cube declared `public: false` is hidden from the analytics API: discovery
  * (`getMeta`, `GET /analytics/meta`) omits it, and every door that runs a query
- * against a named cube refuses it — `query()` (`POST /analytics/query`, and the
- * dataset door, which reaches `query()` through `DatasetExecutor`) and
- * `generateSql()` (`POST /analytics/sql`). Anything else is visible; the schema
- * default is `true`.
+ * against a named cube refuses it — `query()` (`POST /analytics/query`) and
+ * `generateSql()` (`POST /analytics/sql`). The dataset door's queries run
+ * through the same gate (`queryIn`), asked of the call's own request scope, so
+ * a dataset's compiled cube — visible — answers its own name there. Anything
+ * else is visible; the schema default is `true`.
  *
  * It is VISIBILITY, not row security. An object's records stay governed by the
  * object's permissions and row-level security on every door (`assertReadAdmitted`
