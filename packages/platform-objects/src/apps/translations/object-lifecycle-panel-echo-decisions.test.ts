@@ -1115,8 +1115,13 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // form's `columns` / `sort` / `tabs` repeaters, authored in all three
       // locales. 608 since #20161: the report form's joined-block `chart` row
       // left with its key (nothing ever drew a block chart), taking its label
-      // — authored in all three locales — out of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(608);
+      // — authored in all three locales — out of the catalog. 598 since #20301:
+      // the list view's own `tabs` is a retired key, and its form repeater left
+      // `view.form.ts` with it — the repeater's own label and its nine row labels
+      // (`name`, `label`, `icon`, `view`, `filter`, `order`, `pinned`,
+      // `isDefault`, `visible`), ten leaves authored in all three locales, out of
+      // the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(598);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
