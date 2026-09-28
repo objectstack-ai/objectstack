@@ -305,13 +305,15 @@ function notifyMissingEndpointMatcher(surface: string): void {
  * an empty-fields 200. Mirrors the REST layer's `sendFieldVisibilityFault`.
  */
 function fieldVisibilityFault(deps: DomainHandlerDeps, objectName: string): HttpDispatcherResult {
-    return {
-        handled: true,
-        response: deps.error(
-            `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
-            503,
-        ),
-    };
+    return { handled: true, response: fieldVisibilityFaultResponse(deps, objectName) };
+}
+
+/** [#20478] {@link fieldVisibilityFault}'s response alone, for an answer that owes it headers ({@link withHeaders}). */
+function fieldVisibilityFaultResponse(deps: DomainHandlerDeps, objectName: string): { status: number; body: any } {
+    return deps.error(
+        `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
+        503,
+    );
 }
 
 /**
@@ -820,7 +822,7 @@ async function answerMetaLayered(
         case 'serve':
             return withHeaders(deps.success(answer.layered), { ...headers, 'Cache-Control': answer.cacheControl });
         case 'mask-fault':
-            return withHeaders(fieldVisibilityFault(deps, answer.object).response!, headers);
+            return withHeaders(fieldVisibilityFaultResponse(deps, answer.object), headers);
         case 'refuse': {
             const { refusal } = answer;
             if (refusal.reason === 'absent') return withHeaders(deps.error('Not found', 404), headers);
