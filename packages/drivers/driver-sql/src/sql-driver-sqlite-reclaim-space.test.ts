@@ -124,6 +124,11 @@ describe('SqlDriver.reclaimSpace() on better-sqlite3 returns the whole freelist'
     const reader: Knex = knex({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
     cleanup.push(() => reader.destroy());
     const snapshot = await reader.transaction();
+    // Runs before the destroy above: a failed assertion must not leave the
+    // reader's connection checked out, or the destroy waits for it.
+    cleanup.push(async () => {
+      if (!snapshot.isCompleted()) await snapshot.rollback();
+    });
     await snapshot.raw('SELECT count(*) AS n FROM bulk');
     const before = await secondConnection(file);
     expect(before.freelist).toBeGreaterThanOrEqual(550);
