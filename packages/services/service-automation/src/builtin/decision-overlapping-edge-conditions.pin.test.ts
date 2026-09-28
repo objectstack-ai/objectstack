@@ -31,13 +31,18 @@ import { registerLogicNodes } from './logic-nodes.js';
  *     `DecisionConfigSchema`: a value outside the closed pair, or a `mode`
  *     beside a non-empty `conditions` list, refuses the flow with the schema's
  *     sentence — the same one `os validate` prints.
- *  5. **The rehydration seam does not rewrite the flip.** The ADR-0087
- *     conversion `flow-decision-mode-inclusive-explicit` writes `mode:
- *     'inclusive'` onto a two-branch decision so an OLD flow keeps its
- *     behaviour, but only where the operator asserts the source's age
- *     (`os migrate meta --from 17`); `registerFlow` cannot date a body and
- *     refuses the entry by id, or every NEW exclusive decision would register
- *     as an inclusive one.
+ *  5. **The rehydration seam does not rewrite the flip, and a stored row takes
+ *     the new meaning.** The ADR-0087 conversion
+ *     `flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto a
+ *     two-branch decision so an OLD authored source keeps its behaviour, but
+ *     only where the operator asserts the source's age (`os migrate meta
+ *     --from 17`); `registerFlow` cannot date a body and refuses the entry by
+ *     id, or every NEW exclusive decision would register as an inclusive one.
+ *     So a decision stored in `sys_metadata` before protocol 18, with no
+ *     `mode` and overlapping conditions, runs FIRST-MATCH after the upgrade —
+ *     by maintainer ruling letter C on #15429 (no stored-row rewrite, no
+ *     cutoff, no read-path completion); `os migrate meta --stored` lists such
+ *     nodes for review and writes nothing.
  *  6. **Scoped to `decision`.** Conditioned out-edges of any other node type
  *     keep the every-true-edge traversal they had.
  *
@@ -386,7 +391,7 @@ describe('decision edge branching — exclusive by default, inclusive by declara
         });
     });
 
-    // ── 5. The rehydration seam does not rewrite the flip ─────────────────
+    // ── 5. The rehydration seam does not rewrite the flip (ruling C) ──────
 
     describe('the flow rehydration seam refuses `flow-decision-mode-inclusive-explicit` by id', () => {
         const twoBranches = () => gatewayFlow(OVERLAP);
@@ -413,11 +418,39 @@ describe('decision edge branching — exclusive by default, inclusive by declara
             expect(trace).toEqual(['enter:refuse', 'exit:refuse']);
         });
 
-        it('FIRING CONTROL — the same body through the D3 chain (`os migrate meta --from 17`) DOES get `mode: inclusive`', () => {
+        it('RULING C — a STORED decision lacking `mode`, with overlapping conditions, evaluates FIRST-MATCH after the upgrade: the row registers as stored', async () => {
+            // The body exactly as a `sys_metadata` row written before protocol 18
+            // carries it — JSON text, no `mode` — and every door a stored row
+            // re-enters by (the boot pull, a Studio save, `os migrate meta
+            // --stored`) goes through this one seam.
+            const stored = JSON.parse(JSON.stringify(twoBranches()));
+
+            // What the stored pass would persist: no `mode` written, no notice for it.
+            const { storable, notices } = engine.canonicalizeStoredFlow('gateway', stored);
+            const storableCheck = ((storable as { nodes: Array<{ id: string; config?: unknown }> }).nodes).find((n) => n.id === 'check')!;
+            expect(storableCheck.config).toBeUndefined();
+            expect(notices.map((n) => n.conversionId)).not.toContain('flow-decision-mode-inclusive-explicit');
+
+            engine.registerFlow('gateway', stored);
+            await run({ status: 'confirmed' });
+
+            // Both predicates hold for a confirmed lead; only the first declared runs.
+            expect(trace).toEqual(['enter:refuse', 'exit:refuse']);
+            expect(await stepsOfLastRun()).toContainEqual({ nodeId: 'convert', status: 'skipped', edgeId: 'e_convert' });
+        });
+
+        it('RULING C, and the FIRING CONTROL for both pins above — a SOURCE migrated with `os migrate meta --from 17` carries explicit `mode: inclusive` and still takes EVERY branch', async () => {
             const result = applyMetaMigrations({ flows: [twoBranches()] }, 17, 18);
             const migrated = (result.stack.flows as Array<{ nodes: Array<{ id: string; config?: Record<string, unknown> }> }>)[0]!;
             expect(migrated.nodes.find((n) => n.id === 'check')!.config).toEqual({ mode: 'inclusive' });
             expect(result.applied.map((a) => a.conversionId)).toContain('flow-decision-mode-inclusive-explicit');
+
+            engine.registerFlow('gateway', migrated);
+            await run({ status: 'confirmed' });
+
+            // Every true branch, one after another — exactly what the flow did before protocol 18.
+            expect(trace).toEqual(['enter:refuse', 'exit:refuse', 'enter:convert', 'exit:convert']);
+            expect((await stepsOfLastRun()).filter((s) => s.status === 'skipped')).toEqual([]);
         });
     });
 
