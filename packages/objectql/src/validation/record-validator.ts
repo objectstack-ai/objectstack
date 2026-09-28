@@ -28,7 +28,8 @@
  *  - number types   an array, boolean or object is `invalid_number`, never
  *                   coerced (#20309); a number, or a string by `Number()`,
  *                   must be finite
- *  - `min` / `max`                        (number/currency/percent/rating/slider)
+ *  - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
+ *                   since #20386; it takes neither `scale` nor `precision`)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
  *                   maintainer ruling 2026-08-11), on `number` / `percent` /
@@ -942,19 +943,28 @@ function validateOne(
     if (!Number.isFinite(n)) {
       return fail('invalid_number');
     }
-    // [#20308] `progress` joined the TYPE check above, and only that. The
-    // bounds and `scale` below keep the five types they always read: `scale`'s
-    // own contract names the types it is enforced on (`number`, `percent`,
-    // `rating`, `slider`), and `min` / `max` on `progress` were never enforced;
-    // starting to enforce either would narrow what a caller may write, which is
-    // a separate decision from "a numeric column holds a number".
-    if (t === 'progress') return null;
+    // `min` / `max` bind on every type through this door, `progress` included.
+    // [#20386] `progress` joined the TYPE check above in #20308 and, with this
+    // change, the bounds: `FieldSchema.min` / `max` declare 「Checked on the
+    // WRITTEN value only」 with no type exclusion, and triage 5865053231 ruled
+    // ENFORCE — a `progress` field that declares `max: 100` stored `150` (and
+    // `min: 0` stored `-5`) with 201 on memory and SQLite while `number`
+    // refused both. It answers the `number` field's codes, `min_value` /
+    // `max_value`. A narrowing of what a caller may write, shipped BREAKING.
     if (def.min !== undefined && n < def.min) {
       return fail('min_value', { min: def.min });
     }
     if (def.max !== undefined && n > def.max) {
       return fail('max_value', { max: def.max });
     }
+    // ⛔ …and only the bounds. `scale` and `precision` below keep the five
+    // types they always read, because each key's own contract names them:
+    // `scale` 「Applies to `number`, `percent`, `rating` and `slider` fields」,
+    // `precision` 「Enforced on writes of `number`, `currency`, `percent`,
+    // `rating` and `slider` fields … Not read on any other field type」.
+    // Starting either on `progress` would narrow a write that no contract
+    // names, so this return stays below the bounds and above both.
+    if (t === 'progress') return null;
     // ── `scale` — enforced by REJECTION, never rounding (#7501) ──
     // Maintainer ruling 2026-08-11: an over-scale value is refused the way an
     // out-of-range one is; silent rounding is silently altering data. Applies
