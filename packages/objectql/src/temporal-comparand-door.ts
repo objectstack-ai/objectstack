@@ -391,10 +391,11 @@ export function assertTemporalComparandsInterpretable(
 }
 
 /**
- * [#20263] The remedy on a `having` column. No relative-date placeholder: the
- * engine does not resolve filter placeholders in `having` (only in `where` and
- * a per-aggregation `filter`), so naming `{30_days_ago}` here would send the
- * author to a spelling `having` compares as the literal text it is.
+ * [#20263] The remedy on a `having` column: the literal forms only, no
+ * relative-date placeholder, written when `having` resolved none. [#20334]
+ * `having` resolves placeholders through `where`'s resolver, so
+ * `{30_days_ago}` is a correct spelling here too; these words were left as
+ * they were, so no refusal's text moved with that change.
  */
 const HAVING_REMEDY: Record<TemporalComparandKind, string> = {
   datetime:

@@ -247,7 +247,7 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     await expectHavingRefusal(() => ({ d: { $gt: Y10000 } }), [{ field: 'opened_at', dateGranularity: 'day', alias: 'd' }]);
   });
 
-  it('the remedy names no placeholder: having resolves none, so it would send the author to a literal', async () => {
+  it('the remedy names the literal forms only, no placeholder', async () => {
     for (const having of [{ last_placed: { $lt: 'x' } }, { first_opened: { $lt: 'x' } }]) {
       expect(await expectHavingRefusal(() => having)).not.toContain('{30_days_ago}');
     }
@@ -306,7 +306,6 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['a string on count — not temporal', { n: { $gt: 'not-a-date' } }, []],
     ['a string on avg — not temporal', { mean: { $gt: 'not-a-date' } }, []],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
-    ['an unknown {placeholder} too', { last_placed: { $gte: '{not_a_token}' } }, []],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],
     ['$exists', { last_placed: { $exists: true } }, ['c1', 'c2', 'c3', 'c4']],
@@ -324,6 +323,19 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
       expect(await keptGroups(having)).toEqual(kept);
     });
   }
+
+  // [#20334] An unknown one is stepped around by this door too, and is then
+  // refused one layer down by the token resolver, in its own code, as on
+  // `where` (it kept no group with a 200 before `having` resolved tokens).
+  it('an unknown {placeholder} is not this door\'s verdict: FILTER_TOKEN_UNKNOWN from the resolver, before any read', async () => {
+    for (const path of ['native', 'rows'] as const) {
+      const { engine, reads } = await makeEngine(path, ROWS);
+      const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { last_placed: { $gte: '{not_a_token}' } })));
+      expect(err?.code, path).toBe('FILTER_TOKEN_UNKNOWN');
+      expect(err?.status, path).toBe(400);
+      expect(reads, path).toEqual({ aggregate: 0, find: 0 });
+    }
+  });
 
   it('a coarser bucket is a text label, and is not judged', async () => {
     const kept = await keptGroups(
