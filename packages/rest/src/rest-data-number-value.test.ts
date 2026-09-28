@@ -1,24 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #20309 — a number field refuses a non-number at every REST write door, on a
- * real engine (`ObjectQL` + sqlite `SqlDriver`) and the real `RestServer`
- * routes (the harness `rest-data-blank-typed-value.test.ts` boots).
+ * #20309 — a number field refuses an array, a boolean or an object at every
+ * REST write door, on a real engine (`ObjectQL` + sqlite `SqlDriver`) and the
+ * real `RestServer` routes (the harness `rest-data-blank-typed-value.test.ts`
+ * boots).
  *
  * Measured on `origin/main` c74de10a94 with this harness: `POST /data/:object`
  * with `[500]` on a number field answered 201, and SQLite stored the TEXT
  * `'[500]'`, which `GET` returned as the string `"[500]"`. `[]` stored `'[]'`,
- * `true` stored `1`, and `'0x10'` stored the TEXT `'0x10'` (read back as
- * `16`). Every one of those now answers `400 VALIDATION_FAILED` with the field
- * code `invalid_number`, and no row is written or changed.
+ * and `true` / `false` stored `1` / `0`. Every one of those now answers
+ * `400 VALIDATION_FAILED` with the field code `invalid_number`, and no row is
+ * written or changed.
  *
  * The PHYSICAL column is read with the driver's own query builder and SQLite's
- * `typeof()`, past every engine read coercion, because the read repair makes a
- * stored TEXT `'0x10'` look like the number `16`.
+ * `typeof()`, past every engine read coercion.
  *
- * Controls: `[5, 7]` was already refused and still is; a JS number is stored as
- * a SQLite `real` (`integer` on `rating`) and read back unchanged; a blank is
- * still stored as `null` (#20308).
+ * Controls: `[5, 7]` and `{}` were already refused and still are; a JS number
+ * is stored as a SQLite `real` (`integer` on `rating`) and read back
+ * unchanged; a blank is still stored as `null` (#20308). A string is not
+ * judged differently here: that half waits on #20336.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -39,14 +40,14 @@ const OBJ = {
   },
 };
 
-/** The card's table and the coercions it named. */
+/** The card's table and the non-string coercions it named. */
 const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
   ['[500]', [500]],
   ['[5, 7]', [5, 7]],
   ['[]', []],
   ['true', true],
-  ["'0x10'", '0x10'],
-  ["' 12 '", ' 12 '],
+  ['false', false],
+  ['{}', {}],
 ];
 
 const liveEngines: ObjectQL[] = [];

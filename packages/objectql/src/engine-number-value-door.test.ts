@@ -1,20 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #20309 — on every engine write door, what the number arm judged is what the
- * driver receives.
+ * #20309 — on every engine write door, an array, boolean or object on a number
+ * field is refused before the driver sees it.
  *
  * The arm used to judge `Number(value)` while the write carried `value`, so
- * `[500]`, `[]`, `true`, `'0x10'`, `' 12 '` and `'12'` passed and reached the
- * driver as sent. Measured on `origin/main` c74de10a94: memory stored each
- * verbatim (the array, the boolean, the string), and SQLite stored `'[500]'` /
- * `'[]'` / `'0x10'` as TEXT and `true` as `1`.
+ * `[500]`, `[]` and `true` passed and reached the driver as sent. Measured on
+ * `origin/main` c74de10a94: memory stored each verbatim (the array, the
+ * boolean), and SQLite stored `'[500]'` / `'[]'` as TEXT and `true` as `1`.
  *
  * This file pins the DRIVER-FACING half on each door: a refused value never
  * reaches the driver (no `create`, `bulkCreate`, `update` or `updateMany`
  * call carries it), and an accepted number arrives as the same number
- * (`Object.is`). Memory and MongoDB store exactly this payload. The SQL
- * physical column is pinned in `packages/rest/src/rest-data-number-value.test.ts`.
+ * (`Object.is`), so for a number what the arm judged is what the driver
+ * receives. Memory and MongoDB store exactly this payload. The SQL physical
+ * column is pinned in `packages/rest/src/rest-data-number-value.test.ts`.
+ * A string is not judged differently here: that half waits on #20336.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -25,15 +26,14 @@ import { ValidationError } from './validation/record-validator.js';
 const JUDGED = [...NUMERIC_VALUE_TYPES].filter((t) => !COMPUTED_VALUE_TYPES.has(t));
 const f = (t: string) => `f_${t}`;
 
-/** The card's table and the coercions it named, all refused now. */
+/** The card's table and the non-string coercions it named: all refused. */
 const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
   ['[500]', [500]],
   ['[5, 7]', [5, 7]],
   ['[]', []],
   ['true', true],
-  ["'0x10'", '0x10'],
-  ["' 12 '", ' 12 '],
-  ["'12'", '12'],
+  ['false', false],
+  ['{}', {}],
 ];
 
 interface Call { fn: string; rows: Record<string, unknown>[] }

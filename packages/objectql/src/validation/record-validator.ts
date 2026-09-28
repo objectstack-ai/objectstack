@@ -25,9 +25,9 @@
  *  - `valueDomain`  a declared standard domain's membership, judged by the
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
- *  - number types   the value must be a finite JS number, the spec's stored
- *                   value; a string, array or boolean is `invalid_number`,
- *                   never coerced (#20309)
+ *  - number types   an array, boolean or object is `invalid_number`, never
+ *                   coerced (#20309); a number, or a string by `Number()`,
+ *                   must be finite
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
@@ -861,24 +861,29 @@ function validateOne(
   // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
   // whole numeric class).
   //
-  // [#20309] ONLY a finite JS number passes: the spec's stored value for this
-  // class, `valueSchemaFor`'s `z.number().finite()`. The arm judges the value
-  // the driver receives, and the driver receives exactly what was sent, since
-  // nothing between here and the driver rewrites a numeric value. The arm used
-  // to judge `Number(value)` instead, so every value JS coerces to a finite
-  // number passed and was then written as sent: `[500]` (SQLite stored the
-  // TEXT `'[500]'`, memory the array), `[]`, `true` / `false`, `'0x10'`,
-  // `' 12 '`, `'1e3'`, and a plain `'12'` (memory stored the string).
-  // ⛔ No coercion here: refuse, never silently alter (the #7501 posture). A
-  // write door that parses a string into a number is a second dialect of the
-  // value contract. A producer that holds a string converts it itself, as the
-  // import route does (`parseNumberCell` in `@objectstack/rest`) before the
-  // engine sees the row.
+  // [#20309] A value that is neither a number nor a string is refused: an
+  // array, a boolean, a plain object, a `Date`. The arm used to judge
+  // `Number(value)` on every value while the write carried `value`, so each of
+  // these that JS coerces to a finite number passed and reached the driver as
+  // sent: `[500]` (SQLite stored the TEXT `'[500]'`, memory the array), `[]`,
+  // `true` / `false`. None is the spec's stored value for this class
+  // (`valueSchemaFor`: `z.number().finite()`) and none has a numeric reading
+  // to parse, so the arm refuses it and never silently alters it (the #7501
+  // posture). A number is judged as itself and written as itself.
+  //
+  // ⛔ A STRING is still judged by `Number()` and written as sent, exactly as
+  // before this change. Which strings a number field accepts is a separate
+  // decision: it waits on the producer census and on the platform's one
+  // numeric grammar, which belongs to `@objectstack/spec` (#20336), never to a
+  // second copy here.
   if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
+    if (typeof value !== 'number' && typeof value !== 'string') {
       return fail('invalid_number');
     }
-    const n = value;
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) {
+      return fail('invalid_number');
+    }
     // [#20308] `progress` joined the TYPE check above, and only that. The
     // bounds and `scale` below keep the five types they always read: `scale`'s
     // own contract names the types it is enforced on (`number`, `percent`,
