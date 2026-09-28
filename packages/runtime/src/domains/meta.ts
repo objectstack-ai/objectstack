@@ -52,9 +52,9 @@ import type { MetadataProtocol } from '@objectstack/spec/api';
 // [#20408] …and the item route's post-read chain, the book-tree route, the
 // list's unknown-type refusal, the object mask's cache posture and the
 // organization a caller's `/meta` request is scoped to.
-// [#20478] …and the layered view, on both of its spellings: its whole answer,
-// the deprecated `?layers=` flag's parse and the headers that flag is served
-// under.
+// [#20478] …and the layered view, on both of its spellings: its post-read
+// chain, the deprecated `?layers=` flag's parse and the headers that flag is
+// served under.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
@@ -880,6 +880,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             operation: 'save',
         });
     };
+
     // Defense-in-depth: the metadata catch-all must honour the same
     // anonymous-deny (#2567) as the REST `/meta` routes (which serve `/meta` on
     // the cloud runtime). Object/field schemas — SYSTEM-object schemas on a
@@ -1005,12 +1006,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // its own resource (#5882).
     //
     // [#20478] `RestServer` serves this route, and this domain had none: the
-    // path fell to the located `ROUTE_NOT_FOUND` tail below. The whole answer is
-    // `createMetaLayeredAnswer` in `@objectstack/rest` ({@link
-    // answerMetaLayered}), the one `RestServer`'s handler calls. EXACTLY three
-    // segments, like `/published` beside it. The anonymous gate above
-    // keeps its deny here (`metaReadRouteOf` names no route), as `RestServer`'s
-    // does.
+    // path fell to the located `ROUTE_NOT_FOUND` tail below. Everything after
+    // the read is `createMetaLayeredAnswer` in `@objectstack/rest` ({@link
+    // answerMetaLayered}), the chain `RestServer`'s handler calls. EXACTLY three
+    // segments, like `/published` beside it. The anonymous gate above keeps its
+    // deny here (`metaReadRouteOf` names no route), as `RestServer`'s does.
     if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
@@ -1187,7 +1187,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const name = decodeMetaNameSegment(parts[1]);
         // Extract optional package filter from query string
         const packageId = query?.package || undefined;
-
 
         // PUT /metadata/:type/:name (Save)
         //
