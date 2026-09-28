@@ -446,11 +446,11 @@ export const opportunityCube = defineCube({
   title: 'Opportunities',
   sql: 'opportunity',            // underlying object name (snake_case)
   public: true,
-  measures: {                    // the record KEY is the member's name — no inner `name`
+  measures: {
     count:  { label: 'Count',        type: 'count', sql: '*' },
     amount: { label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
   },
-  dimensions: {                  // queried as `opportunity.<key>`, e.g. `opportunity.stage`
+  dimensions: {
     stage:            { label: 'Stage',    type: 'string', sql: 'stage' },
     close_date:       { label: 'Close',    type: 'time',   sql: 'close_date',
                         granularities: ['day', 'week', 'month', 'quarter', 'year'] },
