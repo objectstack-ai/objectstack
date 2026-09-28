@@ -219,3 +219,65 @@ describe('TestRunner — the sibling operators are unchanged by #7256', () => {
     expect(error).toContain('Unknown assertion operator: not_contains');
   });
 });
+
+// A result used to carry `scenarioId` and nothing else an author wrote: the
+// suite's `name` and each scenario's `name` were parsed and read by nothing, so a
+// careful human-readable title came back as the terse id in every report. These
+// pin the names onto BOTH result envelopes — the completed run and the
+// setup-failure early return — because a report prints the names of the
+// scenarios that failed at least as often as of the ones that passed.
+describe('TestRunner — results carry the suite and scenario names the author wrote', () => {
+  const step: QA.TestStep = {
+    name: 'step-1',
+    action: { type: 'api_call', target: '/api/v1/health' },
+  };
+
+  /** An adapter whose every action throws — drives the setup-failure envelope. */
+  class ThrowingAdapter implements TestExecutionAdapter {
+    async execute(): Promise<unknown> {
+      throw new Error('target unreachable');
+    }
+  }
+
+  const suite: QA.TestSuite = {
+    name: 'Accounts smoke',
+    scenarios: [
+      {
+        id: 'acct-create',
+        name: 'An account can be created',
+        description: 'Fails when the data API refuses a plain insert.',
+        steps: [step],
+      },
+      { id: 'acct-read', name: 'An account reads back', steps: [step] },
+    ],
+  };
+
+  it('runSuite stamps suiteName, scenarioName and description on every result', async () => {
+    const results = await new TestRunner(new StubAdapter({ ok: true })).runSuite(suite);
+
+    expect(results.map((r) => [r.suiteName, r.scenarioId, r.scenarioName, r.description])).toEqual([
+      ['Accounts smoke', 'acct-create', 'An account can be created', 'Fails when the data API refuses a plain insert.'],
+      ['Accounts smoke', 'acct-read', 'An account reads back', undefined],
+    ]);
+    expect(results.every((r) => r.passed)).toBe(true);
+  });
+
+  it('the setup-failure envelope carries the names too', async () => {
+    const [result] = await new TestRunner(new ThrowingAdapter()).runSuite({
+      name: 'Setup suite',
+      scenarios: [{ id: 'with-setup', name: 'Setup that cannot run', setup: [step], steps: [step] }],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(String(result.error)).toContain('Setup failed');
+    expect(result.suiteName).toBe('Setup suite');
+    expect(result.scenarioName).toBe('Setup that cannot run');
+  });
+
+  it('runScenario on a lone scenario names the scenario and no suite', async () => {
+    const result = await new TestRunner(new StubAdapter({ ok: true })).runScenario(suite.scenarios[1]);
+
+    expect(result.scenarioName).toBe('An account reads back');
+    expect(result.suiteName).toBeUndefined();
+  });
+});

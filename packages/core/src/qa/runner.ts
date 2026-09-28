@@ -3,8 +3,27 @@
 import * as QA from '@objectstack/spec/qa';
 import { TestExecutionAdapter } from './adapter.js';
 
+/**
+ * One scenario's outcome, carrying the names a report leads with.
+ *
+ * `scenarioId` is the machine handle; `scenarioName` and `suiteName` are the
+ * human titles the author wrote (`TestScenario.name`, `TestSuite.name`) — a
+ * report that printed only the id handed the author back the terse half of
+ * what they wrote. `description` rides along so a report can say what a
+ * FAILED scenario was checking without the reader opening the suite file.
+ */
 export interface TestResult {
+  /**
+   * `TestSuite.name` of the suite the scenario ran in. Set by `runSuite`;
+   * absent only when `runScenario` is called on a lone scenario, which has no
+   * suite to name.
+   */
+  suiteName?: string;
   scenarioId: string;
+  /** `TestScenario.name` — the title a report prints for this scenario. */
+  scenarioName: string;
+  /** `TestScenario.description`, when the author wrote one. */
+  description?: string;
   passed: boolean;
   steps: StepResult[];
   error?: unknown;
@@ -59,7 +78,7 @@ export class TestRunner {
   async runSuite(suite: QA.TestSuite): Promise<TestResult[]> {
     const results: TestResult[] = [];
     for (const scenario of suite.scenarios) {
-      results.push(await this.runScenario(scenario));
+      results.push({ suiteName: suite.name, ...(await this.runScenario(scenario)) });
     }
     return results;
   }
@@ -79,6 +98,8 @@ export class TestRunner {
         } catch (e) {
            return {
              scenarioId: scenario.id,
+             scenarioName: scenario.name,
+             description: scenario.description,
              passed: false,
              steps: [],
              error: `Setup failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -133,6 +154,8 @@ export class TestRunner {
 
     return {
       scenarioId: scenario.id,
+      scenarioName: scenario.name,
+      description: scenario.description,
       passed: scenarioPassed,
       steps: stepResults,
       error: scenarioError,
