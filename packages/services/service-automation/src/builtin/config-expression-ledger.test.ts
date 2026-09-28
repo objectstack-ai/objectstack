@@ -28,6 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  flowNodeConfigRefusals,
   getSchemalessNodeConfigJsonSchemas,
   resolveFlowNodeExpressions,
   type FlowNodeExpressionRole,
@@ -231,9 +232,11 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
    * Reconciled over the `predicate` role, the one role the flag acts on: the
    * resolver emits an absent value only for a required PREDICATE slot. The
    * channels require two `flow-template` slots too (`loop.collection`,
-   * `map.collection`), and no door refuses their absence — their executors
-   * parse their own config — so the flag stays off there, and the second
-   * assertion pins that it is never set on another role.
+   * `map.collection`), so the flag stays off there, and the second assertion
+   * pins that it is never set on another role. Their absence is refused at the
+   * three doors all the same since #20316 — by `flowNodeConfigRefusals`, the
+   * judge of every key an executor contract requires — and the test after
+   * this one holds that cross-check.
    */
   it('the ledger marks `required` exactly the predicate slots the declaring channel requires (#19961)', () => {
     const declared = declaredEverywhere().filter((d) => d.role === 'predicate');
@@ -245,6 +248,26 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     // not assumed — and the optional one (`visibleWhen`) is derived as optional.
     expect(requiredByChannel).toEqual(['decision.conditions[].expression (predicate)']);
     expect(declared.filter((d) => !d.required).map(key)).toEqual(['screen.fields[].visibleWhen (predicate)']);
+  });
+
+  /**
+   * [#20316] The cross-check the census rests on: every slot a declaring
+   * channel REQUIRES but the ledger's `required` flag leaves alone (the
+   * non-predicate ones — today `loop.collection` and `map.collection`) is
+   * refused ABSENT by the node-config judge, on a config that is otherwise
+   * whole. Before #20316 all three doors admitted both, and each run refused.
+   */
+  it('every channel-required slot outside the predicate role is refused absent by flowNodeConfigRefusals (#20316)', () => {
+    const requiredElsewhere = declaredEverywhere().filter((d) => d.required && d.role !== 'predicate');
+    expect(requiredElsewhere.map(key).sort()).toEqual(['loop.collection (flow-template)', 'map.collection (flow-template)']);
+    const WHOLE: Record<string, Record<string, unknown>> = {
+      loop: { body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } },
+      map: { flowName: 'child_flow' },
+    };
+    for (const slot of requiredElsewhere) {
+      const refusals = flowNodeConfigRefusals(slot.nodeType, WHOLE[slot.nodeType]);
+      expect(refusals.map((r) => [r.code, r.path]), key(slot)).toEqual([['node-config-key-missing', slot.path]]);
+    }
   });
 
   it('decision.conditions[].expression is covered — the #4439 hole', () => {

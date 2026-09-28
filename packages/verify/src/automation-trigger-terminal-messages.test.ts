@@ -86,7 +86,7 @@ function bootFlow(opts: { fails: boolean; successMessage?: string; errorMessage?
         ...(opts.errorMessage !== undefined ? { errorMessage: opts.errorMessage } : {}),
         nodes: [
             { id: 'start', type: 'start', label: 'Start' },
-            { id: 'work', type: 'script', label: 'Work' },
+            { id: 'work', type: 'script', label: 'Work', config: { function: 'noop' } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [

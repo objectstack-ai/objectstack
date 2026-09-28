@@ -464,6 +464,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Decimales",
         helpText: "Número de dígitos decimales"
       },
+      currencyConfig: {
+        label: "Configuración de moneda",
+        helpText: "En qué moneda está este campo. Sin definir: modo dynamic. En ambos modos el valor almacenado es un número sin más."
+      },
+      "currencyConfig.currencyMode": {
+        label: "Modo de moneda",
+        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency."
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "Moneda predeterminada",
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Por defecto, CNY. No se lee en modo dynamic."
+      },
       step: {
         label: "Incremento",
         helpText: "Incremento del control deslizante (1 por defecto). Solo lo usa el renderizador: la ruta de escritura no rechaza un valor fuera de la cuadrícula."
@@ -471,6 +483,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "Tamaño máximo",
         helpText: "Tamaño máximo permitido en BYTES (entero positivo). Se aplica en el servidor al escribir, contra el tamaño registrado del archivo; un archivo sin tamaño registrado no puede incumplirlo."
+      },
+      accept: {
+        label: "Tipos aceptados",
+        helpText: "Tipos de archivo permitidos, como tipos MIME, comodines type/* o sufijos .ext (p. ej., image/*, .pdf). Se pasan al selector de archivos y se vuelven a comprobar en el servidor al escribir, contra el archivo almacenado. Sin definir: cualquier tipo."
       },
       dimensions: {
         label: "Dimensiones",
@@ -538,9 +554,25 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filas por página",
         helpText: "Filas por página en el diálogo del selector de registros: un entero positivo; 10 por defecto."
       },
+      lookupColumns: {
+        label: "Columnas de lookup",
+        helpText: "Columnas de la tabla del selector de registros: nombres de campo del objeto referenciado o entradas {field, label, width, type} (p. ej., [\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]). Sin definir: se derivan del objeto referenciado."
+      },
+      lookupFilters: {
+        label: "Filtros de lookup",
+        helpText: "Filtro base sobre los candidatos del selector, como reglas {field, operator, value} sobre el objeto referenciado; operator es uno de eq, ne, gt, lt, gte, lte, contains, in, notIn (p. ej., [{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]). Se aplica en todas las superficies del selector, combinado con AND con cualquier filtro de dependsOn."
+      },
+      dependsOn: {
+        label: "Depende de",
+        helpText: "Campos del mismo registro de los que dependen las opciones de este campo: el formulario retiene este campo hasta que cada uno tenga valor y lo reevalúa cuando alguno cambia. Un lookup filtra sus candidatos por ellos: un nombre filtra el campo homónimo del objeto referenciado; {field, param} nombra otro distinto. En un campo de opciones, enumera los nombres de los campos padre; la regla por opción va en el visibleWhen de cada opción."
+      },
       relatedListTitle: {
         label: "Título de la lista relacionada",
         helpText: "Título de la lista relacionada de esta relación en la página de detalle del registro padre."
+      },
+      relatedListColumns: {
+        label: "Columnas de la lista relacionada",
+        helpText: "Columnas de la lista relacionada de esta relación en la página de detalle del registro padre, como nombres de campo de este objeto (el hijo), p. ej., name, status. Sin definir: se derivan del objeto hijo. Solo nombres: etiquetas, tipos de celda y formato vienen de las definiciones de campo del hijo."
       },
       inlineTitle: {
         label: "Título en línea",
@@ -586,6 +618,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ID externo",
         helpText: "Marca como ID externo para operaciones upsert"
       },
+      storage: {
+        label: "Almacenamiento",
+        helpText: "Restricciones físicas de almacenamiento (ADR-0113): el DDL que el contrato de escritura deliberadamente no implica. Sin definir: no se solicita ninguna."
+      },
+      "storage.notNull": {
+        label: "No nulo",
+        helpText: "Emite un NOT NULL de base de datos en la columna. Sin definir, la columna sigue admitiendo nulos incluso con required: el motor aplica required al escribir. Declararlo sobre filas nulas existentes es una migración destructiva controlada por la deriva de esquema (rellene antes). Se rechaza junto a requiredWhen."
+      },
       readonly: {
         label: "Solo lectura",
         helpText: "El campo es de solo lectura en formularios"
@@ -602,9 +642,25 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ordenable",
         helpText: "Permite ordenar listas por este campo"
       },
+      visibleWhen: {
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario muestra este campo solo mientras sea TRUE."
+      },
+      readonlyWhen: {
+        label: "Condición de solo lectura",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'paid'): el campo es de solo lectura mientras sea TRUE, y se aplica en el servidor: el cambio de una actualización sobre un campo bloqueado se descarta y se conserva el valor almacenado. Lee las columnas propias del registro; objectstack validate rechaza una lectura a través de un campo de referencia."
+      },
+      requiredWhen: {
+        label: "Condición de obligatoriedad",
+        helpText: "Predicado CEL sobre el registro: el campo es obligatorio mientras sea TRUE, y se aplica en el servidor como compuerta de transición: se rechaza una escritura que deja el valor vacío si el registro cumplía antes de ella, así que una fila a la que ya le faltaba el valor sigue superando ediciones no relacionadas. Para una regla que toda escritura deba cumplir, use una regla script en validations. Se rechaza junto a storage.notNull."
+      },
       maskingRule: {
         label: "Regla de enmascaramiento",
         helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
+      },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para leer o editar este campo (ADR-0066 D3). Sin ellas, el valor se enmascara al leer (parcialmente si hay maskingRule) y las ediciones se deniegan. Vacío o sin definir: sin restricción por capacidad."
       },
       internal: {
         label: "Interno",
@@ -1504,6 +1560,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Operación",
         helpText: "Escritura declarativa de campos sobre un único registro: 'update' aplica `patch`, fusionado bajo los `params` recogidos, al registro actual EN NOMBRE DE QUIEN LLAMA — nunca con privilegios del sistema, así que los permisos de quien llama, los hooks del objeto y sus validaciones se ejecutan igual que en una edición de usuario."
       },
+      patch: {
+        label: "Valores fijos (patch)",
+        helpText: "Valores de campo fijos que la actualización escribe en el registro actual, p. ej., {\"status\": \"done\"}; se fusionan POR DEBAJO de los valores que recoge `params`, así que un parámetro con el mismo nombre prevalece. Se escribe como quien llama: los permisos, hooks y validaciones del objeto se aplican como en una edición de usuario."
+      },
       undoable: {
         label: "Reversible",
         helpText: "Ofrece deshacer después de que la actualización se complete. El deshacer captura el valor previo de cada campo que la acción escribe: el conjunto fusionado, `patch` bajo los `params` recogidos. Una acción sin `operation` no declara conjunto de escritura, así que no hay nada que capturar."
@@ -1512,6 +1572,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ejecución",
         helpText: "Contrato de despacho masivo para el que está escrito el cuerpo de esta acción: 'perRecord' envía un despacho por cada fila seleccionada, con el recordId de esa fila; 'aggregate' envía UN solo despacho para toda la selección, con todos los id en params._selectedIds. Si se omite, la acción se despacha por registro."
       },
+      description: {
+        label: "Descripción",
+        helpText: "Línea explicativa bajo el título del diálogo de parámetros de esta acción. En una acción que recoge parámetros, la pregunta de confirmación va aquí y no en confirmText: un diálogo, no dos. No es ai.description, que es el texto que lee un agente de IA."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -1519,6 +1583,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "Mensaje de éxito",
         helpText: "Mensaje de éxito tras completar"
+      },
+      errorMessage: {
+        label: "Mensaje de error",
+        helpText: "Mensaje de error que se muestra cuando la acción falla, en lugar del error original."
       },
       refreshAfter: {
         label: "Actualizar después",
@@ -1556,6 +1624,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La ruta de acciones de la plataforma rechaza a cualquier otro con 403 (acciones script, flow y modal, y la vía MCP/IA), y se le oculta el botón. Una acción de type api llama directamente a su endpoint, así que ese endpoint debe volver a comprobarlas."
+      },
       ai: {
         label: "Exposición a IA",
         helpText: "Exposición a IA (voluntaria): establece ai.exposed=true y escribe ai.description (≥40 caracteres) para que los agentes puedan llamarla."
@@ -1571,6 +1643,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "Forma del cuerpo",
         helpText: "Estructura del cuerpo de solicitud (flat o nested)"
+      },
+      bodyExtra: {
+        label: "Cuerpo adicional (bodyExtra)",
+        helpText: "Campos fijos del cuerpo de la petición de esta acción api, fusionados al final, así que prevalecen sobre los parámetros recogidos (p. ej., {\"resend\": true}). Los tokens de variables de página (page.NAME entre llaves dobles) los resuelve el runtime. La carga útil va aquí, nunca en params."
       }
     }
   },

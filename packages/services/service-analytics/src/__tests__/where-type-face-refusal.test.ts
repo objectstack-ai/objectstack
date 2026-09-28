@@ -313,7 +313,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     [['id', 'string'], ['amt', 'number'], ['stage', 'string']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return quiet; } } as never;
 

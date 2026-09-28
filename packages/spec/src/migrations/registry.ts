@@ -5444,6 +5444,38 @@ const step18: MigrationStep = {
     + 'actions and object-nested actions as a pure lossless delete, retired from the load path '
     + 'so authors are refused at parse; its D3 record is the semantic entry '
     + '`action-aria-retired`. '
+    + 'It also retires the connector resilience family (ADR-0049 enforce-or-remove, one batch): '
+    + '`connector.health` — the `healthCheck` probe (eight keys) and the `circuitBreaker` (six) — '
+    + '`connector.status` and the connector-nested `webhooks`, sixteen authorable keys with no '
+    + 'reader outside the spec package. No loop ever polled a connector endpoint or tripped a '
+    + 'breaker; nothing read an authored `status` (the runtime publishes a computed `state`, and '
+    + 'participation is `enabled`); and a webhook nested in a connector was never registered as a '
+    + '`webhook` item, so it was never materialized or delivered — the top-level `webhooks:` '
+    + 'collection is the delivered one. The three carrier keys are retiredKey tombstones on '
+    + '`ConnectorBaseSchema`, registered under both carrier defs; `status`, defaulted '
+    + '`\'inactive\'`, joins `connectionTimeoutMs` in the retired-default residue stage, because '
+    + 'every 17.x parse emitted it into every connector. Seven defs leave whole — '
+    + '`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`, `ConnectorStatus`, '
+    + '`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm` — and the D2 conversion '
+    + '`connector-resilience-keys-removed` strips the three keys from `connectors[]` and stored '
+    + 'rows as a pure lossless delete (the nested webhooks are stripped, never moved: moving them '
+    + 'would start deliveries that never happened). It ABSORBS the breaker half of the duration '
+    + 'rename above: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` is no longer '
+    + 'converted, because the whole block it lived in is now removed, and '
+    + '`connector-health-and-trigger-durations-unit-in-key` keeps only `triggers[].interval` → '
+    + '`intervalSeconds`. '
+    + 'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
+    + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
+    + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
+    + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
+    + 'with two or more conditioned out-edges and no `conditions` list, so a flow written while '
+    + 'every true branch ran keeps its behaviour; it is a default flip, so it is retired from '
+    + 'the load path AND refused by the flow rehydration seam and the artifact-ingestion door, '
+    + 'and replays only here — the paired semantic entry carries the judgment the diff then '
+    + 'asks for. BREAKING for flows stored in `sys_metadata`, by maintainer ruling: such a '
+    + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
+    + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
+    + 'the one-line fix where a node meant every branch. '
     + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
     + 'key parsed and was stored at every list-view door and drew nothing: a list view\'s own '
     + '`tabs` has no reader, the one component that would draw it has no production mount, '
@@ -5482,6 +5514,7 @@ const step18: MigrationStep = {
     'api-endpoint-cache-ttl-to-cache-ttl-seconds',
     'dashboard-refresh-interval-to-refresh-interval-seconds',
     'connector-health-and-trigger-durations-unit-in-key',
+    'connector-resilience-keys-removed',
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
@@ -5499,6 +5532,7 @@ const step18: MigrationStep = {
     'currency-config-precision-removed',
     'permission-rls-tags-removed',
     'action-aria-removed',
+    'flow-decision-mode-inclusive-explicit',
     'view-list-tabs-removed',
   ],
   semantic: [
@@ -5901,6 +5935,49 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    // A declared-default correction plus the enforcement that makes the key real —
+    // the shape of `17.approval-escalation-enabled-default-flip`. There is no D2
+    // conversion: no spelling moves, and a written `public: false` is a legitimate
+    // value that the chain cannot tell from a materialized old default, so the
+    // judgement is the author's. The `data/Cube:public` row of
+    // `DEFAULT_CHANGES_BY_MAJOR` records the default move itself. No backticks in
+    // `surface`: the upgrade guide renders it inside a code span and a table cell.
+    {
+      id: 'analytics-cube-public-default-visible-enforced',
+      surface:
+        'data.Cube.public — an analytics cube that declares public: false, and every cube in an '
+        + 'artifact built by os compile before this release (the compiler writes the parsed stack, so '
+        + 'it carries a materialized public: false on each cube that omitted the key)',
+      replacement:
+        'nothing, to keep a cube queryable: cubes are visible by default. Delete an authored '
+        + '`public: false` that only restated the old default, and write it only on a cube that must '
+        + 'stay out of the analytics API. Recompile every `os compile` artifact built before this '
+        + 'release',
+      reason:
+        'A DECLARED-DEFAULT CORRECTION plus the enforcement that makes the key real. The analytics '
+        + 'cube schema declared `public` with a default of `false` under an access-control comment, '
+        + 'and nothing read it: `/analytics/meta` listed every cube and every query door answered it. '
+        + 'The analytics service now reads it. A cube declared `public: false` is left out of '
+        + '`/analytics/meta`, and `/analytics/query` and `/analytics/sql` refuse it with 404 '
+        + '`CUBE_NOT_FOUND` — the same refusal, byte for byte, that an unknown cube name gets, so the '
+        + 'refusal does not confirm a hidden cube exists. Enforcing the old default as declared would '
+        + 'have hidden every cube that omits the key, so the default moves to `true` in the same '
+        + 'change, and a cube that omits the key stays visible exactly as it was. Two holdings change '
+        + 'behaviour on upgrade. An authored `public: false` — including one copied from the example '
+        + 'app, which carried it — now hides the cube and refuses its queries. And an artifact built '
+        + 'by `os compile` before this release carries a materialized `public: false` on every cube '
+        + 'that omitted the key, because the compiler writes the parsed stack with its defaults '
+        + 'applied; a host that registers cubes from such an artifact hides all of them until the '
+        + 'artifact is recompiled. The key is visibility, not row security: records stay governed by '
+        + 'object permissions and row-level security on every door, and the metadata door keeps '
+        + 'serving cube definitions.',
+      acceptanceCriteria:
+        '`GET /analytics/meta` lists every cube your dashboards and reports query, and a query naming '
+        + 'each one answers 200. For each authored `public: false`, either delete it (the cube is meant '
+        + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
+        + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
+        + '`os compile` from this release or later.',
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -7274,35 +7351,94 @@ const step18: MigrationStep = {
     // unit in its NAME) — the D3 entry of the
     // `connector-health-and-trigger-durations-unit-in-key` family (ruling B on
     // #17152: one D3 entry per retirement family, even when D2 is lossless). The
-    // two keys share one authored document and one conversion, so they share one
-    // entry. Both renamed keys are still unread (the liveness ledger records each
-    // as dead, `liveness/connector.json`): the rename is an honesty fix to the
-    // declaration, and the entry says so rather than implying a live engine.
+    // family was two keys in one authored document and one conversion:
+    // `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
+    // `triggers[].interval` → `intervalSeconds`.
+    //
+    // ⚠️ Reconciled with the connector resilience retirement (ADR-0049, the same
+    // unreleased protocol step): the whole `health` block was then removed, so the
+    // breaker half of this rename was ABSORBED — the renamed key is itself retired,
+    // and the conversion now carries only the trigger half. This entry says so,
+    // rather than prescribing a rename to a key the parse refuses next; the
+    // removal's own judgement is the D3 entry `connector-resilience-keys-retired`.
+    // `triggers[].interval` is still unread (the liveness ledger records it dead,
+    // `liveness/connector.json`): the rename is an honesty fix to the declaration,
+    // and the entry says so rather than implying a live engine.
     {
       id: 'connector-resilience-durations-unit-in-key',
-      surface: 'connector.health.circuitBreaker.monitoringWindow and connector.triggers[].interval — '
-        + 'the two connector durations whose name carried no unit',
-      replacement: '`monitoringWindowMs` (milliseconds) and `intervalSeconds` (seconds) — rename each '
-        + 'key; both values are unchanged.',
-      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames both keys '
-        + 'in `connectors[]` and on stored connector rows, keeping each value, with a separate notice '
-        + 'per key so an operator sees which of its own keys moved; the rename is lossless because '
-        + 'each key always meant the unit its new name states. Two judgments remain. First, the units '
-        + 'were easy to get wrong in opposite directions: `monitoringWindow` (milliseconds) sat one '
-        + 'key below `resetTimeoutMs`, and the bare token `interval` means MILLISECONDS elsewhere in '
-        + 'this same spec while a trigger interval meant SECONDS — so a trigger written '
-        + '`interval: 60000` for one minute asked for once every sixteen hours or so, and the rename '
-        + 'keeps 60000. Second, neither key drives an engine today: no polling loop reads a trigger '
-        + 'interval, and no circuit breaker exists for connectors, so nothing reads the monitoring '
-        + 'window. An author who relied '
-        + 'on either for behaviour has not been getting it, before or after this rename.',
-      acceptanceCriteria: 'No connector carries `health.circuitBreaker.monitoringWindow` or '
-        + '`triggers[].interval`; the parse refuses both with the rename. Every `monitoringWindowMs` '
-        + 'value is the window the author intends in milliseconds and every `intervalSeconds` value '
-        + 'the cadence the author intends in seconds — a trigger meant to poll every minute reads '
-        + '`intervalSeconds: 60`. No part of the deployment\'s design depends on a connector polling '
-        + 'on that interval or tripping on that window: where it did, the author has moved that need '
-        + 'to a mechanism that runs.',
+      surface: 'connector.triggers[].interval — the connector duration whose name carried no unit '
+        + '(and, until the whole `health` block was retired, connector.health.circuitBreaker.monitoringWindow)',
+      replacement: '`intervalSeconds` (seconds) — rename the key; the value is unchanged. There is no '
+        + 'replacement for `monitoringWindow`: its renamed spelling `monitoringWindowMs` was retired with '
+        + 'the rest of `connector.health` — delete the block (see `connector-resilience-keys-retired`).',
+      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames '
+        + '`triggers[].interval` in `connectors[]` and on stored connector rows, keeping the value; the '
+        + 'rename is lossless because the key always meant seconds. It used to rename the breaker\'s '
+        + '`monitoringWindow` too, but that half was absorbed by `connector-resilience-keys-removed`, '
+        + 'which strips the whole `health` block — so an author holding either `monitoringWindow` or '
+        + '`monitoringWindowMs` ends with no key at all, and must not re-add `monitoringWindowMs`: the '
+        + 'parse refuses the block. Two judgments remain for the trigger. First, the unit was easy to '
+        + 'get wrong: the bare token `interval` means MILLISECONDS elsewhere in this same spec while a '
+        + 'trigger interval meant SECONDS — so a trigger written `interval: 60000` for one minute asked '
+        + 'for once every sixteen hours or so, and the rename keeps 60000. Second, the key drives no '
+        + 'engine today: no polling loop reads a trigger interval, so an author who relied on it for '
+        + 'behaviour has not been getting it, before or after this rename.',
+      acceptanceCriteria: 'No connector carries `triggers[].interval`; the parse refuses it with the '
+        + 'rename, and every `intervalSeconds` value is the cadence the author intends in seconds — a '
+        + 'trigger meant to poll every minute reads `intervalSeconds: 60`. No connector carries '
+        + '`health` in any spelling (`monitoringWindow` or `monitoringWindowMs` included). No part of '
+        + 'the deployment\'s design depends on a connector polling on that interval or tripping on a '
+        + 'breaker window: where it did, the author has moved that need to a mechanism that runs.',
+    },
+    // ADR-0049 enforce-or-remove — the D3 entry of the connector resilience family:
+    // `connector.health` (the `healthCheck` probe and the `circuitBreaker`),
+    // `connector.status` and the connector-nested `webhooks`, sixteen authorable keys
+    // retired as one batch. One D3 entry per retirement family, even when D2 is
+    // lossless (ruling B on #17152): the D2 conversion
+    // `connector-resilience-keys-removed` repairs the data, and this entry carries
+    // what only the author can judge. It also names the CHAIN through the same
+    // protocol step: `connector-health-and-trigger-durations-unit-in-key` used to
+    // rename `health.circuitBreaker.monitoringWindow` to `monitoringWindowMs`, and
+    // that half was absorbed here — the renamed key is itself removed.
+    {
+      id: 'connector-resilience-keys-retired',
+      surface: 'connector.health (healthCheck / circuitBreaker), connector.status and connector.webhooks — '
+        + 'on a connector and on a stack connectors[] entry',
+      replacement: '(removed — nothing replaces the probe, the breaker or an authored status.) '
+        + 'Participation is `enabled` (and `provider` on a declarative instance); whether a registered '
+        + 'connector can be dispatched is the computed `state` (`ready` / `degraded`) on '
+        + '`GET /api/v1/automation/connectors`; a webhook that is actually delivered is declared in '
+        + 'the top-level `webhooks:` collection; probes and circuit breaking belong in the connector '
+        + 'provider or an upstream gateway.',
+      reason: 'The D2 conversion `connector-resilience-keys-removed` deletes `health`, `status` and '
+        + '`webhooks` from every connector, stack entry and stored connector row, one notice per key, '
+        + 'and the delete is lossless: no loop ever polled a connector endpoint, counted failures or '
+        + 'tripped a breaker, no code read an authored status, and a webhook nested in a connector '
+        + 'was never registered, materialized or delivered. Three judgements remain. First, a probe '
+        + 'or breaker the author believed was protecting a flaky upstream never was — if that '
+        + 'protection matters, it has to be built where calls are made (the connector provider) or '
+        + 'in front of the upstream (a gateway). Second, `status` values like `active` or `error` '
+        + 'gated nothing; an author who used `status` to switch a connector off needs `enabled: '
+        + 'false` on the declarative entry instead. Third, the nested webhooks are STRIPPED, not '
+        + 'moved: redeclaring one in the top-level `webhooks:` collection STARTS deliveries that '
+        + 'never happened before, so which of them should exist is the author\'s call — and their '
+        + '`events` (`sync.completed`, `auth.expired` and the rest) and `signatureAlgorithm` have no '
+        + 'counterpart there. The chain: in this same protocol step, '
+        + '`connector-health-and-trigger-durations-unit-in-key` no longer renames '
+        + '`health.circuitBreaker.monitoringWindow` to `monitoringWindowMs` — the whole block that '
+        + 'key lived in is removed, so an author holding either spelling ends with no key at all; '
+        + 'that conversion\'s `triggers[].interval` to `intervalSeconds` rename is unaffected.',
+      acceptanceCriteria: 'No connector and no stack connector entry carries `health`, `status` or '
+        + '`webhooks`; the parse refuses each with its prescription (a stored `status: \'inactive\'` '
+        + 'default is accepted and stripped as inert residue), and no code imports ConnectorHealth, '
+        + 'HealthCheckConfig, CircuitBreakerConfig, ConnectorStatus, WebhookConfig, WebhookEvent or '
+        + 'WebhookSignatureAlgorithm. Every connector dispatches exactly as it did before the '
+        + 'upgrade. Each declarative connector instance the author meant to be switched off carries '
+        + '`enabled: false` and is observed absent from `GET /api/v1/automation/connectors`; each '
+        + 'nested webhook that is still wanted '
+        + 'is declared in the top-level `webhooks:` collection and observed delivering; and each '
+        + 'probe or breaker the author relied on is provided by the connector provider or a gateway '
+        + 'and observed tripping against a failing upstream.',
     },
     {
       id: 'cube-join-sql-and-relationship-retired',
@@ -10496,6 +10632,71 @@ const step18: MigrationStep = {
         + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
         + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
     },
+    {
+      id: 'flow-decision-edge-branching-first-match',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'flow.nodes[].config.mode (decision) — an OMITTED mode on a decision that branches '
+        + 'on its out-edges and carries two or more conditioned ones',
+      replacement:
+        'nothing, where the out-edge conditions partition (exactly one can hold for any '
+        + 'record): an omitted `mode` now means exclusive, the first true edge in declaration '
+        + 'order wins, and the run is what it always was. `mode: \'inclusive\'` where the flow '
+        + 'RELIES on more than one branch running for one record — the value the D2 conversion '
+        + '`flow-decision-mode-inclusive-explicit` writes onto every such decision so nothing '
+        + 'changes silently. Where the conditions overlap by accident (a `!=` guard beside a '
+        + 'later `==` branch), neither: narrow them into a partition, or mark the fallback '
+        + '`isDefault: true`, and delete the written key.',
+      reason:
+        'A DEFAULT FLIP of a shipped node type, ruled rather than patched: the schema, the docs '
+        + 'and the engine\'s own comment all called an edge-branched decision an exclusive gateway '
+        + 'while the traversal took EVERY out-edge whose condition held, one after another, and '
+        + 'reported nothing — hotcrm#1555 rendered a refusal screen AND ran the conversion in one '
+        + 'execution. The traversal now matches the declaration (BPMN exclusive gateway, '
+        + 'Salesforce Flow Decision, n8n Switch default), and the every-true-edge behaviour is the '
+        + 'BPMN inclusive gateway an author must write down. The KEY converts mechanically and '
+        + 'does: `flow-decision-mode-inclusive-explicit` writes `mode: \'inclusive\'` wherever two '
+        + 'or more conditioned out-edges leave a decision that declares no `conditions` list, so '
+        + 'the migrated source runs exactly as before. What does NOT convert is the INTENT: the '
+        + 'count cannot tell a partition (where the key is redundant) from a reliance on '
+        + 'multi-branch runs (where it is load-bearing) from an accidental overlap (where the '
+        + 'old behaviour was the bug), so the mechanical edit list the chain replay prints is '
+        + 'where that judgment is made, node by node. And the conversion replays ONLY there: it is a '
+        + 'default flip, so the authoring funnel never rewrites a source written against the '
+        + 'new contract, and the automation engine\'s flow rehydration seam and the '
+        + 'artifact-ingestion door both refuse it by id (a code-shipped flow, a REST body, a Studio '
+        + 'save and a scaffolded artifact all arrive undated). BREAKING for stored rows, by '
+        + 'maintainer ruling: the promise that a flow keeps its behaviour is kept by authored '
+        + 'sources and built artifacts only. A decision stored in `sys_metadata` '
+        + 'with no `conditions` list, no `mode` and two or more conditioned out-edges takes the new '
+        + 'meaning on upgrade — it evaluates first-match — and nothing rewrites the row: no '
+        + 'stored-row migration, no cutoff, no read-path completion, because nothing about a stored '
+        + 'row says it was saved before the flip. The one-line fix, for a stored node that meant '
+        + 'every branch, is `mode: \'inclusive\'`; `os migrate meta --stored` lists every such node, '
+        + 'report only, so an operator can review the candidates before and after the upgrade.',
+      acceptanceCriteria:
+        'Review every `flow-decision-mode-inclusive-explicit` line the chain replay lists for '
+        + 'each authored stack: (1) where the two (or more) '
+        + 'out-edge conditions partition — a predicate and its negation, `>` beside `<=`, or a '
+        + 'guard beside `isDefault: true` — delete the written `mode`; the run is unchanged either '
+        + 'way and the exclusive default is the honest declaration; (2) where the flow relies on '
+        + 'more than one branch running for one record, keep `mode: \'inclusive\'`; (3) where the '
+        + 'conditions overlap by accident, narrow them into a partition and delete the key, then '
+        + 're-run the flow on a record that satisfied both and confirm exactly one successor '
+        + 'ran — the passed-over branch now leaves a `skipped` step in the run log. `os validate` '
+        + 'reports `flow-decision-inclusive-overlap` on every decision that keeps the key with '
+        + 'two or more conditioned out-edges, so the review list is the lint output. Then each '
+        + 'deployment: `os migrate meta --stored` lists, under `decisionModeReview`, every stored '
+        + 'decision with two or more conditioned out-edges and no `mode` — each one already '
+        + 'evaluates first-match, and the pass writes none of them — so where one of those nodes '
+        + 'meant every branch, declare `mode: \'inclusive\'` on it in the designer; a node '
+        + 'that declares `mode` either way leaves the list. A decision registering with '
+        + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
+        + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
+        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
     {
@@ -10578,6 +10779,76 @@ const step18: MigrationStep = {
         + '`issues[].path` names `edges[N].condition`, and for a node the refusal carries that same '
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
+    },
+    // ONE entry for the family, not one per node type: every member is the same
+    // decision — a node config its executor cannot run is refused where the flow
+    // is built, by one judge (`flowNodeConfigRefusals`), instead of registering
+    // and failing (or, for a branch with no label, misrouting) at run time.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-node-config-required-keys-refused',
+      surface:
+        'a flow node whose config leaves out a key its executor contract requires — objectName on '
+        + 'get_record / create_record / update_record / delete_record, recipients on notify (and title '
+        + 'when there is no template), url on http, function on script, flowName on subflow, collection '
+        + 'and flowName on map, collection on a loop that has a body, branches on parallel, try on '
+        + 'try_catch, and on screen each field name, each option value and label, and a lookup field '
+        + 'reference — and a decision node whose conditions is not an array, holds a branch that is not '
+        + 'an object, or holds a branch whose label is absent, null, blank or not a string; at any depth '
+        + 'including an ADR-0031 region body. Reachable wherever a flow is authored or stored: '
+        + 'defineStack({ flows }) sources, defineFlow(), an exported stack passed to objectstack validate, '
+        + 'a flow saved from the Studio flow designer (a node added and saved before it is configured; a '
+        + 'decision branch row whose label cell is empty; a screen field row whose name cell is empty), '
+        + 'and a flow row already sitting in sys_metadata',
+      replacement:
+        'the missing key, written on the node\'s `config` — the value the node was meant to act on '
+        + '(`objectName: \'account\'`, `url: \'https://…\'`, `collection: \'{rows}\'`, …). For a decision '
+        + 'branch, the label of the out-edge the branch should take (`{ label: \'approved\', expression: '
+        + '\'record.amount > 1000\' }`, beside an out-edge labelled `approved`), `conditions` written as an '
+        + 'array of such objects, and a bare predicate string moved under `expression`. To branch on the '
+        + 'out-edges instead, delete `conditions` and put each predicate on its edge\'s `condition`. A '
+        + 'legacy flat-graph `loop` (no `body`) needs no `collection` and is untouched',
+      reason:
+        'A flow node\'s `config` is an open record, so what its executor requires was checked by no build '
+        + 'door: `FlowSchema.parse`, `AutomationEngine.registerFlow` and `objectstack validate` all admitted '
+        + 'a node missing a key its executor contract requires, and the executor\'s own contract parse then '
+        + 'refused the node on every run that reached it — the config is metadata, so no rerun could '
+        + 'succeed. A decision branch with no label was worse: it never failed, the matched branch reported '
+        + 'no label and traversal took EVERY out-edge, so the flow ran green down the wrong paths. All '
+        + 'three doors now refuse these shapes through one judge, `flowNodeConfigRefusals`, which parses '
+        + 'each builtin node\'s config against the very contract its executor parses against '
+        + '(`getBuiltinNodeConfigContracts()`, reconciled against the executors\' own parse calls) and keeps '
+        + 'only the keys left out — a present value of the wrong type and an undeclared key are judged where '
+        + 'they were before — plus the decision branch shape its executor reads raw. A key a rule of the '
+        + 'contract requires (a notify with no template needs a title; a lookup screen field needs its '
+        + 'reference) is refused in the contract\'s own words. '
+        + '⚠️ No D2 conversion: the platform cannot know the object, URL, collection, function or '
+        + 'out-edge label the author left out, and no value it could write would keep what the flow did. '
+        + '⚠️ Where such a node already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not armed, '
+        + 'while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.fields.0.name`, `nodes.N.config.conditions.0.label`, or '
+        + 'the region path `nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same '
+        + 'path, and `validateStackExpressions` phrases it as `node \'fetch\' (get_record) config.objectName`. '
+        + 'For each hit write the key the node was meant to carry, per the replacement. Two proofs. (1) For '
+        + 'a stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it (the three boot paths spell it '
+        + '`[Automation] failed to register flow`, `[Automation] flow re-sync: failed to register flow` and '
+        + '`[Automation] cold-boot flow bind: failed to register flow`) — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. A node carrying every key its contract requires parses '
+        + 'and registers byte-identically to before, a decision with no `conditions` (or `conditions: null`, '
+        + 'or an empty list) still routes by its out-edges, and a legacy `loop` with no `body` still needs '
+        + 'no `collection`.',
     },
     // The ledger `predicate` slots' half of the blank-predicate rule. A SEPARATE
     // entry from `flow-edge-condition-evaluated-slot-source-required` on purpose:
@@ -18080,6 +18351,16 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the D2 conversion `connector-health-and-trigger-durations-unit-in-key`:
     // `connectors:` is a stack collection and a published connector row lands whole
     // in `sys_metadata`, so the chain has a seam that sees it.
+    //
+    // ⚠️ Superseded in the same unreleased step: the whole `health` block was then
+    // retired under ADR-0049 (the connector resilience family), so
+    // `integration/CircuitBreakerConfig` left whole (`RETIRED_DEFS_BY_MAJOR[18]`) and
+    // this tombstone left with it. The row STAYS — the whole-def removal steady
+    // state gate (b3) exempts — because it is still the record that the bare
+    // `monitoringWindow` spelling was retired. The rename's breaker half was absorbed
+    // by `connector-resilience-keys-removed`, which strips the block an author
+    // holding either spelling still carries; the `health` tombstone's prescription
+    // names both spellings.
     'integration/CircuitBreakerConfig:monitoringWindow',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.connectionTimeoutMs`
     // (maintainer ruling 2026-09-22, letter A — the narrower SECOND decision this
@@ -18204,6 +18485,91 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #12497 / #13823 grading).
     'integration/Connector:errorMapping',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.health` — the connector
+    // resilience family (one batch with `status` and the nested `webhooks`), retired
+    // by the maintainer's criterion for a declared-but-unenforced family: does the
+    // mainstream platform offer the capability? Author-configured health probes and
+    // circuit breakers are not connector metadata anywhere in the mainstream
+    // (Salesforce Named Credentials, Power Platform custom connectors, Retool /
+    // Appsmith resources); breakers live in API-gateway infrastructure.
+    //
+    // Measured on `origin/main` before the removal: the fourteen keys under the block
+    // — `healthCheck.{enabled, intervalMs, timeoutMs, endpoint, method,
+    // expectedStatus, unhealthyThreshold, healthyThreshold}` and
+    // `circuitBreaker.{enabled, failureThreshold, resetTimeoutMs,
+    // halfOpenMaxRequests, monitoringWindowMs, fallbackStrategy}` — have ZERO reads
+    // outside `packages/spec` (lit control in the same scan: `retryConfig`, the
+    // executed sibling policy, read 17 times in `packages/connectors` and
+    // `packages/services/service-automation`). Nothing polled, counted or tripped.
+    //
+    // Tombstoned with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`,
+    // so a bare deletion would be a silent strip (ADR-0104). The shapes behind it
+    // leave whole — `integration/ConnectorHealth`, `integration/HealthCheckConfig`,
+    // `integration/CircuitBreakerConfig` in `RETIRED_DEFS_BY_MAJOR[18]`. The key
+    // carried no default of its own, so there is no residue window for it (its
+    // sub-keys' defaults were only materialized inside an authored block). Sources
+    // and stored rows are rewritten by the D2 conversion
+    // `connector-resilience-keys-removed`; the family's judgement is the D3 entry
+    // `connector-resilience-keys-retired`.
+    //
+    // Registered under 18, not 17: the removal ships on the 17.x line
+    // (launch-window convention: accept-set narrowings ride minor releases) and the
+    // prescription lives at the major boundary where `migrate meta` users look — the
+    // disposition `18.integration__Connector__errorMapping.ts` records for the same
+    // schema.
+    'integration/Connector:health',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.status` — part of the connector
+    // resilience family batch (see `18.integration__Connector__health.ts`). The key
+    // was `ConnectorStatusSchema` (`active` / `inactive` / `error` / `configuring`)
+    // with a `.default('inactive')`, and NOTHING read it. Measured at `origin/main`
+    // 3f86dc52f2 with one member-read pattern over the connector packages, the
+    // automation service, rest, runtime, metadata and objectql: 38 `.status` reads,
+    // every one on an HTTP answer, an error case or a flow-run entry, none on a
+    // connector def — while the same pattern finds `requestTimeoutMs`, the lit
+    // control, read off a connector entry or provider context five times.
+    // The runtime's dispatchability answer is a DIFFERENT field: the computed
+    // `state` (`ready` / `degraded`) that `GET /api/v1/automation/connectors`
+    // publishes and no authored value can set. Participation is `enabled` (and
+    // `provider` on a declarative instance). The only non-spec occurrences were
+    // WRITES — `status: 'active'` in the four shipped connector packages and
+    // `status: 'error'` on the automation service's degraded husk — read back by
+    // nothing; they were deleted in the same change.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104); the orphaned
+    // `integration/ConnectorStatus` enum leaves via `RETIRED_DEFS_BY_MAJOR[18]`.
+    //
+    // ⭐ RETIRED-DEFAULT RESIDUE: owed and adopted — `{ status: 'inactive' }` joins
+    // `{ connectionTimeoutMs: 30000 }` in `CONNECTOR_RETIRED_KEY_RESIDUE` on both
+    // carriers (#12840's class rule, `shared/retired-key.ts`). The discriminator is
+    // whether a released toolchain MATERIALIZED the default into something that is
+    // later re-parsed, and it did: every 17.x parse emitted `status: 'inactive'`
+    // into every connector — authored or not — and `registerConnector` re-parses a
+    // def built in code, where no conversion runs. Any other value keeps the
+    // refusal. Sources and stored rows are rewritten by the D2 conversion
+    // `connector-resilience-keys-removed`.
+    'integration/Connector:status',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.webhooks` — part of the
+    // connector resilience family batch (see `18.integration__Connector__health.ts`).
+    // A connector's NESTED webhook array is not the collection anything delivers:
+    // the stack decomposition registers a `connectors:` entry WHOLE, so a webhook
+    // nested in it never becomes a `webhook` metadata item, and
+    // `@objectstack/plugin-webhooks` materializes `sys_webhook` rows only from those
+    // items (the top-level `webhooks:` collection). Measured on `origin/main`: zero
+    // reads of a connector's own `webhooks` outside `packages/spec`, while
+    // `stack.webhooks` — the lit control, same scan — is read five times; the one
+    // test that authors a nested array
+    // (`bootstrap-declared-webhooks.connector-nested.test.ts`) exists to pin that it
+    // is NOT hoisted. And no code path emits a connector lifecycle event
+    // (`sync.completed`, `auth.expired`, …) for its `events` to subscribe to.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104). The nested shape
+    // leaves whole — `integration/WebhookConfig`, `integration/WebhookEvent`,
+    // `integration/WebhookSignatureAlgorithm` in `RETIRED_DEFS_BY_MAJOR[18]`. The key
+    // carried no default, so no residue window. The D2 conversion
+    // `connector-resilience-keys-removed` STRIPS the array and never moves it to the
+    // top-level collection: that would start deliveries the connector never made —
+    // the author's decision, carried by the D3 entry `connector-resilience-keys-retired`.
+    'integration/Connector:webhooks',
     // #15680 (stack card 5/6 of #14478) — ruling B. `ConnectorTrigger.interval`
     // said "Polling interval in seconds" in prose and nothing else. A polling
     // cadence is exactly the number a reader guesses at, and the bare name `interval`
@@ -18251,6 +18617,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
     // See `18.integration__Connector__errorMapping.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:errorMapping',
+    // The same `health` tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` are SIBLINGS: each
+    // wraps the shared private `ConnectorBaseSchema` in the retired-default residue
+    // stage, so the tombstone is carried by the shape that `stack.connectors[]`
+    // (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def. See
+    // `18.integration__Connector__health.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:health',
+    // The same `status` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse, which
+    // also carries the `'inactive'` residue stage (both carriers wrap
+    // `ConnectorBaseSchema` with the same `CONNECTOR_RETIRED_KEY_RESIDUE`). One
+    // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__status.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:status',
+    // The same `webhooks` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse. One
+    // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__webhooks.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:webhooks',
     // #18669 — maintainer ruling A (2026-09-17, decision batch #151 item 4):
     // `CompatibilityMatrixEntry.estimatedMigrationTime` said "Estimated migration
     // time in hours" in a source JSDoc and carried no `.describe()` at all, so the
@@ -21659,6 +22048,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'identity/ApiKey',
+    // `integration/CircuitBreakerConfig` (`enabled`, `failureThreshold`,
+    // `resetTimeoutMs`, `halfOpenMaxRequests`, `monitoringWindowMs`,
+    // `fallbackStrategy`, and the `monitoringWindow` rename tombstone) leaves with
+    // `integration/ConnectorHealth`, whose `circuitBreaker` was its only carrier. No
+    // state machine ever opened, half-opened or closed a breaker, and none of the
+    // four `fallbackStrategy` behaviours was implemented. Its `monitoringWindow`
+    // tombstone leaves with it: the `RETIRED_KEYS_BY_MAJOR[18]` row
+    // `integration/CircuitBreakerConfig:monitoringWindow` stays, which is the
+    // whole-def removal steady state gate (b3) of `scripts/build-schemas.ts`
+    // deliberately exempts. See `retired-keys/18.integration__Connector__health.ts`
+    // for the retirement record.
+    'integration/CircuitBreakerConfig',
     // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
     // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
     // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
@@ -21672,6 +22073,22 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
     // record.
     'integration/ConnectorErrorCategory',
+    // `integration/ConnectorHealth` (`healthCheck`, `circuitBreaker`) leaves with its
+    // only carrier, `ConnectorSchema.health`, tombstoned in this same major under
+    // ADR-0049 enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the
+    // declaring file ever parsed or constructed one, and an exported value schema
+    // with no consumer reads as a capability (#3950). See
+    // `retired-keys/18.integration__Connector__health.ts` for the retirement record.
+    'integration/ConnectorHealth',
+    // `integration/ConnectorStatus` (`active` / `inactive` / `error` /
+    // `configuring`) leaves with its only carrier, `ConnectorSchema.status`,
+    // tombstoned in this same major under ADR-0049 enforce-or-remove. Nothing read a
+    // connector's `status`; the runtime's dispatchability answer is the computed
+    // `ConnectorState` (`ready` / `degraded`, `integration/connector-descriptor.ts`),
+    // which is a TypeScript type and not a published def, so nothing replaces this
+    // one. See `retired-keys/18.integration__Connector__status.ts` for the
+    // retirement record.
+    'integration/ConnectorStatus',
     // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
     // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
     // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
@@ -21695,6 +22112,38 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // rename. See `retired-keys/18.integration__Connector__errorMapping.ts` for the
     // retirement record.
     'integration/ErrorMappingRule',
+    // `integration/HealthCheckConfig` (`enabled`, `intervalMs`, `timeoutMs`,
+    // `endpoint`, `method`, `expectedStatus`, `unhealthyThreshold`,
+    // `healthyThreshold`) leaves with `integration/ConnectorHealth`, whose
+    // `healthCheck` was its only carrier. No loop ever polled a connector endpoint:
+    // the only `healthCheck` code outside `packages/spec` is the kernel's PLUGIN
+    // health contract — a different shape on a different subject. Its four
+    // `.default()`s were only ever materialized INSIDE an authored block, so there
+    // is no residue window on the carrier. See
+    // `retired-keys/18.integration__Connector__health.ts` for the retirement record.
+    'integration/HealthCheckConfig',
+    // `integration/WebhookConfig` — the canonical `webhook` shape `.extend()`ed with
+    // `events` and `signatureAlgorithm` — leaves with its only carrier,
+    // `ConnectorSchema.webhooks`, tombstoned in this same major under ADR-0049
+    // enforce-or-remove. A webhook nested in a connector was never registered,
+    // materialized or delivered; the delivered shape is `automation/Webhook`, which
+    // is unaffected. See `retired-keys/18.integration__Connector__webhooks.ts` for
+    // the retirement record.
+    'integration/WebhookConfig',
+    // `integration/WebhookEvent` (`record.created` / `record.updated` /
+    // `record.deleted` / `sync.started` / `sync.completed` / `sync.failed` /
+    // `auth.expired` / `rate_limit.exceeded`) leaves with `integration/WebhookConfig`,
+    // whose `events` was its only carrier. No code path emits any of the connector
+    // lifecycle events it names. See
+    // `retired-keys/18.integration__Connector__webhooks.ts` for the retirement record.
+    'integration/WebhookEvent',
+    // `integration/WebhookSignatureAlgorithm` (`hmac_sha256` / `hmac_sha512` /
+    // `none`) leaves with `integration/WebhookConfig`, whose `signatureAlgorithm` was
+    // its only carrier. A delivered webhook (the top-level `webhooks:` collection) is
+    // signed by the messaging outbox from its `secret`; nothing ever read this
+    // choice. See `retired-keys/18.integration__Connector__webhooks.ts` for the
+    // retirement record.
+    'integration/WebhookSignatureAlgorithm',
     // #11825 — kernel/plugin-lifecycle-advanced.zod.ts
     // `AdvancedPluginLifecycleConfigSchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-25, route 2). The aggregating

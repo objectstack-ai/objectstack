@@ -964,7 +964,7 @@
       "title": "The showcase_delivery analytics cube serves /api/v1/analytics/*: meta discovers its measures/dimensions, a query answers a known aggregate that reconciles against a direct /data aggregate, and an unwired analytics slot degrades honestly to 404",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -990,7 +990,7 @@
         {
           "clause": "meta discovers the cube: GET /analytics/meta lists showcase_delivery with exactly its four measures (namespaced showcase_delivery.count / .total_estimate_hours / .avg_estimate_hours / .done_rate) and four dimensions (showcase_delivery.status / .priority / .due_date / .assignee)",
           "oracle": "api",
-          "verify": "the meta response's cubes[] entry for showcase_delivery names all four measures and four dimensions (getMeta keys them `${cube}.${key}` and does NOT filter on the cube's public:false flag)",
+          "verify": "the meta response's cubes[] entry for showcase_delivery names all four measures and four dimensions (getMeta keys them `${cube}.${key}`, and lists a cube only when its `public` is not `false`: a cube declaring `public: false` is omitted from meta and refused by query()/generateSql() with 404 CUBE_NOT_FOUND. showcase_delivery declares no `public`, so it is visible by the schema default `true`)",
           "evidence": "the /analytics/meta?cube=showcase_delivery body"
         },
         {
@@ -1042,11 +1042,11 @@
         "single-datapoint"
       ],
       "source": [
-        "examples/app-showcase/src/data/analytics/showcase.cube.ts#showcase_project (the showcase_delivery cube — measures, dimensions, base table, showcase_project join, public:false)",
+        "examples/app-showcase/src/data/analytics/showcase.cube.ts#showcase_project (the showcase_delivery cube — measures, dimensions, base table, showcase_project join; no `public` key, so visible by the default `true`)",
         "examples/app-showcase/src/coverage.ts#analyticsCubes (analyticsCubes registration → src/data/analytics/showcase.cube.ts, served by /api/v1/analytics/*)",
         "packages/runtime/src/domains/analytics.ts#cube (route contract: POST /analytics/query, GET /analytics/meta[?cube], entry validation, ExecutionContext scoping #2852, handled:false 404 for an absent/stub slot #3891/#4000)",
         "packages/spec/src/api/analytics.zod.ts#AnalyticsQueryRequestSchema (AnalyticsQueryRequestSchema bare shape + retiredKey query/format; meta response cubes[])",
-        "packages/services/service-analytics/src/analytics-service.ts#getMeta (getMeta keys measures/dimensions as `${cube}.${key}`, returns all registry cubes)",
+        "packages/services/service-analytics/src/analytics-service.ts#getMeta (getMeta keys measures/dimensions as `${cube}.${key}` and omits a registry cube whose `public` is `false` (cube-visibility.ts#isCubePublic); query()/generateSql() refuse such a cube with 404 CUBE_NOT_FOUND through assertCubePublic)",
         "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)"
       ],
       "history": [
@@ -1055,6 +1055,12 @@
           "date": "2026-08-08",
           "change": "new item: showcase_delivery cube /analytics/* meta+query reconciliation against the direct /data aggregate, with the honest empty-slot 404 degradation clause and the entry-validation negatives",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-28",
+          "change": "re-spelled the meta clause's verify text and two source lines, which stopped being true when the analytics service began reading `analytics_cube.public`: getMeta no longer returns every registry cube (it omits one declaring `public: false`, and query()/generateSql() refuse it with 404 CUBE_NOT_FOUND), and the showcase cube no longer declares `public: false` (it is visible by the default `true`). Text only: every clause, step and verdict is unchanged, because showcase_delivery stays visible and its meta entry still names the same four measures and four dimensions",
+          "ref": "#20348"
         }
       ]
     },
