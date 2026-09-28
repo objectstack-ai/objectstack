@@ -381,6 +381,26 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
    * fast path (native driver `date_trunc`).
    */
   timezone: z.string().optional(),
+  /**
+   * Full-Text Search over the rows BEFORE they are grouped — declared exactly
+   * as {@link EngineQueryOptionsSchema}'s `search` (the bare string is the
+   * canonical Tier-1 contract, ADR-0061 D1; the structured
+   * `FullTextSearchSchema` form carries the Tier-2 knobs). `QuerySchema.search`
+   * sits beside `groupBy` / `aggregations` with no carve-out, so the aggregate
+   * verb honours it the way `find` does: the engine expands it through the
+   * same ADR-0061 `$search` → cross-field `$or` expansion and ANDs it with
+   * `where`, so every group and every aggregated number is computed over the
+   * searched rows only. Before this key was declared the engine refused it,
+   * and the one wire path to `aggregate` (`findData`'s grouped branch) left it
+   * out — a grouped answer under a search was the unsearched answer.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional(),
+  /**
+   * Fields the `search` expansion may match against — declared exactly as
+   * {@link EngineQueryOptionsSchema}'s `searchFields`: intersected with the
+   * object's declared/derived searchable set (ADR-0061), never widened.
+   */
+  searchFields: z.array(z.string()).optional(),
 }).describe('QueryAST-aligned options for DataEngine.aggregate operations'));
 
 // --------------------------------------------------------------------------
@@ -1389,6 +1409,12 @@ export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
 export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
 export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
+/**
+ * Post-parse shape of {@link EngineAggregateOptions} — defaults applied (ADR-0122).
+ * The two shapes part at `search`: its structured `FullTextSearchSchema` form
+ * carries flag defaults, exactly as on {@link EngineQueryOptionsParsed}.
+ */
+export type EngineAggregateOptionsParsed = z.infer<typeof EngineAggregateOptionsSchema>;
 export type EngineCountOptions = z.input<typeof EngineCountOptionsSchema>;
 
 // --- Legacy: deprecated types (kept for backward compatibility) ---

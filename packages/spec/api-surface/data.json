@@ -242,6 +242,7 @@
     "EmptyOperatorExpansion (interface)",
     "EnableLike (interface)",
     "EngineAggregateOptions (type)",
+    "EngineAggregateOptionsParsed (type)",
     "EngineAggregateOptionsSchema (const)",
     "EngineCountOptions (type)",
     "EngineCountOptionsSchema (const)",
