@@ -51,6 +51,15 @@
  *    answers them what the plain read answers them, byte for byte.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
+ *
+ *    [#20378] **`/diff` and `/history` are AUTHORING doors** (ruling
+ *    5865708652, letter B, which narrows ruling 5856774816 item 2 for these
+ *    two doors only). Both read `sys_metadata_history`, where a draft save is
+ *    recorded exactly as an active save, so a caller who may not read drafts
+ *    (`readsDrafts` below) is refused them exactly as `GET /meta/_drafts`
+ *    refuses — 403 `FORBIDDEN`, before any read. Everything this census says
+ *    about them holds for the callers they admit. `/layers` and
+ *    `?layers=true` keep the pruned plain-read answer for everyone.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
  *    items that point at this one, never a member of this item's document.
  *
@@ -348,7 +357,12 @@ type DoorKind = 'document' | 'stored' | 'events' | 'exempt';
  * side, a `diff` of two versions, or the pending `draft` in the plain read's
  * envelope (its `item`).
  */
-interface Door { kind: DoorKind; suffix: string; query?: Record<string, string>; reason?: string; serves?: 'layers' | 'diff' | 'draft' }
+/**
+ * `authoring` — [#20378] ruling 5865708652: the door refuses a caller who may
+ * not read drafts (`readsDrafts`) with the `GET /meta/_drafts` 403, before any
+ * read; the rest of its row holds for the callers it admits.
+ */
+interface Door { kind: DoorKind; suffix: string; query?: Record<string, string>; reason?: string; serves?: 'layers' | 'diff' | 'draft'; authoring?: true }
 
 const DOORS: Record<string, Door> = {
     '?layers=true': { kind: 'stored', suffix: '', query: { layers: 'true' }, serves: 'layers' },
@@ -357,8 +371,8 @@ const DOORS: Record<string, Door> = {
     // version — not the rendered world, which is `?preview=draft`.
     '?state=draft': { kind: 'stored', suffix: '', query: { state: 'draft' }, serves: 'draft' },
     '/published': { kind: 'document', suffix: '/published' },
-    '/diff': { kind: 'stored', suffix: '/diff', serves: 'diff' },
-    '/history': { kind: 'events', suffix: '/history' },
+    '/diff': { kind: 'stored', suffix: '/diff', serves: 'diff', authoring: true },
+    '/history': { kind: 'events', suffix: '/history', authoring: true },
     '/audit': { kind: 'events', suffix: '/audit' },
     '/references': {
         kind: 'exempt',
@@ -643,6 +657,20 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                         protocol.getMetaItem.mockClear();
                         const res = await drive(rest, door.suffix, subject.type, subject.name, door.query);
                         const stored = find(subject.type, subject.name);
+                        if (door.authoring && CALLERS[callerName].ctx && !CALLERS[callerName].readsDrafts) {
+                            // [#20378] ruling 5865708652: an authoring door
+                            // refuses a caller who may not read drafts exactly
+                            // as `GET /meta/_drafts` does, whatever the plain
+                            // read answers them — and before any read. (An
+                            // anonymous caller is refused by the `/meta` auth
+                            // gate first, as on every door.)
+                            expect(envelope(res)).toEqual({ status: 403, code: 'FORBIDDEN' });
+                            for (const s of subject.secrets) expect(text(res)).not.toContain(s);
+                            expect(protocol.getMetaItem).not.toHaveBeenCalled();
+                            expect(protocol.diffMetaItem).not.toHaveBeenCalled();
+                            expect(protocol.historyMetaItem).not.toHaveBeenCalled();
+                            return;
+                        }
                         if (door.serves === 'draft' && CALLERS[callerName].ctx) {
                             const asked = protocol.getMetaItem.mock.calls.map(([r]: any[]) => r?.state);
                             if (!CALLERS[callerName].readsDrafts) {
@@ -827,13 +855,20 @@ describe('[#20156] edges', () => {
         const app = await save(rest, 'app', 'crm', clone(CRM_APP));
         expect(envelope(app)).toEqual({ status: 403, code: 'FORBIDDEN' });
         expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
-        // ...so every stored-version door serves them the plain read's pruned app.
+        // ...so every stored-version door serves them the plain read's pruned app
+        // — save `/diff`, an authoring door that refuses them outright
+        // ([#20378] ruling 5865708652: they may not read drafts either).
         const plain = await drive(rest, '', 'app', 'crm');
         const expected = navIds(plainItem(plain));
         expect(expected).not.toEqual(navIds(CRM_APP));
         for (const doorName of AUTHOR_EXEMPTION.doors) {
             const door = DOORS[doorName];
             const res = await drive(rest, door.suffix, 'app', 'crm', door.query);
+            if (door.authoring) {
+                expect(envelope(res), doorName).toEqual({ status: 403, code: 'FORBIDDEN' });
+                for (const s of ['nav_finance_ledger', 'nav_admin_runbook']) expect(text(res), doorName).not.toContain(s);
+                continue;
+            }
             expect(res.statusCode, doorName).toBe(200);
             for (const s of ['nav_finance_ledger', 'nav_admin_runbook']) expect(text(res), doorName).not.toContain(s);
             if (door.serves === 'diff') {
@@ -848,8 +883,12 @@ describe('[#20156] edges', () => {
         }
     });
 
+    // [#20378] Both edges below drive an ADMITTED caller: a caller who may not
+    // read drafts is refused `/diff` and `/history` before any read (the
+    // census rows above), so the question these edges ask is only open for one
+    // who may.
     it('a gated type with nothing behind the name: /diff answers the plain read\'s absence, /history its events', async () => {
-        const { rest, protocol } = setup('non-reader');
+        const { rest, protocol } = setup('reader');
         protocol.getMetaItem.mockImplementation(async ({ type, name }: any) => ({ type: singular(type), name, item: undefined }));
         const diff = await drive(rest, '/diff', 'doc', 'crm_admin_runbook');
         const history = await drive(rest, '/history', 'doc', 'crm_admin_runbook');
@@ -861,7 +900,7 @@ describe('[#20156] edges', () => {
     });
 
     it('a type no per-caller gate judges costs its event and diff doors no extra read', async () => {
-        const { rest, protocol } = setup('non-reader');
+        const { rest, protocol } = setup('reader');
         for (const suffix of ['/history', '/audit', '/diff']) {
             protocol.getMetaItem.mockClear();
             const res = await drive(rest, suffix, 'view', 'all_leads');

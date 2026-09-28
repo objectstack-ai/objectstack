@@ -362,7 +362,7 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
   {
   name: SnakeCaseIdentifierSchema.describe('Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch.'),
   label: z.string().optional().describe('Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization).'),
-  icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash-2").'),
+  icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash").'),
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'outline']).optional().describe('Visual treatment of the button.'),
   operation: BulkActionOperationSchema.describe("What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`)."),
   execution: BulkActionExecutionSchema.optional().describe("For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead."),

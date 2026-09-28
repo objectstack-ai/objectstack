@@ -7349,6 +7349,44 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#20378] AN AUTHORING DOOR — ruling 5865708652 (letter B).
+                    // `sys_metadata_history` is the authoring commit log
+                    // (ADR-0067), and a DRAFT save appends a row to it exactly
+                    // as an active save does, with nothing on the row to tell
+                    // the two apart — so this log, served to a caller who may
+                    // not read pending drafts, lists unpublished authoring work
+                    // (ADR-0106 D4: 「draft/preview reads are admin-gated
+                    // upstream」). The caller is asked
+                    // {@link mayReadPendingDrafts} FIRST, and one it does not
+                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // (403 `FORBIDDEN`, the same nested envelope): before the
+                    // protocol is resolved (no 501-vs-200 probe), before the
+                    // query is parsed, before any item or event is read. The
+                    // answer is therefore one and the same for an item that
+                    // exists, one that does not and a draft-only one — the door
+                    // is no existence oracle — and it carries no item or
+                    // version detail. The message names THIS door, never
+                    // drafts: a refusal worded about drafts would read as
+                    // "this item has one". Whoever it admits reads exactly what
+                    // they read before, the per-caller refusal below included.
+                    //
+                    // Ruling 5856774816 (#20156) item 2 is narrowed for this
+                    // door and `/diff` only: `/layers` and `?layers=true` read
+                    // the active row and keep the pruned plain-read answer.
+                    //
+                    // `historyCtx` is this door's one caller resolution; the org
+                    // partition below reads the same value.
+                    const historyCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    if (!mayReadPendingDrafts(historyCtx)) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Reading a metadata item\'s version history requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     // The cast came off when `MetadataProtocol` declared
                     // `historyMetaItem` (#12005 — the #11006 pattern, exactly
@@ -7429,11 +7467,11 @@ export class RestServer {
                     // uses is what makes the two sides incapable of drifting —
                     // the reasoning `organizationIdForMetaRead` was written for.
                     //
-                    // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
-                    // memoised per request (WeakMap keyed by `req`), the same
-                    // result the audit twin and 40+ handlers here already share.
-                    const historyCtx = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    // ⚠️ NOT a new org-resolution seam: `historyCtx` is the
+                    // caller resolved at the head of this door (#20378), and
+                    // `resolveExecCtx` is memoised per request (WeakMap keyed by
+                    // `req`), the same result the audit twin and 40+ handlers
+                    // here already share.
                     const historyOrganizationId = organizationIdForMetaRead(
                         // [#10340] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
@@ -7976,6 +8014,46 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#20378] AN AUTHORING DOOR — ruling 5865708652 (letter B),
+                    // the `/history` twin's gate on the same log. A diff reads
+                    // stored versions out of `sys_metadata_history`, where a
+                    // DRAFT save is recorded exactly as an active save, so
+                    // `?from=`/`?to=` naming a draft save — or the default
+                    // range, once a draft is pending — served unpublished
+                    // content to a caller who may not read drafts. The version
+                    // store cannot tell a draft version from a published one,
+                    // so there is no exact published-only answer to fall back
+                    // to: the `/meta/_drafts` shape, not the draft switches'
+                    // "answer as if absent". The caller is asked
+                    // {@link mayReadPendingDrafts} FIRST, and one it does not
+                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // (403 `FORBIDDEN`, the same nested envelope): before the
+                    // protocol is resolved, before the query is parsed, before
+                    // the mask posture, the current document or any version is
+                    // read — one answer for an item that exists, one that does
+                    // not and a draft-only one, with no item or version detail,
+                    // so the door is no existence oracle. The message names THIS
+                    // door, never drafts. Whoever it admits reads exactly what
+                    // they read before: every per-caller gate below, and ruling
+                    // 5856774816's author exemption, still apply to them.
+                    //
+                    // Ruling 5856774816 (#20156) item 2 is narrowed for this
+                    // door and `/history` only: `/layers` and `?layers=true`
+                    // read the active row and keep the pruned plain-read answer.
+                    //
+                    // `diffCtx` is this door's one caller resolution; the org
+                    // partition below reads the same value.
+                    const diffCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    if (!mayReadPendingDrafts(diffCtx)) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Comparing a metadata item\'s stored versions requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).diffMetaItem) {
                         res.status(501).json({
@@ -8060,8 +8138,9 @@ export class RestServer {
                     // `request.organizationId ?? null`, so an `?? null` copied
                     // from the audit door would type-check here and still be a
                     // silent no-op — the exact fix-shaped-non-fix this card is.
-                    const diffCtx = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    //
+                    // `diffCtx` is the caller resolved at the head of this door
+                    // (#20378), not a second resolution.
                     const diffOrganizationId = organizationIdForMetaRead(
                         // [#10340] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
