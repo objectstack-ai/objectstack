@@ -50,13 +50,22 @@
  *
  * [#20240] One non-string class is uninterpretable by the same test's other
  * half — the rule cannot put it in the column's form. On a `date` column a
- * finite number or a `Date` becomes its UTC calendar day, and a year below 0 or
- * above 9999 has no `YYYY-MM-DD` spelling: the rule keeps writing
+ * finite number or a `Date` becomes its UTC calendar day, and a year outside
+ * the four-digit ones has no `YYYY-MM-DD` spelling: the rule keeps writing
  * `10000-01-01` / `-1-01-01` for the write and read paths, but as a comparand
  * that text orders as no day does (`10000-01-01` sorts below `2026-…`), and
  * PostgreSQL refuses `-1-01-01` outright. So such a comparand is judged
  * uninterpretable here, exactly as an unparseable string is, and refused by
  * the same doors.
+ *
+ * [#20264] That class is now the supported years, 0001..9999, on `date` AND
+ * `datetime`, and in every spelling the kind's rule reads — a number, a `Date`
+ * or a string. `datetime` spells an instant past 9999 `+010000-…` and one
+ * before year 0 `-000001-…`, which sort as no instant does, and PostgreSQL
+ * answers `22009` / `22007`; year 0 is refused on both kinds because
+ * PostgreSQL's `DATE` and `timestamptz` have no year 0 (`22008`). The range is
+ * `temporal-storage-form.ts`'s `isOutsideTemporalYearRange`, the one the
+ * record validator asks of a written value too; this predicate only calls it.
  *
  * That is why this is not `utcInstantMs` (`@objectstack/spec/data`), which is
  * the stricter canonical reader: it rejects a bare epoch-millisecond string and
@@ -66,15 +75,16 @@
  *
  * ## Two things it deliberately does NOT judge
  *
- * - **Non-string comparands, save the one `date` class above.** A number is
- *   epoch milliseconds, a `Date` is an instant, `null` is a null test, and the
- *   `datetime` and `time` rules read every finite one; so does the `date` rule
- *   for a year from 0 to 9999. The #8690 refusal was scoped to strings by that
+ * - **Non-string comparands, save the year class above.** A number is epoch
+ *   milliseconds, a `Date` is an instant, `null` is a null test, and the
+ *   `time` rule reads every finite one; so do the `date` and `datetime` rules
+ *   for a year from 0001 to 9999. The #8690 refusal was scoped to strings by that
  *   card's own ruling — its triage queued "a non-interpretable bare string", and
  *   the maintainer ruling scoped its two options "to non-empty strings" so the
  *   empty-string cell stayed its own card. That scoped that change; it is not a
  *   standing rule that a non-string is never refused. [#20240] extends the
- *   refusal to the `date` class above by the triage direction on that card.
+ *   refusal to the `date` class above by the triage direction on that card,
+ *   and [#20264] to `datetime` and the range 0001..9999 by triage's ruling.
  *   `NaN`, ±Infinity and an Invalid Date name no instant and no year, so they
  *   are not that class and stay unjudged, as before; no JSON body can carry
  *   one (JSON spells them `null`).
@@ -87,6 +97,7 @@
  */
 
 import { classifyFilterToken } from '@objectstack/spec/data';
+import { isOutsideTemporalYearRange } from './temporal-storage-form.js';
 
 /** Which temporal storage rule a declared field takes. */
 export type TemporalComparandKind = 'datetime' | 'date' | 'time';
@@ -151,32 +162,13 @@ function readsAsWallClock(s: string): boolean {
 }
 
 /**
- * [#20240] `temporalStorageForm`'s `date` reading of a NUMBER or a `Date` lands
- * outside the four-digit years `YYYY-MM-DD` can spell.
- *
- * Both name an instant, and the rule takes that instant's UTC calendar day.
- * Its year must fall from 0 to 9999: `0999-06-15` is a day, `10000-01-01` and
- * `-1-01-01` are not. A finite number past ±8.64e15 names an instant the
- * `Date` type cannot hold at all — a year past ±271821 — so it is outside the
- * range too, and the rule hands it back unchanged. `NaN`, ±Infinity and an
- * Invalid Date name no instant and no year, and are not judged here.
- */
-function isOutsideCalendarDayYears(value: number | Date): boolean {
-  if (typeof value === 'number' && !Number.isFinite(value)) return false;
-  const instant = typeof value === 'number' ? new Date(value) : value;
-  if (Number.isNaN(instant.getTime())) return typeof value === 'number';
-  const year = instant.getUTCFullYear();
-  return year < 0 || year > 9999;
-}
-
-/**
  * Is `value` a comparand that a `kind` column's storage rule cannot read?
  *
  * `true` for a non-empty, non-placeholder STRING that the kind's rule would
- * hand back unchanged, and — on a `date` column only — for a finite number or
- * a `Date` whose UTC calendar day falls in a year below 0 or above 9999
- * ({@link isOutsideCalendarDayYears}). Everything else — any other number or
- * `Date`, `null`, a `{ $field }` reference, filter structure, the empty
+ * hand back unchanged, and — on a `date` or `datetime` column — for a number,
+ * a `Date` or a string the rule reads whose year falls outside 0001..9999
+ * ([#20264], `isOutsideTemporalYearRange`). Everything else — any other number
+ * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
  * string, a `{token}` — answers `false`, each for a reason recorded in the
  * module note or below.
  *
@@ -191,8 +183,8 @@ export function isUninterpretableTemporalComparand(
   kind: TemporalComparandKind,
   value: unknown,
 ): boolean {
-  if (kind === 'date' && (typeof value === 'number' || value instanceof Date)) {
-    return isOutsideCalendarDayYears(value);
+  if (kind !== 'time' && (typeof value === 'number' || value instanceof Date)) {
+    return isOutsideTemporalYearRange(value, kind);
   }
   if (typeof value !== 'string') return false;
   const s = value.trim();
@@ -200,7 +192,7 @@ export function isUninterpretableTemporalComparand(
   if (s === '') return false;
   // Another layer's vocabulary, and it has its own loud refusal.
   if (classifyFilterToken(value) !== null) return false;
-  if (kind === 'datetime') return !readsAsInstant(s);
-  if (kind === 'date') return !readsAsCalendarDay(s);
+  if (kind === 'datetime') return !readsAsInstant(s) || isOutsideTemporalYearRange(s, kind);
+  if (kind === 'date') return !readsAsCalendarDay(s) || isOutsideTemporalYearRange(s, kind);
   return !(readsAsWallClock(s) || readsAsInstant(s));
 }
