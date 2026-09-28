@@ -228,6 +228,36 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'onlyWhen',
     why: "the mirror of `retention.onlyWhen` — one shape by design (`lifecycleOnlyWhenSchema`, object.zod.ts) — with the same boundary: a row-filter map with no scalar rendering among the ttl block's text inputs, and its one writer today is the code-declared sys_session object (`revoked_at: { $null: true }`). Offering it needs a structured control, a form-face addition rather than a reconciliation",
   },
+  // ── The `fieldGroups` repeater (ruling record 5861442317, #19332) ──
+  //
+  // The three `[DEPRECATED → collapse]` aliases of a field group, the
+  // `page.interfaceConfig.sourceView` precedent at the top of this ledger one
+  // list down. The parse still accepts each and derives `collapse` from it
+  // when `collapse` is absent (`normalizeSemanticRoleAliases`, object.zod.ts),
+  // so a stored entry that carries one keeps its meaning. The repeater offers
+  // the canonical `collapse` select instead, and a set `collapse` outranks
+  // every alias, at parse and in `deriveFieldGroupLayout` alike.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: 'fieldGroups',
+    key: 'defaultExpanded',
+    why: "`[DEPRECATED → collapse]` alias (ADR-0085), deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'expanded', `false` → 'collapsed'), this repeater offers the canonical `collapse` select, and a second control beside it would teach the retired spelling",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: 'fieldGroups',
+    key: 'collapsible',
+    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), one half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps the pair onto `collapse` only when `collapse` is absent, this repeater offers the canonical `collapse` select, and the pair can spell the contradictions the enum replaced",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: 'fieldGroups',
+    key: 'collapsed',
+    why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), the other half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'collapsed' on its own), and this repeater offers the canonical `collapse` select",
+  },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
   // Three reasons, each read off the key's own `describe()` or its liveness

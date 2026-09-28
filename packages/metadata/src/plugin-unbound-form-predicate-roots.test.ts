@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveInstalledSpecVersion } from '@objectstack/metadata-core';
+import { ALL_CONVERSIONS } from '@objectstack/spec';
 import { MetadataPlugin } from './plugin.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,21 @@ function fakeCtx() {
 
 function newPlugin(): any {
     return new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } });
+}
+
+/**
+ * The first `x.y.z` past both the installed spec's label and every retired
+ * entry's `retiredAfter` — the floor of an artifact authored against the
+ * surface this runtime actually enforces, which no window opens for.
+ */
+function currentSurfaceFloor(): string {
+    const installed = resolveInstalledSpecVersion();
+    if (!installed) return '';
+    const triples = [installed, ...ALL_CONVERSIONS.flatMap((c) => (c.retiredFromLoadPath === true ? [c.retiredAfter] : []))]
+        .map((v) => v.split('.').slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    const [major, minor, patch] = triples[triples.length - 1]!;
+    return `${major}.${minor}.${patch + 1}`;
 }
 
 /** Just the notices this feature emits — never the #12772 conversion summaries. */
@@ -137,7 +153,12 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         // declaring the current floor gets zero notices even carrying the very
         // same bare-root predicates. Derived from the installed spec rather than
         // hardcoded, so the pin cannot rot into vacuity on the next spec bump.
-        const current = resolveInstalledSpecVersion();
+        //
+        // "Current" is past BOTH the package label and every retirement the
+        // registry enforces (#20390): while `main` carries retirements its label
+        // has not moved past, `^<label>` is an artifact built BY the last
+        // release, and the per-entry half of the window rightly reads it as old.
+        const current = currentSurfaceFloor();
         expect(current, 'spec version must resolve for this pin to mean anything').toBeTruthy();
 
         const fixture = loadFixture();

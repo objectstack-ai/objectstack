@@ -100,7 +100,7 @@
     "MIGRATION_SUPPORT_FLOOR": "src/migrations/registry.ts#MIGRATION_SUPPORT_FLOOR (const)",
     "MapSupportedField": "src/shared/metadata-collection.zod.ts#MapSupportedField (type)",
     "MetadataCollectionInput": "src/shared/metadata-collection.zod.ts#MetadataCollectionInput (type)",
-    "MetadataConversion": "src/conversions/types.ts#MetadataConversion (interface)",
+    "MetadataConversion": "src/conversions/types.ts#MetadataConversion (type)",
     "MigrationApplication": "src/migrations/types.ts#MigrationApplication (interface)",
     "MigrationChainResult": "src/migrations/types.ts#MigrationChainResult (interface)",
     "MigrationFloorError": "src/migrations/chain.ts#MigrationFloorError (class)",
