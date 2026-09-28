@@ -25,8 +25,9 @@ export const entry: SemanticMigration = {
     + 'condition — `{ amount: { $contains: \'5\' } }` may have meant `$eq: 5`, a range, '
     + 'or a filter on a different column altogether — so the loader must not choose one.',
   reason:
-    'objectstack#15661, ruled 2026-09-05 (decision batch #43, option C-deny), landed at '
-    + 'the engine seam as objectstack#15773. A text operator (`$contains` / '
+    'Maintainer ruling of 2026-09-05 (option C-deny: refuse now, over the type sets the '
+    + 'contract already declares, minting no new vocabulary), landed at the engine seam. A '
+    + 'text operator (`$contains` / '
     + '`$notContains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) '
     + 'over a field whose DECLARED type can never store a string — `NUMERIC_VALUE_TYPES` '
     + '∪ `BOOLEAN_VALUE_TYPES` ∪ `CALENDAR_DATE_TYPES` ∪ `INSTANT_TYPES` ∪ '
@@ -54,6 +55,7 @@ export const entry: SemanticMigration = {
     + 'and `user` ids, `autonumber` and the file classes — are unaffected and must keep '
     + 'answering exactly as before; that is the control which proves a repair pass did '
     + 'not over-reach. A DIRECT driver call bypasses this door entirely and keeps '
-    + 'answering the `FILTER_TEXT_CASES` stored-value row (objectstack#14079), so a '
+    + 'answering the `FILTER_TEXT_CASES` stored-value row (a stored value that is not a string '
+    + 'never satisfies a positive text operator and satisfies `$notContains`), so a '
     + 'driver-level test is not evidence about this migration in either direction.',
 };
