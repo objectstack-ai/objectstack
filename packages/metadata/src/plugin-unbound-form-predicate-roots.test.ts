@@ -60,7 +60,7 @@ function currentSurfaceFloor(): string {
     const triples = [installed, ...ALL_CONVERSIONS.flatMap((c) => (c.retiredFromLoadPath === true ? [c.retiredAfter] : []))]
         .map((v) => v.split('.').slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number])
         .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-    const [major, minor, patch] = triples.at(-1)!;
+    const [major, minor, patch] = triples[triples.length - 1]!;
     return `${major}.${minor}.${patch + 1}`;
 }
 
