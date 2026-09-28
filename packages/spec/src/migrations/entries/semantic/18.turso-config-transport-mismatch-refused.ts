@@ -5,10 +5,11 @@ import type { SemanticMigration } from '../../types.js';
 // The AUTHORING half of the turso driver's constructor refusals. The driver
 // refuses these configurations when it is built; this entry records that the
 // datasource contract now refuses them where they are written, together with
-// the one combination the driver builds and then ignores. A structured TODO,
-// not a D2 conversion: which way out an author wants — a remote database, an
-// embedded replica on a local file, or a plain local file — is intent no
-// artifact records.
+// the one combination the driver used to build and then ignore (syncUrl under
+// a forced remote mode), which the constructor refuses too since #20200. A
+// structured TODO, not a D2 conversion: which way out an author wants — a
+// remote database, an embedded replica on a local file, or a plain local
+// file — is intent no artifact records.
 export const entry: SemanticMigration = {
   id: 'turso-config-transport-mismatch-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -35,16 +36,20 @@ export const entry: SemanticMigration = {
     '#19977. Each key parsed on its own, so the contract accepted configurations the turso driver '
     + 'refuses when it is built (VALIDATION_ERROR / 400 from the constructor, since the #19893 '
     + 'and #19976 changes) — a datasource published clean and then failed at boot or at test '
-    + 'connection. One more it builds and then ignores: syncUrl under a forced remote mode, where '
-    + 'the remote client is created without it, no sync ever runs and the sync call fails as not '
-    + 'supported while the driver reports sync as enabled (measured on the built driver). '
-    + 'Authoring now refuses exactly the constructor\'s refused set — the same predicates, a '
-    + 'scheme matched in any letter case, the url read trimmed as both datasource loaders hand it '
-    + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
-    + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
-    + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
-    + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
-    + 'the first four shapes there already); what changes is that creating, testing or editing '
+    + 'connection. One more it built and then ignored until #20200: syncUrl under a forced remote '
+    + 'mode, where the remote client was created without it, no sync ever ran and the sync call '
+    + 'failed as not supported while the driver reported sync as enabled (measured on the built '
+    + 'driver). Authoring now refuses exactly the constructor\'s refused set — the same predicates, '
+    + 'a scheme matched in any letter case, the url read trimmed as both datasource loaders hand '
+    + 'it over — plus that key, refused at authoring first as the declared-but-not-enforced shape '
+    + 'ADR-0049 does not ship, and by the constructor too since #20200. Nothing the constructor '
+    + 'accepts is refused (at #19977 that key was the one exception; since #20200 there is none): '
+    + 'a forced remote mode keeps its url unjudged, as the constructor does. Stored datasource '
+    + 'rows are not re-parsed '
+    + 'when they load, so a stored row still reaches the constructor as written; the constructor '
+    + 'refuses the first four shapes there already and, since #20200, also refuses syncUrl under '
+    + 'a forced remote mode and sync with no syncUrl when the datasource boots. What changes here '
+    + 'is that creating, testing or editing '
     + 'its config through the datasource admin service, defineStack or os validate is refused at '
     + 'the key. Measured on this tree at the change: no example, template, published skill or '
     + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',

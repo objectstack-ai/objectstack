@@ -29,5 +29,5 @@ derived object key is empty, because the boot registrar skips that entry with a
 warning and never refuses it. The boot registrar now calls this function. What it
 refuses, its message and its `VALIDATION_ERROR` / `400` envelope are unchanged.
 
-Not changed: `os build` does not run this check, so it still writes an artifact
-carrying such a container, and the server refuses that artifact when it loads it.
+`os build` runs the same check as well (#20393, its own entry), so it no longer
+writes an artifact carrying such a container.

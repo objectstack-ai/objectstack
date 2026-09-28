@@ -282,3 +282,157 @@ describe('#8798 — a history-table outage now answers the same way for every ty
         expect(err.status).toBe(503);
     });
 });
+
+/**
+ * [#20397] The DEFAULT range (no `toVersion`) labels its to side with the
+ * version whose body it compares.
+ *
+ * The to-side body is the active `sys_metadata` row; the label used to be the
+ * newest `sys_metadata_history` row's version, which is a draft save whenever a
+ * draft is pending (every draft save appends a history row). The label is now
+ * the active row's own `version` column, the one `SysMetadataRepository.put`
+ * stamps with the version of the history row it appends in the same
+ * transaction. Pinned here over seeded rows, beside this file's double, which
+ * already honours the `where` on both tables; the same readings through the
+ * real REST stack are `packages/rest/src/meta-diff-default-range-labels.test.ts`.
+ */
+describe('#20397 — the default range labels the to side with the active row\'s own version', () => {
+    type Seed = { version: number; op: string; body: Record<string, unknown> | null };
+    /** History rows in version order, plus the active and draft rows they left behind. */
+    function seedLineage(
+        tables: Record<string, Array<Record<string, unknown>>>,
+        type: string,
+        name: string,
+        history: Seed[],
+        rows: { active?: Seed; draft?: Seed },
+    ) {
+        const base = { organization_id: null, type, name };
+        history.forEach((h, i) => {
+            tables.sys_metadata_history!.push({
+                ...base,
+                id: `h_${h.version}`,
+                version: h.version,
+                event_seq: i + 1,
+                operation_type: h.op,
+                metadata: h.body == null ? null : JSON.stringify(h.body),
+                checksum: h.body == null ? null : hashSpec(h.body),
+                recorded_at: new Date(i + 1).toISOString(),
+            });
+        });
+        for (const state of ['active', 'draft'] as const) {
+            const row = rows[state];
+            if (!row) continue;
+            tables.sys_metadata!.push({
+                ...base,
+                id: `m_${state}`,
+                state,
+                version: row.version,
+                metadata: JSON.stringify(row.body),
+                checksum: hashSpec(row.body!),
+            });
+        }
+    }
+
+    for (const type of [ORDINARY_TYPE, 'app']) {
+        it(`${type}: with a draft pending, toVersion is the active row's version and the answer is the explicit range's`, async () => {
+            const { engine, tables } = makeStubEngine();
+            const one = { name: 'item', label: 'One' };
+            const two = { name: 'item', label: 'Two' };
+            const pending = { name: 'item', label: 'Pending draft' };
+            seedLineage(tables, type, 'item', [
+                { version: 1, op: 'create', body: one },
+                { version: 2, op: 'update', body: two },
+                { version: 3, op: 'create', body: pending },
+            ], { active: { version: 2, op: 'update', body: two }, draft: { version: 3, op: 'create', body: pending } });
+            const protocol = new ObjectStackProtocolImplementation(engine);
+
+            const res: any = await protocol.diffMetaItem({ type, name: 'item' });
+            const explicit: any = await protocol.diffMetaItem({ type, name: 'item', fromVersion: 1, toVersion: 2 });
+
+            expect(res).toEqual({
+                type,
+                name: 'item',
+                fromVersion: 1,
+                toVersion: 2,
+                added: [],
+                removed: [],
+                changed: [{ path: 'label', from: 'One', to: 'Two' }],
+            });
+            expect(res).toEqual(explicit);
+        });
+    }
+
+    it('the card\'s app reading: one active save and two draft saves label the to side 1 (was 3), with no from side before it', async () => {
+        const { engine, tables } = makeStubEngine();
+        const v1 = { name: 'atlas', label: 'Atlas v1' };
+        const d2 = { name: 'atlas', label: 'Atlas v2 draft' };
+        const d3 = { name: 'atlas', label: 'Atlas v3 draft' };
+        seedLineage(tables, 'app', 'atlas', [
+            { version: 1, op: 'create', body: v1 },
+            { version: 2, op: 'create', body: d2 },
+            { version: 3, op: 'update', body: d3 },
+        ], { active: { version: 1, op: 'create', body: v1 }, draft: { version: 3, op: 'update', body: d3 } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: 'app', name: 'atlas' });
+
+        expect(res).toEqual({
+            type: 'app',
+            name: 'atlas',
+            fromVersion: null,
+            toVersion: 1,
+            added: [{ path: 'name', value: 'atlas' }, { path: 'label', value: 'Atlas v1' }],
+            removed: [],
+            changed: [],
+        });
+    });
+
+    it('no active row (draft saves only): the to side is absent, so its label is null and no draft body is either side', async () => {
+        const { engine, tables } = makeStubEngine();
+        const d1 = { name: 'item', label: 'Only draft one' };
+        const d2 = { name: 'item', label: 'Only draft two' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: d1 },
+            { version: 2, op: 'update', body: d2 },
+        ], { draft: { version: 2, op: 'update', body: d2 } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: null, toVersion: null, added: [], removed: [], changed: [],
+        });
+    });
+
+    it('no active row (deleted): the default range answers null on both sides; the deletion stays readable by naming its versions', async () => {
+        // The same rule as the draft-only case: the to side is absent, so is
+        // its label. Before #20397 this one case happened to agree (the newest
+        // history row was the tombstone, whose body is also absent); the
+        // deletion itself is still one explicit range away.
+        const { engine, tables } = makeStubEngine();
+        const one = { name: 'item', label: 'One' };
+        const two = { name: 'item', label: 'Two' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: one },
+            { version: 2, op: 'update', body: two },
+            { version: 3, op: 'delete', body: null },
+        ], {});
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+        const deletion: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item', fromVersion: 2, toVersion: 3 });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: null, toVersion: null, added: [], removed: [], changed: [],
+        });
+        expect(deletion).toEqual({
+            type: ORDINARY_TYPE,
+            name: 'item',
+            fromVersion: 2,
+            toVersion: 3,
+            added: [],
+            removed: [{ path: 'name', value: 'item' }, { path: 'label', value: 'Two' }],
+            changed: [],
+        });
+    });
+});

@@ -189,46 +189,15 @@ export interface ConversionFixture {
 }
 
 /**
- * A single declarative, lossless metadata conversion.
- *
- * `apply` is a **pure, immutable** transform: it returns a stack with the old
- * shape rewritten to the canonical one (copy-on-write — untouched branches are
- * shared, so `plugins` and other non-clonable values are never touched), and
- * reports each rewrite via `emit`. Registry glue turns each
- * {@link ConversionApplication} into a full {@link ConversionNotice}.
+ * The members every conversion carries, whatever its retirement state. Not
+ * exported: {@link MetadataConversion} is the one public name; this body and
+ * the two retirement states below are how it is spelled.
  */
-export interface MetadataConversion {
+interface MetadataConversionBody {
   /** Stable, kebab-case id; also the migration-chain step id when this graduates (P2). */
   id: string;
   /** The protocol major that introduced the canonical shape. */
   toMajor: number;
-  /**
-   * When `true`, this conversion is **retired from the AUTHORING surface**: the
-   * authoring funnel (`normalizeStackInput` — `defineStack`, `validate`,
-   * `lint`, `compile`, `info`, `doctor`) no longer replays it, so an author
-   * writing the old shape meets the schema's rejection or its tombstone and is
-   * taught the canonical spelling. This is the ADR-0087 D2 window's second half
-   * ("retired in N+1 — but never deleted"), and it is also how a pre-launch
-   * one-step rename (which never had a load window at all) is preserved in the
-   * chain.
-   *
-   * ⚠️ The flag's name says "load path", but its reach is the authoring surface
-   * only — **data-at-rest load paths replay retired entries on purpose**:
-   * stored-row rehydration (`applyConversionsToStoredItem`, which pins
-   * `includeRetired: true` rather than offering it), flow rehydration in the
-   * automation engine, and the artifact-ingestion door
-   * (`applyArtifactForwardConversions`, inside its declared-floor window). A
-   * row, a stored flow or a built artifact has no author for a tombstone to
-   * teach, and refusing a shape that once worked would only break data — see
-   * ADR-0087's `## Addendum (2026-07-31)` and the #12772 ruling. `objectstack
-   * migrate meta` replays it too, against *source* metadata, but by id through
-   * `applyMetaMigrations` rather than through this flag.
-   *
-   * ⇒ Setting this does NOT confine a rewrite to history. For a conversion
-   * whose old and new shapes are both legal and mean different things (a
-   * default flip, not a rename), the data-at-rest seams will still apply it.
-   */
-  retiredFromLoadPath?: boolean;
   /** Dotted surface, e.g. `flow.node.type`, `page.kind`, `flow.node.config`. */
   surface: string;
   /** One-line human summary of the rename/move (the load-bearing prose, kept to one field). */
@@ -250,3 +219,83 @@ export interface MetadataConversion {
   /** Old→new fixture pair driving the CI check. */
   fixture: ConversionFixture;
 }
+
+/** A conversion the authoring funnel still replays: no retirement, so no retirement version. */
+interface LiveConversionState {
+  /** Absent (or `false`): the authoring funnel replays this entry. See the retired state. */
+  retiredFromLoadPath?: false;
+  /** Absent: a live entry has no retirement version. Set it together with `retiredFromLoadPath`. */
+  retiredAfter?: undefined;
+}
+
+/** A conversion retired from the authoring surface, stamped with the version it retired after. */
+interface RetiredConversionState {
+  /**
+   * When `true`, this conversion is **retired from the AUTHORING surface**: the
+   * authoring funnel (`normalizeStackInput` — `defineStack`, `validate`,
+   * `lint`, `compile`, `info`, `doctor`) no longer replays it, so an author
+   * writing the old shape meets the schema's rejection or its tombstone and is
+   * taught the canonical spelling. This is the ADR-0087 D2 window's second half
+   * ("retired in N+1 — but never deleted"), and it is also how a pre-launch
+   * one-step rename (which never had a load window at all) is preserved in the
+   * chain.
+   *
+   * ⚠️ The flag's name says "load path", but its reach is the authoring surface
+   * only — **data-at-rest load paths replay retired entries on purpose**:
+   * stored-row rehydration (`applyConversionsToStoredItem`, which pins
+   * `includeRetired: true` rather than offering it), flow rehydration in the
+   * automation engine, and the artifact-ingestion door
+   * (`applyArtifactForwardConversions`, inside its declared-floor window, which
+   * it decides per entry with {@link RetiredConversionState.retiredAfter}). A
+   * row, a stored flow or a built artifact has no author for a tombstone to
+   * teach, and refusing a shape that once worked would only break data — see
+   * ADR-0087's `## Addendum (2026-07-31)` and the #12772 ruling. `objectstack
+   * migrate meta` replays it too, against *source* metadata, but by id through
+   * `applyMetaMigrations` rather than through this flag.
+   *
+   * ⇒ Setting this does NOT confine a rewrite to history. For a conversion
+   * whose old and new shapes are both legal and mean different things (a
+   * default flip, not a rename), the data-at-rest seams will still apply it.
+   */
+  retiredFromLoadPath: true;
+  /**
+   * The last published `@objectstack/spec` version whose authoring surface
+   * still accepted the old shape, as a stable `x.y.z`. REQUIRED on every
+   * retired entry, so tsc refuses a retirement that omits it.
+   *
+   * It is a FACT when the entry is written, never a guess at the next release
+   * number: it is the package's version label at the moment the retirement
+   * lands — `main` carries the last release's label until the next release is
+   * cut, and that release is the first one to refuse the old shape. For an
+   * entry already published, it is the stable release just before the first
+   * published tarball that carries the entry retired.
+   *
+   * Read by the artifact-ingestion door (`applyArtifactForwardConversions`,
+   * `@objectstack/metadata-core`): an artifact whose declared `engines.protocol`
+   * floor is at or below this version predates the retirement, so the door
+   * replays this entry even when that floor is not below the runtime's own
+   * version label — the gap a `main` that enforces a retirement the label has
+   * not caught up with would otherwise leave. A floor above it still meets the
+   * strict parse and its tombstone.
+   *
+   * Pinned against the published tarballs by `retired-after.census.test.ts`
+   * (the committed census beside it, re-derived from npm by
+   * `scripts/build-retired-after-census.ts`).
+   */
+  retiredAfter: `${number}.${number}.${number}`;
+}
+
+/**
+ * A single declarative, lossless metadata conversion.
+ *
+ * `apply` is a **pure, immutable** transform: it returns a stack with the old
+ * shape rewritten to the canonical one (copy-on-write — untouched branches are
+ * shared, so `plugins` and other non-clonable values are never touched), and
+ * reports each rewrite via `emit`. Registry glue turns each
+ * {@link ConversionApplication} into a full {@link ConversionNotice}.
+ *
+ * Either live or retired: a retired entry (`retiredFromLoadPath: true`) must
+ * also carry `retiredAfter`, the version it retired after; a live entry carries
+ * neither.
+ */
+export type MetadataConversion = MetadataConversionBody & (LiveConversionState | RetiredConversionState);

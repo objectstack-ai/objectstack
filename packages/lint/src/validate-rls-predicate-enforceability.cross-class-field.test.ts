@@ -160,7 +160,7 @@ describe('validateRlsPredicateEnforceability — a field compared with a field o
     expect(using.message).toContain('the same `using` is also the write check whenever no applicable policy');
 
     const check = validateRlsPredicateEnforceability(stackWith({ operation: 'insert', check: 'record.status != record.amount' }))[0];
-    expect(check.message).toContain('the write is admitted and stored whenever that comparison happens to hold');
+    expect(check.message).toContain('every insert or update it judges is refused and nothing is stored');
     expect(check.message).not.toContain('every read this policy scopes');
   });
 

@@ -26,6 +26,12 @@ import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERI
 // `os generate migration` reads the SAME table, in both of its formats — that
 // shared table IS the repair, so ⛔ never restate one of its numbers here.
 import { numericColumnFor } from '@objectstack/spec/data';
+// [#20355] The cross-field comparison class, defined once in the spec (#20347,
+// lifted case for case from this driver's #5222 boundary). This driver READS it
+// — `crossFieldComparisonClass` below delegates — so the read it compiles and
+// the write check `@objectstack/formula` evaluates judge one comparison by one
+// rule.
+import { crossFieldColumnVerdict, type CrossFieldComparisonClass } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -2729,6 +2735,16 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * [#5222] The comparison class a declared field's stored column belongs to, or
  * `null` for a field no column-to-column comparison can be compiled against.
  *
+ * [#20355] The classification is the SPEC'S now — `crossFieldColumnVerdict`
+ * (`@objectstack/spec/data`), lifted case for case from this function by
+ * #20347 — and this function is its reader for the one thing the spec leaves
+ * to a driver: its internal aliases. The write check (`@objectstack/formula`'s
+ * `matchesFilterCondition`, handed the object's declared columns by the RLS
+ * write gate) and the authoring door (`@objectstack/lint`) read the same
+ * export, so a policy's comparison has one answer on the read, on the write
+ * and at `os validate`. The reasoning below is the classification's, kept
+ * here because this driver is where it was measured.
+ *
  * Cross-field comparison is only emitted between two columns of the SAME
  * class. One class = one storage shape on both sides of one row, which is what
  * makes the SQL answer provably the memory evaluator's answer (the cross-path
@@ -2771,19 +2787,22 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  */
 function crossFieldComparisonClass(
   decl: Record<string, unknown>,
-): 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time' | null {
+): CrossFieldComparisonClass | null {
   const type = String((decl as { type?: unknown }).type || 'string');
-  if (isMultiValuedColumn(type, decl)) return null;
-  if (type === 'formula') return null;
-  if (JSON_COLUMN_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type)) return null;
+  // [#20355] A declared `FieldType` is the spec's to classify — the one
+  // classification the write check and the authoring door read too. Its
+  // `multiple` reading is `isMultiValueField`'s, the same predicate
+  // `isMultiValuedColumn` asks.
+  const verdict = crossFieldColumnVerdict({ type, multiple: (decl as { multiple?: unknown }).multiple === true });
+  if (verdict !== undefined) return verdict.kind === 'class' ? verdict.class : null;
+  // A type outside `FieldType` is a driver-internal alias the spec does not
+  // judge (its module header: "a driver layers its own aliases above this
+  // table"). This driver's are read off its own column sets, never restated:
+  // `object` / `array` are JSON columns ({@link JSON_COLUMN_TYPES}), `integer` /
+  // `int` / `float` numeric ones ({@link NUMERIC_SCALAR_TYPES}), and everything
+  // else — the absent-type default `string` included — is stored as TEXT.
+  if (JSON_COLUMN_TYPES.has(type)) return null;
   if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
-  if (type === 'boolean' || type === 'toggle') return 'boolean';
-  if (type === 'date') return 'date';
-  if (type === 'datetime') return 'datetime';
-  if (type === 'time') return 'time';
-  // Everything else `createColumn` stores as TEXT: string/text/textarea/html/
-  // markdown/email/url/phone/password, select, lookup/user (row ids),
-  // autonumber, and the unknown-type default.
   return 'text';
 }
 
@@ -5419,6 +5438,79 @@ function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: nu
     .map((g) => `(${g.key}) \u00d7 ${g.rows} rows`)
     .join('; ');
   return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
+}
+
+/** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
+interface BetterSqlite3Connection {
+  exec(sql: string): unknown;
+  pragma(source: string, options?: { simple: boolean }): unknown;
+}
+
+/**
+ * The better-sqlite3 arm of `SqlDriver.reclaimSpace`: return the whole freelist,
+ * and return the bytes it passes through the `-wal` sidecar too, without ever
+ * waiting on another connection. Every statement runs through the binding's
+ * `exec()` / `pragma()`, which step to completion. Synchronous by design:
+ * nothing else runs on the connection between the chunks, so the freelist
+ * only shrinks while the loop runs.
+ *
+ * Why chunks. In WAL mode one `PRAGMA incremental_vacuum` over a large
+ * freelist is one transaction whose dirty pages outgrow the page cache, so
+ * SQLite spills them into the WAL before the commit truncates them away.
+ * Measured at 25,754 free pages: the database file went to 16,384 bytes and
+ * the `-wal` sidecar to 94,430,432, held until the last connection closed. A
+ * chunk that stays inside the page cache writes only the pages its commit
+ * keeps. The chunk is a quarter of this connection's page cache — 1,000 pages
+ * at better-sqlite3's default `cache_size` (-16000 KiB) and 4 KiB pages.
+ * Readings with a reader pinning the WAL, so every frame written stays
+ * visible: 2,000-page chunks left 883 frames, 4,000 left 3,779, and one
+ * statement 22,920; with a 2 MB cache, 250-page chunks left 1,121 and
+ * 1,000-page chunks 15,491.
+ *
+ * Why these two checkpoints. A `PASSIVE` checkpoint after each chunk moves
+ * its frames into the database and lets the next chunk restart the WAL from
+ * its start; it never waits. What it cannot do is shrink the sidecar, which
+ * keeps its high-water size until something truncates it. So one
+ * `TRUNCATE` checkpoint closes the call, under a busy timeout of 0 for that
+ * one statement and the connection's own timeout put back afterwards: a
+ * `TRUNCATE` checkpoint waits for other connections' readers through the
+ * busy handler, and on this synchronous binding that wait blocks the whole
+ * process — measured at 5,333 ms against a reader in the same process, the
+ * connection's 5,000 ms timeout. When another connection is reading, the
+ * `PASSIVE` checkpoints move only the frames that reader no longer needs and
+ * the `TRUNCATE` one answers "busy" as a result row, not as an error: the
+ * pages are off the freelist, and their bytes leave the files at a later
+ * checkpoint (the next call, SQLite's own auto-checkpoint, or the last
+ * connection closing). Outside WAL mode both checkpoints are no-ops.
+ *
+ * The loop stops when the freelist is empty or a chunk frees nothing: a file
+ * whose `auto_vacuum` is still `NONE` never shrinks its freelist through
+ * this statement (one full `VACUUM` adopts INCREMENTAL, see `SqlDriver.connect`).
+ *
+ * Module-local, like {@link formatDuplicateGroups}: `SqlDriver`'s `.d.ts`
+ * carries its non-public members too, and this helper is no entry point.
+ */
+function reclaimBetterSqlite3(db: BetterSqlite3Connection): void {
+  const scalar = (pragma: string): number => Number(db.pragma(pragma, { simple: true }));
+  let free = scalar('freelist_count');
+  if (free === 0) return;
+  const cacheSize = scalar('cache_size');
+  const cachePages = cacheSize >= 0 ? cacheSize : Math.floor((-cacheSize * 1024) / scalar('page_size'));
+  const chunk = Math.max(1, Math.floor(cachePages / 4));
+  for (;;) {
+    db.exec(`PRAGMA incremental_vacuum(${chunk})`);
+    db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+    const left = scalar('freelist_count');
+    if (left === 0 || left >= free) break;
+    free = left;
+  }
+  const busyTimeout = scalar('busy_timeout');
+  db.pragma('busy_timeout = 0');
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } finally {
+    db.pragma(`busy_timeout = ${busyTimeout}`);
+  }
 }
 
 export class SqlDriver implements IDataDriver {
@@ -10925,6 +11017,10 @@ export class SqlDriver implements IDataDriver {
    * `knex.raw` below). knex's node-sqlite3 client runs a raw statement with
    * `Database.all()`, which reads every row too (read from knex's source; that
    * binding is not installed in this repository).
+   *
+   * On better-sqlite3 the freed bytes also leave the `-wal` sidecar, which is
+   * what a file-backed database in WAL mode (the default, see
+   * {@link applySqliteJournalMode}) needs — see `reclaimBetterSqlite3`.
    */
   async reclaimSpace(_options?: DriverOptions): Promise<void> {
     if (!this.isSqlite) return;
@@ -10932,7 +11028,7 @@ export class SqlDriver implements IDataDriver {
     if (client.driverName === 'better-sqlite3') {
       const connection = await client.acquireConnection();
       try {
-        connection.exec('PRAGMA incremental_vacuum');
+        reclaimBetterSqlite3(connection);
       } finally {
         await client.releaseConnection(connection);
       }

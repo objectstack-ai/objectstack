@@ -392,6 +392,58 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: ['ui/component.zod.ts:RecordAlertProps.visible'],
     note: 'A SEPARATE row from `cel-ui` on purpose, on both axes that row fixes at once: `cel-ui` is `fail-soft-log` (its form-view section/field predicates fault OPEN) and its evaluator is the SchemaRenderer, while this one faults closed through the record:alert renderer. ⚠️ And the honest limit, measured here: because `PageComponentSchema.properties` is an opaque bag served verbatim, a predicate authored in `properties` on a raw `Page` object literal never reaches `ExpressionInputSchema`\'s transform at all — a bare string there stays on the console\'s LEGACY JS evaluator, which has no `has()`, and only an explicit `{dialect:"cel"}` envelope routes to CEL. So the SCHEMA declares the CEL contract this row records while the page path can still deliver the legacy one; the platform\'s sys_user page carries that reading at its own declaration site and gates on the component-NODE `visibleWhen` instead. ⛔ NOT MEASURED HERE: the renderer, which is in objectui and not in this checkout.',
   },
+  // #20371 — the `action:*` page-component rows. Each renderer evaluates its own
+  // `visible` / `disabled` off the hoisted `properties` bag, AND `SchemaRenderer`'s
+  // node gate evaluates the same hoisted keys first, so every surface below has
+  // two evaluation legs; the row states what the COMPOSITION does to a predicate
+  // that faults. Split three ways because the faces differ, per renderer — the
+  // collision rule `cel-action-visible` / `cel-action-disabled` were split on.
+  // Read (not run) at the `.objectui-sha` pin `dd3f7e1be356` (re-read there
+  // 2026-09-28; first read at `f8a9d0fb0596`, and across that hop the node-gate
+  // evaluators and `useCondition` are code-identical, so every fault face below
+  // stands and only line numbers moved): the renderers are `components/src/renderers/action/action-{button,menu,icon,group}.tsx`,
+  // `useCondition` is `react/src/hooks/useExpression.ts:200-244`, the node gate's
+  // two legs are `react/src/SchemaRenderer.tsx` `evaluateVisibilityPredicate`
+  // (:1157) and `evaluateEnablementPredicate` (:1247, :1879-1891). Tracker anchors
+  // kept out of the strings below (`check:doc-authoring`): the node gate's fault
+  // report is objectui#6038 (visibility legs) and objectui#6445 (enablement legs);
+  // the empty-`disabled` fix `cel-action-disabled` cites is objectui#3842.
+  {
+    id: 'cel-action-block-visible-closed',
+    summary: '`action:button` / `action:menu` page-block visibility (props `visible`) — the block is not rendered when the predicate is FALSE',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/page-envelope-audit.ts door 3 parses `ComponentPropsMap["action:button" | "action:menu"]`, the one door that reaches `properties.visible`. EVALUATOR, two legs: (1) SchemaRenderer node gate `evaluateVisibilityPredicate` on the hoisted value, page scope — a fault there answers `evaluateCondition`\'s fail-soft `true` (shown) and is REPORTED in every build; (2) the renderer\'s own `useCondition(toPredicateInput(schema.visible), recordData, { throwOnError: true })` (action-button.tsx:117-120, action-menu.tsx:224-227) against the host-bound row — a fault returns `false` and warns once per predicate (useExpression.ts:215-238), and the block returns null (action-button.tsx:335, action-menu.tsx:322). The legs AND, so a faulting predicate HIDES the block: fail-CLOSED, the face `cel-action-visible` records for a registered action',
+    covers: [
+      'ui/component.zod.ts:ActionButtonPropsSchema.visible',
+      'ui/component.zod.ts:ActionMenuPropsSchema.visible',
+    ],
+    note: 'Separate from `cel-action-visible` (a registered object action, keyed by `name` in `actions[]`, drawn by `ActionEngine`) because this slot is a PAGE component\'s props bag drawn through `SchemaRenderer`, and separate from `cel-action-block-visible-soft` because `action:icon` / `action:group` evaluate the same key WITHOUT `throwOnError` and fault the other way. ⚠️ The same honest limit `cel-record-alert-visible` records, and for the same reason: `PageComponentSchema.properties` is an opaque bag served verbatim, so a bare string never passes `EvaluatedExpressionInputSchema`\'s transform on the page path and reaches the console\'s LEGACY JS evaluator (`evaluateCondition` routes only an explicit `{dialect:"cel"}` envelope to CEL); the pin carries that envelope through the bag loops intact (`preservePredicateEnvelope`, SchemaRenderer.tsx:469). ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
+  },
+  {
+    id: 'cel-action-block-visible-soft',
+    summary: '`action:icon` / `action:group` page-block visibility (props `visible`) — the block is not rendered when the predicate is FALSE',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/page-envelope-audit.ts door 3 parses `ComponentPropsMap["action:icon" | "action:group"]`. EVALUATOR, two legs: (1) SchemaRenderer node gate `evaluateVisibilityPredicate` on the hoisted value — a fault answers the fail-soft `true` (shown) and is REPORTED in every build; (2) the renderer\'s own `useCondition(toPredicateInput(schema.visible), recordData)` WITHOUT `throwOnError` (action-icon.tsx:97, action-group.tsx:238) — a fault answers `evaluateCondition`\'s fail-soft `true` as well (ExpressionEvaluator.ts:387-408), and action-icon.tsx:219-221 names that policy "fail-soft, unlike `action:button`\'s fail-closed one". Both legs show, so a faulting predicate leaves the block RENDERED, and the node gate is the leg that logs it: fail-SOFT-LOG',
+    covers: [
+      'ui/component.zod.ts:ActionIconPropsSchema.visible',
+      'ui/component.zod.ts:ActionGroupPropsSchema.visible',
+    ],
+    note: 'The opposite fault face to `cel-action-block-visible-closed` on the same key, which is why the two do not share a row. The `-log` half rests on the node gate\'s report; the renderer leg itself is silent for a bare string and warns only on the `{dialect:"cel"}` route. A literal `false` on `action:group` is honoured by the node gate, not by the renderer, whose `:343` check is a truthiness test. Same bare-string limit as `cel-action-block-visible-closed`. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
+  },
+  {
+    id: 'cel-action-block-disabled',
+    summary: '`action:button` / `action:icon` page-block disabling (props `disabled`) — the button stays on screen and cannot be pressed while the predicate is TRUE',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/page-envelope-audit.ts door 3 parses `ComponentPropsMap["action:button" | "action:icon"]`. EVALUATOR, two legs, both un-negated: (1) SchemaRenderer node gate `evaluateEnablementPredicate` on the hoisted `disabled` (SchemaRenderer.tsx:1879-1891), forwarded as the `disabled` prop — a fault answers `evaluateCondition`\'s fail-soft `true`, which on this leg means GREYED OUT, and is REPORTED in every build (SchemaRenderer.tsx:1247-1274); (2) the renderer\'s own `useCondition(toPredicateInput(schema.disabled), recordData)` (action-button.tsx:130 + :370-376, action-icon.tsx:102 + :257-263), the same `true` on a fault. The legs OR, so a faulting predicate leaves the button DISABLED: the action is refused, fail-CLOSED',
+    covers: [
+      'ui/component.zod.ts:ActionButtonPropsSchema.disabled',
+      'ui/component.zod.ts:ActionIconPropsSchema.disabled',
+    ],
+    note: 'Deliberately NOT `fail-soft-log` like `cel-action-disabled`: the renderers measured here answer a faulting `disabled` with `true`, and on an un-negated enablement leg that `true` greys the control out — SchemaRenderer.tsx:1258-1265 states exactly that asymmetry ("on the negated visibility legs that means SHOWN, here it means GREYED OUT"). The objectui fix `cel-action-disabled` cites is about an EMPTY `disabled: \'\'`, which `hasDeclaredVisibilityGate` / `hasDeclaredPredicate` now treat as no gate, not about a faulting one. ⚠️ Scope consequence worth knowing: the node-gate leg evaluates at PAGE scope, so a row-scoped `record.*` predicate that does not resolve there faults and greys the button out whatever the row says. Same bare-string limit as `cel-action-block-visible-closed`. ⛔ NOT MEASURED HERE: the renderers were read at the pin, not run.',
+  },
   {
     id: 'cel-flow',
     summary: 'flow / loader branching + filter predicates',

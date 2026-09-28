@@ -259,7 +259,7 @@ quantity:
 
 **Configuration:**
 - `scale`: Decimal places (0 = integer)
-- `precision`: Total digits
+- `precision`: Total digits — a write needing more, counted at `scale`, is refused (`max_precision`)
 - `min`/`max`: Range validation
 
 **Database mapping:**
@@ -318,7 +318,10 @@ deprecated in the spec.
 - `currencyMode: fixed | dynamic` and a `defaultCurrency` code on the field
 - Codes are validated by **length only** (3 characters), so ISO 4217 (`USD`,
   `EUR`, `CNY`) and non-ISO codes (`BTC`, `ETH`) both pass
-- `precision` (0–10, default 2) for decimal places
+- No decimal-places setting: an amount's decimal places are its currency's
+  ISO 4217 minor unit. The field-level `precision` is the amount's **total**
+  digit count (a DECIMAL(18,2) amount declares `precision: 18`), refused on
+  write when exceeded, with the amount's written decimals counted in it
 
 **Database mapping:**
 - SQL driver: the same **exact decimal** column as `number`

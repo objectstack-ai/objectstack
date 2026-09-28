@@ -225,6 +225,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/**/*.yaml',
       'examples/**/*.yml',
       'content/**',
+      // src/data/currency-mode-family-closure.pin.test.ts (#20126) is the
+      // currency-mode family's closure pin. Its rule B also scans example CODE,
+      // for a comment that cites the date record for currency: one family site
+      // was such a comment in a showcase dataset, and `tsc` never judges a
+      // comment, so the non-code reasoning above does not reach it. Declared as
+      // each app's `src/` tree only, ⛔ never `examples/**/*.ts` -- that glob
+      // covers the CRM example's smoke test, the dispatch-gates specimen above.
+      // Stated rather than discovered: the glob does reach the two translation
+      // tests that live inside the todo app's `src/` tree. The pin's site table
+      // quotes the showcase dataset's path, which holds this glob on the roster.
+      'examples/*/src/**/*.ts',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
@@ -781,8 +792,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/system/translations/index.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
       //   src/validate-jsx-pages.production-witness.test.ts (#12924) imports the
-      //     three shipped html pages LIVE and holds the wired gate's census over
-      //     them equal to the ratchet-to-zero ledger (sdui-jsx-baseline.json), so
+      //     three shipped html pages LIVE and holds the wired gate's run over
+      //     them clean (the ratchet-to-zero ledger reached zero and was deleted), so
       //     an edit to any page — or to the repo-root manifest whose vocabulary
       //     judges them — must re-run this package's suite. The manifest is the
       //     checked-in producer artefact `resolveSduiManifest()` picks up from

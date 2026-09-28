@@ -321,6 +321,29 @@ export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
 });
 
 /**
+ * [#20355] Which policy each compiled policy filter came from — recorded by
+ * {@link RLSCompiler.compileFilter} as it keeps a policy's filter, read by
+ * {@link compiledPolicyNameOf}.
+ *
+ * The composed answer is either one policy's filter itself or `{ $or: [...] }`
+ * of them, and both are built fresh by every compile, so the identity of a
+ * member IS its policy. A WeakMap rather than a property on the filter: the
+ * filter is handed to drivers and evaluators that walk its own keys, and a
+ * record kept beside it can neither leak into a query nor outlive it.
+ */
+const POLICY_OF_COMPILED_FILTER = new WeakMap<object, string>();
+
+/**
+ * [#20355] The name of the policy whose compiled filter `node` is, or
+ * `undefined` for any other node (a composed `$or`, a sub-condition, the deny
+ * sentinel). Lets a caller that refuses a compiled filter name the policy it
+ * refused, which the composed filter no longer says.
+ */
+export function compiledPolicyNameOf(node: unknown): string | undefined {
+  return node !== null && typeof node === 'object' ? POLICY_OF_COMPILED_FILTER.get(node) : undefined;
+}
+
+/**
  * Is this field constraint an emptied membership, and what CONSTANT does it
  * evaluate to? `{ $in: [] }` is constant FALSE on every backend ("IN ()
  * matches nothing"); `{ $nin: [] }` is constant TRUE ("NOT IN () excludes
@@ -624,6 +647,7 @@ export class RLSCompiler {
           const comparands = judgeCompiledComparands(outcome.filter);
           if (comparands.ok) {
             filters.push(comparands.filter);
+            POLICY_OF_COMPILED_FILTER.set(comparands.filter, (policy as { name?: string }).name ?? '(unnamed)');
           } else {
             deniedBy.push({ policy, cause: { reason: 'refused-comparand', detail: comparands.detail } });
           }
