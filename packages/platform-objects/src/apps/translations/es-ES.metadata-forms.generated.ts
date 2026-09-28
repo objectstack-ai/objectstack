@@ -293,6 +293,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Validaciones",
         helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
       },
+      activityMilestones: {
+        label: "Hitos de actividad",
+        helpText: "Entradas de la cronología que se disparan cuando un campo alcanza un valor (ADR-0052 §5b.2): cuando una actualización cambia el campo vigilado a ese valor, el plugin de auditoría escribe el resumen del hito en la cronología de actividad del registro en lugar de la entrada de cambio de campo. Gana el primer hito que coincide."
+      },
+      "activityMilestones.field": {
+        label: "Campo",
+        helpText: "Nombre del campo de este objeto que se vigila (p. ej., status). No se comprueba al guardar ni al publicar: un nombre que no es un campo de este objeto nunca se dispara."
+      },
+      "activityMilestones.value": {
+        label: "Valor",
+        helpText: "El valor almacenado al que debe cambiar el campo, comparado exactamente como texto; para un campo de selección, el valor de la opción, no su etiqueta (p. ej., done). Un hito sobre un campo numérico o booleano nunca se dispara."
+      },
+      "activityMilestones.summary": {
+        label: "Resumen",
+        helpText: "Texto de la cronología (p. ej., \"Deal won: {name}\"). Un token {field_name} toma el valor del registro tras la actualización, y el token de un campo de búsqueda, maestro-detalle o usuario muestra el título del registro referenciado; un token que no nombra ningún campo queda vacío."
+      },
+      "activityMilestones.type": {
+        label: "Tipo",
+        helpText: "Tipo de actividad de la entrada de la cronología: un tipo integrado como completed, o una palabra propia, guardada tal cual. Sin definir: updated."
+      },
       datasource: {
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
@@ -307,7 +327,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "Campos",
-        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Nada los comprueba al guardar ni al publicar: un nombre que no sea una columna almacenada hace que el driver SQL omita el índice entero, con una advertencia en el registro del servidor."
+        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Guardar no los comprueba; publicar y os validate rechazan un nombre que no sea un campo de este objeto. Un campo que no sea una columna almacenada (una fórmula, por ejemplo) hace que el driver SQL omita el índice entero, con una advertencia en el registro del servidor."
       },
       "indexes.unique": {
         label: "Único",
@@ -333,9 +353,61 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Permisos requeridos",
         helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener para acceder a este objeto, comprobadas además de las concesiones CRUD (ADR-0066 D3). Una lista restringe todas las operaciones; un mapa {read, create, update, delete} restringe solo las operaciones que enumera. Ausente o vacío: sin restricción por capacidad."
       },
+      publicSharing: {
+        label: "Uso compartido público",
+        helpText: "Política de enlaces compartidos: si los registros de este objeto pueden publicarse mediante un enlace que cualquiera que lo tenga puede abrir, y en qué condiciones. Es distinta de sharingModel, que comparte con usuarios y equipos concretos. Sin definir o desactivada: no se puede crear ningún enlace y ninguno se abre."
+      },
+      "publicSharing.enabled": {
+        label: "Habilitado",
+        helpText: "Permite enlaces compartidos para los registros de este objeto. Se comprueba en cada canje: al desactivarlo, ningún enlace existente se abre, y al reactivarlo vuelven a servirse. Desactivado (el valor predeterminado): no se aplica nada más de este bloque."
+      },
+      "publicSharing.allowedAudiences": {
+        label: "Audiencias permitidas",
+        helpText: "Audiencias que puede indicar un enlace nuevo; cualquier otra se rechaza. Sin definir: solo enlace. Toda audiencia sigue necesitando el propio enlace: signed in además necesita un usuario con sesión iniciada, y email además necesita la dirección del destinatario en la lista del enlace."
+      },
+      "publicSharing.allowedPermissions": {
+        label: "Permisos permitidos",
+        helpText: "Niveles de permiso que puede conceder un enlace nuevo; cualquier otro se rechaza. Sin definir: solo ver."
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "Días máximos de caducidad",
+        helpText: "Caducidad más lejana que puede solicitar un enlace nuevo, en días a partir de ahora; una posterior se rechaza. Sin definir: 365. No obliga a caducar: un enlace creado sin caducidad nunca caduca."
+      },
+      "publicSharing.redactFields": {
+        label: "Campos ocultados",
+        helpText: "Nombres de campo de este objeto que se eliminan de todo registro servido por un enlace, sea cual sea la audiencia; el acceso propio del propietario no se ve afectado. Un nombre que no es un campo de este objeto se rechaza al publicar."
+      },
+      "publicSharing.eligibility": {
+        label: "Elegibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'published'): solo se crea un enlace mientras sea TRUE, y un enlace existente deja de abrirse cuando su registro deja de cumplirlo. Un predicado que no compila, o que falla al evaluarse, rechaza el enlace."
+      },
       managedBy: {
         label: "Gestionado por",
         helpText: "Categoría de ciclo de vida: platform (CRUD de usuario), config (escrito por el administrador), system-data (esquema definido por la plataforma con datos escribibles por administrador o usuario), engine-owned (sin escrituras de usuario), append-only (auditoría), better-auth (identidad). Los clientes de UI derivan de aquí las acciones CRUD disponibles, así que decide qué se ofrece al usuario en los registros de este objeto."
+      },
+      userActions: {
+        label: "Acciones de usuario",
+        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente."
+      },
+      "userActions.create": {
+        label: "Crear",
+        helpText: "El botón Nuevo: activado lo muestra, desactivado lo oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar el botón al registro en contexto, evaluado una vez por barra de herramientas (el registro anfitrión en una lista relacionada)."
+      },
+      "userActions.import": {
+        label: "Importar",
+        helpText: "La entrada de importación CSV: activada la muestra, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar la entrada al registro en contexto, evaluado una vez por barra de herramientas."
+      },
+      "userActions.edit": {
+        label: "Editar",
+        helpText: "Edición de registros existentes, en línea y en el formulario: activada la ofrece, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar cada fila a su propio registro."
+      },
+      "userActions.delete": {
+        label: "Eliminar",
+        helpText: "Eliminación por fila y masiva: activada la ofrece, desactivada la oculta. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escríbelo en el código fuente para condicionar cada fila a su propio registro."
+      },
+      "userActions.exportCsv": {
+        label: "Exportar CSV",
+        helpText: "La entrada de exportación CSV. Sin definir: se muestra, porque todas las categorías de managedBy ofrecen la exportación."
       },
       editMode: {
         label: "Modo de edición",
@@ -621,6 +693,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       inlineTitle: {
         label: "Título en línea",
         helpText: "Título de la cuadrícula maestro-detalle incrustada en el registro padre."
+      },
+      inlineColumns: {
+        label: "Columnas en línea",
+        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando este campo define inlineEdit, que se escribe en el código fuente. Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
+      },
+      "inlineColumns.name": {
+        label: "Nombre",
+        helpText: "Campo de este objeto (el hijo) que la columna muestra y edita (p. ej., quantity). No se comprueba al guardar ni al publicar: un nombre que no es un campo de este objeto se muestra como una columna de texto simple."
+      },
+      "inlineColumns.label": {
+        label: "Etiqueta",
+        helpText: "Encabezado de la columna. Sin definir: la propia etiqueta del campo."
+      },
+      "inlineColumns.width": {
+        label: "Ancho",
+        helpText: "Ancho fijo de la columna en píxeles. Sin definir: según el tipo de celda; las columnas de texto se expanden y las de número, fecha y selección se mantienen estrechas."
+      },
+      "inlineColumns.defaultHidden": {
+        label: "Oculta por defecto",
+        helpText: "Empieza la columna en el selector de columnas de la cuadrícula en lugar de en pantalla; el usuario puede mostrarla. Una columna cuyo campo es obligatorio siempre se muestra."
       },
       inlineAmountField: {
         label: "Campo de importe en línea",

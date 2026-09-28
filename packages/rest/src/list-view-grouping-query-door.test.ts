@@ -834,3 +834,118 @@ describe('§9 a malformed grouped query is REFUSED, not answered with a plausibl
     expect(res._body?.fields?.[0]?.field).toBe('query.aggregations.0.function');
   });
 });
+
+// ─── §10 A search reaches the header numbers ─────────────────────────────────
+
+/**
+ * `QuerySchema.search` (ADR-0061 D1) is declared on the query with no carve-out
+ * for `groupBy` / `aggregations`, and the flat branch of `findData` has always
+ * honoured it. The grouped branch built its `engine.aggregate` bag without it,
+ * so a header query under a search answered the UNSEARCHED groups: measured on
+ * this door with this fixture, `search: 'harbour'` returned the five full-count
+ * groups (86/61/31/7/1, total 5) while the flat `search: 'harbour'` returned
+ * one row. The engine's aggregate verb now takes `search` / `searchFields` and
+ * runs the one ADR-0061 expander `find` runs, so the grouped answer under a
+ * search IS the grouping of the searched rows.
+ *
+ * Every positive case here is compared against two things: the flat door's
+ * answer under the same search (the parity the defect broke), and the same
+ * query without the search (so a door still dropping it cannot pass).
+ */
+describe('§10 a grouped query under `search` groups the SEARCHED rows', () => {
+  /** Flat rows through the door, no `limit` — so the answer is the whole searched set. */
+  const tallyByUnit = (rows: Array<Record<string, unknown>>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const row of rows) out[String(row.business_unit)] = (out[String(row.business_unit)] ?? 0) + 1;
+    return out;
+  };
+
+  it.each(TIERS)('%s: the measured case — `search: harbour` answers the ONE matching group, not the five unsearched ones', async (tier) => {
+    const flat = await records(OBJECT_CONTIGUOUS, { search: 'harbour' });
+    expect(flat.map((r) => r.business_unit)).toEqual(['harbour_office']);
+
+    const query = { ...compileListViewGroupQuery(PLAIN_VIEW), search: 'harbour' };
+    const res = await onTier(tier, () => postQuery(OBJECT_CONTIGUOUS, query));
+    expect(res._status, JSON.stringify(res._body)).toBeUndefined();
+    expect(res._body?.records).toEqual([{ business_unit: 'harbour_office', [LIST_VIEW_GROUP_COUNT_ALIAS]: 1 }]);
+    expect(res._body?.total).toBe(1);
+    expect(countsByUnit(res._body?.records ?? [])).toEqual(tallyByUnit(flat));
+    if (tier === 'in-memory') {
+      // The rows read carried the expanded predicate, and not the raw key: the
+      // engine's expansion is what reached the driver.
+      expect(lastDataFindAst).not.toHaveProperty('search');
+      expect(JSON.stringify(lastDataFindAst?.where)).toContain('$icontains');
+    }
+
+    // CONTROL — the same body without `search` is the defect's answer.
+    const unsearched = await onTier(tier, () => records(OBJECT_CONTIGUOUS, compileListViewGroupQuery(PLAIN_VIEW)));
+    expect(countsByUnit(unsearched)).toEqual(EXPECTED_COUNTS);
+  });
+
+  it.each(TIERS)('%s: every header number equals the grouping of the searched flat rows', async (tier) => {
+    const flat = await records(OBJECT_INTERLEAVED, { search: 'northgate' });
+    expect(tallyByUnit(flat)).toEqual({ northgate_operations: 86, northgate_quality: 61, northgate_plant: 7 });
+
+    const headers = await onTier(tier, () =>
+      records(OBJECT_INTERLEAVED, { ...compileListViewGroupQuery(GROUPED_VIEW), search: 'northgate' }));
+    expect(headers).toHaveLength(3);
+    expect(countsByUnit(headers)).toEqual(tallyByUnit(flat));
+    // The summaries ride the searched rows too, not only the count.
+    for (const header of headers) {
+      const own = flat.filter((r) => r.business_unit === header.business_unit);
+      expect(header.sum_amount, String(header.business_unit))
+        .toBe(own.reduce((n, r) => n + (r.amount as number), 0));
+    }
+    expect(countsByUnit(headers)).not.toEqual(EXPECTED_COUNTS);
+  });
+
+  it.each(TIERS)('%s: `searchFields` narrows the columns the header numbers are searched over', async (tier) => {
+    const grouped = (extra: Record<string, unknown>) => onTier(tier, () =>
+      records(OBJECT_CONTIGUOUS, { ...compileListViewGroupQuery(PLAIN_VIEW), search: '3', ...extra }));
+
+    // `3` over the default columns hits `owner_3` AND every note carrying a 3.
+    const wide = await grouped({});
+    expect(countsByUnit(wide)).toEqual(tallyByUnit(await records(OBJECT_CONTIGUOUS, { search: '3' })));
+
+    // Narrowed to `owner`, only the `owner_3` rows remain — derived from the
+    // fixture generator, not from the door — and the one-row unit drops out.
+    const narrowed = await grouped({ searchFields: ['owner'] });
+    const ownerThree = tallyByUnit(CONTIGUOUS.filter((r) => r.owner === 'owner_3') as unknown as Array<Record<string, unknown>>);
+    expect(ownerThree).toEqual({ northgate_operations: 21, northgate_quality: 15, riverside_plant: 8, northgate_plant: 2 });
+    expect(countsByUnit(narrowed)).toEqual(ownerThree);
+    expect(countsByUnit(narrowed))
+      .toEqual(tallyByUnit(await records(OBJECT_CONTIGUOUS, { search: '3', searchFields: ['owner'] })));
+    expect(countsByUnit(narrowed)).not.toEqual(countsByUnit(wide));
+  });
+
+  it.each(TIERS)('%s: `search` and `having` both apply — search picks the rows, having picks the groups', async (tier) => {
+    const having = { [LIST_VIEW_GROUP_COUNT_ALIAS]: { $gt: 10 } };
+    const both = await onTier(tier, () =>
+      records(OBJECT_CONTIGUOUS, { ...compileListViewGroupQuery(PLAIN_VIEW), search: 'northgate', having }));
+    expect(countsByUnit(both)).toEqual({ northgate_operations: 86, northgate_quality: 61 });
+
+    // CONTROL — `having` alone keeps riverside_plant (31); the search is what drops it.
+    const havingOnly = await onTier(tier, () =>
+      records(OBJECT_CONTIGUOUS, { ...compileListViewGroupQuery(PLAIN_VIEW), having }));
+    expect(countsByUnit(havingOnly)).toEqual({ northgate_operations: 86, northgate_quality: 61, riverside_plant: 31 });
+  });
+
+  it.each(TIERS)('%s: `aggregations` with no `groupBy` — the whole-object number is the searched one', async (tier) => {
+    const body = { aggregations: [{ function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS }] };
+    const searched = await onTier(tier, () => records(OBJECT_CONTIGUOUS, { ...body, search: 'northgate' }));
+    expect(searched).toEqual([{ [LIST_VIEW_GROUP_COUNT_ALIAS]: 86 + 61 + 7 }]);
+
+    const whole = await onTier(tier, () => records(OBJECT_CONTIGUOUS, body));
+    expect(whole).toEqual([{ [LIST_VIEW_GROUP_COUNT_ALIAS]: TOTAL_ROWS }]);
+  });
+
+  it('a grouped query whose `searchFields` names a column search cannot scan is REFUSED, not answered unsearched', async () => {
+    const res = await postQuery(OBJECT_CONTIGUOUS, {
+      ...compileListViewGroupQuery(PLAIN_VIEW),
+      search: 'harbour',
+      searchFields: ['no_such_column'],
+    });
+    expect(res._status).toBe(400);
+    expect(res._body?.code).toBe('INVALID_FIELD');
+  });
+});

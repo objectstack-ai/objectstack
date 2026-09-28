@@ -293,6 +293,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "検証ルール",
         helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
+      activityMilestones: {
+        label: "アクティビティのマイルストーン",
+        helpText: "フィールドが特定の値に達したときに書き込まれるタイムラインのエントリ（ADR-0052 §5b.2）。更新で監視対象のフィールドがその値に変わると、監査プラグインはフィールド変更のエントリの代わりに、マイルストーンの概要をレコードのアクティビティタイムラインに書き込みます。最初に一致したマイルストーンが使われます。"
+      },
+      "activityMilestones.field": {
+        label: "フィールド",
+        helpText: "監視する、このオブジェクトのフィールド名（例：status）。保存時や公開時には検査されません。このオブジェクトのフィールドではない名前は決して発火しません。"
+      },
+      "activityMilestones.value": {
+        label: "値",
+        helpText: "フィールドが変わるべき保存値で、テキストとして完全一致で比較されます。選択フィールドではラベルではなく選択肢の値を指定します（例：done）。数値または真偽値フィールドのマイルストーンは決して発火しません。"
+      },
+      "activityMilestones.summary": {
+        label: "概要",
+        helpText: "タイムラインのテキスト（例：\"Deal won: {name}\"）。{field_name} トークンは更新後のレコードの値になり、参照・主従・ユーザーフィールドのトークンは参照先レコードのタイトルを表示します。どのフィールドも指さないトークンは空になります。"
+      },
+      "activityMilestones.type": {
+        label: "種類",
+        helpText: "タイムラインのエントリのアクティビティ種別。completed などの組み込みの種別か独自の語で、書いたとおりに保存されます。未設定の場合は updated。"
+      },
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
@@ -307,7 +327,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "フィールド",
-        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時にも公開時にも検査されません。保存される列ではない名前があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログに警告を出します。"
+        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時には検査されませんが、公開時と os validate では、このオブジェクトのフィールドではない名前が拒否されます。保存される列ではないフィールド（数式など）があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログに警告を出します。"
       },
       "indexes.unique": {
         label: "一意",
@@ -333,9 +353,61 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "必要な権限",
         helpText: "このオブジェクトにアクセスするために呼び出し元が保持すべき機能（権限セットの systemPermissions）。CRUD 付与に加えてチェックされます（ADR-0066 D3）。リストはすべての操作を制限し、{read, create, update, delete} マップは列挙した操作だけを制限します。省略または空の場合、機能による制限はありません。"
       },
+      publicSharing: {
+        label: "公開共有",
+        helpText: "共有リンクのポリシー。このオブジェクトのレコードを、持っている人なら誰でも開けるリンクで公開できるかどうかと、その条件を定めます。指定したユーザーやチームと共有する sharingModel とは別物です。未設定またはオフの場合、リンクは作成できず、どのリンクも開けません。"
+      },
+      "publicSharing.enabled": {
+        label: "有効",
+        helpText: "このオブジェクトのレコードに共有リンクを許可します。リンクが開かれるたびに確認されるため、オフにすると既存のリンクはすべて開けなくなり、再びオンにすると再び提供されます。オフ（既定）の場合、ここにある他の設定はいずれも適用されません。"
+      },
+      "publicSharing.allowedAudiences": {
+        label: "許可する対象者",
+        helpText: "新しいリンクで指定できる対象者。それ以外は拒否されます。未設定の場合はリンクのみ。どの対象者でもリンクそのものが必要で、signed in ではさらにサインイン済みのユーザーが、email ではさらに受信者のアドレスがリンクのリストに載っていることが必要です。"
+      },
+      "publicSharing.allowedPermissions": {
+        label: "許可する権限",
+        helpText: "新しいリンクで付与できる権限レベル。それ以外は拒否されます。未設定の場合は閲覧のみ。"
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "最長有効日数",
+        helpText: "新しいリンクが要求できる最も遅い有効期限（今からの日数）。それより遅いものは拒否されます。未設定の場合は 365。有効期限を強制するものではなく、有効期限なしで作成されたリンクは期限切れになりません。"
+      },
+      "publicSharing.redactFields": {
+        label: "秘匿フィールド",
+        helpText: "リンク経由で提供されるすべてのレコードから、対象者に関係なく取り除かれる、このオブジェクトのフィールド名。所有者自身のアクセスには影響しません。このオブジェクトのフィールドではない名前は、公開時に拒否されます。"
+      },
+      "publicSharing.eligibility": {
+        label: "適格条件",
+        helpText: "レコードに対する CEL 述語（例：record.status == 'published'）。TRUE の間だけリンクが作成され、レコードが条件を満たさなくなると既存のリンクは開けなくなります。コンパイルできない、または評価に失敗した述語はリンクを拒否します。"
+      },
       managedBy: {
         label: "ライフサイクル区分",
         helpText: "ライフサイクル区分: platform（ユーザーによる CRUD）、config（管理者が記述）、system-data（プラットフォーム定義のスキーマで、データは管理者／ユーザーが書き込み可）、engine-owned（エンジン所有、ユーザー書き込み不可）、append-only（監査）、better-auth（ID）。UI クライアントはこの値から CRUD の可否を導くため、このオブジェクトのレコードでユーザーに何が提供されるかを決めます。"
+      },
+      userActions: {
+        label: "ユーザー操作",
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+      },
+      "userActions.create": {
+        label: "作成",
+        helpText: "「新規」ボタン。オンで表示、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。スコープ内のレコードでボタンを制御するにはソースに記述してください。ツールバーごとに 1 回評価されます（関連リストではホストレコード）。"
+      },
+      "userActions.import": {
+        label: "インポート",
+        helpText: "CSV インポートの入口。オンで表示、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。スコープ内のレコードで入口を制御するにはソースに記述してください。ツールバーごとに 1 回評価されます。"
+      },
+      "userActions.edit": {
+        label: "編集",
+        helpText: "既存レコードの編集（インラインとフォーム）。オンで提供、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各行をその行自身のレコードで制御するにはソースに記述してください。"
+      },
+      "userActions.delete": {
+        label: "削除",
+        helpText: "行削除と一括削除。オンで提供、オフで非表示。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各行をその行自身のレコードで制御するにはソースに記述してください。"
+      },
+      "userActions.exportCsv": {
+        label: "CSV エクスポート",
+        helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
       },
       editMode: {
         label: "編集の開き方",
@@ -621,6 +693,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       inlineTitle: {
         label: "インライン表のタイトル",
         helpText: "親レコードに埋め込まれるマスター／ディテール表のタイトル。"
+      },
+      inlineColumns: {
+        label: "インライン表の列",
+        helpText: "親レコードのフォームにあるインライン表の列で、表示順に並べます。このフィールドが inlineEdit（ソースに記述）を設定している場合にのみ使われます。未設定の場合はこのオブジェクトの編集可能なフィールドから導出され、6 列を超えた分は最初は表の列選択に収められます。フィールド名だけのエントリは、型・選択肢・ルールをそのフィールドから受け取ります。その他の列のキー（まず type）はソースに記述します。"
+      },
+      "inlineColumns.name": {
+        label: "名前",
+        helpText: "列が表示・編集する、このオブジェクト（子オブジェクト）のフィールド（例：quantity）。保存時や公開時には検査されません。このオブジェクトのフィールドではない名前は、プレーンなテキスト列として表示されます。"
+      },
+      "inlineColumns.label": {
+        label: "ラベル",
+        helpText: "列の見出し。未設定の場合はフィールド自身のラベル。"
+      },
+      "inlineColumns.width": {
+        label: "幅",
+        helpText: "ピクセル単位の固定列幅。未設定の場合はセルの種類に応じた幅になり、テキスト列は伸縮し、数値・日付・選択の列は狭いままです。"
+      },
+      "inlineColumns.defaultHidden": {
+        label: "既定で非表示",
+        helpText: "列を画面に表示せず、最初は表の列選択に収めておきます。ユーザーは表示に切り替えられます。フィールドが必須の列は常に表示されます。"
       },
       inlineAmountField: {
         label: "インライン合計項目",

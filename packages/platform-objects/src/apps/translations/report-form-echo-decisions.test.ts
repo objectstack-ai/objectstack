@@ -1009,7 +1009,9 @@ describe('#19403 round 9 — the provenance table agrees these leaves are now au
   // catalog assertion above.
   for (const [locale, table] of PROVENANCE) {
     it(`${locale}: no decided leaf is still recorded as an extractor fill`, () => {
-      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(0);
       const stillFilled = DECISIONS.filter((d) => table[provenanceKey(d)] !== undefined).map(idOf);
       expect(stillFilled, 'these leaves are still byte copies of their source revision').toEqual([]);
       // Stronger, and shrink-only: NOTHING under `report.` is a fill any more.
@@ -1080,7 +1082,9 @@ describe('#19403 round 9 — the provenance table agrees these leaves are now au
       const objectAuthored = [...enObjectPaths]
         .filter(([p, en]) => localeObjectPaths.has(p) && localeObjectPaths.get(p) !== en)
         .map(([p]) => p);
-      expect(objectEchoes.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(50);
+      // At least one of each is what makes a positive AND a negative; since
+      // #20462 zh-CN's echoing objects leaves are its 42 declared English ones.
+      expect(objectEchoes.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(0);
       expect(objectAuthored.length, `${locale} has no authored objects leaf to sample`).toBeGreaterThan(50);
       expect(
         objectEchoes.filter((p) => table[`objects.${p}`] === undefined),

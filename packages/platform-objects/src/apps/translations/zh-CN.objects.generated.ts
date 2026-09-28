@@ -97,11 +97,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "经理",
-        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
+        help: "该用户的直属上级。构成 `own_and_reports` 层级范围所遍历的汇报链（ADR-0057 / @objectstack/security-enterprise）。"
       },
       primary_business_unit_id: {
         label: "主属业务单元",
-        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
+        help: "该用户的主属业务单元——sys_business_unit_member.is_primary 的去规范化投影，由 plugin-sharing 维护（ADR-0057 附录 D12）。使用户查找字段无需遍历成员关系关联表即可按业务单元筛选候选人。请勿直接编辑；请通过业务单元成员关系设置。"
       },
       source: {
         label: "身份来源",
@@ -334,16 +334,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "过期时间"
       },
       last_activity_at: {
-        label: "Last Activity At",
-        help: "Timestamp of the last request on this session; drives idle-timeout. System-managed."
+        label: "最后活动时间",
+        help: "该会话上最后一次请求的时间戳；用于判定空闲超时。由系统维护。"
       },
       revoked_at: {
-        label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
+        label: "撤销时间",
+        help: "设置后表示该会话已被撤销（空闲超时 / 绝对时长上限 / 并发数上限 / 管理员 / 组织成员关系终止）。由系统维护。"
       },
       revoke_reason: {
-        label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
+        label: "撤销原因",
+        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended 等）。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -431,15 +431,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "访问令牌",
-        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
+        help: "由提供方签发的有效 OAuth 访问令牌——数据 API 绝不返回该值（#7987）；better-auth 通过引擎的特权内部字段访问器读回它"
       },
       refresh_token: {
         label: "刷新令牌",
-        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
+        help: "有效的 OAuth 刷新令牌——长期有效，撤销 ObjectStack 会话不会使其失效；数据 API 绝不返回该值（#7987）"
       },
       id_token: {
         label: "ID 令牌",
-        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
+        help: "由提供方签发的 OIDC ID 令牌——数据 API 绝不返回该值（#7987）"
       },
       access_token_expires_at: {
         label: "Access Token 过期时间"
@@ -455,8 +455,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "邮箱/密码提供方使用的密码哈希"
       },
       previous_password_hashes: {
-        label: "Previous Password Hashes",
-        help: "JSON array of prior password hashes (bounded by password_history_count); reuse-prevention only. System-managed."
+        label: "历史密码哈希",
+        help: "以往密码哈希的 JSON 数组（数量上限为 password_history_count）；仅用于防止重复使用。由系统维护。"
       }
     },
     _views: {
@@ -554,12 +554,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该组织计算日期边界所用的 IANA 时区（如 UTC、Asia/Shanghai）——所有未自行设置时区的业务单元都继承的根默认值。未设置表示 UTC。"
       },
       parent_organization_id: {
-        label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+        label: "上级组织",
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用（ADR-0105 D6）。"
       },
       sort_order: {
-        label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        label: "排序",
+        help: "在同级组织中的显示顺序。仅用于展示。"
       },
       id: {
         label: "组织 ID"
@@ -633,17 +633,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理员",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "受托管理员",
           member: "成员"
         }
       }
     },
     _views: {
       mine: {
-        label: "My Memberships",
+        label: "我的组织",
         emptyState: {
-          title: "No organizations yet",
-          message: "You haven't joined any organizations."
+          title: "尚无组织",
+          message: "你尚未加入任何组织。"
         }
       }
     },
@@ -700,7 +700,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理员",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "受托管理员",
           member: "成员"
         }
       },
@@ -726,12 +726,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "接受邀请后可选分配的团队"
       },
       business_unit_id: {
-        label: "Placement Business Unit",
-        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+        label: "分配业务单元",
+        help: "受邀者接受邀请后被分配到的业务单元（ADR-0105 D8）。必须位于邀请发起人的委派子树内。"
       },
       positions: {
-        label: "Placement Positions",
-        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        label: "分配岗位",
+        help: "接受邀请时分配的 sys_position 名称（ADR-0105 D8）。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
       }
     },
     _views: {
@@ -786,8 +786,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该团队所属的上级组织"
       },
       member_count: {
-        label: "Member Count",
-        help: "Seat counter maintained by better-auth; do not write directly."
+        label: "成员数",
+        help: "由 better-auth 维护的席位计数；请勿直接写入。"
       },
       id: {
         label: "团队 ID"
@@ -845,8 +845,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "用户"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership digest maintained by better-auth; do not write directly."
+        label: "成员关系键",
+        help: "由 better-auth 维护的派生成员关系摘要；请勿直接写入。"
       }
     },
     _actions: {
@@ -1007,8 +1007,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "拥有该 API 密钥的用户"
       },
       active_organization_id: {
-        label: "Active Organization",
-        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+        label: "当前组织",
+        help: "该密钥认证进入的组织——创建时继承自签发者，并被设为请求的当前组织"
       },
       scopes: {
         label: "范围",
@@ -1095,16 +1095,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的备用恢复码"
       },
       verified: {
-        label: "Verified",
-        help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+        label: "已验证",
+        help: "该启用记录是否已通过有效的 TOTP 验证码确认（由 better-auth 管理）"
       },
       failed_verification_count: {
-        label: "Failed Verification Count",
-        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+        label: "验证失败次数",
+        help: "连续 2FA 验证失败的次数；验证成功后重置。由 better-auth 维护。"
       },
       locked_until: {
-        label: "Locked Until",
-        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
+        label: "锁定至",
+        help: "当 2FA 验证失败次数超过锁定阈值时设置。由 better-auth 维护。"
       }
     },
     _views: {
@@ -1291,8 +1291,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "公开的 OAuth 客户端标识"
       },
       client_discovery_id: {
-        label: "Client Discovery ID",
-        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+        label: "客户端发现 ID",
+        help: "提供方在发现路径上查找该客户端所用的不透明标识符，与公开的 `client_id` 相互独立"
       },
       client_secret: {
         label: "客户端密钥",
@@ -1339,8 +1339,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "客户端可申请的 scopes 的 JSON 序列化列表"
       },
       client_credentials_scopes: {
-        label: "Client-Credentials Scopes",
-        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
+        label: "客户端凭据范围",
+        help: "客户端在 client_credentials 授权中可申请的 scopes 的 JSON 序列化列表（该授权下没有进行同意的用户）——与管理用户委托授权的 `scopes` 相互独立"
       },
       subject_type: {
         label: "主体类型",
@@ -1348,15 +1348,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       jwks: {
         label: "JWKS",
-        help: "Client JSON Web Key Set (for private_key_jwt / signed-request verification)"
+        help: "客户端的 JSON Web Key Set（用于 private_key_jwt / 签名请求验证）"
       },
       jwks_uri: {
         label: "JWKS URI",
-        help: "URL of the client JSON Web Key Set"
+        help: "客户端 JSON Web Key Set 的 URL"
       },
       dpop_bound_access_tokens: {
-        label: "DPoP-bound Access Tokens",
-        help: "Require access tokens issued to this client to be DPoP-bound (RFC 9449)"
+        label: "DPoP 绑定访问令牌",
+        help: "要求签发给该客户端的访问令牌必须绑定 DPoP（RFC 9449）"
       },
       disabled: {
         label: "已禁用"
@@ -1370,12 +1370,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "允许客户端调用 OIDC end-session 端点"
       },
       backchannel_logout_uri: {
-        label: "Back-channel Logout URI",
-        help: "OIDC back-channel logout endpoint of the client"
+        label: "后端通道登出 URI",
+        help: "客户端的 OIDC 后端通道登出端点"
       },
       backchannel_logout_session_required: {
-        label: "Back-channel Logout Session Required",
-        help: "Whether the back-channel logout token must include a sid claim"
+        label: "后端通道登出需要会话",
+        help: "后端通道登出令牌是否必须包含 sid claim"
       },
       software_id: {
         label: "软件 ID"
@@ -1404,7 +1404,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       mine: {
-        label: "My Applications"
+        label: "我的应用"
       },
       active: {
         label: "启用"
@@ -1440,7 +1440,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           type: {
             label: "应用类型",
             options: {
-              web: "Web",
+              web: "Web 应用",
               native: "原生应用",
               "user-agent-based": "基于 User-Agent",
               public: "公共客户端"
@@ -1509,16 +1509,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "调用方提供的关联标识符"
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token originates from"
+        label: "授权码 ID",
+        help: "该令牌来源的授权码授权的 ID"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "资源",
+        help: "绑定到该令牌的 RFC 8707 资源指示符的 JSON 序列化列表"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "请求的 UserInfo claim",
+        help: "为 userinfo 端点请求的 OIDC claim 的 JSON 序列化列表"
       },
       scopes: {
         label: "范围",
@@ -1531,12 +1531,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "创建时间"
       },
       revoked: {
-        label: "Revoked At",
-        help: "Timestamp at which this access token was revoked"
+        label: "撤销时间",
+        help: "该访问令牌被撤销的时间戳"
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "确认信息",
+        help: "将该令牌绑定到某个密钥的 RFC 7800 cnf claim（JSON，如 DPoP 密钥指纹）"
       }
     }
   },
@@ -1569,16 +1569,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "调用方提供的关联标识符"
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token chain originates from"
+        label: "授权码 ID",
+        help: "该令牌链来源的授权码授权的 ID"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "资源",
+        help: "绑定到该令牌的 RFC 8707 资源指示符的 JSON 序列化列表"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "请求的 UserInfo claim",
+        help: "为 userinfo 端点请求的 OIDC claim 的 JSON 序列化列表"
       },
       scopes: {
         label: "范围",
@@ -1595,24 +1595,24 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该刷新令牌被撤销的时间戳"
       },
       rotated_at: {
-        label: "Rotated At",
-        help: "Timestamp at which this token was rotated (superseded by a new row)"
+        label: "轮换时间",
+        help: "该令牌被轮换（被新记录取代）的时间戳"
       },
       rotation_replay_response: {
-        label: "Rotation Replay Response",
-        help: "Cached token response replayed when the old token is re-presented within the reuse interval"
+        label: "轮换重放响应",
+        help: "旧令牌在复用间隔内被再次出示时重放的缓存令牌响应"
       },
       rotation_replay_expires_at: {
-        label: "Rotation Replay Expires At",
-        help: "End of the post-rotation reuse interval during which the replay response is served"
+        label: "轮换重放过期时间",
+        help: "轮换后复用间隔的结束时间，在此期间会返回重放响应"
       },
       auth_time: {
         label: "认证时间",
         help: "该令牌链中用户最初完成认证的时间"
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "确认信息",
+        help: "将该令牌绑定到某个密钥的 RFC 7800 cnf claim（JSON，如 DPoP 密钥指纹）"
       }
     }
   },
@@ -1637,12 +1637,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "调用方提供的关联标识符"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators the consent covers"
+        label: "资源",
+        help: "该授权同意涵盖的 RFC 8707 资源指示符的 JSON 序列化列表"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims the user consented to expose"
+        label: "请求的 UserInfo claim",
+        help: "用户同意公开的 OIDC claim 的 JSON 序列化列表"
       },
       scopes: {
         label: "范围",
@@ -1657,103 +1657,103 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_oauth_resource: {
-    label: "OAuth Resource",
-    pluralLabel: "OAuth Resources",
-    description: "Registered OAuth protected resources (RFC 8707 resource indicators)",
+    label: "OAuth 资源",
+    pluralLabel: "OAuth 资源",
+    description: "已注册的 OAuth 受保护资源（RFC 8707 资源指示符）",
     fields: {
       id: {
         label: "ID"
       },
       identifier: {
-        label: "Identifier",
-        help: "Resource indicator URI presented in the RFC 8707 resource parameter"
+        label: "标识",
+        help: "在 RFC 8707 resource 参数中出示的资源指示符 URI"
       },
       name: {
-        label: "Name"
+        label: "名称"
       },
       access_token_ttl: {
-        label: "Access Token TTL",
-        help: "Access-token lifetime in seconds for this resource (overrides the server default)"
+        label: "访问令牌 TTL",
+        help: "该资源的访问令牌有效期（秒），覆盖服务器默认值"
       },
       refresh_token_ttl: {
-        label: "Refresh Token TTL",
-        help: "Refresh-token lifetime in seconds for this resource (overrides the server default)"
+        label: "刷新令牌 TTL",
+        help: "该资源的刷新令牌有效期（秒），覆盖服务器默认值"
       },
       signing_algorithm: {
-        label: "Signing Algorithm",
-        help: "JWS algorithm used to sign access tokens for this resource"
+        label: "签名算法",
+        help: "为该资源签名访问令牌所用的 JWS 算法"
       },
       signing_key_id: {
-        label: "Signing Key ID",
-        help: "Key id (kid) used to sign access tokens for this resource"
+        label: "签名密钥 ID",
+        help: "为该资源签名访问令牌所用的密钥 ID（kid）"
       },
       allowed_scopes: {
-        label: "Allowed Scopes",
-        help: "JSON-serialized list of scopes clients may request for this resource"
+        label: "允许的范围",
+        help: "客户端可为该资源申请的 scopes 的 JSON 序列化列表"
       },
       custom_claims: {
-        label: "Custom Claims",
-        help: "JSON object of extra claims stamped on access tokens for this resource"
+        label: "自定义 claim",
+        help: "附加到该资源访问令牌上的额外 claim 的 JSON 对象"
       },
       dpop_bound_access_tokens_required: {
-        label: "DPoP Required",
-        help: "Require access tokens for this resource to be DPoP-bound (RFC 9449)"
+        label: "要求 DPoP",
+        help: "要求该资源的访问令牌必须绑定 DPoP（RFC 9449）"
       },
       disabled: {
-        label: "Disabled"
+        label: "已禁用"
       },
       policy_version: {
-        label: "Policy Version",
-        help: "Monotonic version of the resource token policy"
+        label: "策略版本",
+        help: "资源令牌策略的单调递增版本号"
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional resource metadata"
+        label: "元数据",
+        help: "附加资源元数据的 JSON 对象"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     }
   },
   sys_oauth_client_resource: {
-    label: "OAuth Client Resource",
-    pluralLabel: "OAuth Client Resources",
-    description: "Grants allowing an OAuth client to request tokens for a protected resource",
+    label: "OAuth 客户端资源",
+    pluralLabel: "OAuth 客户端资源",
+    description: "允许 OAuth 客户端为受保护资源申请令牌的授权",
     fields: {
       id: {
         label: "ID"
       },
       client_id: {
-        label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        label: "客户端 ID",
+        help: "指向 sys_oauth_application.client_id 的外键"
       },
       resource_id: {
-        label: "Resource ID",
-        help: "Foreign key to sys_oauth_resource.identifier"
+        label: "资源 ID",
+        help: "指向 sys_oauth_resource.identifier 的外键"
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional grant metadata"
+        label: "元数据",
+        help: "附加授权元数据的 JSON 对象"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       }
     }
   },
   sys_oauth_client_assertion: {
-    label: "OAuth Client Assertion",
-    pluralLabel: "OAuth Client Assertions",
-    description: "Consumed OAuth client-assertion JTIs (RFC 7523 replay prevention)",
+    label: "OAuth 客户端断言",
+    pluralLabel: "OAuth 客户端断言",
+    description: "已使用的 OAuth 客户端断言 JTI（RFC 7523 防重放）",
     fields: {
       id: {
         label: "ID"
       },
       expires_at: {
-        label: "Expires At",
-        help: "Assertion expiry — rows past this instant are safe to prune"
+        label: "过期时间",
+        help: "断言过期时间——超过该时刻的记录可安全清理"
       }
     }
   },
@@ -1947,174 +1947,174 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_scim_connection_binding: {
-    label: "SCIM Connection Binding",
-    pluralLabel: "SCIM Connection Bindings",
-    description: "Lifecycle state for a SCIM provisioning connection, including its decommission state machine",
+    label: "SCIM 连接绑定",
+    pluralLabel: "SCIM 连接绑定",
+    description: "SCIM 预配连接的生命周期状态，包括其下线状态机",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "Immutable SCIM connection identifier that scopes every provisioned resource"
+        label: "连接 ID",
+        help: "不可变的 SCIM 连接标识符，限定每个预配资源的范围"
       },
       connection_key: {
-        label: "Connection Key",
-        help: "Derived connection uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "连接键",
+        help: "由 @better-auth/scim 维护的派生连接唯一键；请勿直接写入。"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary that receives provisioned resources (defaults to the connection id)"
+        label: "预配域",
+        help: "接收预配资源的应用自有边界（默认为连接 ID）"
       },
       decommission_status: {
-        label: "Decommission Status",
-        help: "Connection lifecycle state: active | reconciling | complete"
+        label: "下线状态",
+        help: "连接生命周期状态：active | reconciling | complete"
       },
       decommissioned_at: {
-        label: "Decommissioned At"
+        label: "下线时间"
       },
       decommission_cursor_user_id: {
-        label: "Decommission Cursor User",
-        help: "Resumable reconciliation cursor maintained by the library"
+        label: "下线游标用户",
+        help: "由该库维护的可续传协调游标"
       },
       decommission_reconciled_user_count: {
-        label: "Reconciled Users"
+        label: "已协调用户数"
       },
       decommission_batch_count: {
-        label: "Decommission Batches"
+        label: "下线批次数"
       },
       decommission_revision: {
-        label: "Decommission Revision",
-        help: "Optimistic-concurrency revision for the decommission state machine"
+        label: "下线修订版本",
+        help: "下线状态机的乐观并发修订版本"
       },
       decommission_completed_at: {
-        label: "Decommission Completed At"
+        label: "下线完成时间"
       },
       decommission_lease_id: {
-        label: "Decommission Lease",
-        help: "Single-worker reconciliation lease maintained by the library"
+        label: "下线租约",
+        help: "由该库维护的单工作进程协调租约"
       },
       decommission_lease_expires_at: {
-        label: "Decommission Lease Expires At"
+        label: "下线租约过期时间"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_connection_credential: {
-    label: "SCIM Connection Credential",
-    pluralLabel: "SCIM Connection Credentials",
-    description: "Bearer credentials (one-way digests) that authenticate SCIM provisioning connections",
+    label: "SCIM 连接凭据",
+    pluralLabel: "SCIM 连接凭据",
+    description: "用于认证 SCIM 预配连接的 Bearer 凭据（单向摘要）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "The SCIM connection this credential authenticates (e.g. \"okta-prod\"); scopes every resource the IdP provisions with it"
+        label: "连接 ID",
+        help: "该凭据认证的 SCIM 连接（例如 “okta-prod”）；限定 IdP 使用它预配的每个资源的范围"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary receiving provisioned resources; defaults to the connection id when absent"
+        label: "预配域",
+        help: "接收预配资源的应用自有边界；缺省时默认为连接 ID"
       },
       organization_id: {
-        label: "Organization",
-        help: "Organization scope of this connection, when provisioning is org-scoped"
+        label: "组织",
+        help: "该连接的组织范围（预配为组织级时）"
       },
       label: {
-        label: "Label",
-        help: "Operator-facing name for this credential (e.g. \"rotation 2026-Q3\")"
+        label: "标签",
+        help: "面向运维人员的凭据名称（例如 “rotation 2026-Q3”）"
       },
       token_digest: {
-        label: "Token Digest",
-        help: "HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored."
+        label: "令牌摘要",
+        help: "Bearer 令牌的 HMAC-SHA-256（base64url），以部署的认证密钥为键——单向；明文仅在签发时显示一次，且绝不存储。"
       },
       active: {
-        label: "Active",
-        help: "Revocation switch — an inactive credential is refused at verification"
+        label: "启用",
+        help: "撤销开关——未启用的凭据在验证时会被拒绝"
       },
       expires_at: {
-        label: "Expires At",
-        help: "Optional hard expiry for staged credential rotation; an expired credential is refused"
+        label: "过期时间",
+        help: "用于分阶段凭据轮换的可选硬性过期时间；已过期的凭据会被拒绝"
       },
       user_id: {
-        label: "Minted By",
-        help: "User who minted this credential"
+        label: "签发人",
+        help: "签发该凭据的用户"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_group: {
-    label: "SCIM Group",
-    pluralLabel: "SCIM Groups",
-    description: "IdP-pushed SCIM 2.0 groups, scoped per provisioning connection",
+    label: "SCIM 组",
+    pluralLabel: "SCIM 组",
+    description: "由 IdP 推送的 SCIM 2.0 组，按预配连接划分范围",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "连接 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "预配域"
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "修订版本",
+        help: "由 @better-auth/scim 维护的乐观并发修订版本"
       },
       display_name: {
-        label: "Display Name",
-        help: "SCIM displayName as sent by the IdP"
+        label: "显示名称",
+        help: "IdP 发送的 SCIM displayName"
       },
       display_name_key: {
-        label: "Display Name Key",
-        help: "Derived case-folded displayName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "显示名称键",
+        help: "由 @better-auth/scim 维护的派生 displayName 唯一键（已做大小写折叠）；请勿直接写入。"
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "外部 ID",
+        help: "IdP 分配的 externalId（当 IdP 发送时）"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID 键",
+        help: "由 @better-auth/scim 维护的派生 externalId 唯一键；请勿直接写入。"
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "排序键",
+        help: "由 @better-auth/scim 维护的派生稳定分页键；请勿直接写入。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_group_member: {
-    label: "SCIM Group Member",
-    pluralLabel: "SCIM Group Members",
-    description: "SCIM group membership rows pushed by the IdP (group ↔ provisioned user)",
+    label: "SCIM 组成员",
+    pluralLabel: "SCIM 组成员",
+    description: "由 IdP 推送的 SCIM 组成员关系记录（组 ↔ 预配的用户）",
     fields: {
       id: {
         label: "ID"
@@ -2124,72 +2124,72 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "记录标题：预配的用户及其所在组（读取时计算）"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "连接 ID"
       },
       group_id: {
-        label: "Group"
+        label: "组"
       },
       scim_user_id: {
-        label: "SCIM User"
+        label: "SCIM 用户"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "成员关系键",
+        help: "由 @better-auth/scim 维护的派生成员关系唯一键；请勿直接写入。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_identity_tombstone: {
-    label: "SCIM Identity Tombstone",
-    pluralLabel: "SCIM Identity Tombstones",
-    description: "Tombstones of IdP-deleted SCIM identities, kept so a re-provision is recognized",
+    label: "SCIM 身份墓碑",
+    pluralLabel: "SCIM 身份墓碑",
+    description: "IdP 已删除的 SCIM 身份的墓碑记录，保留下来以便识别重新预配",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "连接 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "预配域"
       },
       external_id: {
-        label: "External ID",
-        help: "The IdP-assigned externalId of the deleted identity"
+        label: "外部 ID",
+        help: "已删除身份的 IdP 分配 externalId"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID 键",
+        help: "由 @better-auth/scim 维护的派生 externalId 唯一键；请勿直接写入。"
       },
       user_id: {
-        label: "User",
-        help: "The platform user the deleted identity was linked to"
+        label: "用户",
+        help: "已删除身份所关联的平台用户"
       },
       profile: {
-        label: "Final Profile",
-        help: "Serialized final SCIM profile at deletion time, maintained by @better-auth/scim"
+        label: "最终资料",
+        help: "删除时的最终 SCIM 资料（已序列化），由 @better-auth/scim 维护"
       },
       deleted_at: {
-        label: "Deleted At"
+        label: "删除时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_projection_grant: {
-    label: "SCIM Projection Grant",
-    pluralLabel: "SCIM Projection Grants",
-    description: "Role/entitlement grants projected onto platform users by SCIM provisioning",
+    label: "SCIM 投影授权",
+    pluralLabel: "SCIM 投影授权",
+    description: "由 SCIM 预配投影到平台用户上的角色 / 权益授权",
     fields: {
       id: {
         label: "ID"
@@ -2199,173 +2199,173 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "记录标题：投射的角色及被授予该角色的用户（读取时计算）"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "连接 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "预配域"
       },
       scim_user_id: {
-        label: "SCIM User",
-        help: "The per-connection user projection this grant belongs to"
+        label: "SCIM 用户",
+        help: "该授权所属的按连接划分的用户投影"
       },
       user_id: {
-        label: "User",
-        help: "The platform user the grant is projected onto"
+        label: "用户",
+        help: "该授权投影到的平台用户"
       },
       source_kind: {
-        label: "Source Kind",
-        help: "What projected the grant (e.g. group, entitlement, attribute)"
+        label: "来源类型",
+        help: "投影出该授权的来源（例如 group、entitlement、attribute）"
       },
       source_id: {
-        label: "Source ID",
-        help: "Identifier of the projecting source (e.g. the SCIM group id)"
+        label: "来源 ID",
+        help: "投影来源的标识符（例如 SCIM 组 ID）"
       },
       source_value: {
-        label: "Source Value",
-        help: "Source attribute value, when the source kind carries one"
+        label: "来源值",
+        help: "来源属性值（当来源类型携带该值时）"
       },
       role: {
-        label: "Role",
-        help: "The role/entitlement projected onto the user"
+        label: "角色",
+        help: "投影到该用户上的角色 / 权益"
       },
       grant_key: {
-        label: "Grant Key",
-        help: "Derived grant uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "授权键",
+        help: "由 @better-auth/scim 维护的派生授权唯一键；请勿直接写入。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_subject: {
-    label: "SCIM Subject",
-    pluralLabel: "SCIM Subjects",
-    description: "Per-user SCIM provisioning link — one row per user any SCIM connection provisions",
+    label: "SCIM 主体",
+    pluralLabel: "SCIM 主体",
+    description: "按用户划分的 SCIM 预配关联——任一 SCIM 连接预配的每个用户对应一行",
     fields: {
       id: {
         label: "ID"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this subject row tracks (unique — one row per user)"
+        label: "用户",
+        help: "该主体记录跟踪的平台用户（唯一——每个用户一行）"
       },
       profile_source_id: {
-        label: "Profile Source",
-        help: "The sys_scim_user projection currently sourcing this user's profile"
+        label: "资料来源",
+        help: "当前为该用户提供资料的 sys_scim_user 投影"
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "修订版本",
+        help: "由 @better-auth/scim 维护的乐观并发修订版本"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
   sys_scim_user: {
-    label: "SCIM User",
-    pluralLabel: "SCIM Users",
-    description: "Per-connection projection of an IdP-provisioned user (SCIM 2.0 /Users)",
+    label: "SCIM 用户",
+    pluralLabel: "SCIM 用户",
+    description: "IdP 预配用户的按连接投影（SCIM 2.0 /Users）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "SCIM connection that provisioned this user"
+        label: "连接 ID",
+        help: "预配该用户的 SCIM 连接"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "预配域"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this projection materialized as"
+        label: "用户",
+        help: "该投影所落地成的平台用户"
       },
       connection_user_key: {
-        label: "Connection User Key",
-        help: "Derived (connection, user) uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "连接用户键",
+        help: "由 @better-auth/scim 维护的派生（连接, 用户）唯一键；请勿直接写入。"
       },
       user_name: {
-        label: "User Name",
-        help: "SCIM userName as sent by the IdP"
+        label: "用户名",
+        help: "IdP 发送的 SCIM userName"
       },
       user_name_key: {
-        label: "User Name Key",
-        help: "Derived case-folded userName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "用户名键",
+        help: "由 @better-auth/scim 维护的派生 userName 唯一键（已做大小写折叠）；请勿直接写入。"
       },
       primary_email: {
-        label: "Primary Email"
+        label: "主邮箱"
       },
       work_email_value_index: {
-        label: "Work Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "工作邮箱索引",
+        help: "由 @better-auth/scim 维护的派生查找索引；请勿直接写入。"
       },
       email_value_index: {
-        label: "Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "邮箱索引",
+        help: "由 @better-auth/scim 维护的派生查找索引；请勿直接写入。"
       },
       display_name: {
-        label: "Display Name"
+        label: "显示名称"
       },
       formatted_name: {
-        label: "Formatted Name"
+        label: "格式化姓名"
       },
       given_name: {
-        label: "Given Name"
+        label: "名"
       },
       family_name: {
-        label: "Family Name"
+        label: "姓"
       },
       serialized_emails: {
-        label: "Emails (serialized)",
-        help: "Canonical serialized SCIM emails list maintained by @better-auth/scim; do not write directly."
+        label: "邮箱（序列化）",
+        help: "由 @better-auth/scim 维护的规范化序列化 SCIM 邮箱列表；请勿直接写入。"
       },
       serialized_attributes: {
-        label: "Attributes (serialized)",
-        help: "Canonical serialized SCIM attributes maintained by @better-auth/scim; do not write directly."
+        label: "属性（序列化）",
+        help: "由 @better-auth/scim 维护的规范化序列化 SCIM 属性；请勿直接写入。"
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "外部 ID",
+        help: "IdP 分配的 externalId（当 IdP 发送时）"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID 键",
+        help: "由 @better-auth/scim 维护的派生 externalId 唯一键；请勿直接写入。"
       },
       active: {
-        label: "Active",
-        help: "SCIM active flag — false means the IdP deactivated this user"
+        label: "启用",
+        help: "SCIM active 标志——为 false 表示 IdP 已停用该用户"
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "排序键",
+        help: "由 @better-auth/scim 维护的派生稳定分页键；请勿直接写入。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新时间"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "全部"
       }
     }
   },
@@ -2378,29 +2378,29 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "通知 ID"
       },
       topic: {
-        label: "Topic",
-        help: "Notification topic, e.g. task.assigned, collab.mention"
+        label: "主题",
+        help: "通知主题，例如 task.assigned、collab.mention"
       },
       payload: {
-        label: "Payload",
-        help: "Template inputs carried to channels (title/body/url/actor/source/…)"
+        label: "负载",
+        help: "传递给各通道的模板输入（title/body/url/actor/source/…）"
       },
       severity: {
-        label: "Severity",
-        help: "Severity hint for rendering / filtering",
+        label: "严重程度",
+        help: "用于渲染 / 筛选的严重程度提示",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "信息",
+          warning: "警告",
+          critical: "严重"
         }
       },
       suppressed_channels: {
-        label: "Suppressed Channels",
-        help: "Channels fan-out skipped because they are unavailable for this tenant, as [{channel, reason}]; reason is the closed set: transport_not_configured"
+        label: "已抑制的通道",
+        help: "因对该租户不可用而在扇出时被跳过的通道，格式为 [{channel, reason}]；reason 为封闭集合：transport_not_configured"
       },
       dedup_key: {
-        label: "Dedup Key",
-        help: "Idempotency key within a topic window; a repeat emit is a no-op"
+        label: "去重键",
+        help: "主题窗口内的幂等键；重复发出不产生任何效果"
       },
       source_object: {
         label: "来源对象",
@@ -2420,14 +2420,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent",
+        label: "最近",
         emptyState: {
-          title: "No events",
-          message: "No notification events have been emitted."
+          title: "尚无事件",
+          message: "尚未发出任何通知事件。"
         }
       },
       by_topic: {
-        label: "By Topic"
+        label: "按主题"
       }
     }
   },
@@ -2626,17 +2626,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "形如 {name,type,required,description} 的 JSON 数组"
       },
       managed_by: {
-        label: "Managed By",
-        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from declared email_template metadata) / admin = created in Studio.",
+        label: "管理方",
+        help: "记录来源：platform = 框架内置 / package = 应用或包声明（启动时根据声明的 email_template 元数据写入）/ admin = 在 Studio 中创建。",
         options: {
-          platform: "platform",
-          package: "package",
-          admin: "admin"
+          platform: "平台",
+          package: "包",
+          admin: "管理员"
         }
       },
       customized: {
-        label: "Customized",
-        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+        label: "已自定义",
+        help: "管理员编辑包声明的模板时设置；启动种子将不再覆盖该记录（改写过的密码重置邮件在重新部署后得以保留）。对 admin 记录无意义。"
       },
       created_at: {
         label: "创建时间"
@@ -3100,7 +3100,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       recorded_by: {
         label: "记录人",
-        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
+        help: "做出此变更的用户。NULL 表示由系统发起（启动同步、迁移、定时任务）——绝不是哨兵字符串。"
       },
       recorded_at: {
         label: "记录时间"
@@ -3232,8 +3232,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "锁定状态",
         options: {
           none: "无",
-          nooverlay: "no-overlay",
-          nodelete: "no-delete",
+          nooverlay: "禁止叠加",
+          nodelete: "禁止删除",
           full: "完全锁定"
         }
       },
@@ -3367,7 +3367,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "All Secrets"
+        label: "全部密钥"
       }
     }
   },
@@ -3447,7 +3447,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent"
+        label: "最近"
       }
     }
   },
@@ -3485,16 +3485,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "最近一次运行的计数,JSON 编码,供诊断用。"
       },
       deviation_observed_at: {
-        label: "Deviation Observed At",
-        help: "When this deployment last ADMITTED a value its own verified contract rejects, through an OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the irreversible half of what the certificate authorises — byte deletion stops, validation and tombstoning continue. Cleared by the next apply-mode run."
+        label: "偏差发现时间",
+        help: "本部署最近一次经由 OS_ALLOW_LAX_* 逃生开关「放行」一个其自身已验证契约会拒绝的值的时间。刻意「不」清空 verified_at:它只撤回该证书所授权内容中不可逆的那一半——字节删除停止,校验与墓碑化照常进行。下一次 apply 模式运行时清空。"
       },
       deviation_detail: {
-        label: "Deviation Detail (JSON)",
-        help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
+        label: "偏差详情(JSON)",
+        help: "deviation_observed_at 背后的第一个反例,JSON 编码(object、field、type、parse issue),便于运维人员找到关闭了不可逆门禁的那个值。"
       },
       columns_moved_at: {
-        label: "Columns Moved At",
-        help: "When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume."
+        label: "列迁移时间",
+        help: "本部署最近一次完成该迁移「列迁移」的时间——即把已迁移的列改为新类型、并将其中的值重写为新编码的那一步。它是独立于 applied_at 和 verified_at 的证据,后两者只证明回填及其自检:一个部署可以两者都有,却仍以旧编码存储。为空恰恰表示这一点,是预期的稳态而非错误——这也是无法读取本字段的消费方必须作出的假设。"
       },
       created_at: {
         label: "创建时间"
