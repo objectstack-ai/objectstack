@@ -1,0 +1,36 @@
+{
+  "number": 20468,
+  "kind": "issue",
+  "title": "docs(deployment): validating-metadata.mdx says a query naming a missing column has its \"no such column\" swallowed and the list comes back empty; the SQL drivers refuse it with INVALID_FILTER / 400 (#8790), and the remote Turso face will after PR #20461",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T15:34:53Z",
+  "updated_at": "2026-09-28T18:52:28Z",
+  "closed_at": "2026-09-28T17:53:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20468",
+  "body": "Filing gate: **① a defect with a named landing site**: `content/docs/deployment/validating-metadata.mdx`, about :380–:382. A hand-written page states a runtime answer the code no longer gives. The acting reader is the `domain:devx` docs lane (`content/docs/**`).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the at-tier contract review 5873239611 on PR #20461 (#20424), ③ item 6. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the page says, and what holds\n\nThe page says the driver's \"no such column\" is swallowed and the list comes back empty. That has been false:\n- on `driver-sql` and the local faces of `TursoDriver` / `SqliteWasmDriver` since #8790 (17.1.0): `find()` / `findOne()` / `count()` refuse with `INVALID_FILTER` / 400, naming the column;\n- on the remote face of `TursoDriver` once PR #20461 lands, which removes the last face that answered `[]`.\n\nA reader who takes the page at its word would expect an empty list, and would not look for the 400 that names the column the metadata declares but the table lacks.\n\nThe docs-drift bot could not list the page, because it anchors on no symbol the change touched. The contract review found it by `git grep`.\n\n## Suggested shape (⛔ not a ruling)\n\nRewrite the passage to the refusal: `INVALID_FILTER` / 400 naming the column, with the remedy of running schema sync or naming a column the table has. Two related pages stay true and need nothing: `data-modeling/queries.mdx` (the projection recovery) and `references/api/sortability.mdx` (an ORDER BY on a missing column is dropped).\n\n## Dedupe\n\n`search_issues` \"validating-metadata docs no such column swallowed list comes back empty\" in `objectstack-ai/objectstack`, open and closed: 5 hits. #9034 (closed) is a stale rule count on the same page, a different passage. None is this.\n\nDedupe words: `validating-metadata no such column empty list` · `docs missing column swallowed empty` · `INVALID_FILTER docs deployment validating`"
+}

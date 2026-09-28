@@ -2,7 +2,7 @@
   "number": 20414,
   "kind": "pull_request",
   "title": "feat(spec): the number-comparand declared-type door's contract and the platform's numeric grammar",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T09:18:52Z",
-  "updated_at": "2026-09-28T13:42:15Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-28T14:35:47Z",
+  "closed_at": "2026-09-28T14:35:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-28T14:35:45Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20414",

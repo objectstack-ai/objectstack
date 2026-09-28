@@ -2,8 +2,8 @@
   "number": 20379,
   "kind": "issue",
   "title": "[finding] Two major-18 D3 entries print `CurrencyConfigSchema.precision … unchanged` through `os migrate meta`, which PR #20251 makes false in the same major",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T04:16:04Z",
-  "updated_at": "2026-09-28T05:57:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T19:29:41Z",
+  "closed_at": "2026-09-28T19:21:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20379",
   "body": "Filing gate: **① a defect with a named landing site**, finding class **(b)**. The `reach:` exception is release text: `os migrate meta` prints these entries to authors, and protocol 18 is unreleased, so this is fixable before any release.\n\nFound by the base-merge round on #19992 (PR #20251; report on this seat's session, `out_of_scope_findings[0]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What is false\n\nPR #20251 retires `CurrencyConfigSchema.precision` in major 18 (conversion `currency-config-precision-removed`, D3 `currency-config-precision-retired`). The maintainer approved it at `33f53b5e`, and it is armed. Once it lands, two sibling D3 entries of the same major still say the key is unchanged:\n\n- `packages/spec/src/migrations/entries/semantic/18.field-scale-precision-integer-refused.ts` (about :24–25): 「`CurrencyConfigSchema.precision` (under `currencyConfig`) is a different surface with its own bounds and alias table and is unchanged.」\n- `packages/spec/src/migrations/entries/semantic/18.ui-form-field-precision-scale-integer-refused.ts` (about :29–30): 「⚠️ `CurrencyConfigSchema.precision` and the gantt `scale` enum are different surfaces and are unchanged.」\n\n## What the fix is (for the dispatch to confirm)\n\n- Reword only the `CurrencyConfigSchema.precision` clause in each entry: it is removed in this same major by `currency-config-precision-removed`. Put no tracker number in the field text.\n- Keep the gantt `scale` clause, which is still true.\n- Run `gen:migration-registry`, then `check:migration-registry`, `retired-key-migrate-sentence.test.ts` and `migrations.test.ts`. The fix is text only.\n- Serial after PR #20251 lands. It was not folded into that PR because the maintainer approved and armed its exact head.\n\n## Dedupe\n\nThe two sentences were measured by the #19992 round against `origin/main`; `git grep \"CurrencyConfigSchema.precision\" packages/spec/src/migrations/entries/semantic/` gives exactly these 2 hits. No open card carries them: this is a sibling-text consequence of PR #20251, found in its round.\n\nDedupe words: `CurrencyConfigSchema.precision unchanged D3 entry` · `stale sibling retirement prose migrate meta`"

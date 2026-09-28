@@ -1,0 +1,37 @@
+{
+  "number": 20495,
+  "kind": "pull_request",
+  "title": "fix(spec): correct GanttConfig.timeZone describe — date fields don't persist as real instants",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T18:57:08Z",
+  "updated_at": "2026-09-28T20:05:51Z",
+  "closed_at": "2026-09-28T20:05:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-28T20:05:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20495",
+  "body": "Fixes #20466\n\nClause-②: no\n\n## What changed\n\n`packages/spec/src/ui/view.zod.ts`, the `GanttConfig` `timeZone` member's\n`.describe()`: replaced only the false clause \"persisted data stays real\ninstants\" with the card's true wording — a datetime value is still written\nas the real instant, and a date value as the calendar day it was dropped on\nin this zone's calendar (`YYYY-MM-DD`). Nothing else in the describe moved.\n\nVerified against the spec's own storage rule\n(`packages/core/src/utils/temporal-storage-form.ts`, ADR-0053): `datetime`\nstores canonical UTC ISO text; `date` stores a timezone-naive `YYYY-MM-DD`\ncalendar day. The new sentence is true of the contract, not of one renderer.\nNo mention of objectui's DST shim defect (objectstack-ai/objectui#10866\nslice 5) — that stays a renderer bug, per triage.\n\nRegenerated the reference docs that carried the old sentence verbatim\n(`content/docs/references/ui/view.mdx` ×3, `component.mdx` ×1) via\n`pnpm --filter @objectstack/spec gen:schema && gen:docs` — never by hand.\nGrepped the exact phrase across the whole repo; the only other copies were\nthose four generated doc occurrences (plus the JSON-Schema manifest, which\nonly ratchets schema names, not prose). No hand-written copy found, no test\npins the old text.\n\n## Verification record\n\n- `pnpm --filter @objectstack/spec build` — green (36/36 declared `.d.ts`, 130 declaration files, 394/394 relative references resolved).\n- `pnpm --filter @objectstack/spec check:generated` — 15/15 generated artifacts green (only `check:docs` was stale before `gen:docs`, now current).\n- `pnpm --filter @objectstack/spec typecheck` (`tsc --noEmit` + scripts + test-layer) — green.\n- `pnpm --filter @objectstack/spec test` — 572 test files, 16789 tests passed, 1 todo (unrelated pre-existing todo).\n  - Targeted first: `view.test.ts` + `view-gantt-tree-config-closed-15469.test.ts` — 502 tests passed. No test pins the old describe text; none needed updating.\n- `packages/spec`'s own build closure (`pnpm --filter '@objectstack/spec^...' build`) is EMPTY — nothing in this repo depends on `@objectstack/spec` as a workspace package the way `turbo`'s graph tracks it here, so ① has nothing to build.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derived 102 gate commands from the diff (4 files, +25/-5, 30 changed lines). Ran all 102:\n  - **99/102 green** on the real command (exit 0), including `check:doc-authoring` (no tracker number in the describe), `check:nul-bytes`, `check:merge-driver`, `check:changeset-no-major`, `check:empty-changeset`, `check:issue-citations`/`check:closing-keyword-parity` (the `Fixes #20466` line), and every `packages/spec` `check:*` gate the diff touches.\n  - **3/102 NOT MEASURED** — `PREREQUISITE NOT MET` (exit 3, not a finding): `check:skill-examples` (client SDK surface needs `@objectstack/client-react`+`@objectstack/client` built), `check:dual-build-cjs-loads` (needs ~80 packages' `dist/`, effectively a whole-repo build) and `check:lean-entry-closure` (needs `@objectstack/objectql` built). None is in `packages/spec`'s own build closure (which is empty); building them locally would mean rebuilding most of the monorepo for a single-clause prose fix. Deferred to CI's full build, which measures all three.\n  - 3 of the original 6 exit-3s (`check:doc-formula-expressions`, `check:doc-security-posture`, `check:docs-transcript-drift`) needed only `@objectstack/formula` + `@objectstack/lint` built — built those two directly and reran: all green.\n- Merged `origin/main` (view.zod.ts carried seat 4's landed #20474 `view-console-round-trip-keys` change past my region) via `bash scripts/pm/os-regen-merge.sh`: the driver deferred `content/docs/references/ui/view.mdx` (both sides changed it), regenerated with `gen:schema && gen:docs` on the merged tree, verified `#20474`'s symbols and prose survived byte-for-byte (`git grep` against `origin/main`), then committed the regeneration as its own commit per the runbook. `git diff origin/main HEAD -- packages/spec/src/ui/view.zod.ts` shows exactly the one-clause change, nothing else.\n- Reverified no further origin/main commits touch this file surface after the merge (`git log HEAD..origin/main -- <the 3 touched paths>` — empty).\n\n## Acceptance notes\n\n- objectui's `@object-ui/types` zod mirror (`stripImportedDefaults(SpecGanttConfigSchema).shape.timeZone`) is a spec-derived reuse of this describe. Per triage's direction, objectui is not edited here — its mirror picks up the corrected text at its next spec bump.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014EJ1ED8X4MMrT18BhVx4tx)_\n"
+}

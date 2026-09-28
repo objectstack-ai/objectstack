@@ -2,8 +2,8 @@
   "number": 20309,
   "kind": "issue",
   "title": "record validator's number arm accepts any value whose Number() is finite, so POST /api/v1/data with a number field [500] answers 201 and driver-sql stores the text '[500]'",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T20:13:40Z",
-  "updated_at": "2026-09-28T05:56:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T19:46:07Z",
+  "closed_at": "2026-09-28T19:44:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20309",
   "body": "Filing gate: **① a defect with a repro at a public door**, class **(a)**. A number field accepts and stores a non-number.\n- `reach:` measured at the REST data door by the objectstack#19886 stage-2e dev (status note to the seat, 2026-09-27T20:13Z; the dev's final report on #19886 will carry the cell). It used the CRM example dev server on `driver-sql` (better-sqlite3), `POST /api/v1/data/crm_activity`:\n  - `duration_minutes: [500]` → **201**. It is stored as the SQLite TEXT `'[500]'`, and a `GET` returns the string `\"[500]\"`;\n  - `duration_minutes: [5, 7]` → 400 `VALIDATION_FAILED` (the control that fires);\n  - `duration_minutes: 500` → stored as a real (the scalar control).\n- **Cause, read by this seat** on `main` `6a6a17b6`: `packages/objectql/src/validation/record-validator.ts:763`, the number-types arm (`number`, `currency`, `percent`, `rating`, `slider`):\n  ```ts\n  const n = typeof value === 'number' ? value : Number(value);\n  if (!Number.isFinite(n)) {\n    return fail('invalid_number');\n  }\n  ```\n  JS `Number([500])` is `500`, so a one-element array passes the check. The validator judges the coerced `n` but the write carries the original `value`, so the array reaches the driver. By the same coercion, and **not measured at the door**: `Number([])` → `0`, `Number(true)` → `1`, `Number('0x10')` → `16` and `Number(' 12 ')` → `12` also pass. Whatever the driver then stores, `[]`, `true` and `'0x10'` are not numbers.\n\nFound by the `os-dev` round on objectstack#19886 (stage 2e, cells C1 and C2). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. The fix lands in `packages/objectql`. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- The number arm accepts a JS `number`, and a string only under the platform's declared numeric grammar, if one exists (measure which string forms are accepted today and who sends them). It refuses arrays, booleans, objects and hex / whitespace-padded strings with `invalid_number`.\n- Decide whether an accepted numeric string is NORMALIZED to a number before the write, so the validator's `n` is what is stored. That is the #7501 posture: refuse, never silently alter.\n- Pin: the table above, plus the not-measured coercions, at the REST door on driver-sql and driver-memory.\n- Census the producers first. Any shipped producer sending a numeric string or a one-element array is named, and the prescription is converted rather than silently broken.\n- Related, and not this card: a list payload into a scalar column under an RLS ORDERING check is refused by #19886 stage 2e. This card is the general write path, with no policy involved.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `single-element array|[500]|array…number field…(stored|accepted|coerce)|Number([|list payload…(scalar|number)` finds 2 hits: PR #20204 and PR #20097, both about filter comparands, not the write validator. None carries this defect.\n\nBlocked-by: #20336\n"

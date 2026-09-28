@@ -1,0 +1,38 @@
+{
+  "number": 20477,
+  "kind": "issue",
+  "title": "[finding] the runtime dispatcher's `/packages` domain takes the organization from the raw session claim (`resolveActiveOrganizationId`, 9 sites), bypassing ruling B on #15409: a session naming a left organization may read and write it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T16:29:32Z",
+  "updated_at": "2026-09-28T19:08:19Z",
+  "closed_at": "2026-09-28T19:06:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20477",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/runtime/src/http-dispatcher.ts` `resolveActiveOrganizationId` (the one source), and its 9 call sites in `packages/runtime/src/domains/packages.ts`. Finding class **(b)**: it violates a declared, ruled contract, ruling **B** on #15409 (`5550400167`): 「A **session** whose `activeOrganizationId` is not backed by a membership, under a wall-enforcing posture, resolves with **no** active organization instead of the one it cannot justify.」 `reach:` is **NOT MEASURED** for these sites. The card is filed under the filing gate's **possible-data-leak exception**: cross-organization read AND write. **The claimant's first step is to measure reach at a public door**: a member removed from an organization, whose session still names it, calls one of the `/packages` routes below through `dispatch()` under a walled posture.\n\nThe #20408 dev (PR #20473) found it, beside a measured instance of the same defect on the dispatcher's `/meta` doors. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the source says (`origin/main` `75b216924`, read at source)\n\n- `HttpDispatcher.resolveActiveOrganizationId` (`http-dispatcher.ts`, handed to the domains as `deps.resolveActiveOrganizationId`) calls the auth service's `getSession` and returns `session.activeOrganizationId` **as stored**. It never reads the execution context that `resolveAuthzContext` vetted, where ruling B's fix (PR #15794, `d4f9b2a9d`) clears an unbacked claim.\n- `packages/runtime/src/domains/packages.ts` calls it at 9 sites. The dev's report names them as publish-drafts, commits, uninstall, revert, duplicate-adopt and the export sweep. Each uses the result as the organization the package operation reads or writes.\n- `RestServer` reads the vetted `ctx.tenantId`.\n\n## The measured sibling\n\nOn `/meta`, the same raw source let a removed member read the left organization's view overlays and drafts through the dispatcher. It also let a `PUT /meta/view/…` land in that organization. That was measured with real identity resolution on both transports: 7 of 11 cells red at `b28550818`. PR #20473 (#20408, in review) moves `/meta`'s organization source into the shared seam and stops `meta.ts` calling `resolveActiveOrganizationId`. It does not touch `packages.ts` or `http-dispatcher.ts`.\n\n**A note for triage, not a direction:** the dev observed that reading the vetted `executionContext.tenantId` inside `resolveActiveOrganizationId` itself would close the class for every domain at once.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「resolveActiveOrganizationId」: 15 hits. The only open one is #20408, the `/meta` sibling. The closed ones (#7780, #8805, #18487 and others) are other questions.\n- 「activeOrganizationId removed member」: 20 hits. #15409 (the ruling this violates), #15396, #15784 and #15900 are closed, and none covers the dispatcher's `/packages` domain.\n- 「packages.ts organization scope dispatcher」: 20 hits, none on this source.\n\nQuery terms for later deduplication: `resolveActiveOrganizationId raw session claim`, `dispatcher packages org scope`, `activeOrganizationId unvetted`, `removed member organization partition`."
+}

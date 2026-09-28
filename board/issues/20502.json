@@ -1,0 +1,32 @@
+{
+  "number": 20502,
+  "kind": "issue",
+  "title": "driver-sql on PostgreSQL answers 500 for a boolean or Date compared against a number field (`where { amount: { $gt: true } }`), while memory answers no rows and SQLite every row: the non-string half #20336 / #20351 left out",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T19:50:56Z",
+  "updated_at": "2026-09-28T20:03:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20502",
+  "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**. `reach:` was measured at REST `POST /api/v1/data/:object/query` and at `engine.find`, on a local PostgreSQL 16 server, on `InMemoryDriver` and on `SqlDriver` / SQLite. Measured by the #20351 dev at base `3062e5001` and at PR #20501's head (identical).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20351 dev's report (`os-dev-report` on #20351, `out_of_scope_findings[0]`). #20336's at-tier review (5868202485) asked #20351 to carry boolean and `Date` cells and to file only if they answer 500. They do. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA declared `number` field, `where { amount: { $gt: <comparand> } }`:\n\n| comparand | memory | SQLite | PostgreSQL 16 |\n|:--|:--|:--|:--|\n| `true` | no rows | every row | **500 `DATABASE_ERROR`** |\n| a `Date` (`engine.find`) | no rows | no rows | **500 `DATABASE_ERROR`** |\n| `\"abc\"` (after PR #20501) | 400 `INVALID_FILTER` | 400 | 400 |\n\nOne client mistake gets three answers, and PostgreSQL's is a server fault. It is the same shape #20336 fixed for a non-numeric string.\n\n## Why\n\nThe number-comparand contract `#20336` published (`packages/spec/src/data/filter-number-comparand-declared-type.ts`, PR #20414) judges strings only. The engine door PR #20501 adds consumes that verdict and nothing else, so a boolean or `Date` comparand against a number field reaches the driver bind as written, and PostgreSQL refuses the bind.\n\n## Suggested shape (⛔ not a ruling)\n\nOne answer for every dialect and position, decided once: refuse a non-numeric, non-string comparand (boolean, `Date`, object) against a declared number field with `INVALID_FILTER` / 400 naming the field. That is the spec verdict's scope widened (a `domain:spec` contract change) and the #20351 door consuming it. Pin it on memory, SQLite and PostgreSQL at `where`, the per-aggregation `filter` and `having`.\n\n## Dedupe\n\n`search_issues` \"boolean comparand number field postgres 500 Date comparand numeric column DATABASE_ERROR\" in `objectstack-ai/objectstack`, open and closed: 3 hits. #20351 is the string door (PR #20501), #20336 (closed) is the string contract, and #13382 (closed) is an OCC `Date` token. None is this.\n\nDedupe words: `boolean comparand number field postgres 500` · `Date comparand numeric column database_error` · `non-string comparand declared number type`"
+}

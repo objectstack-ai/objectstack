@@ -1,0 +1,31 @@
+{
+  "number": 20467,
+  "kind": "issue",
+  "title": "spec: the ADR-0087 entry `driver-sql-unresolvable-where-column-refused` names only the `where` / `INVALID_FILTER` legs; PR #20461 also refuses the remote Turso `aggregate` legs (`INVALID_FIELD` / 400, a missing table `DATABASE_ERROR` / 500) under it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T15:34:25Z",
+  "updated_at": "2026-09-28T15:59:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20467",
+  "body": "Filing gate: **① a defect with a named landing site and a named reader**. The site is `packages/spec/src/migrations/entries/semantic/18.driver-sql-unresolvable-where-column-refused.ts`. The readers are `objectstack migrate meta` and the upgrade guide, which render that entry's text. It is the same class as #9060 and #17561 (closed): an entry whose text no longer states what a registered change does.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the at-tier contract review 5873239611 on PR #20461 (#20424), ③ item 2. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What is owed\n\nPR #20461 (#20424, open, `domain:engine`) makes the remote face of `TursoDriver` refuse a missing table or column where it answered `[]` / `null`. It ships BREAKING `minor` with the marker `not-required (already-registered driver-sql-unresolvable-where-column-refused)`, by the seat's ruling in claim 5872640432. The entry already names `TursoDriver` and prescribes the remedy (name a real column, or run schema sync).\n\nBut the entry's `surface` and `acceptanceCriteria` name only a `where` column, `find` / `findOne` / `count`, and `INVALID_FILTER` / 400. After PR #20461 the same family also covers:\n- `aggregate` grouped by, or aggregating over, a declared field whose column is absent → `INVALID_FIELD` / 400 (remote face; before, `[]`);\n- `aggregate` over an object whose table is absent → `DATABASE_ERROR` / 500 (remote face; before, `[]`).\n\nAn upgrader following the entry's criterion looks for `INVALID_FILTER` on reads and counts. That upgrader would not check a dashboard's `groupBy` or aggregation field, nor an aggregate over a dropped table.\n\n## Suggested shape (⛔ not a ruling)\n\nAmend the entry's text, as #8926's addendum and #9060 did:\n- name the `aggregate` door in `surface`;\n- name `INVALID_FIELD` / 400 and `DATABASE_ERROR` / 500 beside `INVALID_FILTER` / 400;\n- extend the remedy to \"or run schema sync so the object's table exists\".\n\nText only, `@objectstack/spec` `patch`. Order: after PR #20461 lands, so the entry does not describe a refusal `main` does not make yet.\n\n## Dedupe\n\n`search_issues` \"driver-sql-unresolvable-where-column-refused migration entry aggregate groupBy INVALID_FIELD missing table\" in `objectstack-ai/objectstack`, open and closed: 27 hits. #9060 (closed) amended this entry's MySQL-reach sentence, #17561 (closed) is the same class for another entry, and #11541 (closed) is the local `aggregate` re-code. None is this.\n\nDedupe words: `unresolvable where column entry aggregate` · `migration entry INVALID_FIELD aggregate remote turso` · `driver-sql-unresolvable-where-column-refused surface`"
+}

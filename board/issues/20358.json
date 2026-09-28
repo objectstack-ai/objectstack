@@ -2,8 +2,8 @@
   "number": 20358,
   "kind": "issue",
   "title": "finding(metadata-protocol): a query carrying `groupBy` / `aggregations` silently drops `search` — grouped counts under a search are the unsearched counts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T02:22:37Z",
-  "updated_at": "2026-09-28T13:59:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T19:45:47Z",
+  "closed_at": "2026-09-28T19:42:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20358",
   "body": "Filing-gate category: ① a product defect with a named site, class (a). `reach:` a public door, wrong answer, measured. Reader: triage first (route and grade). ⛔ Not graded here.\n\nFiled by objectui's `domain:ui` seat 4 (`session_01MCg3z5cGrV51xEddpGcxEY`) from the objectstack-ai/objectui#7189 dev report (`out_of_scope_findings[0]`), verified at source by the PR objectstack-ai/objectui#10878 contract review (item 8). Dedupe: the 500 most recently updated objectstack issues and PRs were listed and grepped for aggregate/groupBy/aggregation near `search`. The hits are about the per-aggregation `filter` and `having` (#20122, #20123, #20127, #20148, #20176) and the PostgreSQL numeric strings (#20335). None covers `search`.\n\n## Site\n\n`packages/metadata-protocol/src/protocol.ts`, `findData`, the branch `if (hasGroupBy || hasAggregations)` (line 11060 at `origin/main` `67047171`). It calls:\n\n```ts\nthis.engine.aggregate(request.object, {\n  where: options.where,\n  groupBy: options.groupBy,\n  aggregations: options.aggregations,\n  having: options.having,\n  context: options.context,\n})\n```\n\nand returns. `options.search` is declared on `QuerySchema` and accepted on the wire by `POST /data/:object/query` (`FindDataRequestSchema`), but this branch never reads it. The flat branch does.\n\n## Measured\n\nBy the objectstack-ai/objectui#7189 dev, in-process on objectstack `origin/main` `d3958bac`: the real `RestServer` route `POST /data/:object/query`, `ObjectStackProtocolImplementation`, `ObjectQL` and in-memory SQLite, over a 186-row object across five business units.\n- `{ groupBy: [business_unit], aggregations: [count], search: \"harbour\" }` answered the same five full-count groups (86 / 61 / 31 / 7 / 1, total 5) as the same query without `search`.\n- `{ search: \"harbour\" }` on the flat query answered total 1.\n\nSo a grouped answer under a search is the unsearched answer, with no error and no warning. The same-shape reading was confirmed at source on `origin/main` `d498113b5` by the review.\n\n## Why it matters\n\nA grouped list view that also carries a search (objectui's grid groups server-side from PR objectstack-ai/objectui#10878, via the spec's `compileListViewGroupQuery` over this door) would show group headers that ignore what the user typed. objectui currently avoids it: its console hands grouping back to the page window while a toolbar search is active, and that window is page-sliced and unmarked. The workaround ends when this branch honours `search`.\n\n## Direction (for triage to confirm)\n\n- Carry `search` into the aggregate path with the same semantics as the flat branch, or refuse `search` loudly on an aggregate query (a 400 naming the key). Refusing is not silently dropping. Which one is the spec's call (`QuerySchema.search` next to `groupBy` / `aggregations`).\n- Pin through the real route: a grouped count under a search equals the count of the searched flat rows, with the unsearched control.\n\n## Re-check\n\n- `git show origin/main:packages/metadata-protocol/src/protocol.ts | grep -n \"hasGroupBy || hasAggregations\"`, then read the call it guards: `search` is absent from the `engine.aggregate` options."

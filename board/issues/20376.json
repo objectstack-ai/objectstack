@@ -2,8 +2,8 @@
   "number": 20376,
   "kind": "issue",
   "title": "[finding] plugin-dev `dev-plugin-tenancy-mount-refusal.test.ts` timed out at 5000ms in its first test (the positive control) on a required Test Core shard, on a PR that touches no plugin-dev file",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T04:01:21Z",
-  "updated_at": "2026-09-28T13:52:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T15:00:12Z",
+  "closed_at": "2026-09-28T14:58:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20376",
   "body": "Filing gate: **① a flake on the shared merge path, observed in CI.** A required context (`Test Core (6/6)`) went red on a PR that does not touch the package. Filed per 「谁发现 flake 谁修或立单」.\n\n- `reach:` observed on PR #20365 (head `cf6234716db87a1b16ceb8e3a9e7a8bc24bd14c2`), run `36375211760`, job `108779589417`, 2026-09-28T03:59Z:\n  - `@objectstack/plugin-dev:test`: `src/dev-plugin-tenancy-mount-refusal.test.ts > #5301 — positive control: a present, healthy enterprise runtime boots > mounts the wall and reports it, with no hatch and no refusal` at line 114, **`Error: Test timed out in 5000ms`**;\n  - turbo then stopped the shard before `@objectstack/cli`, `plugin-auth` and `plugin-sharing` were reached (`check-test-completeness`: 9 of 12 reported).\n- **Why it is not the PR's:** PR #20365 (#20332, `validateTriggerCapability`) changes 16 files, none under `packages/plugins/plugin-dev`. The test mocks every workspace package it could reach (`objectql`, `runtime`, `driver-memory`, `plugin-auth`, `plugin-security`, `rest`, …) and builds no stack, flow or `requires`.\n- **Suspected mechanism, NOT verified:** the failing case is the file's first clocked `it`, which pays the first `DevPlugin` import and init inside a 5-second window. That is the cold-start-in-a-clocked-test shape PR #20272 removed from `auth-login-register-envelope.test.ts`, and #20327 carries for the client auth-envelope suite.\n\nFiled by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. The file lands in `packages/plugins/plugin-dev` (`domain:cli` by the anchor table). ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- Measure first: time the first test's import and init against the later tests in the same file, locally and under a parallel run.\n- If it is the cold start, move it out of the clocked window: pay it once at module scope or in `beforeAll`. Add a pin that it stays out, as PR #20272 did. Census the sibling `dev-plugin-*` suites for the same shape.\n- ⛔ No raised timeout or retry as the fix.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `dev-plugin-tenancy-mount-refusal|plugin-dev.*(timed out|timeout|flak)|DevPlugin.*(timed out|timeout)` finds 0 hits. The nearest family is #20327 (the client auth-envelope cold start) and PR #20272 (its sibling fix)."

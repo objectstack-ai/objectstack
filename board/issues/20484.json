@@ -1,0 +1,33 @@
+{
+  "number": 20484,
+  "kind": "pull_request",
+  "title": "docs(deployment): validating-metadata.mdx names the driver refusal, not the swallowed empty list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T17:14:41Z",
+  "updated_at": "2026-09-28T17:53:27Z",
+  "closed_at": "2026-09-28T17:53:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-28T17:53:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20484",
+  "body": "Fixes #20468\n\nClause-②: no\n\n## What changed\n\n`content/docs/deployment/validating-metadata.mdx` (the filter-position passage, `:381`-`:385` after edit) said an unknown column in a predicate has the driver's \"no such column\" swallowed, so the query answers an empty list indistinguishable from \"there is no data\". That is false on the SQL family: `driver-sql`, and the local faces of `TursoDriver` / `SqliteWasmDriver` (both `extends SqlDriver`), refuse an unresolvable WHERE column with `INVALID_FILTER` / 400, naming the column, since #8790. The Turso **remote** face now refuses the same way, as of `3e8b492d28` (#20461), routed through the same inherited `aggregateBackendFault` seam.\n\n### Before\n\n```\nAn unknown column in a predicate is not a skipped column — the predicate can\nnever match, the driver's \"no such column\" is swallowed, and the list comes back\nempty and indistinguishable from *\"there is no data\"*. Each position of a filter\nis judged on its own, so the field above is still checked even though `stage`\ncomes from React state.\n```\n\n### After\n\n```\nAn unknown column in a predicate is not a skipped column — the SQL drivers\nrefuse it with `INVALID_FILTER` / 400, naming the column, instead of running\nthe predicate. The remedy is to run schema sync so the declared field has its\ncolumn, or to name a column the table has. Catching it here, before the page\nships, means an author sees the mistake in the editor instead of a 400 in\nproduction. Each position of a filter is judged on its own, so the field above\nis still checked even though `stage` comes from React state.\n```\n\n## Why (measured on `origin/main`, base `8e02859185`)\n\n- **Which read doors refuse.** `find()`/`findOne()`/`count()` all reach `unresolvableFilterColumnError` (`INVALID_FILTER`/400, naming the column) via `SqlDriver.findRows`'s recovery ladder and `SqlDriver.count` — `packages/drivers/driver-sql/src/sql-driver.ts:837`, `:709`. `aggregate()` reaches the same envelope through `aggregateBackendFault` (`sql-driver.ts:10382`), which attributes the unresolved column to whichever clause named it: a `groupBy`/aggregation `field` answers `INVALID_FIELD`/400 (`unresolvableAggregateColumnRefusal`, `sql-driver.ts:10403`+), and a bare WHERE column falls to the same `INVALID_FILTER`/400 as the other three doors.\n- **Which drivers/faces refuse.** `driver-sql` is the base. `TursoDriver` (`packages/drivers/driver-turso/src/turso-driver.ts:1400`) and `SqliteWasmDriver` (`packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts:67`) both `extends SqlDriver`, so their **local** faces inherit the refusal unchanged. The Turso **remote** face refuses too, as of commit `3e8b492d28` (#20461/#20424): `remoteReadExit`/`remoteReadFault` (`turso-driver.ts:2077`-`2149`) call the same inherited `aggregateBackendFault`, so `find`/`findOne`/`count`/`aggregate` over the remote transport answer identically to the local face for this condition.\n- **Does the error name the column reaching the caller?** Yes — `unresolvableColumnNameOf` (`sql-driver.ts:777`) extracts the column name from the dialect message via regex and `unresolvableFilterColumnError`/`unresolvableAggregateColumnRefusal` put that name in the caller-facing message. What does **not** reach the caller is the *full* compiled statement text with bound literals inlined (`sql-driver.ts:766`-`774`, `#7929`); that stays in the server log only. #20461's own docblock (`turso-driver.ts:2059`) says the same for the remote face: \"the dialect text stays in the server log ... under a non-enumerable `cause`\". I read this as: the column NAME is disclosed to the caller; the raw dialect prose is not — which is what the new passage says.\n- **What still stays true (untouched).** A projection naming a missing column is dropped and the rows answer; an ORDER BY on one is dropped (`#3821` ladder, confirmed by #20461's H1 table: local `find` projecting → rows, `find` ordered by → rows unordered; remote now matches via the same two ladder rungs). Neither `data-modeling/queries.mdx` nor `references/api/sortability.mdx` was touched.\n- **Scope.** The rewrite is scoped to the SQL family (`driver-sql`, `driver-turso`, `driver-sqlite-wasm`) as the card and triage direct; `driver-memory`/`driver-mongodb` were not measured for this condition and are not claimed.\n\n## Tests\n\nDocs-only change; no test suite applies. Derived 40 command(s) via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` against merge-base `8e0285918` of `origin/main`; all 40 run, all exit 0 on head `e9868a7e89` (after a required `pnpm install` + `pnpm --filter @objectstack/spec build` + `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint --filter=@objectstack/client-react --filter=@objectstack/client` to clear four `PREREQUISITE NOT MET` gates that read built `dist/`). `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran <list>` reconciles: \"40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN\". `pnpm check:nul-bytes` and `pnpm check:role-word` re-run clean on the amended head `e9868a7e89`. No changeset: `content/docs/**` is served by `@objectstack/docs`, a `\"private\": true` package — fast-track, not published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_\n"
+}

@@ -1,0 +1,26 @@
+{
+  "number": 20507,
+  "kind": "issue",
+  "title": "[finding] the layered view (`/meta/:type/:name/layers`, `?layers=true`) answers an absent name 200 with every layer null, where an unpublished app answers 404: an existence oracle against ADR-0045 §3",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T20:22:50Z",
+  "updated_at": "2026-09-28T20:22:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20507",
+  "body": "Filing gate: **① a defect with a named landing site**: `createMetaLayeredAnswer` in `packages/rest/src/meta-item-read-gate.ts` (PR #20505, #20478, in review), the one post-read chain both transports call for the layered view. Before that PR lands, the site is `RestServer`'s `/layers` handler and `?layers=true` flag in `packages/rest/src/rest-server.ts`. Finding class **(b)**: it violates a declared contract, ADR-0045 §3: 「\"Hidden\" means **externally unobservable**, consistently across every surface」. `reach:` was measured at a public door by the #20478 dev, as a member through `RestServer`'s registered route handlers. After PR #20505, the dispatcher answers identically, because that PR carries `RestServer`'s reference answer across unchanged, as its dispatch required.\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20478 round. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n`Seam: spec:GetMetaItemLayeredResponseSchema → runtime:createMetaLayeredAnswer (packages/rest/src/meta-item-read-gate.ts)`\n\n## What happens (measured as a member)\n\n| request | plain read | `/layers` and `?layers=true` |\n|:--|:--|:--|\n| `GET /meta/app/launchpad` (an unpublished app) | 404 `RESOURCE_NOT_FOUND` | 404 `RESOURCE_NOT_FOUND` |\n| `GET /meta/app/no_such_app` (no such app) | 404 | **200** `{ code: null, overlay: null, effective: null }` |\n\nBecause an absent name answers 200 and an unpublished one answers 404, a member can tell that an unpublished app exists. The plain read does not leak this: it answers both with 404.\n\n## What the fix looks like (for the dispatch to confirm, not a ruling)\n\nThe dev's suggestion: when no layer is present, the shared chain answers the absence refusal, in one place for both transports. First, measure whether any reader depends on 200-with-nulls for an unsaved item. Studio's designer is the candidate, and it is unmeasured.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「layers existence oracle」: 9 hits. #20478 is the parent round; #20378 and #20441 are closed siblings on other doors. None is this answer.\n- 「layers 200 null absent」: 47 hits, none on this answer.\n\nQuery terms for later deduplication: `layered view existence oracle`, `unpublished app layers 200 null`, `meta layers absent name`, `ADR-0045 layers door`."
+}

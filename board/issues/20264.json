@@ -2,8 +2,8 @@
   "number": 20264,
   "kind": "issue",
   "title": "temporal values outside the years a four-digit text or a backend holds: a `datetime` comparand for year 10000 or −1 misorders on memory/SQLite and 500s on PostgreSQL; a `date` in year 0000 500s on PostgreSQL; a `date` write stores `+010000-…` verbatim",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T17:10:20Z",
-  "updated_at": "2026-09-27T20:11:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T18:09:36Z",
+  "closed_at": "2026-09-28T18:07:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20264",
   "body": "Filing gate: **① a defect with a named landing site**, as one class-closure card for three positions of one family. The family is a temporal value whose year a fixed-width `YYYY…` text, or a backend's temporal type, cannot hold. #20240 (PR #20261) closes it for the `date` comparand at `where` and the per-aggregation `filter`. These are the other positions:\n- `packages/core/src/utils/temporal-storage-form.ts`, `canonicalUtcDatetime`, and `temporal-comparand.ts`, `readsAsInstant`: the `datetime` rule;\n- the same rule's `date` arm for year 0000, against PostgreSQL's `DATE`;\n- the `date` write door (the engine and REST create path), and the rule's string arm on write.\n\nFinding class **(a)**. `reach:` was measured at the public REST door on `main` (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20240 dev's report (`os-dev-report` 5857762502, `out_of_scope_findings[1..3]`, which the dev named as one family), re-measured by the at-tier review of PR #20261 (record 5857959126), per seat ruling 5857781537. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured at `e46218674b`, which equals current `main` on the query and write paths, on InMemoryDriver, SqlDriver on SQLite and SqlDriver on PostgreSQL 16, through the engine and REST. PR #20261 moves none of these cells.\n\n| position | input | memory | SQLite | PostgreSQL | correct |\n|:--|:--|:--|:--|:--|:--|\n| 1 · `where` on a `datetime` field, `$gt` / `$lt` / `$eq` | 10000-01-01 as a number, `Date` or ISO | **7 / 0 / 0** | **7 / 0 / 0** | **500** `DATABASE_ERROR` (22009 on `+010000-…`) | 0 / 7 / 0 |\n| 1 · the same | −1-01-01, same three spellings | 7 / 0 / 0 | 7 / 0 / 0 | **500** (22007 on the negative spelling) | 7 / 0 / 0 |\n| 2 · `where` on a `date` field | year 0000 as a number, `Date`, ISO or bare `0000-06-15` | 7 / 0 / 0 | 7 / 0 / 0 | **500** (22008 `date/time field value out of range`) in all four spellings; a direct driver write of year 0 is also 22008 | one answer on every driver |\n| 3 · REST create on a `date` field | `placed_on: \"+010000-01-01T00:00:00.000Z\"` | **201, stored verbatim** (read back `\"+010000-01-01T00:00:00.000Z\"`, not a `YYYY-MM-DD` day) | 201, stored verbatim | **500** (22009) | a day, or a refusal |\n\n- **1:** the `datetime` rule spells extended ISO years (`+010000-…`, `-000001-…`), which sort as text the way no instant does. The ISO string passes the `datetime` door because `Date.parse` reads extended years.\n- **2:** PostgreSQL's `DATE` has no year 0 (`select '0000-06-15'::date` → out of range). PR #20261 pads year 0 to `0000-06-15`, as triage's range 0..999 directs, and PostgreSQL still refuses it.\n- **3:** the `date` write door accepts an extended-year ISO string, and the rule returns a string with no leading `YYYY-MM-DD` unchanged.\n- **No measured writer** stores or queries these years. The reach is the public door, not an observed caller.\n\n## Suggested shape (⛔ not a ruling)\n\nOne decision for the whole family, then one edit per position in the one rule and its door. ⛔ No driver copy.\n- Decide the supported year range per kind. A candidate is 0001..9999 for `date` and `datetime`, the range every shipped backend holds.\n- Refuse outside it at the temporal-comparand door (`INVALID_FILTER` / 400) on `where`, the per-aggregation `filter`, and `having` (#20263). Refuse it at the write door (`VALIDATION_FAILED` / 400).\n- Decide whether #20240's year-0000 padding stays, or year 0000 joins the refused range.\n- Pin it on the three drivers and both doors, with a 2026 control.\n\n## Filing-gate answers\n\n- **Class**: ① (defects with named landing sites), folded into one class-closure card; finding class (a), measured.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/core` and the SQL / memory drivers). It is sequenced after PR #20261 (#20240), which edits the same rule and predicate. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `datetime year 10000 extended ISO +010000 filter postgres 500` → #20240 (the parent, open), #13382, #11389, #3912 and #4022, none this;\n  - `postgres date year 0000 out of range 22008` → #20240, #4022 and #3942, none this;\n  - `date field write extended year stored verbatim not YYYY-MM-DD` → 0 hits.\n\nDedupe words: `datetime comparand year 10000 extended ISO text order` · `postgres date year 0000 out of range 22008` · `date write door year 10000 stored verbatim`"

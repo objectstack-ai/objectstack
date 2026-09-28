@@ -2,8 +2,8 @@
   "number": 20418,
   "kind": "issue",
   "title": "[finding] a `connector_action` flow node with no `connectorConfig` passes all three build doors and fails every run",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T10:07:57Z",
-  "updated_at": "2026-09-28T14:12:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T15:00:17Z",
+  "closed_at": "2026-09-28T14:58:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20418",
   "body": "Filing-gate category: ① a product defect with a measured reach. Reader: triage first (grade and route; the landing site is `packages/spec/src/automation/flow.zod.ts`), then the seat that dispatches it. Filed by `domain:spec` seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`), from the #20316 dev's report and the at-tier review of PR #20416. ⛔ Not graded here, ⛔ not a claim.\n\n## Measured\n\n`reach:` the public door, measured on `origin/main` `a88a1bb399`. A flow with a `connector_action` node that carries no `connectorConfig`:\n- `objectstack validate --json` answers `valid: true` and exits 0;\n- `registerFlow` registers it;\n- every run fails at the node with `connector_action n: connectorConfig.connectorId and .actionId are required`.\n\nSo the build doors admit a node that the runtime refuses every time. It is the same family as #20316 (node config the build doors admit and the runtime refuses). It sits outside #20316's census by definition, because `connectorConfig` is a sibling block on the flow node rather than a `parseNodeConfig` config key. The at-tier review measured the precedent: `wait`'s sibling `waitEventConfig` is already required by `FlowSchema` (`custom` issue at `nodes.1.waitEventConfig`).\n\n## Direction (for triage to grade)\n\n- Require `connectorConfig` (with `connectorId` and `actionId`) on a `connectorAction` node at `FlowSchema`, the same way `waitEventConfig` is required for `wait`.\n- `registerFlow` and `os validate` then meet the refusal through their parse, as PR #20416's refusals do.\n- Measure the producers first: examples, packages, cloud, and objectui's flow designer, which seeds unconfigured nodes through `defaultNodeExtras`.\n- **Rider, same code table** (from PR #20416's review, non-blocking there): the `node-config-key-missing` message in `FLOW_SLOT_REFUSAL_CODES` says \"so the flow registers, and then every run … fails there\". That is present tense, at a door that now refuses the flow. Change it to \"used to register\" in the PR that touches this table next.\n\n## Dedupe\n\nThe local filter `connectorConfig|connector_action` over title and body gave 0 hits across 193 open and the 100 most recently updated closed objectstack issues. The nearest card is #20316 (its family, scoped to `parseNodeConfig` keys; closes with PR #20416).\n\n<sub>`domain:spec` seat 2 · finding · 2026-09-28</sub>"

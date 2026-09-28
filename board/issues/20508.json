@@ -1,0 +1,26 @@
+{
+  "number": 20508,
+  "kind": "issue",
+  "title": "[finding] `RestServer`'s environment-scoped `?layers=true` answers a `Link` that names the literal route template (`/environments/:environmentId/…/layers`), not the request path",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T20:22:53Z",
+  "updated_at": "2026-09-28T20:22:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20508",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/rest/src/rest-server.ts`, where the `?layers=true` deprecation `Link` is built from `metaPath` (or, after PR #20505, the shared `metaItemLayersDeprecationHeaders` in `packages/rest/src/meta-item-read-gate.ts`). Finding class **(a)**. `reach:` was measured once at a public door by the #20478 dev: `RestServer`'s environment-scoped route handler, with `enableProjectScoping` on.\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20478 round. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n`GET /api/v1/environments/env_1/meta/view/lead_all?layers=true` answers the `Deprecation` header and a successor-version `Link` naming `/api/v1/environments/:environmentId/meta/view/lead_all/layers`, the literal route template. It should name `/api/v1/environments/env_1/meta/view/lead_all/layers`. A client that follows the `Link` requests a path with a literal `:environmentId` in it. The runtime dispatcher builds its `Link` from the request URL and is not affected. The unscoped mount is not affected either, because its template has no parameter.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「layers Link environmentId template」: 6 hits. #20478 is the parent round; #13406, #7637 and #14304 are closed and about other questions.\n- 「Deprecation Link successor-version layers」: 1 hit, #20478.\n\nQuery terms for later deduplication: `layers Link successor-version environmentId template`, `scoped meta deprecation link`, `rest-server metaPath Link`."
+}

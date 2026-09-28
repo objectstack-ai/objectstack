@@ -1,0 +1,34 @@
+{
+  "number": 20478,
+  "kind": "issue",
+  "title": "[finding] the runtime dispatcher answers `GET /meta/:type/:name?layers=true` with the plain read's envelope, where `RestServer` answers the layered envelope with `Deprecation: true`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T16:29:36Z",
+  "updated_at": "2026-09-28T20:23:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20478",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/runtime/src/domains/meta.ts` `handleMetadataRequest`, the item read's `?layers=true` flag. Finding class **(a)**. `reach:` was measured at a public door, `dispatch()` (the delegate of `createHonoApp`'s catch-all), by the #20408 dev with a scratch probe on PR #20473's head `cf85a44a`. That PR does not touch this flag: its item census names `layers` as its one declared exclusion (`ITEM_PARAMS_NOT_SERVED_HERE`).\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20408 round. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n| request | dispatcher | `RestServer` |\n|:--|:--|:--|\n| `GET /meta/app/crm?layers=true` | 200 `{ type, name, item }`, the plain read | 200 `{ type, name, code, overlay, effective }`, with `Deprecation: true` |\n| `GET /meta/app/crm/layers` | a located 404 `ROUTE_NOT_FOUND` (loud) | the layered answer |\n\nThe route is refused loudly. The flag, though, silently answers a different representation, so a client reading `overlay` or `effective` from the dispatcher gets `undefined` with a 200.\n\n## The contract\n\nAGENTS.md 〈Route & surface ownership〉 rule 1: one implementation, two transports. Ruling B on #20156 (`5856774816`) item 2 fixed what `/layers` and `?layers=true` answer on `RestServer`. The dispatcher answers neither form of it.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「dispatcher layers=true」: 16 hits. #20408 is open and excludes this flag by name. #20156, #20193 and #20378 are closed and about read gates, not this representation.\n- 「layers query dispatcher plain read」: 25 hits, none on this divergence.\n\nQuery terms for later deduplication: `dispatcher layers query flag`, `meta item layered view`, `?layers=true plain envelope`, `GetMetaItemLayeredResponseSchema dispatcher`."
+}
