@@ -5406,10 +5406,12 @@ const step18: MigrationStep = {
     + 'built artifacts carry it without anyone having written it. Retired from the load path; '
     + 'an authored key is refused with the prescription. '
     + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
-    + 'key parsed and was stored at every list-view door and drew nothing: the one component '
-    + 'that reads a `ViewTab[]` has no production mount, and the tab strip above an object\'s '
-    + 'records is the saved-view switcher, which renders one tab per `listViews` entry and '
-    + 'reads no `tabs` key. The key is a `retiredKey()` tombstone on the list-view shape (its '
+    + 'key parsed and was stored at every list-view door and drew nothing: a list view\'s own '
+    + '`tabs` has no reader, the one component that would draw it has no production mount, '
+    + 'and the tab strip above an object\'s records is the saved-view switcher, which renders '
+    + 'one tab per `listViews` entry and reads no `tabs` key (`userFilters.tabs`, a different '
+    + 'key of the same element type, is read and rendered, and stays). The key is a '
+    + '`retiredKey()` tombstone on the list-view shape (its '
     + 'prescription says how to move each tab to a named `listViews` entry); `ViewTabSchema` '
     + 'itself stays, because the page-only `userFilters.tabs` preset bar reuses it and renders. '
     + 'The D2 conversion `view-list-tabs-removed` strips the key from every list payload in '
@@ -20274,13 +20276,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'ui/ListView:pageName',
     // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
     // maintainer's #18900 criterion). `ListView.tabs` declared tab definitions for
-    // a multi-tab view interface, and no renderer ever drew them: the one
-    // component that reads a `ViewTab[]` (objectui's `TabBar`) has no production
-    // mount, and the tab strip above an object's records is the saved-view
-    // switcher (`ViewTabBar`), which renders one tab per `listViews` entry and
-    // reads no `tabs` key. Tombstoned with `retiredKey()` beside the `pageName`
-    // tombstone already on this shape; `ViewTabSchema` stays, reused by the
-    // page-only `userFilters.tabs` preset bar. D2: `view-list-tabs-removed`.
+    // a multi-tab view interface, and no renderer ever drew them: a list view's own
+    // `tabs` has no reader, and objectui's `TabBar`, the one component that would
+    // draw it, has no production mount. The tab strip above an object's records is
+    // the saved-view switcher (`ViewTabBar`), which renders one tab per `listViews`
+    // entry and reads no `tabs` key. `userFilters.tabs`, a different key of the
+    // same element type, is read and rendered, and stays. Tombstoned with
+    // `retiredKey()` beside the `pageName` tombstone already on this shape;
+    // `ViewTabSchema` stays, reused by the page-only `userFilters.tabs` preset bar.
+    // D2: `view-list-tabs-removed`.
     'ui/ListView:tabs',
     // #16885 — the list view's `navigation.view` binding, retired under ADR-0049
     // enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
@@ -20368,14 +20372,16 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `view-page-mount-removed`.
     'ui/ObjectListView:pageName',
     // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
-    // maintainer's #18900 criterion). `ObjectListView.tabs` declared tab definitions for
-    // a multi-tab view interface, and no renderer ever drew them: the one
-    // component that reads a `ViewTab[]` (objectui's `TabBar`) has no production
-    // mount, and the tab strip above an object's records is the saved-view
-    // switcher (`ViewTabBar`), which renders one tab per `listViews` entry and
-    // reads no `tabs` key. Tombstoned with `retiredKey()` beside the `pageName`
-    // tombstone already on this shape; `ViewTabSchema` stays, reused by the
-    // page-only `userFilters.tabs` preset bar. D2: `view-list-tabs-removed`.
+    // maintainer's #18900 criterion). `ObjectListView.tabs` declared tab
+    // definitions for a multi-tab view interface, and no renderer ever drew them: a
+    // list view's own `tabs` has no reader, and objectui's `TabBar`, the one
+    // component that would draw it, has no production mount. The tab strip above an
+    // object's records is the saved-view switcher (`ViewTabBar`), which renders one
+    // tab per `listViews` entry and reads no `tabs` key. `userFilters.tabs`, a
+    // different key of the same element type, is read and rendered, and stays.
+    // Tombstoned with `retiredKey()` beside the `pageName` tombstone already on
+    // this shape; `ViewTabSchema` stays, reused by the page-only `userFilters.tabs`
+    // preset bar. D2: `view-list-tabs-removed`.
     'ui/ObjectListView:tabs',
     // ADR-0090 D2 (no Profile concept) + ADR-0049 enforce-or-remove; maintainer
     // ruling 2026-09-12, decision batch #121 item 2, verbatim 「同意」.

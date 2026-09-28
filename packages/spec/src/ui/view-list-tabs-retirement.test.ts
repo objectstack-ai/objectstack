@@ -7,10 +7,13 @@
  *
  * `ListViewSchema.tabs` parsed at every list-view door, was stored, and drew
  * nothing. Measured before removal, with lit controls, and recorded on the
- * ledger row (`liveness/view.json`, `/props/list/children/tabs`): objectui's
- * `TabBar` — the one component that reads a `ViewTab[]` — has zero production
- * mounts at the pinned sha, while `ViewTabBar`, the saved-view switcher,
- * mounts in the object view and is fed from `listViews`.
+ * ledger row (`liveness/view.json`, `/props/list/children/tabs`): a list
+ * view's own `tabs` has no reader, and objectui's `TabBar` — the one component
+ * that would draw it — has zero production mounts at the pinned sha, while
+ * `ViewTabBar`, the saved-view switcher, mounts in the object view and is fed
+ * from `listViews`. `userFilters.tabs`, a different key of the same element
+ * type, is read and rendered (the page preset bar) and stays — the BOUNDARY
+ * pinned below.
  *
  * Bookkeeping shapes, pinned below:
  *   1. A `retiredKey()` tombstone on the SHAPE every list-view door is built

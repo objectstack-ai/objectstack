@@ -12,13 +12,16 @@ enforce-or-remove; triage verdict RETIRE, on the rule that a capability the
 mainstream has and this platform already delivers keeps ONE spelling.
 
 The key parsed at every list-view door and was stored, and no renderer ever
-drew it. Measured before removal, each reading beside a lit control: the one
-component that reads a `ViewTab[]` (objectui's `TabBar`) has zero production
-mounts at the objectui commit this repo pins — every occurrence is in its own
-two test files — while the saved-view switcher (`ViewTabBar`) mounts in the
-object view and is fed from the object's `listViews`. That switcher IS the tab
-strip above an object's records: one tab per named list view. Zero list views
-in this repo's examples, skills or platform sources authored the key.
+drew it. Measured before removal, each reading beside a lit control: a list
+view's own `tabs` has no reader, and objectui's `TabBar` — the one component
+that would draw it — has zero production mounts at the objectui commit this
+repo pins (every occurrence is in its own two test files), while the saved-view
+switcher (`ViewTabBar`) mounts in the object view and is fed from the object's
+`listViews`. That switcher IS the tab strip above an object's records: one tab
+per named list view. `userFilters.tabs` is a different key with the same
+element type: it is read and rendered as a page list's preset bar, and it
+stays. Zero list views in this repo's examples or platform sources authored the
+key; the one published skill example that taught it is corrected here.
 
 ### FROM → TO
 

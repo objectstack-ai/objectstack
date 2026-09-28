@@ -2773,12 +2773,14 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * [#20301] REMOVED — ADR-0049 enforce-or-remove, triage verdict RETIRE by
    * the maintainer's #18900 criterion (mainstream named-view switching is
    * already delivered here, by `listViews`). The key parsed, was stored, and
-   * drew nothing: objectui's `TabBar` — the one component that reads a
-   * `ViewTab[]` — has zero production mounts, and the tab strip above an
-   * object's records is the saved-view switcher (`ViewTabBar`), which renders
-   * one tab per named list view and reads no `tabs` key. Measured with lit
-   * controls and recorded on the ledger row (`liveness/view.json`,
-   * `/props/list/children/tabs`).
+   * drew nothing: a list view's own `tabs` has no reader, and objectui's
+   * `TabBar` — the one component that would draw it — has zero production
+   * mounts. The tab strip above an object's records is the saved-view
+   * switcher (`ViewTabBar`), which renders one tab per named list view and
+   * reads no `tabs` key. (`userFilters.tabs`, a different key of the same
+   * element type, IS read and rendered — the page preset bar — and stays.)
+   * Measured with lit controls and recorded on the ledger row
+   * (`liveness/view.json`, `/props/list/children/tabs`).
    *
    * Tombstoned rather than deleted so the removal is audible in both channels
    * an upgrading author hits — `tsc` (the input type is `never`) and the parse

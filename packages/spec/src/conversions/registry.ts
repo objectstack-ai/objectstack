@@ -10572,12 +10572,14 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
  * maintainer's #18900 criterion: mainstream named-view switching is already
  * delivered here, by `listViews`).
  *
- * `ListViewSchema.tabs` parsed, was stored, and drew nothing. The one
- * component that reads a `ViewTab[]` — objectui's `TabBar` — has zero
- * production mounts at the pinned objectui sha, and the tab strip above an
- * object's records is the saved-view switcher (`ViewTabBar`), which renders
- * one tab per NAMED LIST VIEW and reads no `tabs` key. The measurement, with
- * lit controls, is on the ledger row (`liveness/view.json`,
+ * `ListViewSchema.tabs` parsed, was stored, and drew nothing. A list view's
+ * own `tabs` has no reader, and objectui's `TabBar` — the one component that
+ * would draw it — has zero production mounts at the pinned objectui sha. The
+ * tab strip above an object's records is the saved-view switcher
+ * (`ViewTabBar`), which renders one tab per NAMED LIST VIEW and reads no `tabs`
+ * key. `userFilters.tabs`, a different key of the same element type, is read
+ * and rendered (the page preset bar) and stays. The measurement, with lit
+ * controls, is on the ledger row (`liveness/view.json`,
  * `/props/list/children/tabs`).
  *
  * **Retired from the load path** — the key is a `retiredKey()` tombstone on the
@@ -10587,9 +10589,9 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
  * stored `view` row CAN carry the key: every list-view door accepted and
  * persisted it until this release, and `applyConversionsToStoredItem` replays
  * the chain over stored `view` rows as `{ views: [row] }`. Without it such a
- * row would fail its rehydration parse over a key that never had an effect. It
- * also lets `os migrate meta --from 17` list the mechanical edits for existing
- * sources.
+ * row would carry the retired key back to the strict write door, which refuses
+ * it on the next save, over a key that never had an effect. It also lets
+ * `os migrate meta --from 17` list the mechanical edits for existing sources.
  *
  * The delete is lossless in pixels: no renderer ever drew the tabs, so
  * removing them changes no screen. `stripKeys` deletion is idempotent by
@@ -10601,9 +10603,10 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
  * and `view-export-options-pdf-removed` have. `objects[].listViews.*` is NOT
  * reached by any conversion in this registry, so an object body carrying the
  * key is refused at its own door rather than converted. Measured population
- * for both: zero authored list-view `tabs` in this tree's examples, skills and
- * platform sources (the in-tree hits are test fixtures of two author-time
- * reference walks, which read raw input and never parse it).
+ * for both: zero authored list-view `tabs` in this tree's examples or platform
+ * sources (the in-tree hits are test fixtures of two author-time reference
+ * walks, which read raw input and never parse it); the one published skill
+ * example that taught it is corrected in the same change.
  */
 const viewListTabsRemoved: MetadataConversion = {
   id: 'view-list-tabs-removed',
