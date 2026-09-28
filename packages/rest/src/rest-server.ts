@@ -3716,6 +3716,16 @@ export class RestServer {
      * old spelling answers *the same body* — two copies would let that stop
      * being true without anything failing.
      *
+     * [#20478] …and behind two TRANSPORTS: everything after the store read is
+     * `createMetaLayeredAnswer` in `./meta-item-read-gate.ts` — THE per-caller
+     * gate on every layer under the stored-version doors' policy (#20156,
+     * ruling 5856774816: whole for whoever may write the item, pruned as the
+     * plain read prunes it for everyone else) and the ADR-0106 mask on every
+     * layer with its cache posture — which the runtime dispatcher serves both
+     * spellings through too. ⛔ A step is added there, never here. The read
+     * stays this transport's, scoped by `metaReadOrganizationId`, the one
+     * answer the dispatcher's layered read asks.
+     *
      * Not translated and not cached, both deliberately: this is a diagnostic
      * view of what is STORED at each layer, so locale-collapsing it (or serving
      * it from the published-value cache) would misreport the thing being
@@ -3752,11 +3762,12 @@ export class RestServer {
         // why naming the org unconditionally would resurrect #6190's phantoms).
         const layeredCtx = await this.resolveExecCtx(environmentId, req)
             .catch(rethrowAuthzStoreUnavailable);
-        const layeredOrganizationId = organizationIdForMetaRead(
-            // [#10340] FOLDED, not raw — see the PUT door's org-scope comment
-            // for the measurement.
-            canonicalMetaUrlType(req.params.type), layeredCtx?.tenantId,
-        );
+        // [folded-type commit 26f3588fb] (the original card no longer
+        // resolves) FOLDED, not raw — see the PUT door's org-scope comment for
+        // the measurement. [#20478] Asked of `metaReadOrganizationId` (the
+        // same fold over the vetted `tenantId`), the one answer the runtime
+        // dispatcher's layered read asks too.
+        const layeredOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, layeredCtx);
         // [#9741] This door never carried an `as any`, but `p: any` meant its
         // request literal was never checked either — the same blind spot with
         // a different spelling. Typing the literal (spec shape + the
@@ -3770,61 +3781,26 @@ export class RestServer {
             ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         };
         const layered = await p.getMetaItemLayered(layeredRequest);
-        // [#20156] The per-caller read gate, on EVERY layer. This view used to
-        // run none of the plain read's gates, so a member the plain read refuses
-        // `crm_admin_runbook` read its body here — and an anonymous caller read
-        // any doc or book through the deprecated `?layers=true`, which sits on
-        // the publicly-reachable book/doc route. Each present layer is judged,
-        // `effective` first (it is what the plain read serves, so its refusal is
-        // the plain read's own), then `code` and `overlay`: a layer the caller
-        // may not read is not served beside one they may. `per-caller` because
-        // these are STORED versions, loaded by Studio's designer and saved
-        // back.
-        //
-        // [#20156] Each layer is SERVED as the gate serves it, never as
-        // stored: ruling 5856774816 — a caller who may write an app reads
-        // every layer whole, and any other caller who may open it reads each
-        // layer pruned, exactly as the plain read prunes it (see
-        // `MetaReadGatePolicy.app`). Every layer is judged before any is
-        // replaced, so a refusal sends nothing of the others.
-        {
-            const metaType = RestServer.metaTypeSingular(req.params.type);
-            const present = (['effective', 'code', 'overlay'] as const)
-                .filter((layer) => (layered as any)?.[layer] != null);
-            const judge = this.metaItemReadGate(
-                environmentId, req, p, metaType, req.params.name,
-                present.map((layer) => (layered as any)[layer]),
-                RestServer.STORED_VERSION_DOOR_POLICY,
-            );
-            const served = new Map<(typeof present)[number], unknown>();
-            for (const layer of present) {
-                const verdict = await judge((layered as any)[layer]);
-                if (verdict.kind === 'refuse') {
-                    verdict.send(res);
-                    return;
-                }
-                served.set(layer, verdict.document);
-            }
-            for (const [layer, document] of served) (layered as any)[layer] = document;
+        // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
+        // the shared chain. The stored-version doors honour the author
+        // exemption, so the caller carries this transport's save-door
+        // admission (`metaItemReadGateSources(…, true)`).
+        const answer = await metaReadGate.createMetaLayeredAnswer(
+            this.metaItemReadGateSources(environmentId, req, p, true),
+            { metaType: RestServer.metaTypeSingular(req.params.type), name: req.params.name, maskPosture },
+        )(layered);
+        switch (answer.kind) {
+            case 'refuse':
+                RestServer.sendMetaReadRefusal(res, answer.refusal);
+                return;
+            case 'mask-fault':
+                sendFieldVisibilityFault(res, answer.object);
+                return;
+            case 'serve':
+                if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
+                res.json(answer.layered);
+                return;
         }
-        // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
-        // `code`, `overlay` and `effective` are each a full object schema.
-        // Both entry points (the canonical `/layers` path and the deprecated
-        // `?layers=` flag) pass their request's resolved posture in, so the
-        // extraction cannot turn the mask into a one-entry-point detour.
-        if (maskPosture.kind === 'project') {
-            for (const layer of ['code', 'overlay', 'effective'] as const) {
-                const masked = this.maskObjectDocument(
-                    res, maskPosture, req.params.name, (layered as any)?.[layer],
-                );
-                if (!masked) return;
-                if (layered && typeof layered === 'object') (layered as any)[layer] = masked.document;
-            }
-        }
-        if (maskPosture.kind === 'undetermined') {
-            res.header('Cache-Control', 'private, no-store');
-        }
-        res.json(layered);
     }
 
     /**
@@ -6256,19 +6232,18 @@ export class RestServer {
                         // headers, so a client can discover the migration without
                         // reading the changelog. Delete this branch (and the
                         // headers with it) once the callers have moved.
-                        const wantLayered = req.query?.layers !== undefined && req.query?.layers !== '';
+                        //
+                        // [#20478] The flag's parse (`wantsMetaItemLayers`) and its
+                        // headers (`metaItemLayersDeprecationHeaders`: RFC 9745
+                        // `Deprecation` + RFC 8288 `Link` to the successor) are the
+                        // ones the runtime dispatcher's item read asks too, so the
+                        // deprecated spelling is one answer on both transports.
+                        const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
-                            // RFC 9745 `Deprecation` + RFC 8288 `Link` — the same
-                            // machine-readable pairing `versioning.zod.ts` already
-                            // describes for retiring API versions, applied to a
-                            // retiring query flag. No `Sunset` date: choosing the
-                            // hard cut-off is a maintainer call, and an invented
-                            // date is worse than none.
-                            res.header('Deprecation', 'true');
-                            res.header(
-                                'Link',
-                                `<${metaPath}/${req.params.type}/${req.params.name}/layers>; rel="successor-version"`,
+                            const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
+                                `${metaPath}/${req.params.type}/${req.params.name}`,
                             );
+                            for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
                             await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
                             return;
                         }
