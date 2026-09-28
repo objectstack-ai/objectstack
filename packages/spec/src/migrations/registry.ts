@@ -10299,8 +10299,8 @@ const step18: MigrationStep = {
         + 'the migrated source runs exactly as before. What does NOT convert is the INTENT: the '
         + 'count cannot tell a partition (where the key is redundant) from a reliance on '
         + 'multi-branch runs (where it is load-bearing) from an accidental overlap (where the '
-        + 'old behaviour was the bug), so the diff `os migrate meta --from 17` prints is where '
-        + 'that judgment is made, node by node. And the conversion replays ONLY there: it is a '
+        + 'old behaviour was the bug), so the mechanical edit list the chain replay prints is '
+        + 'where that judgment is made, node by node. And the conversion replays ONLY there: it is a '
         + 'default flip, so the authoring funnel never rewrites a source written against the '
         + 'new contract, the automation engine\'s flow rehydration seam refuses it by id (a '
         + 'code-shipped flow, a REST body and a Studio save all arrive there undated), and the '
@@ -10308,8 +10308,8 @@ const step18: MigrationStep = {
         + 'a decision saved from the Studio BEFORE this release, with two or more conditioned '
         + 'out-edges and no `mode`, now runs first-match and is rewritten by nothing.',
       acceptanceCriteria:
-        'Run `os migrate meta --from 17` over each authored stack and review every '
-        + '`flow-decision-mode-inclusive-explicit` line in its diff: (1) where the two (or more) '
+        'Review every `flow-decision-mode-inclusive-explicit` line the chain replay lists for '
+        + 'each authored stack: (1) where the two (or more) '
         + 'out-edge conditions partition — a predicate and its negation, `>` beside `<=`, or a '
         + 'guard beside `isDefault: true` — delete the written `mode`; the run is unchanged either '
         + 'way and the exclusive default is the honest declaration; (2) where the flow relies on '
@@ -10325,7 +10325,8 @@ const step18: MigrationStep = {
         + 'the Studio designer by the same three-way judgment. A decision registering with '
         + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
         + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
-        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes.',
+        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.

@@ -1407,14 +1407,15 @@ shape in which more than one branch can run for one record.
 
 <Callout type="info">
 **Upgrading a flow written before protocol 18.** An edge-branched decision used
-to take every out-edge whose condition held. `os migrate meta --from 17` writes
-`mode: 'inclusive'` onto every decision with two or more conditioned out-edges
-and no `mode` (the ADR-0087 conversion `flow-decision-mode-inclusive-explicit`),
-so the migrated flow runs exactly as before; delete the key where the two
-conditions partition (`== 'a'` beside `!= 'a'`, `>` beside `<=`), which is the
-common case and the honest declaration. Nothing rewrites a flow at load: an
+to take every out-edge whose condition held. The ADR-0087 conversion
+`flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto every
+decision with two or more conditioned out-edges and no `mode` when the chain is
+replayed, so the migrated flow runs exactly as before; delete the key where the
+two conditions partition (`== 'a'` beside `!= 'a'`, `>` beside `<=`), which is
+the common case and the honest declaration. Nothing rewrites a flow at load: an
 author who writes two branches today gets the exclusive gateway the contract
-describes.
+describes. Run `os migrate meta --from 17` to list the mechanical edits for
+existing sources; apply them by hand.
 </Callout>
 
 **Branch on the node** (Salesforce-style decision outcomes): the node declares
