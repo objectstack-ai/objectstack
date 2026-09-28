@@ -64,7 +64,14 @@
  * was written: `description` → text `--strict` 1, `--json --strict` 1, `--json`
  * 0, `warnings: []`, one notice; `subtitle` → 0 on every face, no notices.
  *
- * The non-empty `conversions` assertion is the anti-vacuity guard, and it is
+ * ⚠️ Re-judged under the one-authoring-shape ruling (#20367): `os validate`
+ * refuses a default export `defineStack` did not build, and `defineStack`
+ * applies the conversion itself at load (stderr notice), so the door's
+ * `conversions` is empty and the cell below is unreachable by an accepted
+ * config. The pin now holds what IS true — both faces agree at exit 0, the
+ * notice fires in the producer — and the anti-vacuity guard reads stderr.
+ *
+ * The live-notice assertion (on stderr since the re-judgement) is the anti-vacuity guard, and it is
  * load-bearing rather than decorative. `page-header-subtitle-alias` is a LIVE
  * window that retires from the load path at protocol 18; the day it retires,
  * this fixture raises nothing and, without that assertion, the file would keep
@@ -272,46 +279,40 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
   }, 120_000);
 
-  it('conversions-only: the cell where --strict is decided by a collection the payload keeps OUT of `warnings`', async () => {
+  it('conversions-only (ruling B): the PRODUCER consumes the conversion at load — both faces agree at exit 0', async () => {
+    // Re-judged under the one-authoring-shape ruling (#20367). A config is now
+    // always `defineStack(…)` output, and `defineStack` runs the D2 conversion
+    // itself (either mode) and reports it on stderr, so the door's own
+    // `normalizeStackInput` has nothing left to convert: the #11301 cell —
+    // `{ valid: true, warnings: [], conversions: [...] }` at exit 1 — is no
+    // longer reachable by a config the door accepts. ⚠️ Recorded, not endorsed:
+    // `--strict` therefore does not gate on a retiring conversion for ANY
+    // accepted config (it never did for a `defineStack` one); the PR reports
+    // that as an open finding rather than widening this change to fix it.
     const text = await runCli(['validate', '--strict'], conversionsDir);
     const json = await runCli(['validate', '--json', '--strict'], conversionsDir);
 
-    // Same floor as the first case: equality is only worth asserting over a run
-    // that genuinely had something to fail on.
-    expect(
-      text.code,
-      `text --strict must fail on the conversions-only config:\n${text.stdout}\n${text.stderr}`,
-    ).not.toBe(0);
-
-    expect(
-      json.code,
-      `--json --strict exited ${json.code} where --strict exited ${text.code}, same config.\n` +
-        `json stdout:\n${json.stdout}\njson stderr:\n${json.stderr}`,
-    ).toBe(text.code);
+    // Parity, the #11174 contract this file exists for, still holds.
+    expect(text.code, `text --strict:\n${text.stdout}\n${text.stderr}`).toBe(0);
+    expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(text.code);
 
     const payload = JSON.parse(json.stdout) as {
       valid?: unknown;
       warnings?: unknown;
       conversions?: unknown;
     };
-
-    // The cell spelled out. `warnings: []` is asserted, not tolerated: it is the
-    // whole point — narrow the gate to this field and the run above drops to 0
-    // while the text face stays at 1.
     expect(payload.valid).toBe(true);
     expect(payload.warnings).toEqual([]);
-    expect(
-      Array.isArray(payload.conversions) && (payload.conversions as unknown[]).length,
-      'the fixture raised NO conversion — the alias has most likely retired from ' +
-        'the load path; re-point `headerPageSource` at a live entry in ' +
-        '`packages/spec/src/conversions/registry.ts` rather than deleting this line',
-    ).toBeGreaterThan(0);
+    expect(payload.conversions, 'the door computed no conversion: the producer already applied it').toEqual([]);
 
-    // Separates "gates on --strict" from "fails whenever a conversion is seen".
-    // The warnings fixture's own without-strict control cannot cover this: it
-    // raises no conversions, so it passes under either behaviour.
-    const loose = await runCli(['validate', '--json'], conversionsDir);
-    expect(loose.code, `--json without --strict must stay 0:\n${loose.stdout}\n${loose.stderr}`).toBe(0);
+    // Anti-vacuity: the conversion is LIVE — it fired, in the producer, on both
+    // faces. The day `page-header-subtitle-alias` retires this goes red; re-point
+    // `headerPageSource` at a live entry in `packages/spec/src/conversions/registry.ts`.
+    for (const run of [text, json]) {
+      expect(run.stderr, 'defineStack reported the conversion at load').toContain(
+        "conversion 'page-header-subtitle-alias'",
+      );
+    }
   }, 120_000);
 
   it('control: the same page under the CANONICAL key converts nothing and exits 0 on both faces', async () => {
@@ -326,6 +327,8 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const payload = JSON.parse(json.stdout) as { warnings?: unknown; conversions?: unknown };
     expect(payload.warnings).toEqual([]);
     expect(payload.conversions).toEqual([]);
+    // The discriminator's other half: the canonical key raises no notice anywhere.
+    expect(json.stderr).not.toContain("conversion 'page-header-subtitle-alias'");
   }, 120_000);
 
   it('control: without --strict, the same advisory-raising config still exits 0 under --json', async () => {
