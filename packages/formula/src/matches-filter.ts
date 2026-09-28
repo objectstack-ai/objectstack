@@ -76,9 +76,26 @@
  * refusal and driver-memory's array-comparand refusal — already refuse the
  * shape with `INVALID_FILTER` / 400; this face now gives the same envelope. See
  * {@link arrayComparandError}.
+ *
+ * [#20355] A third shape is refused when the caller hands over the object's
+ * declared columns ({@link MatchesFilterOptions.fields}): a `{ $field }`
+ * comparison between two columns that share no COMPARISON CLASS — text against
+ * a number, text against a file field, anything against a formula field. The
+ * rule is the spec's `crossFieldComparisonVerdict`, the same one driver-sql's
+ * read applies, so one access policy gets one answer on both sides of the
+ * write. See {@link findCrossFieldClassRefusal}.
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#20355] The cross-field comparison class, defined once in the spec (#20347)
+// and read by every judge of a column-to-column comparison: driver-sql's read,
+// the authoring door in `@objectstack/lint`, and this evaluator's write check.
+import {
+  crossFieldComparisonVerdict,
+  type CrossFieldColumnVerdict,
+  type CrossFieldComparisonFieldMeta,
+  type CrossFieldComparisonVerdict,
+} from '@objectstack/spec/data';
 // [#6520] `asciiCaseInsensitiveContains` is `$icontains`' fold, defined once in
 // the spec and shared by every JS evaluation face — so a `check` evaluated here
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
@@ -265,8 +282,31 @@ function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+/**
+ * [#20355] What a caller that knows the record's object may tell the evaluator.
+ */
+export interface MatchesFilterOptions {
+  /**
+   * The declared columns of the object `record` belongs to, keyed by field
+   * name — each column's declared `type` and `multiple`, the slice the spec's
+   * cross-field classification reads.
+   *
+   * Supplied, every `{ $field }` comparison between two columns named here is
+   * judged by that classification before any record is read, and one the
+   * platform defines no answer for is refused ({@link findCrossFieldClassRefusal}).
+   * Omitted, the evaluator judges values only, as it always has: it has no
+   * schema of its own, and a caller without one (an aggregated row, a probe
+   * record) is not asked for one.
+   */
+  readonly fields?: Readonly<Record<string, CrossFieldComparisonFieldMeta>>;
+}
+
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
-export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
+export function matchesFilterCondition(
+  record: Record<string, unknown>,
+  filter: FilterCondition | null | undefined,
+  options?: MatchesFilterOptions,
+): boolean {
   if (filter == null) return true;
   if (typeof filter !== 'object' || Array.isArray(filter)) return false;
   // [#5240] Shape first, then evaluate. The refusal is raised by a walk of the
@@ -276,7 +316,210 @@ export function matchesFilterCondition(record: Record<string, unknown>, filter: 
   // depending on the RECORD being tested. A malformed permission rule must be
   // refused for every record or none. Evaluation below is untouched.
   assertFilterShape(filter as Record<string, unknown>, 'filter');
+  // [#20355] The comparison-class rule is judged the same way, and for the same
+  // reason: it reads the declared columns, never the record, so a policy is
+  // refused for every record or for none.
+  if (options?.fields) {
+    const refusal = findCrossFieldClassRefusal(filter, options.fields);
+    if (refusal) throw crossFieldClassError(refusal);
+  }
   return evalNode(record, filter as Record<string, unknown>);
+}
+
+/**
+ * [#20355] One `{ $field }` comparison between two declared columns that share
+ * no comparison class, as {@link findCrossFieldClassRefusal} found it.
+ */
+export interface CrossFieldClassRefusal {
+  /** The constrained column — the key the comparison sits under. */
+  readonly field: string;
+  /** The comparison operator (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`). */
+  readonly operator: string;
+  /** The referenced column — the `{ $field }` value. */
+  readonly reference: string;
+  /** The classification's answer: two classes, or a column with none. */
+  readonly verdict: Extract<CrossFieldComparisonVerdict, { verdict: 'cross-class' | 'no-class' }>;
+  /**
+   * The comparison and both declarations in words. SERVER-SIDE ONLY: it names
+   * the columns of a predicate the caller may not have written, so it goes to
+   * a log, never into an error message (see {@link crossFieldClassError}).
+   */
+  readonly diagnostic: string;
+}
+
+/**
+ * [#20355] The first `{ $field }` comparison in `filter` whose two columns are
+ * both declared in `fields` and share no comparison class — `null` when there
+ * is none. Pure: it reads the filter and the declarations, never a record.
+ *
+ * ## The rule, and why it is the spec's
+ *
+ * A column-to-column comparison has one meaning only between two columns of
+ * ONE comparison class, and a file field, a formula field or a column holding
+ * a list or an object has no class at all (`@objectstack/spec/data`
+ * `crossFieldComparisonVerdict`, lifted from driver-sql's #5222 boundary by
+ * #20347). Across classes the backends answer differently: SQLite orders
+ * every TEXT above every INTEGER, while this evaluator's JS comparison coerces
+ * (`'open' > 5` is false), so a comparison that is well defined nowhere gets a
+ * different answer on each path.
+ *
+ * Measured through the real plugin-security and ObjectQL on driver-sql, on
+ * SQLite and on PostgreSQL, before this rule: an RLS policy
+ * `record.status != record.amount` (text vs number), `record.status !=
+ * record.photo` (text vs image), `record.status != record.is_open` (text vs a
+ * formula field) or `record.status != record.meta` (text vs json) answered the
+ * read it scopes with `INVALID_FILTER` / 400, because driver-sql refuses to
+ * compile the comparison; and the insert its `check` judges — or its `using`,
+ * standing in as the check — was ADMITTED and stored, because this evaluator
+ * compared the two raw values (`'open' !== 5`). One policy, two answers, the
+ * permissive one on the write side. The write check now refuses the
+ * comparison exactly where the read does, by the same classification.
+ *
+ * ## What it judges, and what it leaves
+ *
+ * The six operators a `{ $field }` comparand is declared for
+ * ({@link ARRAY_REFUSED_OPERATORS}: the ones that compare ONE value), at any
+ * depth under `$and` / `$or` / `$not`, whether or not the reference carries an
+ * `addDays` offset — driver-sql asks the class question before it reads the
+ * offset. Only a comparison whose BOTH columns are keys of `fields` is judged:
+ * a dotted path, or a column the object does not declare, is a different
+ * question with its own answer elsewhere (the RLS compiler's field guard
+ * refuses an undeclared column before a filter ever reaches this evaluator).
+ * A declared type outside `FieldType` is not judged either
+ * (`unjudged`) — it is not a declaration the classification covers, and the
+ * metadata schema refuses it at authoring.
+ */
+export function findCrossFieldClassRefusal(
+  filter: FilterCondition | Record<string, unknown> | null | undefined,
+  fields: Readonly<Record<string, CrossFieldComparisonFieldMeta>>,
+): CrossFieldClassRefusal | null {
+  const declared = (name: string): CrossFieldComparisonFieldMeta | undefined =>
+    Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+  const walk = (node: unknown): CrossFieldClassRefusal | null => {
+    if (node == null || typeof node !== 'object' || Array.isArray(node)) return null;
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$and' || key === '$or') {
+        if (!Array.isArray(val)) continue;
+        for (const child of val) {
+          const found = walk(child);
+          if (found) return found;
+        }
+        continue;
+      }
+      if (key === '$not') {
+        const found = walk(val);
+        if (found) return found;
+        continue;
+      }
+      if (key.startsWith('$') || !isOperatorMap(val)) continue;
+      const target = declared(key);
+      if (!target) continue;
+      for (const op of ARRAY_REFUSED_OPERATORS) {
+        const raw = val[op];
+        if (!isFieldReference(raw) || typeof raw.$field !== 'string') continue;
+        const ref = declared(raw.$field);
+        if (!ref) continue;
+        const verdict = crossFieldComparisonVerdict(target, ref);
+        if (verdict.verdict !== 'cross-class' && verdict.verdict !== 'no-class') continue;
+        return {
+          field: key,
+          operator: op,
+          reference: raw.$field,
+          verdict,
+          diagnostic: describeCrossFieldClassRefusal(key, target, op, raw.$field, ref, verdict),
+        };
+      }
+    }
+    return null;
+  };
+  return walk(filter);
+}
+
+/** How one declared column stands in a refused comparison, in words. */
+function describeColumn(name: string, meta: CrossFieldComparisonFieldMeta, verdict: CrossFieldColumnVerdict): string {
+  const declared = `"${name}" (type '${meta.type}'${meta.multiple === true ? ', multiple' : ''})`;
+  if (verdict.kind === 'class') return `${declared} is compared as ${verdict.class}`;
+  if (verdict.reason === 'file') return `${declared} is a file field, which has no comparison class`;
+  if (verdict.reason === 'formula') return `${declared} is a formula field, which has no stored column to compare`;
+  return `${declared} holds a list or an object, which has no comparison class`;
+}
+
+function describeCrossFieldClassRefusal(
+  field: string,
+  target: CrossFieldComparisonFieldMeta,
+  op: string,
+  reference: string,
+  ref: CrossFieldComparisonFieldMeta,
+  verdict: CrossFieldClassRefusal['verdict'],
+): string {
+  const parts =
+    verdict.verdict === 'cross-class'
+      ? [
+          describeColumn(field, target, { kind: 'class', class: verdict.left }),
+          describeColumn(reference, ref, { kind: 'class', class: verdict.right }),
+        ]
+      : [
+          ...(verdict.left.kind === 'no-class' ? [describeColumn(field, target, verdict.left)] : []),
+          ...(verdict.right.kind === 'no-class' && reference !== field
+            ? [describeColumn(reference, ref, verdict.right)]
+            : []),
+        ];
+  return (
+    `the comparison { "${field}": { "${op}": { "$field": "${reference}" } } } compares two columns that ` +
+    `share no comparison class: ${parts.join(', and ')}`
+  );
+}
+
+/**
+ * [#20355] The refusal carried on the error, under a SYMBOL key — the same
+ * non-travel reason driver-sql's withheld diagnostic uses one: `JSON.stringify`,
+ * a spread, `Object.keys` and the structured-clone boundary all skip it, so no
+ * error mapper can put the column names back on the wire. `Symbol.for` so a
+ * duplicated copy of this package resolves the same key.
+ */
+const CROSS_FIELD_CLASS_REFUSAL = Symbol.for('objectstack.formula.crossFieldClassRefusal');
+
+/**
+ * [#20355] A `{ $field }` comparison between two columns of no shared
+ * comparison class is REFUSED, with the envelope the read gives the same
+ * comparison: `INVALID_FILTER` / 400.
+ *
+ * The message names nothing from the filter, for the reason
+ * {@link arrayComparandError} names nothing: on the write gate the filter is an
+ * access policy, and the caller who receives the 400 is usually not its author
+ * — driver-sql withholds the same comparison's columns on the read for the
+ * same reason (#7929). The columns, the operator and both declarations travel
+ * on the error for the server log ({@link crossFieldClassRefusalCarriedBy}).
+ */
+function crossFieldClassError(refusal: CrossFieldClassRefusal): Error {
+  const err = new Error(
+    'A field-to-field comparison ({ "$field": … }) in this filter compares two columns that share no ' +
+      'comparison class. Two columns are compared only within one class — a number with a number, text ' +
+      'with text, a boolean with a boolean, a date with a date, a datetime with a datetime, a time of day ' +
+      'with a time of day — and a file field, a formula field, or a column that holds a list or an object ' +
+      'has no class at all, so the platform defines no answer for this comparison. It is refused rather ' +
+      'than evaluated: across classes SQL and this evaluator answer differently, and the read path refuses ' +
+      'the same comparison, so an answer here would give one access policy two meanings. The columns and ' +
+      'the operator are withheld from this message because the filter may be an access policy the caller ' +
+      'did not write; the server log names them. In a row-level policy, compare a field only with a field ' +
+      'of the same class, or fix the declaration of the one that is declared with the wrong type.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  Object.defineProperty(err, CROSS_FIELD_CLASS_REFUSAL, { value: refusal, enumerable: false });
+  return err;
+}
+
+/**
+ * [#20355] The comparison-class refusal an error carries, or `null` for any
+ * other error — the read half of {@link crossFieldClassError}, for a caller that
+ * logs the refused comparison server-side (the RLS write gate names the policy
+ * beside it).
+ */
+export function crossFieldClassRefusalCarriedBy(err: unknown): CrossFieldClassRefusal | null {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
+  const refusal = (err as Record<symbol, unknown>)[CROSS_FIELD_CLASS_REFUSAL];
+  return refusal && typeof refusal === 'object' ? (refusal as CrossFieldClassRefusal) : null;
 }
 
 /**

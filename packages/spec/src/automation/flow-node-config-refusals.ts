@@ -82,7 +82,9 @@ let cachedBuiltinNodeConfigContracts: ReadonlyMap<string, BuiltinNodeConfigContr
  * shape is judged by {@link flowNodeConfigRefusals}'s own arm), `assignment`
  * (three read-compatible shapes, no single contract), and `wait` /
  * `connector_action`, whose inputs are FlowNode SIBLING blocks
- * (`waitEventConfig` / `connectorConfig`), not `config`.
+ * (`waitEventConfig` / `connectorConfig`), not `config` — each required by
+ * `flow.zod.ts` itself (`requireTypeScopedConfig`,
+ * `connectorActionConfigRefusals`).
  */
 export function getBuiltinNodeConfigContracts(): ReadonlyMap<string, BuiltinNodeConfigContract> {
   if (cachedBuiltinNodeConfigContracts === undefined) {
@@ -182,8 +184,8 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
   return (
     `This \`${nodeType}\` node's config leaves out \`${key}\`, which the ${nodeType} contract requires. Its executor `
     + 'parses the config against that contract before it does anything else and refuses the node without it — so '
-    + 'the flow registers, and then every run that reaches this node fails there; the config is metadata, and '
-    + `re-running changes nothing. Write \`${key}\` on the node's \`config\`.`
+    + 'the flow used to register, and then every run that reached this node failed there; the config is metadata, '
+    + `and re-running changes nothing. Write \`${key}\` on the node's \`config\`.`
   );
 }
 

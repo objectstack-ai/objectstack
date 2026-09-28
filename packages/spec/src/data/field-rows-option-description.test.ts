@@ -328,13 +328,28 @@ describe('#13671 — the object.form options repeater offers only keys the door 
     }
   });
 
-  it('declares exactly one `icon` input in total — the OBJECT-level row, a different subject', () => {
+  it('declares exactly two `icon` inputs in total — the OBJECT-level row and the field-group row, different subjects', () => {
     // The object form declares two `icon` inputs in total before #13671 and
     // one after. The survivor is the object's own Lucide icon in Basics, which
     // `ObjectSchema` declares and Studio renders; an over-broad deletion that
     // took it out would otherwise look like a pass above.
+    //
+    // Two again since #19332 (flight G2a), and the second is not the withdrawn
+    // one: the `fieldGroups` repeater's `icon` sub-row, a group header's Lucide
+    // icon, which `ObjectFieldGroupSchema` declares and the record detail page
+    // renders. Each is pinned by where it sits, so neither can stand in for an
+    // `icon` input returning to the options repeater (asserted above).
     const iconRows = findSpecs(objectForm, (s) => s.field === 'icon');
-    expect(iconRows).toHaveLength(1);
-    expect(String(iconRows[0].helpText ?? '')).toContain('Lucide icon name');
+    expect(iconRows).toHaveLength(2);
+    const topLevel = (((objectForm as FormSpec).sections ?? []) as FormSpec[])
+      .flatMap((sec) => ((sec.fields ?? []) as FormSpec[]))
+      .filter((s) => s.field === 'icon');
+    const groups = findSpecs(objectForm, (s) => s.field === 'fieldGroups' && s.type === 'repeater');
+    expect(groups, 'the object form no longer declares exactly one `fieldGroups` repeater').toHaveLength(1);
+    const groupIcon = (groups[0].fields as FormSpec[] | undefined)?.find((s) => s.field === 'icon');
+    expect(topLevel).toHaveLength(1);
+    expect(groupIcon).toBeDefined();
+    expect(iconRows).toEqual(expect.arrayContaining([topLevel[0], groupIcon]));
+    for (const row of iconRows) expect(String(row.helpText ?? '')).toContain('Lucide icon name');
   });
 });

@@ -113,6 +113,13 @@ const MEMBER = {
       name: 'work_hours', type: 'number' as const, label: 'Max hours per shift',
       precision: 5, scale: 0, min: 1, max: 12,
     },
+    // #19992 — the triage's own `precision` pin declaration: a DECIMAL(5, 2),
+    // up to 999.99. Unbounded otherwise, so `precision` is the only constraint
+    // a refusal below can come from.
+    hourly_rate: {
+      name: 'hourly_rate', type: 'number' as const, label: 'Hourly rate',
+      precision: 5, scale: 2,
+    },
   },
 };
 
@@ -950,6 +957,73 @@ describe('import + create routes — number `scale` enforcement (#7501)', () => 
     } as any, ok);
     expect(ok._status ?? 200).toBeLessThan(400);
     expect((await engine.findOne('member', { where: { id: 'w5' } }))?.work_hours).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #19992 — a declared `precision` is enforced by REJECTION at the write seam,
+// and the refusal survives the HTTP error envelope: the direct create route
+// answers `400 VALIDATION_FAILED` with field code `max_precision` (code AND
+// status), and the import route — whose create leg is a batch through
+// `createManyData` — refuses the row and writes its sibling. The engine-door
+// pins (insert[], insertMany, update by predicate) live beside the validator,
+// in `packages/objectql/src/validation/record-validator.precision.test.ts`.
+// ---------------------------------------------------------------------------
+describe('import + create routes — number `precision` enforcement (#19992)', () => {
+  let route: any;
+  let engine: any;
+  let rest: any;
+  beforeEach(async () => { ({ route, engine, rest } = await boot()); });
+
+  it('the direct create route answers 400 VALIDATION_FAILED + max_precision (code AND status), and writes nothing', async () => {
+    const create = rest.getRoutes().find(
+      (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object',
+    );
+    expect(create).toBeDefined();
+    const res = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'h1', member_name: 'Ada', status: 'active', hourly_rate: 1234.5 },
+    } as any, res);
+    expect(res._status).toBe(400);
+    expect(res._json).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(res._json.fields[0]).toMatchObject({
+      field: 'hourly_rate', code: 'max_precision',
+      constraint: { precision: 5, scale: 2, actual: 6 },
+    });
+    expect(await engine.findOne('member', { where: { id: 'h1' } })).toBeNull();
+
+    // …and a value inside the declaration still writes.
+    const ok = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'h2', member_name: 'Bo', status: 'active', hourly_rate: 123.45 },
+    } as any, ok);
+    expect(ok._status ?? 200).toBeLessThan(400);
+    expect((await engine.findOne('member', { where: { id: 'h2' } }))?.hourly_rate).toBe(123.45);
+  });
+
+  it('the import route refuses the over-precision row, writes its sibling, and the dry run predicts it', async () => {
+    const imp = (body: any) => {
+      const res = makeRes();
+      return route.handler({ params: { object: 'member' }, body } as any, res).then(() => res);
+    };
+    const rows = [
+      { id: 'h3', member_name: 'Cy', status: 'active', hourly_rate: 1234.5 },
+      { id: 'h4', member_name: 'Di', status: 'active', hourly_rate: 999.99 },
+    ];
+    const dry = await imp({ format: 'json', dryRun: true, rows });
+    expect(dry._json).toMatchObject({ dryRun: true, total: 2, ok: 1, errors: 1 });
+
+    const res = await imp({ format: 'json', rows });
+    expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
+    const failed = res._json.results.find((r: any) => !r.ok);
+    expect(failed).toMatchObject({
+      row: 1, ok: false, action: 'failed', field: 'hourly_rate', code: 'max_precision',
+      error: 'Hourly rate must have at most 5 digits in total, counting 2 decimal places (got 6)',
+    });
+    expect(await engine.findOne('member', { where: { id: 'h3' } })).toBeNull();
+    expect((await engine.findOne('member', { where: { id: 'h4' } }))?.hourly_rate).toBe(999.99);
   });
 });
 
