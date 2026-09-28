@@ -108,6 +108,34 @@
  *    vocabularies, would make the second report noise — and the first one is
  *    the better message, because it is written about syntax.
  *
+ * ## A field compared with a field that holds a list or an object (#19886)
+ *
+ * `record.status != record.tags`, with `tags` a `json` field or a `multiple`
+ * lookup, LOWERS — to `{ status: { $ne: { $field: 'tags' } } }` — because the
+ * compiler knows the predicate's text and not the object's field types. So the
+ * seeder's verdict is `ok` and the rule is seeded. The runtime refuses it one
+ * step later. Measured through the real `SharingServicePlugin` (seeding, hook
+ * binding, the boot backfill) on driver-sql and driver-sqlite-wasm: every
+ * criteria query such a rule runs answers `INVALID_FILTER` / 400, because
+ * driver-sql refuses a cross-field comparison against such a column by its
+ * DECLARED type; `SharingRuleService` reads the refused query as matching no
+ * record; and the rule grants nothing, at boot and on every later write, behind
+ * one WARN line per rule. The scalar field-to-field controls granted and
+ * enforced in the same run. (driver-memory reads a `{ $field }` comparand as a
+ * literal for EVERY field-to-field comparison, scalar ones included, so it is
+ * no evidence either way.)
+ *
+ * The compiler cannot see this, so this arm is the one place the rule judges
+ * more than the seeder's call: it reads the LOWERED filter against the declared
+ * field map, through the same classification the RLS rule uses
+ * (`listHoldingComparisons`, which reads the spec's `STRUCTURED_JSON_TYPES` and
+ * `isMultiValueField`, the two sets driver-sql refuses by). It keeps the
+ * unlowerable id: the fix is the same rewrite of the predicate, and the same
+ * class's literal spelling (`record.status == ['a', 'b']`) is already reported
+ * under that id, refused by the compiler rather than by the driver. A column
+ * the graph cannot answer for — an object this stack does not declare, a field
+ * map it cannot read, a name it does not declare — is not judged here.
+ *
  * ## What this rule deliberately does NOT do
  *
  *  - **It does not re-implement `isMatchAllCriteria`.** The seeder's second
@@ -138,9 +166,14 @@
 
 import { compileCelToFilter } from '@objectstack/formula';
 import { referenceCarrierOf } from '@objectstack/spec/data';
-import { recordsOf } from './object-graph.js';
+import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
+import { listHoldingComparisons } from './validate-rls-predicate-enforceability.js';
 
-/** A `condition` outside the pushdown subset — the rule is never seeded. */
+/**
+ * A `condition` the runtime cannot evaluate as written: outside the pushdown
+ * subset (the rule is never seeded), or a lowered comparison with a field that
+ * holds a list or an object (seeded, and it grants nothing).
+ */
 export const SHARING_RULE_UNLOWERABLE_CONDITION = 'sharing-rule-unlowerable-condition';
 /** A `condition` reading `current_user.*` — unresolvable when grants are materialized. */
 export const SHARING_RULE_RUNTIME_VARIABLE_CONDITION = 'sharing-rule-runtime-variable-condition';
@@ -205,6 +238,43 @@ const PUSHDOWN_SUBSET =
   'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, ' +
   'and the string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column `record.<field>` ' +
   'paths (ADR-0058 D2).';
+
+/**
+ * The finding for a lowered `condition` that compares a field with a field
+ * holding a list or an object, or `null` when it compares none (see this
+ * file's header). The consequence is the one measured through the real
+ * plugin-sharing on the SQL drivers.
+ */
+function listHoldingFinding(
+  graph: ObjectGraph,
+  object: string,
+  filter: Record<string, unknown>,
+  at: { where: string; path: string; source: string },
+): SharingRuleEnforceabilityFinding | null {
+  const comparisons = object ? listHoldingComparisons(graph, object, filter) : [];
+  if (comparisons.length === 0) return null;
+  return {
+    severity: 'error',
+    rule: SHARING_RULE_UNLOWERABLE_CONDITION,
+    where: at.where,
+    path: at.path,
+    message:
+      `Sharing-rule condition \`${at.source}\` lowers, but compares a field with a field that holds a list or ` +
+      `an object: ${comparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ')}. ` +
+      'A column that holds a list or an object is not one comparable value, on either side of a ' +
+      'field-to-field comparison, so the platform refuses the comparison instead of evaluating it: the rule ' +
+      'is seeded into `sys_sharing_rule`, but every criteria query it runs is refused on the SQL drivers ' +
+      '(`INVALID_FILTER` / 400: driver-sql refuses a cross-field comparison against such a column by its ' +
+      'declared type), and `SharingRuleService` reads a refused query as matching no record. No ' +
+      '`sys_record_share` grant is ever materialised, at boot or on any later write, and the only signal is ' +
+      'a WARN line in the server log. The rule is declared and grants nothing.',
+    hint:
+      'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares one ' +
+      'value with one value, and cannot test membership in a list another column holds. Compare with a ' +
+      "single-valued column, or with a literal — \"one of these values\" is `record.status in ['open', " +
+      "'pending']` — or keep the value the rule keys on in a single-valued field and compare with that.",
+  };
+}
 
 /**
  * The object's effective sharing model, as `SharingService` computes it.
@@ -430,6 +500,8 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     const name = str(obj.name);
     if (name) objectsByName.set(name, obj);
   }
+  // [#19886] The declared field map, for the list-holding arm, built once.
+  const graph = indexObjectGraph(cfg);
 
   recordsOf(cfg.sharingRules).forEach((rule, index) => {
     anchorFindings(rule, index, objectsByName).forEach((f) => findings.push(f));
@@ -437,21 +509,30 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     const input = toCompilerInput(rule.condition);
     if (input === null) return;
 
-    // The seeder's exact call: `compileCelToFilter(r.condition, { variables: {} })`
-    // in `bootstrap-declared-sharing-rules.ts`. Same function, same options —
-    // so `ok === false` here means "this rule will be skipped at boot", not
-    // "this rule looks suspicious".
-    const result = compileCelToFilter(input, { variables: {} });
-    if (result.ok) return;
-    // Syntax belongs to `validateStackExpressions`, which already gates this
-    // same field with a message written about syntax.
-    if (result.reason === 'parse-error') return;
-
     const name = str(rule.name) || String(index);
     const object = str(rule.object);
     const where = `sharing rule "${name}"${object ? ` on object "${object}"` : ''}`;
     const path = `sharingRules[${index}].condition`;
     const source = sourceOf(rule.condition);
+
+    // The seeder's exact call: `compileCelToFilter(r.condition, { variables: {} })`
+    // in `bootstrap-declared-sharing-rules.ts`. Same function, same options —
+    // so `ok === false` here means "this rule will be skipped at boot", not
+    // "this rule looks suspicious".
+    const result = compileCelToFilter(input, { variables: {} });
+    if (result.ok) {
+      // [#19886] Seeded — and refused by the driver on every criteria query
+      // when it compares with a list- or object-holding field (file header).
+      const listHolding = listHoldingFinding(graph, object, result.filter as Record<string, unknown>, {
+        where, path, source,
+      });
+      if (listHolding) findings.push(listHolding);
+      return;
+    }
+    // Syntax belongs to `validateStackExpressions`, which already gates this
+    // same field with a message written about syntax.
+    if (result.reason === 'parse-error') return;
+
     const skipped =
       'so `bootstrapDeclaredSharingRules` SKIPS the rule at boot: it is never written to ' +
       '`sys_sharing_rule`, no `sys_record_share` grant is ever materialised, and the only signal is one ' +
