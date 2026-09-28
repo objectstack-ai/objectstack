@@ -8,7 +8,11 @@ export const entry: SemanticMigration = {
     + 'no unit (system/worker.zod.ts)',
   replacement: 'durationMs — rename the key; the value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'It stands alone because it is the only offender left on its file, and the file itself '
     + 'is what makes it a drift rather than a convention: TaskResult.durationMs, declared '
     + 'ninety lines earlier in the SAME source, already spelled the identical measurement '
@@ -19,7 +23,7 @@ export const entry: SemanticMigration = {
     + 'without an error. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
     + 'jobs, not queues, so a QueueConfig is worker host configuration rather than a stack '
     + 'collection member or a stored sys_metadata row, and the conversion chain has no seam '
-    + 'that would see it. #15679, #14478, ADR-0087.',
+    + 'that would see it. ADR-0087.',
   acceptanceCriteria:
     'Every queue declaration spells rateLimit.durationMs. Authoring rateLimit.duration fails '
     + 'to compile (input type `never`) and fails to parse with the rename prescription rather '

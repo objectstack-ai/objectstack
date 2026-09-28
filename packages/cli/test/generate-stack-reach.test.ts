@@ -15,10 +15,15 @@
  *                   exit 0, the config byte-identical, and the exact import and
  *                   key lines that wire it printed.
  *   cannot run      reached, but the stack's `requires` lacks a token the
- *                   scaffold runs on: the WHOLE requires list printed.
+ *                   scaffold runs on: the WHOLE requires list printed. No
+ *                   scaffold reaches it through this command since #20332:
+ *                   the flow scaffold's only tokens are the pair, and
+ *                   `defineStack` refuses a record-change flow in a stack that
+ *                   lacks EITHER one, so that stack is `refused` below.
  *   refused         a config that loaded before the write and does not load
  *                   after it — an action bound to an object nobody declared, a
- *                   flow in a stack without `triggers`: exit 1, and the project
+ *                   flow in a stack without `triggers`, a flow in a stack with
+ *                   `triggers` but not `automation`: exit 1, and the project
  *                   tree byte-identical, because the write is taken back out.
  *
  * A control keeps the refusal from being a command that refuses everything:
@@ -138,6 +143,7 @@ const runs: Record<string, Run> = {};
 let wiredAfterRefusal: Record<string, string>;
 let actionFileAfterRefusal: boolean;
 let noRequiresAfterRefusal: Record<string, string>;
+let triggersOnlyAfterRefusal: Record<string, string>;
 
 beforeAll(async () => {
   root = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-stack-reach-'));
@@ -156,6 +162,7 @@ beforeAll(async () => {
 
   before.wired = tree(dirs.wired);
   before.noRequires = tree(dirs.noRequires);
+  before.triggersOnly = tree(dirs.triggersOnly);
   before.preFixConfig = { [CONFIG]: readFileSync(join(dirs.preFix, CONFIG), 'utf-8') };
 
   // Sequential on purpose: cold tsx starts in a container several agents share.
@@ -175,6 +182,7 @@ beforeAll(async () => {
   runs.dashboardPort = await runCli(['g', 'dashboard', 'port'], dirs.wired);
 
   runs.flowTriggersOnly = await runCli(['g', 'flow', 'order_line'], dirs.triggersOnly);
+  triggersOnlyAfterRefusal = tree(dirs.triggersOnly);
   runs.viewPreFix = await runCli(['g', 'view', 'order_line'], dirs.preFix);
   runs.viewBare = await runCli(['g', 'view', 'order_line'], dirs.bare);
 }, RUN_TIMEOUT_MS);
@@ -199,6 +207,20 @@ describe('[#20215] refused: the write would stop a loading config from loading',
     expect(runs.flowNoRequires.code, out(runs.flowNoRequires)).toBe(1);
     expect(noRequiresAfterRefusal).toEqual(before.noRequires);
     expect(runs.flowNoRequires.stdout).toContain("requires: ['automation', 'triggers']");
+  });
+
+  // [#20332] This stack was the `cannot run` answer — the config loaded and the
+  // server never ran the flow. `defineStack` now refuses `triggers` without
+  // `automation`, so the write stops the config from loading and is refused.
+  it('a flow in a stack that requires `triggers` but not `automation`: exit 1, the tree byte-identical', () => {
+    expect(runs.flowTriggersOnly.code, out(runs.flowTriggersOnly)).toBe(1);
+    expect(triggersOnlyAfterRefusal).toEqual(before.triggersOnly);
+    expect(existsSync(join(dirs.triggersOnly, 'src', 'flows', 'order_line.flow.ts'))).toBe(false);
+    // The subject is named: the token the stack lacks, in the stack's own reason.
+    expect(runs.flowTriggersOnly.stdout).toContain("does not include 'automation'");
+    // The line an author pastes: the whole pair.
+    expect(runs.flowTriggersOnly.stdout).toContain("requires: ['automation', 'triggers']");
+    expect(runs.flowTriggersOnly.stdout).not.toContain('Created');
   });
 
   it('CONTROL: in the same project, once the object exists, the same action generates and reaches', () => {
@@ -238,12 +260,3 @@ describe('[#20215] not wired: exit 0, the config untouched, and the lines that w
   });
 });
 
-describe('[#20215] cannot run: reached, and a capability it runs on is missing', () => {
-  it('a flow in a stack that requires `triggers` but not `automation`', () => {
-    expect(runs.flowTriggersOnly.code, out(runs.flowTriggersOnly)).toBe(0);
-    expect(runs.flowTriggersOnly.stdout).toContain("'order_line_flow'");
-    // The whole list, never a second `requires` key beside the first.
-    expect(runs.flowTriggersOnly.stdout).toContain("requires: ['triggers', 'automation'],");
-    expect(runs.flowTriggersOnly.stdout).not.toContain('import * as flows');
-  });
-});

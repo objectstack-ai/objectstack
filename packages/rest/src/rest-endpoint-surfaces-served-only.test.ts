@@ -250,9 +250,17 @@ describe('#5224 — GET /meta/api announces only what the matcher serves', () =>
     // items it exists to show. Codegen and SDK clients read the plain list.
     const manager = await managerHolding([SERVED]);
     const { rest } = mountRest(ALL_ENUMERATED, manager);
+    // [#20338] The drafts view is served only to a caller who may read drafts
+    // (the authoring capability `/meta/_drafts` asks)…
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: ['studio.access'] });
 
     expect(announcedNames((await getMetaApi(rest, 'api', { preview: 'draft' })).body))
       .toEqual(['anon_unmetered', 'e8_backdoor', 'showcase_task_feed']);
+
+    // …and anyone else is answered the plain list, which IS filtered.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1' });
+    expect(announcedNames((await getMetaApi(rest, 'api', { preview: 'draft' })).body))
+      .toEqual(['showcase_task_feed']);
   }, 60_000);
 
   it('does not narrow any OTHER metadata type — the special case is `api`-only', async () => {

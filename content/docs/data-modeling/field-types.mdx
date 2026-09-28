@@ -152,33 +152,21 @@ code lives in `currencyConfig`, never in the value.
 | `precision` | `number` | — | Total digits |
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
-| `currencyConfig.precision` | `number` | `2` | Decimal precision for currency |
 | `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
 | `currencyConfig.defaultCurrency` | `string` | `'CNY'` | The column's currency code under `fixed`; not the displayed currency under `dynamic` |
 
 ```typescript
-{ name: 'price', label: 'Price', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } }
+{ name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }
 ```
 
 A currency amount's decimal places are its currency's ISO 4217 minor unit
-(2 for USD, 0 for JPY, 3 for KWD), not a field setting, so a `currency` field
-takes no `scale`: publish-time validation refuses the key. The field-level
-`precision` is the amount's total digit count — a DECIMAL(18,2) amount declares
-`precision: 18` — and is never compared with the currency.
-
-A declared `currencyConfig.precision` must agree with the currency's ISO 4217
-fraction digits when the currency is statically known — that is, when
-`currencyConfig` is in `fixed` mode. Publish-time validation rejects the
-contradiction, naming both numbers ("currency JPY has 0 fraction digits;
-`precision: 2` contradicts it"): the yen has no minor unit to show two digits
-of, and `precision: 2` on a KWD field would silently drop the third fils digit
-that exists. Omit `currencyConfig.precision` to let renderers derive the width
-from the currency itself. The rule is
-deliberately partial: a field in `dynamic` currencyMode has no single currency
-to check against, and currency codes outside CLDR `currencyData`
-(cryptocurrency or custom business codes) are not checked. The rule judges
-only *authored* precision — an untouched `currencyConfig` (whose `precision`
-defaults to `2`) is never rejected, whatever its currency.
+(2 for USD, 0 for JPY, 3 for KWD), not a field setting, and they are declared
+nowhere. A `currency` field takes no `scale`, and `currencyConfig` has no
+decimal-places key: publish-time validation refuses `scale` on the field and
+`currencyConfig.precision` (removed in `@objectstack/spec` 17.5.0 — no renderer
+or runtime ever read it), each with a prescription to delete the key. The
+field-level `precision` is the amount's total digit count — a DECIMAL(18,2)
+amount declares `precision: 18` — and is never compared with the currency.
 
 ### `percent`
 Percentage value (0–100 or decimal).

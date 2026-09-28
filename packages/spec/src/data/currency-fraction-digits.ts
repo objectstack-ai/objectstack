@@ -1,12 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ISO 4217 / CLDR currency fraction digits — the static digit table behind the
- * #7918 publish-time rule (maintainer ruling 2026-08-12, Option A): a currency
- * field whose AUTHORED `currencyConfig.precision` contradicts its
- * statically-known currency's fraction digits is rejected at parse/publish
- * time, with a message naming both numbers. The FIELD-level `precision` key is
- * not judged here: it is "Total digits", not decimal places (#20011).
+ * ISO 4217 / CLDR currency fraction digits — a checked-in snapshot whose KEY
+ * SET is the membership list of the `iso_4217_currency` value domain
+ * (`shared/value-domain.zod.ts`): a `text` field declaring
+ * `valueDomain: 'iso_4217_currency'` accepts exactly these codes.
+ *
+ * #19992 — the snapshot was generated for the #7918 publish-time rule that
+ * compared an authored `currencyConfig.precision` with the currency's fraction
+ * digits. That key was removed (ADR-0049 enforce-or-remove: no renderer or
+ * runtime ever read it), and the verdict function and its case-folding lookup
+ * went with it, having no other reader. The table stayed because the value
+ * domain reads its keys; the digit VALUES are kept as the provenance below
+ * records them rather than being flattened to a code list, so a regeneration
+ * stays a diff against the same snippet.
  *
  * ## Provenance — CLDR `currencyData`, checked in, not probed at runtime
  *
@@ -23,24 +30,24 @@
  * `currencyData`, keyed by the currency and not by the reader — measured
  * identical across en-US / de-DE / ja-JP / ar-KW / zh-CN / fr-FR / pl-PL /
  * es-ES (the #7918 card's own measurement, and objectui's
- * `currencyFractionDigits` renderer helper carries the same one). Checking a
- * CHECKED-IN snapshot rather than asking `Intl` at validation time keeps
- * publish-time validation deterministic — the verdict cannot vary with the
- * host's ICU build (a small-icu node answers 2 for everything), and the
- * validation path takes no `Intl` dependency at all.
+ * `currencyFractionDigits` renderer helper carries the same one). Reading a
+ * CHECKED-IN snapshot rather than asking `Intl` at validation time keeps the
+ * verdict deterministic — it cannot vary with the host's ICU build (a
+ * small-icu node answers 2 for everything), and the validation path takes no
+ * `Intl` dependency at all.
  *
- * Renderers still derive display width from live `Intl` (objectui#4361), and
- * the two sources agree because both read CLDR `currencyData`. If a future
- * CLDR revision moves a digit count, regenerate with the snippet above and
+ * Renderers derive display width from live `Intl` (objectui#4361), and the
+ * two sources agree because both read CLDR `currencyData`. If a future CLDR
+ * revision moves a digit count or a code, regenerate with the snippet above and
  * update the provenance line — the table is a snapshot, not hand-curated data.
  *
- * ## The set is deliberately OPEN — unknown codes fail OPEN
+ * ## Two different code rules — do not merge them
  *
- * `CurrencyConfigSchema` validates currency codes by length only, on purpose:
- * cryptocurrency and custom business codes (BTC, ETH, …) are legal. A code
- * this table does not know gets `undefined` — NO verdict — so the #7918 rule
- * does not fire on it. Refusing unknown codes would be a different rule that
- * nobody ruled; do not "improve" this into a membership check.
+ * `CurrencyConfigSchema` validates a currency FIELD's code by length only, on
+ * purpose: cryptocurrency and custom business codes (BTC, ETH, …) are legal
+ * there, and this table is not consulted. The `iso_4217_currency` value domain
+ * is the opposite, opt-in rule for a text field that must hold a standard
+ * code. Neither is a stricter version of the other.
  */
 
 /**
@@ -72,45 +79,3 @@ export const CURRENCY_FRACTION_DIGITS: Readonly<Record<string, number>> = {
   XCG: 2, XDR: 2, XOF: 0, XPF: 0, XSU: 2, YER: 0, ZAR: 2, ZMW: 2,
   ZWG: 2, ZWL: 2,
 };
-
-/**
- * The fraction digits CLDR gives `code`, or `undefined` for a code outside
- * the table (crypto/custom — the open-set, fail-open case above). Case-folded
- * to match `Intl.NumberFormat`'s own case-insensitive currency handling, so a
- * lowercased `'jpy'` — legal under the length-3 schema — cannot dodge the
- * check that `'JPY'` gets.
- */
-export function currencyFractionDigits(code: string): number | undefined {
-  return CURRENCY_FRACTION_DIGITS[code.toUpperCase()];
-}
-
-/**
- * The #7918 verdict for `CurrencyConfigSchema.precision`, checked pre-default
- * inside that schema (its `.superRefine`, and the `.overwrite` that decides
- * whether the default 2 may be materialized). Returns the issue message when
- * `precision` contradicts `currency`'s fraction digits, `undefined` when they
- * agree or the currency is unknown (fail-open).
- *
- * ⛔ Not for the FIELD-level `precision` key. That key is "Total digits" — a
- * DECIMAL(18,2) amount declares `precision: 18` — so comparing it with a
- * fraction-digit count refuses correct metadata and prescribes a total-digit
- * count of 2. `FieldSchema` ran this verdict on it until #20011.
- *
- * The message's first clause names both numbers, verbatim per the ruling:
- * "currency JPY has 0 fraction digits; `precision: 2` contradicts it".
- */
-export function currencyPrecisionContradiction(
-  currency: string,
-  precision: number,
-): string | undefined {
-  const digits = currencyFractionDigits(currency);
-  if (digits === undefined || digits === precision) return undefined;
-  return (
-    `currency ${currency.toUpperCase()} has ${digits} fraction digits; ` +
-    `\`precision: ${precision}\` contradicts it — the amount would render minor-unit digits ` +
-    `the currency does not have, or drop digits it does (ISO 4217 / CLDR currencyData). ` +
-    `Declare \`precision: ${digits}\`, or omit \`precision\` and let renderers derive the width ` +
-    `from the currency. Codes outside CLDR (crypto/custom) are not checked, and a field in ` +
-    `\`dynamic\` currencyMode has no single currency to check against.`
-  );
-}

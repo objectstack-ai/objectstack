@@ -605,9 +605,10 @@ export const SCAFFOLD_WIRED_BARRELS: readonly { type: string; dir: string; stack
 /**
  * The union of the capability tokens the scaffolds need to run — today the
  * `flow` scaffold's pair. Declared by every template that wires the `flows`
- * barrel: without `triggers` a record-change flow makes `defineStack` refuse
- * the config, so the first `os g flow` would break the project, and without
- * `automation` the server loads the flow and never runs it.
+ * barrel: without `triggers` or without `automation` a record-change flow
+ * makes `defineStack` refuse the config (#20332: the trigger installs into the
+ * automation service, so neither token alone installs it), and the first
+ * `os g flow` would break the project.
  */
 export const SCAFFOLD_WIRED_REQUIRES: readonly string[] = [
   ...new Set(GENERATOR_SCAFFOLD_TARGETS.flatMap((t) => t.requires)),
@@ -647,9 +648,8 @@ function renderWiredStackKeys(): string {
   return [
     `  // What the files \`objectstack generate\` writes need in order to run. A`,
     `  // flow that starts on a record change is fired by 'triggers' and run by`,
-    `  // 'automation': without 'triggers' this config stops loading once it holds`,
-    `  // such a flow, and without 'automation' the server loads the flow and never`,
-    `  // runs it. Both can go if this project will never hold a flow.`,
+    `  // 'automation': without either one this config stops loading once it`,
+    `  // holds such a flow. Both can go if this project will never hold a flow.`,
     `  requires: [${requires}],`,
     '',
     `  // Every directory \`objectstack generate\` writes into is wired here: its`,

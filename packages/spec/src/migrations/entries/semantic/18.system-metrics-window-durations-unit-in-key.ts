@@ -10,7 +10,11 @@ export const entry: SemanticMigration = {
   replacement: 'window.durationSeconds, window.durationSeconds and period.durationSeconds — '
     + 'rename each key; every value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'The three are one entry because they are one measurement expressed three times on one '
     + 'file: how long a window or period is. The new name is deliberately NOT the mechanical '
     + 'sizeSeconds the gate prints. size means a byte or row count everywhere else in this '
@@ -26,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'deletion would strip in silence. Why a semantic entry and not a D2 conversion: '
     + 'stack.zod.ts declares no metrics collection, and none of an aggregation config, an SLI '
     + 'or an SLO is a registered metadata kind stored as a sys_metadata row. '
-    + '#15679, #14478, ADR-0087.',
+    + 'ADR-0087.',
   acceptanceCriteria:
     'Every aggregation window and SLI window spells durationSeconds, and every SLO period '
     + 'spells durationSeconds. Authoring window.size or period.duration fails to compile '
@@ -40,7 +44,7 @@ export const entry: SemanticMigration = {
     + 'key\'s describe ("Window size") names none. So the gate lists it among the '
     + 'duration-shaped keys without judging it — neither an offender nor an exemption — and '
     + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
-    + '#15939; '
+    + 'filed as a finding of its own; '
     + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
     + 'to carry. Both keep their names. '
     // Pointer, not a rewrite (Prime Directive #13): the sentence above is #15679's, left
@@ -49,6 +53,7 @@ export const entry: SemanticMigration = {
     + 'One of those two moves after all, in this same protocol step: the error-budget '
     + 'burn-rate window is renamed to durationSeconds by '
     + 'system-metrics-jsdoc-durations-unit-in-key, the remediation of the JSDoc-channel gap '
-    + '#15939 named just above. Read that entry with this one; the exporter batch size is '
+    + 'named just above (ruled: a duration key whose JSDoc names a unit its describe does not '
+    + 'is refused). Read that entry with this one; the exporter batch size is '
     + 'still a COUNT of records and still does not move.',
 };

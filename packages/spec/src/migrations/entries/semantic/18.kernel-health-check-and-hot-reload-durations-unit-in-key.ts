@@ -12,8 +12,11 @@ export const entry: SemanticMigration = {
   replacement: 'intervalMs, timeoutMs and debounceDelayMs — rename each key; all three values '
     + '(milliseconds) and their 30000 / 5000 / 1000 defaults are unchanged',
   reason:
-    'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
-    + 'batch #115), executing the #14478 rule per file. Each key named milliseconds in its JSDoc '
+    'Director-seat ruling A of 2026-09-11 on the JSDoc-channel finding, carrying the '
+    + 'maintainer\'s 「同意」: a duration key whose JSDoc names a unit its describe does not is '
+    + 'refused, and the keys in that shape are remediated per file before that refusal lands — '
+    + 'the duration-unit rule (the unit lives in the key name or its value type, never in prose '
+    + 'alone) executed file by file. Each key named milliseconds in its JSDoc '
     + '— "Health check interval in milliseconds", "Timeout for health check in milliseconds", '
     + '"Debounce delay before reloading (milliseconds)" — and the JSDoc above a key is NOT what '
     + '`content/docs/references/**` renders; `.describe()` is. Measured on this tree by the '
@@ -32,12 +35,16 @@ export const entry: SemanticMigration = {
     + 'Ttl-versus-TTL question the sibling round had to settle, there is no competing family '
     + 'spelling to choose between. All three old spellings are retiredKey() tombstones: neither '
     + 'PluginHealthCheckSchema nor HotReloadConfigSchema is .strict(), so a bare deletion would '
-    + 'be a SILENT STRIP (#3733, ADR-0104) — and here the stripped value lands on a setInterval '
+    + 'be a SILENT STRIP (ADR-0104; an earlier field-key prune measured exactly that — the '
+    + 'parse succeeded and the removed key was dropped without a word) — and here the '
+    + 'stripped value lands on a setInterval '
     + 'period, a race deadline and a setTimeout delay. Why a semantic entry and not a D2 '
     + 'conversion: the conversion chain walks a normalized STACK, and neither def is an '
     + 'authorable surface — no metadata-type binding, stack collection or manifest embed carries '
     + 'either, and both are library parameters a host passes to PluginHealthMonitor / '
-    + 'HotReloadManager in TypeScript (the #4914 / #11825 keep) — so a conversion would be a '
+    + 'HotReloadManager in TypeScript (kept twice: as the hot-reload vocabulary that had an '
+    + 'implementation when the manifest-side copy was removed, and as a host-driven library '
+    + 'when the declarative lifecycle config container was retired) — so a conversion would be a '
     + 'transform with no seam that ever runs. That is the same disposition '
     + 'plugin-auto-restart-never-reinitialised and hot-reload-watch-placeholder-retired recorded '
     + 'for keys on these two defs. The registration-time refusals in '
@@ -64,6 +71,8 @@ export const entry: SemanticMigration = {
     + 'Behaviour is unchanged: the same milliseconds, the same 30000 / 5000 / 1000 defaults and '
     + 'the same min bounds (1000 / 100 / 0), and the published describes now name milliseconds. '
     + 'The sibling shutdownTimeout on HotReloadConfig is deliberately NOT renamed with them: its '
-    + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the #14519 '
-    + 'unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.',
+    + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the '
+    + 'unit-nowhere shape (no unit in the name or in the published describe, first measured on '
+    + 'two tenant timeouts) that the duration-unit gate leaves outside its verdict, not part of '
+    + 'this row set.',
 };

@@ -25,6 +25,9 @@
  *  - `valueDomain`  a declared standard domain's membership, judged by the
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
+ *  - number types   an array, boolean or object is `invalid_number`, never
+ *                   coerced (#20309); a number, or a string by `Number()`,
+ *                   must be finite
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
@@ -857,7 +860,26 @@ function validateOne(
   // failed with `ERR_SUMMARY_RECOMPUTE` on memory and SQLite. A blank on a
   // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
   // whole numeric class).
+  //
+  // [#20309] A value that is neither a number nor a string is refused: an
+  // array, a boolean, a plain object, a `Date`. The arm used to judge
+  // `Number(value)` on every value while the write carried `value`, so each of
+  // these that JS coerces to a finite number passed and reached the driver as
+  // sent: `[500]` (SQLite stored the TEXT `'[500]'`, memory the array), `[]`,
+  // `true` / `false`. None is the spec's stored value for this class
+  // (`valueSchemaFor`: `z.number().finite()`) and none has a numeric reading
+  // to parse, so the arm refuses it and never silently alters it (the #7501
+  // posture). A number is judged as itself and written as itself.
+  //
+  // ⛔ A STRING is still judged by `Number()` and written as sent, exactly as
+  // before this change. Which strings a number field accepts is a separate
+  // decision: it waits on the producer census and on the platform's one
+  // numeric grammar, which belongs to `@objectstack/spec` (#20336), never to a
+  // second copy here.
   if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
+    if (typeof value !== 'number' && typeof value !== 'string') {
+      return fail('invalid_number');
+    }
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) {
       return fail('invalid_number');

@@ -2,8 +2,9 @@
 
 /**
  * `os migrate meta` — the guidance it prints for the ADR-0087 semantic entries
- * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`) states each lesson
- * in words and carries no tracker number.
+ * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`, `driver-*`,
+ * `kernel-*`, `system-*`) states each lesson in words and carries no tracker
+ * number.
  *
  * ## What this pins
  *
@@ -72,7 +73,7 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const TRACKER_ID = /#\d{4,5}\b/;
 
 /** The families this pin holds, selected by entry-id prefix. */
-const COVERED_PREFIXES = ['engine-', 'ui-', 'plugin-'];
+const COVERED_PREFIXES = ['engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-'];
 
 /**
  * The entries rewritten when each family was brought to this line — the
@@ -80,11 +81,27 @@ const COVERED_PREFIXES = ['engine-', 'ui-', 'plugin-'];
  * is held by its prefix and needs no row here.
  */
 const REWRITTEN = [
+  'driver-aggregate-undeclared-key-aliases-removed',
+  'driver-capabilities-inert-bits-removed',
+  'driver-options-timeout-to-timeout-ms',
+  'driver-sql-distinct-bare-filter-typed',
+  'driver-sql-unresolvable-where-column-refused',
+  'driver-sql-upsert-cross-row-identity-merge-refused',
+  'driver-turso-config-local-path-wasm-retired',
   'engine-dotted-filter-refused',
   'engine-dotted-projection-refused',
   'engine-find-formula-filter-refused',
   'engine-find-formula-order-by-refused',
   'engine-update-upsert-retired',
+  'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
+  'kernel-context-preview-mode-retired',
+  'kernel-event-bus-retention-unit-in-key',
+  'kernel-health-check-and-hot-reload-durations-unit-in-key',
+  'kernel-package-lifecycle-durations-unit-in-key',
+  'kernel-plugin-health-report-durations-unit-in-key',
+  'kernel-plugin-security-durations-unit-in-key',
+  'kernel-runtime-config-timeout-unit-in-key',
+  'kernel-startup-orchestrator-durations-unit-in-key',
   'plugin-activation-events-retired',
   'plugin-auto-restart-never-reinitialised',
   'plugin-manifest-contributes-dead-members-retired',
@@ -95,6 +112,16 @@ const REWRITTEN = [
   'plugin-runtime-family-retired',
   'plugin-security-scan-result-surface-retired',
   'plugin-security-scanner-retired',
+  'system-cache-durations-unit-in-key',
+  'system-collaboration-durations-unit-in-key',
+  'system-failover-health-check-interval-unit-in-key',
+  'system-metrics-jsdoc-durations-unit-in-key',
+  'system-metrics-window-durations-unit-in-key',
+  'system-object-storage-durations-unit-in-key',
+  'system-registry-config-durations-unit-in-key',
+  'system-tracing-otel-exporter-durations-unit-in-key',
+  'system-tracing-span-duration-unit-in-key',
+  'system-worker-queue-rate-limit-duration-unit-in-key',
   'ui-cloud-connection-widgets-unknown-keys-refused',
   'ui-form-field-length-malformed-refused',
   'ui-form-field-precision-scale-integer-refused',

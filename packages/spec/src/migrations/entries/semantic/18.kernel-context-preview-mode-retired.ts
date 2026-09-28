@@ -23,12 +23,11 @@ export const entry: SemanticMigration = {
     + 'as it is — deployment ROUTING (widening the trusted-origin list for '
     + 'preview subdomains), unrelated to identity. If a preview experience '
     + 'becomes a product capability it re-declares fresh, with the '
-    + 'production-posture hard-refusal as the first-landed half (#11846 '
-    + 'ruling record)',
+    + 'production-posture hard-refusal as the first-landed half (as the '
+    + 'removal ruling recorded)',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 on #11846 '
-    + '(decision-inbox batch 2, Option A: remove — all four decision facets '
-    + 'pointed the same way). The declaration was the sharpest '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 '
+    + '(Option A: remove). The declaration was the sharpest '
     + 'declared-≠-enforced shape on a SECURITY surface: the schema promised '
     + '"bypass auth, simulate admin identity" and named a production guard '
     + '"the runtime must enforce", and NO code path implemented either half. '
@@ -37,11 +36,11 @@ export const entry: SemanticMigration = {
     + "non-declaration hits for RuntimeMode or mode === 'preview' are the "
     + 'schema unit test, a type-alias pin and a measurement-test comment '
     + '(re-verified at dispatch, 2026-08-27, origin/main 15bf9e8). objectui — '
-    + 'the #11846 card records the measurement. cloud — cloud#1651 (closed '
-    + '2026-08-26): previewMode appears only as a local variable for '
-    + 'OS_PREVIEW_MODE whose effect is adding preview-domain wildcards to '
-    + "better-auth's CSRF trusted origins; RuntimeMode has zero hits "
-    + 'repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
+    + 'zero consumers, measured when the removal was ruled. cloud — a census '
+    + 'closed 2026-08-26: OS_PREVIEW_MODE there is a routing-only switch '
+    + "(the same switch this repository's serve.ts reads only to add "
+    + "preview-domain wildcards to better-auth's trusted origins); RuntimeMode "
+    + 'has zero hits repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
     + 'predicted preview auto-login would live if it existed) has 20+ hits '
     + 'and never touches previewMode. An author — very often an AI (ADR-0033) '
     + '— could write the six-key block per the reference docs, parse cleanly, '
@@ -58,8 +57,7 @@ export const entry: SemanticMigration = {
     + 'source to rewrite: a kernel context is constructed by host code at '
     + 'boot — not a stack collection member, never stored as a sys_metadata '
     + 'row — so the conversion chain has no seam that would ever see one '
-    + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087, '
-    + '#11846.',
+    + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     "No host constructs a kernel context with mode: 'preview' or a "
     + 'previewMode block: both now fail tsc at the authoring site and fail '
