@@ -18,18 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.object.fields.access.default.helpText": "28cffcb17a3650d6",
-  "metadataForms.object.fields.access.default.label": "8729014292708a6e",
-  "metadataForms.object.fields.access.helpText": "667cc73f584c49bb",
-  "metadataForms.object.fields.access.label": "5a06534d8d136ba3",
-  "metadataForms.object.fields.highlightFields.helpText": "80fdd7ec09c4467a",
-  "metadataForms.object.fields.highlightFields.label": "2ef0216c2983def2",
-  "metadataForms.object.fields.requiredPermissions.helpText": "1423960cf2821f3d",
-  "metadataForms.object.fields.requiredPermissions.label": "a47b2168b71f5e68",
-  "metadataForms.object.fields.searchableFields.helpText": "5732eb9327f82f77",
-  "metadataForms.object.fields.searchableFields.label": "fac6b1d04dfe8e64",
-  "metadataForms.permission.fields.adminScope.helpText": "5bc5d10d92085f73",
-  "metadataForms.permission.fields.adminScope.label": "eed8bc6065d3ec8d",
   "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
   "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
   "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",
