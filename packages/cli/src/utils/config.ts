@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import type { Plugin } from 'esbuild';
+import { hasStackProvenance } from '@objectstack/spec';
 import { printErrorToStderr, printWarningToStderr } from './format.js';
 
 export interface LoadedConfig {
@@ -39,6 +40,23 @@ export interface LoadedConfig {
    * finding does not depend on a caller opting in.
    */
   shadowedNamedExports: readonly string[];
+
+  /**
+   * Whether the module's DEFAULT export was built by a stack producer —
+   * `defineStack` (either mode) or `composeStacks` — read with
+   * `hasStackProvenance` (`@objectstack/spec`) off `mod.default` itself.
+   *
+   * Read HERE, before the named-export merge, because the merge builds a new
+   * object with a spread and the provenance mark is non-enumerable: `config`
+   * never carries it once any named export is merged, so asking `config` would
+   * answer `false` for a correct `defineStack` project that also exports
+   * `onEnable`. `false` for a plain object literal, a spread or JSON copy of a
+   * built stack, and a module with no default export at all.
+   *
+   * `os validate` and `os build` refuse on `false` (`STACK_PROVENANCE_MISSING`,
+   * `refuseUnbuiltStack`); every other command reads the config as before.
+   */
+  stackProvenance: boolean;
 }
 
 /**
@@ -433,6 +451,12 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     throw new Error(`No default export found in ${path.basename(absolutePath)}`);
   }
 
+  // [#20367 ruling B] Read the producer's mark off the default export ITSELF,
+  // before the merge below spreads it into a new object and drops it (the mark
+  // is non-enumerable by design). `mod` stands in for a missing default, and a
+  // module namespace never carries the mark.
+  const stackProvenance = hasStackProvenance(baseConfig);
+
   // Preserve named exports (e.g. the `onEnable` runtime hook and `functions`)
   // alongside the default-exported stack. Module-namespace named exports are
   // otherwise dropped when we unwrap `mod.default`, which prevents AppPlugin
@@ -484,6 +508,7 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     duration: Date.now() - start,
     namedExports,
     shadowedNamedExports,
+    stackProvenance,
   };
 }
 

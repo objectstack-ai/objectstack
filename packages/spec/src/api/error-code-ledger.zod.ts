@@ -973,6 +973,14 @@ export const ERROR_CODE_LEDGER = {
     // the code `@objectstack/cloud-connection` already registers — one
     // condition, one vocabulary; provenance, not identity (see above).
     'ENVIRONMENT_NOT_FOUND',
+    // [#20367 ruling B] `os validate` / `os build` refuse a config whose default
+    // export no stack producer built (`hasStackProvenance`, `@objectstack/spec`)
+    // — right after load, before any other judgement, through each command's
+    // catch-all (`--json`: `code` beside `error`, exit 1). `door: 'none'`: a CLI
+    // exit, no HTTP boundary. Second EMITTER of the code `@objectstack/spec`
+    // registers for `composeStacks`' refusal of an unbuilt input — one
+    // condition, one vocabulary.
+    'STACK_PROVENANCE_MISSING',
   ],
   '@objectstack/cloud-connection': [
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
@@ -1330,6 +1338,13 @@ export const ERROR_CODE_LEDGER = {
     'STACK_CROSS_REFERENCE_INVALID',             // items name objects the stack does not define (the ADR-0130 matrix, plus the duplicate-action-key / global-`update` / mapping-transform findings the same aggregate carries)
     'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED', // a HIERARCHY permission scope while `requires` omits `hierarchy-security`
     'STACK_NAMESPACE_PREFIX_INVALID',            // an object name lacks the `manifest.namespace` prefix
+    // [#20367 ruling B] The provenance refusal of the same family: an input
+    // `composeStacks` was handed that no stack producer built (a plain object,
+    // a spread or JSON copy of a built stack), `status: 422`, one `issues`
+    // entry per refused input. `door: 'none'` on the same reading as the rows
+    // around it. Second emitter: `@objectstack/cli` raises the same code at
+    // `os validate` / `os build` for an unmarked default export — see its row.
+    'STACK_PROVENANCE_MISSING',                  // the value was not built by `defineStack` / `composeStacks` (`hasStackProvenance` is false)
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)

@@ -14,6 +14,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
@@ -249,7 +250,15 @@ export default class Compile extends Command {
     try {
       // 1. Load Configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
+      const loaded = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = loaded;
+      // 1a. [#20367 ruling B] One authoring shape: refuse a default export no
+      //     stack producer built, BEFORE any other judgement — the `STACK_*`
+      //     cross-field refusals run inside `defineStack` only, so an unbuilt
+      //     export would otherwise pass this door unjudged. Throws into the
+      //     catch-all below (`--json`: `error` + `code`, exit 1), the same
+      //     envelope a `defineStack` refusal raised at load reaches.
+      refuseUnbuiltStack(loaded);
 
       if (!flags.json) {
         printKV('Config', path.relative(process.cwd(), absolutePath));
