@@ -25,6 +25,9 @@
  *  - `valueDomain`  a declared standard domain's membership, judged by the
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
+ *  - number types   the value must be a finite JS number, the spec's stored
+ *                   value; a string, array or boolean is `invalid_number`,
+ *                   never coerced (#20309)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
@@ -857,11 +860,25 @@ function validateOne(
   // failed with `ERR_SUMMARY_RECOMPUTE` on memory and SQLite. A blank on a
   // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
   // whole numeric class).
+  //
+  // [#20309] ONLY a finite JS number passes: the spec's stored value for this
+  // class, `valueSchemaFor`'s `z.number().finite()`. The arm judges the value
+  // the driver receives, and the driver receives exactly what was sent, since
+  // nothing between here and the driver rewrites a numeric value. The arm used
+  // to judge `Number(value)` instead, so every value JS coerces to a finite
+  // number passed and was then written as sent: `[500]` (SQLite stored the
+  // TEXT `'[500]'`, memory the array), `[]`, `true` / `false`, `'0x10'`,
+  // `' 12 '`, `'1e3'`, and a plain `'12'` (memory stored the string).
+  // ⛔ No coercion here: refuse, never silently alter (the #7501 posture). A
+  // write door that parses a string into a number is a second dialect of the
+  // value contract. A producer that holds a string converts it itself, as the
+  // import route does (`parseNumberCell` in `@objectstack/rest`) before the
+  // engine sees the row.
   if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
-    const n = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(n)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
       return fail('invalid_number');
     }
+    const n = value;
     // [#20308] `progress` joined the TYPE check above, and only that. The
     // bounds and `scale` below keep the five types they always read: `scale`'s
     // own contract names the types it is enforced on (`number`, `percent`,
