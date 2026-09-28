@@ -52,14 +52,19 @@ import type { MetadataProtocol } from '@objectstack/spec/api';
 // [#20408] …and the item route's post-read chain, the book-tree route, the
 // list's unknown-type refusal, the object mask's cache posture and the
 // organization a caller's `/meta` request is scoped to.
+// [#20478] …and the layered view, on both of its spellings: its whole answer,
+// the deprecated `?layers=` flag's parse and the headers that flag is served
+// under.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
     createMetaItemReadGate,
+    createMetaLayeredAnswer,
     createMetaListAnswer,
     isPublicAudienceRead,
     metaCallerOrganizationId,
+    metaItemLayersDeprecationHeaders,
     metaReadOrganizationId,
     metaRequestLocale,
     projectMetaObjectSchema,
@@ -67,9 +72,12 @@ import {
     STORED_VERSION_DOOR_POLICY,
     translateMetaEnvelope,
     translateMetaList,
+    wantsMetaItemLayers,
     type MetaItemAnswer,
     type MetaItemAnswerSources,
     type MetaItemReadGateSources,
+    type MetaLayeredAnswer,
+    type MetaLayeredAnswerSources,
     type MetaListAnswerSources,
     type MetaListTranslationSources,
     type MetaPublicReadRoute,
@@ -219,8 +227,10 @@ export function createMetaDomain(deps: DomainHandlerDeps): DomainRoute {
  * [#20408] `book/:name/tree` is one of them now: this domain serves the route
  * `RestServer` serves ({@link isBookTreePath}), with its type segment LITERAL
  * as there — `/meta/books/:name/tree` is no route on either transport. Every
- * other path of three or more segments is `/published`, the FSM
- * `/state/:field` read or the located `ROUTE_NOT_FOUND`, and none is exempt.
+ * other path of three or more segments is `/published`, [#20478] `/layers`, the
+ * FSM `/state/:field` read or the located `ROUTE_NOT_FOUND`, and none is exempt
+ * — as on `RestServer`, where `/layers` keeps the anonymous deny and only the
+ * item read's `?layers=` flag reaches a `public` book's §6.7 gate.
  */
 function metaReadRouteOf(parts: readonly string[]): MetaPublicReadRoute | undefined {
     if (parts.length === 1) return 'list';
@@ -248,10 +258,27 @@ function successWithHeaders(
     data: unknown,
     headers: Readonly<Record<string, string | undefined>>,
 ): HttpDispatcherResult {
+    return withHeaders(deps.success(data), headers);
+}
+
+/**
+ * [#20478] ANY `deps.*` answer, carrying the headers a `/meta` read owes it —
+ * the ONE place this domain builds an answer with headers ({@link
+ * successWithHeaders} is its success case). The deprecated `?layers=` flag owes
+ * `Deprecation` and `Link` on EVERY answer it gets, refusals included, as on
+ * `RestServer`, which sets them before it reads; `deps.error` takes no headers
+ * either. The body is the `deps.*` helper's declared envelope, spread. A header
+ * whose value is `undefined` is not owed; with none owed the answer is the
+ * helper's own.
+ */
+function withHeaders(
+    response: { status: number; body: any },
+    headers: Readonly<Record<string, string | undefined>>,
+): HttpDispatcherResult {
     const set: Record<string, string> = {};
     for (const [name, value] of Object.entries(headers)) if (value !== undefined) set[name] = value;
-    if (Object.keys(set).length === 0) return { handled: true, response: deps.success(data) };
-    return { handled: true, response: { ...deps.success(data), headers: set } };
+    if (Object.keys(set).length === 0) return { handled: true, response };
+    return { handled: true, response: { ...response, headers: set } };
 }
 
 /**
@@ -621,11 +648,36 @@ async function answerMetaItem(
     }
 }
 
-/** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
+/** [#20320] This transport's save-door admission of `:type/:name` — see {@link metaSaveVerdictOf}. */
 type MetaSaveVerdict = (
     canonicalType: string,
     activeOrganizationId: string | undefined,
 ) => ReturnType<typeof metaWriteCapabilityVerdict>;
+
+/**
+ * [#12702 · #20320 · #20478] May this caller SAVE `:type/:name` on THIS
+ * transport? The admission of the item branch's `PUT`, spelled ONCE: that door
+ * asks it, and so does every read door that honours the author exemption —
+ * the `?state=draft` read and the layered view, on both of its spellings
+ * (ruling 5856774816, item 1: 「whoever can save it must see it whole, or a
+ * save drops entries silently」), which `MetaReadGateCaller.mayWriteItem` says
+ * must be the transport's own save-door answer. A second spelling at a read
+ * could drift from the door it stands for. `canonicalType` is the folded
+ * segment and `activeOrganizationId` the one resolution each caller already
+ * made, so authorization and scope read one value.
+ */
+function metaSaveVerdictOf(context: HttpProtocolContext): MetaSaveVerdict {
+    return (canonicalType, activeOrganizationId) => {
+        const ec: any = context.executionContext;
+        return metaWriteCapabilityVerdict({
+            isSystem: ec?.isSystem === true,
+            systemPermissions: ec?.systemPermissions,
+            canonicalType,
+            activeOrganizationId,
+            operation: 'save',
+        });
+    };
+}
 
 /**
  * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
@@ -688,6 +740,93 @@ async function readPendingDraft(
         { metaType: singularType, name, policy: STORED_VERSION_DOOR_POLICY, maskPosture: item.maskPosture },
         item.query, envelope, mayWriteItem,
     );
+}
+
+/**
+ * [#20478] The path THIS request's item read arrived on, as the client sent it
+ * — `/api/v1/meta/app/crm` for `GET /api/v1/meta/app/crm?layers=true` — read
+ * off the request's own URL (`createHonoApp` hands `dispatch()` the raw Fetch
+ * `Request`, whose `url` is absolute; a Node request's is path-only), without
+ * its query and trailing slash. `undefined` when the request carries no URL.
+ *
+ * It is the path the deprecated `?layers=` spelling names its successor under
+ * (`metaItemLayersDeprecationHeaders`). This domain is handed a path with the
+ * host's API prefix stripped, so the request's own URL is the only statement of
+ * where this host serves the item; with none there is no successor this
+ * transport can name, and the flag is answered with `Deprecation` alone.
+ */
+function requestedItemPath(context: HttpProtocolContext): string | undefined {
+    const url = (context.request as { url?: unknown } | undefined)?.url;
+    if (typeof url !== 'string' || url.length === 0) return undefined;
+    try {
+        const path = new URL(url, 'http://dispatcher.invalid').pathname.replace(/\/+$/, '');
+        return path.length > 0 ? path : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** [#20478] A protocol whose `getMetaItemLayered` the caller has PROBED — the handle {@link answerMetaLayered} reads through. */
+type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol, 'getMetaItemLayered'>>;
+
+/**
+ * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
+ * deprecated `?layers=` flag on the item read — through THE layered chain
+ * (`createMetaLayeredAnswer`, the one `RestServer` serves both spellings
+ * through; ⛔ no step lives here) and write its answer on this transport's wire.
+ *
+ * The chain reads the protocol's `getMetaItemLayered` in the caller's VETTED
+ * organization ({@link metaReadOrganizationId}, the partition the plain read
+ * reads) and `?package=` scope, judges every present layer under
+ * `STORED_VERSION_DOOR_POLICY` — whole for a caller this transport's save door
+ * admits ({@link metaSaveVerdictOf}, carried as `mayWriteItem`), pruned as the
+ * plain read prunes it for everyone else (ruling 5856774816) — and projects
+ * every layer through the ADR-0106 mask under the posture resolved before the
+ * read. The dispatcher served neither spelling: the route answered a located
+ * `404 ROUTE_NOT_FOUND`, and the flag answered the PLAIN read's
+ * `{ type, name, item }` with a `200`.
+ *
+ * The answers, in this transport's envelope, with `RestServer`'s status and
+ * code: the layered answer (no `Vary`: it is not translated; `private,
+ * no-store` when an undetermined posture served a schema unmasked);
+ * `absent` → the SAME `deps.error('Not found', 404)` the item read answers for
+ * a name with nothing behind it (ADR-0045 §3); `app-permission` /
+ * `docs-audience` → `403 PERMISSION_DENIED` / `401 UNAUTHENTICATED`;
+ * `mask-fault` → the D6 field-visibility fault; a read or gate input that
+ * could not be read → that fault, `500` for a shapeless one — ⛔ never a layered
+ * view with a layer missing. `headers` (the flag's `Deprecation` and `Link`)
+ * ride EVERY one of those answers.
+ */
+async function answerMetaLayered(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaLayeredProtocol,
+    request: { type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture },
+    headers: Readonly<Record<string, string | undefined>> = {},
+): Promise<HttpDispatcherResult> {
+    const caller = context.executionContext as MetaReadGateCaller | undefined;
+    const mayWriteItem = metaSaveVerdictOf(context)(canonicalMetaUrlType(request.type), metaCallerOrganizationId(caller)).allowed;
+    const sources: MetaLayeredAnswerSources = {
+        ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+        readLayered: (layeredRequest) => protocol.getMetaItemLayered(layeredRequest),
+    };
+    let answer: MetaLayeredAnswer;
+    try {
+        answer = await createMetaLayeredAnswer(sources, request);
+    } catch (e: any) {
+        return withHeaders(deps.errorFromThrown(e, 500), headers);
+    }
+    switch (answer.kind) {
+        case 'serve':
+            return withHeaders(deps.success(answer.layered), { ...headers, 'Cache-Control': answer.cacheControl });
+        case 'mask-fault':
+            return withHeaders(fieldVisibilityFault(deps, answer.object).response!, headers);
+        case 'refuse': {
+            const { refusal } = answer;
+            if (refusal.reason === 'absent') return withHeaders(deps.error('Not found', 404), headers);
+            return withHeaders(deps.error(refusal.message, refusal.status, { code: refusal.code }), headers);
+        }
+    }
 }
 
 /**
@@ -852,6 +991,47 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
     }
 
+    // GET /metadata/:type/:name/layers — the three-layer diagnostic projection
+    // (`code` / `overlay` / `effective`, `GetMetaItemLayeredResponseSchema`) as
+    // its own resource (#5882).
+    //
+    // [#20478] `RestServer` serves this route, and this domain had none: the
+    // path fell to the located `ROUTE_NOT_FOUND` tail below. The whole answer is
+    // `createMetaLayeredAnswer` in `@objectstack/rest` ({@link
+    // answerMetaLayered}), the one `RestServer`'s handler calls. EXACTLY three
+    // segments, like `/published` beside it (#12195). The anonymous gate above
+    // keeps its deny here (`metaReadRouteOf` names no route), as `RestServer`'s
+    // does.
+    if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
+        const type = parts[0];
+        const name = decodeMetaNameSegment(parts[1]);
+        const protocol = await resolveProtocol(deps, _context);
+        // [ADR-0106 D2/D5] Its own schema-serving outlet: the caller's posture,
+        // resolved before the read with the FOLDED type, as `RestServer`'s route
+        // resolves it — and before the capability probe, in the same order.
+        let maskPosture: ObjectSchemaMaskPosture;
+        try {
+            maskPosture = await (await resolveObjectMasker(deps, _context, pluralToSingular(type)))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+        if (!protocol || typeof protocol.getMetaItemLayered !== 'function') {
+            // A dedicated path cannot fall through to the plain read the way the
+            // `?layers=` flag does — `RestServer`'s `501 NOT_IMPLEMENTED`, in this
+            // transport's envelope.
+            return {
+                handled: true,
+                response: deps.error('Layered metadata view not supported by protocol implementation', 501),
+            };
+        }
+        const packageId = query?.package || undefined;
+        return answerMetaLayered(
+            deps, _context, protocol as MetaLayeredProtocol,
+            { type, name, packageId, maskPosture },
+        );
+    }
+
     // GET /metadata/:type/:name/published → get published version
     //
     // [#12195] EXACTLY three segments, and no fold. This used to be
@@ -1000,25 +1180,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = query?.package || undefined;
 
         // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS
-        // transport? The admission of the `PUT` branch below, spelled ONCE:
-        // that branch asks it, and so does the `?state=draft` read's author
-        // exemption (ruling 5856774816, item 1: 「whoever can save it must see
-        // it whole, or a save drops entries silently」), which
-        // `MetaReadGateCaller.mayWriteItem` says must be the transport's own
-        // save-door answer. A second spelling at the read could drift from the
-        // door it stands for. `canonicalType` is the folded segment and
-        // `activeOrganizationId` the one resolution each caller already made,
-        // so authorization and scope read one value.
-        const saveVerdict: MetaSaveVerdict = (canonicalType, activeOrganizationId) => {
-            const ec: any = _context.executionContext;
-            return metaWriteCapabilityVerdict({
-                isSystem: ec?.isSystem === true,
-                systemPermissions: ec?.systemPermissions,
-                canonicalType,
-                activeOrganizationId,
-                operation: 'save',
-            });
-        };
+        // transport? The admission of the `PUT` branch below, spelled ONCE
+        // ({@link metaSaveVerdictOf}): that branch asks it, and so do the read
+        // doors that honour the author exemption — the `?state=draft` read
+        // below and [#20478] the layered view.
+        const saveVerdict: MetaSaveVerdict = metaSaveVerdictOf(_context);
 
         // PUT /metadata/:type/:name (Save)
         //
@@ -1337,6 +1503,28 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
 
         try {
+            // [#5882 · #20478] The DEPRECATED spelling of the layered view,
+            // `?layers=<any non-empty value>` — the parse `RestServer`'s item
+            // read asks (`wantsMetaItemLayers`), answered FIRST, before either
+            // draft switch, as there. Where the protocol has a layered read the
+            // flag is the layered view ({@link answerMetaLayered}, the route's
+            // own answer), with `Deprecation` and a `Link` to the successor on
+            // every answer; where it has none the flag is the plain read, as it
+            // always was on `RestServer`. It answered the plain read's
+            // `{ type, name, item }` here whatever the protocol could do — a
+            // `200` whose `overlay` and `effective` read `undefined`, and an
+            // app pruned for its author where ruling 5856774816 serves it whole.
+            if (wantsMetaItemLayers(query)) {
+                const protocol = await resolveProtocol(deps, _context);
+                if (protocol && typeof protocol.getMetaItemLayered === 'function') {
+                    return await answerMetaLayered(
+                        deps, _context, protocol as MetaLayeredProtocol,
+                        { type, name, packageId, maskPosture },
+                        metaItemLayersDeprecationHeaders(requestedItemPath(_context)),
+                    );
+                }
+            }
+
             if (isDraftRead) {
                 return await readPendingDraft(
                     deps, _context, type, name, packageId, previewDrafts, saveVerdict, { maskPosture, query },
