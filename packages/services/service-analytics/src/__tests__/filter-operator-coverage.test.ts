@@ -54,7 +54,7 @@ const CUBE: Cube = {
     name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
     score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /**

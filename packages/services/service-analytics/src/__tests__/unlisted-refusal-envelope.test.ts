@@ -171,7 +171,7 @@ const joinedCube: Cube = {
   joins: {
     account: { name: 'account' },
   },
-  public: false,
+  public: true,
 };
 
 /** A cube declaring exactly ONE measure — so `revenue` is undeclared on it. */
@@ -181,7 +181,7 @@ const countOnlyCube: Cube = {
   sql: 'crm_opportunity',
   measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
   dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
-  public: false,
+  public: true,
 };
 
 function ctxFor(cube: Cube): StrategyContext {

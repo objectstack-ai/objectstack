@@ -281,7 +281,7 @@ describe('#5520 — the gate: a dimension over a missing field is a 400, not a d
                 industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
                 legacy: { name: 'legacy', label: 'Legacy', type: 'string', sql: 'dropped_column' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated } = makeService({ cubes: [authored] });
 
@@ -350,7 +350,7 @@ describe('#5520 — the dataset face: refused before SQL exists, so nothing can 
             dimensions: {
                 bogus_dim: { name: 'bogus_dim', label: 'x', type: 'string', sql: 'bogus_dim' },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived], native: true });
 
@@ -425,7 +425,7 @@ describe('#5520 — what the gate must NOT do', () => {
             dimensions: {
                 assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated } = makeService({ cubes: [authored] });
 
@@ -457,7 +457,7 @@ describe('#5520 — what the gate must NOT do', () => {
             dimensions: {
                 anything: { name: 'anything', label: 'x', type: 'string', sql: 'anything' },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived] });
 
@@ -478,7 +478,7 @@ describe('#5520 — what the gate must NOT do', () => {
             sql: 'crm_account',
             measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [joined] });
 
@@ -504,7 +504,7 @@ describe('#5520 — what the gate must NOT do', () => {
                     sql: "CASE WHEN annual_revenue > 0 THEN 'yes' ELSE 'no' END",
                 },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [computed] });
 
@@ -536,7 +536,7 @@ describe('#5520 — what the gate must NOT do', () => {
             dimensions: {
                 ghost: { name: 'ghost', label: 'x', type: 'string', sql: 'ghost' },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [external] });
 

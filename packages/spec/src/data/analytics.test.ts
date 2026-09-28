@@ -411,7 +411,7 @@ describe('CubeSchema', () => {
     const cube = CubeSchema.parse(validCube);
 
     expect(cube.name).toBe('orders');
-    expect(cube.public).toBe(false);
+    expect(cube.public).toBe(true);
   });
 
   it('should accept cube with all fields', () => {
@@ -437,10 +437,17 @@ describe('CubeSchema', () => {
     expect(cube.public).toBe(true);
   });
 
+  it('keeps an explicit `public: false` (the hidden cube the analytics API refuses)', () => {
+    expect(CubeSchema.parse({ ...validCube, public: false }).public).toBe(false);
+  });
+
   it('should apply defaults', () => {
     const cube = CubeSchema.parse(validCube);
 
-    expect(cube.public).toBe(false);
+    // Visible by default — the Cube.dev default. `service-analytics` hides a
+    // cube only on an explicit `public: false` (cube-visibility.ts), so a
+    // `false` default would hide every cube that omits the key.
+    expect(cube.public).toBe(true);
     expect(cube.title).toBeUndefined();
     expect(cube.joins).toBeUndefined();
     expect(cube.refreshKey).toBeUndefined();

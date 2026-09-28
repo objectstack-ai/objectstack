@@ -22,6 +22,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Transitive dependencies
 
 - `node_modules/@objectstack/spec/src/automation/control-flow.zod.ts` — Structured control-flow constructs (ADR-0031) — the **native + AI-authored**
+- `node_modules/@objectstack/spec/src/automation/schemaless-node-config.zod.ts` — Config contracts for the **descriptor-schemaless** builtins whose designer
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema

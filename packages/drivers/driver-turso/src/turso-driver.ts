@@ -646,6 +646,71 @@ function refuseRemoteInheritedMember(
   throw err;
 }
 
+// ── Federated objects on the remote face ─────────────────────────────────────
+
+/**
+ * [#20107] The refusal for a federated object whose `external.columnMap`
+ * renames a column, on any REMOTE data door.
+ *
+ * # Why the table is answered and the column map is refused
+ *
+ * The two halves of an ADR-0015 binding reach the local face through one
+ * registration, `SqlDriver.registerExternalObject`, and are read there in two
+ * different places. The TABLE (`external.remoteName`) is read wherever a
+ * statement is built, which on this face is one argument per data door:
+ * {@link TursoDriver.remoteTableFor} hands it to `RemoteTransport`, and every
+ * door now answers from the mapped table. The COLUMN map is read inside the
+ * local compiler itself. `SqlDriver` translates each WHERE and ORDER BY key and
+ * each write key to the remote column, and keeps the type coercion keyed by the
+ * local field. `RemoteTransport` compiles its own WHERE, projection, ORDER BY,
+ * aggregate and write statements and addresses every column by field name. So
+ * this face could reach the right table and still name columns it does not
+ * have. Measured on the remote face with the table resolved and the map
+ * ignored, a filter on a renamed field answered an empty list: the transport
+ * reads the backend's `no such column` as "no rows". A write failed with the
+ * backend's own error.
+ *
+ * Translating the map here would be a second copy of the local compiler's
+ * column rule inside the transport's compiler. That is the second
+ * implementation ADR-0053 D-A1 exists to prevent, so it is not written. Until
+ * it is, the object is refused before any statement is built. An empty answer
+ * that is really a missing column is the shape a caller cannot see.
+ *
+ * # Only a map that renames something
+ *
+ * An entry whose remote column equals its local field is a no-op on the local
+ * face as well: `formatOutput` skips it and the column resolver answers the
+ * same name. Refusing it would refuse a binding this face serves correctly, so
+ * it is not refused.
+ *
+ * # Why NOT_IMPLEMENTED / 501
+ *
+ * The binding is spelled correctly, `@objectstack/spec` declares it, and the
+ * local and embedded-replica faces of this driver honour it. The gap is this
+ * transport's, which is the class this file answers with 501 everywhere else
+ * ({@link refuseRemoteInheritedMember}). `NOT_IMPLEMENTED` is a
+ * {@link StandardErrorCode} member, so there is no new code.
+ */
+function refuseRemoteColumnMap(object: string, door: string, renamed: string[]): never {
+  const err = new Error(
+    `\`${door}()\` on object "${object}" is not supported by the Turso REMOTE transport (this ` +
+    `datasource's transport mode is \`remote\`): the object's \`external.columnMap\` renames ` +
+    `field(s) [${renamed.join(', ')}] to other remote columns, and this transport does not ` +
+    'translate that map. It builds its own statements and addresses every column by the field ' +
+    'name, so a filter on a renamed field would read a column the remote table does not have, ' +
+    'and a write would name one. Nothing was read or written. The object\'s remote table ' +
+    '(`external.remoteName`) is honoured on this face; only the column translation is missing. ' +
+    'The binding is spelled correctly and the local and embedded-replica faces of this driver ' +
+    'translate it, so this is a capability gap of the remote transport rather than a mistake in ' +
+    'the request, which is why it answers NOT_IMPLEMENTED/501 and not a 400. Use the local or ' +
+    'embedded-replica transport for an object whose remote columns are renamed, or name the ' +
+    'fields after the remote columns and drop the renaming entries.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 /** The sentence the Knex-bound refusals below share. */
 const REMOTE_HAS_NO_KNEX_CONNECTION =
   'Remote mode builds the SQL driver\'s Knex with no connection and sends every statement to the ' +
@@ -723,7 +788,8 @@ export const REMOTE_FACE_ANSWERS = {
   supportsRotation: 'remote',
   rotateShards: 'refused',
   // In-memory bookkeeping with no Knex; the remote schema doors call it
-  // themselves (`registerRemoteFieldMetadata`).
+  // themselves (`registerRemoteFieldMetadata`). Every remote data door reads
+  // the table it records (`remoteTableFor`), as `getBuilder` does locally.
   registerExternalObject: 'inherited',
   // In-memory bookkeeping with no Knex, by its own contract (`skipSchemaSync`).
   registerObjectMetadata: 'inherited',
@@ -1764,7 +1830,11 @@ export class TursoDriver extends SqlDriver {
   // `turso-driver-doors-declared-types.test.ts`.
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'find');
-    if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'find');
+      const remoteQuery = this.toRemoteReadQuery(object, query);
+      return this.formatRemoteRows(object, await this.remoteReadExit(object, () => this.remoteTransport!.find(object, remoteQuery, table)));
+    }
     return super.find(object, query, options);
   }
 
@@ -1776,7 +1846,11 @@ export class TursoDriver extends SqlDriver {
   // re-erasing the door, which no driver-sql fix reaches.
   override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.assertRemoteTransactionUnsupported(options, 'findOne');
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'findOne');
+      const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true });
+      return this.formatRemoteRow(object, await this.remoteReadExit(object, () => this.remoteTransport!.findOne(object, remoteQuery, table)));
+    }
     return super.findOne(object, query, options);
   }
 
@@ -1829,6 +1903,93 @@ export class TursoDriver extends SqlDriver {
       `\`options.transaction\` on \`${door}()\``,
       'A transaction handle was supplied for this operation and the remote face silently dropped it.',
     );
+  }
+
+  /**
+   * [#20107] The table a REMOTE statement for `object` is compiled against: the
+   * answer {@link SqlDriver.getBuilder} gives the local face, read from the same
+   * registry, `physicalTableByObject`.
+   *
+   * # The defect this closes
+   *
+   * `registerExternalObject` records a federated object's remote table
+   * (`external.remoteName`, ADR-0015), and on the local face `getBuilder`
+   * reads that record for every statement. This face inherits the registration
+   * (`REMOTE_FACE_ANSWERS.registerExternalObject`), and every remote data door
+   * handed `RemoteTransport` the object name, which the transport used as the
+   * table. So the registration was recorded and never read here. Measured on a
+   * remote face over a libSQL `file:` client with `ext_t` registered to
+   * `probe_t`, at the base of this change: `find`, `findOne`, `count` and every
+   * write door failed with a bare `LibsqlError`, `SQLITE_ERROR: no such table:
+   * ext_t` (no `status`); `aggregate` answered `[]`; `distinct` answered
+   * `DATABASE_ERROR`/500. A local control over the same file answered all of
+   * them from `probe_t`.
+   *
+   * The `IDataDriver` contract says what carrying `registerExternalObject`
+   * promises: the driver records the physical remote table "so queries resolve
+   * to the remote table". ADR-0015 says `remoteName` "is honoured on all
+   * dialects". This face carries the member, so it delivers what the member
+   * promises.
+   *
+   * # One lookup, not a copy
+   *
+   * The registry is `SqlDriver`'s and stays there: this reads it, and does not
+   * move it or restate it. A managed object misses the map, or maps to itself
+   * (`registerRemoteFieldMetadata` registers it under its own name), so it
+   * resolves to its own name, and its statement is the one this face built
+   * before. `physicalSchemaByObject` needs no reading here: the base
+   * registration never fills it on a SQLite dialect, where it warns that the
+   * qualifier is ignored, on both faces alike.
+   *
+   * # A column map that renames is refused here, before any statement
+   *
+   * See {@link refuseRemoteColumnMap}. Every remote data door calls this first,
+   * so a refused call sends nothing.
+   */
+  private remoteTableFor(object: string, door: string): string {
+    const columnFields = this.columnFieldByObject[object];
+    if (columnFields) {
+      const renamed = Object.entries(columnFields)
+        .filter(([remoteColumn, field]) => remoteColumn !== field)
+        .map(([, field]) => field);
+      if (renamed.length > 0) refuseRemoteColumnMap(object, door, renamed);
+    }
+    return this.physicalTableByObject[object] ?? object;
+  }
+
+  /**
+   * [#20107] The terminal of the remote `find`, `findOne` and `count` exits:
+   * the local face's own read-exit envelope, {@link SqlDriver.backendStatementFault}.
+   *
+   * On the local face every typed read exit ends there (#8931), so a statement
+   * the backend refuses leaves the driver as `DATABASE_ERROR` / 500. The
+   * dialect text stays in the server log, the dialect error rides under a
+   * non-enumerable `cause`, and the table the statement targeted is declared
+   * for `isMissingTableError`. These three remote exits had no terminal: the
+   * libSQL client's error came back whole, a `LibsqlError` with an
+   * `SQLITE_ERROR` code and no `status`. That is what a federated object's
+   * reads raised here, and what a remote table that really is absent still
+   * raises once the table is resolved.
+   *
+   * The same method is called, not a copy. It resolves the targeted table the
+   * way {@link remoteTableFor} does, from the same registry, so the declared
+   * table is the one this face's statement named. It returns anything that
+   * already declares a `status` unchanged: the transport's filter refusals and
+   * the remote timeout envelope keep their own answers. `distinct` already
+   * reaches the same terminal through `distinctBackendFault`. `aggregate` is
+   * not wrapped, because nothing would reach a wrapper: the transport's own
+   * catch answers a missing table or column with `[]`, where the local face
+   * answers this envelope. That divergence predates this change and is not
+   * widened by it. The write doors are left alone exactly as the local face
+   * leaves them, because a write fault is classified at the REST boundary from
+   * its message.
+   */
+  private async remoteReadExit<T>(object: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      throw this.backendStatementFault(object, error);
+    }
   }
 
   /**
@@ -1948,8 +2109,9 @@ export class TursoDriver extends SqlDriver {
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     this.assertRemoteTransactionUnsupported(options, 'create');
     if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'create');
       this.refuseUngeneratableRemoteAutonumber(object, [data], 'create');
-      return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
+      return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data), table));
     }
     return super.create(object, data, options);
   }
@@ -1961,7 +2123,10 @@ export class TursoDriver extends SqlDriver {
   // place this package's own `.d.ts` re-erased the door.
   override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.assertRemoteTransactionUnsupported(options, 'update');
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'update');
+      return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data), table));
+    }
     return super.update(object, id, data, options);
   }
 
@@ -1976,6 +2141,7 @@ export class TursoDriver extends SqlDriver {
   override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     this.assertRemoteTransactionUnsupported(options, 'upsert');
     if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'upsert');
       // [#6944] An upsert is insert-OR-merge, and only the merge leg is safe
       // here: `RemoteTransport.upsert` emits
       // `INSERT … ON CONFLICT(<keys>) DO UPDATE`, so a row that matches keeps
@@ -2000,7 +2166,7 @@ export class TursoDriver extends SqlDriver {
       const mayMerge = data?.id !== undefined || data?._id !== undefined
         || (Array.isArray(conflictKeys) && conflictKeys.length > 0);
       if (!mayMerge) this.refuseUngeneratableRemoteAutonumber(object, [data], 'upsert');
-      const row = this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+      const row = this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys, table));
       // Judged on the row the CALLER receives, after read-coercion — reporting
       // a different value than the one handed out would be its own defect. The
       // `!mayMerge` leg reaches this too and is a no-op there by construction:
@@ -2014,13 +2180,17 @@ export class TursoDriver extends SqlDriver {
 
   override async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
     this.assertRemoteTransactionUnsupported(options, 'delete');
-    if (this.isRemote) return this.remoteTransport!.delete(object, id);
+    if (this.isRemote) return this.remoteTransport!.delete(object, id, this.remoteTableFor(object, 'delete'));
     return super.delete(object, id, options);
   }
 
   override async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'count');
-    if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'count');
+      const remoteQuery = this.toRemoteQuery(object, query);
+      return this.remoteReadExit(object, () => this.remoteTransport!.count(object, remoteQuery, table));
+    }
     return super.count(object, query, options);
   }
 
@@ -2048,7 +2218,10 @@ export class TursoDriver extends SqlDriver {
     options?: DriverOptions,
   ): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
-    if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'aggregate');
+      return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table);
+    }
     return super.aggregate(object, query, options);
   }
 
@@ -2102,9 +2275,10 @@ export class TursoDriver extends SqlDriver {
    * runs on libsql (SQLite), and the base config is `better-sqlite3`, so every
    * dialect branch inside it resolves the way local mode's does.
    *
-   * The write-column map is deliberately NOT applied: a managed object is its
-   * own physical table here (see `registerRemoteFieldMetadata`), so the mapping
-   * is a no-op, and the transport addresses columns by object-field name.
+   * The write-column map is deliberately NOT applied: a managed object has
+   * none (see `registerRemoteFieldMetadata`), the transport addresses columns
+   * by object-field name, and a federated object whose `external.columnMap`
+   * renames a column is refused before this runs ({@link remoteTableFor}).
    */
   private toRemoteWriteForms<T>(object: string, data: T): T {
     if (!data || typeof data !== 'object') return data;
@@ -2335,8 +2509,8 @@ export class TursoDriver extends SqlDriver {
    * `formatOutput()` had nothing to coerce. Reuse the base `registerExternalObject`,
    * whose sole documented job is exactly this — it classifies fields with the
    * canonical logic, so the two can never drift. A managed object is its own
-   * physical table, so the default `remoteName === name` mapping is a no-op for
-   * the RemoteTransport SQL (which addresses tables by object name directly).
+   * physical table, so the default `remoteName === name` mapping it records is
+   * what {@link remoteTableFor} then reads back for the object: its own name.
    *
    * It also records the object as one whose table this driver created, which is
    * the whole input to {@link paginationTieBreaker} in remote mode. That goes
@@ -2581,6 +2755,7 @@ export class TursoDriver extends SqlDriver {
   override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'bulkCreate');
     if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'bulkCreate');
       // [#6944] Same refusal as `create`, and it has to be stated here rather
       // than inherited: `RemoteTransport.bulkCreate` loops its OWN `create`, not
       // this class's, so nothing about the single-row override reaches this
@@ -2589,7 +2764,7 @@ export class TursoDriver extends SqlDriver {
       // not a state this can leave behind.
       this.refuseUngeneratableRemoteAutonumber(object, Array.isArray(data) ? data : [], 'bulkCreate');
       const formatted = Array.isArray(data) ? data.map((d) => this.toRemoteWriteForms(object, d)) : data;
-      return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted));
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted, table));
     }
     return super.bulkCreate(object, data, options);
   }
@@ -2605,31 +2780,36 @@ export class TursoDriver extends SqlDriver {
   override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'bulkUpdate');
     if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'bulkUpdate');
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
         : updates;
-      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted));
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted, table));
     }
     return super.bulkUpdate(object, updates, options);
   }
 
   override async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'bulkDelete');
-    if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids);
+    if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids, this.remoteTableFor(object, 'bulkDelete'));
     return super.bulkDelete(object, ids, options);
   }
 
   override async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'updateMany');
     if (this.isRemote) {
-      return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
+      const table = this.remoteTableFor(object, 'updateMany');
+      return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data), table);
     }
     return super.updateMany(object, query, data, options);
   }
 
   override async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     this.assertRemoteTransactionUnsupported(options, 'deleteMany');
-    if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'deleteMany');
+      return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query), table);
+    }
     return super.deleteMany(object, query, options);
   }
 
@@ -2928,7 +3108,8 @@ export class TursoDriver extends SqlDriver {
       );
     }
     // Compiled outside the classifier, so a filter refusal keeps its envelope.
-    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters));
+    const table = this.remoteTableFor(object, 'distinct');
+    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters), table);
     let rows: unknown;
     try {
       rows = await this.remoteTransport!.execute(sql, args);
