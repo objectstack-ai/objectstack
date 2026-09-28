@@ -21,5 +21,7 @@ component without a binding.
 Effect on `os validate`, `os lint` and `os build`: a document that sets both a
 `dataSource` binding and a wrong-typed `properties.object` now gets one
 `component-props-invalid` warning it did not get before. The rule stays
-advisory, so nothing that validated before is refused. A component that binds
+advisory: without `--strict` nothing that validated before is refused; under
+`os validate --strict` or `os lint --strict` the new warning fails the run, as
+every warning does. A component that binds
 through `dataSource` and omits `properties.object` is still clean.
