@@ -37,6 +37,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -161,7 +162,10 @@ beforeAll(() => {
   const make = (label: string, s: Record<string, unknown>) => {
     const dir = join(root, label);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'objectstack.config.ts'), `export default ${JSON.stringify(s, null, 2)};\n`);
+    // A `defineStack` config (#20367 ruling B: `os build` refuses any other
+    // default export), spec linked in — the `validate-view-container-name` twin.
+    writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSource(s));
+    linkSpec(dir);
     dirs[label] = dir;
   };
   make('divergent-json', stack('order_line'));
