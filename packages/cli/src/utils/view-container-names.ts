@@ -8,8 +8,8 @@
  *
  * A `views:` container whose own `name` disagrees with the object key it binds
  * to — `{ name: 'order_line', object: 'my_app_order_line', list: {…} }` — is
- * refused at boot by `ObjectQL.registerMetadataCollections` (#14666, #7378 row
- * 1). `os validate` had no counterpart, so it exited 0 on that stack and
+ * refused at boot by `ObjectQL.registerMetadataCollections` (#7378 row 1).
+ * `os validate` had no counterpart, so it exited 0 on that stack and
  * `os serve` then refused it. `os validate` is the author-time judge of what
  * the runtime will accept (NORTH-STAR road step ①), and a green validate
  * followed by a boot refusal is the silent-validator shape.

@@ -359,9 +359,9 @@ export default class Validate extends Command {
             valid: false,
             errors: containerNameRefusals,
             // [#12047] Every exit carries the lists the run has computed so
-            // far — here the pre-parse ones only.
+            // far — here the pre-parse ones only, and the conversion notices
+            // `normalizeStackInput` filled at step 2.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });

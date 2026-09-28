@@ -11,8 +11,8 @@
  * `engine.ts`). A container whose own `name` is set and differs from that
  * derived key is refused: resolving the disagreement silently in either
  * direction files the item under a key the author never wrote (#7378 row 1).
- * The boot loop adopted the refusal under the #14666 ruling (maintainer,
- * 2026-09-03, direction 2), converging onto the artifact/HMR loader, which
+ * The boot loop adopted the refusal under the maintainer ruling of
+ * 2026-09-03 (direction 2), converging onto the artifact/HMR loader, which
  * already refused the same document.
  *
  * ## Why this is a module and not a block inside `registerMetadataCollections`
@@ -51,7 +51,7 @@
  */
 
 import { isAggregatedViewContainer } from '@objectstack/spec';
-// The LEAF subpath, for the reason `engine.ts` states at its own import (#14680).
+// The LEAF subpath, for the reason `engine.ts` states at its own import.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 
 /** The refusal, in the ADR-0112 envelope the boot registrar throws it in. */
