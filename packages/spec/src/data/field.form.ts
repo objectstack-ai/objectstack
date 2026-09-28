@@ -271,7 +271,7 @@ export const fieldForm = defineForm({
           field: 'inlineColumns',
           type: 'repeater',
           visibleWhen: "data.type == 'master_detail'",
-          helpText: 'Columns of the inline grid on the parent\'s form, in display order; read only when this field sets inlineEdit, which is written in source. Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
+          helpText: 'Columns of the inline grid on the parent\'s form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
           fields: [
             { field: 'name', label: 'Name', type: 'text', required: true, helpText: 'Field of this (the child) object that the column shows and edits (e.g. quantity). Nothing checks it when you save or publish: a name that is not a field of this object renders a plain text column.' },
             { field: 'label', label: 'Label', type: 'text', helpText: 'Column header. Unset: the field\'s own label.' },

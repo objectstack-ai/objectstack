@@ -608,7 +608,7 @@ export const objectForm = defineForm({
         {
           field: 'publicSharing',
           type: 'composite',
-          helpText: 'Share-link policy: whether records of this object can be published through a link that anyone holding it opens, and on what terms. Separate from sharingModel, which shares with named users and teams. Unset or off: no link can be created.',
+          helpText: 'Share-link policy: whether records of this object can be published through a link that anyone holding it opens, and on what terms. Separate from sharingModel, which shares with named users and teams. Unset or off: no link can be created, and none opens.',
           fields: [
             { field: 'enabled', label: 'Enabled', type: 'boolean', helpText: 'Allow share links for this object\'s records. Checked on every redemption: switching it off stops every existing link from opening, and switching it back on serves them again. Off (the default): nothing else here applies.' },
             { field: 'allowedAudiences', label: 'Allowed Audiences', widget: 'multiselect', helpText: 'Audiences a new link may name; any other is refused. Unset: link only. Every audience still needs the link itself: signed in also needs a signed-in user, and email also needs the recipient\'s address on the link\'s list.', options: [
