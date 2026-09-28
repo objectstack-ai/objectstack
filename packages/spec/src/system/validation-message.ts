@@ -90,6 +90,11 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}} must be ≥ {{min}}',
     max_value: '{{label}} must be ≤ {{max}}',
     max_scale: '{{label}} must have at most {{scale}} decimal places (got {{actual}})',
+    // `max_precision` (#19992): two sentences, one wire code. The plain one when
+    // the count is the value's own digits; `_scaled` when the field's scale
+    // padded it, so `1234.5` at `scale: 2` reads as the 6 digits of `1234.50`.
+    max_precision: '{{label}} must have at most {{precision}} digits in total (got {{actual}})',
+    max_precision_scaled: '{{label}} must have at most {{precision}} digits in total, counting {{scale}} decimal places (got {{actual}})',
     invalid_email: '{{label}} must be a valid email address',
     invalid_url: '{{label}} must be a valid URL (scheme://...)',
     invalid_phone: '{{label}} must be a valid phone number',
@@ -134,6 +139,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}}必须大于或等于 {{min}}',
     max_value: '{{label}}必须小于或等于 {{max}}',
     max_scale: '{{label}}的小数位数不能超过 {{scale}} 位(当前 {{actual}} 位)',
+    max_precision: '{{label}}的总位数不能超过 {{precision}} 位(当前 {{actual}} 位)',
+    max_precision_scaled: '{{label}}的总位数不能超过 {{precision}} 位(按 {{scale}} 位小数计,当前 {{actual}} 位)',
     invalid_email: '{{label}}必须是有效的电子邮件地址',
     invalid_url: '{{label}}必须是有效的 URL(scheme://...)',
     invalid_phone: '{{label}}必须是有效的电话号码',
@@ -171,6 +178,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}}は {{min}} 以上で入力してください',
     max_value: '{{label}}は {{max}} 以下で入力してください',
     max_scale: '{{label}}の小数点以下は {{scale}} 桁以内で入力してください(現在 {{actual}} 桁)',
+    max_precision: '{{label}}は合計 {{precision}} 桁以内で入力してください(現在 {{actual}} 桁)',
+    max_precision_scaled: '{{label}}は小数点以下 {{scale}} 桁を含めて合計 {{precision}} 桁以内で入力してください(現在 {{actual}} 桁)',
     invalid_email: '{{label}}は有効なメールアドレスを入力してください',
     invalid_url: '{{label}}は有効な URL(scheme://...)を入力してください',
     invalid_phone: '{{label}}は有効な電話番号を入力してください',
@@ -208,6 +217,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     min_value: '{{label}} debe ser mayor o igual que {{min}}',
     max_value: '{{label}} debe ser menor o igual que {{max}}',
     max_scale: '{{label}} no debe superar {{scale}} decimales (actual: {{actual}})',
+    max_precision: '{{label}} no debe superar {{precision}} dígitos en total (actual: {{actual}})',
+    max_precision_scaled: '{{label}} no debe superar {{precision}} dígitos en total, contando {{scale}} decimales (actual: {{actual}})',
     invalid_email: '{{label}} debe ser una dirección de correo electrónico válida',
     invalid_url: '{{label}} debe ser una URL válida (scheme://...)',
     invalid_phone: '{{label}} debe ser un número de teléfono válido',

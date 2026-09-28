@@ -1234,7 +1234,15 @@ export const FieldSchema = lazySchema(() => {
   // (#19992) and its `decimals` / `scale` spellings are refused with the same
   // prescription — see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE. Do not
   // conflate this total-digit count with a currency's decimal places.
-  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
+  // #19992 (triage ENFORCE on the #18900 ④ criterion, SQL DECIMAL(p, s) /
+  // Salesforce Length + Decimal Places) — the count is ENFORCED at the
+  // write seam: `packages/objectql`'s record validator refuses a value whose
+  // digit count exceeds it (`max_precision`), after the `max_scale` branch and
+  // on the same stored-value basis. ⛔ Not a column size: every numeric column
+  // stays the fixed exact decimal of NUMERIC_COLUMN_REPRESENTATION. The
+  // describe states the counting rule because the field reference page is
+  // generated from it, and that page is what an author reads.
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its ISO 4217 minor unit) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
   // #18972 — and an UPPER bound, for the same declared=enforced reason one
   // axis over: `scale` is unrenderable above 100 at every consumer, so a
   // larger declaration could only ever crash a reader. See

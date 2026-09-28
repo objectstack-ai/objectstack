@@ -85,8 +85,13 @@ function flowWithHandler(name: string, node: Record<string, unknown>) {
  * inventory classifies, so those rows register the node WHOLE and remove the
  * key from the stored flow before the run: the shape an executor meets when a
  * config reaches it past the doors.
+ *
+ * `stripBlock` (#20418): the same move for a node whose contract is a SIBLING
+ * block rather than `config` — a `connector_action` with no `connectorConfig`
+ * is refused at the build doors too, so its row registers the block whole and
+ * removes it from the stored node before the run.
  */
-const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string; strip?: string }> = [
+const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string; strip?: string; stripBlock?: string }> = [
     // Since #4277 a missing REQUIRED key is refused by the executor's contract
     // parse (parse-config.ts) before the hand-written guard runs, so those
     // entries pin the parse refusal's fragment. The classification is the
@@ -168,7 +173,8 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
     {
         name: 'connector_action without connectorId/actionId',
         why: 'required config keys',
-        node: { type: 'connector_action', config: {} },
+        node: { type: 'connector_action', connectorConfig: { connectorId: 'crm', actionId: 'push' } },
+        stripBlock: 'connectorConfig',
         expect: 'are required',
     },
     {
@@ -208,7 +214,7 @@ describe('#3863 — the guard inventory stays un-routable', () => {
 
     it.each(GUARDS.map((g, i) => ({ ...g, i })))(
         '$name stays fatal with a fault edge ($why)',
-        async ({ node, expect: fragment, i, strip }) => {
+        async ({ node, expect: fragment, i, strip, stripBlock }) => {
         let handlerRan = false;
         engine.registerNodeExecutor({
             type: 'script',
@@ -220,6 +226,7 @@ describe('#3863 — the guard inventory stays un-routable', () => {
         const flowName = `guard_case_${i}`;
         const stored = engine.registerFlow(flowName, flowWithHandler(flowName, node) as any);
         if (strip) delete (stored.nodes.find((n) => n.id === 'op')!.config as Record<string, unknown>)[strip];
+        if (stripBlock) delete (stored.nodes.find((n) => n.id === 'op') as unknown as Record<string, unknown>)[stripBlock];
 
         const result = await engine.execute(flowName, { record: { id: 'r1', owner: 'usr_7' } } as any);
 

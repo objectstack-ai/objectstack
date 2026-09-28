@@ -734,12 +734,21 @@ export class DevPlugin implements Plugin {
       // NOTE: @objectstack/studio is intentionally NOT default-loaded — the
       // console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>,
       // so Studio no longer needs to exist as a navigable app tile.
+      //
+      // [#20376] Each entry carries its own LITERAL `import('…')`, as every
+      // other declared-dependency load in this method does. A variable
+      // specifier (`import(spec[0])`) cannot be resolved when this file is
+      // transformed: under vitest every call became a round trip to the main
+      // process — two per `init()`, measured, mocked packages included —
+      // inside every clocked test window that boots this plugin. Both packages
+      // are declared dependencies, and the absent-package path below is
+      // unchanged. `dev-plugin-literal-imports.pin.test.ts` pins the form.
       for (const spec of [
-        ['@objectstack/setup', 'createSetupAppPlugin'],
-        ['@objectstack/account', 'createAccountAppPlugin'],
+        ['@objectstack/setup', 'createSetupAppPlugin', () => import('@objectstack/setup')],
+        ['@objectstack/account', 'createAccountAppPlugin', () => import('@objectstack/account')],
       ] as const) {
         try {
-          const mod: any = await import(/* @vite-ignore */ spec[0]);
+          const mod: any = await spec[2]();
           this.childPlugins.push(mod[spec[1]]());
           ctx.logger.info(`  ✔ App package enabled (${spec[0]})`);
         } catch (err) {
