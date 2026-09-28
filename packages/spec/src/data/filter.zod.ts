@@ -22,6 +22,10 @@ import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './da
 // rather than restated so the `$` dialect and the view vocabulary judge one set.
 import { isRefusedTextComparand, textComparandRefusalReason } from './filter-text-comparand';
 import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinement-projection';
+// [#20311] The value-contract sets the `$empty` expansion reads. Read only
+// inside `expandEmptyOperator`'s body, never at module scope: this module and
+// `field-value.zod` meet in the `field.zod` import cycle.
+import { STRING_VALUE_TYPES, isMultiValueField, type ValueShapeFieldDef } from './field-value.zod';
 
 /**
  * Unified Query DSL Specification
@@ -1537,7 +1541,39 @@ const EXISTS_PREDICATE_DESCRIPTION =
   + '`{ $eq: null }` (false) on MongoDB.';
 
 /**
- * Special check operators for null and existence.
+ * [#20311] The `describe()` `$empty` carries in both copies — and it IS the
+ * operator's meaning, not a gloss on it.
+ *
+ * Ruling B on #20311 (record 5861435168) set what 「is empty」 means once, per
+ * field type; ruling A on #20399 (record 5865693155) spelled it as this
+ * operator, "whose describe IS the per-type table". So this string is the
+ * table, and `filter-empty-operator.test.ts` pins it to the ruled text and
+ * pins each type list it names to the set {@link expandEmptyOperator} reads
+ * (`STRING_VALUE_TYPES`, `MULTI_OPTION_TYPES`, `MULTI_CAPABLE_TYPES` in
+ * `field-value.zod.ts`), so the prose and the function cannot drift apart. The
+ * lists are spelled out rather than joined from those sets because this
+ * module is evaluated inside the `field.zod` ↔ `field-value.zod` import cycle,
+ * where reading a set at module scope is not safe under `OS_EAGER_SCHEMAS=1`.
+ *
+ * The last sentence is load-bearing too: the operator is STAGED (the
+ * maintainer's amendment of ruling A, record 5868169573, 「照 $like 先例分阶段」),
+ * so an author reading this description is told that every executor refuses
+ * it today rather than discovering it as a 400 — see {@link FILTER_OPERATORS}.
+ */
+const EMPTY_PREDICATE_DESCRIPTION =
+  'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
+  + '`false` is its exact complement. What counts as empty: text-like types (text, textarea, '
+  + 'email, url, phone, password, secret, markdown, html, richtext, code, color, signature, '
+  + 'qrcode) = null or \'\' (the empty string); multi-value types (multiselect, checkboxes, '
+  + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
+  + '(the empty list); every other type = null only. A face that holds no field declaration '
+  + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
+  + 'backends and absent from FILTER_OPERATORS, so every query executor refuses it '
+  + '(INVALID_FILTER) until each has its arm; the view operators is_empty / is_not_empty '
+  + 'still lower to $null.';
+
+/**
+ * Special check operators for null, existence and emptiness.
  */
 export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
@@ -1549,7 +1585,106 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
    * `{$ne: null}` / `{$eq: null}` on MongoDB.
    */
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+
+  /**
+   * [#20311] Field IS EMPTY by its declared type — the per-type table
+   * {@link EMPTY_PREDICATE_DESCRIPTION} carries, expanded per field by
+   * {@link expandEmptyOperator}. STAGED: not in {@link FILTER_OPERATORS}.
+   */
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
+
+// ============================================================================
+// 3.6 The `$empty` expansion — ONE definition for every face (#20311)
+// ============================================================================
+
+/**
+ * [#20311] The three rows of the ruled 「is empty」 table (ruling B on #20311,
+ * record 5861435168):
+ *
+ * - `text` — text-like types (`STRING_VALUE_TYPES`): null or `''`;
+ * - `multi_value` — a field whose persisted value is a list
+ *   (`isMultiValueField`: multiselect, checkboxes, tags, or a multi-capable
+ *   type with `multiple: true` — a multi-value lookup is a `lookup` or `user`
+ *   with `multiple: true`): null or `[]`;
+ * - `null_only` — every other type: null only.
+ */
+export type EmptyOperatorArm = 'text' | 'multi_value' | 'null_only';
+
+/**
+ * [#20311] What `$empty: true` matches on one field, stated surface-neutrally:
+ * null (no value) always counts as empty, and the two flags say which of the
+ * two further stored states count too. A compile surface turns this into its
+ * own predicate — `IS NULL OR col = ''` on the SQL family, a JSON-length test
+ * for `emptyList`, a value test on a JS face — and `$empty: false` is the exact
+ * complement of whatever `true` matches.
+ *
+ * ⛔ Deliberately NOT a `FilterCondition`: the multi-value row cannot be
+ * spelled in the lowered vocabulary, because an empty list is refused as an
+ * equality comparand (ruling 乙 on #19757, record 5793368540, unchanged by this
+ * operator). That is why the table lives in an operator each surface expands,
+ * rather than in a lowering that emits fragments.
+ */
+export interface EmptyOperatorExpansion {
+  /** Which row of the ruled table the field takes. */
+  readonly arm: EmptyOperatorArm;
+  /** The empty string `''` counts as empty, beside null. */
+  readonly emptyString: boolean;
+  /** The empty list `[]` counts as empty, beside null. */
+  readonly emptyList: boolean;
+}
+
+/**
+ * [#20311] The three expansions, one frozen object per row, so a surface may
+ * compare by identity or switch on `arm`.
+ */
+export const EMPTY_OPERATOR_ARMS: Readonly<Record<EmptyOperatorArm, EmptyOperatorExpansion>> = Object.freeze({
+  text: Object.freeze({ arm: 'text', emptyString: true, emptyList: false }),
+  multi_value: Object.freeze({ arm: 'multi_value', emptyString: false, emptyList: true }),
+  null_only: Object.freeze({ arm: 'null_only', emptyString: false, emptyList: false }),
+});
+
+/**
+ * [#20311] Expand `$empty` for one field, keyed on its DEFINITION — the type
+ * and `multiple` — because the multi-value row cannot be read off the type
+ * alone: a `lookup` is `null_only` and a `lookup` with `multiple: true` is
+ * `multi_value`. The one function every compile surface calls (ruling A on
+ * #20399, record 5865693155: "each compile surface expands it by the field's
+ * declared type through one spec function"), reading the same sets the value
+ * contract already owns rather than a list of its own.
+ *
+ * The multi-value test runs first. The two sets are disjoint today (no
+ * text-like type is multi-capable), so the order only decides a future
+ * overlap, and it decides it by the stored SHAPE: a field whose value is a
+ * list is emptied to `[]`.
+ */
+export function expandEmptyOperator(field: ValueShapeFieldDef): EmptyOperatorExpansion {
+  if (isMultiValueField(field)) return EMPTY_OPERATOR_ARMS.multi_value;
+  if (STRING_VALUE_TYPES.has(field.type)) return EMPTY_OPERATOR_ARMS.text;
+  return EMPTY_OPERATOR_ARMS.null_only;
+}
+
+/**
+ * [#20311] Is this stored VALUE empty? The value-level half of the same table,
+ * for the JS evaluation faces.
+ *
+ * - With an `expansion` (from {@link expandEmptyOperator}): the declared row —
+ *   null or `undefined` always, `''` only on the `text` row, `[]` only on the
+ *   `multi_value` row.
+ * - Without one: the reading ruling A gives the faces that hold NO field
+ *   declaration (`@objectstack/formula`'s matcher, objectql `having` over
+ *   aggregated rows) — null, `undefined`, `''` and `[]` are all empty. It
+ *   differs from the declared table only on a non-text column holding `''`,
+ *   which is a write-door defect rather than a stored state.
+ *
+ * `$empty: false` is `!isEmptyFilterValue(…)` with the same arguments.
+ */
+export function isEmptyFilterValue(value: unknown, expansion?: EmptyOperatorExpansion): boolean {
+  if (value === null || value === undefined) return true;
+  if (value === '') return expansion === undefined || expansion.emptyString;
+  if (Array.isArray(value) && value.length === 0) return expansion === undefined || expansion.emptyList;
+  return false;
+}
 
 // ============================================================================
 // Combined Field Operators
@@ -1620,6 +1755,11 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // Special
   $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+  // [#20311] Emptiness by the field's declared type — the ruled per-type table
+  // IS the description. STAGED like `$like` (#7536): declared here and in
+  // `SpecialOperatorSchema`, deliberately ABSENT from `FILTER_OPERATORS` until
+  // every face has its arm — see the `$empty` paragraph there.
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -2640,6 +2780,11 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Null / empty predicates — direction comes from the operator NAME, not the
   // (filler) value: the ObjectUI client sends a truthy placeholder value for
   // both `isnull` and `isnotnull`, so keying off `value` would collapse them.
+  // [#20311] The empty pair still lowers to `$null`, on purpose: its ruled
+  // spelling `$empty` is staged out of `FILTER_OPERATORS`, so emitting it here
+  // would turn every stored 「is empty」 into a refusal. The flip card moves
+  // both this branch and `canonicalAstOperator`'s fold once every face answers
+  // `$empty`.
   if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
     return { [field]: { $null: true } } as FilterCondition;
   }
