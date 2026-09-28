@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { FilterConditionSchema } from '../data/filter.zod';
+import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
@@ -280,8 +280,14 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
   columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)').meta({ title: 'Columns' }),
   /** Measure names (from the dataset) to display. Dataset-bound only. */
   values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)').meta({ title: 'Values' }),
-  /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
+  /**
+   * Render-time scope filter, ANDed at query time. Dataset-bound only.
+   * [#20116] Charted through the analytics `where` door, so it is an analytics
+   * carrier: a comparand that door refuses INSIDE a nested relation is refused
+   * on save too — see {@link analyticsCarrierFilter}
+   * (`./analytics-carrier-filter.ts`).
+   */
+  runtimeFilter: analyticsCarrierFilter().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
   /** Result ordering for this block, most significant key first (framework#3916). */
   order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first').meta({ title: 'Order' }),
 }).superRefine(checkReportOrder));
@@ -409,8 +415,12 @@ export const ReportSchema = lazySchema(() => strictObject({
    * `joined` report is refused — see `blocks[].values`.
    */
   values: z.array(z.string()).optional().describe('Measure names to show'),
-  /** Render-time scope filter, ANDed at query time. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter'),
+  /**
+   * Render-time scope filter, ANDed at query time. [#20116] An analytics
+   * carrier, like a block's — see {@link analyticsCarrierFilter}
+   * (`./analytics-carrier-filter.ts`).
+   */
+  runtimeFilter: analyticsCarrierFilter().describe('Render-time scope filter'),
   /**
    * Result ordering — most significant key first (framework#3916).
    *
