@@ -673,8 +673,10 @@ function refuseRemoteInheritedMember(
  * this face could reach the right table and still name columns it does not
  * have. Measured on the remote face with the table resolved and the map
  * ignored, a filter on a renamed field answered an empty list: the transport
- * reads the backend's `no such column` as "no rows". A write failed with the
- * backend's own error.
+ * then read the backend's `no such column` as "no rows". A write failed with the
+ * backend's own error. (Since #20424 that read is refused `INVALID_FILTER` /
+ * 400 instead, which is loud but still wrong for a field the author declared:
+ * the refusal below stays the answer.)
  *
  * Translating the map here would be a second copy of the local compiler's
  * column rule inside the transport's compiler. That is the second
@@ -1918,7 +1920,10 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'find');
       const remoteQuery = this.toRemoteReadQuery(object, query);
-      return this.formatRemoteRows(object, await this.remoteReadExit(object, () => this.remoteTransport!.find(object, remoteQuery, table)));
+      return this.formatRemoteRows(
+        object,
+        await this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.find(object, remoteQuery, table)),
+      );
     }
     return super.find(object, query, options);
   }
@@ -1934,7 +1939,10 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'findOne');
       const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true });
-      return this.formatRemoteRow(object, await this.remoteReadExit(object, () => this.remoteTransport!.findOne(object, remoteQuery, table)));
+      return this.formatRemoteRow(
+        object,
+        await this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.findOne(object, remoteQuery, table)),
+      );
     }
     return super.findOne(object, query, options);
   }
@@ -2061,20 +2069,82 @@ export class TursoDriver extends SqlDriver {
    * table is the one this face's statement named. It returns anything that
    * already declares a `status` unchanged: the transport's filter refusals and
    * the remote timeout envelope keep their own answers. `distinct` already
-   * reaches the same terminal through `distinctBackendFault`. `aggregate` is
-   * not wrapped, because nothing would reach a wrapper: the transport's own
-   * catch answers a missing table or column with `[]`, where the local face
-   * answers this envelope. That divergence predates this change and is not
-   * widened by it. The write doors are left alone exactly as the local face
-   * leaves them, because a write fault is classified at the REST boundary from
-   * its message.
+   * reaches the same terminal through `distinctBackendFault`. The write doors
+   * are left alone exactly as the local face leaves them, because a write
+   * fault is classified at the REST boundary from its message.
+   *
+   * [#20424] `aggregate` now ends here too, and every exit reaches the
+   * terminal through {@link remoteReadFault}, which adds the local face's
+   * unresolvable-column arms in front of it.
    */
-  private async remoteReadExit<T>(object: string, read: () => Promise<T>): Promise<T> {
+  private async remoteReadExit<T>(object: string, query: DriverQuery, read: () => Promise<T>): Promise<T> {
     try {
       return await read();
     } catch (error) {
-      throw this.backendStatementFault(object, error);
+      throw this.remoteReadFault(object, query, error);
     }
+  }
+
+  /**
+   * [#20424] Which envelope a backend error leaving a remote read exit
+   * deserves: the local face's answer, from the local face's own seam.
+   *
+   * # The defect this closes
+   *
+   * `RemoteTransport` answered a missing table or column with `[]` in two
+   * catches: `aggregate` for `no such table` and `no such column`, and the
+   * terminal of `find`'s projection backstop for `no such column`. Measured at
+   * base `6e3e5462c` over one libSQL `file:` database, with a local driver over
+   * the same file as the control, for a federated object and for a managed one
+   * alike:
+   *
+   * ```
+   * aggregate, table really absent                     local DATABASE_ERROR 500  remote []
+   * aggregate, groupBy a declared field, column absent local INVALID_FIELD 400   remote []
+   * find, where names a declared field, column absent  local INVALID_FILTER 400  remote []
+   * findOne, the same where                            local INVALID_FILTER 400  remote null
+   * find, orderBy on that field                        local rows, unordered     remote []
+   * count, the same where                              local INVALID_FILTER 400  remote DATABASE_ERROR 500
+   * ```
+   *
+   * The transport now lets the backend's error out (its `find` keeps the local
+   * ladder's projection and ORDER BY rungs first), and this classifies it.
+   *
+   * # The seam: `SqlDriver.aggregateBackendFault`, called, not copied
+   *
+   * The local face decides AFTER its statement runs, from the backend's error:
+   * `count` and `findRows` send an unresolvable column to
+   * `unresolvableFilterColumnRefusal` (#8790) and everything else to
+   * `backendStatementFault` (#8931); `aggregate` attributes the column to the
+   * clause the caller's own query names it in first (#11541). All three
+   * compositions are protected members this driver inherits. The class
+   * predicate they share, `isUnresolvableColumnError`, is not exported from
+   * `@objectstack/driver-sql`, so `aggregateBackendFault` is the one inherited
+   * member that asks it. For `aggregate` it is the local exit verbatim. For
+   * `find`, `findOne` and `count` it is handed the WHERE alone, and then it is
+   * the local exit too: with no groupBy and no aggregation its first arm cannot
+   * fire, its second is `unresolvableFilterColumnRefusal` with the caller's
+   * `where`, and its terminal is `backendStatementFault`. The one place the two
+   * could differ, a recognised wording whose column name does not parse (the
+   * local `count` still answers `INVALID_FILTER` there, this answers
+   * `DATABASE_ERROR`), cannot arise on libSQL, whose only wording is
+   * `no such column: <name>`.
+   *
+   * # Anything that already declares a `status` passes unchanged
+   *
+   * The local face guards only the statement's EXECUTION, so its classifier
+   * never sees a refusal raised while the statement is built. A remote door
+   * compiles and executes inside one transport call, so the transport's own
+   * refusals (the filter compiler's `INVALID_FILTER`, the aggregate
+   * vocabulary's refusals, the timeout envelope) arrive here beside the
+   * backend's errors. They all declare a `status`; a libSQL error declares
+   * none. So the gate `backendStatementFault` applies first on its own terms
+   * ("is it already ours") is applied here before the classifier reads a
+   * message, and the classifier sees exactly what the local one sees.
+   */
+  private remoteReadFault(object: string, query: DriverQuery, error: unknown): Error {
+    if (typeof (error as { status?: unknown } | null | undefined)?.status === 'number') return error as Error;
+    return this.aggregateBackendFault(object, query, error);
   }
 
   /**
@@ -2274,7 +2344,7 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'count');
       const remoteQuery = this.toRemoteQuery(object, query);
-      return this.remoteReadExit(object, () => this.remoteTransport!.count(object, remoteQuery, table));
+      return this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.count(object, remoteQuery, table));
     }
     return super.count(object, query, options);
   }
@@ -2305,7 +2375,12 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'aggregate');
-      return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table);
+      // [#20424] The caller's own query is what the fault is attributed
+      // against, as `SqlDriver.aggregate` does locally: its groupBy and
+      // aggregation fields, and the `where` before `toRemoteFilter` rewrote it.
+      return this.remoteReadExit(object, query, () =>
+        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table),
+      );
     }
     return super.aggregate(object, query, options);
   }

@@ -72,6 +72,34 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "検索対象項目",
         helpText: "$search クエリが照合する項目名（ADR-0061）。レコードピッカー、一覧のクイック検索、グローバル検索の既定値で、ビューで絞り込めます。未設定の場合は名前／タイトル項目と短いテキスト項目で検索します。各項目はこのオブジェクトの保存済みの項目を指す必要があり、不明な名前や仮想の formula 項目は公開時に拒否されます。"
       },
+      fieldGroups: {
+        label: "フィールドグループ",
+        helpText: "このオブジェクトのフィールドを入力フォームとレコード詳細ページでまとめる、順序付きのセクション（ADR-0085）。配列の順序が表示順です。フィールドは自身の group 設定にグループのキーを指定するとそのグループに加わります。どのグループにも属さないフィールドはグループの後に続き、フィールドが 1 つも属さないグループは表示されません。"
+      },
+      "fieldGroups.key": {
+        label: "キー",
+        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。フィールドはこのキーを指定してグループに加わるため、キーを変更するとそれらのフィールドはどのグループにも属さなくなります。"
+      },
+      "fieldGroups.label": {
+        label: "表示名",
+        helpText: "グループのセクションの見出しテキスト。"
+      },
+      "fieldGroups.icon": {
+        label: "アイコン",
+        helpText: "レコード詳細ページで見出しの横に表示される Lucide アイコン名（例：\"banknote\"）。入力フォームには表示されません。"
+      },
+      "fieldGroups.description": {
+        label: "説明",
+        helpText: "見出しの下に表示されるテキスト。入力フォームとレコード詳細ページに表示されます。"
+      },
+      "fieldGroups.collapse": {
+        label: "折りたたみ",
+        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+      },
+      "fieldGroups.visibleWhen": {
+        label: "表示条件",
+        helpText: "レコードに対する CEL 述語（例：record.type == 'invoice'）。TRUE の間だけ、入力フォームに見出しを含むグループ全体が表示されます。"
+      },
       fields: {
         label: "フィールド",
         helpText: "このオブジェクトが保存する列を追加"
@@ -268,6 +296,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
+      },
+      indexes: {
+        label: "インデックス",
+        helpText: "このオブジェクトのテーブルのデータベースインデックス。SQL ドライバーはテーブルを同期するとき、テーブルにまだないインデックスを作成します。同期でインデックスが削除されることはありません。"
+      },
+      "indexes.name": {
+        label: "名前",
+        helpText: "物理インデックス名。未設定の場合は、テーブル名と列名から生成されます（例：idx_task_status）。"
+      },
+      "indexes.fields": {
+        label: "フィールド",
+        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時にも公開時にも検査されません。保存される列ではない名前があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログに警告を出します。"
+      },
+      "indexes.unique": {
+        label: "一意",
+        helpText: "一意性のスコープ（ADR-0120）。未設定の場合は一意ではありません。非推奨の裸の true（global を意味します）は選択肢にありません。true を持つインデックスは、スコープを選ぶまでその値を保持します。"
       },
       ownership: {
         label: "所有権モデル",

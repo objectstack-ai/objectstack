@@ -210,7 +210,9 @@ describe('#20116 §1 — the enumeration: the save door refuses exactly what the
   it('the table is derived, not hand-listed, and covers every arm the faces and the flag rule judge', () => {
     // The vocabulary is the enforced copy's, so a new operator joins the table.
     expect(OPERATORS).toEqual(expect.arrayContaining(['$eq', '$ne', '$gt', '$in', '$nin', '$between', '$null', '$exists']));
-    expect(BOOLEAN_SLOTS.sort()).toEqual(['$exists', '$null']);
+    // [#20311] `$empty` is declared `z.boolean()` (staged out of FILTER_OPERATORS),
+    // so it joins the flag arm by derivation and the door must hold it to a boolean.
+    expect(BOOLEAN_SLOTS.sort()).toEqual(['$empty', '$exists', '$null']);
     // Every operator the face judges today refuses at least one battery shape —
     // the guard against a battery that silently stopped reaching an arm.
     const faceJudged = OPERATORS.filter((op) => BATTERY.some(([, c]) => faceRefusal({ f: { [op]: c } })));

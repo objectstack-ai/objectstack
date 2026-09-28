@@ -28,7 +28,48 @@ import {
     BOUND_FORM_VIEW_PREDICATE_ROOTS,
     BOUND_FORM_FIELD_PREDICATE_ROOTS,
     type ArtifactForwardConversionResult,
+    type ArtifactForwardConversionVerdict,
 } from '@objectstack/metadata-core';
+
+/**
+ * Which forward-conversion verdicts mean the versioned window OPENED for an
+ * artifact — the one reading both artifact-door notices below take, off the
+ * pass's own verdict rather than a second comparison of their own.
+ *
+ * A total table rather than a guard naming only some verdicts: a verdict added
+ * to `ArtifactForwardConversionVerdict` is a compile error here until someone
+ * decides which side of the window it is on. The guard this replaced named the
+ * open verdicts by hand, and when the per-entry half of the window
+ * (`'converted-retired-after'`) arrived it silently fell on the closed side, so
+ * the #12915 notice depended on the package label again.
+ */
+const FORWARD_WINDOW_OPENED: Readonly<Record<ArtifactForwardConversionVerdict, boolean>> = {
+    'converted-forward': true,
+    'converted-undeclared': true,
+    'converted-retired-after': true,
+    'authored-current': false,
+    'runtime-version-unknown': false,
+    'not-an-object': false,
+};
+
+/**
+ * The clause both artifact-door notices open with: why this artifact's window
+ * opened. Under the per-entry half the floor is NOT below the runtime's
+ * label — `main` enforces retirements its label has not moved past — so
+ * "predates this runtime's spec", printed beside a runtime version equal to
+ * the floor, would read as a contradiction; that verdict says what actually
+ * opened it instead.
+ */
+function artifactWindowClause(result: ArtifactForwardConversionResult<unknown>): string {
+    const floor = result.authoredFloor ?? '<undeclared>';
+    if (result.verdict === 'converted-retired-after') {
+        return `was built on a surface that still accepted shapes this runtime has since retired `
+            + `(authored engines.protocol floor ${floor}, at or below the last release that accepted them; `
+            + `runtime spec ${result.runtimeSpecVersion}, whose label has not moved past that release)`;
+    }
+    return `predates this runtime's spec (authored engines.protocol floor ${floor}, runtime spec `
+        + `${result.runtimeSpecVersion})`;
+}
 
 // `SysMetadataObject` + `SysMetadataHistoryObject` are the customer overlay
 // storage substrate (ADR-0005). They must always be auto-provisioned so
@@ -747,9 +788,12 @@ export class MetadataPlugin implements Plugin {
      * (`applyConversionsToStoredItem`, ADR-0087 addendum); this is the same
      * policy at the artifact door, **keyed off the artifact's own declared
      * `engines.protocol` floor**: an artifact authored below the running spec
-     * version converts forward, an artifact authored at the current (or a
-     * newer) surface converts nothing and answers to the strict parse,
-     * tombstones included. The version key is what keeps this a conversion
+     * version converts forward; one whose floor is not below the runtime's label
+     * but is at or below a retired entry's `retiredAfter` gets exactly those
+     * retirements replayed (`converted-retired-after` — `main` between two
+     * releases); an artifact authored at the current (or a newer) surface
+     * converts nothing and answers to the strict parse, tombstones included.
+     * The version key is what keeps this a conversion
      * rather than an amnesty — the retired keys return with the M2 lifecycle
      * batch (#1883), and artifacts authored against that surface must never
      * have them stripped by history.
@@ -773,17 +817,28 @@ export class MetadataPlugin implements Plugin {
             if (existing) existing.count += 1;
             else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
         }
+        // Under the per-entry half of the window, each replayed entry is named
+        // as what it is — a retirement this runtime enforces past the
+        // artifact's floor — with the release it retired after.
+        const retiredAfter = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
         for (const [conversionId, agg] of byConversion) {
             const key = `${conversionId}|${label}`;
             if (this.artifactConversionWarned.has(key)) continue;
             this.artifactConversionWarned.add(key);
+            const pastFloor = retiredAfter.get(conversionId);
             ctx.logger.warn(
-                `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
-                + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
-                + `${result.runtimeSpecVersion}) — converted ${agg.count} site(s) forward via ADR-0087 `
-                + `conversion '${conversionId}' (first at ${agg.firstPath}). ${agg.message} `
-                + `The artifact file itself is unchanged — rebuild it with current tooling `
-                + `('os build') to persist the canonical shape.`,
+                pastFloor !== undefined
+                    ? `[MetadataPlugin] artifact '${label}' ${artifactWindowClause(result)} — ADR-0087 `
+                        + `conversion '${conversionId}' is a retirement this runtime enforces past the `
+                        + `artifact's floor (the shape was last accepted by @objectstack/spec ${pastFloor}): `
+                        + `converted ${agg.count} site(s) forward (first at ${agg.firstPath}). ${agg.message} `
+                        + `The artifact file itself is unchanged, so it converts again on every boot until `
+                        + `it is rebuilt ('os build') with tooling from a release that ships this retirement.`
+                    : `[MetadataPlugin] artifact '${label}' ${artifactWindowClause(result)} — converted `
+                        + `${agg.count} site(s) forward via ADR-0087 conversion '${conversionId}' `
+                        + `(first at ${agg.firstPath}). ${agg.message} `
+                        + `The artifact file itself is unchanged — rebuild it with current tooling `
+                        + `('os build') to persist the canonical shape.`,
             );
         }
         return result.definition;
@@ -815,19 +870,23 @@ export class MetadataPlugin implements Plugin {
      *
      * **Same versioned window as the conversion replay above** — and read off
      * that pass's own verdict rather than recomputed, so the two can never
-     * disagree about which artifacts are "old". An artifact declaring the
-     * current (or a newer) floor answers to the strict parse and gets nothing
-     * from here even when it does carry bare roots; that boundary is what keeps
-     * a notice about legacy artifacts out of contract territory. An undeclared
-     * range is treated as old data at rest, matching the grandfathering posture
-     * the window already takes (`converted-undeclared`).
+     * disagree about which artifacts are "old": {@link FORWARD_WINDOW_OPENED}
+     * is the one reading, total over the verdicts, so the per-entry half of the
+     * window (`converted-retired-after` — an artifact built by the last release
+     * on a runtime enforcing retirements its label has not moved past) is "old"
+     * here exactly as it is for the replay, whatever the label says. An artifact
+     * declaring the current (or a newer) floor answers to the strict parse and
+     * gets nothing from here even when it does carry bare roots; that boundary
+     * is what keeps a notice about legacy artifacts out of contract territory.
+     * An undeclared range is treated as old data at rest, matching the
+     * grandfathering posture the window already takes (`converted-undeclared`).
      */
     private _warnUnboundFormPredicateRoots(
         ctx: PluginContext,
         result: ArtifactForwardConversionResult<unknown>,
         label: string,
     ): void {
-        if (result.verdict !== 'converted-forward' && result.verdict !== 'converted-undeclared') return;
+        if (!FORWARD_WINDOW_OPENED[result.verdict]) return;
 
         const findings = detectUnboundFormViewPredicateRoots(result.definition);
         if (findings.length === 0) return;
@@ -865,9 +924,8 @@ export class MetadataPlugin implements Plugin {
         ].filter(Boolean).join('; ');
 
         ctx.logger.warn(
-            `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
-            + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
-            + `${result.runtimeSpecVersion}) and carries ${findings.length} form-view predicate(s) whose `
+            `[MetadataPlugin] artifact '${label}' ${artifactWindowClause(result)} `
+            + `and carries ${findings.length} form-view predicate(s) whose `
             + `root identifier is NOT bound where it evaluates — ${quote(roots)} `
             + `(bound roots ${vocabulary}) — across `
             + `${views.length} view(s): ${views.join(', ')} (first at ${findings[0]!.path}). `

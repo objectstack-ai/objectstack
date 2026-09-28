@@ -101,7 +101,7 @@
     "MIGRATION_SUPPORT_FLOOR (const)",
     "MapSupportedField (type)",
     "MetadataCollectionInput (type)",
-    "MetadataConversion (interface)",
+    "MetadataConversion (type)",
     "MigrationApplication (interface)",
     "MigrationChainResult (interface)",
     "MigrationFloorError (class)",
