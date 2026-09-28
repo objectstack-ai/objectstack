@@ -404,6 +404,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'runWideningAlters',
         "The widening ALTER never ran — the MySQL column keeps its legacy zero-precision type (`TIMESTAMP` for a `Field.datetime`, `TIME` for a `Field.time`) while the object stays registered and served, so every subsequent write silently drops the milliseconds the canonical storage form promises are always present: a `TIMESTAMP` truncates them, and a `TIME(0)` ROUNDS a fractional literal, changing the wall clock it was asked to store. Reads come back looking clean because the value that was stored is the value that is returned, and nothing else reports the column is still un-widened (#9609).",
     ],
+    [
+        'applyConfigPatch',
+        "A stored auth setting was never applied — `AuthManager` refused the patch that carried it, so better-auth keeps running on the standing value while the settings console still shows the stored one as saved, and nothing retries it until the next settings change. When one patch carried the whole settings pass, a single refused key dropped every sibling in it (password policy, MFA, rate limits, session lifetime, social providers) behind one `warn` (#20412).",
+    ],
 ]);
 
 /**

@@ -1451,6 +1451,7 @@ export class AuthPlugin implements Plugin {
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
+      const authManager = this.authManager;
       try {
         const payload = await settings.getNamespace('auth');
         const values: Record<string, unknown> = {};
@@ -1477,18 +1478,62 @@ export class AuthPlugin implements Plugin {
           return Number.isFinite(n) && n > 0 ? n : undefined;
         };
 
+        // [#20412] The pass is applied in pieces, split along the lines where
+        // the manager can REFUSE. `applyConfigPatch` validates a patch on entry
+        // wherever it carries a block the manager judges: `emailAndPassword`
+        // (`assertAudienceConfig`, against the standing audience posture) and
+        // `plugins` (`assertScimAdminCoherence`). A key that lands in one of
+        // those blocks is applied ALONE (`refusable`), so a refusal names that
+        // key and takes nothing else with it; every other key rides `patch`,
+        // one application the manager does not validate. When the whole pass
+        // went out as one patch, one refused key dropped password policy, MFA,
+        // rate limits, session lifetime and social providers with it, while
+        // the settings console showed all of them as saved.
+        //
+        // The plugin decides nothing here: the manager's own verdict on each
+        // piece is the verdict, and the piece carries the settings key its
+        // refusal is reported under.
         const patch: Partial<AuthManagerOptions> = {};
-        const emailAndPassword: Partial<NonNullable<AuthConfig['emailAndPassword']>> = {};
+        type ApplyOptions = Parameters<AuthManager['applyConfigPatch']>[1];
+        const refusable: Array<{
+          key: string;
+          patch: Partial<AuthManagerOptions>;
+          options?: ApplyOptions;
+        }> = [];
+        const emailAndPasswordField = (
+          key: string,
+          fields: Partial<NonNullable<AuthConfig['emailAndPassword']>>,
+          options?: ApplyOptions,
+        ): void => {
+          refusable.push({
+            key,
+            patch: { emailAndPassword: fields as AuthManagerOptions['emailAndPassword'] },
+            options,
+          });
+        };
         if (isExplicit('email_password_enabled')) {
-          emailAndPassword.enabled = asBoolean(values.email_password_enabled, true);
+          emailAndPasswordField('email_password_enabled', {
+            enabled: asBoolean(values.email_password_enabled, true),
+          });
         }
         if (isExplicit('signup_enabled')) {
-          emailAndPassword.disableSignUp = !asBoolean(values.signup_enabled, true);
+          emailAndPasswordField('signup_enabled', {
+            disableSignUp: !asBoolean(values.signup_enabled, true),
+          });
         }
         if (isExplicit('require_email_verification')) {
-          emailAndPassword.requireEmailVerification = asBoolean(
-            values.require_email_verification,
-            false,
+          emailAndPasswordField(
+            'require_email_verification',
+            { requireEmailVerification: asBoolean(values.require_email_verification, false) },
+            {
+              // [#20389] An `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override is
+              // the DEPLOYMENT's declaration (the settings service reports it as
+              // source `env`, locked); anything else explicit was stored through
+              // the console. Under posture `open` only the former may turn
+              // verification off — `assertAudienceConfig` owns that verdict.
+              requireEmailVerificationFrom:
+                sources.require_email_verification === 'env' ? 'deployment' : 'console',
+            },
           );
         }
 
@@ -1522,14 +1567,11 @@ export class AuthPlugin implements Plugin {
         // password reset. Ignore malformed/non-positive values (keep the default).
         if (isExplicit('password_min_length')) {
           const n = asPositiveInt(values.password_min_length);
-          if (n !== undefined) emailAndPassword.minPasswordLength = n;
+          if (n !== undefined) emailAndPasswordField('password_min_length', { minPasswordLength: n });
         }
         if (isExplicit('password_max_length')) {
           const n = asPositiveInt(values.password_max_length);
-          if (n !== undefined) emailAndPassword.maxPasswordLength = n;
-        }
-        if (Object.keys(emailAndPassword).length > 0) {
-          patch.emailAndPassword = emailAndPassword as AuthManagerOptions['emailAndPassword'];
+          if (n !== undefined) emailAndPasswordField('password_max_length', { maxPasswordLength: n });
         }
 
         // Breached-password rejection (ADR-0069 D1) — enables better-auth's
@@ -1537,10 +1579,14 @@ export class AuthPlugin implements Plugin {
         // off; only an explicit toggle applies (manifest defaults must not
         // mask the deployment env var). See buildPluginList() for the seam.
         if (isExplicit('password_reject_breached')) {
-          patch.plugins = {
-            ...(patch.plugins ?? {}),
-            passwordRejectBreached: asBoolean(values.password_reject_breached, false),
-          } as AuthManagerOptions['plugins'];
+          refusable.push({
+            key: 'password_reject_breached',
+            patch: {
+              plugins: {
+                passwordRejectBreached: asBoolean(values.password_reject_breached, false),
+              } as AuthManagerOptions['plugins'],
+            },
+          });
         }
 
         // Password complexity (ADR-0069 D1) — custom validator in the before
@@ -1565,15 +1611,18 @@ export class AuthPlugin implements Plugin {
 
         // Enforced MFA (ADR-0069 D3). Enabling it also turns the twoFactor
         // plugin on so the /two-factor/* enrollment endpoints exist — otherwise
-        // gated users would have no way to comply.
+        // gated users would have no way to comply. [#20412] So the enforcement
+        // and the plugin are ONE piece: a refused plugins block leaves MFA at
+        // its standing value too, never enforced without its enrollment path.
         if (isExplicit('mfa_required')) {
           const on = asBoolean(values.mfa_required, false);
-          patch.mfaRequired = on;
           if (on) {
-            patch.plugins = {
-              ...(patch.plugins ?? {}),
-              twoFactor: true,
-            } as AuthManagerOptions['plugins'];
+            refusable.push({
+              key: 'mfa_required',
+              patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+            });
+          } else {
+            patch.mfaRequired = false;
           }
         }
         if (isExplicit('mfa_grace_period_days')) {
@@ -1696,23 +1745,52 @@ export class AuthPlugin implements Plugin {
             : undefined;
         }
 
+        const audienceKeys = [
+          'audience_posture',
+          'audience_allowed_email_domains',
+          'audience_self_registration_permission_set',
+        ];
+
+        // [#20412] Each piece is applied in its own `try`, so a refusal is
+        // contained to the piece it names. `error`, not `warn` (AGENTS.md,
+        // degradation log levels): the settings console shows the refused
+        // value as saved while the runtime keeps the standing one, and nothing
+        // else looks broken afterwards. The manager's message carries the
+        // remedy, as in the audience block below.
+        const applyPiece = (
+          keys: readonly string[],
+          piece: Partial<AuthManagerOptions>,
+          options?: ApplyOptions,
+        ): void => {
+          try {
+            authManager.applyConfigPatch(piece, options);
+          } catch (refusal: any) {
+            const named = keys.map((key) => `auth.${key}`).join(', ');
+            ctx.logger.error(
+              `[auth] auth settings REFUSED (${named}) — the standing runtime value keeps ruling while the settings ` +
+                'console shows the stored value as saved; the other auth settings in this pass still apply. ' +
+                String(refusal?.message ?? refusal),
+            );
+          }
+        };
         if (Object.keys(patch).length > 0) {
-          this.authManager.applyConfigPatch(patch, {
-            // [#20389] An `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override is
-            // the DEPLOYMENT's declaration (the settings service reports it as
-            // source `env`, locked); anything else explicit was stored through
-            // the console. Under posture `open` only the former may turn
-            // verification off — `assertAudienceConfig` owns that verdict.
-            requireEmailVerificationFrom:
-              sources.require_email_verification === 'env' ? 'deployment' : 'console',
-          });
+          const pieceKeys = new Set(refusable.map((piece) => piece.key));
+          applyPiece(
+            Object.keys(values).filter(
+              (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
+            ),
+            patch,
+          );
+        }
+        for (const piece of refusable) {
+          applyPiece([piece.key], piece.patch, piece.options);
         }
 
         // [#11768] Audience posture (#11739) — the console switch for
         // `invite_only | email_domain | open`. The three `audience_*` keys are
         // ONE atomic declaration mapped to ONE `applyConfigPatch({ audience })`
         // (the #11767 contract: the patch replaces the WHOLE audience object
-        // and validates the MERGED result), applied AFTER the main patch so
+        // and validates the MERGED result), applied AFTER the pieces above so
         // that validation judges the audience against the `emailAndPassword`
         // state this same pass just applied — an explicit
         // `require_email_verification: false` beside `email_domain`, or beside
@@ -1738,11 +1816,6 @@ export class AuthPlugin implements Plugin {
         // Missing required siblings are NOT guessed: the patch goes out
         // without them and `applyConfigPatch` refuses the merged result
         // (standing config keeps ruling — refusing to OPEN fails closed).
-        const audienceKeys = [
-          'audience_posture',
-          'audience_allowed_email_domains',
-          'audience_self_registration_permission_set',
-        ];
         if (audienceKeys.some((key) => isExplicit(key))) {
           const rawPosture = values.audience_posture;
           if (!isExplicit('audience_posture')) {
@@ -1797,7 +1870,17 @@ export class AuthPlugin implements Plugin {
           }
         }
       } catch (err: any) {
-        ctx.logger.warn('Auth: failed to apply auth settings: ' + (err?.message ?? err));
+        // [#20412] A refusal no longer reaches here — each piece above
+        // contains its own. What does is a pass that failed as a whole, the
+        // namespace read first among them: the stored auth settings it had not
+        // applied keep their standing runtime values while the console shows
+        // them as saved, so `error`, for the same reason as a refusal.
+        ctx.logger.error(
+          `[auth] auth settings NOT APPLIED — the auth settings pass failed (${String(err?.message ?? err)}), ` +
+            'so the stored auth settings it had not yet applied keep their standing runtime values while the settings ' +
+            'console shows them as saved. The pass re-runs on the next auth settings change: restore the settings ' +
+            'store, then save any auth setting (or restart) to apply them.',
+        );
       }
     };
 
