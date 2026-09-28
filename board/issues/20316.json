@@ -14,18 +14,20 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T20:34:56Z",
-  "updated_at": "2026-09-27T22:16:30Z",
+  "updated_at": "2026-09-28T03:45:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20316",
   "body": "Filing gate: **① a declared≠enforced shape with measured silent misbehaviour**, class **(b)**. `DecisionConditionSchema` declares `label` as `z.string()` (required), but no build door parses a decision branch against it.\n- `reach:` measured by the objectstack#19961 dev on the PR #20315 head, before and independent of that PR's fix:\n  - `objectstack validate --json` answers `valid: true`, exit 0, and `registerFlow` registers, for a decision branch `{ expression: 'true' }` with **no `label`**;\n  - at run time the flow succeeds (`success: true`) but traversal takes **every** out-edge of the decision (steps `start, d, y, x`: both the `isDefault` edge and the labelled one). The matched branch reports `branchLabel` undefined (`packages/services/service-automation/src/builtin/logic-nodes.ts:74`, `return { success: true, branchLabel: cond.label … }`), so no edge is held back. **Silent wrong routing.**\n  - A `conditions` element that is not an object (for example the string `'true'`) also validates and registers. The run then fails at the node with a condition-evaluation error, because the executor reads `.expression` of a string. The expression-path ledger walk does not reach a non-object element.\n- **Named producer** for the missing label: objectui `FlowObjectListField` `rowsToList` at the `.objectui-sha` pin `f8a9d0fb` writes `{ expression }` when the label cell is blank. This is the mirror of #19961's `{ label }` for a blank expression cell.\n\nThe same family as #19961 (the branch shape is never parsed against the node's open config). #19961 closes only the absent-`expression` member, in PR #20315. Found by the `os-dev` round on #19961 (report on #19961, `out_of_scope_findings[0..1]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- The same one-judge, three-door refusal PR #20315 builds, extended to the rest of the declared branch shape: a missing `label` and a non-object element. It must be the same walk; measure whether the ledger walk or a parse against `DecisionConditionSchema` is the smallest correct site.\n- A census of producers with a missing `label`, including objectui's `rowsToList` blank-label write. That becomes a loud save error, as #19961's triage accepted for the blank expression.\n- Serial after PR #20315, which holds `flow-node-expression-paths.ts` and the `FlowSchema` predicate-slot refinement.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `branchLabel|decision branch…label|DecisionConditionSchema…(never parsed|not parsed|open config)|conditions…non-object` finds 2 hits: #19961 and PR #20315, the absent-`expression` member only. Neither carries these members."

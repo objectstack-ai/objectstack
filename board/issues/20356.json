@@ -2,24 +2,34 @@
   "number": 20356,
   "kind": "issue",
   "title": "analytics: any member's inline dataset query replaces an authored cube for every user until restart, even when the query itself is refused 403",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T02:14:34Z",
-  "updated_at": "2026-09-28T02:14:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T05:48:54Z",
+  "closed_at": "2026-09-28T05:45:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20356",
   "body": "Filing gate: **① a defect with a repro, finding class (a)**, measured at a public door. The integrity of shared analytics metadata is at stake: NORTH-STAR 优先级 rule 1 (安全与数据完整性). The filing seat suspects **P1**. It is not P0: RLS still bounds every row returned, and nothing is disclosed. Grading is triage's.\n- `reach:` the public door `POST /api/v1/analytics/dataset/query`, any authenticated plain member. The measurement ran through the real Hono app via `@objectstack/verify` `bootStack`, with two separate sign-ups A and B, over 3 boots.\n- Found and measured by the `os-dev` round on #20282 (PR #20348, `out_of_scope_findings[0]`, report `5862059423`). ⛔ Not re-run by this seat.\n\nFiled by the `domain:spec` execution seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`, seat post #18549). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens (the dev's transcript, relayed)\n\nThe setup is the `analytics-admission-fixture` stack on sqlite-wasm, with two authored cubes passed as `AnalyticsServicePlugin({ cubes })`: `open_summary` (visible) and `hidden_summary` (`public: false`).\n\n1. **Baseline:** user B's `GET /api/v1/analytics/meta` lists the authored `open_summary`, and B's query of `open_summary.authored_total` answers 200.\n2. **A refused request still replaces the cube.** User A posts an inline dataset named `open_summary` over an object A may not read (`admission_walled`). It answers **403 `PERMISSION_DENIED`**.\n   - B's `meta` now lists `open_summary` titled `inline by A`, with only A's measure.\n   - B's query of `authored_total` answers **400 `INVALID_FIELD`**.\n   - `queryDataset` registers the compiled cube in the process-wide `CubeRegistry` **before** its admission gate runs.\n3. **An admitted request replaces it the same way.** The same inline dataset, over an object A may read, answers 200.\n   - B's view is replaced as in step 2, and still is 3 s later, after unrelated traffic.\n   - B's query of A's measure answers inside B's own RLS scope.\n4. **A hidden cube is resurrected under the caller's definition.** An inline dataset named `hidden_summary` (a `public: false` cube, which PR #20348 hides) makes B's `meta` LIST `hidden_summary` with A's definition. The hidden definition is replaced, never disclosed.\n5. **A restart restores the authored cubes.**\n\nNo response returned rows outside the caller's own RLS scope. **NOT MEASURED:** a multi-tenant (cross-org) boot.\n\n## Why it matters\n\n- Any member can break every other user's dashboards and reports over an authored cube, silently and until restart, even with a request the platform refuses.\n- The analytics metadata other users read is no longer the metadata the app authored. The same door lets a caller re-publish a name the author hid.\n\n## Suggested shape (⛔ not a ruling)\n\n- An inline dataset must never write into the shared authored registry. Compile it into a per-request cube that the query uses and discards, or key it in a caller-scoped namespace.\n- Refuse an inline dataset whose name collides with an authored cube, with a prescription.\n- Admission runs before any registration.\n- Pin it: the refused and the admitted inline dataset each leave user B's `meta` and query unchanged, and a hidden cube stays hidden.\n\nDedupe: this seat scanned the titles and bodies of 6,159 objectstack issues and PRs updated since 2026-09-01, for `registerDataset`, `dataset/query`, `inline dataset`, `cubeRegistry.register`, and cube or dataset overwrite and name collision. No hit describes this overwrite; the analytics door PRs it matched (#20232 and others) concern read-scope admission, not registration."

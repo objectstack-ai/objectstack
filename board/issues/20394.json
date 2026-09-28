@@ -1,0 +1,34 @@
+{
+  "number": 20394,
+  "kind": "issue",
+  "title": "docs(adr-0053): one addendum line — a client-evaluated formula's `today()` names the compute-tz reference day, UTC while no reference timezone reaches the client (ruling A on objectui#10903)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T06:27:14Z",
+  "updated_at": "2026-09-28T08:22:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20394",
+  "body": "Sub-card of objectui#10903, filed by the director seat (objectstack#12708, summon #30 续 2, `session_01AsCNgFBs8HCjwhyHQsFbx3`) so the objectstack half of ruling A (batch #233 item 1, maintainer 「同意」, 2026-09-28) has a carrier in the lane that owns `docs/adr/**`. ⛔ Filed bare for triage to grade and route (`domain:spec` by the ADR's owner); ⛔ not a claim.\n\n## What is ruled\n\nobjectui's `@object-ui/core` `FormulaFunctions` evaluates `TODAY()` in the browser as the UTC day (`new Date().toISOString().split('T')[0]`); the server's `today()` is UTC midnight today (ADR-0053, `startOfDayUtc`) and becomes the calendar day in the reference timezone under Phase 2 items 5–6. Ruling A: **a client-evaluated formula's `today()` names the same reference day the server resolves for that user (the compute-tz axis), and UTC while no reference timezone reaches the client.** One \"today\" per execution context; a preview and the saved answer agree. Not taken: the viewer's local day (B), UTC forever (C).\n\n## The one edit\n\nAn addendum line in `docs/adr/0053-date-and-datetime-semantics.md`, beside Phase 2 items 5–6 (reference timezone; `today()` timezone-aware), stating that client-evaluated formulas (objectui's expression evaluator) take the compute-tz reference day with a UTC fallback, and that threading the reference timezone to the client is a follow-up once Phase 2 exposes it. The consumer list gains objectui's client evaluator beside `@objectstack/formula`.\n\nGoverned path (`docs/adr/**`, Tier H): the PR carries the at-tier record, the 维护者速读, `needs-user-decision` on the PR and a review request to `os-zhuang` / `hotlong`; it lands on the maintainer's APPROVED. `Clause-②: no` (prose in an ADR; no key moves).\n\n## Related\n\n- objectui#10903 — the ruling carrier; the objectui half (the `FormulaFunctions` JSDoc) proceeds there, unblocked by this card.\n- objectui#10866 — the D1 arithmetic slice for `DATEADD` / `DATEDIFF` / `DATEFORMAT` proceeds regardless.\n- Follow-up, not yet filed: thread the reference timezone to the client when Phase 2 exposes it."
+}

@@ -1,0 +1,28 @@
+{
+  "number": 20400,
+  "kind": "issue",
+  "title": "finding(lint): `validateComponentProps`'s `dataSource` waiver matches by path alone, so it also silences a wrong-typed `object` (e.g. `object: 7`) beside a binding, while its docblock scopes it to a missing `object`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T06:55:41Z",
+  "updated_at": "2026-09-28T06:55:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20400",
+  "body": "Filing-gate category: ① a rule whose code does more than its declared contract, with a named landing site. Reader: triage first (grade and route), then the seat that owns `@objectstack/lint`. Filed by `domain:ui` seat 2 (objectui), `session_014mXUNuFomfj24w7s1pZzhN`, from contract review `5864946806` on PR objectstack-ai/objectui#10908, which mirrors this waiver in `objectui validate`. The seat re-read the code at objectstack `origin/main` `2f122b6e4`. ⛔ Not graded here.\n\n## The declared contract\n`packages/lint/src/validate-component-props.ts` scopes the waiver to absence, twice:\n- `DATASOURCE_SUPPLIED_PROP`'s docblock: \"The one prop whose absence this rule does NOT report when the component carries a per-element `dataSource`\".\n- `suppliedByDataSource`'s docblock: \"Is this issue 'the required `object` prop is missing', on a component whose `dataSource` supplies it?\"\n\n## The code\n`suppliedByDataSource` returns true for ANY issue whose path is exactly `['object']`, whenever `dataSource.object` is a non-empty string. It never checks that the issue is a missing value. So on\n`{ type: 'element:number', dataSource: { object: 'contact' }, properties: { object: 7, aggregate: 'count' } }`\nthe props row's `invalid_type` at `object` is waived, and nothing is reported. The same holds for any other issue the row raises at that path.\n\n## Why it matters\nThe rule is advisory, so nothing is rejected today. But it reports nothing on a document whose `object` prop is wrong. It is also the reference that objectui's validator mirrors. The objectui arm (PR objectui#10908) follows the docblock and refuses `object: 7`, so the two readers now disagree on this input, and the gate's side is the one its own docblock says is wrong.\n\n## Also stale in the same docblock (context, not this card's fix)\nThe docblock justifies the waiver with \"objectui's element renderers read it FIRST (`const object = ds.object ?? props.object`)\". That is false today for `element:number`: its renderer reads only `properties.object`, filed as objectstack-ai/objectui#10909. The waiver still applies to that type, so a `dataSource`-only metric passes this gate and renders an empty dash. The fix belongs to the renderer (objectui#10909), and the sentence becomes true when it lands. Triage may want this rule to name the types whose renderer is measured to honour the binding, rather than every row that declares `object`.\n\n## Direction (for triage to grade)\n- `suppliedByDataSource` waives only a MISSING `object`: the component's `properties` has no `object` key (or it is `undefined`), not merely an issue at that path. A present-but-wrong `object` is reported as the row reports it.\n- **Pins:**\n  - the existing \"does not report the required object prop when dataSource supplies it\" stays green;\n  - a new row: `object: 7` beside `dataSource: { object: 'x' }` is reported at `properties.object`;\n  - control: `object: 7` with no binding is reported the same way.\n\n## Dedupe\nSemantic search of objectstack issues for the waiver (`validateComponentProps`, `suppliedByDataSource`, `dataSource.object`) returned three closed cards about renderers consuming `PageComponentSchema.dataSource` (objectstack-ai/objectstack#5576, #6953, #7121). None is about this rule's matching. objectstack-ai/objectui#10909 is the renderer half.\n\n<sub>`domain:ui` seat 2 · finding · 2026-09-28</sub>"
+}

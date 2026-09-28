@@ -1,0 +1,29 @@
+{
+  "number": 20359,
+  "kind": "issue",
+  "title": "[Decision] May an app owner put their own title, description, version, contact and license on the API document ObjectStack serves (/openapi.json)?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T02:44:15Z",
+  "updated_at": "2026-09-28T03:00:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20359",
+  "body": "Ruled: 5862477514 · letter B · 2026-09-28T02:59Z\n\nDecision card for #20294, which is blocked on it. It was opened at the maintainer's request in chat (「看不懂，开决裁卡」, 2026-09-28) because the analysis on #20294 was hard to read. Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Not a claim.\n\n## 维护者速读\n\n**这是什么。** ObjectStack 的 REST 服务会发布一份「API 说明书」`/openapi.json`,给开发者和工具看这个系统有哪些接口。说明书最上面有一个「封面」`info`,写着:\n\n- 标题\n- 简介\n- 版本\n- 联系人\n- 许可证\n\n**现在的情况。** 配置里其实有 9 个设置项可以写这个封面(`api.documentation.title`、`description`、`version`、`contact`、`license` 等),但**写了也没用**。封面永远是 ObjectStack 自己的:\n\n- 标题 `ObjectStack REST API`\n- 版本 `17.x`\n- 许可证 Apache-2.0\n\n实测:9 个设置全写上,0 个生效。三个仓里目前没有任何人写这些设置。\n\n**为什么要你拍板。** 你之前的两次裁决在这里撞上了:\n\n1. **8 月 #11646**(你「全部同意」):封面**整块归平台 spec 所有**,版本号固定显示平台 spec 版本;「为没人要的需求加配置键」那个选项被否掉了。\n2. **9 月 #18900**(你的判据):每个功能看**主流平台有没有这个能力**,有就把它做实。分诊按这条判了「做实」(ENFORCE)。Azure API Management、Apigee、ServiceNow 都让 API 所有者给自己的 API 设封面。\n\n两条放在一起,就是:要不要让**在 ObjectStack 上做应用的客户**,给自己发布的 API 说明书写上自己的标题、简介、联系人、许可证和版本?\n\n**三个选项**\n\n- **A(席位推荐):能写,写了才生效。**\n  - 客户写了哪项,封面就显示哪项。\n  - 什么都不写,封面和今天一模一样。\n  - 平台内部的路由版本、运行时版本照旧永远不会跑到封面上。\n- **B:能写,但版本号不行。** 版本永远显示平台 spec 版本,和 8 月的决定一字不差;其余 8 项生效,「版本」这一项删掉,写了会报错。\n- **C:不能写。** 封面永远归平台,9 个设置全部删掉,写了会报错。8 月的决定原样保持。\n\n**席位意见:A。** 客户给自己的 API 起名字、留联系人是主流平台都有的基本能力,而且不写就完全不变,零风险。8 月那次否掉的是「给路由版本号占用封面」,A 不碰那个。如果你认为封面上的版本必须永远等于平台版本,就选 B。如果你觉得这个能力现在不需要,就选 C,也最省事。\n\n**你要做的(一个动作):** 回一个字母,A / B / C。\n\n## Governing text (verbatim, retrieved by the seat)\n\n- #11646, maintainer ruling `5405070350`: 「the `info` block returns to being wholly `packages/spec`-owned」 … 「A (keep the two-meanings split) and C (a config key for a demand nobody expressed) are dead.」\n- #18900, maintainer criterion `5727134555`: 「每族该问的是:主流平台有没有这个能力 —— 有 ⇒ 补消费端(一次做对)」.\n- #20294, triage grade `5859594397`: 「Verdict: **ENFORCE**, by the maintainer's criterion」.\n\n## Evidence\n\n- The dev's measurement on #20294 (the `os-dev-report` comment): both serving doors ignore all nine authored keys, and the unset cases equal the artifact.\n- The seat's first analysis, the four facets and the two folded sub-questions (title default, whole-block `contact` / `license`), are on #20294, on the `Release:` comment of 2026-09-28.\n\n## Execution after the answer\n\n- **A:** re-dispatch #20294 on the dev's ready resume plan. Its worktree is kept.\n- **B:** re-dispatch #20294 as eight keys ENFORCE plus `documentation.version` RETIRE.\n- **C:** #20294 is re-graded RETIRE for all nine keys."
+}

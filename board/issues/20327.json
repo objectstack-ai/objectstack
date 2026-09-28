@@ -2,8 +2,8 @@
   "number": 20327,
   "kind": "issue",
   "title": "[finding] client auth-get-session-envelope.test.ts pays the engine cold start inside its first clocked test and timed out at 5000ms on a required Test Core shard — the sibling #20272 fixed for auth-login-register",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-litant"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T22:14:16Z",
-  "updated_at": "2026-09-28T01:03:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T04:04:00Z",
+  "closed_at": "2026-09-28T04:01:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20327",
   "body": "Filing gate: **① a flake on the shared merge path, observed in CI.** A required context (`Test Core (5/6)`) went red on a PR that does not touch the package.\n- `reach:` observed. PR #20325 (head `e9f93902`, which does not touch `packages/client`), job `108717176436`, run `36353694714`, 2026-09-27T22:12Z:\n  - `@objectstack/client:test`: `Tests 1 failed | 636 passed (637)`;\n  - `src/auth-get-session-envelope.test.ts > [#16760] /get-session is lifted into the SessionResponse envelope it declares > ① me() delivers the envelope it declares > parses as the declared envelope, with the payload under data` at line 262: **`Error: Test timed out in 5000ms`**.\n  - `main`'s CI at `de091b50` was green.\n- **Mechanism, read by this seat on `main`:** the file's first test calls `await signedIn()` INSIDE the clocked `it` (`:262`–`:264`), so the engine's cold start is paid within a 5-second test timeout. This is exactly the shape PR #20272 (`80c29a14`) removed from the sibling `auth-login-register-envelope.test.ts`: `await registered(); await closeEngines();` at module scope, plus a pin (⑦) that the cold start stays outside every clocked window. #20272 did not cover this file.\n\nFiled by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017), per 「谁发现 flake 谁修或立单」. ⛔ Filed bare: routing and grading belong to triage. The file lands in `packages/client`. ⛔ Not a claim.\n\n## What the fix is (for the dispatch to confirm)\n\n- Port #20272's pattern: pay the first `signedIn()` (engine cold start) once at module scope, close it, and keep `afterEach` closing per case.\n- Add the same kind of pin, so the cold start cannot drift back into a clocked window.\n- Census the other `packages/client/src/auth-*envelope*.test.ts` files (and any suite that boots an engine inside its first `it`) for the same shape, and fix the family in one PR.\n- ⛔ No raised timeout or retry as the fix: #20272's reasoning applies.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `auth-get-session-envelope|get-session…(timed out|timeout|flak)|auth-envelope suite` finds 1 hit: PR #20272 (the sibling file, merged). None carries this file."

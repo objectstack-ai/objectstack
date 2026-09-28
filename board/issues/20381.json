@@ -1,0 +1,35 @@
+{
+  "number": 20381,
+  "kind": "issue",
+  "title": "analytics: an ad-hoc `/analytics/query` or `/analytics/sql` request writes inferred and augmented cubes into the shared registry before admission, so a refused request still changes every member's `meta`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:services",
+    "needs-user-decision",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T04:52:59Z",
+  "updated_at": "2026-09-28T08:13:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20381",
+  "body": "Filing gate: **① a defect with a repro, finding class (a)**, measured at a public door. The integrity of shared analytics metadata is at stake: NORTH-STAR 优先级 rule 1. This is the same request-time-shared-registry-write family as #20356. Grading is triage's; the filing seat does not grade.\n\n- `reach:` the public doors `POST /api/v1/analytics/query` (and the same `ensureCube` call on the `generateSql` / `/analytics/sql` door), any authenticated plain member.\n  - Measured through the real app with `@objectstack/verify` `bootStack`, on `sqlite-wasm` with two separate sign-ups, on head `15e21b98` (PR #20380's branch).\n  - Found and measured by the #20356 `os-dev` round, report `5863662331`, `out_of_scope_findings[0]`. This seat re-read the source order on `origin/main` `a88a1bb3` and did not re-run the measurement.\n\nFiled by the `domain:services` execution seat (#6021, `session_01TEah6PeJGjxJfbHaySJjLQ`). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim. Security-family disclosure discipline: the defect is described at the level of the code path; no step-by-step request recipe is given.\n\n## What happens\n\n- `AnalyticsService.query()` (`analytics-service.ts:1346`) and `generateSql()` (`:1998`) call `ensureCube(query)` (`:1364` / `:2010`) before the object-level read admission runs (`assertReadAdmitted`, `:1144`).\n- `ensureCube` has two branches, and both write the process-wide `CubeRegistry`:\n  - the **inference** branch registers a cube inferred from the queried object (`:2073`);\n  - the **augmentation** branch registers a configured cube with a caller-named suffix measure appended (`:2141`).\n- Measured consequences, per the report:\n  - a request refused `403 PERMISSION_DENIED` still leaves an inferred cube, named after the refused object, in every other member's `GET /api/v1/analytics/meta`;\n  - an admitted request naming a suffix measure appends that measure to a configured cube, for every member.\n- No row outside the caller's read scope is returned. **NOT MEASURED:** a multi-tenant (cross-org) boot.\n- The code's own #4437 note states the invariant this breaks: a rejected query must leave no trace in the registry.\n\n## Relation to #20356 / PR #20380\n\n- PR #20380 closes the **dataset** door (`queryDataset`). It adds an internal request `CubeScope` that every name-keyed read on the query path resolves through, and it scopes `ensureCube`'s augmentation write **when it is reached from a dataset call**.\n- It deliberately leaves the two `ensureCube` writes on the ad-hoc `query()` / `generateSql()` doors unchanged. Changing them alters the documented registry source (\"CubeRegistry source 3\"), and it overlaps PR #20348's `inferCubeFromQuery` edit.\n- The dev's suggested shape (⛔ not a ruling): run `query()` / `generateSql()` in a per-request `CubeScope` as well, so that inference and augmentation stay request-local and admission precedes any registry write. Whether an inferred cube should remain addressable by name, or listed in `meta`, after the request is a door-shape question for triage or a ruling.\n\n## Pin, when fixed\nThrough the real route (`bootStack`, two sign-ups): a refused and an admitted ad-hoc query each leave user B's `meta` and B's queries of configured cubes unchanged. Control: a configured cube still serves.\n\nDedupe: GitHub semantic issue search in this repository, closed included:\n- «analytics query ensureCube registers inferred or augmented cube into shared CubeRegistry before admission, refused query leaves cube in meta» → 8 hits.\n- «inferCubeFromQuery registered meta analytics cube inference trace rejected query #4437» → 9 hits.\n- None is this defect. The nearest are #20356 (the dataset door, same family), #20282 / PR #20348 (cube `public`), #4437 and #5669 (field validation), and #4467 (record scoping)."
+}

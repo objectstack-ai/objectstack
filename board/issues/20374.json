@@ -1,0 +1,35 @@
+{
+  "number": 20374,
+  "kind": "issue",
+  "title": "plugin-email：auth 邮件纯文本部分把链接里的 & 转义成 &amp;，纯文本链接丢失 callbackURL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T04:01:06Z",
+  "updated_at": "2026-09-28T07:00:11Z",
+  "closed_at": "2026-09-28T06:59:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20374",
+  "body": "## 来源\n\n2026-09-28 cloud 本地全链路验收（cloud `96eb092f`，framework pin `bdea10a1`）。注册一个新用户，读取控制库 `sys_email` 里的验证邮件。对照 objectstack `main` 后确认，问题代码仍在。\n\n## 现象\n\n验证邮件的**纯文本部分**里，链接被 HTML 转义了：\n\n```\nhttp://localhost:4600/api/v1/auth/verify-email?token=eyJ…&amp;callbackURL=%2F\n```\n\nHTML 部分的 `href` 是正确的 `&callbackURL=`。但只显示纯文本的客户端，或者用户复制文本里的链接时，拿到的查询参数是 `amp;callbackURL`：token 仍能被解析，`callbackURL` 却丢了。这会把验证后应该跳转的去向（比如接受邀请页）打回默认的 `/`。\n\n## 机制\n\n`packages/plugins/plugin-email/src/templates/auth-templates.ts` 的 `bodyText` 用的是 `{{verificationUrl}}`（双花括号，按 `template-engine.ts` 默认会做 HTML 转义）。HTML 部分的 `href` 用的是 `{{{verificationUrl}}}`。纯文本本来就不该做 HTML 转义。所有 locale 变体（`AUTH_VERIFY_EMAIL_TEMPLATE_*`）都一样，其他带 URL 的 auth 模板（重置密码、邀请等）大概率也有同样的问题。\n\n## 修复方向\n\n要么纯文本模板里的 URL 统一改用 `{{{…}}}`，要么让模板引擎在渲染 `bodyText` 时整体不做 HTML 转义。后者更稳，能一次覆盖所有模板。\n\n## 验收\n\n1. 验证、重置、邀请这几类邮件的 `body_text` 里，链接中的 `&` 都是字面量。\n2. 单测：渲染含 `&` 的 URL 时，纯文本部分不出现 `&amp;`。\n\n## 相关\n\n- objectstack-ai/objectui#10893（注册时 signUp 不传 callbackURL，同样导致验证后丢掉跳转去向）\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 20367,
+  "kind": "issue",
+  "title": "[finding] `os validate` runs only the stack schema parse, so a config that exports a plain object (no `defineStack()` call) skips every defineStack cross-field refusal and passes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T03:15:38Z",
+  "updated_at": "2026-09-28T08:09:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20367",
+  "body": "Filing gate: **① a defect with a named landing site**, finding class **(b)**: a declared door that does not hold. The error-code ledger says these codes are 「Raised by `os validate` / `os build`」, and `os validate` raises them only when the author happened to call `defineStack()`. `reach:` was measured at the public door `os validate`.\n\nFound by the `os-dev` round on #20332 (PR #20365; the report on #20332, `out_of_scope_findings[0]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured by the dev at `94e32023`, relayed)\n\n| config shape | `requires: ['triggers']` + a `record_change` flow | `os validate` |\n|:--|:--|:--|\n| `export default defineStack({ … })` | refused at load | exit 1, `STACK_TRIGGER_CAPABILITY_REQUIRED` |\n| `export default { … }` (a plain object) | not refused | **exit 0, 「Validation passed」** |\n\n- `packages/cli/src/commands/validate.ts` step 2 runs only `ObjectStackDefinitionSchema.safeParse`.\n- Every cross-field refusal that `defineStack` runs is therefore reached only when the author called `defineStack`: the capability, namespace prefix, single app, hierarchy scope and trigger capability refusals.\n- `os build` (`compile.ts`) is not measured.\n\n## Why it matters\n\nThe error-code ledger (`packages/spec/src/api/error-code-ledger.zod.ts`) documents these codes as raised by `os validate` / `os build`. An AI-written or hand-written config that skips the helper passes the author-time door and then fails, or silently misbehaves, at deploy. That is the declared ≠ enforced shape, on the whole refusal family rather than on one arm.\n\nSeam: `spec:defineStack` refusal family → `runtime:packages/cli/src/commands/validate.ts` step 2 (and, unmeasured, `compile.ts`).\n\n## What the fix is (for the dispatch to confirm)\n\n- One judge, both doors. `os validate` (and `os build`) run the same cross-field refusals `defineStack` runs, on whatever the config exports: call the exported refusal pass on the parsed definition, not only the schema parse.\n- Pin it: the same stack as `defineStack({…})` and as a plain object gives the same code and exit at `os validate`, for each refusal in the family.\n- Census the example and template configs for a plain-object export. Expected: `defineStack` everywhere, but measure it.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `plain object.*(validate|defineStack)|without defineStack|defineStack.*(not called|skipped|only when)|os validate.*(plain|export default)|ObjectStackDefinitionSchema\\.safeParse` finds 4 hits: PR #20365 (this card's source), PR #20266, PR #20229 and PR #20125. None carries the door gap.\n\nDedupe words: `os validate plain object config skips defineStack refusal` · `defineStack cross-field refusals only when defineStack called` · `validate without defineStack capability refusal`"
+}

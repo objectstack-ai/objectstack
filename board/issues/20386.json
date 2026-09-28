@@ -1,0 +1,32 @@
+{
+  "number": 20386,
+  "kind": "issue",
+  "title": "record validator: a `progress` field's declared `min` / `max` are never checked — REST POST stores 150 over `max: 100` and −5 under `min: 0` (201), where a `number` field refuses both",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T05:22:36Z",
+  "updated_at": "2026-09-28T07:01:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20386",
+  "body": "Filing gate: **① a product defect with a named landing site and a measured `reach:`**. Finding class **(a)**, `reach:` measured at the public REST door (below).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). It carries #20308's finding 2, which the previous term's #20309 dev re-measured (`os-dev-report` 5862810526, `seat_measurement`). The previous term handed it over to be filed bare (seat post #6367). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nREST `POST /api/v1/data/:object`, one field per write, measured by the #20309 dev at `c74de10a94` (unchanged through its head `c135a38d31`):\n\n| field | value | SQLite | memory |\n|:--|:--|:--|:--|\n| `progress`, `max: 100` | `150` | **201**, stored `150` (real) | **201**, stored `150` |\n| `progress`, `min: 0` | `-5` | **201**, stored `-5` (real) | **201**, stored `-5` |\n| `number`, `max: 100` (control) | `150` | 400 `VALIDATION_FAILED` / `max_value`, no row | the same |\n| `number`, `min: 0` (control) | `-5` | 400 `VALIDATION_FAILED` / `min_value`, no row | the same |\n\n## Where, on `origin/main` `eee0974236`\n\n- `packages/objectql/src/validation/record-validator.ts`, the number arm (`NUMERIC_VALUE_TYPES ∖ COMPUTED_VALUE_TYPES`). After the finite check it runs `if (t === 'progress') return null;`, before the `min` / `max` / `scale` checks. The #20308 docblock there says `min` / `max` on `progress` \"were never enforced; starting to enforce either would narrow what a caller may write, which is a separate decision\". This card is that decision.\n- The contract declares both keys with no type exclusion. `packages/spec/src/data/field.zod.ts` `min`: \"Minimum value. Checked on the WRITTEN value only …\"; `max`: \"Maximum value. Checked on the WRITTEN value only …\". So a `progress` field that authors `max: 100` declares a check the runtime does not run.\n\n## The decision triage routes\n\nAn ADR-0049 declared-but-unenforced case, one of two ways:\n- **Enforce:** `progress` joins the `min` / `max` checks at the write door (`domain:engine`, a narrowing, BREAKING `minor`).\n- **Remove:** `min` / `max` are refused on a `progress` field at parse (`domain:spec`).\n\nNot measured: whether any shipped producer (objectui `SliderField`, which `progress` edits through, or an example app) writes a `progress` value outside a declared bound.\n\n## Dedupe\n\n`search_issues` \"progress field min max not enforced record validator stores value outside range\" in `objectstack-ai/objectstack`, open and closed: 2 hits, neither this. #7501 (closed) is `scale` on `number`, and its title says min / max \"are enforced\". #11949 (closed) is `minLength`."
+}

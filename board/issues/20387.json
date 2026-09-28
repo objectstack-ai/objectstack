@@ -1,0 +1,32 @@
+{
+  "number": 20387,
+  "kind": "issue",
+  "title": "aggregate `sum` / `avg`: PostgreSQL and MySQL native answer exact decimal (0.1 + 0.2 = 0.3) while SQLite and the engine rows path answer a double (0.30000000000000004), so `having { s: { $eq: 0.3 } }` keeps the group on PG / MySQL native only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T05:34:56Z",
+  "updated_at": "2026-09-28T07:02:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20387",
+  "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**, `reach:` measured at the public REST door (below). The landing site is one of the two faces named under \"Where\", and which face moves is triage's routing.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20335 dev's report (`os-dev-report` 5862967111, `out_of_scope_findings[0]`). The at-tier contract review of PR #20372 (record 5864089089, ③ F1) escalated it to the seat. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA `number` column holds `0.1` and `0.2` in one group. `sum` / `avg` of that group, through `engine.aggregate` and REST `POST /api/v1/data/:object/query`:\n\n| face | `sum` | `having { sum_weight: { $eq: 0.3 } }` | `having { avg_weight: { $eq: 0.15 } }` |\n|:--|:--|:--|:--|\n| PostgreSQL 16.13, native `aggregate` (exact `numeric`) | `0.3` | keeps the group | keeps the group |\n| MySQL 8.0.46, native `aggregate` (exact `DECIMAL`) | `0.3` | keeps the group | keeps the group |\n| SQLite native (double `SUM`) | `0.30000000000000004` | keeps no group | keeps no group |\n| the engine's rows path, every dialect (`in-memory-aggregation.ts`, JS `reduce`) | `0.30000000000000004` | keeps no group | keeps no group |\n\nOne query gives two answers depending on dialect and path. The dev measured it identical at base (`26daf0b036`) and at PR #20372's head. PR #20372 changes the answer's TYPE on PostgreSQL / MySQL (string to number), not the arithmetic, so it neither introduced nor fixes this.\n\n## Where\n\n- the rows path: `packages/objectql/src/in-memory-aggregation.ts`, the `sum` / `avg` reduction over `toNumber` (double arithmetic);\n- the native faces: `packages/drivers/driver-sql/src/sql-driver.ts` `aggregate()`, where the database does exact-decimal arithmetic on PostgreSQL / MySQL and double arithmetic on SQLite.\n\nWhich face moves, if any (exact arithmetic on the rows path, a tolerance in `having` `$eq`, or a documented precision contract) is a routing and design question. The dev's report left it open.\n\n## Dedupe\n\n`search_issues` \"aggregate sum exact decimal native PostgreSQL MySQL versus double rows path 0.30000000000000004 having $eq divergence\" in `objectstack-ai/objectstack`, open and closed: 2 hits. #20335 is the string-TYPE defect this finding came out of, and #8931 (closed) is an unrelated dotted-WHERE-key error. Neither is this."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 20390,
+  "kind": "issue",
+  "title": "Forward conversion never opens on unreleased main: spec still labelled 17.4.0 while main refuses 17.5.0 retirements, so artifacts built by the published 17.4.0 CLI are refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T05:55:04Z",
+  "updated_at": "2026-09-28T08:20:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20390",
+  "body": "Ruled: 5865890672 · letter A · 2026-09-28T08:02Z\n\n## Source\n\nThis surfaced on objectstack-ai/hotcrm#1964 (floor 1 of the cloud framework re-cut, objectstack-ai/cloud#2332 / PR objectstack-ai/cloud#2423) and is tracked under epic objectstack-ai/cloud#2440.\n\nMaintainer ruling in the epic session, 2026-09-28 (verbatim): 「平台修转换 + HotCRM 先删 scale（推荐）」. The platform fixes the forward conversion. hotcrm only removes what no release can convert.\n\n## What breaks\n\nobjectstack `main` (measured at `862b6ce8`) already refuses keys that the retirement ledger marks \"removed in @objectstack/spec 17.5.0\". But `packages/spec` on `main` still carries the version label `17.4.0`, and 17.5.x is not published (npm `latest` = 17.4.0).\n\n`applyArtifactForwardConversions` (`packages/metadata-core/src/artifact-forward-conversion.ts` ~301, `resolveInstalledSpecVersion`) therefore reads runtime `17.4.0` == the artifact's authored floor `^17.4.0` and returns **authored-current**. The retired conversions are then not replayed, and `MetadataPlugin._parseAndRegisterArtifact` (`packages/metadata/src/plugin.ts` ~894) refuses the artifact.\n\nConsequence: any artifact built by the **published** `@objectstack/cli` 17.4.0 that contains a dashboard chart cannot boot on a runtime that runs unreleased `main`. At 17.4.0, `chartConfig.type` is **required**, and `main` refuses it. Such a runtime is the EE composed boot through `OS_COMPOSED_ARTIFACT_URL`, as cloud does when it pins a framework SHA. No source spelling of `chartConfig` is legal on both versions short of deleting the block.\n\n## Measured (hotcrm#1964 dev report, 2026-09-28)\n\nProbe: the same `ObjectStackDefinitionSchema.parse(applyArtifactForwardConversions(...))` from objectstack `862b6ce` dist, run on hotcrm `main`'s artifact:\n\n| runtime label | verdict | conversions applied | issues left |\n|---|---|---|---|\n| `17.4.0` (actual label on main) | authored-current | none | 63: 16 `chartConfig.type`, 9 `xAxis`, 9 `yAxis`, 23 `objects..scale`, 6 `pages..assignedProfiles` |\n| forced `17.5.0` | converted-forward | `dashboard-widget-chart-config-structure-removed` ×34, `page-assigned-profiles-removed` ×6, `page-component-filter-record-to-rule-array` ×4 | only the 23 currency `scale` issues (no conversion exists; hotcrm is removing them) |\n\nDirect EE boot of the same artifact on `main`: exit 1. With all three key families stripped: serves (HTTP 200).\n\n## Direction (for triage and the owning lane)\n\nMake the conversion window open for artifacts authored at the last published release whenever the runtime already enforces a later retirement. The dev named two shapes; picking one is the owning lane's design call:\n- **Option a.** `main` carries a prerelease label (e.g. `17.5.0-next`) as soon as it contains a 17.5 retirement.\n- **Option b.** The window compares the artifact's authored version against the **retirement's own version** instead of the package label.\n\n## Acceptance\n\n1. An artifact built by the published 17.4.0 CLI with dashboard charts and page `assignedProfiles` boots on `main`, and the conversion notices are logged.\n2. Newly authored sources that use the retired keys are still refused loudly.\n3. A regression test pins the \"unreleased main, artifact at last release\" case.\n"
+}

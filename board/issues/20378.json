@@ -1,0 +1,35 @@
+{
+  "number": 20378,
+  "kind": "issue",
+  "title": "[finding] `GET /meta/:type/:name/diff` serves PENDING draft content to a member with no authoring capability: its history versions include draft saves, and it is the one draft-serving door the #20338 gate leaves open",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T04:13:33Z",
+  "updated_at": "2026-09-28T08:00:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20378",
+  "body": "Ruled: 5865708652 · letter B · 2026-09-28T07:49Z\n\nFiling gate: **① a defect with a named landing site**, `packages/rest/src/rest-server.ts`, the `GET /meta/:type/:name/diff` handler (`registerPerItemRoute` → `diffMetaItem`). Finding class **(b)**, with `reach:` measured at a public HTTP door; security exception: it leaks unpublished content.\n\nFound by the `os-dev` round on #20338 (PR #20373). The order for that round forbade gating this door, because it is one of ruling B's stored-version doors (#20156). Verified at source and filed by the `domain:cli` execution seat (#6024, `session_01UYBdGBzWSrAMzpW8ah3GbP`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured)\n\nThe dev drove the real REST stack at `8bc02e48b` (the PR #20373 branch; this door is unchanged from `origin/main` there). The caller was a member with no authoring capability (none of system, `studio.access`, `setup.access` or `manage_metadata`) who may open the app.\n\n| door | answer |\n|:--|:--|\n| `GET /meta/app/NAME/diff?from=0&to=2` on a published app with a pending draft | **200**, carrying the draft's label and a draft-only navigation entry |\n| the same on a draft-only app | 404 |\n| `GET /meta/app/NAME/history` | events only, no bodies |\n\n## The seat's reading at source (`origin/main`)\n\n- `sys_metadata_history` stores a full body for every draft save: the repository's single `put` appends a history row for `state: 'draft'` saves too (`sys-metadata-repository.ts`). `diffMetaItem` (`packages/metadata-protocol/src/protocol.ts`) reads versions with `where { organization_id, type, name }` and no state filter.\n- For `app`, `doc` and `book` (`gatesPerCaller`), the REST handler judges every side with `metaItemReadGate(..., RestServer.STORED_VERSION_DOOR_POLICY)`. That gate decides who may open the item and prunes by audience. It never asks whether the caller may read drafts.\n- For every other type (for example `view`), `/diff` fetches no current document and applies no per-caller gate. So the draft-only 404 above holds only for those three types. This is a reading at source, confirmed by the contract review of PR #20373 (`5863212700`); it was not measured.\n- The runtime dispatcher (`packages/runtime/src/domains/meta.ts`) has no `/diff` route. This door is REST-only.\n- Once PR #20373 lands, every door that takes a draft switch asks `isObjectSchemaMaskExempt` first:\n  - the item read's `?state=draft` and `?preview=draft`;\n  - the list's `?preview=draft`;\n  - the dataset preview's `previewDrafts`;\n  - the dispatcher's `?preview=draft`.\n\n  `/diff` still serves draft bodies to the same member.\n\n## Governing text\n\n- ADR-0106 D4: 「draft/preview reads are admin-gated upstream already」.\n- The maintainer ruling on #9741, recorded in the `2a29caa` changeset: 「declaration ≠ authorization … draft access stays admin-gated upstream」.\n- Ruling B on #20156 (comment `5856774816`, confirmed `5856866273`) sets this door's pruning policy (`STORED_VERSION_DOOR_POLICY`, `app: 'author-exempt'`). A fix must keep that policy for what the door still serves. Whether a member keeps seeing published history on `/diff` while draft versions are withheld is the shape triage has to set.\n\n## Who acts on it\n\nTriage grades and routes it. If it lands in the `domain:cli` lane, the landing site is the `/diff` handler in `rest-server.ts`, a hot file on that lane's serial queue.\n\n## Duplicate check\n\nSearched the board, open and closed:\n\n- 「metadata diff endpoint serves draft history to member without authoring capability」: 8 hits. #20338 (the parent, gating the draft switches) and #20290 (the author's draft baseline) are relatives. The rest are unrelated (#11087, #17951, #8798, #7748, #4981, #1892).\n- 「sys_metadata_history draft body diff」: 6 hits, none this defect (#11087, #8833, #5462, #4326, #4981, #13205).\n- 「draft read gate diff door admin-gated upstream」: 57 hits. In the first 10, #20338 is the parent and #20156 closed the alternate doors' per-caller gates. Neither covers draft versions on `/diff`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

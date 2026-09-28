@@ -1,0 +1,28 @@
+{
+  "number": 20402,
+  "kind": "issue",
+  "title": "Organization invitation mail ignores the request locale: a zh-CN inviter sends an English invitation while verification mails are localized",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T07:23:25Z",
+  "updated_at": "2026-09-28T07:23:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20402",
+  "body": "## Source\n\nobjectstack-ai/cloud#2435 item 6, observed in both 2026-09-28 cloud end-to-end runs: cloud `96eb092f`, first at framework pin `bdea10a1`, then at objectstack `main` `862b6ce8`. Epic objectstack-ai/cloud#2440.\n\n## What happens\n\nA zh-CN user invites a colleague from the cloud console. The invitation mail comes out in English:\n- subject `林悦 invited you to 悦来商贸`;\n- body `林悦 (linyue@example.com) invited you to join 悦来商贸 on ObjectOS Cloud. Accept: …`.\n\nOn the same stack and the same day, the verification mail sent to the same user is Chinese (「验证您的 ObjectOS Cloud 邮箱地址」). objectstack#14319 / #14591 made auth mails pick their language from Accept-Language.\n\n## Not measured\n\nThe mechanism is not measured. It is unknown whether the invitation template lacks a zh variant, or whether the invite path does not pass the inviter's request locale to the mail renderer (`plugin-email` auth templates / better-auth organization `sendInvitationEmail`). The invitee's own locale is unknown at send time; the inviter's request language is the available signal.\n\n## Acceptance\n\n1. With a zh-CN request, the invitation subject and body render in Chinese.\n2. English stays the default.\n3. A test pins the locale choice for the invitation mail.\n"
+}

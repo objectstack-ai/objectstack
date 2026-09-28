@@ -1,0 +1,33 @@
+{
+  "number": 20389,
+  "kind": "issue",
+  "title": "plugin-auth: under the `open` audience posture, honour an explicit `requireEmailVerification: false` (`email_domain` stays forced)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:identity",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T05:50:03Z",
+  "updated_at": "2026-09-28T08:04:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20389",
+  "body": "Filing-gate: ③ maintainer-directed task (direct dispatch from a maintainer-commanded PM session)\n\n## Maintainer instruction (verbatim, not translated)\n\nGiven 2026-09-28 in Claude Code session `d8bf7d34-4f31-407d-ac85-6cb849eec4bf` (a PM session anchored in `objectstack-ai/cloud`), after the seat showed that the cloud deployment's `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false` is inert:\n\n> 是否需要邮件验证应该是一个环境变量，staging 环境可以配置那个变量。\n\n> 让它成为真正的开关，先开issue ，然后用项目经理技能派发处理\n\n## Reader\n\nThis PM seat claims and dispatches this card to an `os-dev` in the same session. The consumer is `objectstack-ai/cloud#2249`, which is blocked on this card and then on a cloud pin move.\n\n## Dedupe\n\nSearch (open + closed) on 2026-09-28: `requireEmailVerification open posture` → 9 hits, `email verification audience posture` → 77, `requireEmailVerification false refused` → 7. None asks for this. The closest are the closed #11739 / #11767, which introduced the forcing this card narrows.\n\n## What is true on `main` today (read at `ab946560fd`)\n\n- `packages/plugins/plugin-auth/src/audience-posture.ts`, `assertAudienceConfig`: under any posture that permits self-registration (`email_domain` or `open`), an explicit `emailAndPassword.requireEmailVerification: false` is refused at config entry. The message anchor is `FORCES email verification on`.\n- `packages/plugins/plugin-auth/src/auth-manager.ts` forces `requireEmailVerification: true` whenever `audiencePermitsSelfRegistration(posture)`, in both the wired better-auth options and `getPublicConfig()`.\n- `packages/spec/src/system/auth-config.zod.ts`, the `audience` docblock, states that invariant as protocol: both `email_domain` and `open` force verification on.\n\n⇒ A deployment on the `open` posture has no way to run self-registration without mailbox verification. A pre-production deployment with no mail transport becomes a dead end at the verify page.\n\n## Ruling (from the instruction above)\n\nMake it a real switch, **for the `open` posture only**:\n\n1. Under `open`, an explicit `emailAndPassword.requireEmailVerification: false` is honoured, not refused. Absent or `true` keeps today's forced-on default, so nothing changes for anyone who does not opt out.\n2. Under `email_domain`, nothing changes: an explicit `false` stays refused. There the domain allowlist is the only gate, so an unverified signup is colleague impersonation, which is the reason the invariant exists.\n3. The opt-out is loud: one boot-time warning naming the posture and the consequence, and `getPublicConfig()` reports the value actually wired, so the advertisement cannot disagree with the behaviour.\n4. The spec docblock and the published docs that state the invariant are amended in the same PR to say what the code does.\n\n## Acceptance\n\n- `open` + explicit `false`: boots, and a sign-up without verification yields a session. `getPublicConfig()` reports `requireEmailVerification: false`, and the warning is emitted once.\n- `open` + absent or `true`: forced on, exactly as today.\n- `email_domain` + explicit `false`: still refused at config entry, with the same code and message family.\n- `invite_only`: unchanged.\n- Spec docblock and docs are amended. Every existing test that pinned the `open` refusal is flipped to assert the new behaviour, not deleted.\n\n## Out of scope\n\nWiring the variable in the cloud deployment (`objectstack-ai/cloud#2249`), and any change to `email_domain` or `invite_only` semantics."
+}

@@ -14,7 +14,7 @@
     "area:access",
     "bug",
     "domain:engine",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2",
     "security"
   ],
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T02:12:06Z",
-  "updated_at": "2026-09-28T02:12:06Z",
+  "updated_at": "2026-09-28T08:29:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20355",
   "body": "Blocked-by: #20347\n\nPath: permissions that actually hold | 缺项 (no item enforces an RLS policy that compares fields of two classes) | P2\n\nFiled and graded by the triage seat (objectstack-wide, seat post #6015, `session_01W89enF2dYV7K4N2Fbfj33f`), splitting #20347 on the #15661 / #20336 two-lane precedent. ⛔ Not a claim.\n\n**Grade:** `bug` · `security` · `priority:p2` · `domain:engine` · `area:access` · `pm:blocked`.\n\n## The defect (measured on #20347, through the real `plugin-security` + ObjectQL + `driver-sql`)\n\nFor a policy whose predicate is `record.status != record.amount` (text vs number) or `record.status != record.photo` (text vs image):\n- the **read** (`using` on `find`) answers `INVALID_FILTER` / 400, because `driver-sql`'s `crossFieldComparisonClass` (`sql-driver.ts` about :2714) refuses it;\n- the **write check** (`check` on `insert`) is **admitted and the row is stored**, because the in-process evaluator (`packages/formula` `matches-filter`) has no class rule.\n\nThat is one policy with two enforcement answers, the write side the permissive one.\n\n## Why it is its own card\n\n#20347 keeps the contract and the authoring door (`domain:spec`): the comparison classification, exported once from `@objectstack/spec/data`, and the `validateRlsPredicateEnforceability` refusal in `packages/lint`. This card is the runtime half. Stacks and policies that never pass `os validate` (a Studio save, an API write) still reach enforcement, so the two evaluators must agree on their own.\n\n## Execution notes\n\n1. `driver-sql` and the `matches-filter` write-check evaluator read #20347's exported classification. ⛔ No second copy: `crossFieldComparisonClass` moves to, or delegates to, the shared source.\n2. The write check refuses a cross-class comparison exactly as the read does: the same `INVALID_FILTER` envelope, naming the policy and fields. It is never admitted.\n3. Pin it on memory, SQLite and PostgreSQL: the text vs number and text vs image predicates are refused on read and write, and a same-class comparison is admitted on both (the control). Measure the formula-field cell (`record.status != record.is_open`) and include it.\n4. `Clause-②: no (narrowing enforcement to the read's answer)`, BREAKING `minor` if any stored policy trips it. The #19886 2f census found 0."

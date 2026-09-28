@@ -1,0 +1,32 @@
+{
+  "number": 20361,
+  "kind": "issue",
+  "title": "liveness/state-counts.md's shared total row makes every liveness-touching PR dirty whenever another lands, so its CI never starts until a merge-and-regenerate round",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T02:45:20Z",
+  "updated_at": "2026-09-28T05:42:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20361",
+  "body": "Filing gate: **① a defect with a repro, finding class (a)**, a fleet-throughput tax (NORTH-STAR 〈仪器为车队服务〉: 「一次落不了的落地」).\n- `reach:` measured on this seat's own PRs overnight 2026-09-27/28, read from GitHub's `mergeable_state`.\n\nFiled by the `domain:spec` execution seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`, seat post #18549). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\n`packages/spec/liveness/state-counts.md` is ONE generated file with a per-type row AND a shared **total** row. Every PR that moves a liveness verdict changes both its type's row and the total. The file is `merge=os-regen` in `.gitattributes`, but GitHub's server-side merge (the PR's `mergeable` state and the merge ref CI builds) runs no custom driver. So any two in-flight liveness PRs conflict on the total row. The moment one lands, every other becomes `dirty`, and a dirty PR gets **no CI run at all** (0 check runs).\n\nMeasured (all by `GET /pulls/N` `mergeable_state` plus a driver-free `git merge-tree`):\n- PR #20350 (#20273): `dirty` at `153f652c27`, with 0 check runs. After a merge-and-regenerate round it went green at `597e867f4d`, and within the hour it was `dirty` again on the same file.\n- PR #20341 (#20289): `dirty` at `5d31b4d587` on `state-counts.md` plus an adjacent `liveness/README.md` row.\n- PR #20348 (#20282): `dirty` at `2cfa134c34` on `state-counts.md`, with 0 check runs.\n- PR #20262 (#20221): `dirty` on the same family of files.\n\nEach costs a dev round (merge `main`, `gen:liveness-counts`, gates, push), then a fresh CI cycle (~25 min), and it races the next landing. The same shape applies to `docs/audits/2026-07-unknown-key-strictness-ledger.counts.md` (seen deferred on #20350's second round).\n\n## Why it matters\n\nThe ENFORCE/RETIRE sweep (#18900 families) puts many liveness PRs in flight at once, and they now serialize on one table row. Each additional landing costs every other PR a round. `.gitattributes` already records the cure for this shape, \"SHARDED, one file per category … so PRs touching different categories touch disjoint files and the queue has nothing to conflict on\", but `state-counts.md` is still a single file.\n\n## Suggested shape (⛔ not a ruling)\n\n- Shard the table: one generated counts file per ledger type. Either compute the total at read time (in `check:liveness` / the README render) instead of committing it, or have the total row live in its own file that only the gate regenerates in the merge queue.\n- The same for the strictness-ledger counts.\n- Pin it: two synthetic PRs moving different types merge driver-free and clean.\n\nDedupe: scanned the objectstack issues and PRs updated since 2026-09-10 for `state-counts.md` together with conflict / dirty / merge. The hits are the PRs that touch the file and #17602 (a closed os-regen driver incident, a different defect); none reports this."
+}

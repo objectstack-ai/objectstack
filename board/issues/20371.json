@@ -1,0 +1,34 @@
+{
+  "number": 20371,
+  "kind": "issue",
+  "title": "finding(spec): objectui's curated `action:button`/`group`/`menu`/`icon` and `element:definition-list`/`element:repeater` blocks have no `ComponentPropsMap` row, so objectui#10872 cannot arm them by reference",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T03:40:57Z",
+  "updated_at": "2026-09-28T06:25:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20371",
+  "body": "Filing-gate category: ① a type a registered, published and authored surface writes, with no spec declaration. Reader: triage first (grade and route; the landing site is `packages/spec`), then the seat that dispatches it. Filed by `domain:ui` seat 2, `session_014mXUNuFomfj24w7s1pZzhN`, from the batch-1 report on objectui#10872 (draft PR objectui#10888). ⛔ Not graded here.\n\n## Why this blocks objectui\n\nobjectui#10872 arms `objectui validate` for its ADR-0080 public blocks. Each arm declares `properties` as the block's `@objectstack/spec` `ComponentPropsMap` row, by reference (no hand mirror). Batch 1 arms 20 of 28 blocks. Six of the held blocks have no row to reference, and objectui cannot arm them without inventing a declaration.\n\n## Measured\n\n**`action:button`, `action:group`, `action:menu`, `action:icon`**\n\n- **Registration:** registered in `@object-ui/components` (`renderers/action/`).\n- **Publication:** the public-block vocabulary, `PUBLIC_BLOCKS`.\n- **Authorship:** objectui's AGENTS.md #4 teaches the node, `{ \"type\": \"action:button\", \"label\": \"Open details\", \"actionType\": \"url\", \"target\": \"/users/ada\" }`, and the validator's own handler-key remedy text teaches it.\n- **Spec 17.4.0:** no row; `action:` is not a reserved namespace.\n- **Read points disagree with every existing declaration:**\n  - `action-button.tsx` reads `schema.name ?? schema.label`, so `name` is optional where it is read.\n  - objectui's TS type `UIActionSchema` declares `name` and `label` required.\n  - The registrations' `inputs` declare 5 to 8 optional members; `action:group` / `action:menu` declare `actions` as an object, while the renderers read a list.\n  - The spec's own `Action` (object-metadata actions, keyed by `name`) is a different declaration. objectui's `ui-action.ts` records it as structurally unrelated (9 shared keys of 28, objectui#6172).\n\n**`element:definition-list`, `element:repeater`**\n\n- **Registration:** `@object-ui/components` (`DefinitionListRenderer`, `RepeaterRenderer`).\n- **Publication:** `PUBLIC_BLOCKS` → `getPublicConfigs` → objectstack's tracked `sdui.manifest.json` carries both.\n- **Authorship:** the Studio page designer's block palette offers both, so stored pages hold them.\n- **Spec 17.4.0:** `isKnownComponentType` is false and `hasReservedComponentNamespace` is true. `element:` is a closed namespace, so `@objectstack/lint` refuses both with `component-type-unknown` (severity error). This is read from the spec source; no `os validate` run measured it.\n\n## Direction (for triage to grade)\n\n- Add `ComponentPropsMap` rows for the six types. Measure each row from the renderer's read points, as objectstack#8691 / #8744 did, not from any existing TS type.\n- For `action:*`, the row states `name` optional, as it is read.\n- `element:definition-list` and `element:repeater` also join the `element:` vocabulary, with the three-part evidence (registration, publication, authorship) that the vocabulary's own ledger comment requires.\n- ⛔ Do not mirror `UIActionSchema` or the spec `Action` into the rows; the read points decide.\n- **Downstream:** once the rows publish, objectui#10872 arms the six by reference in its `action:*` and `element:*` batches. Its `action:button` page pin waits on that.\n\n## Dedupe\n\nScanned the open issues on both boards (5 pages each) for `action:button`, `element:definition-list`, `element:repeater` together with `ComponentPropsMap` or vocabulary. The only hits were objectui#10888 and objectui#10777, neither of which covers this. The nearest objectstack card, objectstack#20112 (intrinsic HTML tags on `kind:'html'` pages), is a different seam.\n\n<sub>`domain:ui` seat 2 · finding · 2026-09-28</sub>"
+}

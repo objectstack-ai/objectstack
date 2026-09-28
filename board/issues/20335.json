@@ -2,8 +2,8 @@
   "number": 20335,
   "kind": "issue",
   "title": "driver-sql on PostgreSQL: the native `aggregate` returns `count` / `sum` / `avg` as strings (`\"n\":\"1\"`, `\"total\":\"20.000…\"`), so `having { n: { $in: [2] } }` keeps no group on PostgreSQL alone, where memory, SQLite and PG's rows path keep c1, c2",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-sales"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T23:05:36Z",
-  "updated_at": "2026-09-28T01:48:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T05:59:41Z",
+  "closed_at": "2026-09-28T05:58:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20335",
   "body": "Filing gate: **① a defect with a named landing site**: `SqlDriver.aggregate` on PostgreSQL, `packages/drivers/driver-sql/src/sql-driver.ts`. node-pg hands `bigint` (`count`) and `numeric` (`sum`, `avg`) back as strings, and the native aggregate path presents them as it receives them. The consumer is `applyHaving` in `packages/objectql`.\n\nFinding class **(a)**. `reach:` was measured at the public REST door (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20263 dev's report (`os-dev-report` 5859428680, `out_of_scope_findings[2]`), re-measured by the at-tier review of PR #20307 (record 5860498332). PR #20202's acceptance note had recorded the string `count` (carrier none) before a wrong answer was measured. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured at `2dccb7d494`, which equals `main` on this path, through `engine.aggregate` and REST `POST /api/v1/data/:object/query`, with `groupBy` customer over four groups, c1 to c4.\n\n| | memory | SQLite | PostgreSQL rows path | **PostgreSQL native path** |\n|:--|:--|:--|:--|:--|\n| the aggregated record | `\"n\": 1`, `\"total\": 20` | numbers | numbers | **`\"n\": \"1\"`, `\"total\": \"20.000000000000000000000000000000\"`**, `\"mean\"` a string |\n| `having { n: { $in: [2] } }` | c1, c2 | c1, c2 | c1, c2 | **none** |\n| `having { total: { $in: [500, 20] } }` | c1, c4 | c1, c4 | c1, c4 | **none** |\n| `having` on `count` / `sum` / `avg` with `$lt \"not-a-date\"` or `$gt` an extended-year ISO | none | none | none | **c1–c4** |\n\n- One `having` answers differently on one dialect, and on one path of that dialect, depending on whether the native aggregate or the in-memory aggregation produced the row.\n- The REST response itself carries strings where the other dialects carry numbers.\n\n## Suggested shape (⛔ not a ruling)\n\n- Present the native aggregate's numeric results as numbers on PostgreSQL (`count` → number; `sum` / `avg` → number, with the precision policy decided once), so that the native and rows paths and all dialects agree.\n- Check MySQL's `SUM` / `AVG` (`DECIMAL`) in the same pass.\n- Pin `having` `$in` / `$eq` on `count` / `sum` / `avg` across both paths on SQLite, PostgreSQL and MySQL.\n\n## Filing-gate answers\n\n- **Class**: ① (a defect with a named landing site); finding class (a), measured.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `driver-sql`).\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included: `postgres aggregate count sum avg returned as string numeric having $in` → #16737, #16099 and #4157 (analytics measure types, all closed), none this.\n\nDedupe words: `postgres aggregate count string` · `pg sum avg numeric string having $in` · `driver-sql native aggregate numeric type`"

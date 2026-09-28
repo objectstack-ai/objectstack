@@ -2,7 +2,7 @@
   "number": 20298,
   "kind": "pull_request",
   "title": "docs(security): state the RLS write check as the gate enforces it in ADR-0066 and the data skill",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T19:17:57Z",
-  "updated_at": "2026-09-28T02:18:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-28T02:43:54Z",
+  "closed_at": "2026-09-28T02:43:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-28T02:43:52Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20298",

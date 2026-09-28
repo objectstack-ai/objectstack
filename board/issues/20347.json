@@ -2,8 +2,8 @@
   "number": 20347,
   "kind": "issue",
   "title": "[finding] An RLS predicate comparing two fields of different comparison classes (text vs number, text vs image) passes os validate; on driver-sql the using read answers 400 while the check insert is admitted and stored",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:access",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T00:39:21Z",
-  "updated_at": "2026-09-28T02:13:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T08:28:21Z",
+  "closed_at": "2026-09-28T08:26:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20347",
   "body": "Filing gate: **① a defect with a named landing site**, finding class **(c)**, with `reach:` measured at the real authoring door and through the real enforcement stack. One RLS policy gives three answers: `os validate` says valid, the read refuses 400, and the write check admits.\n\nFound by the `os-dev` round on #19886 stage 2f (PR #20346; report on #19886 `5861308252`, `out_of_scope_findings[0]`). Filed by the `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured by the dev at `509728de`, relayed; evidence file read by this seat)\n\n- **`os validate` (real CLI) reports valid** for a `rowLevelSecurity` policy whose `using` is `record.status != record.amount` (text vs number) or `record.status != record.photo` (text vs single image).\n- **Through the real `plugin-security` + ObjectQL + `driver-sql`**, the same policy splits:\n\n| predicate | `using` on `find` | `check` on `insert` |\n|:--|:--|:--|\n| text `!=` number | `INVALID_FILTER` / 400 | **admitted, row stored** |\n| text `!=` image | `INVALID_FILTER` / 400 | **admitted, row stored** |\n| control: scalar `!=` of one class | rows returned | admitted, stored |\n\n- A formula-field cell (`record.status != record.is_open`) is also silent at `os validate`. Its runtime is NOT MEASURED.\n\n## Why\n\n- `driver-sql`'s `crossFieldComparisonClass` (`sql-driver.ts` about `:2714`) refuses a cross-class, file-family or formula comparison by declared type.\n- The in-process write-check evaluator admits the same comparison. This is one operation with two implementations that disagree (meta-criterion ②).\n- `@objectstack/lint`'s `validateRlsPredicateEnforceability` has no arm for class mismatch. After PR #20346 it refuses list/object-holding columns only, which is #19886's family. This is a different family: a type-class mismatch, not a list.\n\nSeam: `spec:FilterCondition { $field }` → `runtime:driver-sql crossFieldComparisonClass` | `lint:validateRlsPredicateEnforceability` (no authoring consumer) | the write-check evaluator (`packages/formula` `matches-filter`).\n\n## What the fix is (for the dispatch to confirm)\n\n- **One classification, read by every judge.** Refuse, at the authoring door, a field-to-field RLS comparison whose two columns fall in different comparison classes. Use the classification `driver-sql` already applies, lifted to one shared source rather than a second copy.\n- **Make the write check give the read's answer**, so enforcement is one answer per policy.\n- **Census:** shipped `using` / `check` / sharing conditions comparing fields of two classes. The #19886 2f census found 2 field-to-field comparisons in the whole tree, both same-class, so the expected count is 0.\n\n## Dedupe\n\nA local scan of every open and recently closed objectstack issue and PR for `crossFieldComparisonClass|cross-field comparison|cross-class|field-to-field…(class|type)|type-class mismatch|cross[- ]field|check…admitted…stored` found these hits: #20346, #20259, #20174, #20127, #20147, #19949 / #20182 (mongodb `$field`), #20020, #19950 and #19989.\n- #20346 and #20259 carry the list family.\n- #20127 is a `having` temporal `$field` case.\n- #19949 and #20182 are MongoDB's literal `$field`.\n- None carries a class mismatch between two RLS columns.\n\nDedupe words: `cross-field comparison class mismatch lint` · `record.status != record.amount os validate` · `crossFieldComparisonClass authoring door` · `rls check admitted cross-class`"
