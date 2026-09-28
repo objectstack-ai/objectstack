@@ -217,8 +217,9 @@
       }
     },
     "aria": {
-      "status": "live",
-      "note": "PARTIAL — honored by a few objectui renderers, not the core action buttons/menus."
+      "status": "dead",
+      "verifiedAt": "2026-09-28",
+      "note": "REMOVED 2026-09-28 (#20323, ADR-0049 enforce-or-remove) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-18 conversion action-aria-removed. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); write the accessible name as the action's required `label`, and put a region name in the placing node's `aria` block (`page.components[].aria` or the list view `aria`). The `live` grade this row replaces rested on an uncited note — 「PARTIAL — honored by a few objectui renderers, not the core action buttons/menus」 — with no reader behind it: re-measured at the `.objectui-sha` pin f8a9d0fb05, none of the action surfaces (action:button/icon/menu/group/bar, the grid row and bulk action menus, record:quick_actions, the declared-actions bar) reads an action's `aria`; the only `schema.aria` readers there are the placing nodes' own blocks (the record:* page components, the list view, element:button's props)."
     },
     "shortcut": {
       "status": "dead",

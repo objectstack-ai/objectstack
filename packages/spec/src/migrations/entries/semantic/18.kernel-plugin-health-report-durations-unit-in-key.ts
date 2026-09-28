@@ -11,7 +11,11 @@ export const entry: SemanticMigration = {
     + '(kernel/plugin-lifecycle-advanced.zod.ts)',
   replacement: 'uptimeMs and responseTimeMs — rename each key; both values are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'uptime is the case this rule was written for, and this repo had already paid for it in '
     + 'documentation: the platform serves a SECONDS-valued uptime on GET /health and stores a '
     + 'MILLISECONDS-valued uptime on this report, so the protocol lifecycle page carried a '
@@ -29,7 +33,7 @@ export const entry: SemanticMigration = {
     + '(packages/core/src/health-monitor.ts) and kept in memory — never authored into a '
     + 'metadata document, never a stored sys_metadata row — so the conversion chain has no '
     + 'seam that would see one, the same disposition HealthStatus.timestamp took '
-    + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+    + '(epoch-instant-keys-renamed). ADR-0087.',
   acceptanceCriteria:
     'Every producer of a PluginHealthReport spells uptimeMs and responseTimeMs — concretely '
     + 'packages/core/src/health-monitor.ts, the one production writer, whose metrics block now '

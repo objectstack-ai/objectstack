@@ -4,10 +4,21 @@
  * Minimal mustache-style template renderer.
  *
  * Supports `{{path.to.value}}` placeholders resolved against a plain
- * JS object via dotted-path lookup. Values are HTML-escaped by
- * default; use `{{{path}}}` (triple braces) to opt out of escaping
- * (e.g. when injecting pre-rendered HTML fragments such as URLs in
- * `<a href="">`).
+ * JS object via dotted-path lookup.
+ *
+ * Escaping follows the FACE being rendered, so there are two entry points:
+ *
+ * - {@link renderTemplate} renders an HTML face (`body_html`). Values are
+ *   HTML-escaped by default; use `{{{path}}}` (triple braces) to opt out
+ *   of escaping (e.g. when injecting pre-rendered HTML fragments such as
+ *   URLs in `<a href="">`).
+ * - {@link renderPlainTextTemplate} renders a plain-text face (`subject`,
+ *   `body_text`). Every hole, double- or triple-braced, renders its value
+ *   verbatim: HTML entities in plain text are not markup, they are
+ *   corruption — a `&` in a link turned into `&amp;` hands a plain-text
+ *   reader a query parameter named `amp;callbackURL`. The switch lives
+ *   here, once, so every template that reaches the renderer — built-in,
+ *   declared or authored — gets it without a per-template brace change.
  *
  * A hole may carry an optional formatter from the shared formula
  * whitelist — `{{ order.total | currency:EUR }}`, `{{ ts | datetime }}` —
@@ -84,8 +95,14 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** How a double-braced hole's value is encoded for the face being rendered. */
+type HoleEncoder = (value: string) => string;
+
+const verbatim: HoleEncoder = (value) => value;
+
 /**
- * Render `template` with values from `data`. Missing placeholders
+ * Render `template` as an HTML face with values from `data`: `{{x}}`
+ * holes are HTML-escaped, `{{{x}}}` holes are not. Missing placeholders
  * render as empty strings (no throw); call `requireVars()` first if
  * you need strict validation.
  */
@@ -93,6 +110,30 @@ export function renderTemplate(
   template: string,
   data: Record<string, any>,
   opts: RenderOptions = {},
+): string {
+  return render(template, data, opts, escapeHtml);
+}
+
+/**
+ * Render `template` as a PLAIN-TEXT face (`subject`, `body_text`) with
+ * values from `data`: every hole renders its value verbatim, with no HTML
+ * escaping — plain text is not markup, so an entity there is a corrupted
+ * character, never a safe one. Same lookup, formatter and missing-value
+ * rules as {@link renderTemplate}.
+ */
+export function renderPlainTextTemplate(
+  template: string,
+  data: Record<string, any>,
+  opts: RenderOptions = {},
+): string {
+  return render(template, data, opts, verbatim);
+}
+
+function render(
+  template: string,
+  data: Record<string, any>,
+  opts: RenderOptions,
+  encode: HoleEncoder,
 ): string {
   if (!template) return '';
   return template.replace(
@@ -117,7 +158,7 @@ export function renderTemplate(
         if (raw == null) return '';
         str = typeof raw === 'string' ? raw : String(raw);
       }
-      return isUnescaped ? str : escapeHtml(str);
+      return isUnescaped ? str : encode(str);
     },
   );
 }
