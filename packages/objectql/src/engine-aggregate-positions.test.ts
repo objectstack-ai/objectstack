@@ -154,24 +154,30 @@ async function keptGroups(having: unknown, context?: Context): Promise<string[]>
 
 /**
  * Refused on both paths, on an empty and a populated object, with no read of
- * the object and one message everywhere. Returns the refusal.
+ * the object and one message per path — one message across the two paths as
+ * well unless `acrossPaths` is false (a refusal that lists the aggregated
+ * row's columns names the rows path's extra aggregation). Returns the native
+ * path's refusal.
  */
-async function expectHavingRefusal(having: () => unknown, context?: Context): Promise<Refusal> {
-  let first: Refusal | undefined;
+async function expectHavingRefusal(having: () => unknown, acrossPaths = true): Promise<Refusal> {
+  const first: Partial<Record<Path, Refusal>> = {};
   for (const path of ['native', 'rows'] as const) {
     for (const [population, rows] of [['empty', []], ['populated', ROWS]] as const) {
       const cell = `${path}, ${population}`;
       const { engine, reads } = await makeEngine(path, rows);
-      const { err } = await outcome(() => engine.aggregate(OBJECT, havingQuery(path, having(), context)));
+      const { err } = await outcome(() => engine.aggregate(OBJECT, havingQuery(path, having())));
       expect(err, cell).toBeInstanceOf(Error);
       expect(reads, cell).toEqual({ aggregate: 0, find: 0 });
-      first ??= err!;
-      expect(err!.code, cell).toBe(first.code);
-      expect(err!.status, cell).toBe(first.status);
-      expect(err!.message, cell).toBe(first.message);
+      first[path] ??= err!;
+      expect(err!.code, cell).toBe(first[path]!.code);
+      expect(err!.status, cell).toBe(first[path]!.status);
+      expect(err!.message, cell).toBe(first[path]!.message);
     }
   }
-  return first!;
+  expect(first.rows!.code).toBe(first.native!.code);
+  expect(first.rows!.status).toBe(first.native!.status);
+  if (acrossPaths) expect(first.rows!.message).toBe(first.native!.message);
+  return first.native!;
 }
 
 /** The same condition as a `where` on the object's fields — the twin. */
@@ -233,7 +239,7 @@ describe('[#20334] having — a known placeholder resolves, and compares as the 
 
 describe('[#20334] having — a placeholder the resolver cannot resolve is refused before any read, as its where twin is', () => {
   // name · having · its `where` twin · code
-  const REFUSED: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>, string, Context?]> = [
+  const REFUSED: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>, string]> = [
     ["the card's row: an unknown token on max(date), which kept no group",
       () => ({ last_placed: { $gte: '{not_a_token}' } }), { placed_on: { $gte: '{not_a_token}' } }, 'FILTER_TOKEN_UNKNOWN'],
     ['an unknown token on count, a column no temporal door judges',
@@ -268,7 +274,7 @@ describe('[#20334] having — a placeholder the resolver cannot resolve is refus
 
 describe('[#20334] having — the doors in front of the resolver keep their verdicts', () => {
   it('an earlier having door answers first, in its own words (#20123, a key naming no column)', async () => {
-    const err = await expectHavingRefusal(() => ({ totl: { $gt: 1 }, last_placed: { $gte: '{not_a_token}' } }));
+    const err = await expectHavingRefusal(() => ({ totl: { $gt: 1 }, last_placed: { $gte: '{not_a_token}' } }), false);
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.message).toContain("`having` filters on 'totl' at having.totl");
   });
