@@ -45,8 +45,42 @@
 //   `data.token` is absent from the normalized body too, so a regression back
 //   to `data.data?.token` cannot pass by accident, and the "enveloping it
 //   would have fixed refreshToken" reading stays refuted in code.
+// - `⑥ the cold start stays outside every clocked window` — pins WHERE the
+//   first scenario's one-time cost is paid (next section).
+//
+// ## [#20327] Why one throwaway scenario runs at MODULE SCOPE
+//
+// The first scenario in a worker pays a one-time cost no later one sees:
+// better-auth's lazily imported module graph, sql.js's WASM compile, and the
+// first-use costs of the sync and the sign-up. The phases are measured in
+// `auth-login-register-envelope.test.ts`, which carries the same arrangement
+// and the same fix. Here, idle on 4 vCPU at `c74de10a9`, that cost put the
+// first case at 1035 ms against 110-330 ms for the six after it. On a loaded
+// `Test Core` shard (PR #20325's run) the first case crossed vitest's 5000 ms
+// `testTimeout` while every other case passed. Twenty-four CPU-bound busy
+// loops on this box reproduce that exact signature on the first case.
+//
+// So the cost is now paid by a module-scope `await`, during COLLECTION, which
+// no vitest clock covers: `@vitest/runner@4.1.11` wraps hooks and test bodies
+// in `withTimeout(...)` and awaits the file import bare. This is the repo's
+// convention: "clocked windows measure behaviour, never loading" (AGENTS.md,
+// Build & Test; `check:test-source-alias`). The warm-up is the file's own
+// `signedIn()`, the arrangement five of the seven cases run, so no list of
+// loads can drift from what the cases really pay.
+//
+// ⛔ It shares nothing a case asserts on. Its engine and manager are its own
+// and are closed before any case starts. Every case still builds a fresh
+// engine, a fresh `AuthManager` and a fresh sign-up. What it leaves warm is
+// process-level: the module registry, sql.js's compiled WASM and the JIT,
+// which the first case used to leave to every later case.
+//
+// ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
+// timeout: vitest clocks a hook exactly as it clocks a test body, and a wider
+// window only moves the cliff to a heavier shard.
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuthManager } from '@objectstack/plugin-auth';
@@ -250,12 +284,21 @@ const principalFor = async (manager: AuthManager, token: string | undefined) => 
   return session?.user?.id ?? null;
 };
 
-afterEach(async () => {
+/** Close every engine a scenario opened: after each case, and after the warm-up. */
+const closeEngines = async (): Promise<void> => {
   while (engines.length) {
     const engine = engines.pop();
     await (engine as unknown as { close?: () => Promise<void> })?.close?.().catch(() => {});
   }
-});
+};
+
+// [#20327] The first scenario's one-time cost, paid during COLLECTION, which
+// no vitest clock covers (header, last section). ⛔ It stays at module scope,
+// and `⑥` below pins that.
+await signedIn();
+await closeEngines();
+
+afterEach(closeEngines);
 
 describe('[#16760] /get-session is lifted into the SessionResponse envelope it declares', () => {
   describe('① me() delivers the envelope it declares', () => {
@@ -425,6 +468,23 @@ describe('[#16760] /get-session is lifted into the SessionResponse envelope it d
       expect(res.token).toBeUndefined();
       expect(res.data.token).toBeUndefined();
       expect(typeof res.data.session?.token).toBe('string');
+    });
+  });
+
+  describe('⑥ the cold start stays outside every clocked window', () => {
+    it('pays the first scenario at module scope, and no hook carries it', () => {
+      // [#20327] Read off this file's own text, so "do not move it into a
+      // hook" is an assertion rather than a sentence nobody reads.
+      const code = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+
+      // Exactly one warm-up call, and it opens its own line at column 0. So it
+      // sits in no function body, which is what "paid during collection"
+      // reduces to. Comment lines start with `//` and cannot match.
+      expect(code.match(/^await signedIn\(\);$/gm) ?? []).toHaveLength(1);
+
+      // ⛔ No `before*` hook may come back to carry it: vitest clocks a hook
+      // with `hookTimeout` exactly as it clocks a test body with `testTimeout`.
+      expect(code).not.toMatch(/^\s*before(All|Each)\s*\(/m);
     });
   });
 });

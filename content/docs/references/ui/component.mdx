@@ -1,6 +1,6 @@
 ---
 title: Component
-description: Component protocol schemas
+description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProps and 37 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -362,8 +362,8 @@ Sort field and direction pair
 | **recordId** | `string \| number` | optional | Record to load (edit/view modes) |
 | **mode** | `Enum<'create' \| 'edit' \| 'view'>` | optional | Form mode |
 | **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional | Form presentation |
-| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout |
-| **columns** | `number` | optional | Field columns in grid layout |
+| **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
+| **columns** | `number` | optional | Number of field columns (multi-column forms), honoured under either `layout` |
 | **fields** | `any[]` | optional | Limit/order the fields shown |
 | **customFields** | `any` | optional | Custom field definitions merged into the generated set |
 | **sections** | `any[]` | optional | Form sections (`{ label, description?, fields }` — wizard steps / tab panes) |
