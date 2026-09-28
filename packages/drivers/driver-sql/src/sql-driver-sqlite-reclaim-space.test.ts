@@ -144,8 +144,8 @@ describe('SqlDriver.reclaimSpace() on better-sqlite3 returns the whole freelist'
 
     // Once the reader is gone, the next reclaim returns what this one left.
     await snapshot.commit();
-    await driver.bulkCreate('bulk', [{ id: 'later', body: 'x'.repeat(4000) }]);
-    await driver.delete('bulk', 'later');
+    await freePages(driver, 10);
+    expect((await secondConnection(file)).freelist).toBeGreaterThan(0);
     await driver.reclaimSpace();
     const settled = await secondConnection(file);
     expect(settled.freelist).toBe(0);
