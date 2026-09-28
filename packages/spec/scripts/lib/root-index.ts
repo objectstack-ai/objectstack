@@ -60,6 +60,7 @@
  */
 
 import { AUTO_GENERATED_BANNER } from './generated-output';
+import { rootIndexTitle, titleFrontmatter } from './page-title';
 
 /** One generated reference page, as the root index needs to describe it. */
 export interface RootIndexPage {
@@ -170,8 +171,10 @@ export function renderRootIndex(input: RootIndexInput): string {
   const totalPages = sections.reduce((n, s) => n + s.pages.length, 0);
   const totalSchemas = sections.reduce((n, s) => n + s.schemaCount, 0);
 
+  // The docs title rule, like every generated page (`lib/page-title.ts`);
+  // `Protocol Reference` stays this page's `navTitle`.
   let mdx = `---\n`;
-  mdx += `title: Protocol Reference\n`;
+  mdx += titleFrontmatter(rootIndexTitle());
   mdx += `description: Every schema published by @objectstack/spec — ${totalSchemas} schemas across ${plural(sections.length, 'protocol module')}\n`;
   mdx += `---\n\n`;
   mdx += AUTO_GENERATED_BANNER;
