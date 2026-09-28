@@ -5,7 +5,7 @@
 
 feat(spec,rest)!: retire `api.responseFormat` and `api.documentation.enabled` — parsed, defaulted, and read by nothing (#20295)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 **BREAKING** — shipped as `minor` under the launch-window convention
 (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by
