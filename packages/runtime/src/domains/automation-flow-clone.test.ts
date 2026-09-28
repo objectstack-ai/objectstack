@@ -100,7 +100,7 @@ function packagedExemplar(): Record<string, unknown> {
                     condition: 'record.stage == "negotiation"',
                 },
             },
-            { id: 'notify', type: 'notify', label: 'Notify manager', config: { channel: 'email', to: '{record.manager_email}' } },
+            { id: 'notify', type: 'notify', label: 'Notify manager', config: { channel: 'email', to: '{record.manager_email}', title: 'Deal in negotiation' } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [

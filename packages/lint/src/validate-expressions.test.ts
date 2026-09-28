@@ -4497,7 +4497,7 @@ describe('node config an executor requires (#20316)', () => {
     ['map', { collection: '{rows}', flowName: 'child_flow' }, 'collection'],
     ['get_record', { objectName: 'account' }, 'objectName'],
     ['http', { url: 'https://example.com/hook' }, 'url'],
-    ['script', { function: 'recalc_totals' }, 'function'],
+    ['subflow', { flowName: 'child_flow' }, 'flowName'],
   ] as Array<[string, Record<string, unknown>, string]>)('%s without `%s` is refused; with it, nothing is', (type, whole, key) => {
     expect(errorsOf(stackWith({ type, config: whole }))).toHaveLength(0);
     const authored = { ...whole };
@@ -4522,14 +4522,10 @@ describe('node config an executor requires (#20316)', () => {
     expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (decision) config.conditions[0]"]);
   });
 
-  it('a `script` with no `function` is ONE finding — the judge\'s, not also the callable check\'s', () => {
+  it('a `script` with no `function` is ONE finding, the callable check\'s — it reads the pre-conversion spellings this pass may be handed', () => {
     const found = errorsOf(stackWith({ type: 'script', config: {} }));
-    expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (script) config.function"]);
-  });
-
-  it('CONTROL — a `script` whose `function` is present but blank keeps the callable check\'s finding', () => {
-    const found = errorsOf(stackWith({ type: 'script', config: { function: '  ' } }));
     expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (script) callable"]);
+    expect(errorsOf(stackWith({ type: 'script', config: { functionName: 'recalc_totals' } }))).toHaveLength(0);
   });
 });
 

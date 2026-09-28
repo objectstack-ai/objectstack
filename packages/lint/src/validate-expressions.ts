@@ -1628,7 +1628,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // handed to `validateStackExpressions` without a parse in front of it
         // is held to the same bar. `error`: the flow would register and then
         // refuse — or, for a branch with no label, misroute — every run.
-        const configRefusals = flowNodeConfigRefusals(nodeType, node.config);
+        const configRefusals = flowNodeConfigRefusals(nodeType, node.config)
+          // A `script`'s `function` stays the callable check's below (#1870,
+          // #4343): this pass may be handed a pre-conversion source, and that
+          // check reads what such a source spells — the `functionName` alias,
+          // the retired dispatch keys — and names each, where the judge would
+          // only see `function` absent.
+          .filter((r) => !(nodeType === 'script' && r.path === 'function'));
         for (const refusal of configRefusals) {
           issues.push({
             where: `${at} · node '${node.id}' (${nodeType}) config.${refusal.path}`,
@@ -1744,10 +1750,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
                   + 'sources; apply them by hand.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
-          } else if (!fn && !configRefusals.some((r) => r.path === 'function')) {
-            // [#20316] An ABSENT `function` is the contract judge's finding
-            // above (one finding, not two); this arm keeps the shape that judge
-            // leaves alone — a `function` that is present and blank.
+          } else if (!fn) {
             issues.push({
               where: `${at} · node '${node.id}' (script) callable`,
               message:
