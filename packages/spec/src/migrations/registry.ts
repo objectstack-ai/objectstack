@@ -11141,7 +11141,8 @@ const step18: MigrationStep = {
         + 'the 365 default on EventSourcingConfig',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'What makes these two one entry rather than two is the neighbour they share and the one '
@@ -11256,7 +11257,8 @@ const step18: MigrationStep = {
         + 'value is unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These three are one entry because they are one story told to one audience — a package '
@@ -11295,7 +11297,8 @@ const step18: MigrationStep = {
       replacement: 'uptimeMs and responseTimeMs — rename each key; both values are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'uptime is the case this rule was written for, and this repo had already paid for it in '
@@ -11341,7 +11344,8 @@ const step18: MigrationStep = {
         + 'rename each key; every value is unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These four are one entry because they are one document — everything here hangs off a '
@@ -11456,7 +11460,8 @@ const step18: MigrationStep = {
         + 'unchanged, and so is the 30000 default on StartupOptions',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These three are one entry because they are one boundary: a host passes StartupOptions '
@@ -14688,7 +14693,8 @@ const step18: MigrationStep = {
         + 'TTL default and the 30 reset default are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'These two are one entry because they are one file and one authoring session: a '
@@ -14723,7 +14729,8 @@ const step18: MigrationStep = {
         + '300000 idle-timeout default are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'idleTimeout is the collision that got this whole population ruled rather than merely '
@@ -14759,7 +14766,8 @@ const step18: MigrationStep = {
         + 'are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because its file has exactly one offender left — and because the key '
@@ -14881,7 +14889,8 @@ const step18: MigrationStep = {
         + 'rename each key; every value is unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'The three are one entry because they are one measurement expressed three times on one '
@@ -14934,7 +14943,8 @@ const step18: MigrationStep = {
       replacement: 'maxAgeSeconds and timeoutMs — rename each key; both values are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'AccessControlConfig.maxAge is the one key in this stack where the two structural '
@@ -14971,7 +14981,8 @@ const step18: MigrationStep = {
         + 'value, the 30000 timeout default and the 3600 TTL default are unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'The three are one entry because they are one file and, for the first two, one object: '
@@ -15089,7 +15100,8 @@ const step18: MigrationStep = {
       replacement: 'durationMs — rename the key; the value is unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because it is the only offender on its file and the only one in this '
@@ -15122,7 +15134,8 @@ const step18: MigrationStep = {
       replacement: 'durationMs — rename the key; the value is unchanged',
       reason:
         'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-        + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+        + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+        + 'a schema declares on the key itself): the unit of a '
         + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
         + 'only in the describe prose, and no existing offender is grandfathered. '
         + 'It stands alone because it is the only offender left on its file, and the file itself '

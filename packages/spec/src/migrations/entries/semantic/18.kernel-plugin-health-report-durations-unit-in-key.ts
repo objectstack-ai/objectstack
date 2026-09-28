@@ -12,7 +12,8 @@ export const entry: SemanticMigration = {
   replacement: 'uptimeMs and responseTimeMs — rename each key; both values are unchanged',
   reason:
     'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
     + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
     + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'uptime is the case this rule was written for, and this repo had already paid for it in '

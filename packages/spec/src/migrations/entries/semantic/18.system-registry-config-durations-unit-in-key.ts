@@ -11,7 +11,8 @@ export const entry: SemanticMigration = {
     + 'value, the 30000 timeout default and the 3600 TTL default are unchanged',
   reason:
     'Maintainer ruling B on duration units (2026-09-02, its population widened on '
-    + '2026-09-05 to every authored and every runtime-emitted duration): the unit of a '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
     + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
     + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'The three are one entry because they are one file and, for the first two, one object: '
