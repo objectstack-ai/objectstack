@@ -50,9 +50,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
-const SOURCE = readFileSync(fileURLToPath(new URL('./dev-plugin.ts', import.meta.url)), 'utf8');
+// `__dirname`, not `import.meta.url`: this package's build config compiles
+// `src/**` as CommonJS, where `import.meta` is TS1470. Vitest's evaluator
+// provides `__dirname` to every module it runs.
+const HERE = __dirname;
+const SOURCE = readFileSync(resolve(HERE, 'dev-plugin.ts'), 'utf8');
 
 /**
  * The source with comments masked. Block comments go first. A `//` comment is
