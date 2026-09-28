@@ -56,7 +56,7 @@ for both corollaries.
 | `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
-| `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
+| `qa` | 8 | 0 | 0 | 1 | 0 | 9 |
 | `manifest` | 23 | 0 | 1 | 15 | 0 | 39 |
 | `crud_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
 | `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
@@ -67,4 +67,4 @@ for both corollaries.
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 30 | 1 | 60 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **936** | **5** | **1** | **152** | **9** | **1103** |
+| **total** | **940** | **5** | **1** | **148** | **9** | **1103** |
