@@ -3762,7 +3762,8 @@ export class RestServer {
         // why naming the org unconditionally would resurrect #6190's phantoms).
         const layeredCtx = await this.resolveExecCtx(environmentId, req)
             .catch(rethrowAuthzStoreUnavailable);
-        // [#10340] FOLDED, not raw — see the PUT door's org-scope comment for
+        // [folded-type commit 26f3588fb] (the original card no longer
+        // resolves) FOLDED, not raw — see the PUT door's org-scope comment for
         // the measurement. [#20478] Asked of `metaReadOrganizationId` (the
         // same fold over the vetted `tenantId`), the one answer the runtime
         // dispatcher's layered read asks too.

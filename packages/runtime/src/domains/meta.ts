@@ -649,36 +649,11 @@ async function answerMetaItem(
     }
 }
 
-/** [#20320] This transport's save-door admission of `:type/:name` — see {@link metaSaveVerdictOf}. */
+/** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
 type MetaSaveVerdict = (
     canonicalType: string,
     activeOrganizationId: string | undefined,
 ) => ReturnType<typeof metaWriteCapabilityVerdict>;
-
-/**
- * [#12702 · #20320 · #20478] May this caller SAVE `:type/:name` on THIS
- * transport? The admission of the item branch's `PUT`, spelled ONCE: that door
- * asks it, and so does every read door that honours the author exemption —
- * the `?state=draft` read and the layered view, on both of its spellings
- * (ruling 5856774816, item 1: 「whoever can save it must see it whole, or a
- * save drops entries silently」), which `MetaReadGateCaller.mayWriteItem` says
- * must be the transport's own save-door answer. A second spelling at a read
- * could drift from the door it stands for. `canonicalType` is the folded
- * segment and `activeOrganizationId` the one resolution each caller already
- * made, so authorization and scope read one value.
- */
-function metaSaveVerdictOf(context: HttpProtocolContext): MetaSaveVerdict {
-    return (canonicalType, activeOrganizationId) => {
-        const ec: any = context.executionContext;
-        return metaWriteCapabilityVerdict({
-            isSystem: ec?.isSystem === true,
-            systemPermissions: ec?.systemPermissions,
-            canonicalType,
-            activeOrganizationId,
-            operation: 'save',
-        });
-    };
-}
 
 /**
  * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
@@ -782,12 +757,12 @@ type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol
  * ({@link metaReadOrganizationId}, the partition the plain read reads — ⛔ never
  * the session's claim as stored) and to `?package=` (ADR-0048). The chain
  * judges every present layer under `STORED_VERSION_DOOR_POLICY` — whole for a
- * caller this transport's save door admits ({@link metaSaveVerdictOf}, carried
- * as `mayWriteItem`), pruned as the plain read prunes it for everyone else
- * (ruling 5856774816) — and projects every layer through the ADR-0106 mask
- * under the posture resolved before the read. The dispatcher served neither
- * spelling: the route answered a located `404 ROUTE_NOT_FOUND`, and the flag
- * answered the PLAIN read's `{ type, name, item }` with a `200`.
+ * caller this transport's save door admits (`saveVerdict`, the `PUT` branch's
+ * own admission, carried as `mayWriteItem`), pruned as the plain read prunes
+ * it for everyone else (ruling 5856774816) — and projects every layer through
+ * the ADR-0106 mask under the posture resolved before the read. The dispatcher
+ * served neither spelling: the route answered a located `404 ROUTE_NOT_FOUND`,
+ * and the flag answered the PLAIN read's `{ type, name, item }` with a `200`.
  *
  * The answers, in this transport's envelope, with `RestServer`'s status and
  * code: the layered answer (no `Vary`: it is not translated; `private,
@@ -805,12 +780,13 @@ async function answerMetaLayered(
     context: HttpProtocolContext,
     protocol: MetaLayeredProtocol,
     request: { type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture },
+    saveVerdict: MetaSaveVerdict,
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture } = request;
     const caller = context.executionContext as MetaReadGateCaller | undefined;
     const organizationId = metaReadOrganizationId(type, caller);
-    const mayWriteItem = metaSaveVerdictOf(context)(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
+    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
     let answer: MetaLayeredAnswer;
     try {
         const layered = await protocol.getMetaItemLayered({
@@ -881,6 +857,29 @@ function decodeMetaNameSegment(segment: string): string {
  */
 export async function handleMetadataRequest(deps: DomainHandlerDeps, path: string, _context: HttpProtocolContext, method?: string, body?: any, query?: any): Promise<HttpDispatcherResult> {
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS transport?
+    // The admission of the item branch's `PUT`, spelled ONCE: that door asks
+    // it, and so does every read door that honours the author exemption — the
+    // `?state=draft` read and [#20478] the layered view, on both of its
+    // spellings (ruling 5856774816, item 1: 「whoever can save it must see it
+    // whole, or a save drops entries silently」), which
+    // `MetaReadGateCaller.mayWriteItem` says must be the transport's own
+    // save-door answer. A second spelling at a read could drift from the door
+    // it stands for. `canonicalType` is the folded segment and
+    // `activeOrganizationId` the one resolution each caller already made, so
+    // authorization and scope read one value. [#20478] Declared here, above
+    // every branch, so the `/layers` branch asks the same one.
+    const saveVerdict: MetaSaveVerdict = (canonicalType, activeOrganizationId) => {
+        const ec: any = _context.executionContext;
+        return metaWriteCapabilityVerdict({
+            isSystem: ec?.isSystem === true,
+            systemPermissions: ec?.systemPermissions,
+            canonicalType,
+            activeOrganizationId,
+            operation: 'save',
+        });
+    };
     // Defense-in-depth: the metadata catch-all must honour the same
     // anonymous-deny (#2567) as the REST `/meta` routes (which serve `/meta` on
     // the cloud runtime). Object/field schemas — SYSTEM-object schemas on a
@@ -1009,7 +1008,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // path fell to the located `ROUTE_NOT_FOUND` tail below. The whole answer is
     // `createMetaLayeredAnswer` in `@objectstack/rest` ({@link
     // answerMetaLayered}), the one `RestServer`'s handler calls. EXACTLY three
-    // segments, like `/published` beside it (#12195). The anonymous gate above
+    // segments, like `/published` beside it. The anonymous gate above
     // keeps its deny here (`metaReadRouteOf` names no route), as `RestServer`'s
     // does.
     if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
@@ -1038,7 +1037,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = query?.package || undefined;
         return answerMetaLayered(
             deps, _context, protocol as MetaLayeredProtocol,
-            { type, name, packageId, maskPosture },
+            { type, name, packageId, maskPosture }, saveVerdict,
         );
     }
 
@@ -1189,12 +1188,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // Extract optional package filter from query string
         const packageId = query?.package || undefined;
 
-        // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS
-        // transport? The admission of the `PUT` branch below, spelled ONCE
-        // ({@link metaSaveVerdictOf}): that branch asks it, and so do the read
-        // doors that honour the author exemption — the `?state=draft` read
-        // below and [#20478] the layered view.
-        const saveVerdict: MetaSaveVerdict = metaSaveVerdictOf(_context);
 
         // PUT /metadata/:type/:name (Save)
         //
@@ -1529,7 +1522,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 if (protocol && typeof protocol.getMetaItemLayered === 'function') {
                     return await answerMetaLayered(
                         deps, _context, protocol as MetaLayeredProtocol,
-                        { type, name, packageId, maskPosture },
+                        { type, name, packageId, maskPosture }, saveVerdict,
                         metaItemLayersDeprecationHeaders(requestedItemPath(_context)),
                     );
                 }
