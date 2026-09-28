@@ -594,10 +594,8 @@ describe('[#20320] row B: an anonymous read of a public book or doc is served on
                 .toEqual({ status, code: status === 200 ? undefined : 'UNAUTHENTICATED' });
             expect({ status: dispatcher.status, code: dispatcher.code }).toEqual({ status: rest.status, code: rest.code });
             // The document served: its identity, label and body. (The item read's
-            // doc LOCALE collapse — `RestServer` drops a doc's `translations` map
-            // on this read, the dispatcher does not — is a divergence of the item
-            // read, not of reachability; it is reported with this card's
-            // out-of-scope findings, not pinned here.)
+            // doc LOCALE collapse — the rest of the answer — is pinned by the
+            // [#20408] item census below, every caller × query parameter.)
             const served = (a: Answer) => a.item && { name: a.item.name, label: a.item.label, content: a.item.content };
             if (status === 200) expect(served(dispatcher)).toEqual(served(rest));
             expect(text(dispatcher)).not.toContain(DOC_SECRET);
@@ -616,8 +614,11 @@ describe('[#20320] row B: an anonymous read of a public book or doc is served on
         }
     });
 
-    it('control: the exemption reaches only the dispatcher\'s own list and item reads — /published and an unrouted book path stay 401', async () => {
-        for (const path of ['/meta/book/public_guide/published', '/meta/book/public_guide/tree', '/meta/doc/public_faq/published']) {
+    it('control: the exemption reaches only the dispatcher\'s own list, item and book-tree reads — /published and an unrouted book path stay 401', async () => {
+        // [#20408] `/meta/book/:name/tree` is a route here now, and exempt as on
+        // `RestServer` (its census is below); the plural spelling is no route on
+        // either transport, so it keeps the deny.
+        for (const path of ['/meta/book/public_guide/published', '/meta/books/public_guide/tree', '/meta/doc/public_faq/published']) {
             const { read, protocol } = bootDispatcher('anonymous');
             const res = await read(path);
             expect({ status: res.status, code: res.code }, path).toEqual({ status: 401, code: 'UNAUTHENTICATED' });

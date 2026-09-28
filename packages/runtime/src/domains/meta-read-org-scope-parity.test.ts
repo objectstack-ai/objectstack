@@ -101,9 +101,12 @@ function protocolDouble() {
             if (org) for (const [n, v] of Object.entries(ORG_OVERLAYS[org]?.[t] ?? {})) merged.set(n, clone(v));
             return { type: t, items: [...merged.values()] };
         }),
+        // The overlay layer is a strict `state: 'active'` lookup, org-scoped first,
+        // then env-wide — the env-wide rows here are env-wide overlay rows.
         getMetaItemLayered: vi.fn(async ({ type, name, organizationId }: any) => {
             const { overlay, env } = resolve(type, name, organizationId);
-            return { type: canonicalMetaUrlType(type), name, code: env ? clone(env) : null, overlay: overlay ? clone(overlay) : null, effective: clone(overlay ?? env ?? null) };
+            const active = overlay ?? env;
+            return { type: canonicalMetaUrlType(type), name, code: null, overlay: active ? clone(active) : null, effective: clone(active ?? null) };
         }),
         listDrafts: vi.fn(async ({ organizationId }: any) => ({
             items: clone(typeof organizationId === 'string' ? ORG_DRAFTS[organizationId] ?? [] : ENV_DRAFTS),
@@ -265,6 +268,8 @@ describe('[#20408] controls: the rig can tell the organizations apart', () => {
             const item = await call('GET', 'member', '/meta/view/lead_all');
             expect({ status: item.status, label: item.data?.item?.label }).toEqual({ status: 200, label: 'Alpha pipeline' });
             expect(labelOf((await call('GET', 'member', '/meta/view')).data, 'lead_all')).toBe('Alpha pipeline');
+            const published = await call('GET', 'member', '/meta/view/lead_all/published');
+            expect({ status: published.status, label: published.data?.label }).toEqual({ status: 200, label: 'Alpha pipeline' });
         }
     });
 
@@ -292,6 +297,8 @@ describe('[#20408] a session claim the resolver DROPPED scopes nothing, on eithe
         const { call } = bootRest();
         expect((await call('GET', 'exmember', '/meta/view/lead_all')).data?.item?.label).toBe('All leads');
         expect(labelOf((await call('GET', 'exmember', '/meta/view')).data, 'lead_all')).toBe('All leads');
+        expect((await call('GET', 'exmember', '/meta/view/lead_all', { preview: 'draft' })).data?.item?.label).toBe('All leads');
+        expect((await call('GET', 'exmember', '/meta/view/lead_all/published')).data?.label).toBe('All leads');
     });
 
     for (const [label, path, query, read] of [

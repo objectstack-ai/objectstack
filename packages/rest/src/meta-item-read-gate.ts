@@ -159,8 +159,8 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
  * `undefined` for an anonymous caller, a caller with no active organization,
  * and one whose claim was dropped — which are one fact to every consumer.
  */
-export function metaCallerOrganizationId(caller: { readonly tenantId?: unknown } | null | undefined): string | undefined {
-    const tenantId = caller?.tenantId;
+export function metaCallerOrganizationId(caller: unknown): string | undefined {
+    const tenantId = caller && typeof caller === 'object' ? (caller as { tenantId?: unknown }).tenantId : undefined;
     return typeof tenantId === 'string' ? tenantId : undefined;
 }
 
@@ -175,10 +175,7 @@ export function metaCallerOrganizationId(caller: { readonly tenantId?: unknown }
  * `RestServer`'s list and item reads and the runtime dispatcher's ask this, so
  * the partition a caller reads cannot differ by transport.
  */
-export function metaReadOrganizationId(
-    type: unknown,
-    caller: { readonly tenantId?: unknown } | null | undefined,
-): string | undefined {
+export function metaReadOrganizationId(type: unknown, caller: unknown): string | undefined {
     return organizationIdForMetaRead(
         canonicalMetaUrlType(typeof type === 'string' ? type : ''),
         metaCallerOrganizationId(caller),
