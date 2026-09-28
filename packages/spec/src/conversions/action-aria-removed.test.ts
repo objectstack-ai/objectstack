@@ -95,4 +95,24 @@ describe('[#20323] action-aria-removed (ADR-0087 D2)', () => {
     expect(converted).not.toHaveProperty('aria');
     expect(ActionSchema.safeParse(converted).success).toBe(true);
   });
+
+  it('the stored-row seam reaches an `object` row\'s nested action too', () => {
+    // The second authored coordinate at rest: an `object` row wraps as
+    // `objects[0]`, so the walk reaches `objects[].actions[]`. Everything but
+    // the retired key survives, and the untouched sibling action is the SAME
+    // reference (copy-on-write).
+    const untouched = { name: 'close_case', label: 'Close', type: 'script', target: 'closeCase' };
+    const stored = {
+      name: 'support_case',
+      label: 'Case',
+      actions: [
+        { name: 'reopen_case', label: 'Reopen', type: 'script', target: 'reopenCase', aria: ARIA },
+        untouched,
+      ],
+    };
+    const converted = applyConversionsToStoredItem('object', stored) as typeof stored;
+    expect(converted.actions[0]).toEqual({ name: 'reopen_case', label: 'Reopen', type: 'script', target: 'reopenCase' });
+    expect(converted.actions[1]).toBe(untouched);
+    expect(converted.name).toBe('support_case');
+  });
 });

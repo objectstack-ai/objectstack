@@ -1124,7 +1124,12 @@ describe('Action ARIA Integration (retired — #20323)', () => {
     expect(result.success, 'an authored `action.aria` must be refused').toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'aria');
     expect(issue, 'the refusal sits at the retired key').toBeDefined();
-    expect(issue!.message).toMatch(/`action\.aria` was removed.*Delete the key\./s);
+    // The tombstone's own issue kind — a `never` slot at `aria` — not the
+    // strict shape's generic `unrecognized_keys` at the root, which is what a
+    // bare deletion would answer, without the prescription below.
+    expect(issue!.code).toBe('invalid_type');
+    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(false);
+    expect(issue!.message).toMatch(/`action\.aria` was removed in @objectstack\/spec 17\.5\.0.*Delete the key\./s);
   });
 
   it('control: the same action without `aria` parses, and keeps its accessible name in `label`', () => {

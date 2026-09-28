@@ -2,7 +2,7 @@
 '@objectstack/spec': minor
 ---
 
-**BREAKING** — remove `aria` from the action (`ActionSchema`), the ARIA block no action surface ever applied.
+**BREAKING** — `aria` on an action (`ActionSchema`, top-level `actions[]` and `objects[].actions[]`) is now refused at parse: no action surface ever applied it. Write the accessible name in the action's rendered `label`, and name the region that places the actions with `ariaLabel` / `ariaDescribedBy` / `role` in the placing node's `aria` block (`page.components[].aria` or the list view `aria`).
 
 Clause-②: yes
 
@@ -34,7 +34,7 @@ It is the fourth member of the `aria` family retired for exactly this, after `da
 ## Reach, measured
 
 - This repository: **0** authors of `aria` on an action in `examples/**`, `packages/**` fixtures or the published skills (control: 15 `variant:` lines in `examples/**`). Two hand-written docs pages taught the key and are corrected here.
-- HotCRM at `origin/main` `2f7b2326`: **0** on an action; its 6 `aria:` blocks are all page-level `page.aria`, which stays live (control: HotCRM authors actions — 5 action files declare `locations:`).
+- HotCRM at `origin/main` `2f7b2326`: **0** on an action; its 6 `aria:` blocks are all page-level `page.aria`, which stays live (control: HotCRM authors actions — 7 files under `src/**/actions/` declare `locations:`, 17 times).
 - Other out-of-repo authors: NOT MEASURED.
 
 ## What an operator with a STORED action sees

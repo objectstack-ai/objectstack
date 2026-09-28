@@ -1682,7 +1682,7 @@ const actionObject = () => strictObject({
   // def retirement. Sources are stripped by the D2 conversion
   // `action-aria-removed`.
   aria: retiredKey(
-    '`action.aria` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no action ' +
+    '`action.aria` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no action ' +
     'surface ever applied it: the button, icon, menu, group and bar renderers, the row and bulk ' +
     'action menus and the record quick-actions toolbar all take the accessible name from the ' +
     "action's `label` and never read this block, so ARIA attributes declared here parsed and then " +
