@@ -232,12 +232,17 @@
  * `record.status != record.photo` (text vs a single image) lower to legal
  * `{ status: { $ne: { $field: … } } }` shapes and hold no list, so the arm above
  * lets them through. Measured before this arm, through the real plugin-security
- * and ObjectQL on driver-sql: `os validate` reported them valid, the read their
- * `using` scopes answered `INVALID_FILTER` / 400 (driver-sql compiles a
- * column-to-column comparison only between two columns of ONE comparison
- * class, and refuses the file family and formula fields outright), and an
- * insert their `check` judges was ADMITTED and stored — the in-process write
- * check has no class rule, so the permissive answer sat on the write side of
+ * and ObjectQL on driver-sql, for those two and for `record.status !=
+ * record.is_open` (a formula field): `os validate` reported them valid; the
+ * read their `using` scopes answered `INVALID_FILTER` / 400 (driver-sql
+ * compiles a column-to-column comparison only between two columns of ONE
+ * comparison class, and refuses the file family and formula fields outright)
+ * and a by-id update or delete it scopes `PERMISSION_DENIED` / 403; and an
+ * insert their `check` judges — or their `using`, standing in as the check —
+ * was ADMITTED and stored. The in-process write check has no class rule and
+ * compares the two raw values, so the write answer is whatever that comparison
+ * happens to give (`record.amount > record.status` was refused 403, because
+ * `5 > 'open'` is false in JS): the permissive answer sits on the write side of
  * an access policy. One policy, three answers.
  *
  * This arm refuses the comparison where it is written, by the same rule the
@@ -1231,9 +1236,10 @@ function crossClassConsequence(clause: 'using' | 'check'): string {
     'comparison happens to hold — an answer the read path refuses to give';
   return clause === 'using'
     ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses ' +
-        'the comparison by the two columns\' declared types). On an `insert`, `update` or `all` policy the same ' +
-        '`using` is also the write check whenever no applicable policy for that operation declares a `check` ' +
-        `(ADR-0058 D4), and there ${write}.`
+        'the comparison by the two columns\' declared types), and every by-id update or delete it scopes fails ' +
+        'closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or `all` policy the same `using` is also ' +
+        'the write check whenever no applicable policy for that operation declares a `check` (ADR-0058 D4), and ' +
+        `there ${write}.`
     : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and is enforced by an ` +
         'accident of the two values.';
 }

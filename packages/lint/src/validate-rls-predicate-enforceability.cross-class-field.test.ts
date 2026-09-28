@@ -154,7 +154,8 @@ describe('validateRlsPredicateEnforceability — a field compared with a field o
     const using = validateRlsPredicateEnforceability(stackWith({ operation: 'select', using: 'record.status != record.amount' }))[0];
     expect(using.message).toContain(
       'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the ' +
-        "comparison by the two columns' declared types).",
+        "comparison by the two columns' declared types), and every by-id update or delete it scopes fails closed " +
+        '(`PERMISSION_DENIED` / 403).',
     );
     expect(using.message).toContain('the same `using` is also the write check whenever no applicable policy');
 
