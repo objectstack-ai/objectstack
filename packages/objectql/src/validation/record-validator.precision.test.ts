@@ -109,10 +109,11 @@ describe('validateRecord — the DECIMAL(p, s) reading of `precision` (#19992)',
       expect(fieldsOf(schema, { qty: ok }), String(ok)).toBeNull();
     }
     const [err] = fieldsOf(schema, { qty: 12345 })!;
-    expect(err).toMatchObject({ code: 'max_precision', constraint: { precision: 4, scale: 0, actual: 5 } });
+    expect(err).toMatchObject({ field: 'qty', code: 'max_precision', constraint: { precision: 4, scale: 0, actual: 5 } });
     // The value's own digits were counted, so the plain sentence — no padding to explain.
     expect(err.message).toBe('Qty must have at most 4 digits in total (got 5)');
     expect(fieldsOf(schema, { qty: 1.2345 })?.[0]).toMatchObject({
+      field: 'qty',
       code: 'max_precision',
       constraint: { precision: 4, scale: 4, actual: 5 },
     });
@@ -137,7 +138,7 @@ describe('validateRecord — the DECIMAL(p, s) reading of `precision` (#19992)',
 
   it('zero occupies no digits, so it fits even `precision: 0` — which refuses every other value', () => {
     expect(fieldsOf(schema, { zero: 0 })).toBeNull();
-    expect(fieldsOf(schema, { zero: 1 })?.[0]).toMatchObject({ code: 'max_precision', constraint: { precision: 0, actual: 1 } });
+    expect(fieldsOf(schema, { zero: 1 })?.[0]).toMatchObject({ field: 'zero', code: 'max_precision', constraint: { precision: 0, actual: 1 } });
   });
 });
 
@@ -204,7 +205,7 @@ describe('validateRecord — where `precision` binds, and where it does not (#19
 
   it('refuses on update too, and judges a string-carried number (a CSV cell) after coercion', () => {
     const s = { fields: { rate: { type: 'number', label: 'Rate', precision: 5, scale: 2 } } };
-    expect(fieldsOf(s, { rate: 1234.5 }, 'update')?.[0]).toMatchObject({ code: 'max_precision' });
+    expect(fieldsOf(s, { rate: 1234.5 }, 'update')?.[0]).toMatchObject({ field: 'rate', code: 'max_precision' });
     expect(fieldsOf(s, { rate: '1234.5' })?.[0]).toMatchObject({ code: 'max_precision', constraint: { actual: 6 } });
     expect(fieldsOf(s, { rate: '123.45' })).toBeNull();
     // An omitted field is never judged on update — a stored value above a count declared later rests.
