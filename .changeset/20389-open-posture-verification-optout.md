@@ -5,7 +5,7 @@
 
 **plugin-auth: under the `open` audience posture, the deployment can turn email verification off**
 
-Clause-②: yes (widening)
+Clause-②: yes
 
 Under `audience.posture: 'open'`, an explicit `emailAndPassword.requireEmailVerification: false`
 declared by the **deployment** is now honoured instead of refused at config entry. The deployment
