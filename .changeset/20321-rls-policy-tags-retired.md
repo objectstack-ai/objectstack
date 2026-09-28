@@ -4,7 +4,7 @@
 
 feat(spec)!: retire `rowLevelSecurity[].tags` — no mainstream platform tags a row-level policy, and nothing here ever read one (#20321)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 **BREAKING** — shipped as `minor` under the launch-window convention
 (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by
