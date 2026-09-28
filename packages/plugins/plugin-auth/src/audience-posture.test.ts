@@ -30,6 +30,7 @@ import {
   emailDomainAllowed,
   extractEmailDomain,
   resolveAudience,
+  resolveEmailVerificationRequirement,
   SELF_REGISTRATION_CLOSED,
   EMAIL_DOMAIN_NOT_ALLOWED,
   AUDIENCE_CONFIG_ERROR,
@@ -432,20 +433,59 @@ describe('entry validation: assertAudienceConfig (#11739)', () => {
     ).toThrow(/admin_full_access/);
   });
 
-  it('refuses the open-posture-with-verification-off contradiction (verification is FORCED on)', () => {
-    expect(() =>
-      assertAudienceConfig(
-        { posture: 'open', selfRegistrationPermissionSet: 'p' },
-        { requireEmailVerification: false },
-      ),
-    ).toThrow(/verification/i);
+  it('email_domain: an explicit verification-off stays refused, from ANY declarant (the domain list is the only gate there)', () => {
+    const emailDomain = {
+      posture: 'email_domain' as const,
+      allowedEmailDomains: ['acme.com'],
+      selfRegistrationPermissionSet: 'p',
+    };
+    for (const verificationDeclaredBy of [undefined, 'deployment', 'console'] as const) {
+      expect(
+        () => assertAudienceConfig(emailDomain, { requireEmailVerification: false }, { verificationDeclaredBy }),
+        `declared by ${verificationDeclaredBy ?? 'default'}`,
+      ).toThrow(
+        /^\[audience\] invalid audience configuration: posture 'email_domain' opens self-registration, which FORCES email verification on — emailAndPassword\.requireEmailVerification: false contradicts it and is refused \(an unverified allowlisted-domain signup is colleague impersonation\)/,
+      );
+    }
     // Explicit true and undefined are both fine — the wiring forces true.
+    expect(() => assertAudienceConfig(emailDomain, { requireEmailVerification: true })).not.toThrow();
+    expect(() => assertAudienceConfig(emailDomain, undefined)).not.toThrow();
+  });
+
+  it("open: an explicit verification-off is the DEPLOYMENT's to declare — honoured from it, refused from the console", () => {
+    const open = { posture: 'open' as const, selfRegistrationPermissionSet: 'p' };
+    // The deployment's own configuration (also the default declarant) is honoured.
+    expect(() => assertAudienceConfig(open, { requireEmailVerification: false })).not.toThrow();
     expect(() =>
-      assertAudienceConfig(
-        { posture: 'open', selfRegistrationPermissionSet: 'p' },
-        { requireEmailVerification: true },
-      ),
+      assertAudienceConfig(open, { requireEmailVerification: false }, { verificationDeclaredBy: 'deployment' }),
     ).not.toThrow();
+    // A value only the settings console stored cannot make the opt-out.
+    expect(() =>
+      assertAudienceConfig(open, { requireEmailVerification: false }, { verificationDeclaredBy: 'console' }),
+    ).toThrow(
+      /^\[audience\] invalid audience configuration: posture 'open' FORCES email verification on unless the DEPLOYMENT turns it off/,
+    );
+    // Explicit true and undefined stay fine from either declarant.
+    for (const verificationDeclaredBy of ['deployment', 'console'] as const) {
+      expect(() => assertAudienceConfig(open, { requireEmailVerification: true }, { verificationDeclaredBy })).not.toThrow();
+      expect(() => assertAudienceConfig(open, undefined, { verificationDeclaredBy })).not.toThrow();
+    }
+    // invite_only is untouched: a console-stored false there was never a contradiction.
+    expect(() =>
+      assertAudienceConfig({ posture: 'invite_only' }, { requireEmailVerification: false }, { verificationDeclaredBy: 'console' }),
+    ).not.toThrow();
+  });
+
+  it('resolveEmailVerificationRequirement: email_domain always on, open on unless declared false, invite_only follows the declaration', () => {
+    for (const declared of [undefined, true, false]) {
+      expect(resolveEmailVerificationRequirement('email_domain', declared), `email_domain/${declared}`).toBe(true);
+    }
+    expect(resolveEmailVerificationRequirement('open', undefined)).toBe(true);
+    expect(resolveEmailVerificationRequirement('open', true)).toBe(true);
+    expect(resolveEmailVerificationRequirement('open', false)).toBe(false);
+    expect(resolveEmailVerificationRequirement('invite_only', undefined)).toBe(false);
+    expect(resolveEmailVerificationRequirement('invite_only', true)).toBe(true);
+    expect(resolveEmailVerificationRequirement('invite_only', false)).toBe(false);
   });
 
   it('the constructor runs the same assertion (boot refusal, not a first-signup 403)', () => {
@@ -453,6 +493,20 @@ describe('entry validation: assertAudienceConfig (#11739)', () => {
     expect(() =>
       makeManager(createMemoryEngine(), { audience: { posture: 'email_domain', allowedEmailDomains: [] as string[] } }),
     ).toThrow(/allowedEmailDomains/);
+    // The constructor config IS the deployment's declaration: open + false boots…
+    expect(() =>
+      makeManager(createMemoryEngine(), {
+        audience: { posture: 'open', selfRegistrationPermissionSet: 'p' },
+        emailAndPassword: { requireEmailVerification: false },
+      }),
+    ).not.toThrow();
+    // …and email_domain + false still refuses the boot.
+    expect(() =>
+      makeManager(createMemoryEngine(), {
+        audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'p' },
+        emailAndPassword: { requireEmailVerification: false },
+      }),
+    ).toThrow(/posture 'email_domain' opens self-registration, which FORCES email verification on/);
   });
 
   it('applyConfigPatch refuses an invalid merged result and the standing config keeps ruling', () => {
@@ -463,10 +517,63 @@ describe('entry validation: assertAudienceConfig (#11739)', () => {
       /allowedEmailDomains/,
     );
     expect(manager.getAudience().posture).toBe('open');
-    // A verification-off patch beside a standing open posture is the same contradiction.
+    // A verification-off value only the console stored, beside a standing open
+    // posture, is the contradiction: refused, and verification stays on.
+    expect(() =>
+      manager.applyConfigPatch(
+        { emailAndPassword: { requireEmailVerification: false } } as any,
+        { requireEmailVerificationFrom: 'console' },
+      ),
+    ).toThrow(/posture 'open' FORCES email verification on unless the DEPLOYMENT turns it off/);
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+  });
+
+  it('applyConfigPatch: a deployment-declared opt-out under open is honoured, and the console may only AGREE with it', () => {
+    const manager = makeManager(createMemoryEngine(), {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'portal_user' },
+    });
+    // Host code (the default declarant) is the deployment.
+    manager.applyConfigPatch({ emailAndPassword: { requireEmailVerification: false } } as any);
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+    // The console restating the same false agrees with the deployment.
+    expect(() =>
+      manager.applyConfigPatch(
+        { emailAndPassword: { requireEmailVerification: false } } as any,
+        { requireEmailVerificationFrom: 'console' },
+      ),
+    ).not.toThrow();
+    // Once the deployment re-declares verification ON, a console false is refused again.
+    manager.applyConfigPatch({ emailAndPassword: { requireEmailVerification: true } } as any);
+    expect(() =>
+      manager.applyConfigPatch(
+        { emailAndPassword: { requireEmailVerification: false } } as any,
+        { requireEmailVerificationFrom: 'console' },
+      ),
+    ).toThrow(/unless the DEPLOYMENT turns it off/);
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+  });
+
+  it('applyConfigPatch: opening the posture over a console-stored false is refused — that false never becomes an opt-out', () => {
+    const manager = makeManager(createMemoryEngine()); // undeclared ⇒ invite_only
+    // Legal under invite_only, where nothing forces verification.
+    manager.applyConfigPatch(
+      { emailAndPassword: { requireEmailVerification: false } } as any,
+      { requireEmailVerificationFrom: 'console' },
+    );
+    expect(() =>
+      manager.applyConfigPatch({ audience: { posture: 'open', selfRegistrationPermissionSet: 'p' } } as any),
+    ).toThrow(/unless the DEPLOYMENT turns it off/);
+    expect(manager.getAudience().posture).toBe('invite_only');
+  });
+
+  it('applyConfigPatch: under email_domain not even the deployment can turn verification off', () => {
+    const manager = makeManager(createMemoryEngine(), {
+      audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'p' },
+    });
     expect(() =>
       manager.applyConfigPatch({ emailAndPassword: { requireEmailVerification: false } } as any),
-    ).toThrow(/verification/i);
+    ).toThrow(/posture 'email_domain' opens self-registration, which FORCES email verification on/);
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
   });
 });
 
@@ -690,6 +797,40 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     await vi.waitFor(() => {
       expect((engine.tables.get('sys_user_permission_set') ?? []).length).toBe(1);
     });
+  });
+
+  it('open + a deployment-declared verification-off: public config, wired flag and minted session agree — the sign-up is signed in', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default');
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+      emailAndPassword: { requireEmailVerification: false },
+    });
+    const pub = manager.getPublicConfig();
+    expect(pub.emailPassword.requireEmailVerification).toBe(false);
+    expect((pub.features as any).audiencePosture).toBe('open');
+    const res = await signUp(manager, 'anyone@anywhere.com');
+    expect(res.status).toBeLessThan(300);
+    const body = await res.json();
+    // No verification step: better-auth mints the session at sign-up.
+    expect(typeof body?.token).toBe('string');
+    expect(body.token.length).toBeGreaterThan(0);
+    expect(body?.user?.emailVerified).toBe(false);
+  });
+
+  it('CONTROL — open with verification undeclared stays forced on: the admitted sign-up mints NO session', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default');
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    });
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+    const res = await signUp(manager, 'anyone@anywhere.com');
+    expect(res.status).toBeLessThan(300);
+    const body = await res.json().catch(() => ({}));
+    expect(body?.token ?? null).toBeNull();
   });
 
   it('an off-vocabulary posture smuggled past entry (direct mutation) fails CLOSED at admission with AUTH_CONFIG_ERROR', async () => {

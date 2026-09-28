@@ -225,6 +225,35 @@
  * JSON-column set and its multi-valued test from. It runs on every clause, and
  * before the engine's pass, so the engine never judges a clause this arm
  * already refused: one defect, one finding.
+ *
+ * ## A field compared with a field of another comparison class (#20347)
+ *
+ * `record.status != record.amount` (text vs number) and
+ * `record.status != record.photo` (text vs a single image) lower to legal
+ * `{ status: { $ne: { $field: … } } }` shapes and hold no list, so the arm above
+ * lets them through. Measured before this arm, through the real plugin-security
+ * and ObjectQL on driver-sql, for those two and for `record.status !=
+ * record.is_open` (a formula field): `os validate` reported them valid; the
+ * read their `using` scopes answered `INVALID_FILTER` / 400 (driver-sql
+ * compiles a column-to-column comparison only between two columns of ONE
+ * comparison class, and refuses the file family and formula fields outright)
+ * and a by-id update or delete it scopes `PERMISSION_DENIED` / 403; and an
+ * insert their `check` judges — or their `using`, standing in as the check —
+ * was ADMITTED and stored. The in-process write check has no class rule and
+ * compares the two raw values, so the write answer is whatever that comparison
+ * happens to give (`record.amount > record.status` was refused 403, because
+ * `5 > 'open'` is false in JS): the permissive answer sits on the write side of
+ * an access policy. One policy, three answers.
+ *
+ * This arm refuses the comparison where it is written, by the same rule the
+ * read applies: {@link crossFieldComparisonVerdict} (`@objectstack/spec/data`),
+ * the classification lifted from driver-sql and held to it by a pairwise parity
+ * test there. Only `comparable` passes; `cross-class` and `no-class` (a file
+ * field, a formula field) are refused, and `unjudged` — a declared type outside
+ * `FieldType` — is Zod's to reject, not this arm's. A comparison either side of
+ * which holds a list or an object stays the arm above's, so no comparison is
+ * reported twice. It runs on every clause, beside the arm above and ahead of
+ * the engine's pass: one defect, one finding.
  */
 
 import type { EngineFilterJudgement, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -238,10 +267,15 @@ import {
 import type { CelBoundsOverrun } from '@objectstack/formula';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import {
+  CROSS_FIELD_COMPARISON_CLASSES,
+  CROSS_FIELD_COMPARISON_TYPE_CLASSES,
   STRUCTURED_JSON_TYPES,
   assertListComparandShapes,
+  crossFieldComparisonVerdict,
   isMultiValueField,
   normalizeFilterComparandTypes,
+  type CrossFieldColumnVerdict,
+  type CrossFieldComparisonClass,
 } from '@objectstack/spec/data';
 import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
@@ -1066,6 +1100,156 @@ function listHoldingConsequence(clause: 'using' | 'check'): string {
         'or an object in that column.';
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * #20347 — a field compared with a field of ANOTHER comparison class (see the
+ * header). The classification is the spec's; this block only names it.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** How one comparison class reads in a sentence. */
+const CLASS_PHRASE: Readonly<Record<CrossFieldComparisonClass, string>> = {
+  numeric: 'a number',
+  text: 'text',
+  boolean: 'a boolean',
+  date: 'a date',
+  datetime: 'a datetime',
+  time: 'a time of day',
+};
+
+/** Why a single-valued column has no class, as a sentence (a list or an object is the arm above's). */
+const NO_CLASS_PHRASE: Readonly<Record<'file' | 'formula', string>> = {
+  file: 'a file field, which no row filter can compare with another column',
+  formula: 'a formula field, which has no stored column a row filter can read',
+};
+
+/**
+ * Every comparison class with the declared types it holds, read off the spec's
+ * class table — so a type added to one of its value-class sets later is listed
+ * here without a change to this file.
+ */
+export const CROSS_FIELD_CLASS_LISTING: string = CROSS_FIELD_COMPARISON_CLASSES.map((cls) => {
+  const types = CROSS_FIELD_COMPARISON_TYPE_CLASSES
+    .filter((row) => row.verdict.kind === 'class' && row.verdict.class === cls)
+    .flatMap((row) => [...row.types]);
+  return `${CLASS_PHRASE[cls]} only with ${CLASS_PHRASE[cls]} (${types.map((t) => `\`${t}\``).join(', ')})`;
+}).join('; ');
+
+/** A declared column the graph answers for, with the slice the classification reads. */
+function declaredColumn(
+  graph: ObjectGraph,
+  object: string,
+  name: string,
+): { name: string; type: string; multiple?: boolean; meta: GraphField } | null {
+  const verdict = resolveFieldPath(graph, object, name);
+  if (verdict?.kind !== 'ok' || !verdict.meta || typeof verdict.meta.type !== 'string') return null;
+  return { name, type: verdict.meta.type, multiple: verdict.meta.multiple === true, meta: verdict.meta };
+}
+
+/** One column's part in a refused comparison, as the author declared it. */
+function describeColumn(column: { name: string; type: string }, verdict: CrossFieldColumnVerdict): string {
+  const declared = `\`${column.name}\` is declared \`type: '${column.type}'\``;
+  if (verdict.kind === 'class') return `${declared}, compared as ${CLASS_PHRASE[verdict.class]}`;
+  return verdict.reason === 'list-or-object' ? declared : `${declared}, ${NO_CLASS_PHRASE[verdict.reason]}`;
+}
+
+/** One lowered comparison between two columns that share no comparison class. */
+export interface CrossClassComparison {
+  /** The comparison as the author wrote it, back in CEL. */
+  written: string;
+  /** The column(s) at fault, with what each is declared as. */
+  columns: string[];
+}
+
+/**
+ * Every lowered `{ $field }` comparison whose two declared columns share no
+ * comparison class — two classes (text vs number), or a column with none (a
+ * file field, a formula field) — judged by {@link crossFieldComparisonVerdict}.
+ * Read off the COMPILER'S OUTPUT and resolved against the object graph, like
+ * {@link listHoldingComparisons}; a comparison either side of which holds a list
+ * or an object is that function's and is skipped here, and a column the graph
+ * cannot answer for, or whose declared type is outside `FieldType`, is not
+ * judged.
+ *
+ * Exported for `validate-sharing-rule-enforceability.ts`, which judges the same
+ * class on a sharing rule's lowered `condition`: one classification, two rules.
+ */
+export function crossClassComparisons(
+  graph: ObjectGraph,
+  object: string,
+  filter: Record<string, unknown>,
+): CrossClassComparison[] {
+  const found = new Map<string, CrossClassComparison>();
+  const sites = loweredSites(filter, (op, operand) =>
+    FIELD_COMPARISON_SYMBOL.has(op) &&
+    !!operand && typeof operand === 'object' && !Array.isArray(operand) &&
+    typeof (operand as Record<string, unknown>).$field === 'string');
+  for (const site of sites) {
+    const referenced = (site.operand as { $field: string }).$field;
+    const target = declaredColumn(graph, object, site.field);
+    const ref = declaredColumn(graph, object, referenced);
+    if (!target || !ref) continue;
+    if (listHoldingDeclaration(target.meta) || listHoldingDeclaration(ref.meta)) continue;
+    const verdict = crossFieldComparisonVerdict(target, ref);
+    let columns: string[];
+    if (verdict.verdict === 'cross-class') {
+      columns = [
+        describeColumn(target, { kind: 'class', class: verdict.left }),
+        describeColumn(ref, { kind: 'class', class: verdict.right }),
+      ];
+    } else if (verdict.verdict === 'no-class') {
+      columns = [
+        ...(verdict.left.kind === 'no-class' ? [describeColumn(target, verdict.left)] : []),
+        ...(verdict.right.kind === 'no-class' && ref.name !== target.name ? [describeColumn(ref, verdict.right)] : []),
+      ];
+    } else {
+      continue;
+    }
+    const written = `record.${site.field} ${FIELD_COMPARISON_SYMBOL.get(site.op)} record.${referenced}`;
+    found.set(written, { written, columns });
+  }
+  return [...found.values()];
+}
+
+/** The comparisons, quoted back with the declarations behind them. */
+export function describeCrossClassComparisons(comparisons: readonly CrossClassComparison[]): string {
+  return comparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ');
+}
+
+/** The sentence both rules state before their per-surface consequence. */
+export const CROSS_CLASS_SENTENCE =
+  'Two columns are compared only within one comparison class — the class decides how their stored values ' +
+  'order and equal, and across classes SQL and the in-memory evaluator answer differently — and a file field ' +
+  'or a formula field has no class at all, so the platform defines no comparison between these columns';
+
+/**
+ * What a cross-class comparison does at request time, per clause. Measured
+ * through the real plugin-security and ObjectQL on driver-sql (see this file's
+ * header).
+ *
+ * ⚠️ The WRITE half is the in-process write check's behaviour, which the engine
+ * lane moves onto the same classification: when it does, this sentence changes
+ * in the same change.
+ */
+function crossClassConsequence(clause: 'using' | 'check'): string {
+  const write =
+    'the in-process write check has no class rule of its own, so a single-record insert or by-id update it ' +
+    'judges compares the two raw values instead, and the write is admitted and stored whenever that ' +
+    'comparison happens to hold — an answer the read path refuses to give';
+  return clause === 'using'
+    ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses ' +
+        'the comparison by the two columns\' declared types), and every by-id update or delete it scopes fails ' +
+        'closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or `all` policy the same `using` is also ' +
+        'the write check whenever no applicable policy for that operation declares a `check` (ADR-0058 D4), and ' +
+        `there ${write}.`
+    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and is enforced by an ` +
+        'accident of the two values.';
+}
+
+/** The prescription both rules share, ahead of their per-surface alternatives. */
+export const CROSS_CLASS_REMEDY =
+  `Compare a field only with a field of the same comparison class: ${CROSS_FIELD_CLASS_LISTING}. ` +
+  'A file field and a formula field cannot be compared with another column at all. If the two columns do ' +
+  'hold comparable values, one of them is declared with the wrong type: fix the declaration, not the predicate.';
+
 /**
  * What a reference miss costs at request time, per clause. Measured, not inferred.
  *
@@ -1379,6 +1563,27 @@ function referenceFindings(
         'with a single-valued column, or with a literal or a `current_user` value — "one of these ' +
         "values\" is `record.status in ['open', 'pending']` or `record.owner in current_user.org_user_ids` " +
         '— or move the condition into a validation rule or a hook.',
+    });
+  }
+
+  // [#20347] A field compared with a field of ANOTHER comparison class — two
+  // classes, or a file / formula field with none — by the spec's classification
+  // (this file's header). Every clause, beside the arm above (which keeps every
+  // comparison against a list or an object), and ahead of the engine's pass.
+  const crossClass = filter ? crossClassComparisons(graph, object, filter) : [];
+  if (crossClass.length > 0) {
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` lowers, but compares two fields that share no comparison class: ` +
+        `${describeCrossClassComparisons(crossClass)}. ${CROSS_CLASS_SENTENCE}: ${crossClassConsequence(clause)}`,
+      hint:
+        `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal or a ` +
+        '`current_user` value, test a file field with `!= null`, or store the value you mean in a field of the ' +
+        'right type and compare that — or move the condition into a validation rule or a hook.',
     });
   }
 

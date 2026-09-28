@@ -1,4 +1,5 @@
 [
   "src/action-owner-key-single-source.test.ts",
+  "src/domains/meta-list-projection-parity.test.ts",
   "src/error-envelope.conformance.test.ts"
 ]

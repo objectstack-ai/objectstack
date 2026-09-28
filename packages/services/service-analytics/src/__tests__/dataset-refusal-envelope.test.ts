@@ -113,7 +113,7 @@ const bareCube: Cube = {
   sql: 'crm_opportunity',
   measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
   dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
-  public: false,
+  public: true,
 };
 
 function nativeCtx(allowed: Set<string>): StrategyContext {

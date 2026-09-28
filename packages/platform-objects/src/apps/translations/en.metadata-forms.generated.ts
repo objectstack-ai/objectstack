@@ -64,6 +64,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Is System",
         helpText: "System object (protected from deletion; defaults sharing to public)"
       },
+      highlightFields: {
+        label: "Highlight Fields",
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+      },
+      searchableFields: {
+        label: "Searchable Fields",
+        helpText: "Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish."
+      },
       fields: {
         label: "Fields",
         helpText: "Add the columns this object will store"
@@ -269,6 +277,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sharing Model",
         helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
       },
+      access: {
+        label: "Access",
+        helpText: "Wildcard-grant posture (ADR-0066 D2). Absent resolves to public. It decides whether a permission set's '*' object grant covers this object; record visibility between users is sharingModel."
+      },
+      "access.default": {
+        label: "Default",
+        helpText: "public: covered by '*' wildcard grants. private: needs an explicit per-object grant, and is exempt from wildcard row-level security."
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold to reach this object, checked in addition to CRUD grants (ADR-0066 D3). A list gates every operation; a {read, create, update, delete} map gates only the operations it lists. Absent or empty: no capability gate."
+      },
       managedBy: {
         label: "Managed By",
         helpText: "Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object."
@@ -444,6 +464,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Scale",
         helpText: "Number of decimal digits"
       },
+      currencyConfig: {
+        label: "Currency Config",
+        helpText: "Which currency this field is in. Unset: dynamic mode. The stored value is a bare number in either mode."
+      },
+      "currencyConfig.currencyMode": {
+        label: "Currency Mode",
+        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency."
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "Default Currency",
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode."
+      },
       step: {
         label: "Step",
         helpText: "Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid."
@@ -451,6 +483,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       maxSize: {
         label: "Max Size",
         helpText: "Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it."
+      },
+      accept: {
+        label: "Accept",
+        helpText: "Permitted upload types, as MIME types, type/* wildcards or .ext suffixes (e.g. image/*, .pdf). Offered to the file picker and re-checked server-side on write against the stored file. Unset: any type."
       },
       dimensions: {
         label: "Dimensions",
@@ -518,9 +554,25 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lookup Page Size",
         helpText: "Rows per page in the record-picker dialog — a positive integer; default 10."
       },
+      lookupColumns: {
+        label: "Lookup Columns",
+        helpText: "Columns of the record-picker table: field names of the referenced object, or {field, label, width, type} entries (e.g. [\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]). Unset: derived from the referenced object."
+      },
+      lookupFilters: {
+        label: "Lookup Filters",
+        helpText: "Base filter on the picker's candidates, as {field, operator, value} rules on the referenced object — operator one of eq, ne, gt, lt, gte, lte, contains, in, notIn (e.g. [{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]). Applied to every picker surface, ANDed with any dependsOn filter."
+      },
+      dependsOn: {
+        label: "Depends On",
+        helpText: "Fields on the same record this field's choices depend on: the form holds this field until each is set, and re-evaluates it when one changes. A lookup filters its candidates by them — a name filters the same-named field of the referenced object, {field, param} names a different one. On an option field list the parent field names; the per-option rule lives in each option's visibleWhen."
+      },
       relatedListTitle: {
         label: "Related List Title",
         helpText: "Title for this relationship's related list on the parent's detail page."
+      },
+      relatedListColumns: {
+        label: "Related List Columns",
+        helpText: "Columns of this relationship's related list on the parent's detail page, as field names of this (the child) object, e.g. name, status. Unset: derived from the child object. Names only — labels, cell types and formatting come from the child's field definitions."
       },
       inlineTitle: {
         label: "Inline Title",
@@ -566,6 +618,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "External Id",
         helpText: "Mark as external ID for upsert operations"
       },
+      storage: {
+        label: "Storage",
+        helpText: "Physical storage constraints (ADR-0113): the DDL the write contract deliberately does not imply. Unset: none requested."
+      },
+      "storage.notNull": {
+        label: "Not Null",
+        helpText: "Emit a database NOT NULL on the column. Unset, the column stays nullable even under required — the engine enforces required on write. Declaring it over existing null rows is a destructive migration gated by schema drift (backfill first). Refused beside requiredWhen."
+      },
       readonly: {
         label: "Readonly",
         helpText: "Field is read-only in forms"
@@ -582,9 +642,25 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sortable",
         helpText: "Allow sorting lists by this field"
       },
+      visibleWhen: {
+        label: "Visible When",
+        helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the form shows this field only while it is TRUE."
+      },
+      readonlyWhen: {
+        label: "Readonly When",
+        helpText: "CEL predicate over the record (e.g. record.status == 'paid') — the field is read-only while it is TRUE, enforced server-side: an update's change to a locked field is dropped and the stored value kept. Reads the record's own columns; objectstack validate refuses a read through a reference field."
+      },
+      requiredWhen: {
+        label: "Required When",
+        helpText: "CEL predicate over the record — the field is required while it is TRUE, enforced server-side as a transition gate: a write that leaves the value missing is refused when the record complied before it, so a row already missing the value keeps passing unrelated edits. For a rule every write must meet, use a validations script rule. Refused beside storage.notNull."
+      },
       maskingRule: {
         label: "Masking Rule",
         helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate."
       },
       internal: {
         label: "Internal",
@@ -1515,6 +1591,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Operation",
         helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit."
       },
+      patch: {
+        label: "Patch",
+        helpText: "Static field values the update writes to the current record, e.g. {\"status\": \"done\"} — merged UNDER the values `params` collects, so a param of the same name wins. Written as the caller: the object's permissions, hooks and validations apply as for a user edit."
+      },
       undoable: {
         label: "Undoable",
         helpText: "Offer an Undo affordance after this update succeeds. The undo captures the prior value of every field the action writes — the merged bag, `patch` under the collected `params`. An action with no `operation` declares no write set, so there is nothing to capture."
@@ -1523,6 +1603,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Execution",
         helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record."
       },
+      description: {
+        label: "Description",
+        helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"
@@ -1530,6 +1614,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       successMessage: {
         label: "Success Message",
         helpText: "Success message after completion"
+      },
+      errorMessage: {
+        label: "Error Message",
+        helpText: "Error message shown when the action fails, in place of the raw error."
       },
       refreshAfter: {
         label: "Refresh After",
@@ -1567,6 +1655,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them."
+      },
       ai: {
         label: "Ai",
         helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
@@ -1582,6 +1674,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       bodyShape: {
         label: "Body Shape",
         helpText: "Request body structure (flat or nested)"
+      },
+      bodyExtra: {
+        label: "Body Extra",
+        helpText: "Static request-body fields for this api action, merged last so they override the collected params (e.g. {\"resend\": true}). Page-variable tokens (page.NAME in double braces) are resolved by the runtime. The payload goes here, never in params."
       }
     }
   },
@@ -2078,6 +2174,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       systemPermissions: {
         label: "System Permissions",
         helpText: "List of system capability keys"
+      },
+      adminScope: {
+        label: "Admin Scope",
+        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments, manageBindings and authorEnvironmentSets default to false; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
       },
       objects: {
         label: "Objects",

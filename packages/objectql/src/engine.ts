@@ -215,6 +215,9 @@ import {
 // for the reason the `/errors` import above states (#14680). See
 // `resolveMetadataItemName` below for why this registrar lost its fourth copy.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
+// [#20331] The divergent view-container `name` refusal — the ONE judge this
+// registrar and `os validate` both call.
+import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -6556,57 +6559,28 @@ export class ObjectQL implements IObjectQLEngine {
               // reads a non-container's own `name` FIRST.
               //
               // Scope is the ruling's named main risk, so the gate is three
-              // independent narrowings and each one is load-bearing:
+              // independent narrowings and each one is load-bearing. The first
+              // stays here:
               //   * `key === 'views'` — this is the GENERIC metadata loop; no
               //     other kind changes behaviour and they all keep the
-              //     reconcile below;
-              //   * `isAggregatedViewContainer(item)` — the CONTAINER branch
-              //     only. A standalone ViewItem's `name` is its identity, not
-              //     a binding, and it has no disagreement to make;
-              //   * `name` present AND different. A container carrying no
-              //     `name` is untouched (the reconcile below still mints the
-              //     derived key onto it); so is one whose `name` already
-              //     equals the derived key; and so is one that declares no
-              //     binding anywhere else, because `deriveViewContainerObject`
-              //     then derives the key FROM that same `name` and it cannot
-              //     disagree with itself.
+              //     reconcile below.
+              // The other two — the CONTAINER branch only, and `name` present
+              // AND different — and the message, the envelope and the reason
+              // the prose is this seam's own live in `viewContainerNameRefusal`
+              // (`view-container-name-refusal.ts`).
               //
-              // The runtime string deliberately carries NO tracker id: it is read by
-              // authors and operators who cannot resolve `#NNNN`
-              // (`check:doc-authoring`, maintainer ruling 2026-08-12). The rule it
-              // enforces is #7378 row 1, named in this comment instead, where the
-              // reader who can resolve it is already looking.
-              //
-              // The ADR-0112 envelope is the artifact door's exactly —
-              // `VALIDATION_ERROR` / 400 — because a document refused at one
-              // SOURCE registrar must be refused the same way at the other,
-              // and that equality is asserted in
-              // `view-container-divergent-name-registrars.test.ts`. The prose
-              // is this seam's own on purpose: `assertMetadataRegisterContract`
-              // opens its message with `IMetadataService.register(...)`, an API
-              // this seam does not call, and a refusal that misnames its own
-              // door is the opposite of "locate the mismatch".
-              if (
-                  key === 'views'
-                  && isAggregatedViewContainer(item)
-                  && typeof item.name === 'string'
-                  && item.name
-                  && item.name !== itemName
-              ) {
-                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
-                      `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
-                      + `\`name\` is '${item.name}', which disagrees with the object key it binds to, `
-                      + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
-                      + '`form.data.object`). A disagreement is almost always an authoring bug, and resolving '
-                      + 'it silently in either direction can file the item under a key the caller never wrote '
-                      + '(refuse loudly, locate the mismatch) — the artifact/HMR loader refuses '
-                      + 'this same document. Register under one name: drop `name`, or set it to '
-                      + `'${itemName}'.`,
-                  );
-                  err.code = 'VALIDATION_ERROR';
-                  err.status = 400;
-                  err.httpStatus = 400;
-                  throw err;
+              // [#20331] Moved there so that `os validate` runs the SAME
+              // judgment, in the same words, instead of passing a document this
+              // loop then refuses at boot. The message and the envelope moved
+              // unchanged. The `!itemName` skip just above is this loop's
+              // precondition for the check, so the function carries it too: it
+              // answers `undefined` for a falsy derived key, and a door calling
+              // it without this loop cannot refuse an entry this loop skips.
+              // ⛔ Do not re-inline it here, and do not write a second copy of
+              // it anywhere else: one judge, two doors.
+              if (key === 'views') {
+                  const refusal = viewContainerNameRefusal(item, sourceLabel, ownerId);
+                  if (refusal) throw refusal;
               }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
               // [#5320] The `views:` tighten — containers ONLY, the contract the

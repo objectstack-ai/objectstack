@@ -23,9 +23,11 @@ import {
   decideAudienceAdmission,
   isHumanUserRow,
   resolveAudience,
+  resolveEmailVerificationRequirement,
   AUDIENCE_CONFIG_ERROR,
   type AudienceCreationClass,
   type ResolvedAudience,
+  type VerificationDeclarant,
 } from './audience-posture.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import type { IDataEngine } from '@objectstack/core';
@@ -1302,6 +1304,16 @@ export class AuthManager {
   private authBuild: Promise<Auth<any>> | null = null;
   private config: AuthManagerOptions;
   /**
+   * [#20389] Whether the DEPLOYMENT declared email verification off — the
+   * constructor config, or a later `applyConfigPatch()` whose
+   * `requireEmailVerification` came from the deployment (host code, or an
+   * `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override) rather than from a value
+   * stored in the settings console. Under posture `open` an explicit `false`
+   * is honoured only while this is true: the console can agree with the
+   * deployment's opt-out, never make one (`assertAudienceConfig`).
+   */
+  private deploymentDeclaredVerificationOff: boolean;
+  /**
    * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
    * dev fallback is `'dev-secret-' + Date.now()` — a fresh value per call — so
    * every consumer that needs the same key material (better-auth's own
@@ -1371,10 +1383,13 @@ export class AuthManager {
     // reason as the OTP guard above: an unusable audience declaration must
     // refuse the boot loudly, not surface as a 403 on the first sign-up.
     // Off-vocabulary postures, inert declarations (ADR-0078) and the
-    // open-posture-with-verification-off contradiction are all refused here;
+    // email_domain-with-verification-off contradiction are all refused here;
     // `applyConfigPatch` runs the same assertion on the merged result so no
-    // entry path can smuggle an invalid declaration past boot.
-    assertAudienceConfig(config.audience, config.emailAndPassword);
+    // entry path can smuggle an invalid declaration past boot. [#20389] The
+    // constructor config IS the deployment's declaration, so under `open` its
+    // explicit `requireEmailVerification: false` is honoured.
+    this.deploymentDeclaredVerificationOff = config.emailAndPassword?.requireEmailVerification === false;
+    assertAudienceConfig(config.audience, config.emailAndPassword, { verificationDeclaredBy: 'deployment' });
 
     // [#13816] SCIM ⇄ admin coherence — same boot-loudly rationale as the two
     // asserts above: effective SCIM with an explicit `plugins.admin: false`
@@ -1623,15 +1638,19 @@ export class AuthManager {
           // [#11739] Invariant: a posture that permits self-registration
           // (email_domain / open) FORCES email verification on — an
           // unverified allowlisted-domain signup is colleague impersonation
-          // and makes the domain gate decorative. The explicit-false
-          // contradiction was already refused at config entry
-          // (assertAudienceConfig), so this forcing never overrides a value
-          // the entry validation accepted; getPublicConfig() mirrors it so
+          // and makes the domain gate decorative. [#20389] One exception:
+          // under `open` the deployment may declare it off with an explicit
+          // `false`. The entry validation (assertAudienceConfig) already
+          // refused every other explicit false, so this never overrides a
+          // value it accepted; getPublicConfig() reads the SAME resolver, so
           // the advertised flag cannot disagree with the wired one.
-          ...(audiencePermitsSelfRegistration(this.getAudience().posture)
-            ? { requireEmailVerification: true }
-            : (this.config.emailAndPassword?.requireEmailVerification != null
-              ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {})),
+          ...((() => {
+            const posture = this.getAudience().posture;
+            const declared = this.config.emailAndPassword?.requireEmailVerification;
+            return audiencePermitsSelfRegistration(posture) || declared != null
+              ? { requireEmailVerification: resolveEmailVerificationRequirement(posture, declared) }
+              : {};
+          })()),
           ...(this.config.emailAndPassword?.minPasswordLength != null
             ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
           ...(this.config.emailAndPassword?.maxPasswordLength != null
@@ -2273,10 +2292,12 @@ export class AuthManager {
             // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
             //
             // We turn that shield on ourselves: a posture that permits
-            // self-registration FORCES `requireEmailVerification` on (see
-            // `createAuthInstance`), so `email_domain` and `open` sign-ups for an
-            // address that already exists answered 200 while `invite_only`
-            // answered 422 on the same population. Measured on a real ObjectQL
+            // self-registration forces `requireEmailVerification` on by default
+            // (see `createAuthInstance` — always under `email_domain`, and under
+            // `open` unless the deployment declared it off, #20389), so
+            // `email_domain` and `open` sign-ups for an address that already
+            // exists answered 200 while `invite_only` answered 422 on the same
+            // population. Measured on a real ObjectQL
             // engine with the posture held CONSTANT and only the verification flag
             // moved, so the divergence is the flag's, not the posture's: zero
             // inserts reach the engine, no `sys_account` appears, and the next
@@ -4140,7 +4161,18 @@ export class AuthManager {
    * request is enough. If an instance already exists, reset it so the next
    * request rebuilds with the new policy.
    */
-  applyConfigPatch(patch: Partial<AuthManagerOptions>): void {
+  applyConfigPatch(
+    patch: Partial<AuthManagerOptions>,
+    options: {
+      /**
+       * [#20389] Who declared the patch's `emailAndPassword.requireEmailVerification`.
+       * Defaults to `deployment` (host code); the settings binding passes
+       * `console` for a value an administrator stored, and `deployment` for an
+       * `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override.
+       */
+      requireEmailVerificationFrom?: VerificationDeclarant;
+    } = {},
+  ): void {
     const next: AuthManagerOptions = {
       ...this.config,
       ...patch,
@@ -4177,8 +4209,19 @@ export class AuthManager {
     if ('audience' in patch) {
       next.audience = patch.audience;
     }
+    // [#20389] A patch that sets `requireEmailVerification` from the
+    // deployment re-declares the deployment's opt-out; one from the console
+    // leaves it as it stood (the console can agree with it, never make it).
+    const deploymentDeclaredVerificationOff =
+      patch.emailAndPassword !== undefined &&
+      'requireEmailVerification' in patch.emailAndPassword &&
+      (options.requireEmailVerificationFrom ?? 'deployment') === 'deployment'
+        ? patch.emailAndPassword.requireEmailVerification === false
+        : this.deploymentDeclaredVerificationOff;
     if ('audience' in patch || 'emailAndPassword' in patch) {
-      assertAudienceConfig(next.audience, next.emailAndPassword);
+      assertAudienceConfig(next.audience, next.emailAndPassword, {
+        verificationDeclaredBy: deploymentDeclaredVerificationOff ? 'deployment' : 'console',
+      });
     }
     // [#13816] Same entry validation the constructor runs, on the MERGED
     // plugins block: a patch must not be able to smuggle the
@@ -4189,6 +4232,7 @@ export class AuthManager {
     }
 
     this.config = next;
+    this.deploymentDeclaredVerificationOff = deploymentDeclaredVerificationOff;
     // [#17176] An in-flight build is discarded alongside a materialised one:
     // it was composed from the pre-patch config, so adopting it would serve
     // the superseded configuration to every later caller. `getOrCreateAuth()`
@@ -6613,12 +6657,14 @@ export class AuthManager {
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
       disableSignUp: ssoOnly ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
-      // Mirrors the wiring in createAuthInstance(): a self-registration-
-      // permitting posture forces verification ON — the advertised flag must
-      // not disagree with the wired one.
-      requireEmailVerification: audiencePermitsSelfRegistration(audience.posture)
-        ? true
-        : (emailPasswordConfig.requireEmailVerification ?? false),
+      // Mirrors the wiring in createAuthInstance() through the SAME resolver:
+      // a self-registration-permitting posture forces verification ON, except
+      // an `open` deployment's explicit opt-out (#20389) — the advertised flag
+      // must not disagree with the wired one.
+      requireEmailVerification: resolveEmailVerificationRequirement(
+        audience.posture,
+        emailPasswordConfig.requireEmailVerification,
+      ),
     };
 
     // Extract enabled features

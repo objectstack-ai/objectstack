@@ -5,8 +5,8 @@
 ## 形态
 
 - 本席为姊妹仓执行座位:在 objectui 仓认领、派发、复核、落地。
-- ⛔ 不产 `domain:*`、type 与定级,中央分诊唯一生产,见 SKILL.md 多仓协调规则 1 与 4。
-- 误标 ⛔ 不自改:挂 `pm:retriage` 加异议评论同笔,见同节规则 4。
+- ⛔ 不产 `domain:*`、type 与定级,中央分诊唯一生产;误标 ⛔ 不自改,挂 `pm:retriage`+异议同笔。
+- 维护者裁决例外于上条与 SKILL.md 无标签禁认领:main/队列 `Spec Main Shape Gate` 红即止血认领。
 
 ## 范围
 

@@ -63,6 +63,7 @@ const deal = {
     account: { type: 'lookup', label: 'Account', reference: 'account' },
     tags: { type: 'json', label: 'Tags' },
     watchers: { type: 'lookup', label: 'Watchers', reference: 'account', multiple: true },
+    photo: { type: 'image', label: 'Photo' },
   },
 };
 const account = { name: 'account', label: 'Account', fields: { region: { type: 'text', label: 'Region' } } };
@@ -276,6 +277,63 @@ describe('a field compared with a json / multiple field is refused at both doors
         { severity: 'error', rule: UNENFORCEABLE, path: `permissions[0].rowLevelSecurity[0].${row.clause}` },
       ]);
       expect(cli[0].message).toContain('lowers, but compares a field with a field that holds a list or an object');
+
+      expect(saved.accepted).toBe(false);
+      expect({ code: saved.code, status: saved.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+      expect(saved.issues.map((i) => ({ rule: i.rule, path: i.path }))).toEqual([
+        { rule: UNENFORCEABLE, path: `permissions.sales.rowLevelSecurity[0].${row.clause}` },
+      ]);
+      expect(saved.issues[0].message).toBe(cli[0].message);
+    });
+  }
+
+  for (const row of CONTROLS) {
+    it(`ACCEPTED at both doors — ${row.label}: \`${row.predicate}\``, async () => {
+      expect(cliDoor('', setFor(row))).toEqual([]);
+      expect(await runtimeDoor('', setFor(row))).toEqual({ accepted: true, issues: [] });
+    });
+  }
+});
+
+/**
+ * [#20347] A field compared with a field of ANOTHER comparison class — text vs
+ * number, text vs a single image, text vs a formula field — is refused when it
+ * is AUTHORED, at both doors, on every clause. None of these holds a list, so
+ * the #19886 arm above lets them through; measured before this arm, the real
+ * `os validate` reported `record.status != record.amount` and
+ * `record.status != record.photo` valid, while through the real plugin-security
+ * on driver-sql the read their `using` scopes answered `INVALID_FILTER` / 400
+ * and the insert their `check` judges was admitted and stored. The rule judges
+ * by the spec's classification (`crossFieldComparisonVerdict`); the full
+ * operator × clause × class × order table is pinned beside the rule in
+ * `@objectstack/lint`.
+ */
+describe('a field compared with a field of another comparison class is refused at both doors, on every clause (#20347)', () => {
+  const ROWS: ReadonlyArray<{ label: string; clause: 'using' | 'check'; operation: string; predicate: string }> = [
+    { label: 'using on select, text != number', clause: 'using', operation: 'select', predicate: 'record.region != record.amount' },
+    { label: 'using on all, text != a single image', clause: 'using', operation: 'all', predicate: 'record.region != record.photo' },
+    { label: 'using on select, text != a formula field', clause: 'using', operation: 'select', predicate: 'record.region != record.is_open' },
+    { label: 'using on update, number > date', clause: 'using', operation: 'update', predicate: 'record.amount > record.close_date' },
+    { label: 'check on insert, text != number', clause: 'check', operation: 'insert', predicate: 'record.region != record.amount' },
+    { label: 'check on insert, the image first', clause: 'check', operation: 'insert', predicate: 'record.photo != record.region' },
+  ];
+  const CONTROLS: ReadonlyArray<{ label: string; clause: 'using' | 'check'; operation: string; predicate: string }> = [
+    { label: 'using on select, text != text', clause: 'using', operation: 'select', predicate: 'record.region != record.owner' },
+    { label: 'check on insert, a single lookup == text (both text)', clause: 'check', operation: 'insert', predicate: 'record.account == record.owner' },
+    { label: 'using on all, an image null test', clause: 'using', operation: 'all', predicate: 'record.photo != null' },
+  ];
+  const setFor = (row: { clause: string; operation: string; predicate: string }) =>
+    permissionSet('', { operation: row.operation, [row.clause]: row.predicate });
+
+  for (const row of ROWS) {
+    it(`REFUSED at both doors with one sentence — ${row.label}: \`${row.predicate}\``, async () => {
+      const cli = cliDoor('', setFor(row));
+      const saved = await runtimeDoor('', setFor(row));
+
+      expect(cli.map((f) => ({ severity: f.severity, rule: f.rule, path: f.path }))).toEqual([
+        { severity: 'error', rule: UNENFORCEABLE, path: `permissions[0].rowLevelSecurity[0].${row.clause}` },
+      ]);
+      expect(cli[0].message).toContain('lowers, but compares two fields that share no comparison class');
 
       expect(saved.accepted).toBe(false);
       expect({ code: saved.code, status: saved.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });

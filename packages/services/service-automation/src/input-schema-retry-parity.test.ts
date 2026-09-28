@@ -74,7 +74,9 @@ function countingFlowEngine(opts: {
                 id: 'work',
                 type: 'script' as any,
                 label: 'Work',
-                config: opts.config,
+                // `function` is the key the script executor contract requires;
+                // the flow parse refuses a script node without it (#20316).
+                config: { function: 'noop', ...opts.config },
                 inputSchema: opts.inputSchema,
             },
             { id: 'end', type: 'end', label: 'End' },

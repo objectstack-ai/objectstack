@@ -250,7 +250,7 @@ describe('AutomationEngine', () => {
                 ],
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'run', type: 'script', label: 'Run' },
+                    { id: 'run', type: 'script', label: 'Run', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -280,7 +280,7 @@ describe('AutomationEngine', () => {
                 type: 'record_change',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'run', type: 'script', label: 'Run' },
+                    { id: 'run', type: 'script', label: 'Run', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -304,7 +304,7 @@ describe('AutomationEngine', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'unknown', type: 'get_record', label: 'Get' },
+                    { id: 'unknown', type: 'get_record', label: 'Get', config: { objectName: 'task' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -348,7 +348,7 @@ describe('AutomationEngine', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'fail', type: 'script', label: 'Fail' },
+                    { id: 'fail', type: 'script', label: 'Fail', config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -1433,7 +1433,7 @@ describe('AutomationEngine - Execution History', () => {
                 name: 'failing_flow',
                 nodes: [
                     { id: 'start', type: 'start' as const, label: 'Start' },
-                    { id: 'bad', type: 'script' as const, label: 'Bad' },
+                    { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
                     { id: 'end', type: 'end' as const, label: 'End' },
                 ],
                 edges: [
@@ -1526,8 +1526,8 @@ describe('AutomationEngine - Fault Edge Support', () => {
             variables: [{ name: 'status', type: 'text', isOutput: true }],
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script', label: 'Risky' },
-                { id: 'handler', type: 'script', label: 'Error Handler' },
+                { id: 'risky', type: 'script', label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script', label: 'Error Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1563,8 +1563,8 @@ describe('AutomationEngine - Fault Edge Support', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'risky', type: 'script', label: 'Risky' },
-                { id: 'handler', type: 'script', label: 'Handler' },
+                { id: 'risky', type: 'script', label: 'Risky', config: { function: 'noop' } },
+                { id: 'handler', type: 'script', label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1594,7 +1594,7 @@ describe('AutomationEngine - Fault Edge Support', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'fail', type: 'script', label: 'Fail' },
+                { id: 'fail', type: 'script', label: 'Fail', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1668,7 +1668,7 @@ describe('AutomationEngine - Step-Level Execution Logs', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'bad', type: 'script', label: 'Bad' },
+                { id: 'bad', type: 'script', label: 'Bad', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1937,7 +1937,7 @@ describe('AutomationEngine - Node Timeout', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'slow', type: 'script', label: 'Slow', timeoutMs: 50 },
+                { id: 'slow', type: 'script', label: 'Slow', timeoutMs: 50, config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -1965,7 +1965,7 @@ describe('AutomationEngine - Node Timeout', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'fast', type: 'script', label: 'Fast', timeoutMs: 5000 },
+                { id: 'fast', type: 'script', label: 'Fast', timeoutMs: 5000, config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2012,7 +2012,7 @@ describe('AutomationEngine - Node Timeout', () => {
                     id: `n${i}`,
                     type: 'script',
                     label: `Guarded ${i}`,
-                    timeoutMs: GUARD_MS,
+                    timeoutMs: GUARD_MS, config: { function: 'noop' },
                 })),
                 { id: 'end', type: 'end', label: 'End' },
             ];
@@ -2094,7 +2094,7 @@ describe('AutomationEngine - Node Timeout', () => {
                 type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'Start' },
-                    { id: 'hangs', type: 'script', label: 'Hangs', timeoutMs: 50 },
+                    { id: 'hangs', type: 'script', label: 'Hangs', timeoutMs: 50, config: { function: 'noop' } },
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [
@@ -2346,8 +2346,8 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'branch_a', type: 'script', label: 'Branch A', config: { delay: 10 } },
-                { id: 'branch_b', type: 'script', label: 'Branch B', config: { delay: 10 } },
+                { id: 'branch_a', type: 'script', label: 'Branch A', config: { function: 'noop', delay: 10 } },
+                { id: 'branch_b', type: 'script', label: 'Branch B', config: { function: 'noop', delay: 10 } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2414,7 +2414,7 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
                     id: 'validated',
                     type: 'script',
                     label: 'Validated',
-                    config: {},
+                    config: { function: 'noop' },
                     inputSchema: {
                         url: { type: 'string', required: true, description: 'URL to call' },
                     },
@@ -2450,7 +2450,7 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
                     id: 'validated',
                     type: 'script',
                     label: 'Validated',
-                    config: { count: 'not_a_number' },
+                    config: { function: 'noop', count: 'not_a_number' },
                     inputSchema: {
                         count: { type: 'number', required: true },
                     },
@@ -2563,7 +2563,7 @@ describe('AutomationEngine - Execution Status', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'bad', type: 'script', label: 'Bad' },
+                { id: 'bad', type: 'script', label: 'Bad', config: { function: 'noop' } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -3167,7 +3167,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         name, label: name, type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
-            { id: 'bad', type: 'script' as const, label: 'Bad' },
+            { id: 'bad', type: 'script' as const, label: 'Bad', config: { function: 'noop' } },
             { id: 'end', type: 'end' as const, label: 'End' },
         ],
         edges: [
@@ -3237,7 +3237,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         // from the trigger door and is not dead code.
         engine.registerFlow('startless', {
             name: 'startless', label: 'Startless', type: 'autolaunched',
-            nodes: [{ id: 'middle', type: 'script', label: 'Middle' }],
+            nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
             edges: [],
         });
         const startless = await engine.execute('startless');
@@ -3271,7 +3271,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
 
         engine.registerFlow('startless_coded', {
             name: 'startless_coded', label: 'Startless', type: 'autolaunched',
-            nodes: [{ id: 'middle', type: 'script', label: 'Middle' }],
+            nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
             edges: [],
         });
         const startless = await engine.execute('startless_coded');

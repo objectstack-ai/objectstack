@@ -92,13 +92,13 @@ const stackWithApp = (label: unknown) => ({
 
 const stackWithListLabel = (label: unknown) => ({
   manifest: MANIFEST,
-  views: [{ name: 'invoice_views', object: 'invoice', list: { label, type: 'grid', columns: ['name'] } }],
+  views: [{ name: 'invoice', object: 'invoice', list: { label, type: 'grid', columns: ['name'] } }],
 });
 
 const stackWithNamedListLabel = (label: unknown) => ({
   manifest: MANIFEST,
   views: [{
-    name: 'invoice_views',
+    name: 'invoice',
     object: 'invoice',
     listViews: { all: { label, type: 'grid', columns: ['name'] } },
   }],

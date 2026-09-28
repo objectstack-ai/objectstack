@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
-import type { AnalyticsQuery, AnalyticsResult, IAnalyticsService } from '@objectstack/spec/contracts';
+import type { AnalyticsQuery, AnalyticsResult, AnalyticsStrategy, IAnalyticsService } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 import { CubeRegistry } from '../cube-registry.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
@@ -31,7 +31,7 @@ const ordersCube: Cube = {
       granularities: ['day', 'week', 'month'],
     },
   },
-  public: false,
+  public: true,
 };
 
 const baseQuery: AnalyticsQuery = {
@@ -561,8 +561,24 @@ describe('AnalyticsService', () => {
     // when no Cube has been declared for "case" — used to crash with
     // "Cannot read properties of undefined (reading 'sql')".
     const executeAggregate = vi.fn().mockResolvedValue([{ 'case.count': 7 }]);
+    // [#20381] The inferred cube lives only in this request — it is never
+    // registered — so it is read where the request's strategies read it: a
+    // probe ahead of them records `ctx.getCube` and declines.
+    const handed: Cube[] = [];
+    const probe: AnalyticsStrategy = {
+      name: 'RequestCubeProbe',
+      priority: 0,
+      canHandle: (q, ctx) => {
+        const cube = ctx.getCube(q.cube!);
+        if (cube) handed.push(cube);
+        return false;
+      },
+      execute: vi.fn(),
+      generateSql: vi.fn(),
+    };
     const service = new AnalyticsService({
       logger: silentLogger,
+      strategies: [probe],
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
       executeAggregate,
     });
@@ -580,7 +596,11 @@ describe('AnalyticsService', () => {
       ]),
     }));
     expect(result.rows).toBeDefined();
-    expect(service.cubeRegistry.has('case')).toBe(true);
+    // A minimal cube was inferred for the request, over the object itself…
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toMatchObject({ name: 'case', sql: 'case' });
+    // …and it stayed in the request: the shared registry does not gain it.
+    expect(service.cubeRegistry.has('case')).toBe(false);
   });
 
   it('should auto-infer measures from suffix conventions (_sum, _avg, _max)', async () => {

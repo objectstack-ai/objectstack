@@ -687,7 +687,17 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // declared type is. The pin does not: it filters `type === 'repeater'`, and
     // `summaryOperations` is a `composite`. All five of its children echoed in
     // all three locales, and they are five of the nine keys this round decides.
-    expect(UNWALKED_CHILDREN.length).toBe(5);
+    //
+    // 8 since #19332 (flight G1b): that flight gave the form two more
+    // composites, `currencyConfig` (`currencyMode`, `defaultCurrency`) and
+    // `storage` (`notNull`). Their three children are unwalked by the repeater
+    // pin exactly as these five are, and the extractor emitted a key for each —
+    // but that flight authored all six of their string leaves in all three
+    // locales, so the echo rule above reads them translated, not undecided.
+    expect(UNWALKED_CHILDREN.length).toBe(8);
+    for (const child of ['currencyConfig.currencyMode', 'currencyConfig.defaultCurrency', 'storage.notNull']) {
+      expect(UNWALKED_CHILDREN).toContain(child);
+    }
     for (const child of ['object', 'function', 'field', 'relationshipField', 'filter']) {
       expect(UNWALKED_CHILDREN).toContain(`summaryOperations.${child}`);
       expect(
@@ -717,7 +727,10 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     const coveredParents = new Set(ROW_PROPERTIES.map((k) => k.replace(/\.[^.]+$/, '')));
     const skippedParents = new Set(UNWALKED_CHILDREN.map((k) => k.replace(/\.[^.]+$/, '')));
     expect([...coveredParents]).toEqual(['options']);
-    expect([...skippedParents]).toEqual(['summaryOperations']);
+    // `currencyConfig` and `storage` joined in #19332 (flight G1b), in form
+    // order around it; their children were authored by that flight, so the
+    // broken five still hang off `summaryOperations` alone.
+    expect([...skippedParents]).toEqual(['currencyConfig', 'summaryOperations', 'storage']);
     // The type is "carried" — the control the other pin reads — yet none of the
     // leaves this round had to decide is inside its derivation.
     expect(ROW_PROPERTIES.length, 'field DOES carry repeater row properties, so the other pin counts it covered').toBeGreaterThan(0);

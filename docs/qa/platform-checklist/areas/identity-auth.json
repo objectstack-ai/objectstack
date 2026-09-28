@@ -1700,7 +1700,7 @@
       "title": "Self-signup gate: the default audience posture (invite_only) refuses at the server with a LOUD code, a pending invitation carves through, and OS_DISABLE_SIGNUP bounces the UI AND the endpoint — the register form's presence is deliberate, never the gate",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous uninvited registrant", "an invited email's registrant", "org admin (mints the invitation)", "env owner (sets OS_DISABLE_SIGNUP)"],
@@ -1712,8 +1712,8 @@
           "a second boot with OS_DISABLE_SIGNUP=true exported for the disabled legs"
         ],
         "knownGaps": [
-          "the email_domain and open posture variants need a CONFIG-DECLARED audience — audience is config-only (AuthConfigSchema.audience, packages/spec/src/system/auth-config.zod.ts; no env knob) and must declare selfRegistrationPermissionSet (entry validation refuses a permitting posture without it, audience-posture.ts). No stock example declares one, so those variants are blocked(fixture) without a bespoke config boot",
-          "BOUNDARY: on a permitting posture, requireEmailVerification is FORCED on (#11739), so the completed-signup → challenge → verify loop belongs to identity-auth.email-verification-loop — this item owns the ADMISSION decision only; do not double-cover",
+          "the email_domain and open posture variants need a DECLARED audience, and no stock example declares one. Two doors declare it: the stack config (AuthConfigSchema.audience, packages/spec/src/system/auth-config.zod.ts), or the auth settings namespace — the console's Audience group, or its env overrides OS_AUTH_AUDIENCE_POSTURE, OS_AUTH_AUDIENCE_ALLOWED_EMAIL_DOMAINS and OS_AUTH_AUDIENCE_SELF_REGISTRATION_PERMISSION_SET (the settings service derives an OS_AUTH_* override for every auth manifest key; bindAuthSettings in auth-plugin.ts applies them). Either door must declare selfRegistrationPermissionSet (entry validation refuses a permitting posture without it, audience-posture.ts). The env door is measured in its two halves, not yet on a live stock boot: the settings service resolves those variables as source env, locked, and audience-posture-setting.test.ts pins bindAuthSettings applying env-sourced audience keys. Until a run records a declared audience, those variants are blocked(fixture) on the stock boot",
+          "BOUNDARY: email_domain always forces requireEmailVerification on, and open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config; a false stored only through the settings console is refused under open — resolveEmailVerificationRequirement and assertAudienceConfig, audience-posture.ts). On a verification-forced boot the completed-signup → challenge → verify loop belongs to identity-auth.email-verification-loop — this item owns the ADMISSION decision only; do not double-cover",
           "the zero-user bootstrap bypass is the ONE admission exception and is owned by identity-auth.first-run-owner-bootstrap — cross-reference, do not re-test here"
         ]
       },
@@ -1768,7 +1768,7 @@
       "variants": [
         "invite_only (stock default; refuse SELF_REGISTRATION_CLOSED, invitation carve-out admits — audience-posture.ts,398-402)",
         "email_domain (allowlisted address admitted + granted the declared set; off-list refused EMAIL_DOMAIN_NOT_ALLOWED; matching rules pinned — last-@, case-insensitive, exact entry, no subdomain implication, +tag irrelevant, audience-posture.ts,411-421) — blocked(fixture) without a config boot",
-        "open (admitted + granted selfRegistrationPermissionSet; verification forced on — the loop is email-verification-loop's) — blocked(fixture) without a config boot",
+        "open (admitted + granted selfRegistrationPermissionSet; verification forced on unless the deployment declares it off — the loop is email-verification-loop's) — blocked(fixture) without a config boot",
         "OS_DISABLE_SIGNUP=true env (UI bounce + server refusal; env > config; OS_AUTH_SIGNUP_ENABLED inverts and wins over it)",
         "ssoOnlyMode (forces disableSignUp true — surface covered by identity-auth.sso-enforced-first-paint; here only the config-resolution fact)"
       ],
@@ -1777,12 +1777,13 @@
       "source": [
         "packages/plugins/plugin-auth/src/audience-posture.ts#resolveAudience (the single owner of audience admission: resolveAudience default invite_only; decideAudienceAdmission — operator/provider exempt, bootstrap admit, invitation carve-out, posture semantics; SELF_REGISTRATION_CLOSED / EMAIL_DOMAIN_NOT_ALLOWED; pinned domain rules in the module doc)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#readDisableSignUpEnv (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED wins, then OS_DISABLE_SIGNUP) + (effective disableSignUp: ssoOnly forces true, else env ?? config) + (the sign-up route raises the audience refusal BEFORE the anti-enumeration shield — measured swallow documented in place) +,5040 (getPublicConfig: disableSignUp NOT forced by posture, features.audiencePosture advertised)",
-        "packages/spec/src/system/auth-config.zod.ts#AUDIENCE_POSTURES (AUDIENCE_POSTURES const — invite_only/email_domain/open, the named enum backing posture z.enum) + (AudienceConfigSchema on AuthConfigSchema — config-only, no env knob)",
+        "packages/spec/src/system/auth-config.zod.ts#AUDIENCE_POSTURES (AUDIENCE_POSTURES const — invite_only/email_domain/open, the named enum backing posture z.enum) + (AudienceConfigSchema on AuthConfigSchema — the stack-config door; the auth settings namespace is the second door, through the console and the OS_AUTH_AUDIENCE_* env overrides)",
         "objectui apps/console/src/pages/auth/RegisterPage.tsx,69-88 (probe /auth/config, bounce to /login when disableSignUp; server-side gate named as the source of truth in its own header)",
         "objectui apps/console/src/pages/auth/LoginPage.tsx,136,298 (signUpDisabled from /auth/config; registerUrl withheld when disabled)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4). CORRECTED against source from the register's hypothesis 'default boot sign-up completes': since #11739 (epic #11723, ruling 2026-08-24) the undeclared audience resolves to invite_only, so a stock-boot uninvited self-signup is REFUSED 403 SELF_REGISTRATION_CLOSED — the item encodes the posture matrix (enumSource-pinned on AUDIENCE_POSTURES), the pre-anti-enumeration-shield loud-refusal ordering, the invitation carve-out, the deliberate form-stays-rendered shape, and the OS_DISABLE_SIGNUP env gate on both the UI and the endpoint", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4). CORRECTED against source from the register's hypothesis 'default boot sign-up completes': since #11739 (epic #11723, ruling 2026-08-24) the undeclared audience resolves to invite_only, so a stock-boot uninvited self-signup is REFUSED 403 SELF_REGISTRATION_CLOSED — the item encodes the posture matrix (enumSource-pinned on AUDIENCE_POSTURES), the pre-anti-enumeration-shield loud-refusal ordering, the invitation carve-out, the deliberate form-stays-rendered shape, and the OS_DISABLE_SIGNUP env gate on both the UI and the endpoint", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-09-28", "change": "restated two knownGaps, the open variant and one source note to the shipped rule. Verification: email_domain always forces it on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config), and a false stored only through the settings console is refused under open — the BOUNDARY gap said every permitting posture forces it. Audience declaration: it is not config-only — the auth settings namespace carries it, through the console and the OS_AUTH_AUDIENCE_* env overrides; the gap and the source note said no env knob. Steps, acceptance clauses, oracles and negatives are unchanged", "ref": "#20413" }
       ]
     },
     {
@@ -1790,14 +1791,14 @@
       "title": "Email verification loop: a challenged sign-up lands a captured verification mail, unverified sign-in is refused EMAIL_NOT_VERIFIED server-side, the link admits, resend works — and the default boot never challenges",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a fresh registrant (unverified, then verified)", "admin (reads state)", "env owner (configures the verification boot)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a VERIFICATION-ENABLED boot — no stock boot challenges. Two ways to arm it: (a) config emailAndPassword.requireEmailVerification:true + emailVerification.sendOnSignUp:true (wired at auth-manager.ts), or (b) any audience posture that permits self-registration (open / email_domain), which FORCES requireEmailVerification on (#11739 invariant, auth-manager.ts; the explicit-false contradiction is refused at config entry, audience-posture.ts)",
+          "a VERIFICATION-ENABLED boot — no stock boot challenges. Two ways to arm it: (a) config emailAndPassword.requireEmailVerification:true + emailVerification.sendOnSignUp:true (wired at auth-manager.ts), or (b) a self-registration posture that FORCES requireEmailVerification on — email_domain always, open unless the deployment declared it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config). resolveEmailVerificationRequirement (audience-posture.ts) is the one rule the wiring and the /auth/config mirror both read; assertAudienceConfig refuses an explicit false under email_domain from any source, and under open when only the settings console stored it",
           "an ADMISSIBLE sign-up to feed the loop: on an (a)-style boot the default posture is still invite_only, so either mint a pending invitation for the test address first, or use a (b)-style open-posture boot (which must declare selfRegistrationPermissionSet)",
           "the dev `log` mail transport so the verification mail (template auth.verify_email) and its link are CAPTURED, not sent — same harness as identity-auth.self-service-password-reset"
         ],
@@ -1848,7 +1849,7 @@
           "evidence": "the refusal + the still-refused sign-in + the error-state screenshot"
         },
         {
-          "clause": "the default boot never challenges — both sides of the gate: with no verification config (and the stock invite_only posture) an admitted user signs in with no verification step, and /auth/config advertises requireEmailVerification false; on the forced-verification (permitting-posture) boot the same flag advertises TRUE (the mirror may never disagree with the wiring)",
+          "clause": "the default boot never challenges — both sides of the gate: with no verification config (and the stock invite_only posture) an admitted user signs in with no verification step, and /auth/config advertises requireEmailVerification false; on a forced-verification boot (email_domain, or open without the deployment's opt-out) the same flag advertises TRUE (the mirror may never disagree with the wiring)",
           "oracle": "api",
           "verify": "the two /auth/config reads (getPublicConfig mirror, auth-manager.ts) + an unchallenged stock sign-in trace",
           "evidence": "the two config reads + the stock sign-in trace"
@@ -1857,14 +1858,14 @@
       "negative": [
         "a UI-only challenge (prompt page shown but the unverified sign-in succeeds server-side) is a FAIL — the refusal is the enforcement",
         "a verification mail silently vanishing (no transport capture AND no thrown/logged send failure) is a FAIL — the send seam throws into the log on template/transport failure rather than dropping (auth-manager.ts); silence is the defect",
-        "a permitting-posture boot advertising requireEmailVerification false is the #11739 mirror regression — the advertised flag disagreeing with the wired forcing is itself the FAIL, independent of behavior",
+        "a forced-verification boot (email_domain, or open without the deployment's opt-out) advertising requireEmailVerification false is the mirror regression — the advertised flag disagreeing with the wired forcing is itself the FAIL, independent of behavior. An open boot WITH the deployment's opt-out advertises false correctly and logs one boot warning naming the posture — that is not this FAIL",
         "the default stock boot challenging sign-ins would be a config regression (verification leaking on) — FAIL",
         "a garbage token producing a success state (or verifying the account) is a security FAIL"
       ],
       "traps": ["eventual-consistency", "auth-state-leak", "hydration-race"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-manager.ts#requireEmailVerification (requireEmailVerification wiring — [#11739]: a self-registration-permitting posture FORCES it on; otherwise config passthrough) + (emailVerification block: sendOnSignUp/sendOnSignIn/autoSignInAfterVerification/expiresIn passthrough; sendVerificationEmail via template auth.verify_email, failures thrown into the log) + (getPublicConfig mirrors the forced flag)",
-        "packages/plugins/plugin-auth/src/audience-posture.ts#entry (entry validation refuses the permitting-posture + explicit-false contradiction)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#requireEmailVerification (requireEmailVerification wiring through resolveEmailVerificationRequirement — email_domain always FORCES it on, open forces it on unless the deployment declared it off, invite_only passes the declared value through, default off) + (emailVerification block: sendOnSignUp/sendOnSignIn/autoSignInAfterVerification/expiresIn passthrough; sendVerificationEmail via template auth.verify_email, failures thrown into the log) + (getPublicConfig mirrors the forced flag)",
+        "packages/plugins/plugin-auth/src/audience-posture.ts#entry (entry validation, assertAudienceConfig: an explicit requireEmailVerification false is refused under email_domain from any source, and under open when only the settings console stored it)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail) — re-pointed #18104: sendVerificationEmail is a CLIENT METHOD name, carried in this file only inside a dotted string value",
         "objectui apps/console/src/App.tsx (/verify-email + /verify-email-prompt routes)",
         "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via the POST variant — GET 302s, POST returns JSON so the SPA controls the post-verify UX)",
@@ -1873,7 +1874,8 @@
         "packages/plugins/plugin-email/src/transports/index.ts (the dev `log` capture transport — same harness as identity-auth.self-service-password-reset)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4): the verification loop (challenge, capture, verify, resend, default-never-challenges) had no item. Grounded the #11739 posture-forces-verification invariant and its advertised mirror, the console's three surfaces (/verify-email POST-variant consumption, /verify-email-prompt resend, LoginPage's EMAIL_NOT_VERIFIED redirect), and the admissibility precondition the audience wall adds to the fixture", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4): the verification loop (challenge, capture, verify, resend, default-never-challenges) had no item. Grounded the #11739 posture-forces-verification invariant and its advertised mirror, the console's three surfaces (/verify-email POST-variant consumption, /verify-email-prompt resend, LoginPage's EMAIL_NOT_VERIFIED redirect), and the admissibility precondition the audience wall adds to the fixture", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-09-28", "change": "restated the forced-verification wording to the shipped rule: email_domain always forces verification on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false stored only through the settings console is refused under open. The (b) fixture, clause 6, the mirror negative and two source notes said every permitting posture forces it; the negative now names the open opt-out boot, which advertises false correctly, as not a FAIL. Steps, oracles and the other clauses are unchanged", "ref": "#20413" }
       ]
     },
     {
