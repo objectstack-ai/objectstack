@@ -1722,7 +1722,7 @@ judged against something `os test` can observe:
 
 - `requires.params` — environment variables that must be set to a non-empty
   value **in the process running `os test`** (not on the target server, which a
-  suite cannot see): `"params": ["OS_QA_BILLING_TOKEN"]`.
+  suite cannot see): `"params": ["BILLING_SANDBOX_KEY"]`.
 - `requires.services` — service keys the target must declare in its discovery
   document as `enabled` with status `available`, read from the same discovery
   request the runner already makes once per run: `"services": ["ai", "analytics"]`.
