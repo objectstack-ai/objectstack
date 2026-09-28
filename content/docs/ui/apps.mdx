@@ -344,7 +344,7 @@ the two item-level mechanisms are enforced in *different places*:
 
 | Item property | Enforced where | What it actually does |
 | :--- | :--- | :--- |
-| `requiredPermissions`, `requiresService` | **Server**, in both trees — then re-checked in the shell | The entry is never served: it is absent from the `/meta` body |
+| `requiredPermissions`, `requiresService` | **Server**, in both trees — then re-checked in the shell | The entry is not served: it is absent from the rendered `/meta` body (the stored-version doors below answer by who is asking) |
 | `visible` (CEL), `requiresObject` | **Client only**, at every level | Hides an entry the browser has already received |
 
 Since #4722 the authoritative server-side filter (`filterAppForUser`) runs the
@@ -356,21 +356,30 @@ enforced identically in both trees: a gated entry — with its `objectName` /
 collapses; an area *authored* empty is passed through untouched, because
 filtering reports what the caller may not see rather than tidying the metadata.
 
-The single-app reads — `GET /api/v1/meta/app/<name>` and its `/published`
-twin — serve that filtered body to every caller, the app's authors included,
-and every door refuses an app the caller may not open: one whose app-level
-`requiredPermissions` they lack (`403`), or an unpublished app to a
-non-builder (`404`). The doors that serve an app's *stored* versions for
-authoring — the layered view (`/layers`, and the deprecated `?layers=true`) and
-`/diff` — answer by who is asking. A caller who may **save** the app (the one
-`PUT /api/v1/meta/app/<name>` admits: `manage_metadata`, or a system context)
-reads the full stored version there, gated entries included, because Studio's
-designer saves back what it loaded and a pruned load would delete the entries
-withheld from its author. Every other caller reads it without the entries
-`requiredPermissions` or the docs audience withhold from them, left out as the
-single-app read leaves them out, on every layer and on both sides of a diff.
-The exemption lifts no whole refusal: an app an author may not open is refused
-on these doors too.
+The single-app reads — `GET /api/v1/meta/app/<name>` (its `?preview=draft`
+preview included) and its `/published` twin — serve that filtered body to
+every caller, the app's authors included, and every door refuses an app the
+caller may not open: one whose app-level `requiredPermissions` they lack
+(`403`), or an unpublished app to a non-builder (`404`). The doors that serve
+an app's *stored* versions for authoring — the layered view (`/layers`, and the
+deprecated `?layers=true`), `/diff`, and the pending draft
+(`GET /api/v1/meta/app/<name>?state=draft`) — answer by who is asking. A caller
+who may **save** the app (the one `PUT /api/v1/meta/app/<name>` admits:
+`manage_metadata`, or a system context) reads the full stored version there,
+gated entries included, because Studio's designer saves back what it loaded
+(its editors merge the pending draft over the layered view) and a pruned load
+would delete the entries withheld from its author. Every other caller reads it
+without the entries `requiredPermissions` or the docs audience withhold from
+them, left out as the single-app read leaves them out, on every layer, in the
+draft, and on both sides of a diff. These doors apply no per-deployment gate:
+an entry whose `requiresService` names a service this deployment lacks is part
+of the stored version, for every caller. The exemption lifts no whole refusal:
+an app an author may not open is refused on these doors too. Reading a
+*pending* draft at all — `?state=draft`, and the `?preview=draft` preview —
+needs an authoring capability (`studio.access`, `setup.access` or
+`manage_metadata`: the check `GET /api/v1/meta/_drafts` makes). A caller
+without one is answered as if the parameter were absent: the published app,
+or `404` for an app that has never been published.
 
 `visible` did **not** move server-side with them, and that asymmetry is
 deliberate: CEL is evaluated in the browser because server-side evaluation needs

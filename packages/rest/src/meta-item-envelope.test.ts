@@ -74,9 +74,9 @@ function itemRoute(rest: RestServer) {
     );
 }
 
-async function dispatch(protocol: any, params: any, query: any = {}, config: any = ANON_API) {
+async function dispatch(protocol: any, params: any, query: any = {}, config: any = ANON_API, systemPermissions: string[] = []) {
     const rest = new RestServer(mockServer() as any, protocol as any, config as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions });
     rest.registerRoutes();
     const res = mockRes();
     await itemRoute(rest)!.handler({ params, query, headers: {} }, res);
@@ -190,10 +190,14 @@ describe('#5563 GET /meta/:type/:name — one body shape on every branch', () =>
             })),
         });
 
+        // [#20338] As a caller who may read drafts — the authoring capability
+        // `/meta/_drafts` asks; anyone else is served the plain read.
         const { body } = await dispatch(
             protocol,
             { type: 'object', name: 'customer' },
             { state: 'draft' },
+            ANON_API,
+            ['studio.access'],
         );
 
         expect(protocol.getMetaItemCached).not.toHaveBeenCalled();

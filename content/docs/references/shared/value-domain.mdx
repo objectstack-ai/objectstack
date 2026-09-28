@@ -1,6 +1,6 @@
 ---
 title: Value Domain
-description: Value Domain protocol schemas
+description: "Standard value domains: one closed vocabulary and one membership predicate for settings and fields."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -26,8 +26,7 @@ shape — nothing consuming it moved).
 Prime Directive #2 keeps business logic out of the spec, and the earlier
 TSDoc of this vocabulary read that as "the list does not live here". The
 ruling above settles it the other way for this one predicate, on the same
-footing as the package's existing shared verdicts: `currencyPrecisionContradiction`
-(a checked-in CLDR table and the rule read over it), `filterVerdict`, the
+footing as the package's existing shared verdicts: `filterVerdict`, the
 comparand-shape door. Each is a pure, dependency-free function two or more
 doors must answer IDENTICALLY — and "the same answer on both doors" is
 exactly what a shared contract is for. The predicate takes no I/O, holds no

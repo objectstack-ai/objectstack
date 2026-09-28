@@ -1102,17 +1102,30 @@ the chain resolves from either end:
   parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
-no run is stranded as resumable-forever. **When the child's failure is a
-strand** — its resume consumed the pause and a downstream node threw — each
-ancestor's consumed pause is recorded too, and the repair verb puts the whole
-chain back in one call: `POST …/runs/{runId}/restore-suspension` on **any**
-member re-arms every member, deepest first, so the continuation re-issued on
-the run you named flows back up through the ancestors instead of completing a
-leaf into a parent that never continues. Re-arming an ancestor is all the verb
-does — an ancestor is never *stranded*, because resuming it is not what moves
-it. A cascade from a child that is **not** repairable records no ancestor
-snapshot, deliberately, so the verb never promises a chain repair it could not
-finish.
+none of them is left stranded as resumable-forever. **When the child's failure
+is a strand** — its resume consumed the pause and a downstream node threw —
+each ancestor's consumed pause is recorded too, and the repair verb puts the
+whole chain back in one call: `POST …/runs/{runId}/restore-suspension` on
+**any** member re-arms every member, deepest first, so the continuation
+re-issued on the run you named flows back up through the ancestors instead of
+completing a leaf into a parent that never continues. Re-arming an ancestor is
+all the verb does in this case — no ancestor is stranded here, because
+resuming it is not what moves it. A cascade from a child that is **not**
+repairable records no ancestor snapshot, deliberately, so the verb never
+promises a chain repair it could not finish.
+
+**A third case is the opposite: the bubble itself is what strands an
+ancestor.** The child completes cleanly, `bubbleToParent` resumes the parent
+on the child's behalf, and the parent's own downstream node throws. There the
+bubble — not a resume the caller issued — is exactly what moves the parent,
+and it is the parent, not the child, that lands on the engine's `'stranded'`
+exit, terminal. The child's own resume genuinely succeeded, so its resumer
+(an approvals decision door, a wait timer) is told the resume succeeded; as
+of #15556 an approval `decide()` also reports the stranded parent on
+`resumeFailure` (`{ code: 'RESUME_FAILED', runId: '<parent>', status:
+'stranded', repairable: true }`). Repair it the same way: the same
+`restore-suspension` verb (`restoreConsumedSuspension` underneath), issued on
+the parent's run id — the `runId` `resumeFailure` names, not the child's.
 
 See the worked example pair in the showcase app:
 `showcase_project_closure` invokes the reusable `showcase_closure_signoff`
@@ -1815,15 +1828,19 @@ export default defineStack({
 ```
 
 Registration is not arming. A `record_change`, `schedule`, `time_relative` or
-`api` flow fires only when its trigger is mounted, and the triggers ship
-separately (`@objectstack/trigger-*`) behind **one** capability token on the
-same stack: `requires: ['triggers']` (`automation` mounts the engine itself;
-neither is in the always-on slate an absent `requires` falls back to).
-`defineStack` refuses a stack that declares such a flow without the token,
-naming the flow, the trigger kind it resolved and the fix — because the
-alternative was measured: the flow registers, `os validate` and `os build`
-pass, and it never runs. A `screen` flow, or an `autolaunched` one you start
-by hand, owes nothing.
+`api` flow fires only when its trigger is installed, and that takes **both**
+capability tokens on the same stack: `requires: ['automation', 'triggers']`.
+The triggers ship separately (`@objectstack/trigger-*`, mounted by
+`triggers`), and each one installs itself into the automation engine
+(`@objectstack/service-automation`, mounted by `automation`) — with
+`triggers` alone the trigger plugins load, find no engine, and install
+nothing. Neither token implies the other, and neither is in the always-on
+slate an absent `requires` falls back to. `defineStack` refuses a stack that
+declares such a flow while `requires` lacks either token, naming the flow, the
+trigger kind it resolved and the fix for the tokens it is missing — because
+the alternative was measured: the flow registers, `os validate` and
+`os build` pass, and it never runs. A `screen` flow, or an `autolaunched` one
+you start by hand, owes nothing.
 
 The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration

@@ -194,7 +194,7 @@ export const MetadataBulkResponseSchema = lazySchema(() => BaseResponseSchema.ex
 //
 // The section-5 contracts (`MetadataOverlayResponseSchema`,
 // `MetadataOverlaySaveRequestSchema`, `MetadataEffectiveResponseSchema`) were
-// REMOVED per ADR-0049 enforce-or-remove (#13135, re-charter of #12057):
+// REMOVED per ADR-0049 enforce-or-remove (commit 9e0ba21a1, re-charter of #12057):
 // they declared REST contracts for the paper metadata-customization protocol
 // — `GET/PUT …/overlay`, `GET …/effective` — endpoints NO adapter ever
 // served (measured: no route spelling exists in packages/rest or

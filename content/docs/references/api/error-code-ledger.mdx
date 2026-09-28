@@ -1,6 +1,6 @@
 ---
 title: Error Code Ledger
-description: Error Code Ledger protocol schemas
+description: "Error-Code Ledger. Reference for ErrorCode, ProvenanceWaiver, StandardSynonymWaiver: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -109,7 +109,7 @@ absent here is a protocol gap, not a tier question.
 ONE shape, no second list: a `door: 'none'` code is a row like any other —
 the string under the package that stamps it, and a comment that states its
 `status` and the reachability reading ("no HTTP door on this tree; the
-thrown value is the boundary"). Until #16649 the dispatcher vocabulary
+thrown value is the boundary"). Until commit 44c917a47 the dispatcher vocabulary
 (`packages/runtime/src/dispatcher-error-vocabulary.ts`) carried a
 `boot-refusal` verdict that recorded that same reachability for the codes
 NOT yet registered; it is RETIRED, because the gate below now refuses it —
@@ -125,7 +125,7 @@ it, `error.code` carries the specific code instead of the status-derived
 member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
 genuinely unknown / third-party spellings only.
 
-EVERY published package's `src/**` is held to this mechanically — #16649
+EVERY published package's `src/**` is held to this mechanically — commit 44c917a47
 widened the rule from `packages/spec/src/**` alone, which is all #16449
 could afford to measure. `check:dispatcher-error-vocabulary` refuses to
 classify a stamp site under one as anything but `foreign-vocabulary` (a
@@ -172,7 +172,7 @@ host boot matching is not wire vocabulary.
 boot refusal that ships in `dist` is owed a row, so the codes left out or
 retired on the "not wire vocabulary" reasoning were registrations owed
 under the ruling, not re-argued per card — #16449 registered the nine
-measured on its tree, and #16649 the fourteen `boot-refusal` rows
+measured on its tree, and commit 613bfbd3d the fourteen `boot-refusal` rows
 `dispatcher-error-vocabulary.ts` still carried, among them
 `MONGODB_MULTI_TENANT_UNSUPPORTED` itself, back under
 `@objectstack/driver-mongodb` with the #8035 removal reversed on the

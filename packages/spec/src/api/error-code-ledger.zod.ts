@@ -105,7 +105,7 @@
  * ONE shape, no second list: a `door: 'none'` code is a row like any other —
  * the string under the package that stamps it, and a comment that states its
  * `status` and the reachability reading ("no HTTP door on this tree; the
- * thrown value is the boundary"). Until #16649 the dispatcher vocabulary
+ * thrown value is the boundary"). Until commit 44c917a47 the dispatcher vocabulary
  * (`packages/runtime/src/dispatcher-error-vocabulary.ts`) carried a
  * `boot-refusal` verdict that recorded that same reachability for the codes
  * NOT yet registered; it is RETIRED, because the gate below now refuses it —
@@ -121,7 +121,7 @@
  * member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
  * genuinely unknown / third-party spellings only.
  *
- * EVERY published package's `src/**` is held to this mechanically — #16649
+ * EVERY published package's `src/**` is held to this mechanically — commit 44c917a47
  * widened the rule from `packages/spec/src/**` alone, which is all #16449
  * could afford to measure. `check:dispatcher-error-vocabulary` refuses to
  * classify a stamp site under one as anything but `foreign-vocabulary` (a
@@ -168,7 +168,7 @@
  * boot refusal that ships in `dist` is owed a row, so the codes left out or
  * retired on the "not wire vocabulary" reasoning were registrations owed
  * under the ruling, not re-argued per card — #16449 registered the nine
- * measured on its tree, and #16649 the fourteen `boot-refusal` rows
+ * measured on its tree, and commit 613bfbd3d the fourteen `boot-refusal` rows
  * `dispatcher-error-vocabulary.ts` still carried, among them
  * `MONGODB_MULTI_TENANT_UNSUPPORTED` itself, back under
  * `@objectstack/driver-mongodb` with the #8035 removal reversed on the
@@ -193,7 +193,7 @@ export const ERROR_CODE_LEDGER = {
     'AMBIGUOUS_MATCH',            // import row matched more than one record
     'ANALYTICS_QUERY_FAILED',
     'APPROVAL_ACTIONS_FAILED',
-    // [#8885] The eight rows below are the TEMPLATE-GENERATED members of the
+    // [commit 30b1c636a] The eight rows below are the TEMPLATE-GENERATED members of the
     // family whose literal-spelled siblings (`APPROVAL_RECALL_FAILED`,
     // `APPROVAL_ACTIONS_FAILED`, `APPROVAL_REQUEST_GET_FAILED`,
     // `APPROVAL_REQUEST_LIST_FAILED`) were already registered: the approvals
@@ -295,7 +295,7 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_DISMISS_FAILED',
     'SUGGESTION_LIST_FAILED',
     'SUMMARY_RECOMPUTE_FAILED',
-    // [#8885] `POST /approvals/requests/:id/remind` inside the reminder
+    // [commit 30b1c636a] `POST /approvals/requests/:id/remind` inside the reminder
     // cool-down window — `handleApprovalError` (`rest-server.ts`) maps
     // plugin-approvals' `THROTTLED: …` throw (`approval-service.ts`,
     // `remind()`) to 429 with this code on the wire. The spec contract
@@ -426,7 +426,7 @@ export const ERROR_CODE_LEDGER = {
     // `errorFromThrown` (`action-execution.ts`). Reported by the #8087
     // dispatcher-vocabulary gate.
     'FLOW_FAILED',
-    // [#11504] the definition-level input-schema refusal: a node's static
+    // [commit f90e82024] the definition-level input-schema refusal: a node's static
     // `config` violates the `inputSchema` its own flow definition declares, so
     // the engine refused to dispatch — nothing ran, nothing was written, and
     // the result carries NO `status` (the #9378 never-dispatched class, beside
@@ -443,7 +443,7 @@ export const ERROR_CODE_LEDGER = {
     // a node's config contradicts the schema the definition itself declares.
     // Not a VALIDATION_ERROR synonym: the REQUEST is well-formed — what fails
     // is the stored definition. Registered ahead of its producer by design
-    // (the #10413 → #10576 split shape, applied to #10025 → #11504): the
+    // (the #10413 → #10576 split shape, applied to #10025 → commit f90e82024): the
     // emitting half — `execute()`'s catch short-circuiting before
     // `retryExecution` in `@objectstack/service-automation` — is #10025's,
     // blocked on this row, and asserts this exact string by value. Registered
@@ -488,7 +488,7 @@ export const ERROR_CODE_LEDGER = {
     // listed once per emitting package — provenance, not identity.
     'WRITABLE_PACKAGE_REQUIRED',
     'WRONG_PASSWORD',
-    // [#16649] ADR-0130 D4 — `resolveArtifactCollections`
+    // [commit 613bfbd3d] ADR-0130 D4 — `resolveArtifactCollections`
     // (`artifact-collections.ts`) refuses one collection key declared in the
     // ARRAY form by one source and the RECORD form by another inside the same
     // artifact; `refuse()` there stamps `code` + `status: 422`. Registered
@@ -753,7 +753,7 @@ export const ERROR_CODE_LEDGER = {
     // seam and ahead of `stripSearchCompanion` and the realtime publish.
     // `UpdateHookResultNotWriteShapeError`, `verb-hook-result-shape.ts`.
     'UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE',
-    // [#14748] the ADR-0048 Phase 1 install-time namespace gate's refusal: a
+    // [commit 92b5d7f00] the ADR-0048 Phase 1 install-time namespace gate's refusal: a
     // package's `manifest.namespace` is already owned by an INSTALLED package
     // that is not a co-owner of it (ADR-0130 D1), so the install is refused up
     // front rather than allowed to half-apply and fail later at table
@@ -765,7 +765,7 @@ export const ERROR_CODE_LEDGER = {
     // no artifact install SCOPE — which this gate, unlike the ADR-0130 D3
     // object-name one, does not need — so an ordinary one-package install
     // reaches it, and the domain's terminal catch answers through
-    // `errorFromThrown`. #14474 gave the throw its ADR-0112 envelope (`code` +
+    // `errorFromThrown`. Commit df657d9df gave the throw its ADR-0112 envelope (`code` +
     // `status: 422`); until this row landed the door's #9106 narrowing demoted
     // the spelling onto the open `declaredCode` sibling and put the closed
     // member 422 derives (`VALIDATION_ERROR`) in `error.code`, so a caller
@@ -819,7 +819,7 @@ export const ERROR_CODE_LEDGER = {
     // QUERY_OBJECT_MISMATCH one layer up.
     'UPDATE_ID_MISMATCH',
     'VALIDATION_FAILED',
-    // [#16649] ADR-0130 D3 — two packages delivered by ONE release artifact
+    // [commit 613bfbd3d] ADR-0130 D3 — two packages delivered by ONE release artifact
     // both claiming the same object name, refused by
     // `SchemaRegistry.installPackage` ahead of every mutation it makes and
     // therefore ahead of all DDL (`registry.ts`; `status: 422`; the literal
@@ -847,7 +847,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
-    // [#16649] The nine rows below are `door: 'none'` codes — raised while a
+    // [commit 613bfbd3d] The nine rows below are `door: 'none'` codes — raised while a
     // process is still assembling itself, or by a runner the CLI drives —
     // registered under the #16404 ruling (door or no door; see the header).
     // Each ships in this package's `dist/index.js` (measured), so its
@@ -916,7 +916,7 @@ export const ERROR_CODE_LEDGER = {
     'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
     // "this delivery row's state does not permit the requested operation" —
     // ONE concept on TWO delivery surfaces of this package, deliberately
-    // sharing one spelling (PR #11858's contract-review PASS ruled option B;
+    // sharing one spelling (the contract review that passed commit 1a47a5368 ruled option B;
     // a second near-synonym code was rejected for the vocabulary sprawl
     // ADR-0112 exists to prevent). Stated per-surface because the two refuse
     // OPPOSITE halves of the state space — no single status predicate glosses
@@ -931,11 +931,11 @@ export const ERROR_CODE_LEDGER = {
     //     re-claimed the row mid-call — both `SqlHttpOutbox` and
     //     `MemoryHttpOutbox` report that miss instead of a false success
     //     (#11009).
-    //   - `INotificationOutbox.ack` (`NotificationAckError`; #11453, #11859)
+    //   - `INotificationOutbox.ack` (`NotificationAckError`; commits 1a47a5368, d9cf78eaa)
     //     refuses a row that is not `in_flight` — an unclaimed `pending` row
     //     (the ack-as-cancel trap) or an already-terminal one, because `ack`
     //     records the outcome of a delivery the caller CLAIMED — AND, since
-    //     #11859, an `in_flight` row no longer held by the claim being
+    //     commit d9cf78eaa, an `in_flight` row no longer held by the claim being
     //     completed: `ack` takes back the record `claim()` returned and the
     //     compare-and-set binds its (`claimed_by`, `claimed_at`) credential,
     //     so a claim lost to the `claimTtlMs` reap plus a re-claim (by ANY
@@ -1117,7 +1117,7 @@ export const ERROR_CODE_LEDGER = {
     'NOT_OVERRIDABLE',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
-    // [#19307] The data door's duplicate-name refusal on `sys_permission_set`
+    // [commit 8f6d83147] The data door's duplicate-name refusal on `sys_permission_set`
     // — `PermissionSetNameConflictError` (`errors.ts`), thrown by the
     // ADR-0094 D3 write-through middleware's insert leg
     // (`permission-set-projection.ts`) when a set with that machine name
@@ -1157,7 +1157,7 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
   ],
   '@objectstack/organizations': [
-    // [#16649] The walled-posture membership-policy gate (#16130, ADR-0132):
+    // [commit 613bfbd3d] The walled-posture membership-policy gate (#16130, ADR-0132):
     // `assertWalledMembershipPolicyDeclared` (`membership-policy-gate.ts`)
     // throws `WalledMembershipPolicyError` — this code as `code` via the
     // exported `MEMBERSHIP_POLICY_ERROR_CODE`, no `status` — when a walled
@@ -1178,7 +1178,7 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/driver-memory': [
     // [#13254] Provenance for the in-memory driver's uniqueness refusal, which
-    // #13197 (field-level `unique`) and #13239 (declared `indexes[]` entries)
+    // commit 56c093c4d (field-level `unique`) and #13239 (declared `indexes[]` entries)
     // made real: a colliding write is REFUSED rather than landed. Stamped in
     // ONE place for both declaration surfaces — `conflictRefusal`
     // (`packages/drivers/driver-memory/src/memory-unique-constraint.ts`),
@@ -1201,7 +1201,7 @@ export const ERROR_CODE_LEDGER = {
     // admission rule checks WHO emits, so an unlisted emitter is invisible to
     // every gate the repo has.
     'UNIQUE_VIOLATION',
-    // [#16649] The in-memory driver's tenancy refusal —
+    // [commit 613bfbd3d] The in-memory driver's tenancy refusal —
     // `MemoryMultiTenantUnsupportedError` (`memory-tenancy-guard.ts`) carries
     // this code as `code` via the exported `MULTI_TENANT_UNSUPPORTED_CODE`,
     // no `status`; thrown by `assertSingleTenantPosture` and
@@ -1219,7 +1219,7 @@ export const ERROR_CODE_LEDGER = {
     'MEMORY_MULTI_TENANT_UNSUPPORTED',
   ],
   '@objectstack/driver-mongodb': [
-    // [#16649] The MongoDB driver's tenancy refusal —
+    // [commit 613bfbd3d] The MongoDB driver's tenancy refusal —
     // `MongoDBMultiTenantUnsupportedError` (`mongodb-tenancy-guard.ts`)
     // carries this code as `code` via the exported
     // `MULTI_TENANT_UNSUPPORTED_CODE`, no `status`; thrown by
@@ -1250,12 +1250,12 @@ export const ERROR_CODE_LEDGER = {
     // that": the request is well-formed and nothing faulted.
     //
     // Registered from the start — not left driver-local, as
-    // `MULTI_TENANT_UNSUPPORTED_CODE` was until #16649 — because it IS
+    // `MULTI_TENANT_UNSUPPORTED_CODE` was until commit 613bfbd3d — because it IS
     // wire-reachable: publishing a drafted object calls
     // `engine.syncObjectSchema` → `SqlDriver.syncSchema` → the DDL gate, on a
     // server already serving HTTP. That is the exact test #8035 applied when
     // it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it — a
-    // removal #16649 reversed under #16404; the test now decides only what a
+    // removal commit 613bfbd3d reversed under #16404; the test now decides only what a
     // door answers with, never whether a shipped code is registered.
     // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
     'SQL_DIALECT_EMISSION_UNSUPPORTED',
@@ -1332,7 +1332,7 @@ export const ERROR_CODE_LEDGER = {
     'STACK_NAMESPACE_PREFIX_INVALID',            // an object name lacks the `manifest.namespace` prefix
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
-    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
+    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the

@@ -387,7 +387,7 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
    * The producer's user-facing refusal text, verbatim — the same field, with
    * the same semantics, as `ApiErrorSchema.userMessage` (`contract.zod.ts`,
    * which carries the full rationale): the producer-side opt-in that marks a
-   * refusal message as addressed to the END USER (#9934, maintainer ruling
+   * refusal message as addressed to the END USER (commit 79c46da90, maintainer ruling
    * 2026-08-19 on objectui#5210). Present exactly when the producer opted in
    * at throw time; absent means consumers keep their generic substitution
    * (#3821 preserved by construction). Status-agnostic; never replaces

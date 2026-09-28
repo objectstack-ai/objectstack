@@ -20,7 +20,7 @@ import { deriveWireFace } from '../../../../scripts/check-error-status-conforman
  *
  *   - **A translated code is not on the wire.** `DuplicateRecordError` declares
  *     `code = 'DUPLICATE_RECORD'`, and the REST door translates that envelope at
- *     the boundary, so every route answers `UNIQUE_VIOLATION` (#14723). The enum
+ *     the boundary, so every route answers `UNIQUE_VIOLATION` (the 2026-09-03 ruling, landed in commit 65846bc46). The enum
  *     keeps the in-process spelling; the wire never carries it. Demanding a
  *     `### \`DUPLICATE_RECORD\`` heading on a page that documents the wire is
  *     demanding the page publish a code no client can ever receive — which is

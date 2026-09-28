@@ -1,6 +1,6 @@
 ---
 title: Field
-description: Field protocol schemas
+description: "Field schemas of the ObjectStack Data Protocol: CurrencyConfig, CurrencyValue, Field and 7 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -27,7 +27,6 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
 | **defaultCurrency** | `string` | optional (default: `"CNY"`) | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
 
@@ -98,7 +97,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `{ precision?: integer; currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |
+| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
@@ -235,7 +234,6 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
 | **defaultCurrency** | `string` | optional (default: `"CNY"`) | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
 

@@ -532,7 +532,7 @@ describe('MetadataBulkResponseSchema', () => {
 });
 
 // ==========================================
-// 5. Overlay / Customization — REMOVED (#13135, ADR-0049; see metadata.zod.ts §5)
+// 5. Overlay / Customization — REMOVED (commit 9e0ba21a1, ADR-0049; see metadata.zod.ts §5)
 // ==========================================
 
 // ==========================================
@@ -994,7 +994,7 @@ describe('Cross-Framework Metadata API Contracts', () => {
   });
 
   // (The `…/overlay` and `…/effective` route cases were removed with the
-  // section-5 contracts — #13135, ADR-0049: no adapter ever served those
+  // section-5 contracts — commit 9e0ba21a1, ADR-0049: no adapter ever served those
   // paths, so the cases pinned an API that did not exist.)
 
   describe('GET /api/meta/:type/:name/dependencies — Get dependencies', () => {

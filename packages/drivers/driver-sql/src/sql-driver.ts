@@ -1477,6 +1477,64 @@ const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new M
 ]);
 
 /**
+ * [#20335] What each declared aggregate function ANSWERS — a derived `number`,
+ * or a value OF the aggregated column — and therefore which read presentation
+ * {@link SqlDriver.aggregate} gives its result column.
+ *
+ * - `'number'` — `count`, `count_distinct`, `sum`, `avg`. A count or a total is
+ *   a number whatever the column held, and it is presented as one (`'number'`,
+ *   the presenter `formatOutput` applies to a numeric field on a `find()` row).
+ * - `'column'` — `min`, `max`. The answer is one of the column's own values, so
+ *   it takes that column's presentation ({@link SqlDriver.readPresentationKind}),
+ *   exactly as before this table existed.
+ *
+ * Why the `'number'` half needs presenting at all: the SQL client hands a
+ * result back as the wire type of the SQL expression, not as the platform's
+ * value type. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 through this
+ * driver's own connections: node-postgres parses `bigint` (OID 20 — `count`,
+ * and `sum` over an integer column) and `numeric` (OID 1700 — `sum` / `avg`
+ * over the exact-decimal numeric family, `avg` over an integer column) to
+ * STRINGS (`"2"`, `"500.000000000000000000000000000000"`), and mysql2 does the
+ * same for `DECIMAL` (`SUM` / `AVG`; its `COUNT` arrives as a number). The
+ * engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and SQLite answer
+ * numbers for the same query, so `having { n: { $in: [2] } }` kept c1, c2 on
+ * those and no group on PostgreSQL's native path.
+ *
+ * Keyed on the function the query ASKED for, never on whether a value looks
+ * numeric, and deliberately not gated by dialect: the presenter only rewrites a
+ * STRING, so a client that already answers a number (better-sqlite3, mysql2's
+ * `COUNT`) passes through untouched — measured byte-identical on SQLite — and
+ * no list of "string-answering dialects" exists to drift.
+ *
+ * ## The precision policy — one JS number, the loss declared
+ *
+ * The answer is `Number(text)`: an IEEE-754 double, on every dialect. A `sum` /
+ * `avg` over the exact-decimal column (`numeric(65,30)` / `DECIMAL(65,30)`)
+ * whose value needs more than a double's ~15-17 significant digits, or an
+ * integer at or above 2^53, is ROUNDED to the nearest double — declared, not
+ * silent: it is the same bound `formatOutput` already puts on a `find()` read of
+ * that column (#16318, `valueSchemaFor`'s `z.number().finite()`, ADR-0104 D1),
+ * and the bound the rows path has always had (`toNumber` sums JS doubles). A
+ * value-dependent type — a number when it fits, a string when it does not — was
+ * rejected: it would reopen this defect for exactly the large totals, where a
+ * `having` `$in` or a chart silently stops matching. Only a string `Number()`
+ * reads as NaN (PostgreSQL's `numeric` `'NaN'`) is left as written, the
+ * presenter's existing rule.
+ *
+ * A `Record` over `AggregationFunction` on purpose: a function that joins the
+ * declared vocabulary without an answer here fails `tsc` rather than reaching a
+ * caller unpresented.
+ */
+const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'column'>> = {
+  count: 'number',
+  count_distinct: 'number',
+  sum: 'number',
+  avg: 'number',
+  min: 'column',
+  max: 'column',
+};
+
+/**
  * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
  * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
  * "declared" has exactly one definition and this driver cannot drift from it.
@@ -6372,7 +6430,9 @@ export class SqlDriver implements IDataDriver {
       // A function-valued `connection` (knex's per-acquire provider) is left
       // alone: the host is building each connection itself and owns its timeouts.
     }
-    return SqlDriver.withPostgresCalendarDayAsText(SqlDriver.withUtcSession(bounded));
+    return SqlDriver.withPostgresCalendarDayAsText(
+      SqlDriver.withMysqlCalendarDayAsText(SqlDriver.withUtcSession(bounded)),
+    );
   }
 
   /**
@@ -6426,6 +6486,74 @@ export class SqlDriver implements IDataDriver {
       },
     };
     return out;
+  }
+
+  /**
+   * The mysql2 column types handed back as the server's own text rather than
+   * as a JS `Date` — see {@link withMysqlCalendarDayAsText}. `DATE` only:
+   * `DATETIME` and `TIMESTAMP` are instants, and ADR-0053 D-F2 keeps the
+   * client parser's `Date` for them.
+   */
+  private static readonly MYSQL_TEXT_TEMPORAL_TYPES: readonly string[] = ['DATE'];
+
+  /**
+   * Keep a MySQL `DATE` a calendar-day STRING, never a JS `Date` (#20280).
+   *
+   * The MySQL counterpart of {@link withPostgresCalendarDayAsText}: the wire
+   * form of a `DATE` IS `YYYY-MM-DD`, so the driver asks mysql2 for that text
+   * (`dateStrings: ['DATE']`) and presents it through {@link toDateOnly} —
+   * `@objectstack/core`'s `temporalStorageForm`, the rule the write and
+   * `where` paths already apply. A `date` column then reaches the read doors
+   * as TEXT on every dialect.
+   *
+   * ## The measurement
+   *
+   * mysql2 3.23's `Packet#parseDate` rebuilds a `DATE` from its three numbers:
+   * `new Date(Date.UTC(y, m - 1, d))` under the `timezone: 'Z'` pin of
+   * {@link withUtcSession}, `new Date(y, m - 1, d)` under the default
+   * `'local'`. Both constructors read a year from 0 to 99 as 1900 + year.
+   * Measured on MySQL 8.0.46 (server `time_zone='+08:00'`) through `find()`:
+   *
+   * | stored (`CAST(d AS CHAR)`) | mysql2 materialised | presented before | presented now |
+   * |---|---|---|---|
+   * | `0009-03-04` | `1909-03-04T00:00:00.000Z` | `1909-03-04` | `0009-03-04` |
+   * | `0099-03-04` | `1999-03-04T00:00:00.000Z` | `1999-03-04` | `0099-03-04` |
+   * | `0999-06-15` | `0999-06-15T00:00:00.000Z` | `0999-06-15` | `0999-06-15` |
+   * | `2026-03-04` | `2026-03-04T00:00:00.000Z` | `2026-03-04` | `2026-03-04` |
+   *
+   * The write was right and the read was wrong: `where d $eq '0009-03-04'`
+   * found the row and presented `1909-03-04`. A year from 1000 to 9999 presents
+   * exactly what it did. A zero day (`0000-00-00`, storable only with
+   * `NO_ZERO_DATE` off) presents as that text, where mysql2 invented
+   * `1899-11-30`.
+   *
+   * ## Why `DATE` and not `DATETIME`
+   *
+   * `dateStrings` also takes `'DATETIME'`, and a `DATETIME` in years 0..99 is
+   * misread too: `parseDateTime` hands `'0009-03-04 10:00:00.000Z'` to V8's
+   * non-ISO `Date` parser, which answers 2004-09-03. But a `DATETIME` is an
+   * instant, and ADR-0053 D-F2 keeps the client parser's `Date` for an instant,
+   * folded to text only at the driver's own read doors — text at the client
+   * parser is the option that ADR did not take. That half is not decided here.
+   *
+   * The other measured remedy, a `'+00:00'` zone, takes mysql2's padded
+   * string-constructor arm for a `DATE` but keeps the `Date`, and moves the
+   * zone every bound `Date` and every `DATETIME` is rendered in. The text is
+   * the narrower change, and it is how PostgreSQL already reads a day.
+   *
+   * A host that set `dateStrings` itself is left alone, as
+   * {@link withUtcSession} leaves an explicit `timezone`; so is a
+   * function-valued `connection`, which the host builds per acquire.
+   */
+  private static withMysqlCalendarDayAsText(knexConfig: Record<string, any>): Record<string, any> {
+    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
+
+    const conn = knexConfig.connection;
+    if (!conn || typeof conn !== 'object' || (conn as any).dateStrings !== undefined) return knexConfig;
+    return {
+      ...knexConfig,
+      connection: { ...(conn as object), dateStrings: [...SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES] },
+    };
   }
 
   /**
@@ -6507,7 +6635,9 @@ export class SqlDriver implements IDataDriver {
    * paths. Fixing it at the parser leaves exactly one clock in play, because
    * the driver then never produces a `Date` for a `date` column at all — which
    * is already how SQLite behaves (TEXT round-trip) and, via
-   * {@link withUtcSession}'s `timezone: 'Z'`, how mysql2 behaves.
+   * {@link withMysqlCalendarDayAsText}, how mysql2 behaves. (Before that,
+   * {@link withUtcSession}'s `timezone: 'Z'` kept mysql2's `Date` on the one
+   * UTC clock, but read a year below 100 a century late.)
    *
    * `pool.afterCreate` is the hook rather than a `pg.types.setTypeParser`
    * call because `setTypeParser` mutates the pg-types registry **process
@@ -9786,8 +9916,10 @@ export class SqlDriver implements IDataDriver {
     // GROUP BY bucket expression (#3773) and the result presentation (#3797).
     const table = this.coercionKey(builder);
 
-    // Result columns that carry a raw column VALUE (rather than a count/total
-    // derived from one), keyed by the column name the caller will read.
+    // Result columns and the presentation each takes, keyed by the column name
+    // the caller will read: a raw column VALUE (a group key, `min`/`max`) takes
+    // its column's presentation, and [#20335] a count or total derived from one
+    // takes the `'number'` presentation (see `AGGREGATE_ANSWER_KIND`).
     // Collected while the statement is built because that is the only point
     // where a column name and its meaning are both known: a `min()` lands under
     // its alias (never under the field name), and a date-BUCKETED column lands
@@ -9937,6 +10069,17 @@ export class SqlDriver implements IDataDriver {
           // their NULL passes through. See {@link foldEmptyAggregateAnswers}.
           const identity = emptyGroupValueFor(funcName);
           if (identity !== undefined) foldedOutput.set(agg.alias, identity);
+          // [#20335] A count or a total is presented as the number it is, on
+          // every dialect: node-postgres hands `bigint` / `numeric` back as a
+          // string and mysql2 `DECIMAL`, so without this the native path
+          // answered `"2"` where the rows path and SQLite answer `2`. Keyed on
+          // the function asked for; the precision policy (one JS double, the
+          // loss above a double's precision declared) is stated on
+          // `AGGREGATE_ANSWER_KIND`. The fold above runs first, so a folded
+          // `0` is already a number and passes through.
+          if (AGGREGATE_ANSWER_KIND[funcName] === 'number') {
+            presentedOutput.set(agg.alias, 'number');
+          }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
           // the only ones whose result still needs the column's presentation.
@@ -9944,7 +10087,7 @@ export class SqlDriver implements IDataDriver {
           // below lands under a dialect-dependent column name
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
-          if ((funcName === 'min' || funcName === 'max') && agg.field) {
+          if (AGGREGATE_ANSWER_KIND[funcName] === 'column' && agg.field) {
             // [#11152] A BOOLEAN aggregand is the ruled exception to "the
             // result still needs the column's presentation": the maintainer's
             // 2026-08-28 ruling (superseding #11249's `false`/`true`, which
@@ -14658,7 +14801,8 @@ export class SqlDriver implements IDataDriver {
    * `new Date('2026-08-24')` comparand becomes `2026-08-23` west of UTC — the
    * identical one-day error, moved onto the write and filter paths). The read
    * path was fixed at its source instead — see
-   * {@link withPostgresCalendarDayAsText} — so on every dialect a `date`
+   * {@link withPostgresCalendarDayAsText} and, for MySQL,
+   * {@link withMysqlCalendarDayAsText} — so on every dialect a `date`
    * column now arrives here as TEXT and no driver-materialised `Date` reaches
    * this helper at all. ⛔ Do not "repair" a residual date skew by switching
    * the rule's UTC getters to their local twins; that reintroduces #11389 in the
@@ -15055,7 +15199,9 @@ export class SqlDriver implements IDataDriver {
    * the audit-stamp fold run everywhere (`datetime` and `audit_timestamp`
    * since #13973, [ADR-0053 D-F1] — the former SQLite-only and the latter
    * absent before, which handed the two live dialects' `Date` through), the
-   * numeric coercion is SQLite-only, and the boolean coercion runs on SQLite
+   * numeric coercion runs everywhere (#16318 for a declared numeric column;
+   * [#20335] for `aggregate()`'s counts and totals, `AGGREGATE_ANSWER_KIND`),
+   * and the boolean coercion runs on SQLite
    * and MySQL (#11782 — the two dialects whose stored boolean is a number).
    * {@link readPresentationKind} does the dialect gating for the scalar kinds,
    * so by the time one arrives here the dialect is settled.
@@ -15123,7 +15269,9 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Apply {@link presentReadValue} to the result columns a caller of
-   * `aggregate()` will read as column VALUES — group keys, and `min`/`max`.
+   * `aggregate()` will read as column VALUES — group keys, and `min`/`max` —
+   * and [#20335] to its counts and totals (`count`, `count_distinct`, `sum`,
+   * `avg`), which take the `'number'` presenter (`AGGREGATE_ANSWER_KIND`).
    *
    * Which columns those are cannot be recovered from the rows — the driver has
    * to be told, because the mapping from column name to meaning is only

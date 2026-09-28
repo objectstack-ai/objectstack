@@ -25,9 +25,14 @@
  *   flow    start `objectName`      advisory `flow-trigger-unknown-object`: the flow never fires
  *   view    `object`                no finding at all: a binding to nothing, silently
  *
- * No gate judges a view's, action's, flow's, dashboard's, app's or skill's OWN
- * `name` against the namespace. So those stay as typed, and every OBJECT name
- * gains the prefix through one derivation (`objectNameFor`).
+ * No `os validate` gate judges a view's, action's, flow's, dashboard's, app's
+ * or skill's OWN `name` against the namespace. So those stay as typed, and
+ * every OBJECT name gains the prefix through one derivation (`objectNameFor`).
+ *
+ * One exception the census above could not see, because it stops at
+ * `os validate` (#20215): the RUNTIME registers a views container under the
+ * object it binds to and refuses, at boot, one whose own `name` disagrees —
+ * so a view's `name` is an object name, and is prefixed with its `object`.
  *
  * ## Why `defineStack` and not the per-artifact parse
  *
@@ -97,10 +102,11 @@ async function generateAll(name: string, namespace?: string): Promise<Record<str
 /**
  * One stack holding every scaffold, under `manifest.namespace` when given.
  *
- * `requires: ['triggers']` is the HOST's declaration, not the scaffold's: the
- * flow scaffold is a `record_change` flow, and `defineStack` refuses such a
- * flow in a stack that does not require the trigger capability. That refusal
- * is about the host's capability list and has nothing to do with names.
+ * `requires: ['automation', 'triggers']` is the HOST's declaration, not the
+ * scaffold's: the flow scaffold is a `record_change` flow, and `defineStack`
+ * refuses such a flow in a stack that does not require the pair that installs
+ * its trigger (#20332). That refusal is about the host's capability list and
+ * has nothing to do with names.
  */
 function composedStack(artifacts: Record<string, Record<string, unknown>>, namespace?: string) {
   const stack: Record<string, unknown> = {
@@ -111,7 +117,7 @@ function composedStack(artifacts: Record<string, Record<string, unknown>>, names
       type: 'app',
       ...(namespace ? { namespace } : {}),
     },
-    requires: ['triggers'],
+    requires: ['automation', 'triggers'],
   };
   for (const [type, artifact] of Object.entries(artifacts)) {
     stack[singularToPlural(type)] = [artifact];
@@ -150,6 +156,7 @@ function objectNamesWritten(a: Record<string, Record<string, unknown>>) {
   return {
     'object.name': a.object.name,
     'view.object': a.view.object,
+    'view.name (its object key)': a.view.name,
     'action.objectName': a.action.objectName,
     'flow start.config.objectName': flowStart?.config?.objectName,
     'app navigation[0].objectName': nav?.objectName,
@@ -183,11 +190,15 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
       'action.objectName': PREFIXED,
       'flow start.config.objectName': PREFIXED,
       'app navigation[0].objectName': PREFIXED,
+      // [#20215] A views container's own `name` is its object key: the
+      // runtime registers the container under the object it binds to and
+      // refuses one whose `name` disagrees (`registerMetadataCollections`),
+      // so it carries the prefix like the binding beside it.
+      'view.name (its object key)': PREFIXED,
     });
     // The census: no gate judges these against the namespace, so they are
     // written exactly as they were before this change.
     expect({
-      view: a.view.name,
       action: a.action.name,
       'action target (a flow)': a.action.target,
       flow: a.flow.name,
@@ -195,7 +206,6 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
       app: a.app.name,
       skill: a.skill.name,
     }).toEqual({
-      view: STEM,
       action: STEM,
       'action target (a flow)': `${STEM}_flow`,
       flow: `${STEM}_flow`,
@@ -229,13 +239,13 @@ describe('[#20197] under a manifest namespace, the generated set passes the gate
 describe('[#20197] the name cases around the prefix', () => {
   it('a project with no namespace gets no prefix, and its set passes too', async () => {
     const a = await generateAll(STEM);
-    expect(Object.values(objectNamesWritten(a))).toEqual(Array(5).fill(STEM));
+    expect(Object.values(objectNamesWritten(a))).toEqual(Array(6).fill(STEM));
     expect(defineStackRefusal(composedStack(a))).toBeNull();
   });
 
   it('a name that already carries the prefix is used as written, never doubled', async () => {
     const a = await generateAll(PREFIXED, NS);
-    expect(Object.values(objectNamesWritten(a))).toEqual(Array(5).fill(PREFIXED));
+    expect(Object.values(objectNamesWritten(a))).toEqual(Array(6).fill(PREFIXED));
     expect(defineStackRefusal(composedStack(a, NS))).toBeNull();
   });
 

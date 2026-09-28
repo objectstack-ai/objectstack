@@ -1703,6 +1703,20 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * [#20116] Is this object DATA rather than filter structure, as the
+ * comparand-type face classifies it? Structure is a PLAIN object only,
+ * prototype `Object.prototype` or `null` (the face's `isFilterNode`, the
+ * convention `driver-sql` shares since #5134, and the analytics door's
+ * nested-relation test). A `Map` or a class instance answers
+ * `typeof x === 'object'` while being data: `{ stage: new Map() }` is a
+ * comparand the type face refuses, never an empty nested relation.
+ */
+function isDataObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto !== Object.prototype && proto !== null;
+}
+
+/**
  * Walk one condition node and report every comparand this authoring door
  * refuses — the bare date-range PRESET names in an ordering position (#8793),
  * the `$icontains` comparands the platform's own conformance table declares
@@ -1732,6 +1746,20 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *   `$in: []` / `$nin: []` and a whitespace endpoint all keep passing, because
  *   the face passes them. The flags, which that face does not judge, use the
  *   one predicate every flag face uses: `typeof comparand !== 'boolean'`.
+ * - **The comparand-TYPE face too** (`normalizeFilterComparandTypes`, the
+ *   #7872 accepted set), asked by the same function after the shape face: a
+ *   plain object where a literal belongs (`{ $eq: { a: 1 } }`), a `Map`, a
+ *   class instance, a function, a Symbol, `undefined` or a bigint beyond ±2^53
+ *   — as the comparand or as a list member — is refused on save, as every
+ *   query face refuses it. Measured on `origin/main` `17bd3187` before this
+ *   arm: every save door accepted `{ stage: { $eq: { a: 1 } } }`,
+ *   `{ stage: { $in: [{ a: 1 }] } }` and a `Map` comparand, while the type face
+ *   and the analytics door refused each with `INVALID_FILTER` / 400. A `Date`,
+ *   a `{ $field }` reference, a `{placeholder}` string resolved at request time
+ *   and a bigint within ±2^53 keep passing, because the face passes them. So
+ *   that a `Map` or a class instance reaches the face at all, a field value is
+ *   a comparand unless it is a PLAIN object ({@link isDataObject}, the face's
+ *   own structure test).
  * - **The words** are chosen in that module: the face's own sentence where
  *   the two doors already share a builder, the enforced
  *   operator slot's sentence where `FieldOperatorsSchema` already prints one for
@@ -1742,7 +1770,7 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *   with no `$` key. The drivers' flag checks stop at the same place. The
  *   analytics `where` door does descend a nested relation (it flattens one to a
  *   dotted member), so those positions belong to the analytics carriers' own
- *   walk (`refuseNestedRelationComparands`, `../ui/dataset.zod.ts`), which
+ *   walk (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`), which
  *   asks the same function — never to this shared walk, which every other
  *   carrier reads.
  *
@@ -1827,13 +1855,14 @@ function checkFilterConditionComparands(
 
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('$')) continue; // $and/$or/$not re-parse; other $ keys stay unjudged
-    // [#19889, #20116] An IMPLICIT comparand — a scalar, a `Date` or an array
-    // (the equality slot's `{ field: [...] }`, the empty list included) — asked
-    // of the query faces. Judged on this node's OWN field entries only
-    // (`depth` 0), the face's exact reach: its walk never descends a field spec
-    // that has no `$` key, so nothing inside a nested-relation condition is
-    // refused there, and nothing is refused here. See the docblock.
-    if (!isPlainFilterNode(value)) {
+    // [#19889, #20116] An IMPLICIT comparand — a scalar, a `Date`, an array
+    // (the equality slot's `{ field: [...] }`, the empty list included), or a
+    // `Map` / class instance, which the type face calls data — asked of the
+    // query faces. Judged on this node's OWN field entries only (`depth` 0),
+    // the face's exact reach: its walk never descends a field spec that has no
+    // `$` key, so nothing inside a nested-relation condition is refused there,
+    // and nothing is refused here. See the docblock.
+    if (!isPlainFilterNode(value) || isDataObject(value)) {
       if (depth === 0) reportQueryFaceRefusals(ctx, [...path, key], key, undefined, value, FieldOperatorsSchema);
       continue;
     }
@@ -1848,9 +1877,15 @@ function checkFilterConditionComparands(
       // [#20116] Every operator slot asked of the query faces, on the same
       // reach as the implicit form above: the comparand-shape face's verdict
       // (the equality and `$ne` slots, the ordering `null` carve-out, the list
-      // operators' shape, null-member and endpoint rules) and the boolean
-      // flags'. An operator neither judges passes through untouched.
-      if (depth === 0) reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema);
+      // operators' shape, null-member and endpoint rules), the comparand-type
+      // face's (a plain object, `Map`, class instance, `undefined` … where a
+      // literal belongs), and the boolean flags'. An operator none of them
+      // judges passes through untouched. A slot they refuse raises that one
+      // issue, and this walk's own arms below stay silent on it: one defect,
+      // one issue at one path.
+      if (depth === 0 && reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema, value)) {
+        continue;
+      }
       if (op === FILTER_TEXT_COMPARAND_OPERATOR && isRefusedTextComparand(comparand)) {
         ctx.addIssue({
           code: 'custom',

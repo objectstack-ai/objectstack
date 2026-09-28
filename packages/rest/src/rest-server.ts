@@ -103,9 +103,14 @@ import {
 } from '@objectstack/spec/api';
 import { z } from 'zod';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
-// [#20061 / #20062] The DECLARED request schemas two query-reading doors parse
-// their numeric parameters through — see `readDeclaredQueryNumber` below.
-import { ListImportJobsRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
+// [#20061 / #20062 / #20139] The DECLARED request schemas three query-reading
+// doors parse their numeric parameters through — see `readDeclaredQueryNumber`
+// below.
+import {
+    ListImportJobsRequestSchema,
+    HistoryMetaItemRequestSchema,
+    AuditMetaItemRequestSchema,
+} from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
@@ -670,16 +675,20 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
 ];
 
 /**
- * [#20062] The reading of a ROW-COUNT query parameter on a door whose request
- * has no declared schema (`GET /data/:object/export`, `GET /search`): a whole
- * number, and nothing about range. Range stays each door's own business — the
- * export route's `Math.max(1, …)` floor and 50000 cap, `searchAll`'s `[1, 100]`
- * clamp — because neither card this closes takes a position on bounds; it only
- * refuses a value the door cannot read as a count at all. The same rule
+ * [#20062 / #20139] The reading of a numeric query parameter on a door whose
+ * request has no declared schema: a whole number, and nothing about range.
+ * Every such parameter in this file counts or addresses whole things — rows
+ * (`GET /data/:object/export` `limit`; `GET /search` `limit` / `perObject`;
+ * `GET /approvals/requests` `limit` / `offset`) or history versions
+ * (`GET /meta/:type/:name/diff` `from` / `to`). Range stays each door's own
+ * business — the export route's `Math.max(1, …)` floor and 50000 cap,
+ * `searchAll`'s `[1, 100]` / `[1, 25]` clamps, the approvals service's
+ * `[1, 200]` — because no card this closes takes a position on bounds; it only
+ * refuses a value the door cannot read as a whole number at all. The same rule
  * `@objectstack/runtime`'s `parseIntegerParam` applies without `bounds`, which
  * this package cannot import (runtime depends on rest).
  */
-const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
+const UNDECLARED_WHOLE_NUMBER_PARAM = z.number().int().optional();
 
 /**
  * [#20061 / #20062] Read ONE numeric query parameter against the door's own
@@ -721,17 +730,28 @@ const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
  * ## The refusal
  *
  * THROWN as `validationFailure` (`@objectstack/types`), never written here:
- * every door that calls this already sends its catch through
- * `handleRouteError` / `mapDataError`, which answer `400` with the data
- * surface's `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
- * declared-schema body doors in this file answer. `fields[].code` comes from
- * `zodIssuesToFields`, so it is the ADR-0114 D3 catalog member for the failed
- * constraint (`invalid_type`, `min_value`, `max_value`), with `field` naming
- * the parameter.
+ * every door that calls this sends the throw through `handleRouteError` /
+ * `mapDataError`, which answer `400` with the data surface's
+ * `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
+ * declared-schema body doors in this file answer. A door whose own catch maps
+ * something else (`GET /approvals/requests` answers every throw
+ * `500 APPROVAL_REQUEST_LIST_FAILED`) catches the read itself and hands it to
+ * `handleRouteError`. `fields[].code` comes from `zodIssuesToFields`, so it is
+ * the ADR-0114 D3 catalog member for the failed constraint (`invalid_type`,
+ * `min_value`, `max_value`), with `field` naming the parameter.
  *
  * Call it AFTER `refuseRepeatedQueryParams` has run for `param`: that gate
  * refuses a repeated occurrence and unwraps a one-element array, so what
  * reaches this function is a single string or nothing.
+ *
+ * ## The census that keeps the family closed
+ *
+ * [#20139] `rest-server-query-number-census.test.ts` finds every numeric
+ * coercion in this file (`Number(…)`, `parseInt` / `parseFloat`, unary `+`)
+ * and fails on any it has not classified: this function's own `Number(raw)`, a
+ * value that is not a request query value, or a ledgered exemption with its
+ * reason. A new bare `Number(req.query.x)` therefore reddens its PR instead of
+ * reopening the family one door at a time.
  */
 function readDeclaredQueryNumber(
     queryParams: Record<string, unknown> | undefined,
@@ -1115,12 +1135,13 @@ type NormalizedRestServerConfig = {
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
         // [#14366] The PARSED shape, not the authored one: this block is
-        // built from `RestApiConfigSchema`'s output, so a `documentation` or
-        // `responseFormat` the caller wrote arrives with its OWN declared
-        // inner defaults applied (`documentation.enabled`, `.title`;
-        // `responseFormat.envelope`, `.includeMetadata`, `.includePagination`).
+        // built from `RestApiConfigSchema`'s output, so a `documentation` the
+        // caller wrote arrives with its OWN declared inner defaults applied
+        // (`.title`). [#20295] `documentation.enabled` and the whole
+        // `responseFormat` block are `retiredKey()` tombstones now — the parse
+        // REFUSES them at construction, so neither is carried here and
+        // neither is re-defaulted.
         documentation: RestApiConfigParsed['documentation'];
-        responseFormat: RestApiConfigParsed['responseFormat'];
     };
     crud: {
         operations: {
@@ -1643,6 +1664,42 @@ function sendMetaItemAbsent(res: any): void {
     res.status(404).json({
         error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
     });
+}
+
+/**
+ * [#20338] May this caller read PENDING metadata — a `sys_metadata` row in
+ * `state: 'draft'`, unpublished authoring work? THE question every door that
+ * asks the protocol for draft content asks first.
+ *
+ * ONE predicate, never a second rule: `isObjectSchemaMaskExempt`, the check
+ * `GET /meta/_drafts` has asked since #6599 — a system caller, or any holder of
+ * `studio.access`, `setup.access` or `manage_metadata`. Three texts declared
+ * this gate before any door but `_drafts` enforced it: the maintainer ruling
+ * recorded in commit 2a29caa's changeset, whose card no longer resolves
+ * (「declaration ≠ authorization … draft access stays admin-gated upstream」),
+ * ADR-0106 D4 (「draft/preview reads are admin-gated upstream already」) and
+ * ADR-0037's Risks row (「confirm/add a builder/admin role gate on the
+ * dispatcher reads」).
+ *
+ * What a door answers a caller this does not admit: NOT a refusal. It answers
+ * what it answers without the draft switch — the published version, pruned for
+ * that caller as the plain read prunes it, and for a name with nothing
+ * published that door's own absence — so the answer is byte-identical to a read
+ * that never named the switch and says nothing about whether a draft exists.
+ * `?preview=draft` already degrades to the published value when there is no
+ * draft; a caller who may not see drafts is answered the same way.
+ * `/meta/_drafts` alone refuses (403): it lists drafts and nothing else, so it
+ * has no published answer to fall back to.
+ *
+ * Builders are untouched: whoever this admits reads exactly what they read
+ * before (whole for an author on `?state=draft`, #20290; pruned per caller
+ * otherwise). The runtime dispatcher's `/meta` domain asks the same predicate
+ * through its own copy of this delegation. Every draft switch in this file is
+ * ledgered in `meta-draft-read-door-census.test.ts`, which also holds this
+ * function to a bare delegation.
+ */
+function mayReadPendingDrafts(caller: unknown): boolean {
+    return isObjectSchemaMaskExempt(caller);
 }
 
 /**
@@ -3461,8 +3518,10 @@ export class RestServer {
 
     /**
      * [#20156] The policy of the doors that serve STORED versions for authoring
-     * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
-     * the two cannot come to disagree about the `app` row.
+     * — the layered view (`/layers`, `?layers=`), `/diff` and [#20290] the
+     * plain read's `?state=draft` branch (the pending draft row, which Studio's
+     * designers merge over the layered view and save back). One constant, so
+     * they cannot come to disagree about the `app` row.
      *
      * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
      * 5856866273): a caller who may write the app ({@link metaSaveVerdict},
@@ -4167,6 +4226,18 @@ export class RestServer {
      *    observes it today — but it is a real change to this structure's
      *    contents and belongs in the record rather than in a reader's surprise.
      *
+     *    [#20295] Two of those keys then left under ADR-0049
+     *    enforce-or-remove: `responseFormat` (the whole block) and
+     *    `documentation.enabled` are `retiredKey()` tombstones, so this parse
+     *    REFUSES them at construction with their prescription — the
+     *    `crud.patterns` posture, NOT `requireAuth`'s `.omit()` below, because
+     *    no boot path or shipped config writes either (measured in this repo,
+     *    in objectui at its pin and in cloud) and nothing chose
+     *    warn-and-ignore for them. The key diff stays empty with the
+     *    tombstones counted on the schema side only: `normalizeConfig` reads
+     *    13 keys, the schema declares those 13 plus the `responseFormat`
+     *    tombstone, which parses to nothing and is not threaded.
+     *
      *  - the retired `api.requireAuth` key is STILL `.omit()`ed rather than enforced.
      *    #3963 retired it with a deliberate warn-and-ignore posture
      *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
@@ -4267,10 +4338,13 @@ export class RestServer {
 
         return {
             // Keys listed rather than spread: `NormalizedRestServerConfig`
-            // declares `documentation` / `responseFormat` as REQUIRED (possibly
-            // `undefined`) while the schema declares them `.optional()`, so a
-            // spread would not satisfy this type — and listing them is also
-            // what makes the empty key diff readable at the seam it protects.
+            // declares `documentation` as REQUIRED (possibly `undefined`)
+            // while the schema declares it `.optional()`, so a spread would
+            // not satisfy this type — and listing them is also what makes the
+            // empty key diff readable at the seam it protects. [#20295] The
+            // retired `responseFormat` tombstone is deliberately NOT listed:
+            // the parse above refuses it, so there is nothing to forward and
+            // no default to re-apply.
             api: {
                 version: api.version,
                 basePath: api.basePath,
@@ -4285,7 +4359,6 @@ export class RestServer {
                 enableProjectScoping: api.enableProjectScoping,
                 projectResolution: api.projectResolution,
                 documentation: api.documentation,
-                responseFormat: api.responseFormat,
             },
             crud: {
                 // Per key, not per object: since ADR-0122 `crud.operations` is the
@@ -5651,8 +5724,11 @@ export class RestServer {
                         // unauthorized caller cannot use the 501-vs-200 answer to
                         // probe which kernels support drafts (same posture as
                         // `_migrate-stored` below).
+                        //
+                        // [#20338] Asked through {@link mayReadPendingDrafts},
+                        // the one question every draft door in this file asks.
                         const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        if (!isObjectSchemaMaskExempt(ctx)) {
+                        if (!mayReadPendingDrafts(ctx)) {
                             res.status(403).json({
                                 error: {
                                     code: 'FORBIDDEN',
@@ -5841,14 +5917,6 @@ export class RestServer {
                         // rule on a READ door, and why it throws instead of
                         // building a body.
                         await this.refuseUnknownMetaListType(p, req.params?.type);
-                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
-                        // overlays pending drafts on the active list, exactly as
-                        // the runtime dispatcher's /metadata/:type route does —
-                        // the console's draft preview (Live Canvas) reads THIS
-                        // route, so dropping the flag here silently renders the
-                        // published-only world.
-                        const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft';
                         // [#9454] The scoped listing is the second door the
                         // card measured absent (`?object=` unchanged after a
                         // runtime PUT). `getMetaItems` unions the env-wide and
@@ -5864,6 +5932,21 @@ export class RestServer {
                             // org-scope comment for the measurement.
                             canonicalMetaUrlType(req.params.type), listCtx?.tenantId,
                         );
+                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
+                        // overlays pending drafts on the active list, exactly as
+                        // the runtime dispatcher's /metadata/:type route does —
+                        // the console's draft preview (Live Canvas) reads THIS
+                        // route, so dropping the flag here silently renders the
+                        // published-only world.
+                        //
+                        // [#20338] …for a caller who may read drafts. Anyone
+                        // else is answered the list as if the switch were
+                        // absent — {@link mayReadPendingDrafts} says why that,
+                        // and not a refusal. Declared WITH its admission so no
+                        // later branch of this handler can read the switch past it.
+                        const previewDrafts = typeof req.query?.preview === 'string'
+                            && req.query.preview.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(listCtx);
                         // [#9741] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
                         // literal used to carry is retired now that the spec
@@ -6590,15 +6673,30 @@ export class RestServer {
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
                         const isAppType = metaType === 'app';
+                        // [#20338] The caller, resolved ABOVE the two draft
+                        // switches because each is admitted per caller; the
+                        // #9454 org resolution below reads the same value.
+                        // Memoised per request — not a new seam.
+                        const readCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#20338] Both draft switches are declared WITH their
+                        // admission ({@link mayReadPendingDrafts}). A caller who
+                        // may not read drafts is answered this read as if
+                        // neither switch were present — the published item,
+                        // pruned as the plain read prunes it, or its absence —
+                        // and no later branch re-reads `?state=` past the gate
+                        // (the uncached arm used to parse it a second time).
                         const isDraftRead = typeof req.query?.state === 'string'
-                            && req.query.state.toLowerCase() === 'draft';
+                            && req.query.state.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(readCtx);
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
                         // draft on the active item (draft wins, falls back to
                         // active). Must also bypass the cache: ETags are keyed
                         // on the published checksum, so a cached 304 would pin
                         // the preview to the stale published world.
                         const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft';
+                            && req.query.preview.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(readCtx);
                         // ADR-0048 — a `?package=` read is package-scoped
                         // (prefer-local). The cached path keys ETags on
                         // type+name only and does NOT thread `packageId` into
@@ -6684,8 +6782,7 @@ export class RestServer {
                         // two arms incapable of disagreeing about scope.
                         // ⚠️ NOT a new seam: memoised per request, and this
                         // handler resolves the same context again further down.
-                        const readCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#20338] `readCtx` is resolved above the draft switches.
                         const readOrganizationId = organizationIdForMetaRead(
                             // [#10340] FOLDED, not raw — see the PUT door's
                             // org-scope comment for the measurement.
@@ -6838,9 +6935,6 @@ export class RestServer {
                         } else {
                             // Non-cached version
                             const packageId = req.query?.package || undefined;
-                            const stateParam = typeof req.query?.state === 'string'
-                                ? req.query.state.toLowerCase()
-                                : undefined;
                             // [#9741] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
@@ -6852,7 +6946,9 @@ export class RestServer {
                                 type: req.params.type,
                                 name: req.params.name,
                                 packageId,
-                                ...(stateParam === 'draft' ? { state: 'draft' as const } : {}),
+                                // [#20338] The ADMITTED switches declared above,
+                                // never `req.query` re-read here.
+                                ...(isDraftRead ? { state: 'draft' as const } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
                                 // [#9454] The uncached arm — `dashboard`'s route
                                 // (`isDashboardType`), and every read the cache
@@ -6916,13 +7012,35 @@ export class RestServer {
                             // exemption (ruling 5856774816, see
                             // `MetaReadGatePolicy.app`).
                             //
+                            // [#20290] Save its `?state=draft` branch, which serves
+                            // a STORED version — the pending draft row, never the
+                            // rendered world (that is `?preview=draft`, which keeps
+                            // the policy above) — and so reads under the
+                            // stored-version doors' policy
+                            // ({@link STORED_VERSION_DOOR_POLICY}). Studio's
+                            // designers merge this answer over the layered view
+                            // and save the result back, so a draft pruned for an
+                            // author deleted what it withheld: whoever may save
+                            // the app reads its draft whole, every other caller
+                            // pruned per caller (ruling 5856774816's rule, the
+                            // carrier triage decided in 5859504238). And no
+                            // per-DEPLOYMENT gate: a nav entry or a widget whose
+                            // service is merely off here is part of the stored
+                            // draft, for every caller, as on `/layers`.
+                            // [#20338] "Every other caller" is every other caller
+                            // who may READ drafts: one who may not never reaches
+                            // this branch (`isDraftRead` is false for them), and
+                            // is served the published item under the policy above.
+                            //
                             // [plural-spelling commit 83a3b1f2e] (the original
                             // card no longer resolves) Judged on the NORMALIZED
                             // `metaType`, like every gate here: `/meta/books/:name`
                             // is the canonical plural spelling (Prime Directive #3).
+                            const readPolicy: MetaReadGatePolicy = isDraftRead
+                                ? RestServer.STORED_VERSION_DOOR_POLICY
+                                : { arms: 'all', app: 'gate' };
                             const verdict = await this.metaItemReadGate(
-                                environmentId, req, p, metaType, req.params.name, [visible],
-                                { arms: 'all', app: 'gate' },
+                                environmentId, req, p, metaType, req.params.name, [visible], readPolicy,
                             )(visible);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
@@ -7485,9 +7603,16 @@ export class RestServer {
                     // `?limit=` silently returned the UNLIMITED history instead
                     // of the page the caller asked for.
                     if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit'])) return;
-                    const sinceSeq = req.query?.sinceSeq !== undefined
-                        ? Number(req.query.sinceSeq)
-                        : undefined;
+                    // [#20139] `sinceSeq` is parsed through its DECLARATION
+                    // (`HistoryMetaItemRequestSchema.sinceSeq`, `z.number().optional()`),
+                    // the way `limit` is just below: `?sinceSeq=abc` used to be `NaN`,
+                    // dropped by the spread below, and answered with the log read from
+                    // the START; `?sinceSeq=` became `Number('')` = 0, a cursor the
+                    // repository applies (`event_seq <= 0` rows skipped) that the
+                    // caller never sent. Both are refused now; any finite number is
+                    // still forwarded exactly as before.
+                    const sinceSeq = readDeclaredQueryNumber(req.query, 'sinceSeq',
+                        HistoryMetaItemRequestSchema.shape.sinceSeq, { emptyIsAbsent: false });
                     // [#20062] `limit` is parsed through its DECLARATION
                     // (`HistoryMetaItemRequestSchema.limit`, `z.number().optional()`),
                     // not coerced: `?limit=abc` used to be `NaN`, dropped by the
@@ -7592,9 +7717,9 @@ export class RestServer {
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
                         ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
-                        ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
-                        // Already finite or absent — the declared parse above refuses
-                        // anything else, so no `Number.isFinite` drop is left here.
+                        // Both already finite or absent — the declared parses above
+                        // refuse anything else, so no `Number.isFinite` drop is left here.
+                        ...(sinceSeq !== undefined ? { sinceSeq } : {}),
                         ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.historyMetaItem(historyRequest);
@@ -7677,9 +7802,16 @@ export class RestServer {
                     // [#6877] Same `Number(...)` → `NaN` → dropped-limit shape as
                     // the history twin above.
                     if (refuseRepeatedQueryParams(req, res, ['limit'])) return;
-                    const limit = req.query?.limit !== undefined
-                        ? Number(req.query.limit)
-                        : undefined;
+                    // [#20139] Parsed through its DECLARATION
+                    // (`AuditMetaItemRequestSchema.limit`, `z.number().optional()`),
+                    // the history twin's reading: `?limit=abc` used to be `NaN`,
+                    // dropped by the spread below, and answered with the producer's
+                    // default 100 events; `?limit=` became `Number('')` = 0, which the
+                    // implementation clamps to ONE event. Both are refused now; any
+                    // finite number is still forwarded, and the implementation's own
+                    // `[1, 500]` clamp is unchanged.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        AuditMetaItemRequestSchema.shape.limit, { emptyIsAbsent: false });
                     // [#20156] The history twin's gate, for the same reason: the
                     // audit trail of an item the plain read refuses this caller
                     // is refused with the plain read's answer. See
@@ -7736,7 +7868,9 @@ export class RestServer {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId: ctx?.tenantId ?? null,
-                        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+                        // Already finite or absent — the declared parse above
+                        // refuses anything else.
+                        ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.auditMetaItem(auditRequest);
                     res.json(result);
@@ -7751,7 +7885,7 @@ export class RestServer {
         });
 
         // POST /meta/:type/:name/publish — promote the pending draft
-        // overlay to live. 404 [no_draft] when nothing to publish.
+        // overlay to live. 404 `NO_DRAFT` when nothing to publish.
         registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/publish`,
@@ -8084,18 +8218,28 @@ export class RestServer {
                         });
                         return;
                     }
-                    const parseV = (raw: any): number | undefined => {
-                        if (raw === undefined || raw === null || raw === '') return undefined;
-                        const n = Number(raw);
-                        return Number.isFinite(n) ? n : undefined;
-                    };
-                    // [#6877] `parseV` returns `undefined` for `NaN`, and the
-                    // spreads below then omit the bound entirely — so a repeated
-                    // `?from=` quietly diffed a different pair of versions and
-                    // answered 200.
+                    // [#6877] A repeated `?from=` became `NaN`, the spreads below
+                    // omitted the bound, and the door quietly diffed a different
+                    // pair of versions and answered 200.
                     if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
-                    const fromVersion = parseV(req.query?.from ?? req.query?.fromVersion);
-                    const toVersion = parseV(req.query?.to ?? req.query?.toVersion);
+                    // [#20139] The same drop for a SINGLE unreadable value: the
+                    // `parseV` helper that stood here answered `undefined` for
+                    // `?from=abc` (and `Infinity`), so `diffMetaItem` substituted
+                    // "the version before `to`" — or, for `?to=abc`, the CURRENT
+                    // body — and the door answered 200 with a comparison nobody
+                    // asked for; `?from=1.5` was forwarded and diffed against a
+                    // version that cannot exist. No request schema is declared for
+                    // this door, so a version reads as a whole number. The name the
+                    // caller used is the one read (and the one a refusal names):
+                    // `from` / `to` win over `fromVersion` / `toVersion` exactly as
+                    // the old `??` had it, and an empty value stays absent, as
+                    // `parseV('')` already answered.
+                    const fromParam = req.query?.from != null ? 'from' : 'fromVersion';
+                    const toParam = req.query?.to != null ? 'to' : 'toVersion';
+                    const fromVersion = readDeclaredQueryNumber(req.query, fromParam,
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    const toVersion = readDeclaredQueryNumber(req.query, toParam,
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
                     // [#20156] A diff discloses BOTH versions' values — for a
                     // doc its `content`, for an app its `navigation`, for an
                     // object its `fields` — so it owes the plain read's
@@ -9810,9 +9954,17 @@ export class RestServer {
                     // the reading is "a whole number"; the floor and the cap below
                     // are this door's own and are unchanged.
                     const limitParam = readDeclaredQueryNumber(q, 'limit',
-                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: false });
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
                     const requestedLimit = limitParam !== undefined ? Math.max(1, limitParam) : 10_000;
                     const limit = Math.min(requestedLimit, HARD_CAP);
+                    // [#20139] Deliberately NOT read through `readDeclaredQueryNumber`
+                    // — the one ledgered exemption of the family's census
+                    // (`rest-server-query-number-census.test.ts`, which also pins
+                    // why). `page` sets only the CHUNK size of the `findData` loop
+                    // below: whatever it holds, readable or not, the export streams
+                    // the same rows in the same order, so no value of it can widen or
+                    // substitute the answer, and refusing one would turn a correct
+                    // export into a `400`.
                     const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
                     // Colour cells only for xlsx within the style cap; decided up
                     // front (before streaming) since we can't know the true row
@@ -10220,12 +10372,19 @@ export class RestServer {
                     // `searchAll`'s own `[1, 100]` clamp is unchanged, and an empty
                     // `?limit=` stays absent as the old falsy guard had it.
                     const limit = readDeclaredQueryNumber(req.query, 'limit',
-                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: true });
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    // [#20139] `perObject`, the same way: `?perObject=abc` reached
+                    // `searchAll` as `NaN`, its `Math.max(1, Math.min(25, NaN))` is
+                    // `NaN`, and the per-object cap was silently gone. Whole number;
+                    // the `[1, 25]` clamp stays `searchAll`'s own, and an empty
+                    // `?perObject=` stays absent as the old falsy guard had it.
+                    const perObject = readDeclaredQueryNumber(req.query, 'perObject',
+                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
                     const result = await searchAll.call(p, {
                         q,
                         objects,
                         limit,
-                        perObject: req.query?.perObject ? Number(req.query.perObject) : undefined,
+                        perObject,
                         ...(context ? { context } : {}),
                     });
                     res.json(result);
@@ -11148,7 +11307,14 @@ export class RestServer {
                     // equalling `'draft'`, so the Studio preview silently ran
                     // over PUBLISHED rows and looked like the draft had no data.
                     if (refuseRepeatedQueryParams(req, res, ['preview'])) return;
-                    const previewDrafts = body.previewDrafts === true || req.query?.preview === 'draft';
+                    // [#20338] …for a caller who may read drafts: both halves
+                    // serve unpublished work (a draft definition, a pending
+                    // seed's rows). Anyone else runs over the published
+                    // dataset and live rows, as if the flag were absent — a
+                    // draft-only `datasetName` is this door's own 404 —
+                    // {@link mayReadPendingDrafts} says why that, and not a refusal.
+                    const previewDrafts = (body.previewDrafts === true || req.query?.preview === 'draft')
+                        && mayReadPendingDrafts(context);
 
                     // Resolve the dataset definition: inline draft (Studio
                     // preview) or a saved dataset by name.
@@ -12777,8 +12943,30 @@ export class RestServer {
                         .flatMap((s: any) => String(s).split(','))
                         .map((s: string) => s.trim())
                         .filter(Boolean);
-                    const limit = q.limit != null ? Number(q.limit) : undefined;
-                    const offset = q.offset != null ? Number(q.offset) : undefined;
+                    // [#20139] Read, not coerced. `?limit=abc` (or `Infinity`) was
+                    // `NaN`, dropped by an `isFinite` guard, and answered with the
+                    // UNPAGED 500-row window and no `total` — a caller asking for a
+                    // page got a different shape of answer; `?offset=abc` was dropped
+                    // to the first page. `?limit=` / `?offset=` became `Number('')` =
+                    // 0: a ONE-row page, or the service's 50-row paged mode the caller
+                    // never asked for — so empty is refused here, not read as absent.
+                    // No request schema is declared for this door, so both read as
+                    // whole numbers; the service's own `[1, 200]` clamp is unchanged.
+                    //
+                    // Caught HERE, not by the catch below: that one answers every
+                    // throw `500 APPROVAL_REQUEST_LIST_FAILED`, and a query value the
+                    // door cannot read is the caller's `400`.
+                    let limit: number | undefined;
+                    let offset: number | undefined;
+                    try {
+                        limit = readDeclaredQueryNumber(q, 'limit',
+                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                        offset = readDeclaredQueryNumber(q, 'offset',
+                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                    } catch (refusal: any) {
+                        handleRouteError(res, refusal);
+                        return;
+                    }
                     const listFilter = {
                         object: q.object,
                         recordId: q.recordId ?? q.record_id,
@@ -12786,8 +12974,8 @@ export class RestServer {
                         approverId: approverIds.length ? approverIds : undefined,
                         submitterId: q.submitterId ?? q.submitter_id,
                         q: typeof q.q === 'string' ? q.q : undefined,
-                        limit: Number.isFinite(limit) ? limit : undefined,
-                        offset: Number.isFinite(offset) ? offset : undefined,
+                        limit,
+                        offset,
                     };
                     const rows = await svc.listRequests(listFilter, context ?? {});
                     // `total` only when the caller pages — counting costs a
