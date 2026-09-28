@@ -39,7 +39,7 @@
  *    | the other 13 | unchanged, and true on this face | unchanged |
  */
 
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -304,6 +304,17 @@ describe('reclaimSpace(): the local statement, run to completion on the remote d
     await driver.reclaimSpace();
     expect(statSync(file).size).toBe((await pageState(file)).pages * pageSize);
     expect((await pageState(file)).freelist).toBe(0);
+  });
+
+  it('local face: in WAL mode the freed bytes leave the -wal sidecar too, while the driver is still open', async () => {
+    const { driver, file } = await withFreePages('local');
+    const wal = () => (existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0);
+    const pageSize = await secondConnection(file, 'PRAGMA page_size');
+    expect(wal()).toBeGreaterThan(0);
+    await driver.reclaimSpace();
+    const after = await pageState(file);
+    expect(after.freelist).toBe(0);
+    expect({ file: statSync(file).size, wal: wal() }).toEqual({ file: after.pages * pageSize, wal: 0 });
   });
 
   it('remote face: a row written after the call reaches a second connection', async () => {

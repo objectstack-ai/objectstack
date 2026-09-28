@@ -14,6 +14,4 @@ Clause-②: no
 
 `SqliteWasmDriver` was already complete: its dialect steps every PRAGMA to the end (300 → 0 before and after this change).
 
-On a file-backed database in WAL mode (the default) the database file shrinks once a checkpoint runs, and during the call the freed pages pass through the `-wal` file, which keeps its size until the last connection closes.
-
 Nothing to migrate: `reclaimSpace()` keeps its signature, and a database whose `auto_vacuum` mode is not `INCREMENTAL` still reclaims nothing, as before.
