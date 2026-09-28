@@ -581,7 +581,13 @@ export interface UserAuthzGrants {
 }
 
 export interface ResolveUserAuthzGrantsOptions {
-  /** Active org/tenant id — scopes org-bound grants (a null-org row is global). */
+  /**
+   * Active org/tenant id — scopes org-bound grants (a null-org row is global).
+   * Omitted ⇒ NO active organization, so only the global grants apply: an
+   * organization-scoped position or permission-set row applies only while its
+   * organization is this tenant ({@link grantAppliesInTenant}). There is no
+   * "every organization" reading of an omitted tenant.
+   */
   tenantId?: string;
   /** Clock injection for grant validity windows (tests). */
   nowMs?: number;
@@ -613,6 +619,36 @@ export interface ResolveUserAuthzGrantsOptions {
    * would then trust.
    */
   bypassGrantsCache?: boolean;
+}
+
+/**
+ * The ONE organization rule for a stored grant row — `sys_user_position` (§4)
+ * and `sys_user_permission_set` (§6) both ask it, so the two cannot disagree:
+ * a row with no `organization_id` is GLOBAL and applies in every resolution; a
+ * row scoped to an organization applies only when that organization is the
+ * ACTIVE tenant. With no active tenant, an organization-scoped row does not
+ * apply at all.
+ *
+ * The spelling both sites carried before, `org && tenantId && org !== tenantId`
+ * as the SKIP condition, read "no tenant" as "every organization": it was false
+ * for every row once `tenantId` was undefined, so a resolution with no active
+ * organization kept every organization-scoped grant the user held anywhere.
+ * That is the resolution the session arm of {@link resolveAuthzContext} falls
+ * back to when it drops a claim its membership no longer backs, so a member
+ * removed from an organization kept the capabilities that organization had
+ * granted — with no organization boundary left on them at all.
+ *
+ * ⛔ There is no "every organization" mode: no option selects one and nothing
+ * falls back to one. A caller that has an organization passes it; a caller
+ * that has none gets the global grants and nothing else.
+ *
+ * ⚠️ Not applied to §3's `sys_member` role projection, which reads the user's
+ * OWN memberships rather than a grant row, nor to §6a's `sys_position` read,
+ * which is scoped by threading the organization into the driver's tenant scope
+ * rather than by filtering rows here.
+ */
+function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefined): boolean {
+  return !organizationId || organizationId === tenantId;
 }
 
 /**
@@ -795,11 +831,11 @@ export async function resolveUserAuthzGrants(
 
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
-  //    `organization_id = null` = global (cross-tenant); else match active org.
+  //    `organization_id = null` = global (cross-tenant); else match active org —
+  //    so with no active org, only the global rows ({@link grantAppliesInTenant}).
   // (read in Leg 1 above)
   for (const ur of userPositionRows) {
-    const org = ur.organization_id ?? null;
-    if (org && tenantId && org !== tenantId) continue;
+    if (!grantAppliesInTenant(ur.organization_id, tenantId)) continue;
     if (!isGrantActive(ur, nowMs)) continue;
     const r = ur.position;
     if (typeof r === 'string' && r && !grants.positions.includes(r)) grants.positions.push(r);
@@ -817,17 +853,15 @@ export async function resolveUserAuthzGrants(
     grants.org_user_ids = Array.from(ids);
   }
 
-  // 6. Permission sets — user-scoped grants (null org = global, else active org).
+  // 6. Permission sets — user-scoped grants (null org = global, else active org;
+  //    with no active org, only the global rows — {@link grantAppliesInTenant}).
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
   // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const psIds = new Set<string>(
     upsRows
-      .filter((r) => {
-        const org = (r.organization_id ?? r.organizationId) ?? null;
-        return !(org && tenantId && org !== tenantId);
-      })
+      .filter((r) => grantAppliesInTenant(r.organization_id ?? r.organizationId, tenantId))
       .map((r) => r.permission_set_id ?? r.permissionSetId)
       .filter(Boolean),
   );
