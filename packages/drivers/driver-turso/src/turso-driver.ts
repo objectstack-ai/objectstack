@@ -3041,18 +3041,43 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Reclaim free pages — answered on the REMOTE face with the statement the
-   * local face issues, `PRAGMA incremental_vacuum`, sent to the remote database
-   * through the raw door's envelope (`DATABASE_ERROR` / 500 if the server
-   * refuses it). As on a local file, it returns pages only on a database whose
-   * `auto_vacuum` is `INCREMENTAL`; the remote face does not set that mode at
-   * connect, the local face does.
+   * local face issues, `PRAGMA incremental_vacuum`, run to completion on the
+   * remote database, in the raw door's envelope (`DATABASE_ERROR` / 500 if the
+   * server refuses it). As on a local file, it returns pages only on a database
+   * whose `auto_vacuum` is `INCREMENTAL`; the remote face does not set that
+   * mode at connect, the local face does.
+   *
+   * The statement goes through the client's `executeMultiple()`, not
+   * `execute()`. SQLite frees one page per step of this statement, and the
+   * libSQL client's `execute()` steps a statement that declares no result
+   * columns once and leaves it unfinished. Measured over a libSQL `file:`
+   * client: the issuing connection read one page fewer (300 → 299), a second
+   * connection read the freelist and the file size unchanged, and a row
+   * written after the call on the same connection never reached the file.
+   * `executeMultiple()` runs each statement to its end: a second connection
+   * reads 300 → 0, and the later write lands. What a hosted libSQL server does
+   * with either call is not measured here.
+   *
+   * The free-page count is read first, through the raw door, which connects
+   * the transport lazily as every remote door does. Nothing more is sent when
+   * the freelist is empty.
    */
   override async reclaimSpace(options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'reclaimSpace');
     if (this.isRemote) {
+      const transport = this.remoteTransport!;
+      const count = 'PRAGMA freelist_count';
+      let freePages: number;
+      try {
+        const rows = (await transport.execute(count)) as ArrayLike<ArrayLike<unknown>>;
+        freePages = Number(rows[0]?.[0]);
+      } catch (error) {
+        throw this.rawStatementFault(count, error);
+      }
+      if (freePages === 0) return;
       const statement = 'PRAGMA incremental_vacuum';
       try {
-        await this.remoteTransport!.execute(statement);
+        await transport.getClient()!.executeMultiple(statement);
       } catch (error) {
         throw this.rawStatementFault(statement, error);
       }
