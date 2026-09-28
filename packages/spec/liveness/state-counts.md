@@ -30,7 +30,7 @@ for both corollaries.
 | `object` | 50 | 0 | 0 | 0 | 1 | 51 |
 | `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
-| `action` | 44 | 0 | 0 | 3 | 2 | 49 |
+| `action` | 46 | 0 | 0 | 3 | 0 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -52,7 +52,7 @@ for both corollaries.
 | `job` | 15 | 0 | 0 | 1 | 0 | 16 |
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
 | `seed` | 13 | 0 | 0 | 0 | 0 | 13 |
-| `translation` | 22 | 0 | 0 | 0 | 2 | 24 |
+| `translation` | 23 | 0 | 0 | 0 | 1 | 24 |
 | `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -62,9 +62,9 @@ for both corollaries.
 | `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
-| `rest_api` | 12 | 0 | 0 | 14 | 0 | 26 |
+| `rest_api` | 12 | 0 | 0 | 12 | 0 | 24 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 44 | 1 | 74 |
 | `analytics_cube` | 18 | 0 | 0 | 9 | 0 | 27 |
-| **total** | **934** | **5** | **1** | **167** | **12** | **1119** |
+| **total** | **937** | **5** | **1** | **165** | **9** | **1117** |
