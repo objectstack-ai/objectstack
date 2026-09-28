@@ -25,6 +25,7 @@
   "src/api/export-job-family-retirement.test.ts",
   "src/api/rest-api-config-dead-keys-retirement.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
+  "src/data/currency-mode-family-closure.pin.test.ts",
   "src/identity/position-delegatable-enforcer.pin.test.ts",
   "src/integration/connector-connection-timeout-retirement.test.ts",
   "src/integration/connector-resilience-keys-retirement.test.ts",

@@ -175,7 +175,13 @@ const DATASOURCE_SUPPLIED_PROP = 'object';
 function suppliedByDataSource(issue: LintZodIssue, component: AnyRec): boolean {
   if (issue.path.length !== 1 || issue.path[0] !== DATASOURCE_SUPPLIED_PROP) return false;
   const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
-  return strName(dataSource?.object) !== undefined;
+  if (strName(dataSource?.object) === undefined) return false;
+  // "Missing" is read off the component, never off the issue: the path alone
+  // also matches a PRESENT value the row rejects (`object: 7`, `object: null`),
+  // and the binding supplies nothing there — the author wrote that value and
+  // the row's own verdict on it stands. Only no key, or `undefined`, is waived.
+  const props = isRec(component.properties) ? component.properties : undefined;
+  return props?.[DATASOURCE_SUPPLIED_PROP] === undefined;
 }
 
 /**

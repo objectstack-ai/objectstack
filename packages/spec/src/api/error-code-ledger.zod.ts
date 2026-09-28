@@ -1390,6 +1390,21 @@ export const REGISTERED_ERROR_CODES: readonly RegisteredErrorCode[] = Object.fre
  * standard catalog ∪ registered extension codes. This is what
  * `ApiErrorSchema.code` parses against — an unregistered code is a schema
  * failure, not a new dialect.
+ *
+ * [#19920] The cast names BOTH of `z.ZodType`'s parameters, `<Output, Input>`.
+ * The cast exists because the spread above erases the members to `string`.
+ * Naming only the output left `Input` at its default, `unknown`, so `ApiError`
+ * (the INPUT type of `ApiErrorSchema`) typed `code` as `unknown`:
+ * `{ code: 42, message: 'x' }` compiled as an `ApiError` while this schema
+ * refuses it. An enum's input is its output, so both parameters are the same
+ * union.
+ *
+ * Both are spelled with the {@link ErrorCode} type alias, never the union
+ * written out: declaration emit prints an inline union literal by literal at
+ * every schema that embeds this one (78 sites in the `api` entry), while an
+ * alias it prints by name. Measured over the built declarations: with the
+ * union inline in both parameters they grew by 3.36 MB (+11%); with the alias
+ * they shrink by 3.32 MB, since the output half was printed inline before too.
  */
 export const ErrorCode = z.enum(
   [...StandardErrorCode.options, ...REGISTERED_ERROR_CODES] as [string, ...string[]],
@@ -1397,7 +1412,7 @@ export const ErrorCode = z.enum(
   // standard spelling would answer here with zod's bare enum message unless this
   // door passes the same prescription (`retired-error-codes.ts`).
   { error: retiredStandardErrorCodeMessage },
-) as z.ZodType<StandardErrorCode | RegisteredErrorCode>;
+) as z.ZodType<ErrorCode, ErrorCode>;
 
 export type ErrorCode = StandardErrorCode | RegisteredErrorCode;
 

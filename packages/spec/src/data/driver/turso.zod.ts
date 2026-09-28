@@ -78,13 +78,14 @@ export const TursoTransportModeSchema = z.enum(['local', 'replica', 'remote'])
 export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 
 // ==========================================================================
-// 1b. Transport coherence — what `new TursoDriver` refuses or ignores
+// 1b. Transport coherence — what `new TursoDriver` refuses
 // ==========================================================================
 //
 // #19977. `url`, `syncUrl`, `mode` and `timeoutMs` each parsed on their own,
 // so this shape accepted combinations the driver refuses at construction
-// (`VALIDATION_ERROR` / 400) — or constructs and then ignores. Authoring now
-// refuses exactly those, with the supported spelling in the message:
+// (`VALIDATION_ERROR` / 400) — or, until #20200, constructed and then ignored.
+// Authoring now refuses exactly those, with the supported spelling in the
+// message:
 //
 //  - a local or replica mode (forced by `mode`, or selected by `syncUrl`
 //    beside a `file:` / `:memory:` url, or by a url that is none of those)
@@ -92,20 +93,22 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    that is not a `file:` url or `:memory:` (a bare path, another scheme);
 //  - a replica on an in-memory url;
 //  - `timeoutMs` beside a `wss://` / `ws://` url in remote mode;
-//  - `syncUrl` under a forced `mode: 'remote'`, which the driver accepts and
-//    then IGNORES: the remote client is built without it, no sync ever runs,
-//    and the driver's sync call fails as not supported while its sync-enabled
-//    check still answers true. That arm has no constructor refusal behind it;
-//    it is refused here because a declared setting that changes nothing is
-//    the shape ADR-0049 does not ship.
+//  - `syncUrl` under a forced `mode: 'remote'`, which the driver used to accept
+//    and then IGNORE: the remote client was built without it, no sync ever
+//    ran, and the driver's sync call failed as not supported while its
+//    sync-enabled check still answered true. It was refused here first,
+//    because a declared setting that changes nothing is the shape ADR-0049
+//    does not ship; since #20200 the constructor refuses it too, in this
+//    arm's own words.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
 // `packages/drivers/driver-turso/src/turso-driver.ts`): a scheme matches in
 // any letter case, `:memory:` is matched exactly, and a `file:` url whose path
 // is `:memory:` (or starts `:memory:?`) is in-memory. Nothing the constructor
-// accepts is refused here, the `syncUrl`-under-`mode: 'remote'` arm aside. The
-// url is classified TRIMMED, because
+// accepts is refused here: the one former exception, the
+// `syncUrl`-under-`mode: 'remote'` arm, has been a constructor refusal too
+// since #20200. The url is classified TRIMMED, because
 // both loaders trim it before construction (`resolveTursoUrl` in
 // `@objectstack/service-datasource`); `syncUrl` counts when it is a non-empty
 // string, as `buildTursoDriverConfig` forwards it. The driver-local mirror
@@ -262,8 +265,8 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
       path: 'syncUrl',
       message:
         "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write "
-        + 'straight to `url` and builds no replica: the turso driver never hands `syncUrl` to the '
-        + 'remote client and runs no sync, so the setting changes nothing. For a remote database, '
+        + 'straight to `url` and builds no replica: the turso driver refuses this configuration when '
+        + 'it starts. For a remote database, '
         + `drop ${syncUrlKeys}. For an embedded replica, drop \`mode\` and point \`url\` at a local `
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
@@ -467,8 +470,8 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
           + 'nothing.',
       });
     }
-    // What the driver refuses at construction, or constructs and ignores —
-    // see `tursoTransportIssues` above the shape.
+    // What the driver refuses at construction — see `tursoTransportIssues`
+    // above the shape.
     for (const issue of tursoTransportIssues(cfg)) {
       ctx.addIssue({ code: 'custom', path: [issue.path], message: issue.message });
     }
