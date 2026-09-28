@@ -53,7 +53,7 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
- *  - date / datetime: must be ISO-parsable
+ *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -83,6 +83,7 @@ import {
   percentScaleOf,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isOutsideTemporalYearRange } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -1112,8 +1113,16 @@ function validateOne(
 
   // ── date/datetime ───────────────────────────────────────────────
   if (t === 'date' || t === 'datetime') {
-    if (value instanceof Date) return null;
-    if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return null;
+    const readable = value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+    // [#20264] …and names a year from 0001 to 9999, the range the
+    // temporal-comparand door holds a comparand to — one function,
+    // `@objectstack/core`'s `isOutsideTemporalYearRange`, answers both doors.
+    // A date written as `+010000-01-01T00:00:00.000Z` has no leading
+    // `YYYY-MM-DD`, so the storage rule kept it verbatim (a stored non-day,
+    // 201 on memory and SQLite) and PostgreSQL refused it with a 500; year 0
+    // is a 500 on PostgreSQL on both kinds. Same code and words as any other
+    // value that is not a valid date.
+    if (readable && !isOutsideTemporalYearRange(value, t)) return null;
     // Same wire code, two sentences: "a valid date" vs "a valid datetime".
     return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }
