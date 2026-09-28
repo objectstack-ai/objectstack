@@ -251,7 +251,7 @@ function listHoldingFinding(
   filter: Record<string, unknown>,
   at: { where: string; path: string; source: string },
 ): SharingRuleEnforceabilityFinding | null {
-  const comparisons = object ? listHoldingComparisons(graph, object, filter) : [];
+  const comparisons = listHoldingComparisons(graph, object, filter);
   if (comparisons.length === 0) return null;
   return {
     severity: 'error',
@@ -500,8 +500,23 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     const name = str(obj.name);
     if (name) objectsByName.set(name, obj);
   }
-  // [#19886] The declared field map, for the list-holding arm, built once.
-  const graph = indexObjectGraph(cfg);
+  // [#19886] The declared field map of a rule's ANCHOR, for the list-holding
+  // arm — the only object a lowered sharing criterion can address (a
+  // cross-object path does not lower). Built lazily, once per anchor, and only
+  // for a condition that lowered, so a stack this arm never judges is indexed
+  // exactly as before and the anchor arm's own refusal of an unreadable carrier
+  // keeps its precedence.
+  const graphs = new Map<string, ObjectGraph>();
+  const anchorGraph = (object: string): ObjectGraph | null => {
+    const target = objectsByName.get(object);
+    if (!target) return null;
+    let graph = graphs.get(object);
+    if (!graph) {
+      graph = indexObjectGraph({ objects: [target] });
+      graphs.set(object, graph);
+    }
+    return graph;
+  };
 
   recordsOf(cfg.sharingRules).forEach((rule, index) => {
     anchorFindings(rule, index, objectsByName).forEach((f) => findings.push(f));
@@ -523,9 +538,10 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     if (result.ok) {
       // [#19886] Seeded — and refused by the driver on every criteria query
       // when it compares with a list- or object-holding field (file header).
-      const listHolding = listHoldingFinding(graph, object, result.filter as Record<string, unknown>, {
-        where, path, source,
-      });
+      const graph = object ? anchorGraph(object) : null;
+      const listHolding = graph
+        ? listHoldingFinding(graph, object, result.filter as Record<string, unknown>, { where, path, source })
+        : null;
       if (listHolding) findings.push(listHolding);
       return;
     }
