@@ -44,6 +44,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -96,7 +97,9 @@ const ordersManifest = {
   dependencies: { 'com.example.mp.core': '^1.0.0' },
 };
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [account, order],
   hooks: [orderHook],
@@ -104,24 +107,28 @@ export default {
     { manifest: { ...ordersManifest, objects: [order], hooks: [orderHook] } },
     { manifest: { ...coreManifest, objects: [account] } },
   ],
-};
+}, { strict: false });
 `;
 
 /** The same project with ONE package and no `packages` key — the D7 branch. */
 const CONFIG_SINGLE = `
 const stampOrder = async () => { return { ok: true }; };
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.mp.solo', name: 'solo', version: '1.0.0', type: 'app', namespace: 'mp' },
   objects: [
     { name: 'mp_order', label: 'Order', sharingModel: 'private', fields: { name: { type: 'text', label: 'Number' } } },
   ],
   hooks: [{ name: 'mp_order_before_insert', object: 'mp_order', events: ['beforeInsert'], handler: stampOrder }],
-};
+}, { strict: false });
 `;
 
 /** A package body still carrying the AUTHORING manifest's glob patterns. */
 const CONFIG_GLOBS = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.mp.core', name: 'core', version: '1.0.0', type: 'app', namespace: 'mp' },
   objects: [
     { name: 'mp_account', label: 'Account', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } },
@@ -129,7 +136,7 @@ export default {
   packages: [
     { manifest: { id: 'com.example.mp.core', name: 'core', version: '1.0.0', type: 'app', namespace: 'mp', objects: ['./src/objects/*.object.ts'] } },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -214,7 +221,9 @@ const probeOrder = {
   ],
 };
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [probeAccount],
   packages: [
@@ -227,7 +236,7 @@ export default {
       },
     },
   ],
-};
+}, { strict: false });
 `;
 
 interface Artifact {
@@ -249,6 +258,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    linkSpec(dir);
     dirs[name] = dir;
   }
 });

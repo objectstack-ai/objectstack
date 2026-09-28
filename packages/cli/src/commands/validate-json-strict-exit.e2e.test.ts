@@ -108,6 +108,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkSpec } from '../../test/helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../../bin/run-dev.js');
@@ -121,15 +122,19 @@ const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
  * before any advisory is computed.
  */
 const WARNS_SOURCE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   objects: [],
   apps: [],
-};
+}, { strict: false });
 `;
 
 /** The zero-warning control — pins the other end of the matrix. */
 const CLEAN_SOURCE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
   objects: [{
     name: 'strictexit_ticket',
@@ -138,7 +143,7 @@ export default {
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   apps: [{ name: 'strictexit_app', label: 'Strict Exit App' }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -151,7 +156,9 @@ export default {
  * assumed to be.
  */
 const headerPageSource = (headerTextKey: 'description' | 'subtitle'): string => `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
   objects: [{
     name: 'strictexit_ticket',
@@ -167,7 +174,7 @@ export default {
       { type: 'page:header', properties: { title: 'Tickets', ${headerTextKey}: 'All open tickets' } },
     ] }],
   }],
-};
+}, { strict: false });
 `;
 
 interface Run {
@@ -201,12 +208,16 @@ let conversionsCanonDir: string;
 beforeAll(() => {
   warnsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-warns-'));
   writeFileSync(join(warnsDir, 'objectstack.config.ts'), WARNS_SOURCE);
+  linkSpec(warnsDir);
   cleanDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-clean-'));
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
+  linkSpec(cleanDir);
   conversionsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-'));
   writeFileSync(join(conversionsDir, 'objectstack.config.ts'), headerPageSource('description'));
+  linkSpec(conversionsDir);
   conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
   writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), headerPageSource('subtitle'));
+  linkSpec(conversionsCanonDir);
 });
 
 afterAll(() => {

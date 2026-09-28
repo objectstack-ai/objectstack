@@ -66,6 +66,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -116,7 +117,9 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extraFields?: string; extraTop?: string } = {}): string {
   const { pageKind = 'jsx', requires = [], extraFields = '', extraTop = '' } = opts;
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
   pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
@@ -130,7 +133,7 @@ export default {
       },
     },
   ],${extraTop}
-};
+}, { strict: false });
 `;
 }
 
@@ -188,6 +191,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    linkSpec(dir);
     for (const [file, body] of docs) writeFileSync(join(dir, 'src', 'docs', file), body);
     dirs[name] = dir;
     return dir;
@@ -240,7 +244,9 @@ beforeAll(() => {
   // catch-all, AT LOAD — the config throws on import, ABOVE step 2.
   make('earlythrow', `
 throw new Error('zzz_config_module_threw');
-export default {};
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({}, { strict: false });
 `);
 
   // The control — the same shape, reaching SUCCESS.

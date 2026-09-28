@@ -43,6 +43,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -85,7 +86,9 @@ const OBJECT = `{
 
 /** INTAKE: the reference app's shape — an inline handler, no `body`. */
 const CONFIG_HANDLER = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.reach-handler', name: 'reach_handler', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -96,12 +99,14 @@ export default {
       await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });
     },
   }],
-};
+}, { strict: false });
 `;
 
 /** CONTROL: the identical statement authored as an explicit `body`. */
 const CONFIG_BODY = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.reach-body', name: 'reach_body', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -113,7 +118,7 @@ export default {
       source: "await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });",
     },
   }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -123,7 +128,9 @@ export default {
  * refused: a stack that validated green before #16544 validates green after.
  */
 const CONFIG_HANDLER_OK = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.reach-handler-ok', name: 'reach_handler_ok', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -134,7 +141,7 @@ export default {
       await ctx.api.object('crm_case').update({ id: ctx.input.id, title: 'seen' });
     },
   }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -150,7 +157,9 @@ export default {
  * `lowerActionCallable` handles (`actions[*]`, `objects[*].actions[*]`).
  */
 const CONFIG_ACTION_TARGET = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.reach-action-target', name: 'reach_action_target', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'crm_case',
@@ -174,7 +183,7 @@ export default {
       return { ok: true, id: ctx.input.id };
     },
   }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -188,7 +197,9 @@ export default {
  * function un-lowered (not a limb).
  */
 const CONFIG_FUNCTIONS_NAMELESS = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.reach-functions-nameless', name: 'reach_functions_nameless', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   functions: [{
@@ -196,7 +207,7 @@ export default {
       return { ok: true, id: ctx.input.id };
     },
   }],
-};
+}, { strict: false });
 `;
 
 const dirs: Record<string, string> = {};
@@ -204,6 +215,7 @@ const dirs: Record<string, string> = {};
 function project(key: string, source: string): string {
   const dir = mkdtempSync(join(tmpdir(), `os-reach-${key}-`));
   writeFileSync(join(dir, 'objectstack.config.ts'), source);
+  linkSpec(dir);
   dirs[key] = dir;
   return dir;
 }
