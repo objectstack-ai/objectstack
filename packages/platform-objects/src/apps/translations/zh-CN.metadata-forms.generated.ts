@@ -72,6 +72,34 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可搜索字段",
         helpText: "$search 查询匹配的字段名（ADR-0061）：记录选择器、列表快速搜索和全局搜索的默认范围，视图可以再收窄。未设置时，搜索使用名称/标题字段加上短文本字段。每一项都必须是本对象已存储的字段——未知的名称或虚拟的 formula 字段会在发布时被拒绝。"
       },
+      fieldGroups: {
+        label: "字段分组",
+        helpText: "对本对象的字段进行分组的有序分区，用于录入表单和记录详情页（ADR-0085）；数组顺序即显示顺序。字段在自身的 group 设置中填写分组的键即可加入该分组。未归入任何分组的字段排在各分组之后；没有任何字段加入的分组不会显示。"
+      },
+      "fieldGroups.key": {
+        label: "键",
+        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。字段通过填写此键加入分组，因此重命名它会使这些字段变为未分组。"
+      },
+      "fieldGroups.label": {
+        label: "显示名称",
+        helpText: "该分组所在分区的标题文字。"
+      },
+      "fieldGroups.icon": {
+        label: "图标",
+        helpText: "在记录详情页的标题旁显示的 Lucide 图标名称（例如 \"banknote\"）。录入表单不显示它。"
+      },
+      "fieldGroups.description": {
+        label: "描述",
+        helpText: "显示在标题下方的文字，出现在录入表单和记录详情页上。"
+      },
+      "fieldGroups.collapse": {
+        label: "折叠",
+        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+      },
+      "fieldGroups.visibleWhen": {
+        label: "可见条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.type == 'invoice'）——仅当其为 TRUE 时，录入表单才显示整个分组（包括标题）。"
+      },
       fields: {
         label: "字段",
         helpText: "添加该对象将存储的列"
@@ -268,6 +296,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       datasource: {
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
+      },
+      indexes: {
+        label: "索引",
+        helpText: "本对象数据表上的数据库索引。SQL 驱动在同步数据表时创建表中尚不存在的索引；同步从不删除索引。"
+      },
+      "indexes.name": {
+        label: "名称",
+        helpText: "物理索引名。未设置：根据表名和列名生成（例如 idx_task_status）。"
+      },
+      "indexes.fields": {
+        label: "字段",
+        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存或发布时不会检查它们：若某个名称不是已存储的列，SQL 驱动会跳过整个索引，并在服务器日志中记录一条警告。"
+      },
+      "indexes.unique": {
+        label: "唯一",
+        helpText: "唯一性范围（ADR-0120）。未设置：不唯一。已弃用的裸 true（等同于 global）不在选项中；带有它的索引会保留该值，直到你选择一个范围。"
       },
       ownership: {
         label: "归属模型",
