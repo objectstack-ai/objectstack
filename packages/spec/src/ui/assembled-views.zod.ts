@@ -122,9 +122,9 @@ export type AssembledViewArtifact = z.input<(typeof VIEW_METADATA_MEMBERS)[Exclu
  * [#19920] One default is applied by the parse but absent from this type, the one
  * `ViewMetadataParsed` (`view.zod.ts`) names: the flattened list overlay member declares `type`
  * without the list shape's `.default('grid')` and re-applies it in an `.overwrite()`, which
- * returns the member's own output type. So on that member `type` stays optional here (and, like
- * its `columns`, typed `unknown`), while every body it parses comes back with `type` set:
- * `'grid'` when the body named none.
+ * returns the member's own output type. So on that member `type` stays optional here (typed as
+ * the list shape's `type` enum), while every body it parses comes back with `type` set: `'grid'`
+ * when the body named none.
  */
 export type AssembledViewArtifactParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[Exclude<ViewMetadataBranch, 'container'>]>;
 

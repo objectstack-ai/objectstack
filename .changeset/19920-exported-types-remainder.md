@@ -2,19 +2,20 @@
 '@objectstack/spec': minor
 ---
 
-fix(spec): `JoinedReportBlock`, a ViewItem's `config` and a flattened overlay's `viewKind` carry the shapes their doors accept (#19920)
+fix(spec): `JoinedReportBlock`, a ViewItem's `config`, a flattened overlay's `viewKind` and a flattened list overlay's `type` / `columns` carry the shapes their doors accept (#19920)
 
 Clause-②: yes (narrowing)
 
 **BREAKING for TypeScript code that annotates with `JoinedReportBlock`, `Report`, `ReportParsed`, `ViewItem`, `ViewItemWire`, `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` or `AssembledViewArtifactParsed`, or that passes an unchecked value to `defineReport` / `defineViewItem`**: a narrowing of published TYPES, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). The runtime accept set does not move at all: no schema's parse, no value and no existing export changes. Three parsed-state type names are added (below); nothing is removed or renamed.
 
-Three places in the published types were wider than the doors that judge the same bodies, so values those doors refuse type-checked:
+Four places in the published types were wider than the doors that judge the same bodies, so values those doors refuse type-checked:
 
 - `JoinedReportBlock`: FROM `unknown` TO the input shape of `JoinedReportBlockSchema`. The schema was annotated `z.ZodTypeAny`, which erased its shape; it now carries its inferred type. The same erasure made every `blocks[]` element of `Report` / `ReportParsed` (and so of `defineReport`'s parameter) `unknown`; each is now a block.
 - A ViewItem's `config`: FROM `unknown` TO the arm's own config type, a `ListView` config on the `list` arm and a `FormView` config on the `form` arm. This holds on `ViewItem`, `ViewItemWire`, `defineViewItem`'s parameter and return, and the `viewItem` member of `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and `AssembledViewArtifactParsed`. The arm builder took `config` as `z.ZodTypeAny`; it is now a generic parameter.
 - A flattened overlay member's `viewKind`: FROM `'list' | 'form'` on both members TO `'list'` on the list overlay and `'form'` on the form overlay, the one value each member accepts. A list-shaped body naming `viewKind: 'form'` used to type-check, through the list overlay member, as `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and `AssembledViewArtifactParsed`.
+- A flattened list overlay's `type` and `columns`: FROM `unknown` TO the list view's own types, both optional: `type` one of the list view types, `columns` a field list. This holds on the list overlay member of `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and `AssembledViewArtifactParsed`. The member read both keys off the list view shape through a cast that erased them, so `{ object, viewKind: 'list', columns: 42 }` type-checked as all four while that member refuses it.
 
-**If your code stops compiling.** A value you annotated with one of these names, or passed to `defineReport` / `defineViewItem`, is not the shape the door accepts: correct it, or type a value that is still unvalidated as `unknown` and let the schema's `safeParse` decide. A ViewItem's `config` must match its `viewKind`: a `ListView` config under `viewKind: 'list'`, a `FormView` config under `viewKind: 'form'`.
+**If your code stops compiling.** A value you annotated with one of these names, or passed to `defineReport` / `defineViewItem`, is not the shape the door accepts: correct it, or type a value that is still unvalidated as `unknown` and let the schema's `safeParse` decide. A ViewItem's `config` must match its `viewKind`: a `ListView` config under `viewKind: 'list'`, a `FormView` config under `viewKind: 'form'`. A flattened list overlay's `columns` is a field list and its `type` one of the list view types.
 
 The declared types of `JoinedReportBlockSchema`, `ViewItemSchema` and `ViewItemWireSchema` narrow with them, so `z.input` / `z.infer` of each is typed where it was `unknown` (or carried an `unknown` `config`). Typed, each schema's input and output now differ by its defaults, so three ADR-0122 parsed-state aliases are added beside the bare names: `JoinedReportBlockParsed`, `ViewItemParsed` and `ViewItemWireParsed`. Nothing is removed or renamed.
 

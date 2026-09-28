@@ -5779,13 +5779,17 @@ const FORM_OVERLAY_COLUMNS_IS_A_COUNT =
  * {@link assertViewIdentity} records for the union's own door.
  */
 function listOverlayPatchFields() {
-  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
-  const type = shape.type as unknown as z.ZodDefault<z.ZodTypeAny>;
+  // [#19920] Read off the shape as typed, not through a cast to a record of
+  // `z.ZodTypeAny`: that cast erased both keys to `unknown` on this member, so
+  // `{ object, viewKind: 'list', columns: 42 }` type-checked as every union
+  // type read off {@link VIEW_METADATA_MEMBERS} while this member refuses it.
+  // The schemas are the same objects either way; only their static types move.
+  const shape = ListViewShapeSchema.shape;
   return {
-    columns: shape.columns!.optional(),
+    columns: shape.columns.optional(),
     // `.meta({ default })` keeps the served JSON Schema's `default: 'grid'`
     // byte-identical: the default is real, applied by the overwrite below.
-    type: type.unwrap().optional().meta({ default: LIST_OVERLAY_DEFAULT_TYPE }),
+    type: shape.type.unwrap().optional().meta({ default: LIST_OVERLAY_DEFAULT_TYPE }),
   };
 }
 
@@ -6791,10 +6795,9 @@ export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBr
  * overlay member (`VIEW_METADATA_MEMBERS.listOverlay`) declares `type` without the list shape's
  * `.default('grid')`, so its checks can tell a column-less patch from a full config, and
  * re-applies the default in `.overwrite(applyListOverlayTypeDefault)`. An `.overwrite()` returns
- * the member's own output type, so on that member `type` stays optional here, while every body
- * that member parses comes back with `type` set: `'grid'` when the body named none. On that
- * member `type` and `columns` are also typed `unknown`: `listOverlayPatchFields` reads both off
- * the list shape through an untyped cast.
+ * the member's own output type, so on that member `type` stays optional here (typed as the list
+ * shape's `type` enum), while every body that member parses comes back with `type` set: `'grid'`
+ * when the body named none.
  */
 export type ViewMetadataParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;

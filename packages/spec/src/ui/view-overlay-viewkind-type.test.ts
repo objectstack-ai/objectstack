@@ -2,8 +2,9 @@
 
 /**
  * [#19920] Each flattened overlay member's static `viewKind` is its own arm's literal: `'list'` on
- * the list overlay, `'form'` on the form overlay. And the list overlay's `type` default, which the
- * parse applies and the output type does not carry, is what the `ViewMetadataParsed` /
+ * the list overlay, `'form'` on the form overlay. The list overlay's `type` and `columns` carry the
+ * list shape's own types, not `unknown`. And the list overlay's `type` default, which the parse
+ * applies and the output type does not carry, is what the `ViewMetadataParsed` /
  * `AssembledViewArtifactParsed` TSDoc says it is.
  *
  * `flattenedViewOverlayFields(kind)` took `kind: 'list' | 'form'`, so `z.enum([kind])` widened to
@@ -11,6 +12,11 @@
  * the list member, as `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and
  * `AssembledViewArtifactParsed`, while both doors refuse it (the list member: the arm mismatch; the
  * form member: `type` and `columns`). The function is now generic, so each member keeps its literal.
+ *
+ * `listOverlayPatchFields()` read the list overlay's `type` and `columns` off the list shape
+ * through a cast to a record of `z.ZodTypeAny`, which typed both `unknown` on that member:
+ * `{ object, viewKind: 'list', columns: 42 }` type-checked as the same four union types while the
+ * list member refuses it. It now reads the shape as typed.
  *
  * Two halves, judged by two programs (the `view-metadata-type.test.ts` shape):
  *
@@ -70,23 +76,51 @@ const parsedMetadata: ViewMetadataParsed = { type: 'grid', columns: ['name'], ob
 void [listKindIn, listKindOut, formKindIn, formKindOut, listKindInForm, listKindOutForm, formKindInList, formKindOutList];
 void [artifact, parsedArtifact, metadata, parsedMetadata];
 
+// ── The list overlay's `type` and `columns` carry the list shape's types ─────────────────────
+
+type IsUnknown<T> = unknown extends T ? true : false;
+const typeAndColumnsAreTypedThere: [
+  IsUnknown<ListOverlayIn['type']>, IsUnknown<ListOverlayIn['columns']>,
+  IsUnknown<ListOverlayOut['type']>, IsUnknown<ListOverlayOut['columns']>,
+] = [false, false, false, false];
+const listOverlayPatchWithType: ListOverlayIn = { object: 'crm_lead', viewKind: 'list', type: 'kanban', columns: ['name'] };
+// @ts-expect-error -- the list overlay's `columns` is a field list, not a number.
+const listOverlayColumnsNumber: ListOverlayIn['columns'] = 42;
+// @ts-expect-error -- its `type` is the list shape's enum.
+const listOverlayTypeUnknown: ListOverlayIn['type'] = 'spreadsheet';
+// @ts-expect-error -- a list overlay whose `columns` is a number is no view artifact.
+const numericColumnsArtifact: AssembledViewArtifact = { object: 'crm_lead', viewKind: 'list', columns: 42 };
+// @ts-expect-error -- nor a parsed one.
+const numericColumnsParsedArtifact: AssembledViewArtifactParsed = { object: 'crm_lead', viewKind: 'list', columns: 42 };
+// @ts-expect-error -- nor a view body.
+const numericColumnsMetadata: ViewMetadata = { object: 'crm_lead', viewKind: 'list', columns: 42 };
+// @ts-expect-error -- nor a parsed one.
+const numericColumnsParsedMetadata: ViewMetadataParsed = { object: 'crm_lead', viewKind: 'list', columns: 42 };
+void [typeAndColumnsAreTypedThere, listOverlayPatchWithType, listOverlayColumnsNumber, listOverlayTypeUnknown];
+void [numericColumnsArtifact, numericColumnsParsedArtifact, numericColumnsMetadata, numericColumnsParsedMetadata];
+
 // ── The list overlay's `type` default: applied by the parse, absent from the output type ─────
 //
-// The TSDoc on `ViewMetadataParsed` / `AssembledViewArtifactParsed` says both things in words, and
-// these two lines compile only while each one holds. The day a change carries the `.overwrite()`
-// default into the output type, or types the member's `type` / `columns`, a line stops compiling
-// and the TSDoc sentences are then false: correct them with it.
+// The TSDoc on `ViewMetadataParsed` / `AssembledViewArtifactParsed` says this in words, and this
+// line compiles only while it holds. The day a change carries the `.overwrite()` default into the
+// output type, the line stops compiling and the TSDoc sentences are then false: correct them with
+// it.
 type IsOptionalKey<T, K extends keyof T> = {} extends Pick<T, K> ? true : false;
-type IsUnknown<T> = unknown extends T ? true : false;
 const typeIsOptionalOnListOverlayOutput: IsOptionalKey<ListOverlayOut, 'type'> = true;
-const typeAndColumnsAreUnknownThere: [IsUnknown<ListOverlayOut['type']>, IsUnknown<ListOverlayOut['columns']>] = [true, true];
-void [typeIsOptionalOnListOverlayOutput, typeAndColumnsAreUnknownThere];
+void [typeIsOptionalOnListOverlayOutput];
 
 describe('[#19920] the flattened overlay members keep their own viewKind literal', () => {
   it('the list-shaped `viewKind: "form"` body is refused by every door that judges it', () => {
     const body = { type: 'grid', columns: ['name'], object: 'crm_lead', viewKind: 'form' };
     expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse(body).success).toBe(false);
     expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse(body).success).toBe(false);
+    expect(ViewMetadataSchema.safeParse(body).success).toBe(false);
+    expect(AssembledViewArtifactSchema.safeParse(body).success).toBe(false);
+  });
+
+  it('a list overlay whose `columns` is a number is refused by every door that judges it', () => {
+    const body = { object: 'crm_lead', viewKind: 'list', columns: 42 };
+    expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse(body).success).toBe(false);
     expect(ViewMetadataSchema.safeParse(body).success).toBe(false);
     expect(AssembledViewArtifactSchema.safeParse(body).success).toBe(false);
   });
