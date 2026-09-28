@@ -4020,8 +4020,10 @@ export class RemoteTransport {
 
   /**
    * [#20444] `$empty` aimed at a field whose declaration this transport was not
-   * handed — `driver-sql`'s `undeclaredEmptyOperatorFieldError`, in this
-   * transport's location convention.
+   * handed — `driver-sql`'s `undeclaredEmptyOperatorFieldError`, whose withheld
+   * sentence this one is behind the `[RemoteTransport]` prefix (the declaration
+   * the caller is missing is the DRIVER's registry, which this transport reads),
+   * in this transport's location convention.
    */
   private undeclaredEmptyOperatorField(object: string, field: string, subtree?: unknown): Error {
     const why =
@@ -4031,11 +4033,11 @@ export class RemoteTransport {
       '"has no value".';
     return this.withheldRefusal(
       '[RemoteTransport] Operator "$empty" in this filter targets a field whose declaration this ' +
-        `transport does not hold (no declared type). ${why} The field is withheld from the message; ` +
+        `driver does not hold (no declared type). ${why} The field is withheld from the message; ` +
         'the full diagnostic is in the server log.',
       subtree,
       `[RemoteTransport] Operator "$empty" on field '${object}.${field}' targets a field whose ` +
-        `declaration this transport does not hold (no declared type). ${why}`,
+        `declaration this driver does not hold (no declared type). ${why}`,
     );
   }
 
