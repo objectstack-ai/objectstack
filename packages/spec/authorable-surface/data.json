@@ -103,7 +103,6 @@
     "data/CubeJoin:name",
     "data/CurrencyConfig:currencyMode",
     "data/CurrencyConfig:defaultCurrency",
-    "data/CurrencyConfig:precision",
     "data/CurrencyValue:currency",
     "data/CurrencyValue:value",
     "data/DataEngineAggregateOptions:aggregations",

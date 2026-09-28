@@ -57,8 +57,13 @@ const CALLERS = {
     financeAuthor: { userId: 'u_finance_author', systemPermissions: ['manage_metadata', 'finance.access'] },
     /** The card's author: may save the app, but holds no `finance.access`. */
     author: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
-    /** May open the app, may not save it. */
-    member: { userId: 'u_member', systemPermissions: [] },
+    /**
+     * May open the app and read drafts (a Studio builder), may not save it.
+     * [#20338] A caller who may not read drafts at all is never served one —
+     * they read the published app (`meta-draft-read-builder-gate.test.ts`) — so
+     * the "may not save" control is a caller who may still read the draft.
+     */
+    builder: { userId: 'u_builder', systemPermissions: ['studio.access'] },
 } as const;
 type CallerName = keyof typeof CALLERS;
 
@@ -189,14 +194,14 @@ describe('[#20290] the draft read serves an app author the stored draft whole', 
 
     it('a caller who may not save the app reads the draft pruned per caller (the control) — no per-deployment gate either, as on /layers', async () => {
         const { call } = await boot();
-        const res = await call('member', 'GET', '', 'atlas', { state: 'draft' });
+        const res = await call('builder', 'GET', '', 'atlas', { state: 'draft' });
 
         expect(res.statusCode).toBe(200);
         expect(res.body?.item?.label).toBe('Atlas (draft)');
         expect(navIds(res.body?.item)).toEqual(['nav_leads', 'nav_org_directory']);
         expect(JSON.stringify(res.body)).not.toContain('nav_finance');
         // The same per-caller answer the stored-version doors give them.
-        const layers = await call('member', 'GET', '/layers', 'atlas');
+        const layers = await call('builder', 'GET', '/layers', 'atlas');
         expect(navIds(layers.body?.effective)).toEqual(['nav_leads', 'nav_org_directory']);
     }, 60_000);
 

@@ -628,7 +628,10 @@ describe('RestServer', () => {
 
     it('GET /meta/:type forwards previewDrafts to protocol.getMetaItems', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      // [#20338] Forwarded for a caller who may read drafts (the authoring
+      // capability `/meta/_drafts` asks); anyone else reads the published list
+      // (meta-draft-read-builder-gate.test.ts).
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['studio.access'] });
   rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       expect(route).toBeDefined();
@@ -661,7 +664,8 @@ describe('RestServer', () => {
       // keyed on the published checksum).
       protocol.getMetaItemCached = vi.fn();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      // [#20338] A caller who may read drafts (see the list test above).
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['studio.access'] });
   rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       expect(route).toBeDefined();
