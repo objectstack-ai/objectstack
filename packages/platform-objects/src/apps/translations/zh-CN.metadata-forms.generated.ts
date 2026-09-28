@@ -464,6 +464,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数位",
         helpText: "小数部分位数"
       },
+      currencyConfig: {
+        label: "货币配置",
+        helpText: "此字段使用哪种货币。未设置时为 dynamic 模式。两种模式下存储的值都是一个纯数字。"
+      },
+      "currencyConfig.currencyMode": {
+        label: "货币模式",
+        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。"
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "默认货币",
+        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。默认为 CNY。dynamic 模式下不读取。"
+      },
       step: {
         label: "步进值",
         helpText: "滑块的步进增量（默认 1）。仅渲染端使用：写入路径不会拒绝偏离步进网格的值。"
@@ -471,6 +483,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "最大文件大小",
         helpText: "允许的最大文件大小，单位为字节（正整数）。写入时在服务端按已记录的文件大小校验——没有记录大小的文件不会被它拦下。"
+      },
+      accept: {
+        label: "允许的文件类型",
+        helpText: "允许上传的类型，可写 MIME 类型、type/* 通配符或 .ext 后缀（例如 image/*、.pdf）。提供给文件选择器，并在写入时于服务器端对照已存储的文件再次检查。未设置：任何类型。"
       },
       dimensions: {
         label: "向量维度",
@@ -538,9 +554,25 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "选择器每页行数",
         helpText: "记录选择对话框每页显示的行数——正整数，默认 10。"
       },
+      lookupColumns: {
+        label: "Lookup 列",
+        helpText: "记录选择器表格的列：被引用对象的字段名，或 {field, label, width, type} 条目（例如 [\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]）。未设置：从被引用对象推导。"
+      },
+      lookupFilters: {
+        label: "Lookup 筛选条件",
+        helpText: "选择器候选记录的基础筛选，写作被引用对象上的 {field, operator, value} 规则——operator 取 eq、ne、gt、lt、gte、lte、contains、in、notIn 之一（例如 [{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]）。作用于每一种选择器界面，并与 dependsOn 筛选以 AND 组合。"
+      },
+      dependsOn: {
+        label: "依赖字段",
+        helpText: "此字段的可选项所依赖的同一记录上的字段：在它们都有值之前，表单会暂缓此字段，任一变化时重新计算。lookup 用它们筛选候选记录——写字段名时筛选被引用对象上同名的字段，{field, param} 则指定另一个字段。选项类字段在此列出父字段名；逐项规则写在各选项的 visibleWhen 中。"
+      },
       relatedListTitle: {
         label: "关联列表标题",
         helpText: "该关系在父记录详情页上关联列表的标题。"
+      },
+      relatedListColumns: {
+        label: "相关列表列",
+        helpText: "父记录详情页上此关系的相关列表的列，写作本对象（即子对象）的字段名，例如 name、status。未设置：从子对象推导。只写名称——标签、单元格类型和格式都来自子对象的字段定义。"
       },
       inlineTitle: {
         label: "内嵌表格标题",
@@ -586,6 +618,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部 ID",
         helpText: "标记为外部 ID 用于 upsert 操作"
       },
+      storage: {
+        label: "存储约束",
+        helpText: "物理存储约束（ADR-0113）：写入契约刻意不隐含的 DDL。未设置：不要求任何约束。"
+      },
+      "storage.notNull": {
+        label: "非空（NOT NULL）",
+        helpText: "在该列上生成数据库 NOT NULL 约束。未设置时，即使 required 为真该列仍可为空——必填由引擎在写入时保证。对已存在空值的行声明它是一次破坏性迁移，受 schema drift 流程把关（先回填）。与 requiredWhen 同时声明会被拒绝。"
+      },
       readonly: {
         label: "只读",
         helpText: "在表单中只读"
@@ -602,9 +642,25 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可排序",
         helpText: "允许按此字段排序"
       },
+      visibleWhen: {
+        label: "可见条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.type == 'invoice'）——仅当其为 TRUE 时表单才显示此字段。"
+      },
+      readonlyWhen: {
+        label: "只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
+      },
+      requiredWhen: {
+        label: "必填条件",
+        helpText: "基于记录的 CEL 谓词——为 TRUE 时字段必填，并在服务器端作为状态转换门槛执行：若写入前记录合规，而写入后缺少该值，则拒绝写入；因此原本就缺少该值的行，其无关编辑仍可通过。若需要每次写入都必须满足的规则，请使用 validations 中的 script 规则。与 storage.notNull 同时声明会被拒绝。"
+      },
       maskingRule: {
         label: "脱敏规则",
         helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用方读取或编辑此字段必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D3）。不持有时，读取到的值会被掩码（设置了 maskingRule 时为部分掩码），编辑会被拒绝。为空或未设置：不设能力门槛。"
       },
       internal: {
         label: "不对外返回",
@@ -1535,6 +1591,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "声明式写入",
         helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。"
       },
+      patch: {
+        label: "静态字段值（patch）",
+        helpText: "更新写入当前记录的静态字段值，例如 {\"status\": \"done\"}——合并在 `params` 收集的值之下，同名参数优先。以调用方身份写入：对象的权限、钩子和校验规则都会像用户编辑一样生效。"
+      },
       undoable: {
         label: "可撤销",
         helpText: "更新成功后提供“撤销”入口。撤销捕获的是该动作写入的每个字段的原值——也就是合并后的写入集合，即 `params` 之下的 `patch`。没有声明 `operation` 的动作没有写入集合，因此也没有可捕获的内容。"
@@ -1543,6 +1603,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "批量分发契约",
         helpText: "该动作主体所依据的批量分发契约：'perRecord' 为每条选中的记录各发一次调用，并带上该行的 recordId；'aggregate' 对整批选中只发一次调用，所有 id 都在 params._selectedIds 里。不填则按逐条记录分发。"
       },
+      description: {
+        label: "描述",
+        helpText: "显示在此动作参数对话框标题下方的说明文字。对于会收集参数的动作，确认问题应写在这里而不是 confirmText 中——一个对话框，而不是两个。它不是 ai.description，后者是 AI 智能体读取的文字。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
@@ -1550,6 +1614,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "成功消息",
         helpText: "执行成功后的提示信息"
+      },
+      errorMessage: {
+        label: "错误消息",
+        helpText: "动作失败时显示的错误消息，替代原始错误信息。"
       },
       refreshAfter: {
         label: "完成后刷新",
@@ -1587,6 +1655,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
       },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作路由会以 403 拒绝其他调用方（script、flow 和 modal 动作，以及 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作由浏览器直接调用其端点，因此该端点必须自行再次检查。"
+      },
       ai: {
         label: "AI 暴露",
         helpText: "AI 暴露（需显式开启）：设置 ai.exposed=true 并填写 ai.description（≥40 个字符），此操作即可被代理调用。"
@@ -1602,6 +1674,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "请求体结构",
         helpText: "请求体的组织形式（扁平或嵌套）"
+      },
+      bodyExtra: {
+        label: "附加请求体（bodyExtra）",
+        helpText: "此 api 动作的静态请求体字段，最后合并，因此会覆盖收集到的参数（例如 {\"resend\": true}）。页面变量标记（写在双花括号中的 page.NAME）由运行时解析。请求负载写在这里，不要写在 params 中。"
       }
     }
   },

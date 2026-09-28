@@ -464,6 +464,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数桁",
         helpText: "小数部の桁数"
       },
+      currencyConfig: {
+        label: "通貨設定",
+        helpText: "このフィールドの通貨。未設定の場合は dynamic モードです。どちらのモードでも、保存される値は単なる数値です。"
+      },
+      "currencyConfig.currencyMode": {
+        label: "通貨モード",
+        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。"
+      },
+      "currencyConfig.defaultCurrency": {
+        label: "既定の通貨",
+        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。既定は CNY です。dynamic モードでは参照されません。"
+      },
       step: {
         label: "ステップ値",
         helpText: "スライダーのステップ増分（既定は 1）。レンダラー専用で、書き込み経路はステップから外れた値を拒否しません。"
@@ -471,6 +483,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxSize: {
         label: "最大ファイルサイズ",
         helpText: "許可する最大ファイルサイズ（バイト単位の正の整数）。書き込み時にサーバー側で保存済みのファイルサイズと照合します。サイズが記録されていないファイルは判定対象になりません。"
+      },
+      accept: {
+        label: "許可するファイル形式",
+        helpText: "アップロードを許可する形式。MIME タイプ、type/* ワイルドカード、または .ext 拡張子で指定します（例：image/*、.pdf）。ファイルピッカーに渡され、書き込み時にサーバー側で保存済みのファイルと照合して再チェックされます。未設定の場合はすべての形式を許可します。"
       },
       dimensions: {
         label: "ベクトル次元数",
@@ -538,9 +554,25 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ピッカーの 1 ページ行数",
         helpText: "レコードピッカーのダイアログで 1 ページに表示する行数。正の整数で、既定は 10 です。"
       },
+      lookupColumns: {
+        label: "Lookup の列",
+        helpText: "レコードピッカーの表の列。参照先オブジェクトのフィールド名、または {field, label, width, type} エントリで指定します（例：[\"name\", {\"field\": \"status\", \"label\": \"Stage\"}]）。未設定の場合は参照先オブジェクトから導出されます。"
+      },
+      lookupFilters: {
+        label: "Lookup フィルター",
+        helpText: "ピッカーの候補に適用する基本フィルター。参照先オブジェクトに対する {field, operator, value} ルールで指定し、operator は eq、ne、gt、lt、gte、lte、contains、in、notIn のいずれかです（例：[{\"field\": \"status\", \"operator\": \"eq\", \"value\": \"active\"}]）。すべてのピッカー画面に適用され、dependsOn のフィルターと AND で結合されます。"
+      },
+      dependsOn: {
+        label: "依存フィールド",
+        helpText: "このフィールドの選択肢が依存する、同じレコード上のフィールド。それぞれに値が入るまでフォームはこのフィールドを保留し、いずれかが変わると再評価します。lookup はこれらで候補を絞り込みます。名前だけを書くと参照先オブジェクトの同名フィールドで絞り込み、{field, param} は別のフィールドを指定します。選択肢型のフィールドでは親フィールド名を列挙し、選択肢ごとのルールは各選択肢の visibleWhen に書きます。"
+      },
       relatedListTitle: {
         label: "関連リストのタイトル",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストのタイトル。"
+      },
+      relatedListColumns: {
+        label: "関連リストの列",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストの列。このオブジェクト（子オブジェクト）のフィールド名で指定します（例：name、status）。未設定の場合は子オブジェクトから導出されます。名前のみを指定し、ラベル、セルの型、書式は子オブジェクトのフィールド定義から取られます。"
       },
       inlineTitle: {
         label: "インライン表のタイトル",
@@ -586,6 +618,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部 ID",
         helpText: "upsert 操作用の外部 ID としてマーク"
       },
+      storage: {
+        label: "ストレージ制約",
+        helpText: "物理ストレージの制約（ADR-0113）。書き込み契約があえて含めていない DDL を指定します。未設定の場合、制約は要求されません。"
+      },
+      "storage.notNull": {
+        label: "NOT NULL 制約",
+        helpText: "列にデータベースの NOT NULL を付けます。未設定の場合、required でも列は NULL を許容したままで、必須はエンジンが書き込み時に保証します。既存の NULL 行がある状態で宣言すると破壊的なマイグレーションとなり、スキーマドリフトの手順で制御されます（先にバックフィルしてください）。requiredWhen と同時に宣言すると拒否されます。"
+      },
       readonly: {
         label: "読み取り専用",
         helpText: "フォームでフィールドを読み取り専用にする"
@@ -602,9 +642,25 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び替え可能",
         helpText: "このフィールドでリストの並べ替えを許可"
       },
+      visibleWhen: {
+        label: "表示条件",
+        helpText: "レコードに対する CEL 述語（例：record.type == 'invoice'）。TRUE の間だけ、フォームにこのフィールドが表示されます。"
+      },
+      readonlyWhen: {
+        label: "読み取り専用条件",
+        helpText: "レコードに対する CEL 述語（例：record.status == 'paid'）。TRUE の間はフィールドが読み取り専用になり、サーバー側で強制されます。ロック中のフィールドへの更新による変更は破棄され、保存済みの値が保持されます。レコード自身の列だけを読み、参照フィールドを経由した読み取りは objectstack validate が拒否します。"
+      },
+      requiredWhen: {
+        label: "必須条件",
+        helpText: "レコードに対する CEL 述語。TRUE の間はフィールドが必須となり、サーバー側で状態遷移のゲートとして強制されます。書き込み前のレコードが条件を満たしていて、書き込みで値が欠けるとき、その書き込みは拒否されます。そのため、もともと値が欠けている行は無関係な編集を引き続き通過します。すべての書き込みで満たすべきルールには validations の script ルールを使ってください。storage.notNull と同時に宣言すると拒否されます。"
+      },
       maskingRule: {
         label: "マスキングルール",
         helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
+      },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このフィールドを読み取りまたは編集するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D3）。持たない場合、読み取り時に値がマスクされ（maskingRule があれば部分マスク）、編集は拒否されます。空または未設定の場合、機能による制限はありません。"
       },
       internal: {
         label: "外部に返さない",
@@ -1535,6 +1591,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "宣言的な書き込み",
         helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。"
       },
+      patch: {
+        label: "固定値（patch）",
+        helpText: "更新が現在のレコードに書き込む固定のフィールド値（例：{\"status\": \"done\"}）。`params` が収集した値の下にマージされるため、同じ名前のパラメーターが優先されます。呼び出し元として書き込まれ、オブジェクトの権限、フック、検証がユーザーの編集と同様に適用されます。"
+      },
       undoable: {
         label: "取り消し可能",
         helpText: "更新が成功した後に「元に戻す」操作を提示します。取り消しが保持するのは、このアクションが書き込むすべての項目の変更前の値、すなわち `params` の下にマージされた `patch` という書き込み一式です。`operation` を宣言していないアクションは書き込み一式を持たないため、保持する対象がありません。"
@@ -1543,6 +1603,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "一括ディスパッチ契約",
         helpText: "このアクションの本体が前提とする一括ディスパッチの契約です。'perRecord' は選択された行ごとに 1 回ずつ、その行の recordId を添えてディスパッチします。'aggregate' は選択全体で 1 回だけディスパッチし、すべての id を params._selectedIds に入れて渡します。省略した場合はレコードごとのディスパッチになります。"
       },
+      description: {
+        label: "説明",
+        helpText: "このアクションのパラメーターダイアログのタイトル下に表示される説明文。パラメーターを収集するアクションでは、確認の問いを confirmText ではなくここに書きます（ダイアログは 2 つではなく 1 つ）。AI エージェントが読む ai.description とは別物です。"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"
@@ -1550,6 +1614,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       successMessage: {
         label: "成功メッセージ",
         helpText: "完了後の成功メッセージ"
+      },
+      errorMessage: {
+        label: "エラーメッセージ",
+        helpText: "アクションが失敗したときに、元のエラーの代わりに表示するエラーメッセージ。"
       },
       refreshAfter: {
         label: "完了後に更新",
@@ -1587,6 +1655,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このアクションを実行するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D4）。それ以外の呼び出し元はプラットフォームのアクションルートで 403 として拒否され（script、flow、modal アクションと MCP/AI 経路）、ボタンも表示されません。type が api のアクションはエンドポイントを直接呼び出すため、そのエンドポイントで改めてチェックする必要があります。"
+      },
       ai: {
         label: "AI 公開",
         helpText: "AI 公開（オプトイン）: ai.exposed=true を設定し、ai.description（≥40 文字）を記述すると、エージェントから呼び出せるようになります。"
@@ -1602,6 +1674,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       bodyShape: {
         label: "本文構造",
         helpText: "リクエスト body 構造（flat または nested）"
+      },
+      bodyExtra: {
+        label: "追加リクエストボディ（bodyExtra）",
+        helpText: "この api アクションの固定のリクエストボディ項目。最後にマージされるため、収集したパラメーターを上書きします（例：{\"resend\": true}）。ページ変数トークン（二重波括弧で囲んだ page.NAME）はランタイムが解決します。ペイロードは params ではなくここに書きます。"
       }
     }
   },
