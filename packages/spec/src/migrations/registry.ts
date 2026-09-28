@@ -1156,16 +1156,16 @@ const step17: MigrationStep = {
       reason:
         'ADR-0049 enforce-or-remove. `isAsync` declared "this action suspends the flow '
         + 'awaiting an external reply" and NOTHING read it: a fresh three-repo measurement '
-        + '(#6748, re-run at pickup) found zero property reads across objectstack, objectui '
-        + 'and cloud — every hit was the declaration itself, a generated baseline, one of '
+        + '(taken when the key was filed for retirement, and re-run at pickup) found zero '
+        + 'property reads across objectstack, objectui and cloud — every hit was the declaration itself, a generated baseline, one of '
         + 'five shipped descriptors WRITING it, a test fixture pinning the shape, or prose. '
         + 'So declaring it never made a node suspend and omitting it never stopped one, '
         + 'which is the silently-inert declaration ADR-0049 exists to end. It was always a '
         + 'second, weaker spelling of the capability `supportsPause` states, and the two '
         + 'diverged in exactly the way a duplicated declaration does: `screen` declared '
         + 'both, `map` and `wait` declared `isAsync` alongside `supportsPause`, and nothing '
-        + 'anywhere reconciled them. The sibling took the ENFORCE leg of the same ruling in '
-        + '#6667 — `AutomationEngine` now refuses a suspension whose type does not declare '
+        + 'anywhere reconciled them. The sibling took the ENFORCE leg of the same ruling — '
+        + '`AutomationEngine` now refuses a suspension whose type does not declare '
         + '`supportsPause: true` — so the capability this key gestured at is now a real, '
         + 'enforced fact under one name. This one had no consumer to grow into and takes '
         + 'the remove leg. '
@@ -1207,12 +1207,13 @@ const step17: MigrationStep = {
         'A SECURE-DEFAULT FLIP with no metadata shape to rewrite — the same category as '
         + "protocol 12's `rest-requireauth-default-flip`, and it is registered here for the "
         + 'same reason: whether a given pause is genuinely open to the generic route is a '
-        + 'trust judgment no transform can make. The #3801 resume gate keys on the SUSPENDED '
+        + 'trust judgment no transform can make. The generic resume route\'s authorization gate '
+        + 'keys on the SUSPENDED '
         + "NODE, and `ActionDescriptor.resumeAuthority` used to default to `'any'`, so a "
         + 'pausing node type shipped raw-resumable unless its author remembered the field. '
         + "It now resolves to `'service'` when absent: an unclaimed pause is refused on the "
         + 'generic route with `PERMISSION_DENIED` / 403 until its descriptor states who may '
-        + 'continue it. #3823 is the incident that decided the direction — ADR-0044 pointed '
+        + 'continue it. The revise-window incident decided the direction — ADR-0044 pointed '
         + "an approval's revise edge at a generic `wait`, `wait` is legitimately `'any'`, and "
         + 'the pause standing in a service-owned position inherited a fail-open value nobody '
         + 'chose; the demonstrated cost was an unaudited resubmit plus a destroyed remote '
@@ -1221,8 +1222,8 @@ const step17: MigrationStep = {
         + "guessing `'service'` returns a refusal naming the missing field. ⚠️ The surface "
         + 'is a DESCRIPTOR FIELD set in plugin CODE, never stack metadata, so there is no '
         + 'source for a D2 conversion to rewrite and deliberately no schema tombstone — the '
-        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
-        + '(#5540) and `actor-user-roles-to-positions` (#6011) already carry. It differs from '
+        + 'disposition `data-driver-find-stream-retired`, `storage-service-list-retired` '
+        + 'and `actor-user-roles-to-positions` already carry. It differs from '
         + 'those in one way a reader should not have to infer: nothing is REMOVED, so tsc '
         + 'reports nothing at all — the field was already optional after step one and an '
         + 'omission still compiles. The enforced channels are all run-time: a registration '
@@ -1232,7 +1233,8 @@ const step17: MigrationStep = {
         + 'channel that arrives BEFORE a user hits a run that will not continue. In-tree the '
         + 'flip moves nothing: all six shipped pausing types (screen, wait, subflow, map, '
         + 'approval, approval_revise) declare their authority explicitly. ADR-0044 amendment '
-        + '(2026-07-28) and its 2026-08-08 landing section, ADR-0019 #3801 addendum, #5561.',
+        + '(2026-07-28) and its 2026-08-08 landing section, and the 2026-07-28 resume-seam '
+        + 'addendum to ADR-0019 (approval as a flow node).',
       acceptanceCriteria:
         'Every action descriptor your plugin registers for a node type that can suspend '
         + 'declares `resumeAuthority`. Booting the stack logs no `declares supportsPause but '
@@ -1241,14 +1243,14 @@ const step17: MigrationStep = {
         + "through the generic route succeeds for the ones you declared `'any'`, and answers "
         + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
         + 'through your own service API instead. ⚠️ `supportsPause` is no longer the '
-        + 'declaration nothing enforced (#5703, closed by #6667): an executor whose '
+        + 'declaration nothing enforced: an executor whose '
         + '`execute()` returns `suspend: true` while leaving `supportsPause` false is still '
         + 'warned about by neither warning channel, but '
         + '`AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the '
         + 'one seam every suspension passes through — a guard-class failure no `fault` edge '
         + 'routes — so it needs no hand-check. The residue that does: an executor registering '
         + 'NO descriptor declares nothing for either warning or the refusal to read, so its '
-        + 'pauses are still created and refused only later, on the resume route (#5561).',
+        + 'pauses are still created and refused only later, on the resume route.',
     },
     {
       id: 'action-session-roles-to-positions',
@@ -1257,23 +1259,25 @@ const step17: MigrationStep = {
       reason:
         'The MIRROR-IMAGE sibling of `actor-user-roles-to-positions`, and the reason both are in this '
         + 'step: the hook `ctx.session` carried `roles` declared-and-never-produced (removed '
-        + 'outright, #5050), while the ACTION body\'s `ctx.session` carries it '
+        + 'outright), while the ACTION body\'s `ctx.session` carries it '
         + 'produced-and-really-populated. `buildActionSession()` '
         + '(`packages/runtime/src/action-execution.ts`) copies `ExecutionContext.positions` '
         + 'into a key spelled `roles` — the ADR-0090 D3 vocabulary handed to the author under '
         + 'the one spelling that ADR bans — so a body author met two different answers to one '
         + 'key name on one platform: rejected in a hook, live and full of values in an action. '
-        + '#5613 ruled contract-first (maintainer, 2026-08-06: "C skeleton + A semantics"): '
-        + 'phase 1 (#5697) declared the previously undeclared shape as `ActionSessionSchema`, '
-        + 'and phase 2 renames the key. `positions` is now the canonical key on that schema '
-        + 'and `roles` a deprecated alias of it (#5779); the producer emits both for one '
-        + 'deprecation window (#5613 runtime half), after which `roles` is removed on the path '
-        + 'the v16 session-alias removal already walked (#3280 deprecated → #3290 removed). '
+        + 'The maintainer ruled contract-first on 2026-08-06 ("C skeleton + A semantics": declare '
+        + 'the shape as it stands first, then rename on the typed face): phase 1 declared the '
+        + 'previously undeclared shape as `ActionSessionSchema`, and phase 2 renames the key. '
+        + '`positions` is now the canonical key on that schema and `roles` a deprecated alias of '
+        + 'it; the producer emits both for one deprecation window (the runtime half of the same '
+        + 'ruling), after which `roles` is removed on the path the v16 session-alias removal '
+        + 'already walked (the hook session\'s `tenantId` alias: deprecated first, removed in the '
+        + 'next major). '
         + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds: '
         + 'FIRST, there is no source to convert — an action `ctx.session` is constructed per '
         + 'dispatch and never persisted, so no `sys_metadata` row, example or template can '
-        + 'carry the key — the `openApi31` (#4579) / `activationEvents` (#4657) / '
-        + '`hook-context-session-roles-retired` (#5050) shape. SECOND, the only place the key '
+        + 'carry the key — the `openApi31` / `activationEvents` / '
+        + '`hook-context-session-roles-retired` shape. SECOND, the only place the key '
         + 'is ever SPELLED is inside an action body: author-written JS/TS, or a sandboxed '
         + 'script whose `ScriptContext.session` is still `unknown`. A declarative transform '
         + 'cannot safely rewrite an identifier inside free-form code — exactly the reason the '
@@ -1286,7 +1290,7 @@ const step17: MigrationStep = {
         + 'authorable-surface ratchet adjudicates) belongs to the release that closes the '
         + 'window. Until then this entry IS the channel: `spec-changes.json` and the generated '
         + 'upgrade guide are how a reader learns the rename before the removal reaches them. '
-        + 'ADR-0090 D3, ADR-0087, #5613 / #5779.',
+        + 'ADR-0090 D3, ADR-0087.',
       acceptanceCriteria:
         'No action body reads `ctx.session.roles`; every such read is `ctx.session.positions` '
         + 'and observes the same array (the rename is a rename — the VALUE is '
@@ -2024,7 +2028,7 @@ const step17: MigrationStep = {
         + 'no schema tombstone either: nothing ever ran a driver object through '
         + '`DriverInterfaceSchema.parse()`, so a prescription there would have no one to '
         + 'reach. The enforced channel is tsc, and it points at callers. ADR-0049 / '
-        + 'ADR-0078, #4484.',
+        + 'ADR-0078.',
       acceptanceCriteria:
         'No code calls `driver.findStream(...)`; large reads page through `find()` with '
         + '`limit`/`offset` (which guarantees a total order across the whole walk) or go '
@@ -2049,8 +2053,9 @@ const step17: MigrationStep = {
         + 'layer spends a named 400 (`QUERY_OBJECT_MISMATCH`) refusing the inconsistency. The '
         + 'driver side paid in blanket casts: a direct caller holding only a `where` could not '
         + 'name the type, wrote `as any`, and switched off checking for `where` / `orderBy` / '
-        + '`fields` along with it — 20 such sites measured in cloud#1053, and cloud#1030\'s '
-        + '`$like` reached runtime through exactly that hole. This is a TS contract surface with '
+        + '`fields` along with it — 20 such sites were measured in the downstream cloud codebase, '
+        + 'and a `$like` the type layer would have caught reached runtime there through exactly '
+        + 'that hole. This is a TS contract surface with '
         + 'no authored source for the chain to rewrite, which is why it is a semantic entry and '
         + 'not a D2 conversion; for a typed caller the compiler names every site (TS2353 '
         + '`\'object\' does not exist in type \'DriverQuery\'`), and for an untyped JS caller '
@@ -2059,14 +2064,15 @@ const step17: MigrationStep = {
         + 'unchanged (excess properties are only rejected on fresh literals), and an '
         + 'implementation still declaring `query: QueryAST` keeps compiling under parameter '
         + 'bivariance. What an implementation may no longer do is READ `query.object` — callers '
-        + 'are now entitled to omit it. Registered by the #6350 stock reconciliation. #5181 was '
-        + 'the audit\'s CONTROL sample, drawn to show that not every flagged candidate is an '
+        + 'are now entitled to omit it. Registered by the stock reconciliation that compared the '
+        + 'breaking changesets already on the v17 release train against this ledger. This change '
+        + 'was that audit\'s CONTROL sample, drawn to show that not every flagged candidate is an '
         + 'omission, and it was one: the seven `IDataDriver` hits in the ledger are all prose '
         + 'inside other entries, and the only subject-level hit on this interface is '
         + '`data-driver-find-stream-retired` — a DIFFERENT member. Two later, smaller driver '
-        + 'call-parameter changes (#6321, #6083) both registered, and both cite #5181 as '
-        + 'background; the larger sibling they derive from never got its own entry. ADR-0087, '
-        + '#5181 (backfilled #6350).',
+        + 'call-parameter changes both registered, and both cite this narrowing as '
+        + 'background; the larger sibling they derive from never got its own entry. ADR-0087 '
+        + '(backfilled by that reconciliation).',
       acceptanceCriteria:
         'No `IDataDriver` call site passes an inline literal carrying `object:` — `driver.find('
         + '"account", { object: "account", where: … })` becomes `driver.find("account", { where: '
@@ -2111,7 +2117,7 @@ const step17: MigrationStep = {
         + '`DataEngineBatchRequestSchema`, so a `retiredKey()` prescription would have no one '
         + 'to reach; its three `authorable-surface.json` baseline lines and its '
         + '`json-schema.manifest.json` entry are dropped in the same change, deliberately. '
-        + 'The enforced channel is tsc. ADR-0049 / ADR-0078, #4618.',
+        + 'The enforced channel is tsc. ADR-0049 / ADR-0078.',
       acceptanceCriteria:
         'No code calls `engine.batch(...)` and no type references `DataEngineBatchRequest`; '
         + 'in-process multi-write atomicity goes through `IObjectQLEngine.transaction(cb)`, a '
@@ -2129,7 +2135,8 @@ const step17: MigrationStep = {
       reason:
         '`data.field.changed` was declared in `DataEventType` and emitted by nothing — the '
         + 'engine\'s `publishDataEvent` sends `data.record.{created,updated,deleted}` and (since '
-        + '#4639) `data.records.{updated,deleted}`, and no other producer exists in either '
+        + 'multi-record predicate writes were given events of their own) '
+        + '`data.records.{updated,deleted}`, and no other producer exists in either '
         + 'repository. A subscriber that switched on it was waiting on an event no producer '
         + 'sends: the branch never ran, and because the surrounding `switch` still compiled, '
         + 'nothing anywhere reported the gap (ADR-0078\'s silently-inert declaration, on the '
@@ -2141,7 +2148,7 @@ const step17: MigrationStep = {
         + 'event per write rather than N events on a wide table. This is a runtime EVENT '
         + 'surface — no stack, example or template authors an event name (webhooks subscribe '
         + 'through the separate authorable `WebhookTriggerType`, whose vocabulary was already '
-        + 'trimmed to producers that exist, #3196) — so there is no source for the chain to '
+        + 'trimmed to producers that exist) — so there is no source for the chain to '
         + 'rewrite, and deliberately no schema tombstone: a removed ENUM MEMBER cannot carry a '
         + 'retiredKey() fix-it error the way an authorable object key can (the same limit the '
         + 'sharing-rule `full` retirement `owd-full-alias-removed` hit). The enforced channels are tsc, '
@@ -2149,7 +2156,7 @@ const step17: MigrationStep = {
         + 'fails any consumer still naming the value in a `DataEventType` position, and the '
         + 'enum parse, which now rejects the name instead of accepting an event that never '
         + 'arrives. A genuine per-field stream, if one is ever wanted, gets its own honest '
-        + 'contract the way #4639 gave bulk writes theirs. ADR-0049 / ADR-0078, #4673.',
+        + 'contract the way bulk writes were given theirs. ADR-0049 / ADR-0078.',
       acceptanceCriteria:
         'No consumer subscribes to or switches on `data.field.changed`; per-field change '
         + 'detail is read from a `data.record.updated` event\'s `changes` map (with `before` / '
@@ -2166,8 +2173,10 @@ const step17: MigrationStep = {
         'or a direct `external.credentialsRef` secrets-store reference',
       reason:
         'A datasource artefact is persisted whole into `sys_metadata`, which is served back by ' +
-        'the ordinary data API — an inline credential is cleartext at rest (#7990, maintainer-' +
-        'ruled per-artefact contract closure, 2026-08-12). There is no mechanical rewrite: ' +
+        'the ordinary data API — an inline credential is cleartext at rest. The maintainer ruled ' +
+        'on 2026-08-12 to close that per artefact: each schema that admitted an inline credential ' +
+        'refuses it at publish and points at the secret mechanism the artefact already had, rather ' +
+        'than a heuristic guard at the `sys_metadata` write. There is no mechanical rewrite: ' +
         'moving the value requires ENCRYPTING it into a `sys_secret` row through a running ' +
         "secret binder and deleting the cleartext, which a source-file transform cannot do — " +
         'auto-deleting the key alone would silently drop a live credential instead.',
@@ -2193,13 +2202,14 @@ const step17: MigrationStep = {
       reason:
         'A `${…}` placeholder in authored datasource config is resolved by NOTHING — it is ' +
         'stored verbatim in `sys_metadata` and handed verbatim to the database client at connect ' +
-        '(#7990 census, measured during #8078), so the connection fails, or connects somewhere ' +
+        '(measured by the credential census while the inline-credential refusal was being built), ' +
+        'so the connection fails, or connects somewhere ' +
         'unintended, with no error naming the unresolved placeholder — the masked-failure shape. ' +
         'The syntax looked supported: it parsed green, stored fine, and failed at a distance; two ' +
-        'shipped refusal messages (#8078 inline credentials, #8082 URL userinfo) had to warn ' +
-        '"do NOT substitute a placeholder" around the broken escape. Maintainer-ruled direction 2 ' +
-        'on #8336 (2026-08-13): refuse the syntax loudly at publish; implementing real resolution ' +
-        'was explicitly rejected — a new capability with an env-exfiltration security surface and ' +
+        'shipped refusal messages (the inline-credential refusal and the URL-userinfo refusal) had ' +
+        'to warn "do NOT substitute a placeholder" around the broken escape. The maintainer ruled ' +
+        'on 2026-08-13 for the second of two directions: refuse the syntax loudly at publish; ' +
+        'implementing real resolution was explicitly rejected — a new capability with an env-exfiltration security surface and ' +
         'zero measured pull for actual substitution. There is no mechanical rewrite: the ' +
         'placeholder names a value that exists only in the author\'s intended deployment ' +
         'environment, which a source-file transform cannot know — substituting anything would ' +
@@ -2221,19 +2231,21 @@ const step17: MigrationStep = {
         'secret field (encrypted into `sys_secret`, handle stored at `external.credentialsRef`), ' +
         'or a direct `external.credentialsRef` secrets-store reference',
       reason:
-        'The #7990 closure refused the inline credential KEYS, and #8078 measured that ' +
+        'The inline-credential closure refused the credential KEYS, and building it measured that ' +
         '`config.url` still accepted the identical secret one syntax over — ' +
         '`postgresql://user:password@host/db` landed in `sys_metadata` cleartext exactly as ' +
-        '`config.password` did, and the key refusal itself steered authors there (#8082, ' +
-        'maintainer-ruled Option A, 2026-08-12). Runtime-environment DSNs (`OS_DATABASE_URL` and ' +
-        'friends) never pass through the publish door and are unaffected by construction. There ' +
+        '`config.password` did, and the key refusal itself steered authors there. The maintainer ' +
+        'ruled on 2026-08-12 (Option A) to refuse the URL userinfo password at publish, through ' +
+        'one value-level parse the driver schemas share. Runtime-environment DSNs ' +
+        '(`OS_DATABASE_URL` and friends) never pass through the publish door and are unaffected ' +
+        'by construction. There ' +
         'is no mechanical rewrite, for the same reason as the sibling entry ' +
         '`datasource-config-inline-credential-refused`: moving the value requires ENCRYPTING it ' +
         'into a `sys_secret` row through a running secret binder and stripping the cleartext, ' +
         'which a source-file transform cannot do — auto-stripping the userinfo alone would ' +
         'silently drop a live credential instead. Do not substitute a `${…}` placeholder into ' +
         'the URL: placeholders in authored metadata are resolved by nothing and reach the ' +
-        'database client verbatim (#8078, measured).',
+        'database client verbatim (measured when the inline-credential refusal was built).',
       acceptanceCriteria:
         'Every datasource parses with a credential-free `config.url` / `config.syncUrl` (no ' +
         'userinfo password segment); each affected datasource carries ' +
@@ -3107,8 +3119,8 @@ const step17: MigrationStep = {
         + 'and never a key on `StringOperatorSchema`. That is measured, not assumed — `git '
         + 'log -S\'$regex\'` over `packages/spec/src` returns only doc comments describing how '
         + '`$contains` LOWERS to MongoDB (`Contains substring - SQL: LIKE %?% | MongoDB: '
-        + '$regex`), plus #5701 itself, which added the name solely as `RETIRED_FILTER_OPERATORS` '
-        + 'prescription data. ⚠️ But it differs from those two in the one way that decides the '
+        + '$regex`), plus the retirement\'s own contract-half change, which added the name '
+        + 'solely as `RETIRED_FILTER_OPERATORS` prescription data. ⚠️ But it differs from those two in the one way that decides the '
         + 'disposition, so a reader should not have to infer it: those were driver CALL '
         + 'ARGUMENTS, code and never stack metadata, whereas a filter IS stored metadata. '
         + '`FilterConditionSchema` is an OPEN RECORD (`z.record(z.string(), z.unknown())`) '
@@ -3128,13 +3140,15 @@ const step17: MigrationStep = {
         + 'rewrite would silently change which rows a dashboard, report or permission filter '
         + 'selects, a wrong number rather than a missing one. Choosing the substring the '
         + 'pattern MEANT is a judgment about the query, not a transform. ⚠️ This entry covers '
-        + 'BOTH HALVES of the #4706 ruling (B), not just the driver one: the contract half '
-        + '(#5701 — the `$icontains` declaration, the `$contains` family pinned '
+        + 'BOTH HALVES of the maintainer\'s 2026-08-06 ruling (option B: retire `$regex` loudly '
+        + 'and add `$icontains`, rather than make five backends agree on one regex dialect), not '
+        + 'just the driver one: the contract half '
+        + '(the `$icontains` declaration, the `$contains` family pinned '
         + 'case-sensitive, and the `RETIRED_FILTER_OPERATORS` prescriptions) landed before the '
-        + 'ADR-0087 disposition gate (#6148) existed and so was never asked for a ledger entry; '
-        + 'the driver half (#5702) is where the refusal became executable. One surface, one '
-        + 'entry, registered from the half that made it observable. ADR-0049 / ADR-0087, '
-        + '#4706 / #5701 / #5702.',
+        + 'gate that makes a breaking changeset state its ADR-0087 disposition existed, and so was '
+        + 'never asked for a ledger entry; '
+        + 'the driver half is where the refusal became executable. One surface, one '
+        + 'entry, registered from the half that made it observable. ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'No stored filter and no request `where` spells `$regex` or `$options` — grep the '
         + 'stack for both. Each one is rewritten by asking what the pattern MEANT, not by '
@@ -5591,7 +5605,8 @@ const step18: MigrationStep = {
         + 'transform has both halves in hand, and `objectstack migrate meta` rewrites stored metadata '
         + 'by key. The residue is genuinely a judgement: an action wired BOTH ways has no correct '
         + 'value, because one call and N calls have different side effects and the platform will not '
-        + 'silently unify them (the #17319 ruling refused exactly that option). Such an action is TWO '
+        + 'silently unify them (the 2026-09-12 ruling that made an action declare its dispatch '
+        + 'contract refused exactly that option). Such an action is TWO '
         + 'actions — split the body along the line the two wirings already draw and declare each half '
         + '— or, if the body was deliberately written to serve both, it stays undeclared and the two '
         + 'wirings stand. The census that is this migration’s input was taken 2026-09-13 over '
@@ -5632,8 +5647,9 @@ const step18: MigrationStep = {
         'The rewrite itself is lossless and mechanical, but it is not automatable here: an action handler '
         + 'is authored TypeScript, and the chain rewrites stored metadata by key, so no `os migrate meta` '
         + 'step can reach a call expression inside a function body. The change is a WITHDRAWAL of the '
-        + 'parameter shape #14175 chose, ruled by the director seat (decision batch #123 item 3, '
-        + '2026-09-12, 「同意」) on the long-term axis 「one platform, one query shape」. The facade had been '
+        + 'parameter shape an earlier typing fix chose (the filter alone), ruled by the director '
+        + 'seat on 2026-09-12, with the maintainer\'s agreement, on the long-term axis 「one platform, '
+        + 'one query shape」. The facade had been '
         + 'given a shape different from the engine\'s — the `where` half alone — which made the most '
         + 'natural spelling the wrong one: an author who passed the engine\'s envelope got '
         + '`{ where: { where: … } }`, matching no row and resolving to `[]` with no error, while an '
@@ -7929,7 +7945,8 @@ const step18: MigrationStep = {
       replacement: 'durationSeconds — rename the key; the value is unchanged, and a fractional '
         + 'second is still legal',
       reason:
-        'Maintainer ruling A on #18669 (2026-09-17, decision batch #151 item 4): rename the key and '
+        'Maintainer ruling A of 2026-09-17 on the last two duration keys no closed duration type '
+        + 'could express: rename the key and '
         + 'record an ADR-0087 conversion-layer entry, with no new closed type and no narrowing of '
         + 'anything already stored. '
         + 'This key declared its unit in NO channel at all — no `.describe()`, no JSDoc, no unit '
@@ -7951,9 +7968,11 @@ const step18: MigrationStep = {
         + 'surfaces that state one fact cannot drift apart. '
         + 'The value type is deliberately UNCHANGED at `z.number().optional()`: a fractional second '
         + 'is the ordinary shape of a media length, so the closed `DurationSeconds` type '
-        + '(`.int().nonnegative()`, #18122) was considered and REFUSED by the ruling, and so was an '
-        + '`.int()` floor. That refusal is the load-bearing half — this row is one of the six the '
-        + '#18122 unit set was derived from, and it is the one that takes a NAME instead of a TYPE. '
+        + '(`.int().nonnegative()`, published beside `EpochMs` as a closed duration type) was '
+        + 'considered and REFUSED by the ruling, and so was an '
+        + '`.int()` floor. That refusal is the load-bearing half — this row is one of the six '
+        + 'genuine durations the closed types\' unit set was derived from, and it is the one that '
+        + 'takes a NAME instead of a TYPE. '
         + 'Tombstoned with retiredKey(); FileValueSchema is the one deliberate z.looseObject in this '
         + 'file, so a bare deletion would wave the old spelling through as an unrecognised extra key '
         + 'and the prescription would never be spoken. '
@@ -7962,7 +7981,7 @@ const step18: MigrationStep = {
         + 'FileReferenceIdValueSchema, an opaque string — so a file value is never authored as this '
         + 'shape and never persisted as a sys_metadata row, and the conversion chain has no seam '
         + 'that would ever see one. '
-        + '#18669, #14478, #18122, ADR-0104, ADR-0087.',
+        + 'ADR-0104, ADR-0087.',
       acceptanceCriteria:
         'Every producer that BUILDS an expanded file value spells durationSeconds, and every '
         + 'consumer that reads a media length reads durationSeconds. Authoring duration fails to '
@@ -7981,7 +8000,9 @@ const step18: MigrationStep = {
         + 'unit (data/driver-nosql.zod.ts)',
       replacement: 'timeoutMs — rename the key; the value is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B on duration units (2026-09-02): the unit of a duration-shaped '
+        + 'z.number() lives in the key NAME or in a unit-carrying value, never only in the describe '
+        + 'prose, and no existing offender is grandfathered. '
         + 'It stands alone because it is the only offender on its file. The neighbour is what '
         + 'makes it a real hazard rather than a naming preference: batchSize sits directly beside '
         + 'it, a plain row COUNT with the same z.number().int().positive() shape and the same '
@@ -7992,7 +8013,7 @@ const step18: MigrationStep = {
         + 'the failure a driver timeout exists to prevent. Why a semantic entry and not a D2 '
         + 'conversion: these options are a per-call driver argument, reached only through '
         + 'AggregationPipeline.options, which no stack.zod.ts collection declares and no '
-        + 'sys_metadata row stores, so the chain has no seam. #15680, #14478, ADR-0087.',
+        + 'sys_metadata row stores, so the chain has no seam. ADR-0087.',
       acceptanceCriteria:
         'Every caller that passes NoSQL query options spells timeoutMs. Authoring timeout fails '
         + 'to compile (input type `never`) and fails to parse with the rename prescription. '
@@ -8219,16 +8240,18 @@ const step18: MigrationStep = {
         'or a direct `external.credentialsRef` secrets-store reference, with the username kept in ' +
         'the URL (`mongodb://user@host/db`)',
       reason:
-        'The FOURTH spelling of the same inline secret: #7990 refused the top-level `password` ' +
-        'key, #8082 the URL userinfo, #8337 credential query parameters — and the `options` ' +
-        'passthrough stayed open one syntax over. `options: { auth: { username, password } }` ' +
+        'The FOURTH spelling of the same inline secret: earlier publish refusals closed the ' +
+        'top-level `password` key, the URL userinfo password and the credential-bearing URL query ' +
+        'parameters — and the `options` passthrough stayed open one syntax over. `options: { auth: { username, password } }` ' +
         'parsed green, persisted the password cleartext into `sys_metadata` (served back by the ' +
         'ordinary data API), and genuinely authenticated: mongodb@7.5.0 transforms the block ' +
         'into `MongoCredentials` (measured), so the workaround was live, not inert. A non-empty ' +
         'string `auth.password` is now refused at publish with the binder prescription; ' +
-        '`auth.username` alone stays writable (#8876\'s asymmetry — a username is not credential ' +
-        'material), as do all non-credential passthrough options. The bound secret wins over a ' +
-        'passthrough `auth` block at connect (#8696, measured), so the replacement changes which ' +
+        '`auth.username` alone stays writable (the asymmetry the URL grammar keeps between its ' +
+        'two userinfo halves — a username is not credential material), as do all non-credential ' +
+        'passthrough options. The bound secret wins over a passthrough `auth` block at connect ' +
+        '(measured when the bound secret was made to reach the mongo client on its URL branch), ' +
+        'so the replacement changes which ' +
         'store holds the secret, never which credential connects. There is no mechanical ' +
         'rewrite, for the same reason as the sibling entries ' +
         '`datasource-config-inline-credential-refused`, `datasource-config-url-userinfo-refused` ' +
@@ -8295,9 +8318,11 @@ const step18: MigrationStep = {
         'key: … }` next to `driver`) instead of file-path query parameters',
       reason:
         "`PostgresConfigSchema.url`'s own describe text documents the postgres URL grammar, but " +
-        'until protocol 18 the value was only string-scanned for credentials (#8082/#8337) and ' +
-        'placeholders (#8336) — deliberately so at the SHARED helper, whose refusal to parse is ' +
-        "load-bearing for mongo's multi-host/`+srv` forms (#8696). For postgres that leniency " +
+        'until protocol 18 the value was only string-scanned for credentials (the URL userinfo ' +
+        'password and credential query parameters) and `${…}` placeholders — deliberately so at ' +
+        'the SHARED helper, whose refusal to parse is load-bearing for mongo\'s multi-host/`+srv` ' +
+        'forms (`new URL()` rejects the multi-host form outright, and the mongo arm hands the ' +
+        'authored URL to its client untouched). For postgres that leniency ' +
         'was no check at all: `pg@8.22.0` does not implement libpq\'s multi-host DSN — both ' +
         "`pg-connection-string`'s `parse` and `pg`'s `ConnectionParameters` throw " +
         '`TypeError [ERR_INVALID_URL]` on `postgresql://app@h1:5432,h2:5433/app` (measured) — ' +
@@ -8336,9 +8361,9 @@ const step18: MigrationStep = {
         'handle stored at `external.credentialsRef`), or a direct `external.credentialsRef` ' +
         'secrets-store reference',
       reason:
-        'The #7990 closure refused the inline credential KEYS and #8082 refused the URL userinfo ' +
-        'spelling; the query string was the third spelling of the identical secret, one syntax ' +
-        'over (#8337). `libsql://x.turso.io?authToken=eyJ…` landed in `sys_metadata` cleartext ' +
+        'The inline-credential closure refused the credential KEYS and the next refusal the URL ' +
+        'userinfo spelling; the query string was the third spelling of the identical secret, one ' +
+        'syntax over. `libsql://x.turso.io?authToken=eyJ…` landed in `sys_metadata` cleartext ' +
         'exactly as `config.authToken` did — and at connect `@libsql/core` assigns the URL token ' +
         'OVER the binder-injected one (measured), so the workaround also silently defeated the ' +
         'bound secret; `pg-connection-string` likewise honours `?password=` over userinfo ' +
@@ -8353,7 +8378,7 @@ const step18: MigrationStep = {
         'source-file transform cannot do — auto-stripping the parameter alone would silently ' +
         'drop a live credential instead. Do not substitute a `${…}` placeholder into the URL: ' +
         'placeholders in authored metadata are resolved by nothing and reach the database client ' +
-        'verbatim (#8078, measured).',
+        'verbatim (measured when the inline-credential refusal was built).',
       acceptanceCriteria:
         'Every datasource parses with no credential-bearing query parameter in `config.url` / ' +
         '`config.syncUrl` (no `?authToken=` on turso, no `?password=` on postgres); each ' +
@@ -8372,10 +8397,11 @@ const step18: MigrationStep = {
         '`url` and names no `username`',
       replacement: 'decide what the datasource is meant to do, then make the two halves agree: ' +
         'add `username` to `config` so the bound secret is interpolated beside it into the ' +
-        'composed connection URI at connect (#8696) — or, for a datasource genuinely meant to ' +
+        'composed connection URI at connect — or, for a datasource genuinely meant to ' +
         'connect unauthenticated, remove the `external.credentialsRef` binding (and unbind the ' +
         'orphaned `sys_secret` row via the Setup → Datasources form). Authoring a `config.url` ' +
-        'that names a user is a third valid shape, judged by the sibling #9041 prescription.',
+        'that names a user is a third valid shape, judged by the prescription of the sibling ' +
+        'URL-branch entry, `datasource-credentialsref-mongo-url-no-user-refused`.',
       reason:
         'The pair cannot work as written, and until protocol 18 it was accepted in silence at ' +
         'every door it passed. With no `config.url` the driver factory COMPOSES the connection ' +
@@ -8389,14 +8415,17 @@ const step18: MigrationStep = {
         'authenticate from a password alone — the same measured asymmetry behind the sibling ' +
         'URL-branch refusal. Both branches had always agreed on this input, so this inherits that ' +
         'ruling rather than re-opening it, and lands at the same authoring/publish door — the one ' +
-        'place both halves are visible at once — as the "absence must be loud" half of the ' +
-        '#7314/#7385/#8152/#8875/#8696 family. Deliberately NOT refused, each measured: a ' +
-        'discrete `username` that is present and non-empty (the secret is live there — that is ' +
-        'the branch #8696 already works on), an empty-string `credentialsRef` (not a binding — ' +
-        'the connect path resolves under a truthy check), a non-string `username` (the driver ' +
-        'config gate already reports the type error), and every other driver arm (the postgres ' +
-        'equivalent is re-judged after #8873, never inherited — `pg` receives the bound password ' +
-        'regardless of the DSN naming a user). An EMPTY-STRING `username` IS refused, unlike the ' +
+        'place both halves are visible at once — as the "absence must be loud" half of the family ' +
+        'of driver-factory arms, closed one driver at a time, that each dropped something declared ' +
+        'without a word: the optional-driver arms that answered a missing package with no remedy, ' +
+        'the turso arm that never read its bound secret, and the mysql and mongo DSN branches that ' +
+        'discarded one. Deliberately NOT refused, each measured: a ' +
+        'discrete `username` that is present and non-empty (the secret is live there — the ' +
+        'composed branch has always interpolated it), an empty-string `credentialsRef` (not a ' +
+        'binding — the connect path resolves under a truthy check), a non-string `username` (the ' +
+        'driver config gate already reports the type error), and every other driver arm (the ' +
+        'postgres equivalent is judged on its own client\'s measurement, never inherited — `pg` ' +
+        'receives the bound password regardless of the DSN naming a user). An EMPTY-STRING `username` IS refused, unlike the ' +
         'sibling entry\'s present-but-empty userinfo carve-out: there MongoClient itself throws ' +
         '(`URI contained empty userinfo section`) so the shape is already loud, while here ' +
         '`username: \'\'` composes the same userinfo-free URI and connects — silently. There is ' +
@@ -8407,7 +8436,7 @@ const step18: MigrationStep = {
         'Every mongodb datasource that binds `external.credentialsRef` and authors no `config.url` ' +
         'names a non-empty `config.username` and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource parse ' +
-        'reports the #9147 refusal.',
+        'reports this composed-branch refusal.',
     },
     {
       id: 'datasource-credentialsref-mongo-url-no-user-refused',
@@ -8415,38 +8444,42 @@ const step18: MigrationStep = {
         'no user in its userinfo',
       replacement: 'decide what the datasource is meant to do, then make the two halves agree: ' +
         'add the username to the URL\'s userinfo (`mongodb://user@host/db`) so the bound secret ' +
-        'is injected at connect (#8696) — or, for a datasource genuinely meant to connect ' +
+        'is injected at connect — or, for a datasource genuinely meant to connect ' +
         'unauthenticated, remove the `external.credentialsRef` binding (and unbind the orphaned ' +
         '`sys_secret` row via the Setup → Datasources form)',
       reason:
         'The pair cannot work as written, and until protocol 18 it was accepted in silence at ' +
         'every door it passed. MongoClient credentials need a username as well as a password, ' +
         'and with `url` present the discrete `username` field is superseded — the only place ' +
-        'the username can come from is the URL\'s own userinfo. So the #8696 injection is ' +
-        'conditional on the URL naming a user: `mongodb://app@host/db` + bound secret ' +
+        'the username can come from is the URL\'s own userinfo. So the connect-time injection of ' +
+        'the bound secret on the URL branch is conditional on the URL naming a user: `mongodb://app@host/db` + bound secret ' +
         'authenticates, while `mongodb://host/db` + bound secret connects ANONYMOUSLY with the ' +
         'secret unused and the operator told nothing. Injecting anyway was measured worse ' +
         '(mongodb@7.5.0): fabricating an empty username turns a connection that works ' +
         'anonymously today into a guaranteed handshake failure, and refusing at connect would ' +
         'contradict `MongoConfigSchema.url`\'s published contract ("bind the secret … and it is ' +
         'injected at connect time") while planting a per-branch asymmetry inside the driver ' +
-        'factory — the defect class #8696 closed. The refusal therefore lands at the ' +
+        'factory — the defect class closed when each DSN branch was made to inject the bound ' +
+        'secret its composed branch already used. The refusal therefore lands at the ' +
         'authoring/publish door, the one place both halves are visible at once, as the ' +
-        '"absence must be loud" half of the #7314/#7385/#8152/#8875/#8696 family. Deliberately ' +
+        '"absence must be loud" half of the family of driver-factory arms, closed one driver at a ' +
+        'time, that each dropped something declared without a word: the optional-driver arms that ' +
+        'answered a missing package with no remedy, the turso arm that never read its bound ' +
+        'secret, and the mysql and mongo DSN branches that discarded one. Deliberately ' +
         'NOT refused, each measured: the present-but-empty userinfo forms (`mongodb://@h/db`, ' +
         '`mongodb://:p@h/db` — MongoClient itself throws `MongoParseError: URI contained empty ' +
         'userinfo section`), an empty-string `credentialsRef` (not a binding — the connect path ' +
         'resolves under a truthy check), the composed branch (no `url`, where the discrete ' +
-        '`username` is live), and every other driver arm (the postgres equivalent is re-judged ' +
-        'after #8873, never inherited — `pg` injects on a user-less DSN by its own measured ' +
-        'mechanism). There is no mechanical rewrite because the two valid fixes are ' +
+        '`username` is live), and every other driver arm (the postgres equivalent is judged on ' +
+        'its own client\'s measurement, never inherited — `pg` injects on a user-less DSN by its ' +
+        'own measured mechanism). There is no mechanical rewrite because the two valid fixes are ' +
         'CONTRADICTORY intents — authenticate (add the username) versus anonymous (drop the ' +
         'binding) — and choosing between them requires knowing what the datasource is for.',
       acceptanceCriteria:
         'Every mongodb datasource that binds `external.credentialsRef` and authors `config.url` ' +
         'has a username in that URL\'s userinfo and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource ' +
-        'parse reports the #9041 refusal.',
+        'parse reports this URL-branch refusal.',
     },
     {
       id: 'device-request-response-interval-unit-in-key',
@@ -8714,30 +8747,32 @@ const step18: MigrationStep = {
         + 'also took — becomes `[{ field: \'owner_id\', operator: \'equals\', value: '
         + '\'{current_user_id}\' }]`; the value placeholders and date macros are unchanged. Legacy '
         + 'operator shorthands (`eq`, `ne`, `gt`, `notIn`, …) are accepted and normalized on parse. '
-        + 'The dashboard widget `filter` (`dashboard.zod.ts`) is a different family and is not moved '
-        + 'by this entry (#15829); `object-grid.defaultFilters` is a different key and is not named '
+        + 'The dashboard widget `filter` (`dashboard.zod.ts`) is a different family, judged on its '
+        + 'own, and is not moved by this entry; `object-grid.defaultFilters` is a different key and is not named '
         + 'by the ruling this entry records.',
       reason:
-        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
-        + '2026-08-25, verbatim 「同意」, Option B) reached two more locations the ComponentPropsMap '
-        + 'census could not see (#15442 anchor, #15449 member; decision batch #55, 2026-09-06, '
-        + 'verbatim 「同意」, option A: converge family-wide, one entry). The binding-level '
+        'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: a '
+        + 'filter door takes the `ViewFilterRule` array rather than keeping a record-shaped '
+        + 'exception every author and AI would have to remember) reached two more locations the '
+        + 'ComponentPropsMap census could not see (ruled 2026-09-06, option A: converge the binding '
+        + 'and the four block doors family-wide, under one entry, rather than record an exception). The binding-level '
         + '`dataSource.filter` alone still said `FilterConditionSchema`: it refused the array the '
         + 'consumer\'s own pins author at that key, and `element:record_picker` carried two '
         + 'orthographies at two keys (`properties.filter` the rule array, `dataSource.filter` the '
         + 'record) resolved through one `??` in the renderer — the shape in which a dropped or '
         + 'misread filter returns the wrong rows without an error. The four `object-*` doors said '
-        + '`z.unknown()`: a read-point record derived from the renderers on 2026-08-13 (#7751), '
+        + '`z.unknown()`: a read-point record derived from the renderers on 2026-08-13, when the '
+        + '`object-*` blocks first got props schemas in the map, '
         + 'twelve days before the ruling, not an exception to it — so an author following the '
         + 'showcase wrote the record and an author following the manifest wrote an array, and each '
         + 'got a silent success receipt while the html tier already declared `array` for the grid '
         + 'and the metric. The record\'s `$and` / `$or` / `$not` keys were misread by every gate '
-        + 'block anyway (objectui#6948), so the exception would have preserved a capability the '
+        + 'block anyway (the console\'s filter converter had no branch for them), so the exception would have preserved a capability the '
         + 'consumer does not honour. Sequenced measurement-first, as the family had to be: at the '
         + 'objectui pin `a472b07` the `object-metric` aggregate path posted an array `where` that '
-        + '`POST /analytics/query` refused with 400 on every array form (#15828), so the converge '
-        + 'was parked behind the pin bump #16626; at the pin this repo builds against (`53ded82b`, '
-        + 'objectui#7754) the adapter lowers an authored array through `translateFilterArray` and '
+        + '`POST /analytics/query` refused with 400 on every array form, so the converge '
+        + 'was parked behind a bump of that pin; at the pin this repo builds against (`53ded82b`) '
+        + 'the adapter lowers an authored array through `translateFilterArray` and '
         + 'the spec\'s own `parseFilterAST` sink before the wire, `ObjectGrid.tsx` lowers a rule '
         + 'array through `toFilterNode`, `ObjectKanban.tsx` / `ObjectCalendar.tsx` hand it verbatim '
         + 'to `$filter` where `convertQueryParams` lowers it, and the binding\'s composition seam '
@@ -8749,7 +8784,9 @@ const step18: MigrationStep = {
         + 'in the same change, and zero outside those files; this entry carries the prescription '
         + 'for authors outside the repo. '
         + 'Metadata AT REST: the mappable part of the table above is a D2 conversion, '
-        + '`page-component-filter-record-to-rule-array` (#17321, ruling B), so '
+        + '`page-component-filter-record-to-rule-array` (ruled 2026-09-12, option B: convert what '
+        + 'maps losslessly and name what does not, rather than leave every stored row to its next '
+        + 'save or flatten combinators), so '
         + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) rewrites '
         + 'a stored page whose `filter` is a flat record, an operator object whose operators the '
         + 'rule vocabulary spells, several such keys, or a single-level AST tuple array, and every '
@@ -8786,7 +8823,8 @@ const step18: MigrationStep = {
         + 'a record-form `filter: { status: \'active\' }` is refused at the `filter` path of all '
         + 'five doors (`invalid_type`, expected array), and an AST tuple array is refused at '
         + '`filter.0` (expected object). No `filter` door in `ComponentPropsMap` accepts the '
-        + 'record any more (the twin of the #14406 census pin). At runtime each block and the '
+        + 'record any more (the twin of the census pin that asks whether any `filter` door still '
+        + 'refuses the array). At runtime each block and the '
         + 'binding select exactly the rows the array selects — the same filter a list view '
         + 'renders — including the `object-metric` aggregate tile, whose analytics `where` is the '
         + 'lowered condition. Downstream (objectui, after a released spec version reaches the '
@@ -8878,27 +8916,32 @@ const step18: MigrationStep = {
         + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
         + 'accepted and normalized on parse',
       reason:
-        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
-        + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:number'].filter` "
+        'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
+        + 'align the element to the `ViewFilterRule` array rather than keep it the record-shaped '
+        + "exception). `ComponentPropsMap['element:number'].filter` "
         + 'was the one `filter` input in the map declared as the MongoDB-style record '
         + '(`FilterConditionSchema`) while its siblings declared the `ViewFilterRule` array, so '
         + 'the filter a list view stores and renders was refused by the KPI element beside it, '
         + 'and the objectui parity gate had to carry a reasoned exemption to look away. The '
         + 'convergence was sequenced consumer-first (ruling recorded 2026-08-25, Option A): '
-        + 'objectui#6828 made `ObjectStackAdapter.aggregate()` run the same `translateFilterArray` '
+        + 'the console adapter was changed so `ObjectStackAdapter.aggregate()` runs the same '
+        + '`translateFilterArray` '
         + 'its `find()` path runs, and the objectui pin carrying it was re-measured before this '
-        + 'entry moved — but that measurement named the wrong hop, and #15828 corrects it here. '
+        + 'entry moved — but that measurement named the wrong hop, and the runtime route\'s refusal '
+        + 'of the array corrects it here. '
         + '`translateFilterArray` yields AST tuples, which are still a `FilterArray` — input-only '
         + 'sugar — so the real path is: authored array → `translateFilterArray` → lowered by '
         + '`parseFilterAST` (`@objectstack/spec/data`, the single sink the `FilterArray` docblock '
-        + 'names, #5158 ruling C) in the adapter, BEFORE the wire → a `FilterCondition` on the '
+        + 'names, since the maintainer\'s 2026-08-04 ruling C declared the array input-only sugar '
+        + 'with one lowering seam) in the adapter, BEFORE the wire → a `FilterCondition` on the '
         + 'body. The hop that decides it is the runtime route `POST /analytics/query`, which '
         + 'parses `where` with `AnalyticsQueryRequestSchema` — a `FilterCondition` and nothing '
         + 'else — so an un-lowered array is refused there before any service code runs. '
         + '`lowerAnalyticsWhere` (`service-analytics`), where that earlier measurement stopped, '
-        + 'is the IN-PROCESS door (#5334) for callers reaching `analyticsService.query` '
+        + 'is the IN-PROCESS door (added when an array `where` was found silently dropped on the '
+        + 'analytics path) for callers reaching `analyticsService.query` '
         + "directly, not the wire's; it too still refuses a RAW rule-object array by design. "
-        + 'objectui#7752 lands the adapter-side lowering. '
+        + 'The adapter-side lowering lands in the console\'s own repository. '
         + 'The ruled migration check ran with the change: the '
         + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
         + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
@@ -8914,7 +8957,7 @@ const step18: MigrationStep = {
         + 'filter a list view renders. Downstream (objectui, after a released spec version reaches '
         + "the pin): the `element:number.filter:array` entry in `OFF_SPEC_ARM_EXEMPTIONS` "
         + '(`registry-inputs-spec-parity.test.ts`) becomes deletable, which is what closes '
-        + 'objectui#6206.',
+        + 'the console-side half of this convergence.',
     },
     {
       id: 'element-record-picker-filter-rule-array',
@@ -8925,7 +8968,7 @@ const step18: MigrationStep = {
         '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
         + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
         + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
-        + '`z.unknown()`, #15449). A record-form filter '
+        + '`z.unknown()`, a gap measured on its own). A record-form filter '
         + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
         + "an operator object `{ amount: { $gt: 100 } }` becomes "
         + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
@@ -8933,16 +8976,18 @@ const step18: MigrationStep = {
         + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
         + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
       reason:
-        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
-        + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
+        'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
+        + 'every `filter` door takes the `ViewFilterRule` array rather than keeping record-shaped '
+        + "exceptions). `ComponentPropsMap['element:record_picker'].filter` "
         + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
-        + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+        + '(`FilterConditionSchema`) after `element:number` converged: the three '
         + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
         + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
-        + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+        + 'declare `z.unknown()`, so the filter a list view stores and renders was refused '
         + 'by the picker beside them, and a lone holdout is the state where the next author copies '
         + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
-        + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
+        + 'Option-A ordering ruling: measure the consumer\'s read path before the contract moves): '
+        + 'at the objectui pin `00d3f09c` the renderer hands '
         + '`filter` to `query.$filter` and calls `adapter.find()` '
         + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
         + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
@@ -8964,7 +9009,7 @@ const step18: MigrationStep = {
         + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
         + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
         + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
-        + 'objectui#7663, filed from #14406 with a Blocked-by line.',
+        + 'a console-side change filed in the objectui repository, blocked on that release.',
     },
     {
       id: 'engine-dotted-filter-refused',
@@ -9846,7 +9891,8 @@ const step18: MigrationStep = {
         + 'message prescribes the null predicate because a `null` author was reaching for absence, '
         + 'not for a bound',
       reason:
-        'Maintainer ruling A on #18012 (decision batch #146 item 5, 2026-09-17 「146 同意」). '
+        'Maintainer ruling A of 2026-09-17: a blank `$between` endpoint is refused at the '
+        + 'authoring door, and the refusal names the blank side. '
         + '`FieldOperatorsSchema.safeParse({ $between: [1, \'\'] })` answered `success: true` — '
         + 'measured on the card against the installed spec 17.4.0 and re-measured on `origin/main` '
         + 'before the change. This is a NEW RULE narrowing a published face, ⛔ not a pull-back to a '
@@ -9855,8 +9901,8 @@ const step18: MigrationStep = {
         + 'acceptance was conformant. What made it wrong is the other half of the same contract — '
         + '"Closed interval [min, max]" — which no backend can honour against a blank: driver-sql '
         + 'binds it into `whereBetween`, the JS matchers compare it as a value, and the range stops '
-        + 'bounding on that side while still reading as a complete range. #13495 had already taught '
-        + 'the reference matcher to survive the null-bound form of exactly this (a bounded range '
+        + 'bounding on that side while still reading as a complete range. The reference matcher had '
+        + 'already been taught to survive the null-bound form of exactly this (a bounded range '
         + 'answered EVERY valued row, because both of the arm\'s comparisons are false against a '
         + 'missing bound); the door that admitted it was never addressed. The only producer ever '
         + 'measured is a UI builder padding a HALF-TYPED pair with `\'\'` so that a length-based '
@@ -9889,7 +9935,8 @@ const step18: MigrationStep = {
         + 'operator schema itself, which answers at the endpoint\'s own path with the blank side '
         + 'named, and the engine comparand-shape door, which refuses an executed filter carrying '
         + 'one. The objectui half — the builder stops padding a half-typed pair, so '
-        + 'the console never meets this refusal mid-typing — is objectui#9695 and lands on its own '
+        + 'the console never meets this refusal mid-typing — is a change to the console\'s own '
+        + 'filter builder and lands on its own '
         + 'schedule, either side of this one. ADR-0049 / ADR-0078 / ADR-0087.',
       acceptanceCriteria:
         'Grep every authored `$between` array — view, page and component filter rules, dashboard '
@@ -9954,13 +10001,15 @@ const step18: MigrationStep = {
         'a literal bound — the value the range was meant to stop at, written out. If the range was '
         + 'genuinely meant to be COLUMN-TO-COLUMN, that is not a $between at all: write the two '
         + 'bounds separately as scalar comparisons, {"$gte": {"$field": "a"}} for the lower bound and '
-        + '{"$lte": {"$field": "b"}} for the upper one, which is the position #5222 compiles on every '
+        + '{"$lte": {"$field": "b"}} for the upper one, which is the position the column-to-column '
+        + 'comparison compiles on every '
         + 'face. ⛔ There is no replacement that can be DERIVED from what was written: the literal a '
         + 'reference stood for is not recoverable, and dropping the operator would delete a '
         + 'constraint the author wrote and WIDEN the result set silently. A reference remains legal, '
         + 'unchanged, as the WHOLE comparand of $eq / $ne / $gt / $gte / $lt / $lte',
       reason:
-        'Maintainer ruling of 2026-08-11 on #7596, ADR-0049 enforce-or-remove: REMOVE. Both $between '
+        'Maintainer ruling of 2026-08-11 on column-reference range endpoints, ADR-0049 '
+        + 'enforce-or-remove: REMOVE. Both $between '
         + 'endpoint unions carried FieldReferenceSchema and no backend ever resolved one in a list '
         + 'position — matches-filter.ts leaves the list unresolved and orders against the raw '
         + 'reference OBJECT, so the range silently matches nothing, and both SQL faces refuse the '
@@ -9970,9 +10019,9 @@ const step18: MigrationStep = {
         + '⚠️ That ruling shipped at the AUTHORING SCHEMA door alone, and no ledger entry was written '
         + 'for it — measured before this change: no semantic entry, no retired key, no spec-changes '
         + 'row and no upgrade-guide line named the shape. That was not an omission, and this entry '
-        + 'SUPERSEDES a recorded answer rather than filling a silence: the 2026-08-11 changeset (PR '
-        + '#7713) carried the disposition not-required (no-migration-prescription), reviewed and '
-        + 'accepted on #7596 and shipped in the published CHANGELOG. What changed is the fact that '
+        + 'SUPERSEDES a recorded answer rather than filling a silence: the 2026-08-11 changeset '
+        + 'carried the disposition not-required (no-migration-prescription), reviewed and '
+        + 'accepted with that ruling and shipped in the published CHANGELOG. What changed is the fact that '
         + 'disposition rested on. It was claimed for a removal whose reach was believed to be the '
         + 'authoring schema alone; the runtime half now ships with a migration prescription of its own '
         + '(below), and a body carrying a prescription is exactly what that category refuses. So the '
@@ -9984,7 +10033,7 @@ const step18: MigrationStep = {
         + 'two truth values, decided by which door a caller came through — and the door that passed '
         + 'it is the one an embedder reaches by handing a lowered filter straight to a driver. This '
         + 'entry therefore registers the transition for BOTH doors, not only the second, which is '
-        + 'why it is filed under #19377 rather than as an already-registered rider. '
+        + 'why it is filed as an entry of its own rather than as an already-registered rider. '
         + '⚠️ No D2 conversion and no stored-metadata rewrite, and the load path was MEASURED rather '
         + 'than assumed: applyConversionsToStoredItem — the one primitive every stored-row '
         + 'rehydration seam calls — never throws and never validates, and replays only the '
@@ -10068,9 +10117,10 @@ const step18: MigrationStep = {
         + 'string resolved at request time (such as {current_user_id} or {today}) and a bigint '
         + 'within 2^53 are untouched, and the save door keeps a bigint as written',
       reason:
-        'The save door narrows to exactly what the query faces already refuse (#20116, stage 2 of '
-        + 'the collector). The comparand-type face (normalizeFilterComparandTypes, the #7872 '
-        + 'ruling\'s accepted set) refuses these values on every query: parseFilterAST, the engine '
+        'The save door narrows to exactly what the query faces already refuse (the second stage '
+        + 'of closing the family of comparand shapes the save door accepted and the query faces '
+        + 'refused). The comparand-type face (normalizeFilterComparandTypes, the accepted set the '
+        + 'maintainer ruled on 2026-08-12: string, number, bigint, boolean, null and Date) refuses these values on every query: parseFilterAST, the engine '
         + 'seam, the analytics where door and the read-scope compiler all run it. Measured on '
         + 'origin/main 17bd3187 before the change: FilterConditionSchema, a dataset filter, a '
         + 'dataset measure filter, a dashboard widget filter, a report runtimeFilter and a joined '
@@ -10138,7 +10188,9 @@ const step18: MigrationStep = {
         + 'arrays, empty lists included; every scalar equality comparand, null above all (the '
         + 'has-no-value predicate), is untouched; and $ne is NOT judged by this entry',
       reason:
-        'Maintainer ruling on #19757 (record 5793368540, batch 217 item 3, letter 乙, 「217 同意」): '
+        'Maintainer ruling of 2026-09-23 (option 乙 — rather than declaring an array equality the '
+        + 'SQL-family backends would have to invent, or documenting a divergence that stays silent '
+        + 'on one backend): '
         + 'an array in the implicit-equality slot is refused at the shared face, for every driver at '
         + 'once — no alias, no grace window. The comparand-shape face declared that moving a rule '
         + 'to it 「closes that door for every driver at once」, and before this change it judged '
@@ -10227,7 +10279,8 @@ const step18: MigrationStep = {
         + 'arrays, empty lists included; every scalar equality comparand, null above all, a Date and '
         + 'a { $field } reference are untouched; and $ne is NOT judged by this entry',
       reason:
-        'Ruling on #19889 (record 5805248669, letter A): FilterConditionSchema (implicit equality) '
+        'Ruled on 2026-09-24 (option A), applying the standing refusal of an array in the '
+        + 'equality slot to the schema door: FilterConditionSchema (implicit equality) '
         + 'and FieldOperatorsSchema.$eq refuse an array comparand at parse, with the SAME remedy '
         + 'text the shared compile face emits — one constant, two doors; a stored filter carrying '
         + 'the shape is refused loudly on its next save, and never silently dropped, because a '
@@ -10299,8 +10352,9 @@ const step18: MigrationStep = {
         + 'wrong one. On a view rule an OMITTED value is untouched — absence is not a comparand '
         + 'and this rule says nothing about it',
       reason:
-        '#19514, out of objectui#9050 ruling C-prime (maintainer 2026-09-20, verbatim, '
-        + 'untranslated): 「the differences are the protocol\'s to close」. The platform already '
+        'The protocol half of the maintainer\'s 2026-09-20 ruling (option C-prime) on the console\'s '
+        + 'filter converter, whose first rule reads, verbatim and untranslated: 「the differences are '
+        + 'the protocol\'s to close」. The platform already '
         + 'DECLARED both refusals, as data, in this package: FILTER_TEXT_CASES carries a '
         + 'REJECTION row for an empty comparand and one for a non-string comparand, each with '
         + 'code INVALID_FILTER and each requiring the refusal to name the operator. All five '
@@ -10313,7 +10367,8 @@ const step18: MigrationStep = {
         + 'declared-not-enforced shape ADR-0049 exists to close. '
         + 'The narrowing is DERIVED from the table, not transcribed beside it: both doors call '
         + 'the published predicate isRefusedTextComparand and the published reason text '
-        + 'textComparandRefusalReason, the pair lifted into this package at #18113 for exactly '
+        + 'textComparandRefusalReason, the pair published in this package beside FILTER_TEXT_CASES '
+        + 'for exactly '
         + 'this reason, so a row added to the table reaches both doors without an edit at either. '
         + '$contains, $startsWith, '
         + '$endsWith, $like and $ilike keep the answer they give today, '
@@ -10367,9 +10422,9 @@ const step18: MigrationStep = {
         + 'has-a-value predicate), every scalar, a Date and a { $field } reference are untouched, and '
         + 'the list operators ($in / $nin / $between) keep their arrays, empty lists included',
       reason:
-        'Ruling A on #19886 (record 5805254639, the director seat, class 1): the shared '
-        + 'comparand-shape face refuses an array under $ne for every driver, and FieldOperatorsSchema.$ne '
-        + 'refuses it at parse, with one remedy text naming the declared list-negation operator by its '
+        'Ruled on 2026-09-24 by the director seat, on the standing contract text (option A): '
+        + 'the shared comparand-shape face refuses an array under $ne for every driver, and '
+        + 'FieldOperatorsSchema.$ne refuses it at parse, with one remedy text naming the declared list-negation operator by its '
         + 'spec spelling — no alias, no window. The governing text is $ne\'s own published describe: '
         + 'the comparand is a literal, or a { $field } reference to another column of the same table. '
         + 'An array is neither, so the refusal pulls the doors back to what $ne already declared. '
@@ -10444,13 +10499,15 @@ const step18: MigrationStep = {
         + 'analytics query\'s timeDimensions[].dateRange. A filter comparand is not one of those '
         + 'positions',
       reason:
-        'The C half of #8690, maintainer-ruled 2026-08-15 alongside the engine door (PR #8808). '
+        'The authoring half (option C) of the maintainer\'s 2026-08-15 ruling on uninterpretable '
+        + 'temporal comparands, ruled alongside the engine door (option B) that refuses them at '
+        + 'query time. '
         + 'The preset vocabulary is declared in the dashboard schema and lowered to {date-macro} '
         + 'bounds by the shipped console before any query is sent — so the names were declared in '
         + 'one layer and unrecognised in the next, with no error at the boundary. Authored as a '
         + 'bare comparand (a saved report, an integration, an MCP client, an AI-authored query), '
         + 'the name reached the driver as written and compared false against every row: HTTP 200, '
-        + 'count 0, indistinguishable from "there is no data" (measured on #8690: $gte '
+        + 'count 0, indistinguishable from "there is no data" (measured on the defect report: $gte '
         + '"last_30_days" returned 0 of 51 seeded rows where the macro spelling returned the 38 '
         + 'in-window). The engine now refuses the bare name on a declared temporal field at query '
         + 'time (INVALID_FILTER / 400); this entry records the AUTHORING-time half, and that half '
@@ -10470,7 +10527,8 @@ const step18: MigrationStep = {
         + 'type in hand. ⚠️ Metadata AT REST is deliberately not rewritten and there is no D2 conversion: '
         + 'this shape was never written by any first-party producer (every preset in this repo '
         + 'and the example apps sits in a dashboard date-filter position — measured) and never '
-        + 'executed usefully (it returned a silent zero before #8808 and a 400 after). Coercing '
+        + 'executed usefully (it returned a silent zero before the engine door and a 400 after). '
+        + 'Coercing '
         + 'it at load would be the platform guessing which bound the author meant. The read path '
         + 'does not re-validate stored rows, so no stored dashboard becomes unreadable; what '
         + 'changes is that RE-SAVING one is refused with the window named. '
@@ -10525,8 +10583,9 @@ const step18: MigrationStep = {
         + 'with a list. The null predicate itself, a { $field } reference as a whole comparand, '
         + 'an empty $in or $nin list and a whitespace endpoint are untouched',
       reason:
-        'The save door narrows to exactly what the query faces already refuse (#20116, the '
-        + 'collector for its family; the $ne member is route A, the same reach and the same one '
+        'The save door narrows to exactly what the query faces already refuse (the family of '
+        + 'comparand shapes the save door accepted and the query faces refused; the $ne member is '
+        + 'route A, the same reach and the same one '
         + 'sentence as the equality slot of filter-equality-array-comparand-refused-at-save). The '
         + 'shared comparand-shape face refuses on every query a null ordering comparand (ruled '
         + '2026-09-01), a non-list $in / $nin and a malformed $between range, a null list member or '
@@ -10596,8 +10655,9 @@ const step18: MigrationStep = {
         + 'condition — `{ amount: { $contains: \'5\' } }` may have meant `$eq: 5`, a range, '
         + 'or a filter on a different column altogether — so the loader must not choose one.',
       reason:
-        'objectstack#15661, ruled 2026-09-05 (decision batch #43, option C-deny), landed at '
-        + 'the engine seam as objectstack#15773. A text operator (`$contains` / '
+        'Maintainer ruling of 2026-09-05 (option C-deny: refuse now, over the type sets the '
+        + 'contract already declares, minting no new vocabulary), landed at the engine seam. A '
+        + 'text operator (`$contains` / '
         + '`$notContains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) '
         + 'over a field whose DECLARED type can never store a string — `NUMERIC_VALUE_TYPES` '
         + '∪ `BOOLEAN_VALUE_TYPES` ∪ `CALENDAR_DATE_TYPES` ∪ `INSTANT_TYPES` ∪ '
@@ -10625,7 +10685,8 @@ const step18: MigrationStep = {
         + 'and `user` ids, `autonumber` and the file classes — are unaffected and must keep '
         + 'answering exactly as before; that is the control which proves a repair pass did '
         + 'not over-reach. A DIRECT driver call bypasses this door entirely and keeps '
-        + 'answering the `FILTER_TEXT_CASES` stored-value row (objectstack#14079), so a '
+        + 'answering the `FILTER_TEXT_CASES` stored-value row (a stored value that is not a string '
+        + 'never satisfies a positive text operator and satisfies `$notContains`), so a '
         + 'driver-level test is not evidence about this migration in either direction.',
     },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
