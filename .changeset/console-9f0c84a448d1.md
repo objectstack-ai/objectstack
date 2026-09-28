@@ -136,6 +136,20 @@ Derived from the changesets objectui declared over the range — 318 releasing o
 - _(no changeset)_ fix(console-starter): namespace a spec translation payload the way the console does (#10381) (objectui `170fcb6df`)
 - _(no changeset)_ docs(plugin-charts): state the host-page font precondition for axis tick density (#10374) (objectui `923e1b8ab`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it (this console
+     changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, and the
+     re-recorded pin read-points the lockstep and pin-citation gates name). It adds,
+     removes or renames no ObjectStack-authorable key: no Zod schema, no spec declaration
+     and no stored `sys_metadata` shape moves in it, so `objectstack migrate meta` has
+     nothing here to rewrite, and this body carries no FROM/TO prescription of its own.
+     The 40 declared-breaking entries listed above are objectui's OWN package surfaces
+     (`@object-ui/types`, `@object-ui/components`, the plugin node declarations and the
+     designer), each already carrying its upstream record. Where one of them mirrors an
+     ObjectStack-authorable key, the ledger entry belongs to the `packages/spec` PR that
+     lands the mirror, never to the pin bump, whose diff contains no such key.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+     a per-entry re-measurement of the 40 upstream declared-breaking entries.
+-->
 
 objectui range: `f8a9d0fb0596...9f0c84a448d1`
