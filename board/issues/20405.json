@@ -2,7 +2,7 @@
   "number": 20405,
   "kind": "pull_request",
   "title": "feat(spec): a metadata-form row each for object.access, highlightFields, requiredPermissions, searchableFields and permission.adminScope (#20349)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T07:46:04Z",
-  "updated_at": "2026-09-28T08:21:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-28T08:46:43Z",
+  "closed_at": "2026-09-28T08:46:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-28T08:46:41Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20405",

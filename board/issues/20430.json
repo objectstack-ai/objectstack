@@ -1,0 +1,36 @@
+{
+  "number": 20430,
+  "kind": "issue",
+  "title": "docs(deployment): backup-restore says \"the open framework does not ship\" the Turso/libSQL driver, but `@objectstack/driver-turso` ships and three other pages document it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T11:00:50Z",
+  "updated_at": "2026-09-28T12:51:31Z",
+  "closed_at": "2026-09-28T12:39:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20430",
+  "body": "Filing gate: **① a product defect with a named landing site**: a sentence on a published docs page that the framework's own packages and three other docs pages contradict. Landing site: `content/docs/deployment/backup-restore.mdx`, section \"Managed databases\". `reach:` the published docs page itself (a shipped face).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the at-tier contract review of PR #20422 (record 5868528334, ③.12), which read it while checking that PR's docs drift. It predates that PR, and that PR does not touch the page. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What it says, on `origin/main`\n\n> (Turso/libSQL applies only to ObjectStack Cloud-managed environments — the open framework does not ship that driver.)\n\n## Why it is false\n\n- `@objectstack/driver-turso` is a published package in this repository (`packages/drivers/driver-turso`, `publishConfig.access: public`), with local, embedded-replica and remote modes.\n- `content/docs/data-modeling/drivers.mdx` lists the Turso rows and the install callout, `content/docs/plugins/packages.mdx` describes the driver and its three modes, and `content/docs/data-modeling/index.mdx` lists it among the drivers the same model runs on.\n\nA self-hoster reading the backup page would conclude that Turso/libSQL is not available to them, and would skip the libSQL backup guidance they need.\n\n## Dedupe\n\n`search_issues` \"backup-restore docs says open framework does not ship turso libsql driver\" in `objectstack-ai/objectstack`, open and closed: 2 hits, #19823 (closed, remote deferred DDL) and #5602 (closed, CLI URL-to-driver resolution). Neither is this."
+}

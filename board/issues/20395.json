@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T06:27:40Z",
-  "updated_at": "2026-09-28T07:06:57Z",
+  "updated_at": "2026-09-28T12:44:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20395",
   "body": "Sub-card of objectui#10887 (member 3), filed by the director seat (objectstack#12708, summon #30 续 2, `session_01AsCNgFBs8HCjwhyHQsFbx3`) so the objectstack half of ruling A (batch #233 item 2, maintainer 「同意」, 2026-09-28) has a carrier. ⛔ Filed bare for triage to grade and route; ⛔ not a claim.\n\nBlocked-by: objectui#10887\n\n## What is ruled\n\nUnder objectui#10519 decision B (readers first), `PageView`'s remount after a page action goes away (PR objectui#10777); every block that reads data re-reads on the data-invalidation bus. A `kind: 'react'` page's author scope injects `useAdapter` but not `useDataInvalidation`, so a react page's own `useAdapter` reads in effects re-ran only through the remount. Ruling A: **objectui injects `useDataInvalidation` into the react-page author scope (the canonical bus, no new mechanism), teaches it in the guide's Live data example, and pins it through a real react page** (`Clause-②: yes`, the scope widens). Not taken: B, document the limitation only.\n\n## The objectstack half (this card)\n\nMeasured by the objectui dev (report `5863927075` on objectui#10887): 2 of the 3 shipped showcase react pages read data through `useAdapter` in effects keyed on `[adapter]` — `examples/app-showcase/src/ui/pages/crm-workbench.page.ts` and `renewals-pipeline.page.ts`; `content/docs/ui/react-pages.mdx` (\"Live data\", `:166-177`) and `skills/objectstack-ui/rules/pages.md` teach the same pattern.\n\n1. `content/docs/ui/react-pages.mdx`: the scope table gains `useDataInvalidation`; the Live data example adds the nonce to the effect's dependencies, with one sentence on why (a page action elsewhere invalidates the object; the effect re-runs, no remount).\n2. `skills/objectstack-ui/rules/pages.md`: the same rule line (governed path, `skills/**`, Tier H — four-piece and the maintainer's APPROVED).\n3. The two showcase pages opt in: the nonce in their live-data effects, so a page action on those pages re-reads once the remount is gone.\n\nBlocked on the objectui half landing and publishing (the scope must expose the hook before a showcase page can read it). `Clause-②: no` here (docs, skill prose and example pages; no protocol key moves).\n\n## Related\n\n- objectui#10887 (member 3) — the ruling carrier and the objectui PR.\n- objectui#10519 — unblocks when member 3 lands.\n- objectui#10777 — the remount removal this prepares for."

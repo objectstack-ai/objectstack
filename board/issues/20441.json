@@ -1,0 +1,33 @@
+{
+  "number": 20441,
+  "kind": "issue",
+  "title": "[finding] `GET /meta/:type/:name/audit` lists pending draft-save events (actor, time, `note: draft`) to a member who may not read drafts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T13:01:21Z",
+  "updated_at": "2026-09-28T14:04:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20441",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/rest/src/rest-server.ts`, the `GET /meta/:type/:name/audit` handler. Finding class **(b)**: it violates a declared contract, ADR-0106 D4 「draft/preview reads are admin-gated upstream」. `reach:` is **NOT MEASURED**. The card is filed under the filing gate's **possible-data-leak exception**, so the claimant's **first step is to measure reachability at the public door**: a member without an authoring capability reads `GET /meta/app/<name>/audit` after someone saves a draft of that app.\n\nThe at-tier contract review of PR #20440 (#20378) found it, and the #20378 dev had flagged `/audit` as outside its ruling with no carrier. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the source says (`origin/main` `0fcb10184`, read at source, not measured)\n\n- `saveMetaItem` writes a success audit row for every save. The row carries `operation: 'save'`, `outcome: 'allowed'`, the actor, and `note: mode === 'draft' ? 'draft' : 'active'`. It is in `packages/metadata-protocol/src/protocol.ts`, the ADR-0010 success-audit block after the draft or active write.\n- `auditMetaItem` returns `note` on every event (`note: r.note ?? null`).\n- The REST `/audit` handler applies two things: `eventDoorRefusal`, the plain read's per-caller verdict (a caller the plain read serves is served the events), and the org partition. It never asks `mayReadPendingDrafts`.\n- So a member who may open the published item reads one event per pending draft save: that the draft exists, who saved it and when, labelled `draft`. No body is served.\n\n## Why it is the same class as #20378\n\nRuling `5865708652` (letter B) on #20378 folded `/history` in because it 「lists draft-save events without bodies to the same member, from the same log」. `/audit` serves the same draft-save events from the audit log, and the ruling names two doors only. PR #20440 (in flight) closes `/diff` and `/history`; this door is what remains.\n\n**Open for triage; the seat does not answer it.** Does ruling B's letter carry over, refusing the whole door to a non-author as `/history` now is? Or does the door only withhold the `note: draft` events? The audit trail also records non-draft events that a member might legitimately read. Who actually reads `/audit` today is not measured.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「\"/audit\" draft」: 1694 hits. The top ones are #20378 (the sibling) and unrelated cards.\n- 「auditMetaItem」: 34 hits, all closed and about the capability or its declaration (#11678, #9638, #9426, #8747).\n- 「sys_metadata_audit member」: 13 hits, none about draft events.\n- 「metadata audit authoring door」: 348 hits, none on this door.\n\nNone carries this row. Query terms for later deduplication: `audit draft event member`, `auditMetaItem note draft`, `authoring door audit`."
+}

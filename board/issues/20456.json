@@ -1,0 +1,31 @@
+{
+  "number": 20456,
+  "kind": "issue",
+  "title": "spec(ui)+objectui: declare the console's round-trip keys on the stored view overlay (#20051 stage ii, ruling 甲)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T14:21:19Z",
+  "updated_at": "2026-09-28T14:21:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20456",
+  "body": "Filing gate ③: a ruled task. Stage (ii) of ruling 甲 on #20051 (`5856781584`, batch #227 item 2, maintainer 「开始总监决裁」).\n\nSeam: the stored view overlay's round-trip keys: objectstack `packages/spec` declares them, objectui's console reads them back\n\nFiled by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) in place of `domain:spec` seat 2, which the ruling names as filer and which is vacant (#18549). The maintainer asked the triage seat directly, verbatim: 「#20051 的子卡 你为什么不能立」. ⛔ Not a claim.\n- **Acting reader:** the `domain:spec` seat that dispatches this card. A `Seam:` card claims both ends.\n- **Duplicate check:** a board corpus of 3,419 objectstack issues matched `#20051|round-trip keys|appendix \\(c\\)` 3 times outside #20051: #20186, #20230 and #20101, all closed and none of them this stage. No open duplicate.\n\n## What the ruling orders (item 1, stage ii, verbatim)\n\n> Sub-card **「declare the console's round-trip keys」** (`domain:spec`, `Seam:` with objectui): the dev measures the complete list the console reads back from a stored view row (`isPinned`, `isDefault`, `sortOrder`, `objectName`, `visibility`, `sort[].id`, `filter[].id`, the `exportOptions` shape, and whatever else the measurement finds — the seat's list is a floor, not the census), declares each on the stored-overlay wire with its meaning, and objectui aligns its reads to the declared spellings.\n\n## Why now\n\nStage (i), #20186, is closed, so this stage is dispatchable. The end state is the persisted document being the parsed body (stage iv). ⛔ That storage change is **not** part of this card. The ruling forbids it before stages (ii) and (iii) close, because doing it now turns 「stored and unread」 into 「200, then the user's pinned / sort / visibility state silently dropped」.\n\n## Measured floor (seat 2's analysis `5853397704`, dev reading at `8d1f7ab` through the real `saveMetaItem`)\n\nStoring the parsed body today would strip:\n- `isPinned` / `sortOrder` on the flattened overlay;\n- `visibility` on the ViewItem row;\n- `sort[].id` / `filter[].id` on the personalization PUT.\n\nIt would also rewrite `exportOptions ['csv']` into an object and fill defaults. objectui reads `isPinned` / `sortOrder` / `visibility` back from the stored row (`ObjectView.tsx` `VIEW_ROW_STATE_KEYS`, `ViewTabBar`).\n\n## Acceptance\n\n- The census first: every key objectui's console reads back from a stored view row. Name the reading method and give its lit control, so a zero is a reading and not a dead scan. The floor above is a minimum.\n- Each key declared on the stored-overlay wire with its meaning, as a spec symbol that stage (iii)'s ADR note can cite.\n- objectui aligns its reads to the declared spellings, as the second end of the seam, in its own PR.\n- Changeset `minor`, with `Clause-②: yes` (the declarations widen the wire) and an at-tier contract review (ruling item 4).\n- Measure production `sys_metadata` for stored views that carry undeclared top-level keys, or record it as NOT MEASURED with the reason. Stage (iv) cannot land without that count.\n- ⛔ No change to what is persisted. The three GUARD pins stay as they are, and flipping them is stage (iv)'s.\n\nPart of #20051"
+}

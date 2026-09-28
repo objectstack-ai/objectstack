@@ -2,9 +2,9 @@
   "number": 20409,
   "kind": "pull_request",
   "title": "docs(adr-0053): addendum D-G1 — a client-evaluated today() names the compute-tz reference day, UTC while none reaches the client",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T08:09:55Z",
-  "updated_at": "2026-09-28T08:22:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-28T09:13:27Z",
+  "closed_at": "2026-09-28T09:13:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-28T09:13:25Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20409",

@@ -1,0 +1,34 @@
+{
+  "number": 20413,
+  "kind": "issue",
+  "title": "Stale \"every non-invite_only posture forces email verification\" statements after #20389: settings console text (4 locales) and the identity-auth platform checklist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T09:01:47Z",
+  "updated_at": "2026-09-28T12:24:55Z",
+  "closed_at": "2026-09-28T12:23:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20413",
+  "body": "Filing-gate: ③ maintainer-directed task\nBlocked-by: #20389\n\nFiled on the maintainer's instruction in session `session_d8bf7d34-4f31-407d-ac85-6cb849eec4bf` (2026-09-28), verbatim: 「直接开卡吧」. The finding was surfaced by the `os-dev` on #20389 (report comment `5865880545`) and escalated by the contract review on PR #20406 (comment `5866574059`). It sat outside that claim's file surface, so the dev stopped on it, as required.\n\n## Why\n\nOnce #20406 lands, posture `open` is forced-on only **by default**: a deployment can turn verification off (`emailAndPassword.requireEmailVerification: false`, or `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`). `email_domain` stays forced. The statements below still say every non-`invite_only` posture forces verification. That is wrong beside a deployment opt-out, which the console shows as a locked env value.\n\n## Every location (read at `main` `7db1332f19`)\n\n1. `packages/services/service-settings/src/manifests/auth.manifest.ts`: the audience group `description` (「Postures other than invitation-only force email verification on.」) and the `audience_posture` `help` (「Any posture other than invite_only forces email verification on …」).\n2. The same two strings in `packages/services/service-settings/src/translations/`: `en.ts` (description and help), `zh-CN.ts` (description 「除「仅限邀请」外的口径会强制开启邮箱验证」 and help), `es-ES.ts` (description and help), and `ja-JP.ts` (the same keys; the dev named it, but the PM's keyword grep did not match its wording, so locate it by key).\n3. `docs/qa/platform-checklist/areas/identity-auth.json` `knownGaps`: 「on a permitting posture, requireEmailVerification is FORCED on (#11739)」, and 「audience is config-only … no env knob」. The dev reported a settings env override for the posture exists; that half is **unverified by the PM** and must be checked before it is rewritten.\n\n## Acceptance\n\nEach location states the rule as shipped: `email_domain` always forces verification; `open` forces it unless the deployment opts out; a console-stored `false` under `open` is refused. The four locales stay in step (`settings-translation-coverage.test.ts`).\n\n## Reader\n\nThe `domain:services` execution seat, once #20389 closes. Item 3 lives in the `domain:devx` docs/qa surface: fold it in, or split it at triage.\n\n## Dedupe\n\nSearch (open + closed) on 2026-09-28: `audience_posture help forces verification` → 2 hits, `knownGaps requireEmailVerification forced` → 2. Both are #20389 / #20406. No existing card."
+}

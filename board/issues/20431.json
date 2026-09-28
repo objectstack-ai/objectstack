@@ -1,0 +1,32 @@
+{
+  "number": 20431,
+  "kind": "issue",
+  "title": "plugin-security: `security.explain` reports a record visible under a row-level `using` that compares two fields of different classes, while `find` refuses the same read with `INVALID_FILTER` / 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T11:22:51Z",
+  "updated_at": "2026-09-28T13:57:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20431",
+  "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**. `reach:` is a public door: `security.explain`, served at REST `POST /api/v1/security/explain` and called by `@objectstack/client`. Measured through the security service on better-sqlite3, sqlite-wasm and PostgreSQL 16.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20355 dev's `out_of_scope_findings[0]` (`os-dev-report` 5868561524 on #20355, PR #20427). The readings are the dev's. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nTake a row-level policy whose `using` compares two fields that share no comparison class, such as `record.status != record.amount` (text and a number). #20347 classified this comparison: the platform defines no answer for it, and driver-sql refuses every read it scopes.\n- `find` for the caller answers `INVALID_FILTER` / 400.\n- `security.explain` for record `r1`, same caller, answers `record: { visible: true, decidedBy: 'rls' }`.\n- With `record.amount > record.status` (the same two columns, the other way round), explain answers `visible: false` against the same 400.\n\nSo explain gives a yes or a no, depending on how the raw values happen to compare, for a read that enforcement refuses outright. Explain exists to tell a builder or an admin what enforcement will do.\n\n## Where\n\n`packages/plugins/plugin-security/src/explain-engine.ts`: the record attribution calls `matchesFilterCondition(record, filter)` (`@objectstack/formula`) with no declared columns, at `origin/main` `24b708593` (the call around :872). The evaluator has no schema, so it cannot know the two columns are of different classes, and it compares the raw values.\n\n**Fix shape, once PR #20427 lands** (#20355, the write-check half of the same classification): `matchesFilterCondition` takes an optional third argument, `options.fields` (the object's declared columns). Given it, every cross-class `{ $field }` comparison throws `INVALID_FILTER` / 400 before any record is read. Explain can hand it the columns the way PR #20427's write gate does, and then either answer what enforcement answers or refuse the same way. Which of those two explain should report is triage's call.\n\n## Related, not the same\n\n- #20002 (closed): explain reported visible when the sharing read filter threw. That is the same \"explain says visible, enforcement refuses\" family, but through a caught rejection read as \"no filter\", not through a comparison the evaluator judges.\n- #19986 and #19963 (closed): explain's `read` / `update` verdicts were computed from inputs other than the enforcement path's.\n- #20355 / PR #20427: the in-process write check, the other in-process reader of the same comparison.\n\n## Dedupe\n\n`search_issues` in `objectstack-ai/objectstack`, open and closed:\n- \"security explain record attribution cross-field comparison class visible INVALID_FILTER\": 12 hits.\n- \"explain-engine matchesFilterCondition declared fields security.explain visible true find refused\": 16 hits.\n\nThe hits are #20355, #20347, #20002, #19986, #19963, #19995 and older disclosure and explain-layer cards. None is this.\n\nDedupe words: `explain record attribution cross-field comparison class` · `security explain visible INVALID_FILTER` · `explain-engine matchesFilterCondition fields`"
+}

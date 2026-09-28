@@ -1,0 +1,31 @@
+{
+  "number": 20446,
+  "kind": "issue",
+  "title": "filter: flip `is_empty` / `is_not_empty` to `$empty` and add it to `FILTER_OPERATORS`, once every compile surface answers it (the last step of ruling A on #20399)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T13:11:25Z",
+  "updated_at": "2026-09-28T13:11:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20446",
+  "body": "This card carries the last step of ruling A on #20399. #20311 (PR #20442) declared `$empty`, staged; #20444 (`domain:engine`) and #20445 (`domain:services`) give every compile surface its arm; this card joins `$empty` to `FILTER_OPERATORS` and flips the lowering. Filed by `domain:spec` seat 1 (`session_01B3TqpoQbTAfG7G74GMDWNW`, seat post #6017) at #20311's ACCEPT. It is an in-lane sub-issue of #20311, so it inherits `domain:spec` · `priority:p2` · `area:records`.\n\nBlocked-by: #20444\nBlocked-by: #20445\n\n## The rulings, verbatim\n\n- **Ruling A on #20399** (`5865693155`): 「**A last card flips the lowering** to `$empty` once every surface answers it, with a pin that a stored view rule's 「is empty」 on a multi-value field returns the rows holding `[]` or null and refuses nothing.」\n- **The maintainer's amendment** (`5868169573` on #20311): 「照 $like 先例分阶段」. `$empty` joins `FILTER_OPERATORS` in this card, not before.\n- **Ruling B on #20311** (`5861435168`) is the meaning. **objectui#10813** converges the three builders on `$empty` after the spec release that carries this card.\n\n## Work\n\n- `packages/spec/src/data/filter.zod.ts`:\n  - add `$empty` to `FILTER_OPERATORS` and drop it from `STAGED_AHEAD_OF_BACKENDS`, with the docblock's staging paragraph retired;\n  - lower `is_empty` / `isempty` to `{ f: { $empty: true } }` and `is_not_empty` / `isnotempty` to `{ f: { $empty: false } }`, in `AST_OPERATOR_MAP`, the array-sugar lowering and `canonicalAstOperator`, which today folds them onto `is_null` / `is_not_null`.\n- An ADR-0087 semantic entry if the migration gate asks for one: a stored `is_empty` on a text or multi-value column finds more rows after the flip (the ruling-B widening).\n- `packages/spec/src/ui/view-grouping-query.ts`: its note that the empty-group predicate (`$null`) and the view filter's `is_empty` agree on what \"empty\" means stops being true. Correct the note, or align the predicate (#20311 dev report, `out_of_scope_findings[2]`).\n- **Pins:**\n  - ruling A's stored-view-rule pin, on a multi-value field;\n  - a text field with `''`;\n  - `is_not_empty` as the exact complement;\n  - every compile surface's conformance row, green with `$empty` in `FILTER_OPERATORS`.\n\n## Pre-flight\n\nBefore dispatch, re-measure every face with `$empty` added to `FILTER_OPERATORS`. None may drop the predicate (driver-memory derives its accepted set from that array and ignores an operator it has no arm for). This is the reason for the staging.\n\nDedupe words: `is_empty lowering flip $empty` · `FILTER_OPERATORS $empty`."
+}

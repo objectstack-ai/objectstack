@@ -2,8 +2,8 @@
   "number": 20394,
   "kind": "issue",
   "title": "docs(adr-0053): one addendum line — a client-evaluated formula's `today()` names the compute-tz reference day, UTC while no reference timezone reaches the client (ruling A on objectui#10903)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,19 @@
     "area:records",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T06:27:14Z",
-  "updated_at": "2026-09-28T08:22:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T09:14:32Z",
+  "closed_at": "2026-09-28T09:13:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

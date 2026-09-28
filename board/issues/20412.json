@@ -1,0 +1,34 @@
+{
+  "number": 20412,
+  "kind": "issue",
+  "title": "plugin-auth: one refused key in the auth settings pass drops every sibling setting, and says so only at `warn`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T09:01:28Z",
+  "updated_at": "2026-09-28T12:07:34Z",
+  "closed_at": "2026-09-28T12:06:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20412",
+  "body": "Filing-gate: ① product defect with a named landing point, reach measured\n\nFiled on the maintainer's instruction in session `session_d8bf7d34-4f31-407d-ac85-6cb849eec4bf` (2026-09-28), verbatim: 「直接开卡吧」. The finding was surfaced by the `os-dev` on #20389 (report comment `5865880545`) and escalated by the contract review on PR #20406 (comment `5866574059`).\n\n## Defect\n\n`packages/plugins/plugin-auth/src/auth-plugin.ts`, `applySettings` (read at `main` `7db1332f19`): the main `this.authManager.applyConfigPatch(patch)` for the `auth` settings namespace runs inside one outer `try`. Its `catch` only logs `ctx.logger.warn('Auth: failed to apply auth settings: ' + …)`.\n\n⇒ When `assertAudienceConfig` (or any other entry validation) refuses ONE key in the pass, the whole patch is dropped. Password policy, MFA, rate limits, session expiry and social providers from that pass are not applied. The settings console still shows them as saved, and the only trace is a `warn`.\n\nThe audience block right beside it already does the opposite, on purpose. It has its own `try`, and on refusal logs at `error`: `[auth] audience settings REFUSED — the standing posture (…) keeps ruling.`\n\n## Reach (measured)\n\nMeasured by the dev on `main` `db74b169dc`: stack config `audience.posture: 'open'`, `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false` and `session_expiry_days = 3`. Result: the verification key is refused and `session.expiresIn` stays `undefined`, with only the `warn` above.\n\nAfter #20406 merges, that particular trigger is gone. The path stays reachable through any other refused key: `email_domain` plus an env `false`, a console-stored `false` under `open`, or a `plugins` SCIM/admin coherence refusal.\n\n## Expected\n\nA refused key does not take its siblings with it: either isolate the refused key and apply the rest, or refuse the pass loudly at `error`, naming the key, so the console and the log cannot disagree with what is applied. Which of the two is the landing seat's call; the silent `warn` is the defect.\n\n## Reader\n\nThe `domain:services` execution seat, from `pm:queue`.\n\n## Dedupe\n\nSearch (open + closed) on 2026-09-28: `\"failed to apply auth settings\"` → 2 hits, `applySettings sibling auth settings dropped` → 2, `auth settings pass refused key dropped` → 69. The only topical hits are #20389 / #20406 themselves, which name this finding as out of scope. No existing card."
+}

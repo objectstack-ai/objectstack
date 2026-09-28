@@ -2,8 +2,8 @@
   "number": 20320,
   "kind": "issue",
   "title": "[finding] class closure: the runtime dispatcher's /meta list still diverges from RestServer's off the gate path (`?id=`, `?object=`, plural `/meta/docs` bodies, locale) and refuses a `public` audience to anonymous callers",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:api",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
-    "os-litant"
+    "hotlong"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T21:04:49Z",
-  "updated_at": "2026-09-28T08:15:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T12:17:23Z",
+  "closed_at": "2026-09-28T12:15:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20320",
   "body": "Filing gate: **① a defect with a named landing site**, `packages/runtime/src/domains/meta.ts` `handleMetadataRequest`: its one-segment LIST branch, and the anonymous-deny block at its entry. Filed as the family's **class-closure card**. Row A is class **(a)** and row B is class **(b)**, each with `reach:` measured at a public door through `dispatch()`, which is the `createHonoApp` catch-all's delegate.\n\nFound by the `os-dev` round on #20237 (PR #20319, which puts the dispatcher's list through the same per-caller gate `RestServer` uses). Both rows were confirmed at source by that PR's at-tier contract review (record `5859805795`). Filed by the `domain:cli` execution seat (#6024, `session_01UYBdGBzWSrAMzpW8ah3GbP`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## The family\n\nThe dispatcher's `/meta` read is a second implementation of `RestServer`'s. AGENTS.md 〈Route & surface ownership〉 rule 1 says one owner per route. The PER-CALLER half of the family is closed or closing:\n- #20193 (item reads), landed as PR #20236;\n- #20237 (list reads), PR #20319.\n\nWhat remains is every other place the two answers diverge. None of them leaks gated content, because the per-caller gate prunes first. They are correctness and contract drift, enumerated below.\n\n## Row A (class a): list projections `RestServer` honours and the dispatcher ignores\n\nMeasured after PR #20319's fix, `dispatch()` vs `RestServer`'s `GET /meta/:type`:\n\n| request | dispatcher | `RestServer` | where `RestServer` does it |\n|:--|:--|:--|:--|\n| `GET /meta/app?id=crm` (holder) | lists all three apps | `[crm]` | the #7566 `?id=` block |\n| `GET /meta/view?object=nope` | lists every view | `[]` | the `?object=` view switcher |\n| `GET /meta/docs` (plural, no `?include=content`) | serves doc bodies | slims both spellings | the slim, folded through `metaTypeSingular` |\n| doc locale collapse | not run | run | `resolveDocLocale` |\n| translation | not run | run | the translation step |\n| the `api` served-set face | not run (not measured) | run | the `matchEndpoint` face |\n\nAt source: the dispatcher's list branch reads only `query.package` and `query.preview`, and `slimDocList` compares the raw segment (`type !== 'doc'`).\n\n## Row B (class b): a `public` book audience is unreachable anonymously through the dispatcher\n\nTake a book with `audience: 'public'` that claims `crm_intro`. Anonymous `GET /meta/doc` and `GET /meta/book` then answer **401 `UNAUTHENTICATED`** through the dispatcher, where `RestServer` lists `[crm_intro]` and `[public_guide]`.\n\n- At source, `handleMetadataRequest` opens with `shouldDenyAnonymous({userId, isSystem})`, with no path or method (`packages/core/src/security/anonymous-deny.ts` about :152).\n- `RestServer`'s umbrella gate grants anonymous reachability of book and doc GETs via `isPublicAudienceRead` (`rest-server.ts` about :2752). Its docblock reads: 「so `audience: 'public'` works on a secure-by-default deployment instead of only on one that opened its whole data plane」.\n- The contract is ADR-0046 §6.7's `public` audience.\n\nIt fails closed: it withholds, and exposes nothing.\n\nSeam: `spec:BookSchema.audience` (`'public'`) → `runtime:packages/runtime/src/domains/meta.ts handleMetadataRequest` (the anonymous-deny block).\n\n## The closure pin this card owes\n\nOne census over (list type × query parameter × caller) that asserts the dispatcher answers what `RestServer` answers, including anonymous callers against a `public` audience. It should be derived from `RestServer`'s own list handler where feasible, so the next projection added there fails the census instead of drifting.\n\n## Direction (for triage, ⛔ not presumed here)\n\n- **Extend the shared seam:** the list projections become transport-neutral beside `createMetaListReadGate`, and the dispatcher's anonymous gate learns `isPublicAudienceRead`.\n- **Or retire the dispatcher's `/meta` reads:** #20193 rejected this for the item reads, because `createHonoApp` cannot mount REST and ADR-0076 item 9 keeps the catch-all as the cloud fallback. Re-check that before choosing it.\n\n## Dedupe\n\nMCP issue search in this repository, run 2026-09-27:\n- 「runtime dispatcher meta list ignores query parameters id object and plural docs slim, differs from RestServer list route」 → 4 hits. #20237 (open) is the per-caller half, the parent of this finding. #9813, #7606 and #3611 (all closed) are other route-dialect cards. None is this defect.\n- 「handleMetadataRequest anonymous deny public audience book doc 401 catch-all dispatcher」 → 9 hits. #20237, #20193 and #20129 are the per-caller family. #16245, #10349, #9144, #8013 and #7911 are closed and unrelated. None is this defect.\n\nDedupe words: `dispatcher meta list query params ignored` · `handleMetadataRequest id object filter dropped` · `slimDocList plural docs content` · `dispatcher anonymous public book 401` · `catch-all meta list projection divergence`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

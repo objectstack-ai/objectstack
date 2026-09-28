@@ -2,8 +2,8 @@
   "number": 16506,
   "kind": "issue",
   "title": "Queue-flake anchor: src/email-service.queue-delivery.test.ts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "github-actions[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:services",
-    "pm:dispatched",
     "priority:p2",
     "queue-flake-anchor",
     "tests"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-07T05:42:37Z",
-  "updated_at": "2026-09-13T11:19:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T09:26:40Z",
+  "closed_at": "2026-09-28T09:26:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

@@ -1,0 +1,32 @@
+{
+  "number": 20445,
+  "kind": "issue",
+  "title": "analytics: service-analytics' two filter faces answer `$empty` by the field's declared type (read-scope SQL, the analytics where) — ruling A on #20399",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:services",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T13:10:37Z",
+  "updated_at": "2026-09-28T14:09:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20445",
+  "body": "This card carries the `domain:services` lane's arms for the `$empty` operator. The spec declaration is #20311's (PR #20442); the engine lane's arms and the lowering flip are the sibling cards filed alongside this one. Filed by `domain:spec` seat 1 (`session_01B3TqpoQbTAfG7G74GMDWNW`, seat post #6017) at #20311's ACCEPT, as ruling A's execution parameters order. ⛔ Filed without `domain:*` / grade: the lane below is the ruling's; triage applies the labels.\n\nBlocked-by: #20311\n\n## The rulings, verbatim\n\n- **Ruling A on #20399** (`5865693155`): 「**One sibling card per compile-surface lane**, each `Blocked-by:` #20311's spec PR: `domain:engine` — driver-sql and its heirs, turso `RemoteTransport`, driver-memory, driver-mongodb, formula, objectql `having`; `domain:services` — service-analytics' two faces.」\n- **The maintainer's amendment** (recorded on #20311 as `5868169573`): 「照 $like 先例分阶段」. `$empty` stays out of `FILTER_OPERATORS` until every surface has its arm.\n\n## The two faces\n\n- `compileScopedFilterToSql` (`packages/services/service-analytics/src/read-scope-sql.ts`)\n- `lowerAnalyticsWhere` together with `normalizeAnalyticsFilterTree` (`packages/services/service-analytics/src/strategies/filter-normalizer.ts`)\n\nEach expands `{ f: { $empty: true | false } }` into the declared arm through the spec's single expansion, `expandEmptyOperator(fieldDef)` / `EMPTY_OPERATOR_ARMS` from `@objectstack/spec/data` (PR #20442):\n- text-like: null or `''`;\n- multi-value: null or `[]`;\n- every other type: null only;\n- `$empty: false` is the complement.\n\n⛔ No `$eq: []` comparand: ruling 乙 on #19757 stands.\n\n## Measured at dispatch of #20311 (PR #20442's premise A1)\n\n- `lowerAnalyticsWhere` passes `$empty` through, and `normalizeAnalyticsFilterTree` then refuses it with `INVALID_FILTER` / 400.\n- `compileScopedFilterToSql` refuses it with `READ_SCOPE_COMPILE_FAILED` / **500**. That code answers every unknown operator, `$bogus` included, where the other faces answer `INVALID_FILTER` / 400. This is loud and fail-closed, and it predates the card. Say in the PR whether the read-scope face should answer an authoring mistake with 400; do not change it silently.\n\n## Acceptance\n\n- Both faces answer `$empty` by the declared arm, with pins for text, multi-value and scalar fields (null, `''`, `[]` and a value row), `$empty: false`, and nesting under `$and` / `$or` / `$not`.\n- ⛔ This card does not add `$empty` to `FILTER_OPERATORS` and does not flip the lowering.\n\nDedupe words: `$empty operator analytics read scope` · `is empty analytics where`."
+}

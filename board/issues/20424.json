@@ -1,0 +1,34 @@
+{
+  "number": 20424,
+  "kind": "issue",
+  "title": "driver-turso remote: `aggregate` / `find` answer `[]` for a missing table or a missing column, where the local face refuses DATABASE_ERROR / 500 or INVALID_FIELD / INVALID_FILTER / 400 (the #8790 shape on the remote transport)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T10:23:46Z",
+  "updated_at": "2026-09-28T13:30:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20424",
+  "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**. `reach:` is a named producer: REST `GET /api/v1/data/:object` (ObjectQL `find` → `TursoDriver.find`, remote face), and `service-analytics`' ObjectQL aggregate path (`AnalyticsService` → `engine.aggregate` → `TursoDriver.aggregate`, remote face).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20107 dev's `out_of_scope_findings` (`os-dev-report` 5868026272 on #20107, PR #20422). The readings are the dev's. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20107 dev at `37414c5e8` (PR #20422's head, which predates nothing here), over one libSQL file, with the local `TursoDriver` over the same file as the control:\n\n| read | local face | remote face |\n|:--|:--|:--|\n| `aggregate` on a mapped table that is really absent | `DATABASE_ERROR` / 500 | `[]` |\n| `aggregate` grouped by a declared field whose column is absent | `INVALID_FIELD` / 400 | `[]` |\n| `find` whose `where` names a declared field whose column is absent | `INVALID_FILTER` / 400 | `[]` |\n\nSo on a remote Turso database, a schema drift or a missing table reads as \"there is no data\". The local face and `driver-sql` refuse it loudly. This is the #8790 shape (closed for `driver-sql`) on the remote transport. The dev reports it applies to managed objects too, and that it predates PR #20422.\n\n## Where\n\n`packages/drivers/driver-turso/src/remote-transport.ts`:\n- the `RemoteTransport.aggregate` catch, which maps \"no such table\" / \"no such column\" to `[]`;\n- the `RemoteTransport.find` `$select` backstop, which returns `[]` when no projection is present.\n\n## Dedupe\n\n`search_issues` \"turso remote aggregate find returns empty result on missing table or missing column instead of error RemoteTransport\" in `objectstack-ai/objectstack`, open and closed: 14 hits. None is this defect. #20107 is the source card, #20055 / #20094 / #19894 are other remote-face refusals, and #8790 / #11541 (closed) are the `driver-sql` twins.\n\nDedupe words: `turso remote aggregate no such table empty` · `turso remote find no such column empty result` · `RemoteTransport invented empty read`"
+}

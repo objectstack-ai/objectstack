@@ -1,0 +1,33 @@
+{
+  "number": 20438,
+  "kind": "pull_request",
+  "title": "docs(deployment): correct Turso/libSQL backup guidance in backup-restore.mdx",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T12:15:04Z",
+  "updated_at": "2026-09-28T12:39:09Z",
+  "closed_at": "2026-09-28T12:39:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-28T12:39:07Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20438",
+  "body": "Fixes #20430\n\nCorrects a false statement in `content/docs/deployment/backup-restore.mdx` (was at `:74` on `origin/main` `e4d3f2ca6`). The \"Managed databases\" section said \"(Turso/libSQL applies only to ObjectStack Cloud-managed environments — the open framework does not ship that driver.)\" `@objectstack/driver-turso` is a published, optional driver (`packages/drivers/driver-turso/package.json` `publishConfig.access: public`) and is documented in `content/docs/data-modeling/drivers.mdx` and `content/docs/plugins/packages.mdx`.\n\n## Before\n\n```\n### Managed databases (hosted Postgres, MongoDB Atlas, …)\n\nUse the provider's snapshot, branching, or point-in-time-restore facilities.\nNothing ObjectStack-specific applies. (Turso/libSQL applies only to ObjectStack\nCloud-managed environments — the open framework does not ship that driver.)\n```\n\n## After\n\n```\n### Managed databases (hosted Postgres, MongoDB Atlas, …)\n\nUse the provider's snapshot, branching, or point-in-time-restore facilities.\nNothing ObjectStack-specific applies.\n\n**Turso / libSQL** (`@objectstack/driver-turso`) is a published, optional\ndriver in the open framework — see\n[Turso / libSQL needs one extra install](/docs/data-modeling/drivers#url--driver-inference-table).\nIts backup path depends on which of its three\n[modes](/docs/plugins/packages#objectstackdriver-turso) a datasource runs in:\n\n- **`local`** — a plain SQLite file (or `:memory:`) via the same\n  Knex + `better-sqlite3` engine as the [SQLite section](#sqlite-single-host)\n  above. Back it up the same way.\n- **`replica`** — an embedded replica: a local SQLite file kept in sync from a\n  remote database. The durable state is that local file, so the SQLite backup\n  procedure above applies to it too; the remote side is the provider's.\n- **`remote`** — pure `@libsql/client` requests over HTTP/WebSocket, with no\n  local file. There is nothing on this host to back up; use the snapshot or\n  point-in-time-restore facilities of whatever runs the remote libSQL server\n  (Turso's managed service, or a self-hosted `sqld`), the same as any other\n  managed database above.\n```\n\n## What was measured (file:line on `origin/main` `e4d3f2ca6`)\n\n- `packages/drivers/driver-turso/package.json:` `publishConfig.access: public` — the driver is a real, published npm package, not Cloud-only.\n- `content/docs/plugins/packages.mdx:194,199` — the `### @objectstack/driver-turso` heading and \"**Modes**: `local` (file / `:memory:` via better-sqlite3), `replica` (local file synced from a remote database), `remote` (pure `@libsql/client` over HTTP/WebSocket — no native bindings, so it runs on serverless/edge)\". Measured, not copied from the card's \"local, embedded-replica and remote\" wording — the driver's own JSDoc (`packages/drivers/driver-turso/src/turso-driver.ts:7-9`) and this table both spell the mode `replica`, not \"embedded-replica\".\n- `content/docs/data-modeling/drivers.mdx:49,55-69,81` — the URL-inference table and the \"Turso / libSQL needs one extra install\" callout: `libsql://` / `*.turso.io` URLs are inferred by the CLI and standalone runtime alike; `@objectstack/driver-turso` is an optional peer install (not shipped by default, but shipped as a first-party package — distinct from \"not shipped\").\n- No page documents a distinct backup *procedure* for `replica` or `remote` mode beyond what the mode itself implies (a local SQLite file for `local`/`replica`, no local file for `remote`), so I did not invent one — I named what the driver's own code makes true for each mode and pointed to the existing SQLite backup steps and to the existing \"Managed databases\" pattern (provider snapshot) for `remote`, rather than writing a new procedure.\n\n**PM review fix:** the \"modes\" link originally pointed at `drivers.mdx#supported-drivers`, which has no mode text. The three modes are documented at `content/docs/plugins/packages.mdx:199` under the `### @objectstack/driver-turso` heading (`:194`). Re-pointed the link there, using the `github-slugger`-derived fragment `#objectstackdriver-turso` (verified: `slugger.slug('@objectstack/driver-turso') === 'objectstackdriver-turso'`), and confirmed with `check:doc-anchors` (`✅ check-doc-anchors: 387 internal #fragment link(s) across 412 source file(s) all resolve to a real heading`).\n\n## Scope\n\n`content/docs/deployment/backup-restore.mdx`, \"Managed databases\" section only, as claimed. No changeset (docs-only, not part of any package's published `files[]`).\n\n## Gates\n\nAll 40 gates `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands content/docs/deployment/backup-restore.mdx` derives ran green (exit 0) against commit `eda2ae334`, after building `@objectstack/formula`, `@objectstack/lint`, `@objectstack/spec`, `@objectstack/client-react`, `@objectstack/client` (prerequisite for `check:skill-examples` / `check:doc-formula-expressions` / `check:doc-security-posture`, which read built `dist/`). `--ran` reconciliation: `40 derived, 40 run, 0 NOT-MEASURED (a DERIVED zero — all 40 recorded an exit code and none of them is 3)`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_\n"
+}
