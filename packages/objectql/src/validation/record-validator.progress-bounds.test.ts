@@ -76,10 +76,10 @@ describe('validateRecord — a `progress` field\'s `min` / `max` are enforced (#
 
   it('one bound declared alone binds alone', () => {
     const maxOnly = { fields: { v: { type: 'progress', label: 'Done', max: 100 } } };
-    expect(fieldsOf(maxOnly, { v: 101 })?.[0]).toMatchObject({ code: 'max_value' });
+    expect(fieldsOf(maxOnly, { v: 101 })?.[0]).toMatchObject({ field: 'v', code: 'max_value' });
     expect(fieldsOf(maxOnly, { v: -1000 })).toBeNull();
     const minOnly = { fields: { v: { type: 'progress', label: 'Done', min: 0 } } };
-    expect(fieldsOf(minOnly, { v: -0.5 })?.[0]).toMatchObject({ code: 'min_value' });
+    expect(fieldsOf(minOnly, { v: -0.5 })?.[0]).toMatchObject({ field: 'v', code: 'min_value' });
     expect(fieldsOf(minOnly, { v: 1e6 })).toBeNull();
     // No bound declared: nothing is invented for the type (no implicit 0..100).
     const unbounded = { fields: { v: { type: 'progress', label: 'Done' } } };
@@ -88,9 +88,9 @@ describe('validateRecord — a `progress` field\'s `min` / `max` are enforced (#
   });
 
   it('refuses on update too, judges a string-carried number after coercion, and never re-reads an omitted field', () => {
-    expect(fieldsOf(BOUNDED('progress'), { v: 150 }, 'update')?.[0]).toMatchObject({ code: 'max_value' });
-    expect(fieldsOf(BOUNDED('progress'), { v: '150' })?.[0]).toMatchObject({ code: 'max_value' });
-    expect(fieldsOf(BOUNDED('progress'), { v: '-5' })?.[0]).toMatchObject({ code: 'min_value' });
+    expect(fieldsOf(BOUNDED('progress'), { v: 150 }, 'update')?.[0]).toMatchObject({ field: 'v', code: 'max_value' });
+    expect(fieldsOf(BOUNDED('progress'), { v: '150' })?.[0]).toMatchObject({ field: 'v', code: 'max_value' });
+    expect(fieldsOf(BOUNDED('progress'), { v: '-5' })?.[0]).toMatchObject({ field: 'v', code: 'min_value' });
     expect(fieldsOf(BOUNDED('progress'), { v: '50' })).toBeNull();
     // The WRITTEN value only: an update that does not carry the field is not judged.
     expect(fieldsOf(BOUNDED('progress'), { other: 1 }, 'update')).toBeNull();
@@ -100,16 +100,16 @@ describe('validateRecord — a `progress` field\'s `min` / `max` are enforced (#
 describe('validateRecord — ⛔ `progress` takes the bounds only, never `scale` or `precision` (#20386)', () => {
   it('`scale: 0` is not read on `progress` — the same declaration on `slider` refuses', () => {
     expect(fieldsOf(BOUNDED('progress', { scale: 0 }), { v: 33.5 })).toBeNull();
-    expect(fieldsOf(BOUNDED('slider', { scale: 0 }), { v: 33.5 })?.[0]).toMatchObject({ code: 'max_scale' });
+    expect(fieldsOf(BOUNDED('slider', { scale: 0 }), { v: 33.5 })?.[0]).toMatchObject({ field: 'v', code: 'max_scale' });
   });
 
   it('`precision: 2` is not read on `progress` — the same declaration on `slider` refuses', () => {
     expect(fieldsOf(BOUNDED('progress', { precision: 2 }), { v: 99.5 })).toBeNull();
-    expect(fieldsOf(BOUNDED('slider', { precision: 2 }), { v: 99.5 })?.[0]).toMatchObject({ code: 'max_precision' });
+    expect(fieldsOf(BOUNDED('slider', { precision: 2 }), { v: 99.5 })?.[0]).toMatchObject({ field: 'v', code: 'max_precision' });
   });
 
   it('a bound still answers first when `scale` / `precision` are declared beside it', () => {
-    expect(fieldsOf(BOUNDED('progress', { scale: 0, precision: 2 }), { v: 150.5 })?.[0]).toMatchObject({ code: 'max_value' });
+    expect(fieldsOf(BOUNDED('progress', { scale: 0, precision: 2 }), { v: 150.5 })?.[0]).toMatchObject({ field: 'v', code: 'max_value' });
   });
 });
 
