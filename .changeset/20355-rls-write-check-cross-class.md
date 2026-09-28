@@ -7,7 +7,7 @@
 
 fix(security)!: the RLS write check refuses a field-to-field comparison the read refuses — one comparison class, one answer per policy (#20355)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) no key, value or stored shape changes; the write check now refuses at request time what the read already refused, and no shipped policy compares fields of two classes -->
 
