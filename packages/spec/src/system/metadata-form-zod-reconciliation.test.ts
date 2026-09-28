@@ -109,6 +109,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { FormSelectOptionSchema } from '../ui/view.zod';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Coordinates — what a ledger `path` may say, including the one the dotted
@@ -237,7 +238,11 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // `FRAMEWORK_FIELDS` above — a root row naming one of its keys is refused by
   // the resolve test below. A fifth, a renderer-owned vocabulary, is read off
   // the key's `describe()` and the forms together; its admission test heads
-  // its group below.
+  // its group below. Three more were ruled rather than read (ruling record
+  // 5861442317, #19332): authored through its own editor, code-declared
+  // platform configuration, and no registered widget spells this union. Each
+  // holds exactly the keys that ruling put in it, and the test at the end of
+  // this file also reads what this package can read of each.
   //
   // `view` rows are here although `view` is outside the top-level direction
   // until its per-arm forms exist: each reason holds on every arm, so none of
@@ -366,6 +371,109 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'format',
     why: "renderer-owned vocabulary — the schema's own words: `The spec declares NO vocabulary for it and checks nothing but that it is a string` (a bare `z.string()`). Its one server-side meaning is the autonumber pattern shorthand, which `resolveAutonumberFormat` reads only after the canonical `autonumberFormat` (that key wins when both are present), and both forms that author a field already offer `autonumberFormat` on an autonumber: this form at its root, and the object designer's `fields` quick-add grid. Every other word is a display hint the Studio renderers declare and read (the text-cell format-to-renderer map, the date and datetime display styles). A free-text control would invite the guess its describe warns about: `format: 'email'` on an autonumber mints `email1`",
+  },
+
+  // Authored through its own editor (ruling record 5861442317, #19332): the
+  // value is authored whole in another editor, so a copy in this form would
+  // be a second, poorer editor beside it. Each row names that editor. Where
+  // the editor is another registered metadata type, the key stores that
+  // type's own node, and the test at the end of this file reads it. The page
+  // designer and the import flow live outside this package, so those two
+  // rows rest on the ruling alone.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'actions',
+    why: "authored through its own editor — the `action` type (ruling record 5861442317, #19332): each element is that type's own node, the schema `getMetadataTypeSchema('action')` answers and `action.form.ts` edits, and the key's own describe says the list is `auto-populated from top-level actions via objectName`, so an inline editor here would be a second, poorer copy of the action form",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'listViews',
+    why: "authored through its own editor — the `view` type (ruling record 5861442317, #19332; per-arm view forms under the #19330 ruling, letter A): each value is the very node the `view` container declares under the same key (`ObjectListViewSchema`), which is where the example apps and HotCRM write their list views (`defineView({ listViews })`), so an inline editor here would be a second list-view editor beside the view type's",
+  },
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'slots',
+    why: 'authored through its own editor — the page designer (ruling record 5861442317, #19332): the Studio page designer writes `slots.NAME` one slot at a time from its block inspector, and each slot holds a component tree (a `PageComponentSchema` or an array of them) that the designer composes block by block, so an inline editor here would be a second, poorer designer',
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'external',
+    why: 'authored through its own editor — the import flow (ruling record 5861442317, #19332): the external-datasource import, which the Studio import dialog and `os datasource introspect` both reach through `POST /datasources/:name/external/tables/:remote/draft`, drafts the binding from the remote table it read, so the binding comes from the remote table rather than from a name typed into this form',
+  },
+
+  // Code-declared platform configuration (ruling record 5861442317, #19332):
+  // this is the `lifecycle.*.onlyWhen` precedent applied at the root. Every
+  // writer is a platform object or app declared in code, and no example app
+  // or HotCRM writes the key. Two of the four keys are isolation switches,
+  // and they stay out of the form. Nothing this package can read admits the
+  // class: neither the four keys' `describe()` nor their writers, which are
+  // declared in other packages. So the class rests on the ruling's key list
+  // alone, and each row names the writers measured when it was written.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'tenancy',
+    why: 'code-declared platform configuration (ruling record 5861442317, #19332): an isolation switch, where `enabled: false` takes the object out of organization scoping (the `isTenancyDisabled` opt-out the SQL driver honours and the security plugin reads), written only by platform objects declared in code (`sys_api_key`, `sys_sso_provider`), so a form row would put organization isolation one click away',
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'systemFields',
+    why: "code-declared platform configuration (ruling record 5861442317, #19332): an isolation switch, where `{ tenant: false }` withholds `organization_id` and reads as the tenancy opt-out on the object's security posture, and `false` withholds every injected column, the audit family included (`resolveInjectedSystemColumns`), written only by a platform object declared in code (`sys_metadata_activation`, `{ tenant: false }`), so a form row would put both one click away",
+  },
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: 'contextSelectors',
+    why: 'code-declared platform configuration (ruling record 5861442317, #19332): scope dropdowns, each fetching its options from a REST endpoint through a key mapping (`optionsSource`), written only by an app declared in code (the Studio app, `studio.app.ts`), so offering one needs a designed control for an endpoint mapping, a form-face addition rather than a reconciliation',
+  },
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'resultDialog',
+    why: 'code-declared platform configuration (ruling record 5861442317, #19332): the one-shot reveal of what an API action returns (a TOTP URI, backup codes, a freshly minted OAuth client secret), written only by the actions of identity platform objects declared in code (`sys_user`, `sys_two_factor`, `sys_oauth_application`, `sys_sso_provider`), so offering it needs a designed control for its `fields` list, a form-face addition rather than a reconciliation',
+  },
+
+  // No registered widget spells this union (ruling record 5861442317,
+  // #19332): the key is a union with a boolean or `false` arm. An option
+  // `value` is a lowercase system identifier, so no select can offer that
+  // arm. A union renders only its first arm when a record is created, so a
+  // control would silently never reach the rest. The test at the end of this
+  // file reads the first half here: the node is a union, and
+  // `FormSelectOptionSchema` refuses the arm's value. The widget registry
+  // belongs to objectui, so the second half rests on the ruling.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'stageField',
+    why: 'no registered widget spells this union (ruling record 5861442317, #19332): a field name or `false` (the status field is non-linear, so the stage heuristics are suppressed), and `false` cannot be an option value while a union renders only its first arm on create, so a control would offer the name and never reach `false`',
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'inlineEdit',
+    why: "no registered widget spells this union (ruling record 5861442317, #19332): `true` / `false` or `'grid'` / `'form'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never reaches `'grid'` or `'form'`",
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'relatedList',
+    why: "no registered widget spells this union (ruling record 5861442317, #19332): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never promotes the list to its own tab (`'primary'`)",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no
@@ -1137,5 +1245,210 @@ describe('the ledger has a root coordinate, and the overlay is not surface', () 
     expect(isFrameworkField('_lock')).toBe(true);
     expect(isFrameworkField('protection')).toBe(true);
     expect(offerable).not.toContain('_lock');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The three ruled root reasons (ruling record 5861442317, #19332).
+//
+// The five root reasons above are read off the key itself: its `describe()`,
+// its liveness verdict, the forms. These three were RULED: for each key the
+// maintainer chose between a form row and a recorded reason. So what admits a
+// row to one of them is the ruling's own key list. A row that claims the class
+// for a key the ruling never named is refused, because the class phrase must
+// not become a free excuse for the next key no form offers. A ruled key that a
+// form offers later loses its row through the resolve test above, and leaves
+// this list in the same edit.
+//
+// Where this package can read the class off the key's own node, the row must
+// pass that reading as well:
+//
+// - Authored through its own editor. When the editor is another registered
+//   metadata type, the key stores that type's OWN node. The `object.fields`
+//   subset row rests on the same reading (its full editor is the `field`
+//   type). The page designer and the import flow live in objectui and in the
+//   datasource service, out of this package's reach, and are held to the
+//   ruling's word.
+// - No registered widget spells this union. The node is a union, and one of
+//   its arms has a value `FormSelectOptionSchema` refuses as an option
+//   `value`. That no widget renders the whole union is a reading of objectui's
+//   widget registry, not of this package.
+// - Code-declared platform configuration. Nothing here reads it: neither the
+//   four keys' `describe()` nor their writers, which are platform objects
+//   declared in other packages. The ruling's key list is its only admission.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** The ruling's three classes, each with the keys it put there, transcribed from the record. */
+const RULED_ROOT_REASONS: ReadonlyArray<{ reason: string; keys: readonly string[] }> = [
+  {
+    reason: 'authored through its own editor',
+    keys: ['object.actions', 'object.listViews', 'object.external', 'page.slots'],
+  },
+  {
+    reason: 'code-declared platform configuration',
+    keys: ['action.resultDialog', 'app.contextSelectors', 'object.systemFields', 'object.tenancy'],
+  },
+  {
+    reason: 'no registered widget spells this union',
+    keys: ['field.inlineEdit', 'field.relatedList', 'object.stageField'],
+  },
+];
+
+/**
+ * The editor the ruling names for each own-editor key. It is either a
+ * registered metadata type, which the node reading can check, or a surface
+ * this package cannot see.
+ */
+const RULED_EDITORS: Readonly<Record<string, { type: string } | { surface: string }>> = {
+  'object.actions': { type: 'action' },
+  'object.listViews': { type: 'view' },
+  'page.slots': { surface: 'the page designer' },
+  'object.external': { surface: 'the import flow' },
+};
+
+/** Is `type.key` a key the ruling put in the class `reason` names? */
+const ruledInto = (reason: string, type: string, key: string): boolean =>
+  RULED_ROOT_REASONS.find((c) => c.reason === reason)?.keys.includes(`${type}.${key}`) ?? false;
+
+/**
+ * The registered metadata type whose OWN node `type.key` stores, if any. That
+ * node is either the other type's root schema or the node the other type
+ * declares under the same key. It is judged by node identity, never by name or
+ * by key-set overlap: two schemas that merely look alike are two editors.
+ */
+function editorTypeOf(type: string, key: string): string | undefined {
+  const sub = subSchemaOf(getMetadataTypeSchema(type), key);
+  if (sub === undefined) return undefined;
+  const node = unwrap(sub);
+  return TYPES.find((other) => {
+    if (other === type) return false;
+    const otherRoot = getMetadataTypeSchema(other);
+    const sameKey = subSchemaOf(otherRoot, key);
+    return unwrap(otherRoot) === node || (sameKey !== undefined && unwrap(sameKey) === node);
+  });
+}
+
+/**
+ * The values of a union's arms that no select option can stand for. An option
+ * `value` is a lowercase system identifier, so a boolean or a non-string
+ * literal is refused. The refusal comes from `FormSelectOptionSchema` itself,
+ * not from a list kept here. Returns `undefined` when the node is not a union.
+ */
+function unspellableArmValuesOf(type: string, key: string): unknown[] | undefined {
+  const node = unwrap(subSchemaOf(getMetadataTypeSchema(type), key));
+  const d = node?.def ?? node?._def;
+  if (d?.type !== 'union' && d?.type !== 'discriminated_union') return undefined;
+  const values: unknown[] = [];
+  for (const option of d.options ?? []) {
+    const od = unwrap(option)?.def;
+    const finite: unknown[] =
+      od?.type === 'boolean'
+        ? [true, false]
+        : od?.type === 'literal'
+          ? (od.values ?? [])
+          : od?.type === 'enum'
+            ? Object.values(od.entries ?? {})
+            : [];
+    for (const value of finite) {
+      if (!FormSelectOptionSchema.safeParse({ label: 'probe', value }).success) values.push(value);
+    }
+  }
+  return values;
+}
+
+describe('the three ruled root reasons admit only the keys ruled into them (#19332)', () => {
+  const rootRows = LEDGER.filter((e): e is OmitEntry => e.kind === 'omit' && e.path === ROOT_PATH);
+  const rowsOf = (reason: string) => rootRows.filter((e) => e.why.startsWith(reason));
+  const label = (e: OmitEntry) => `${e.type}.${e.key}`;
+  const OWN_EDITOR = 'authored through its own editor';
+  const PLATFORM_CONFIG = 'code-declared platform configuration';
+  const UNION = 'no registered widget spells this union';
+
+  it('the admission is the ruling: a key the ruling put in a class passes, any other key is refused', () => {
+    // Lit: one ruled key per class.
+    expect(ruledInto(OWN_EDITOR, 'object', 'actions')).toBe(true);
+    expect(ruledInto(PLATFORM_CONFIG, 'object', 'tenancy')).toBe(true);
+    expect(ruledInto(UNION, 'field', 'relatedList')).toBe(true);
+    // Dark: `object.access` is authorable and no form offers it, but the
+    // ruling gave it a form row, not a reason. `object.systemFields` passes
+    // the union reading below (its `false` arm), and the ruling still put it
+    // in the platform-configuration class, so the reading alone does not
+    // decide the class.
+    expect(ruledInto(OWN_EDITOR, 'object', 'access')).toBe(false);
+    expect(ruledInto(PLATFORM_CONFIG, 'object', 'access')).toBe(false);
+    expect(ruledInto(UNION, 'object', 'systemFields')).toBe(false);
+    expect(unspellableArmValuesOf('object', 'systemFields')).toEqual([false]);
+  });
+
+  it('each class holds exactly the keys the ruling put in it, and every row cites the record', () => {
+    for (const { reason, keys } of RULED_ROOT_REASONS) {
+      const held = rowsOf(reason).map(label).sort();
+      expect(
+        held,
+        `"${reason}": the root rows giving this reason are not the keys ruling record 5861442317 put in it. A key the ruling did not name needs a ruling of its own; a ruled key a form now offers leaves this list together with its row`,
+      ).toEqual([...keys].sort());
+      for (const e of rowsOf(reason)) {
+        expect(e.why, `${label(e)}: cite the ruling record that decided the reason`).toContain('5861442317');
+      }
+    }
+  });
+
+  it('authored through its own editor: where the editor is a registered type, the key stores that type\'s own node', () => {
+    // Lit: the two ruled keys whose editor is a registered type, and the
+    // `object.fields` subset row, which rests on the same reading.
+    expect(editorTypeOf('object', 'actions')).toBe('action');
+    expect(editorTypeOf('object', 'listViews')).toBe('view');
+    expect(editorTypeOf('object', 'fields')).toBe('field');
+    // Dark: a key authored on the object itself.
+    expect(editorTypeOf('object', 'tenancy')).toBeUndefined();
+    expect(editorTypeOf('object', 'access')).toBeUndefined();
+    // And measured, not assumed: the other two ruled editors are not
+    // registered types, so their rows rest on the ruling alone.
+    expect(editorTypeOf('page', 'slots')).toBeUndefined();
+    expect(editorTypeOf('object', 'external')).toBeUndefined();
+
+    const rows = rowsOf(OWN_EDITOR);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const e of rows) {
+      const editor = RULED_EDITORS[label(e)];
+      expect(editor, `${label(e)}: the ruling names no editor for this key`).toBeDefined();
+      if (!editor) continue;
+      if ('type' in editor) {
+        expect(
+          editorTypeOf(e.type, e.key),
+          `${label(e)}: does not store the \`${editor.type}\` type's own node, so that type is not its editor`,
+        ).toBe(editor.type);
+        expect(e.why, `${label(e)}: name the editor`).toContain(`the \`${editor.type}\` type`);
+      } else {
+        expect(e.why, `${label(e)}: name the editor`).toContain(editor.surface);
+      }
+    }
+  });
+
+  it('no registered widget spells this union: the key is a union with an arm no option value can spell', () => {
+    // The spelling rule itself, read rather than assumed.
+    expect(FormSelectOptionSchema.safeParse({ label: 'probe', value: false }).success).toBe(false);
+    expect(FormSelectOptionSchema.safeParse({ label: 'probe', value: 'primary' }).success).toBe(true);
+    // Lit: a `false` arm, and a boolean arm.
+    expect(unspellableArmValuesOf('object', 'stageField')).toEqual([false]);
+    expect(unspellableArmValuesOf('field', 'inlineEdit')).toEqual([true, false]);
+    // Dark: a union with no boolean or `false` arm, and a key that is no
+    // union at all.
+    expect(unspellableArmValuesOf('object', 'requiredPermissions')).toEqual([]);
+    expect(unspellableArmValuesOf('object', 'tenancy')).toBeUndefined();
+
+    const rows = rowsOf(UNION);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const e of rows) {
+      const values = unspellableArmValuesOf(e.type, e.key);
+      expect(values, `${label(e)}: not a union, so this reason does not hold`).toBeDefined();
+      expect(
+        values?.length ?? 0,
+        `${label(e)}: an option can spell every arm, so this reason does not hold`,
+      ).toBeGreaterThan(0);
+      for (const value of values ?? []) {
+        expect(e.why, `${label(e)}: name the arm the form cannot reach`).toContain(`\`${String(value)}\``);
+      }
+    }
   });
 });
