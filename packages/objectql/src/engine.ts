@@ -219,7 +219,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -11742,8 +11742,12 @@ export class ObjectQL implements IObjectQLEngine {
     // [#20308] The write doors read a blank on a non-string-typed column as
     // `null` before anything else; the preview does the same at the same point,
     // or a blank on a required field with a `defaultValue` would preview
-    // `required` while the write takes the default.
-    const rawRows = normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]);
+    // `required` while the write takes the default. [#20309] Likewise a
+    // numeric string on a number field is its number here, as on the write.
+    const rawRows = normalizeNumericStringValues(
+      schemaForValidation,
+      normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]),
+    );
     const nowSnapshot = new Date();
     // [#20082] The preview's ONE permission resolution, shared by its CEL
     // defaults and its option gates below, exactly as the write shares one. A
@@ -11914,8 +11918,11 @@ export class ObjectQL implements IObjectQLEngine {
     // validation read the payload, so all of them see one image (a blank then
     // takes a `defaultValue` exactly as `null` does). See
     // `normalizeBlankTypedValues` for the scope; it never mutates the caller's
-    // rows.
+    // rows. [#20309] At the same point, a string on a number field that the
+    // spec's numeric grammar reads becomes that number, so the validator judges
+    // the value the driver stores (`normalizeNumericStringValues`).
     data = normalizeBlankTypedValues(this._registry.getObject(object), data);
+    data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
     const opCtx: OperationContext = {
       object,
@@ -12959,8 +12966,11 @@ export class ObjectQL implements IObjectQLEngine {
      // non-string-typed column is `null` before the middleware, the
      // caller-value snapshot (`suppliedValues`), the hooks, the read-only
      // strips and validation read the payload — so a `readonlyWhen` lock judges
-     // the value it snapshotted. See `normalizeBlankTypedValues`.
+     // the value it snapshotted. See `normalizeBlankTypedValues`. [#20309] The
+     // insert door's numeric-string rewrite, same place and same reason (see
+     // `normalizeNumericStringValues`).
      data = normalizeBlankTypedValues(this._registry.getObject(object), data);
+     data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
      // 1. Extract ID from data or where if it's a single update by ID.
      //    Only a SCALAR `where.id` means "update one row by primary key". An
