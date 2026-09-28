@@ -30,7 +30,11 @@
 // Per-leaf witness: the package's provenance table
 // (`zh-CN.source-hashes.generated.ts`) holds an entry exactly while a leaf is
 // still a byte copy of its source revision. `pnpm i18n:extract` dropped the 320
-// rows for the translated leaves and kept exactly the 42 below; asserted.
+// rows for the translated leaves and kept 42 rows, one per echo below (measured
+// equal at the time). What is asserted is one direction per verdict: every
+// declared echo still has its row, and no pinned translation has one. That the
+// table holds nothing BEYOND the echoes is not asserted, for the reason the
+// next section gives.
 //
 // ## What this file deliberately does NOT assert
 //

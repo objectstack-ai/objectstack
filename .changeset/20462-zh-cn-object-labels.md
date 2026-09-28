@@ -13,8 +13,8 @@ their values were byte copies of the English source that `os i18n extract
 --fill=default` seeds.
 
 - 320 of the 362 zh-CN string leaves that equalled their `en` source are now
-  translated: labels, plural labels, select options, help, descriptions,
-  placeholders and empty states. `delegated_admin` reads 受托管理员 on both
+  translated: labels, plural labels, select options, help, descriptions and
+  empty states. `delegated_admin` reads 受托管理员 on both
   `sys_member` and `sys_invitation`, the word the console already uses for that
   role.
 - The other 42 stay English by design, and each is recorded with its reason in
