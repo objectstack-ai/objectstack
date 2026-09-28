@@ -772,6 +772,16 @@ function filterAt(key: string, slot: Slot, given: unknown): FilterCondition {
 /** The five groups of {@link NUMBER_COMPARAND_DOOR_CASES}, which also prefix each case name. */
 type CaseGroup = 'census' | 'position' | 'grammar' | 'unjudged' | 'value';
 
+/**
+ * Does the door judge this slot at all? The verdict is defined for a JUDGED
+ * position only; a flag operator's comparand (`$null: true`) is never handed
+ * to it, so its row passes whatever the verdict would say of a boolean.
+ */
+function isJudgedSlot(slot: Slot): boolean {
+  if (slot.kind !== 'scalar') return true;
+  return (NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS as readonly string[]).includes(slot.op);
+}
+
 function caseFor(
   group: CaseGroup,
   field: NumberComparandDoorFixtureField,
@@ -779,7 +789,9 @@ function caseFor(
   comparand: unknown,
   note?: string,
 ): NumberComparandDoorCase {
-  const verdict = numberComparandDoorVerdict(field, comparand);
+  const verdict: NumberComparandDoorVerdict = isJudgedSlot(slot)
+    ? numberComparandDoorVerdict(field, comparand)
+    : { verdict: 'passes' };
   const position = slotPosition(field.name, slot);
   const declared = field.returnType ? `${field.type} returning ${field.returnType}` : field.type;
   const base = {

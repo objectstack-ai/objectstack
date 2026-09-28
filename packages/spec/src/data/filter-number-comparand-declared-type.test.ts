@@ -368,7 +368,22 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
       expect(c.declaredType, c.name).toBe(f.type);
       expect(c.returnType, c.name).toBe(f.returnType);
       expect(comparandAt(c, c.filter() as Record<string, unknown>), c.name).toEqual(c.comparand);
-      expect(c.verdict, c.name).toBe(numberComparandDoorVerdict(f, c.comparand).verdict);
+      // The verdict is defined at a JUDGED position; a flag operator's comparand is never handed to it.
+      const op = /\.(\$\w+)/.exec(c.position)?.[1];
+      const judgedPosition = op === undefined
+        || [...NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS, ...NUMBER_COMPARAND_DOOR_LIST_OPERATORS].includes(op as never);
+      expect(c.verdict, c.name).toBe(judgedPosition ? numberComparandDoorVerdict(f, c.comparand).verdict : 'passes');
+    }
+  });
+
+  it('[#20502] the flag operators pass their boolean — the door never judges $null / $exists / $empty, whatever the verdict says of a boolean', () => {
+    const flags = NUMBER_COMPARAND_DOOR_CASES.filter((c) => /\.\$(?:null|exists|empty)$/.test(c.position));
+    expect(sorted(flags.map((c) => c.position))).toEqual(['f_number.$empty', 'f_number.$exists', 'f_number.$null']);
+    for (const c of flags) {
+      expect(typeof c.comparand, c.name).toBe('boolean');
+      expect(c.verdict, c.name).toBe('passes');
+      // …while the same boolean at a judged position is refused: the position, not the value, decides.
+      expect(numberComparandDoorVerdict({ type: 'number' }, c.comparand), c.name).toMatchObject({ verdict: 'door-refusal', form: 'boolean' });
     }
   });
 
