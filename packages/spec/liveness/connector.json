@@ -230,8 +230,8 @@
     },
     "webhooks": {
       "status": "dead",
-      "verifiedAt": "2026-09-17",
-      "note": "A connector's NESTED webhook array is not the collection the dispatcher reads, and nothing else reads it either. `bootstrapDeclaredWebhooks` (packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts) materializes `sys_webhook` rows from `readDeclared(engine, metadataService, 'webhook')` — metadata ITEMS of type `webhook`, which the decomposition registers from the TOP-LEVEL `webhooks:` stack collection (`METADATA_ARRAY_KEYS` in packages/objectql/src/engine.ts, and `webhooks: 'webhook'` in packages/metadata/src/plugin.ts). `connectors: 'connector'` in that same map registers a connector entry WHOLE, so the array nested inside it never becomes a `webhook` item and never reaches the materializer. Census: the only `.webhooks` reads outside packages/spec are of `stack.webhooks` — packages/lint/src/validate-functional-completeness.ts (`for (const hook of entriesOf(stack.webhooks))`) and the bootstrap's own docblock — with no read of a connector's own array anywhere. ⚠️ That docblock says it materializes each 'stack/connector-authored webhook'; the phrase is not backed by its code on this checkout, and it is what makes this key look live. ⛔ ADR-0049 owes a decision rather than a sweep — either decompose a connector's webhooks into `webhook` items, or retire the key. WHY ONE VERDICT COVERS THE SUBTREE, declared rather than assumed: the coordinate is recorded in scripts/liveness/undrilled-containers.baseline.json. `WebhookConfigSchema` is `WebhookSchema.extend({ events, signatureAlgorithm })`, so a `deferred` row pointing at the governed `webhook` type would be refused by the gate's key-set EQUALITY check — correctly, because the extension adds two keys the target does not classify. Drilling would mean writing 21 child rows of which 8 are the ADR-0010 protection envelope the gate auto-classifies `live` everywhere else and 13 would repeat this one sentence: fabricated granularity over a container that is dead as a whole. The recorded row is the honest form, and it leaves the baseline as soon as the decision above is taken."
+      "verifiedAt": "2026-09-27",
+      "note": "RETIRED 2026-09-27 (ADR-0049 enforce-or-remove; the connector resilience family) — the `retire` arm of the decision this row asked for. Tombstoned with `retiredKey` (non-strict schema, ADR-0104), carried by `DeclarativeConnectorEntrySchema` too; the nested shape left whole (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). Stripped — never moved — from sources and stored rows by the protocol-18 conversion `connector-resilience-keys-removed`: moving a nested webhook into the top-level collection would START deliveries it never made, which is the author's call (the D3 entry `connector-resilience-keys-retired`). The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent); it is a LEAF now, so its `connector/webhooks` row in scripts/liveness/undrilled-containers.baseline.json was deleted (the gate reported it stale once the container stopped being one). Why, unchanged from the prior verdict: a connector's NESTED webhook array is not the collection the dispatcher reads — `bootstrapDeclaredWebhooks` (packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts) materializes `sys_webhook` rows only from metadata ITEMS of type `webhook`, which the decomposition registers from the TOP-LEVEL `webhooks:` stack collection, and `connectors: 'connector'` registers a connector entry WHOLE; `bootstrap-declared-webhooks.connector-nested.test.ts` pins that the nested array is not hoisted. Declare a webhook in the top-level `webhooks:` collection. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "rateLimitConfig": {
       "status": "dead",
@@ -312,8 +312,8 @@
     },
     "status": {
       "status": "dead",
-      "verifiedAt": "2026-09-17",
-      "note": "Declared `ConnectorStatusSchema` with a `.default('inactive')`, and dispatched on by nothing — no consumer reads `def.status` in this repo, and the runtime's answer to 'can this connector be dispatched?' is a DIFFERENT field: `RegisteredConnector.state` (`ready` / `degraded`, #3017), which `getConnectorDescriptors` publishes as `state` and which no authored value can set. The two names one letter apart on one wire payload are the trap: `status: 'active'` on an authored entry neither enables nor advertises anything, while `state` — the field a reader will actually see — is computed. The keys that DO decide participation are `enabled` (materialization + the #2612 audit opt-out) and `provider`. ⛔ ADR-0049 owes a decision: retire it, or make it the authored half of the dispatchability answer."
+      "verifiedAt": "2026-09-27",
+      "note": "RETIRED 2026-09-27 (ADR-0049 enforce-or-remove; the connector resilience family) — the decision this row asked for, taken as `retire`. Tombstoned with `retiredKey` because `ConnectorSchema` is not `.strict()` and a plain delete would be a silent strip (ADR-0104); carried by `DeclarativeConnectorEntrySchema` too, so `stack.connectors[]` and `/meta/connector` refuse it; `ConnectorStatus` left whole. Its `.default('inactive')` was materialized by every 17.x parse, so `status: 'inactive'` joined `connectionTimeoutMs: 30000` in the retired-default residue stage (accepted and STRIPPED; every other value keeps the refusal). Stripped from sources and stored rows by the protocol-18 conversion `connector-resilience-keys-removed`. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). What the prior verdict recorded still holds and is why: no consumer read `def.status` — the runtime's dispatchability answer is `RegisteredConnector.state` (`ready` / `degraded`, #3017), computed and published by `getConnectorDescriptors`, one letter away on the same payload. The only non-spec occurrences were WRITES read back by nothing — `status: 'active'` in the four shipped connector packages and `status: 'error'` on the automation service's degraded husk — deleted in the same change. Participation is `enabled` (and `provider`). The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "enabled": {
       "status": "live",
@@ -328,91 +328,9 @@
       "note": "RETIRED (ADR-0049 enforce-or-remove) — eleven authorable keys (`ErrorMappingConfig` ×4, `ErrorMappingRule` ×7) that nothing in the tree ever read, one of them spelled `userMessage`, the name of the LIVE API-error channel, so writing a rule here validated, published and showed nobody anything. Tombstoned with `retiredKey` because `ConnectorSchema` is not `.strict()` and a plain delete would be a silent strip (ADR-0104); the tombstone is inherited by `DeclarativeConnectorEntrySchema`, so `stack.connectors[]` and `/meta/connector` refuse it too. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Registered as `integration/Connector:errorMapping` and `integration/DeclarativeConnectorEntry:errorMapping` in `RETIRED_KEYS_BY_MAJOR[18]`; sources are rewritten by the D2 conversion `connector-error-mapping-removed`. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "health": {
-      "children": {
-        "healthCheck": {
-          "children": {
-            "enabled": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "No connector health-check loop exists. Census: the only `healthCheck` occurrences outside packages/spec are the KERNEL's own plugin health contract (`packages/core/src/health-monitor.ts`, `PluginHealthCheck`) — a different shape on a different subject — and nothing in packages/connectors or packages/services/service-automation polls a connector endpoint, counts consecutive failures, or acts on a threshold. SYNC_ARCHITECTURE.md ticks '✅ Monitoring: Health checks, metrics, logging' at L3; that tick is not backed on this surface. ⛔ ADR-0049 owes a decision rather than a sweep. The sub-keys below are dead for this one reason."
-            },
-            "intervalMs": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled` — nothing schedules the probe."
-            },
-            "timeoutMs": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
-            },
-            "endpoint": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled` — no request is ever made to it."
-            },
-            "method": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
-            },
-            "expectedStatus": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
-            },
-            "unhealthyThreshold": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
-            },
-            "healthyThreshold": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
-            }
-          }
-        },
-        "circuitBreaker": {
-          "children": {
-            "enabled": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "No circuit breaker exists for connectors. Census: nothing outside packages/spec reads `circuitBreaker` except the protocol-18 rename conversion in packages/spec/src/conversions/registry.ts, which rewrites the key's NAME and is not a consumer. No state machine opens, half-opens or closes anything, and no call path consults a breaker before dispatching a connector action. The nearest real mechanism is the ADR-0097 DEGRADED instance (#3017) — a husk registered with `state: 'degraded'` and a backoff retry — which is driven by materialization failures and reads none of these keys. ⛔ ADR-0049 owes a decision rather than a sweep. Sub-keys below are dead for this one reason."
-            },
-            "failureThreshold": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
-            },
-            "resetTimeoutMs": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
-            },
-            "halfOpenMaxRequests": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
-            },
-            "monitoringWindowMs": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`. Renamed from `monitoringWindow` by the protocol-18 conversion (#15680/#14478) so the unit lives in the key name — an honesty fix to a declaration that is still unread."
-            },
-            "monitoringWindow": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "REMOVED (#15680, ruling B on #14478) — tombstoned at the schema with `retiredKey`, which carries the prescription and makes authoring it a tsc error and a parse error; sources are renamed by the protocol-18 conversion `connector-duration-unit-suffixes`. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Use `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. The tombstone is packages/spec/src/integration/connector.zod.ts#CircuitBreakerConfigSchema."
-            },
-            "fallbackStrategy": {
-              "status": "dead",
-              "verifiedAt": "2026-09-17",
-              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`. `cache` / `default_value` / `error` / `queue` name four behaviours none of which is implemented anywhere — the shape this ledger exists to find."
-            }
-          }
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-27",
+      "note": "RETIRED 2026-09-27 (ADR-0049 enforce-or-remove; the connector resilience family, one batch with `status` and `webhooks`) — tombstoned at the schema with `retiredKey` (the prescription names the probe and breaker keys, including `circuitBreaker.monitoringWindowMs` and the pre-rename `monitoringWindow`; authoring it is a tsc error and a parse error) and stripped from sources and stored rows by the protocol-18 conversion `connector-resilience-keys-removed`. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). ⚠️ It is a LEAF now: the fourteen per-key rows that were drilled under `healthCheck` / `circuitBreaker` (all `dead`, verified 2026-09-17) left with the subtree — the gate refuses `children` on a property that is not a container (measured: `connector/health (declared children but property is not a container)`), so keeping them would not be possible, let alone honest. Their verdicts are carried here, one reason each: no connector health-check loop exists — nothing polls a connector endpoint, counts consecutive failures or acts on `unhealthyThreshold` / `healthyThreshold`, and the only `healthCheck` code outside packages/spec is the KERNEL's plugin health contract (`packages/core/src/health-monitor.ts`), a different shape on a different subject; and no circuit breaker exists for connectors — no state machine opens, half-opens or closes anything, no call path consults a breaker before dispatching, and none of the four `fallbackStrategy` behaviours is implemented. Census at origin/main 3f86dc52f2: zero reads of any of the fourteen keys outside packages/spec, with `retryConfig` — the executed sibling policy — read 17 times in packages/connectors + packages/services/service-automation by the same scan. SYNC_ARCHITECTURE.md's '✅ Monitoring: Health checks' tick was dropped with it. Implement probes and circuit breaking in the connector provider or an upstream gateway; dispatchability is the computed `state` (`ready` / `degraded`) on `GET /api/v1/automation/connectors`. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "metadata": {
       "status": "dead",

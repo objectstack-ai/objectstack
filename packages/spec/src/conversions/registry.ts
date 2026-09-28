@@ -9198,8 +9198,9 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
       connectors: [
         // Minimal by the §3 disjointness contract: the retired key and nothing
         // else this major's other `connectors[]` entries also walk
-        // (`errorMapping`, `health.circuitBreaker.monitoringWindow`,
-        // `triggers[].interval`), so every notice here is attributable to this id.
+        // (`errorMapping`, `health` / `status` / `webhooks` — `health` once as
+        // `health.circuitBreaker.monitoringWindow` — and `triggers[].interval`),
+        // so every notice here is attributable to this id.
         { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
         // A connector that never authored the key keeps its identity — the
         // copy-on-write contract `stripKeys` / `mapCollection` are built on.
@@ -9428,54 +9429,40 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
 };
 
 /**
- * The two connector duration keys whose name carried no unit → suffixed
- * (protocol 18, #15680 for #14478): `health.circuitBreaker.monitoringWindow` →
- * `monitoringWindowMs`, and `triggers[].interval` → `intervalSeconds`.
+ * The connector duration key whose name carried no unit → suffixed (protocol
+ * 18, #15680 for #14478): `triggers[].interval` → `intervalSeconds`. The bare
+ * token `interval` means MILLISECONDS elsewhere in this same spec, so the
+ * identical spelling carried two units a thousandfold apart.
  *
- * One entry because they are one authored document and one authoring session —
- * a connector and the resilience block that guards it. The circuit-breaker case
- * is the sharpest in this card: `monitoringWindow` (ms) sat ONE key below
- * `resetTimeoutMs`, which already spelled its unit, so a single six-key shape
- * carried both conventions and a reader had no rule to apply, only two examples
- * that disagreed. The trigger case is the widest: the bare token `interval`
- * means MILLISECONDS elsewhere in this same spec, so the identical spelling
- * carried two units a thousandfold apart.
+ * ⚠️ This entry used to carry a SECOND rename, `health.circuitBreaker.
+ * monitoringWindow` → `monitoringWindowMs` — the sharpest case of that card:
+ * `monitoringWindow` (ms) sat ONE key below `resetTimeoutMs`, which already
+ * spelled its unit. That half was ABSORBED by `connector-resilience-keys-removed`
+ * (ADR-0049 enforce-or-remove, the same unreleased protocol step): the whole
+ * `health` block left the schema, so a breaker key renamed here would be
+ * stripped by the removal immediately after — a composition with no observable
+ * rename — and the table's disjoint-fixture contract cannot hold a fixture
+ * whose `health` block another entry deletes (`spec-property-retirement` §0,
+ * the `agent.knowledge` precedent). An author who still holds either spelling
+ * is served by the removal: its notice names `health`, and the tombstone's
+ * prescription names both `monitoringWindow` and `monitoringWindowMs`. The id
+ * keeps its original spelling on purpose — ids are how the chain, the step
+ * list and every published changelog refer to an entry.
  *
  * A published connector row lands whole in `sys_metadata` (`ConnectorSchema`'s
  * own docblock says so, which is why #7990 forbids inline secrets on it), so
- * the chain has a seam that sees both keys — hence a conversion rather than the
- * semantic entries this card's two runtime-emitted keys took.
- *
- * The two are walked in one pass but emit SEPARATELY: a connector may author
- * either, both, or neither, and an operator reading the notice list needs to see
- * which of its own keys moved. Retired from the load path, tombstoned at the
- * schema, replayable here.
+ * the chain has a seam that sees the key — hence a conversion. Retired from the
+ * load path, tombstoned at the schema, replayable here.
  */
 const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
   id: 'connector-health-and-trigger-durations-unit-in-key',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'connector.health.circuitBreaker.monitoringWindow, connector.triggers[].interval',
-  summary: "connector keys 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs' and 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; both values are unchanged)",
+  surface: 'connector.triggers[].interval',
+  summary: "connector key 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged. The breaker half, 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs', was absorbed by the removal of the whole 'health' block)",
   apply(stack, emit) {
     return mapCollection(stack, 'connectors', (connector, path) => {
       let next = connector;
-
-      const health = next.health;
-      if (isDict(health)) {
-        const breaker = health.circuitBreaker;
-        if (isDict(breaker)) {
-          const renamedBreaker = renameKey(breaker, 'monitoringWindow', 'monitoringWindowMs');
-          if (renamedBreaker) {
-            emit({
-              from: 'monitoringWindow',
-              to: 'monitoringWindowMs',
-              path: `${path}.health.circuitBreaker.monitoringWindowMs`,
-            });
-            next = { ...next, health: { ...health, circuitBreaker: renamedBreaker } };
-          }
-        }
-      }
 
       const triggers = next.triggers;
       if (Array.isArray(triggers)) {
@@ -9505,16 +9492,15 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
           name: 'billing_api',
           label: 'Billing API',
           type: 'rest',
-          health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindow: 120000 },
-          },
+          // No `health` block: `connector-resilience-keys-removed` strips it
+          // whole, so it may not appear in this fixture (disjointness, §3).
           triggers: [
             { key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 },
             // A webhook trigger authors no interval and keeps its identity.
             { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
           ],
         },
-        // A connector that authored neither key keeps its identity (copy-on-write).
+        // A connector that authored no trigger keeps its identity (copy-on-write).
         { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
       ],
     },
@@ -9524,9 +9510,6 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
           name: 'billing_api',
           label: 'Billing API',
           type: 'rest',
-          health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindowMs: 120000 },
-          },
           triggers: [
             { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
             { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
@@ -9535,7 +9518,99 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
         { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `connector.health`, `connector.status` and `connector.webhooks` removed
+ * (protocol 18 — ADR-0049 enforce-or-remove, one batch for the family: the
+ * mainstream connector surface offers none of the three as author metadata, and
+ * what it does offer is already delivered here by other keys).
+ *
+ * Sixteen authorable keys, measured with zero reads outside `packages/spec`:
+ * the `health.healthCheck` probe (eight keys) and `health.circuitBreaker` (six)
+ * had no engine — nothing polled, counted consecutive failures or tripped a
+ * breaker; `status` was read by nothing (the runtime publishes a COMPUTED
+ * `state`, and participation is `enabled`); and a webhook nested in a
+ * connector was never registered as a `webhook` item, so it was never
+ * materialized into `sys_webhook` or delivered.
+ *
+ * A pure lossless delete, one notice per stripped key: none of the three ever
+ * had an effect to preserve. In particular the nested `webhooks` are STRIPPED,
+ * never MOVED to the top-level `webhooks:` collection — moving them would start
+ * deliveries this connector never made, which is an author's decision, not a
+ * mechanical repair (the family's D3 entry, `connector-resilience-keys-retired`,
+ * carries that judgement). The whole `health` block goes as one key, so this
+ * entry also serves an author still holding the pre-rename
+ * `circuitBreaker.monitoringWindow` spelling — the rename's breaker half was
+ * absorbed here (see `connector-health-and-trigger-durations-unit-in-key`).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones all three keys
+ * (`retiredKey`, tsc `never` + the parse-time prescription), so a live parse
+ * refuses loudly. This entry exists because a stored connector row CAN carry
+ * them — the `PUT /meta/connector/:name` door persisted what it parsed,
+ * including the materialized `status: 'inactive'` default — and the
+ * rehydration seam `applyConversionsToStoredItem('connector', row)` is live for
+ * this type; so 17.x rows replay clean, and `os migrate meta --from 17` lists
+ * the mechanical edits for author sources.
+ */
+const connectorResilienceKeysRemoved: MetadataConversion = {
+  id: 'connector-resilience-keys-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'connector.health / connector.status / connector.webhooks',
+  summary:
+    "connector keys 'health', 'status' and 'webhooks' removed (ADR-0049 — no connector health "
+    + 'probe or circuit breaker ever ran, nothing read an authored status (the runtime reports a '
+    + 'computed `state`), and a webhook nested in a connector was never registered or delivered. '
+    + 'The ConnectorHealth / HealthCheckConfig / CircuitBreakerConfig, ConnectorStatus and '
+    + 'WebhookConfig / WebhookEvent / WebhookSignatureAlgorithm shapes went with them)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['health', 'status', 'webhooks'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        {
+          name: 'erp_gateway',
+          label: 'ERP Gateway',
+          type: 'api',
+          // The measured shape: both resilience blocks, including the
+          // pre-rename `monitoringWindow` spelling this removal absorbed.
+          health: {
+            healthCheck: { enabled: true, intervalMs: 30000, endpoint: '/health', method: 'GET' },
+            circuitBreaker: { enabled: true, failureThreshold: 5, monitoringWindow: 120000, fallbackStrategy: 'cache' },
+          },
+          status: 'active',
+          webhooks: [{
+            name: 'erp_order_created',
+            url: 'https://example.invalid/erp/orders',
+            object: 'order',
+            triggers: ['create'],
+            events: ['sync.completed'],
+            signatureAlgorithm: 'hmac_sha512',
+          }],
+        },
+        // A stored 17.x row: the parse that wrote it materialized the
+        // `'inactive'` default, and nothing else of this family.
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas', status: 'inactive' },
+        // A connector that never authored any of the three keeps its identity —
+        // the copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        { name: 'erp_gateway', label: 'ERP Gateway', type: 'api' },
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas' },
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
+      ],
+    },
+    // Three from `erp_gateway` (health, status, webhooks — the nested keys
+    // leave with their block and are not counted), one from `hr_feed`.
+    expectedNotices: 4,
   },
 };
 
@@ -11895,6 +11970,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     apiEndpointCacheTtlToCacheTtlSeconds,
     dashboardRefreshIntervalToRefreshIntervalSeconds,
     connectorHealthAndTriggerDurationsUnitInKey,
+    // AFTER the duration renames above: it strips the whole `health` block, and
+    // an author's pre-rename breaker key must end with the block gone.
+    connectorResilienceKeysRemoved,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
     viewPageMountRemoved,
