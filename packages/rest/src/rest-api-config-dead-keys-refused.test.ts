@@ -156,9 +156,12 @@ describe('[#20294] RestServer construction refuses the retired `api.documentatio
         expect(message).toContain('  - api.documentation.version: ');
         expect(message).toContain('RestApiConfigSchema');
         expect(message).toMatch(DOCS_VERSION_PRESCRIPTION);
-        // Only the retired member is diagnosed.
-        expect(message).not.toContain('api.documentation.title');
-        expect(message).not.toContain('api.documentation.description');
+        // Only the retired member is diagnosed — no issue line locates an
+        // enforced sibling (the prescription itself NAMES
+        // `api.documentation.description`, as the place a release number
+        // goes, so the check is on the located-issue line, not the word).
+        expect(message).not.toContain('  - api.documentation.title: ');
+        expect(message).not.toContain('  - api.documentation.description: ');
         // Not the route identifier either: `api.version` is a different key.
         expect(message).not.toContain('  - api.version: ');
     });
