@@ -596,7 +596,16 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // refuses one, so the form offers the control only where it draws. The same
     // card REMOVED the joined-block `chart` repeater column, which carried no
     // predicate, so it leaves this census untouched.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(73);
+    // It is 81 today, an ADDITION of EIGHT: #19332 (flight G1b) gave sixteen
+    // live structured field and action keys a form row each, and eight of those
+    // rows carry a meaningfulness gate — the key is read only for some field
+    // types or action shapes. Measured, not inferred: the shipped corpus was
+    // differenced against the merge base `789b2ae54` by
+    // `<form>::<field>::<source>`, 73 → 81, eight added and NONE removed —
+    // `field :: accept | currencyConfig | dependsOn | lookupColumns |
+    // lookupFilters | relatedListColumns`, plus `action :: patch` and
+    // `action :: bodyExtra`. The other eight rows carry no predicate.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(81);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -687,7 +696,12 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // quoted literal and is not rewritten.
     // It is 53 today: #20161's `report :: chart` gate is `data.type != 'joined'`,
     // a `!=` against a single-quoted literal.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(53);
+    // It is 56 today: three of #19332 G1b's eight new predicates compare
+    // against a single-quoted literal (`field :: currencyConfig` on
+    // `data.type == 'currency'`, `action :: patch` on
+    // `data.operation == 'update'`, `action :: bodyExtra` on
+    // `data.type == 'api'`); the other five are `in`-list gates.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(56);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

@@ -160,7 +160,6 @@ import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document, and the
 // docs-audience and app-nav gates it is built from — one implementation, which
 // this server and the runtime dispatcher's `/meta` domain both call. The
@@ -401,13 +400,12 @@ export { mapDataError };
  * module-init path exactly as it was before — the same `await import` the
  * translate helpers below already perform, and a module-cache hit after the
  * first call.
+ *
+ * [#20320] `isTranslatableMetaType` in `./meta-item-read-gate.ts`, the one
+ * answer the runtime dispatcher's list translation asks too.
  */
-let translatableMetaTypes: ReadonlySet<string> | undefined;
-async function isTranslatableMetaType(type: string): Promise<boolean> {
-    if (!translatableMetaTypes) {
-        ({ TRANSLATABLE_METADATA_TYPES: translatableMetaTypes } = await import('@objectstack/spec/system'));
-    }
-    return translatableMetaTypes.has(type);
+function isTranslatableMetaType(type: string): Promise<boolean> {
+    return metaReadGate.isTranslatableMetaType(type);
 }
 
 
@@ -2819,26 +2817,26 @@ export class RestServer {
      * `:type` param — not on `req.path` string-matching — so a route added later
      * cannot accidentally fall inside it, and the plural spelling cannot fall
      * outside it (#3984).
+     *
+     * [#20320] The decision is `isPublicAudienceRead` in
+     * `./meta-item-read-gate.ts`, the ONE predicate the runtime dispatcher's
+     * `/meta` anonymous gate asks too; this method only names which of those
+     * route shapes the registered path is.
      */
     private static isPublicAudienceRead(
         entry: Readonly<Record<string, unknown>>,
         req: { method?: unknown; params?: Record<string, unknown> },
     ): boolean {
-        const method = String(req?.method ?? entry?.method ?? '').toUpperCase();
-        if (method !== 'GET') return false; // reads only — never a write or a publish
         const path = typeof entry?.path === 'string' ? entry.path : '';
-        // `GET /meta/book/:name/tree` — the type segment is literal here.
-        if (path.endsWith('/book/:name/tree')) return true;
-        // `GET /meta/:type` and `GET /meta/:type/:name` — book/doc only. Every
-        // other type (object, field, view, flow, …) keeps the anonymous deny.
-        if (!/\/:type(\/:name)?$/.test(path)) return false;
-        const type = RestServer.metaTypeSingular(req?.params?.type);
-        return type === 'book' || type === 'doc';
-    }
-
-    /** Coerce a getMetaItems result (array | {items}) into an array — `metaItemsArray` in `./meta-item-read-gate.ts`. */
-    private static metaItemsArray(raw: unknown): any[] {
-        return metaReadGate.metaItemsArray(raw);
+        return metaReadGate.isPublicAudienceRead(
+            req?.method ?? entry?.method,
+            // `GET /meta/book/:name/tree` — the type segment is literal there.
+            path.endsWith('/book/:name/tree') ? 'book-tree'
+                : /\/:type\/:name$/.test(path) ? 'item'
+                    : /\/:type$/.test(path) ? 'list'
+                        : undefined,
+            req?.params?.type,
+        );
     }
 
     /** Shape a book list for the audience resolver — `audienceBooksOf` in `./meta-item-read-gate.ts`. */
@@ -3528,11 +3526,12 @@ export class RestServer {
      * carried on the caller as `mayWriteItem`) reads the full stored version,
      * and every other caller who may open the app reads exactly what the plain
      * read gives them, pruned. See `MetaReadGatePolicy.app`.
+     *
+     * [#20320] The constant itself is `STORED_VERSION_DOOR_POLICY` in
+     * `./meta-item-read-gate.ts`, which the runtime dispatcher's `?state=draft`
+     * read runs too; this name is kept so every door here reads it unchanged.
      */
-    private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
-        arms: 'per-caller',
-        app: 'author-exempt',
-    });
+    private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = metaReadGate.STORED_VERSION_DOOR_POLICY;
 
     /**
      * [#12702 · #20156] May this caller SAVE `:type/:name`? The admission of
@@ -3583,20 +3582,12 @@ export class RestServer {
     /**
      * Build a `TranslationBundle` (`Record<locale, TranslationData>`) from an
      * `II18nService` instance. Returns `undefined` when no locales are
-     * registered so callers can avoid translation work.
+     * registered so callers can avoid translation work. [#20320]
+     * `translationBundleOf` in `./meta-item-read-gate.ts`, which the runtime
+     * dispatcher's list translation asks too.
      */
     private buildTranslationBundle(i18n: any): any | undefined {
-        if (!i18n || typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') {
-            return undefined;
-        }
-        const locales: string[] = i18n.getLocales();
-        if (!locales.length) return undefined;
-        const bundle: Record<string, any> = {};
-        for (const locale of locales) {
-            const data = i18n.getTranslations(locale);
-            if (data && typeof data === 'object') bundle[locale] = data;
-        }
-        return Object.keys(bundle).length ? bundle : undefined;
+        return metaReadGate.translationBundleOf(i18n);
     }
 
     /**
@@ -3624,14 +3615,9 @@ export class RestServer {
      * widening it — the same shape `getMetaItemLayered` is consumed with.
      */
     private packagedObjectBase(p: any, type: string, name: unknown): unknown {
-        if (type !== 'object') return undefined;
-        if (typeof name !== 'string' || name === '') return undefined;
-        if (!p || typeof p.getPackagedObjectBase !== 'function') return undefined;
-        try {
-            return p.getPackagedObjectBase(name);
-        } catch {
-            return undefined;
-        }
+        // [#20320] `packagedObjectBaseOf` in `./meta-item-read-gate.ts`, which
+        // the runtime dispatcher's list translation asks too.
+        return metaReadGate.packagedObjectBaseOf(p, type, name);
     }
 
     /**
@@ -3639,33 +3625,20 @@ export class RestServer {
      * Falls back to a `?locale=` query parameter, then to the i18n service's
      * default locale. Returns `undefined` when no preference is expressed
      * (callers will then return untranslated metadata).
+     *
+     * [#6877] One of the read points that was ALREADY safe: a repeated
+     * `?locale=` falls to the i18n default rather than into the array arm.
+     * Left as a guard rather than converted to the refusal gate because this
+     * helper is shared by ~10 routes and has no `res` — refusing here would
+     * need every caller to thread one through, for a parameter whose worst
+     * case is falling back to the default locale. Recorded so the asymmetry
+     * reads as a decision.
+     *
+     * [#20320] `metaRequestLocale` in `./meta-item-read-gate.ts`, the one parse
+     * the runtime dispatcher's `/meta` list reads its locale with too.
      */
     private extractLocale(req: any, i18n?: any): string | undefined {
-        const headers = req?.headers;
-        let header: string | undefined;
-        if (headers) {
-            header = typeof headers.get === 'function'
-                ? headers.get('accept-language') ?? undefined
-                : headers['accept-language'] ?? headers['Accept-Language'];
-        }
-        // Shared parse — the runtime dispatcher resolves the same header the
-        // same way, so a message and the labels around it can't disagree (#3957).
-        const preferred = preferredLocaleFromHeader(header);
-        if (preferred) return preferred;
-        // [#6877] One of the read points that was ALREADY safe: the `typeof`
-        // guard sends a repeated `?locale=` to the i18n default rather than
-        // into the array arm. Left as a guard rather than converted to the
-        // refusal gate because this helper is shared by ~10 routes and has no
-        // `res` — refusing here would need every caller to thread one through,
-        // for a parameter whose worst case is falling back to the default
-        // locale. Recorded so the asymmetry reads as a decision.
-        const queryLocale = req?.query?.locale;
-        if (typeof queryLocale === 'string' && queryLocale.length > 0) return queryLocale;
-        if (i18n && typeof i18n.getDefaultLocale === 'function') {
-            const def = i18n.getDefaultLocale();
-            if (typeof def === 'string' && def.length > 0) return def;
-        }
-        return undefined;
+        return metaReadGate.metaRequestLocale({ headers: req?.headers, query: req?.query }, i18n);
     }
 
     /**
@@ -3706,17 +3679,15 @@ export class RestServer {
      * `填报单` to a `zh-CN` request and its `en` bundle to every other one —
      * the contract question this docblock once refused to answer on its own
      * (#14882 left it to #15711, which ruled it).
+     *
+     * [#20320] `metaTranslateOptions` in `./meta-item-read-gate.ts`, which the
+     * runtime dispatcher's list translation spreads too.
      */
     private static translateOptionsFor(
         i18n: any,
         locale: string,
     ): { locale: string; fallbackChain?: string[]; defaultLocale?: string } {
-        const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-        const def = i18n && typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
-        const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
-        if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
-        if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
-        return opts;
+        return metaReadGate.metaTranslateOptions(i18n, locale);
     }
 
     /**
@@ -4049,37 +4020,85 @@ export class RestServer {
      * splitting the fix (list normalized, single-item not) would trade one
      * missing translation for the far harder "the list is localized but the
      * detail page it links to is not".
+     *
+     * [#20320] The translation is `translateMetaList` in
+     * `./meta-item-read-gate.ts` — the last step of the list chain both
+     * transports run, reached here through {@link metaListAnswerSources}; this
+     * method folds the spelling and hands in this transport's I/O.
      */
     private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
-        const metaType = RestServer.metaTypeSingular(type);
-        if (!(await isTranslatableMetaType(metaType))) return items;
-        // `getMetaItems` may hand back a bare array or an `{ items: [...] }`
-        // envelope. Unwrap so list responses are localized the same way the
-        // single-item route is; a non-array, non-envelope value is returned
-        // untouched.
-        const arr: any[] | null = Array.isArray(items)
-            ? items
-            : (items && typeof items === 'object' && Array.isArray(items.items) ? items.items : null);
-        if (!arr) return items;
-        const i18n = await this.resolveI18nService(environmentId, req);
-        // Missing bundle ≠ bail-out — see `translateMetaItem`.
-        const bundle = this.buildTranslationBundle(i18n);
-        const locale = this.extractLocale(req, i18n);
-        if (!locale) return items;
-        const { translateMetadataDocument } = await import('@objectstack/spec/system');
-        // [#8284] One protocol resolution for the whole page; the lookup
-        // itself is a synchronous in-memory registry read per element.
-        const p = metaType === 'object'
-            ? await this.resolveProtocol(environmentId, req).catch(() => undefined)
-            : undefined;
-        // `getMetaItems` elements are metadata documents (the list envelope is
-        // the OUTER `{ type, items }`), so every element translates directly —
-        // #5563 removed the per-element shape sniff that stood here.
-        const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-            ...RestServer.translateOptionsFor(i18n, locale),
-            packagedBase: this.packagedObjectBase(p, metaType, item?.name),
-        }));
-        return Array.isArray(items) ? translated : { ...items, items: translated };
+        return metaReadGate.translateMetaList(
+            this.metaListTranslationSources(environmentId, req),
+            RestServer.metaTypeSingular(type),
+            items,
+        );
+    }
+
+    /**
+     * [#20320] This transport's I/O for the list translation: the request's
+     * i18n service, its protocol (for the #8284 packaged object base, resolved
+     * only for an `object` list) and {@link extractLocale} over this request.
+     */
+    private metaListTranslationSources(
+        environmentId: string | undefined,
+        req: any,
+    ): metaReadGate.MetaListTranslationSources {
+        return {
+            resolveI18nService: () => this.resolveI18nService(environmentId, req),
+            resolveProtocol: () => this.resolveProtocol(environmentId, req).catch(() => undefined),
+            requestLocale: (i18n) => this.extractLocale(req, i18n),
+        };
+    }
+
+    /**
+     * [#20320] This transport's I/O for THE list chain
+     * (`createMetaListAnswer` in `./meta-item-read-gate.ts`): the per-caller
+     * gate's ports ({@link metaItemReadGateSources}), {@link extractLocale},
+     * the translation through {@link translateMetaItems} (handed the RAW
+     * segment, exactly as the list route always called it), the #5224
+     * endpoint matcher and its one-shot absence notice, and the ADR-0106
+     * object mask — which stays this transport's, because it writes this
+     * transport's cache header: an undetermined posture serves the list
+     * `private, no-store`, exactly as the list route always has. A D6 tier-3
+     * fault is handed back, never sent here: the route answers it.
+     */
+    private metaListAnswerSources(
+        environmentId: string | undefined,
+        req: any,
+        p: RestProtocol,
+        res: any,
+    ): metaReadGate.MetaListAnswerSources {
+        return {
+            ...this.metaItemReadGateSources(environmentId, req, p),
+            requestLocale: (i18n) => this.extractLocale(req, i18n),
+            translateList: (_metaType, items) => this.translateMetaItems(req, req.params.type, environmentId, items),
+            resolveEndpointMatcher: () => this.resolveEndpointMatchAuthority(environmentId, req),
+            notifyMissingEndpointMatcher: (surface) => this.notifyMissingEndpointAuthority(surface),
+            maskObjects: async (list) => {
+                const masker = await this.resolveObjectMasker(environmentId, req, 'object');
+                const projected: any[] = [];
+                let undetermined = false;
+                for (const item of list) {
+                    const objectName = String((item as any)?.name ?? '');
+                    let posture: ObjectSchemaMaskPosture;
+                    try {
+                        posture = await masker(objectName);
+                    } catch (maskError: any) {
+                        // D6 tier 3 — one unevaluable object fails the whole
+                        // list rather than serving it with a silent hole in
+                        // the projection.
+                        if (maskError instanceof ObjectSchemaMaskEvaluationError) return { ok: false, object: objectName };
+                        throw maskError;
+                    }
+                    if (posture.kind === 'undetermined') undetermined = true;
+                    const masked = applyObjectSchemaMask(item, posture);
+                    if (masked.emptied) return { ok: false, object: objectName };
+                    projected.push(masked.document);
+                }
+                if (undetermined) res.header('Cache-Control', 'private, no-store');
+                return { ok: true, items: projected };
+            },
+        };
     }
 
     /**
@@ -5960,292 +5979,34 @@ export class RestServer {
                         };
                         const items = await p.getMetaItems(listRequest);
 
-                        // `getMetaItems` is typed as `{type, items[]}` but the
-                        // objectql implementation actually returns the raw
-                        // array. Handle both shapes defensively.
-                        let visible: any = items;
-
-                        // [#5224] `api` is a CONTRACT face, so it announces only
-                        // the declarations the endpoint matcher will actually
-                        // serve — the same set `/openapi.json` documents, asked
-                        // of the same authority.
+                        // [#20320] Everything this route does to the list after
+                        // the read — the #5224 `api` served-set face, THE
+                        // per-caller list gate (#20237), `?id=` for apps (#7566),
+                        // `?object=` for views, the ADR-0046 doc locale collapse
+                        // and content slim, the ADR-0106 object mask and the
+                        // translation step — is ONE chain,
+                        // `createMetaListAnswer` in `./meta-item-read-gate.ts`,
+                        // which the runtime dispatcher's `/meta` list branch
+                        // calls too. Its docblock carries each step's rule and
+                        // their order; ⛔ a list step is added there, never here
+                        // (`meta-list-projection-parity.test.ts` in
+                        // `@objectstack/runtime` derives its census from this
+                        // handler and fails on one added here). `getMetaItems`
+                        // answers a bare array or the `{ type, items }` envelope;
+                        // the chain answers the same shape.
                         //
-                        // The special case is `api`-only and stays that way on
-                        // purpose: for every other type "listed" and "in effect"
-                        // are the same fact, resolved by the one reader that
-                        // enumerated them. For `api` they are not — a declared
-                        // route is served by `IMetadataService.matchEndpoint`,
-                        // whose index is a different reader with a different
-                        // reach, and it is the SOLE holder of that verdict. So
-                        // the special case is not "api is special", it is "api
-                        // is the one type whose service verdict lives somewhere
-                        // this route cannot see without asking".
-                        //
-                        // `?preview=draft` is exempt: that surface exists to
-                        // answer "what is PENDING", which is by construction not
-                        // the served set (a draft is not live and is not meant to
-                        // look live). Filtering it would empty the drafts view of
-                        // a type whose drafts are legitimately unserved. Codegen
-                        // and SDK clients read the plain list, which is filtered.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'api' && !previewDrafts) {
-                            const raw = visible as unknown;
-                            const list = RestServer.metaItemsArray(raw);
-                            if (list.length > 0) {
-                                const authority = await this.resolveEndpointMatchAuthority(environmentId, req);
-                                if (!authority) {
-                                    this.notifyMissingEndpointAuthority('GET /meta/api');
-                                } else {
-                                    // A `matchEndpoint` throw propagates: its
-                                    // contract distinguishes an unreadable store
-                                    // from a miss, so this route FAILS (through
-                                    // `handleRouteError`) rather than claiming
-                                    // the deployment declares nothing. Measured:
-                                    // that failure is currently reported as 400,
-                                    // because an unrecognised error lands on
-                                    // `mapDataError`'s terminal fallback — a
-                                    // pre-existing classification on every error
-                                    // this route reports, not something this
-                                    // narrowing chose. Filed separately; do not
-                                    // read the propagation here as a promise
-                                    // about which status arrives.
-                                    const servedList = await selectServedEndpoints(list, authority, {
-                                        error: (message: string, meta?: unknown) =>
-                                            meta === undefined ? logError(message) : logError(message, meta),
-                                    });
-                                    // The STORED item is what this face answers
-                                    // with — its `_packageId` / `_provenance` /
-                                    // `_diagnostics` decorations are read by the
-                                    // Studio list, and dropping them here would
-                                    // be a second, unannounced change.
-                                    const filtered = servedList.map((s) => s.item);
-                                    visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                                }
-                            }
+                        // `previewDrafts` is handed in ADMITTED — the one
+                        // declaration above — and the chain never re-reads it.
+                        const answer = await metaReadGate.createMetaListAnswer(
+                            this.metaListAnswerSources(environmentId, req, p, res),
+                            { metaType: RestServer.metaTypeSingular(req.params.type), query: req.query, previewDrafts },
+                        )(items);
+                        if (!answer.ok) {
+                            sendFieldVisibilityFault(res, answer.object);
+                            return;
                         }
-
-                        // [#20237] THE per-caller LIST gate — the app nav
-                        // filter (privileged apps and gated nav entries
-                        // stripped for an authenticated caller; an anonymous
-                        // list left to the anonymous-deny floor upstream), the
-                        // ADR-0057 D10 dashboard widget gate, and the ADR-0046
-                        // §6.7 book and doc audience prunes.
-                        // `createMetaListReadGate` in `./meta-item-read-gate.ts`
-                        // is the ONE implementation, which this route and the
-                        // runtime dispatcher's `/meta` list branch both call;
-                        // its docblock carries each type's rule, and ⛔ a list
-                        // gate is added there, never here.
-                        //
-                        // It runs where the app filter always ran: BEFORE
-                        // `?id=` narrows (the next block says why that order is
-                        // a disclosure rule), and on the raw doc items, before
-                        // the locale collapse, so `_packageId` provenance is
-                        // still present for membership scoping.
-                        {
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const judged = await metaReadGate.createMetaListReadGate(
-                                    this.metaItemReadGateSources(environmentId, req, p),
-                                    RestServer.metaTypeSingular(req.params.type),
-                                )(list);
-                                if (judged !== list) {
-                                    visible = Array.isArray(raw) ? judged : { ...(raw as any), items: judged };
-                                }
-                            }
-                        }
-
-                        // [#7566] `GET /meta/app?id=<app>` — the app-list filter,
-                        // which until now was accepted and then dropped.
-                        //
-                        // Nothing on this route had ever read `id`: the block
-                        // above narrows the list by PERMISSION and the branches
-                        // around it by `?object=` / `?include=` / `?package=`, so
-                        // `?id=crm` and `?id=not_an_app` produced the same three
-                        // apps, byte for byte. A caller cannot tell a working
-                        // filter from a dropped one — a client that asks for one
-                        // app and renders `items[0]` gets a plausible, wrong
-                        // answer, and a bogus id can never come back empty.
-                        //
-                        // ⚠️ Runs AFTER the RBAC filter above, on `visible`
-                        // rather than on `items`. The two orders produce the same
-                        // SET (both are pure filters), but not the same
-                        // disclosure: narrowing first would hand `?id=<an
-                        // unpublished app>` a one-element list to gate, and any
-                        // future non-total gate — one that strips a field instead
-                        // of dropping the document — would then be answering
-                        // about an app the caller may not observe at all
-                        // (ADR-0045 §3). Permission decides what exists for this
-                        // caller; the filter narrows what they asked for within
-                        // it, never the reverse.
-                        //
-                        // The match is on `name`, the App document's identity —
-                        // `AppSchema.name`, "App unique machine name", the same
-                        // key `GET /meta/app/:name` addresses and the same key
-                        // the metadata store merges overlays on. `AppSchema`
-                        // declares no `id` of its own (`id` appears on nav items
-                        // and areas, never on the app), so there is no second
-                        // identity to disagree with.
-                        //
-                        // A filter that matches nothing answers `200` with an
-                        // EMPTY list, not a 404 — measured against this route's
-                        // siblings, not chosen: `?package=<no such package>` and
-                        // `/meta/view?object=<no such object>` both serve an
-                        // empty list here, and the only meta 404 is the
-                        // single-item address `GET /meta/:type/:name`. An empty
-                        // list is the honest answer to "which apps have this id",
-                        // and it is already observably different from the defect,
-                        // which answered with all of them.
-                        //
-                        // Empty and absent spellings still mean "no filter", the
-                        // same falsy gate `?package=` on this route has always
-                        // used. The repeated spelling was refused at the top of
-                        // the handler (#6877), so what arrives here is a string.
-                        //
-                        // Its own block rather than a line inside the branch
-                        // above, because the two answer different questions:
-                        // that branch is guarded on a resolved `ctx?.userId` and
-                        // decides what this caller may observe, while narrowing
-                        // to the app you named is not a privilege and must not
-                        // acquire that guard's conditions.
-                        const appIdFilter = RestServer.metaTypeSingular(req.params.type) === 'app'
-                            ? req.query?.id
-                            : undefined;
-                        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
-                            const raw = visible as unknown;
-                            // Only the two shapes this route serves are narrowed
-                            // — a bare array or the `{ items: [] }` envelope.
-                            // Anything else is left alone rather than replaced
-                            // with an invented empty envelope: a filter must not
-                            // be the thing that changes the response's shape.
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const matched = list.filter(
-                                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
-                                );
-                                visible = Array.isArray(raw) ? matched : { ...(raw as any), items: matched };
-                            }
-                        }
-
-                        // View switcher query: GET /meta/view?object=<object>
-                        // returns ONLY the independent ViewItems bound to that
-                        // object (the `package` layer of "Object has-many
-                        // View"), sorted for the switcher / left rail. The
-                        // aggregated container and other objects' views are
-                        // excluded. Runtime `shared` / `personal` views
-                        // (sys_view_definition) are merged client-side via the
-                        // generic data API.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'view' && req.query?.object) {
-                            const obj = String(req.query.object);
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const filtered = list
-                                    .filter((v: any) => v && typeof v === 'object' && v.viewKind && v.object === obj)
-                                    .sort((a: any, b: any) =>
-                                        ((a.order ?? 0) as number) - ((b.order ?? 0) as number) ||
-                                        String(a.name).localeCompare(String(b.name)));
-                                visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                            }
-                        }
-
-                        // ADR-0046 i18n: collapse each doc to the request
-                        // locale (localized label/description, `translations`
-                        // map dropped) before the content-strip step below.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
-                            const locale = this.extractLocale(req);
-                            const { resolveDocLocale } = await import('@objectstack/spec/system');
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const localized = list.map((it: any) =>
-                                    it && typeof it === 'object' ? resolveDocLocale(it as any, locale) : it);
-                                visible = Array.isArray(raw) ? localized : { ...(raw as any), items: localized };
-                            }
-                        }
-
-                        // ADR-0046: `doc` list responses omit `content` by
-                        // default — manuals are the one metadata payload that
-                        // grows unbounded, and the list surface only needs
-                        // name + label. `?include=content` opts back in; the
-                        // single-item GET /meta/doc/:name always returns the
-                        // full body.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'doc' && req.query?.include !== 'content') {
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const slim = list.map((it: any) => {
-                                    if (!it || typeof it !== 'object') return it;
-                                    const { content: _content, ...rest } = it;
-                                    return rest;
-                                });
-                                visible = Array.isArray(raw) ? slim : { ...(raw as any), items: slim };
-                            }
-                        }
-
-                        // [ADR-0106 D5(2)] The list read — each item projected
-                        // the same way, through the same masker. The posture is
-                        // per OBJECT (one caller may read every field of `lead`
-                        // and half of `account`), so the masker is resolved once
-                        // and asked per item.
-                        {
-                            const listMetaType = RestServer.metaTypeSingular(req.params.type);
-                            if (listMetaType === 'object') {
-                                const raw = visible as unknown;
-                                const list = RestServer.metaItemsArray(raw);
-                                if (list.length > 0) {
-                                    const masker = await this.resolveObjectMasker(environmentId, req, listMetaType);
-                                    const projected: any[] = [];
-                                    let undetermined = false;
-                                    for (const item of list) {
-                                        const objectName = String((item as any)?.name ?? '');
-                                        let posture: ObjectSchemaMaskPosture;
-                                        try {
-                                            posture = await masker(objectName);
-                                        } catch (maskError: any) {
-                                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
-                                                // D6 tier 3 — one unevaluable
-                                                // object fails the whole list
-                                                // rather than serving it with a
-                                                // silent hole in the projection.
-                                                sendFieldVisibilityFault(res, objectName);
-                                                return;
-                                            }
-                                            throw maskError;
-                                        }
-                                        if (posture.kind === 'undetermined') undetermined = true;
-                                        const masked = this.maskObjectDocument(res, posture, objectName, item);
-                                        if (!masked) return;
-                                        projected.push(masked.document);
-                                    }
-                                    if (undetermined) res.header('Cache-Control', 'private, no-store');
-                                    visible = Array.isArray(raw) ? projected : { ...(raw as any), items: projected };
-                                }
-                            }
-                        }
-
-                        const translated = await this.translateMetaItems(req, req.params.type, environmentId, visible);
                         res.header('Vary', 'Accept-Language');
-                        res.json(translated);
+                        res.json(answer.data);
                     } catch (error: any) {
                         handleRouteError(res, error);
                     }
@@ -6814,11 +6575,15 @@ export class RestServer {
 
                             // [#9741] Typed request — `as any` retired. The
                             // cached read carries NO draft-visibility members
-                            // on purpose: this branch is unreachable when
-                            // `previewDrafts` / `?state=draft` are set (the
-                            // fork above bypasses the cache for both), and the
-                            // implementation's `getMetaItemCached` signature
-                            // declares neither.
+                            // on purpose: this branch is unreachable when a
+                            // draft switch is ADMITTED (`previewDrafts` /
+                            // `isDraftRead` true — the fork above bypasses the
+                            // cache for both), and the implementation's
+                            // `getMetaItemCached` signature declares neither.
+                            // [#20320] The query PARAMETER still reaches here:
+                            // a caller `mayReadPendingDrafts` does not admit
+                            // sends `?state=draft` / `?preview=draft` and is
+                            // answered this arm, the plain read's (#20338).
                             const cachedRequest: TransportScopedMetaRequest<GetMetaItemCachedRequest> = {
                                 type: req.params.type,
                                 name: req.params.name,
@@ -7584,6 +7349,44 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#20378] AN AUTHORING DOOR — ruling 5865708652 (letter B).
+                    // `sys_metadata_history` is the authoring commit log
+                    // (ADR-0067), and a DRAFT save appends a row to it exactly
+                    // as an active save does, with nothing on the row to tell
+                    // the two apart — so this log, served to a caller who may
+                    // not read pending drafts, lists unpublished authoring work
+                    // (ADR-0106 D4: 「draft/preview reads are admin-gated
+                    // upstream」). The caller is asked
+                    // {@link mayReadPendingDrafts} FIRST, and one it does not
+                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // (403 `FORBIDDEN`, the same nested envelope): before the
+                    // protocol is resolved (no 501-vs-200 probe), before the
+                    // query is parsed, before any item or event is read. The
+                    // answer is therefore one and the same for an item that
+                    // exists, one that does not and a draft-only one — the door
+                    // is no existence oracle — and it carries no item or
+                    // version detail. The message names THIS door, never
+                    // drafts: a refusal worded about drafts would read as
+                    // "this item has one". Whoever it admits reads exactly what
+                    // they read before, the per-caller refusal below included.
+                    //
+                    // Ruling 5856774816 (#20156) item 2 is narrowed for this
+                    // door and `/diff` only: `/layers` and `?layers=true` read
+                    // the active row and keep the pruned plain-read answer.
+                    //
+                    // `historyCtx` is this door's one caller resolution; the org
+                    // partition below reads the same value.
+                    const historyCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    if (!mayReadPendingDrafts(historyCtx)) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Reading a metadata item\'s version history requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     // The cast came off when `MetadataProtocol` declared
                     // `historyMetaItem` (#12005 — the #11006 pattern, exactly
@@ -7664,11 +7467,11 @@ export class RestServer {
                     // uses is what makes the two sides incapable of drifting —
                     // the reasoning `organizationIdForMetaRead` was written for.
                     //
-                    // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
-                    // memoised per request (WeakMap keyed by `req`), the same
-                    // result the audit twin and 40+ handlers here already share.
-                    const historyCtx = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    // ⚠️ NOT a new org-resolution seam: `historyCtx` is the
+                    // caller resolved at the head of this door (#20378), and
+                    // `resolveExecCtx` is memoised per request (WeakMap keyed by
+                    // `req`), the same result the audit twin and 40+ handlers
+                    // here already share.
                     const historyOrganizationId = organizationIdForMetaRead(
                         // [#10340] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
@@ -8211,6 +8014,46 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#20378] AN AUTHORING DOOR — ruling 5865708652 (letter B),
+                    // the `/history` twin's gate on the same log. A diff reads
+                    // stored versions out of `sys_metadata_history`, where a
+                    // DRAFT save is recorded exactly as an active save, so
+                    // `?from=`/`?to=` naming a draft save — or the default
+                    // range, once a draft is pending — served unpublished
+                    // content to a caller who may not read drafts. The version
+                    // store cannot tell a draft version from a published one,
+                    // so there is no exact published-only answer to fall back
+                    // to: the `/meta/_drafts` shape, not the draft switches'
+                    // "answer as if absent". The caller is asked
+                    // {@link mayReadPendingDrafts} FIRST, and one it does not
+                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // (403 `FORBIDDEN`, the same nested envelope): before the
+                    // protocol is resolved, before the query is parsed, before
+                    // the mask posture, the current document or any version is
+                    // read — one answer for an item that exists, one that does
+                    // not and a draft-only one, with no item or version detail,
+                    // so the door is no existence oracle. The message names THIS
+                    // door, never drafts. Whoever it admits reads exactly what
+                    // they read before: every per-caller gate below, and ruling
+                    // 5856774816's author exemption, still apply to them.
+                    //
+                    // Ruling 5856774816 (#20156) item 2 is narrowed for this
+                    // door and `/history` only: `/layers` and `?layers=true`
+                    // read the active row and keep the pruned plain-read answer.
+                    //
+                    // `diffCtx` is this door's one caller resolution; the org
+                    // partition below reads the same value.
+                    const diffCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    if (!mayReadPendingDrafts(diffCtx)) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Comparing a metadata item\'s stored versions requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).diffMetaItem) {
                         res.status(501).json({
@@ -8295,8 +8138,9 @@ export class RestServer {
                     // `request.organizationId ?? null`, so an `?? null` copied
                     // from the audit door would type-check here and still be a
                     // silent no-op — the exact fix-shaped-non-fix this card is.
-                    const diffCtx = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    //
+                    // `diffCtx` is the caller resolved at the head of this door
+                    // (#20378), not a second resolution.
                     const diffOrganizationId = organizationIdForMetaRead(
                         // [#10340] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.

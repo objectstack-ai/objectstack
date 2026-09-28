@@ -64,13 +64,18 @@
  *    nothing read — and then refuses, naming the `function` it does not have,
  *    instead of logging a line and reporting success as it used to.
  *
- * `decision` stays export-only: nothing parses it at run time. It may carry no
- * `conditions` at all when it branches purely on edge predicates, its executor
- * reads `conditions` and nothing else, and its one other key — `mode` — is
- * declared AHEAD of the engine change that reads it (#15429; see
- * {@link DecisionConfigSchema}). Its enforcement remains the objectui
- * reconciliation test, which is what #4278 was actually about (a form
- * authoring keys nothing reads).
+ * `decision` is parsed at **registration**, for one key (#15429): the
+ * automation engine's `registerFlow` runs every decision node's config through
+ * {@link DecisionConfigSchema} and refuses the flow on any issue rooted at
+ * `mode` — a value outside the closed pair, or a `mode` beside a non-empty
+ * `conditions` list — with this schema's own sentence, and `os validate`
+ * reports the same issues as `flow-decision-mode-invalid`, so the two doors
+ * cannot disagree. A decision may carry no `conditions` at all when it
+ * branches purely on edge predicates; its executor reads `conditions` and
+ * nothing else, and the engine's traversal reads `mode`. Its strictness
+ * (unknown keys) still binds at authoring, in the published JSON Schema and in
+ * the objectui reconciliation test, which is what #4278 was actually about (a
+ * form authoring keys nothing reads).
  *
  * Undeclared aliases are NOT part of these contracts: `subflow`'s historical
  * `flow` spelling graduated into the ADR-0087 D2 conversion
@@ -94,9 +99,10 @@
  * precisely the class with no second door. Closing these shapes is therefore
  * not a duplicate check for `script` and `subflow`; it is their first one.
  *
- * `decision` is still export-only, so its strictness binds at authoring
- * (`tsc`), in the published JSON Schema, and in objectui's reconciliation —
- * not at run time. It is closed anyway, because the campaign's whole finding
+ * `decision`'s strictness binds at authoring (`tsc`), in the published JSON
+ * Schema, and in objectui's reconciliation — not at run time, where the
+ * registration reader judges `mode` alone (#15429). It is closed anyway,
+ * because the campaign's whole finding
  * is that a shape left open accretes a test, a form and a fixture that assert
  * the openness, and then closing it is a migration instead of an edit.
  */
@@ -497,20 +503,34 @@ export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
  * forbids that one when the list is non-empty" — and the site is declared in
  * `dropped-refinements.baseline.json` and on the artifact as
  * `x-dropped-refinements`. Like the rest of this contract it binds wherever
- * `DecisionConfigSchema` is parsed: a direct parse, and the registration-time
- * reader #15429 adds.
+ * `DecisionConfigSchema` is parsed: a direct parse, the automation engine's
+ * registration reader (`registerFlow` refuses the flow with this sentence),
+ * and `os validate` (`flow-decision-mode-invalid`, a gating finding).
  *
- * ⚠️ **Declared ahead of its enforcement, and the status quo does NOT match
- * the default above.** The ruling's split order lands this key first, then
- * the engine semantics together with the `os migrate meta` conversion in one
- * change, then the docs. Until that second step lands, nothing reads `mode`,
- * and an edge-branched decision takes EVERY out-edge whose condition holds,
- * one after another, whatever `mode` says — the behaviour
- * `decision-overlapping-edge-conditions.pin.test.ts` (service-automation)
- * pins as the status quo. The engine change and the conversion that writes
- * `mode: 'inclusive'` onto every decision relying on that behaviour land
- * together, so no shipped flow changes behaviour silently; this paragraph is
- * rewritten with them (#15429).
+ * ## Where `mode` is honoured — the traversal, and the migration that keeps old flows whole
+ *
+ * The engine's traversal reads it (#15429): on a `decision` with no
+ * `conditions` list, the conditioned out-edges are evaluated in the order the
+ * flow's `edges` array declares them and the FIRST one whose condition holds
+ * is the branch; the siblings after it are not evaluated and record the same
+ * `skipped` step a closed gate does. With `mode: 'inclusive'` every out-edge
+ * whose condition holds runs, one after another. When none holds, the
+ * `isDefault` edge runs either way. `os validate` reports
+ * `flow-decision-inclusive-overlap` on an inclusive decision with two or more
+ * conditioned out-edges, because that is the shape in which more than one
+ * branch can run for one record.
+ *
+ * Authored sources written while every true branch ran keep their behaviour
+ * through the ADR-0087 D2 conversion `flow-decision-mode-inclusive-explicit`:
+ * `os migrate meta --from 17` writes `mode: 'inclusive'` onto every
+ * edge-branched decision with two or more conditioned out-edges, and the author
+ * deletes it where the branches partition. It is a default flip, so no load
+ * seam replays it — the authoring funnel is where a source written against THIS
+ * contract arrives, and the flow rehydration seam cannot date a body — which is
+ * why the key has to be written into the source, once, by the operator's own
+ * command. A flow STORED in `sys_metadata` is not rewritten at all (maintainer
+ * ruling letter C on #15429): it takes the first-match meaning on upgrade, and
+ * `os migrate meta --stored` lists each such decision for review.
  *
  * The legacy singular `config.condition` is a structural surface the engine
  * parse-validates on every node at registration but the decision executor never
@@ -526,23 +546,28 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
     .describe('Ordered decision branches (first true expression wins; omit to branch purely on edge conditions)'),
   /**
    * How many out-edges an edge-branched decision takes when more than one
-   * condition holds — `'exclusive'` (the first; what an omitted key means) or
-   * `'inclusive'` (every one). Not read by the engine yet: see the
-   * "Declared ahead of its enforcement" note above. Any other value is refused
-   * with {@link decisionModePrescription}; either member beside a non-empty
-   * `conditions` list is refused by the `.superRefine` below, with
-   * {@link decisionModeWithConditionsRefusal}.
+   * condition holds: `'exclusive'` is the first, in declaration order, and is
+   * the reading an absent key gets — the narrower one, a single branch;
+   * `'inclusive'` is all of them. Read by the engine's
+   * traversal: see "Where `mode` is honoured" above. Any other value is
+   * refused with {@link decisionModePrescription}; either member beside a
+   * non-empty `conditions` list is refused by the `.superRefine` below, with
+   * {@link decisionModeWithConditionsRefusal} — at a direct parse, at
+   * registration and by `os validate` alike.
    */
   mode: z.enum(['exclusive', 'inclusive'], {
     error: (issue) => (issue.code === 'invalid_value' ? decisionModePrescription(issue.input) : undefined),
   }).optional()
     .describe(
       'Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: '
-      + "'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); "
-      + "'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, "
-      + 'an edge-branched decision takes every out-edge whose condition holds, whatever this says. Refused beside a '
-      + 'non-empty conditions list, which is first-match on its own: delete mode there, or move the branches onto '
-      + 'the out-edges, delete conditions, and keep mode.',
+      + "'exclusive' = only the first, in the order the edges are declared (what an omitted mode means; the "
+      + "siblings after it are not evaluated and record a skipped step); 'inclusive' = every one that holds, one "
+      + 'after another. When none holds the isDefault edge runs either way. Refused beside a non-empty conditions '
+      + 'list, which is first-match on its own: delete mode there, or move the branches onto the out-edges, delete '
+      + 'conditions, and keep mode. Authored sources written while every true branch ran keep that behaviour '
+      + 'through the os migrate meta --from 17 conversion, which writes mode: inclusive onto every edge-branched '
+      + 'decision with two or more conditioned out-edges; a flow stored in sys_metadata is not rewritten and takes '
+      + 'the first-match reading on upgrade (os migrate meta --stored lists those decisions).',
     ),
 }).superRefine((config, ctx) => {
   // Ruling 5856786357 on #20168 (letter A): `mode` belongs to the

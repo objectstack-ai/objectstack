@@ -239,16 +239,15 @@
  * comparison class, and refuses the file family and formula fields outright)
  * and a by-id update or delete it scopes `PERMISSION_DENIED` / 403; and an
  * insert their `check` judges — or their `using`, standing in as the check —
- * was ADMITTED and stored. The in-process write check has no class rule and
- * compares the two raw values, so the write answer is whatever that comparison
- * happens to give (`record.amount > record.status` was refused 403, because
- * `5 > 'open'` is false in JS): the permissive answer sits on the write side of
- * an access policy. One policy, three answers.
+ * was ADMITTED and stored. The in-process write check had no class rule then
+ * and compared the two raw values; since #20355 it refuses the comparison by
+ * the same classification (`INVALID_FILTER` / 400), so every insert or update
+ * it judges is refused and nothing is stored. One policy, three answers.
  *
  * This arm refuses the comparison where it is written, by the same rule the
  * read applies: {@link crossFieldComparisonVerdict} (`@objectstack/spec/data`),
- * the classification lifted from driver-sql and held to it by a pairwise parity
- * test there. Only `comparable` passes; `cross-class` and `no-class` (a file
+ * the classification lifted from driver-sql, which now delegates to it
+ * through `crossFieldColumnVerdict`. Only `comparable` passes; `cross-class` and `no-class` (a file
  * field, a formula field) are refused, and `unjudged` — a declared type outside
  * `FieldType` — is Zod's to reject, not this arm's. A comparison either side of
  * which holds a list or an object stays the arm above's, so no comparison is
@@ -1225,23 +1224,21 @@ export const CROSS_CLASS_SENTENCE =
  * through the real plugin-security and ObjectQL on driver-sql (see this file's
  * header).
  *
- * ⚠️ The WRITE half is the in-process write check's behaviour, which the engine
- * lane moves onto the same classification: when it does, this sentence changes
- * in the same change.
+ * The WRITE half is the in-process write check's behaviour, which reads the
+ * same classification since the engine lane moved it onto
+ * `crossFieldComparisonVerdict` (#20355): it refuses where the read refuses.
  */
 function crossClassConsequence(clause: 'using' | 'check'): string {
   const write =
-    'the in-process write check has no class rule of its own, so a single-record insert or by-id update it ' +
-    'judges compares the two raw values instead, and the write is admitted and stored whenever that ' +
-    'comparison happens to hold — an answer the read path refuses to give';
+    'the in-process write check refuses the comparison by the same classification (`INVALID_FILTER` / 400), ' +
+    'so every insert or update it judges is refused and nothing is stored';
   return clause === 'using'
     ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses ' +
         'the comparison by the two columns\' declared types), and every by-id update or delete it scopes fails ' +
         'closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or `all` policy the same `using` is also ' +
         'the write check whenever no applicable policy for that operation declares a `check` (ADR-0058 D4), and ' +
         `there ${write}.`
-    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and is enforced by an ` +
-        'accident of the two values.';
+    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and admits no write at all.`;
 }
 
 /** The prescription both rules share, ahead of their per-surface alternatives. */

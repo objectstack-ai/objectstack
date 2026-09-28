@@ -49,7 +49,7 @@ function failingFlowEngine(errorHandling: unknown) {
         errorHandling,
         nodes: [
             { id: 'start', type: 'start', label: 'Start' },
-            { id: 'work', type: 'script' as any, label: 'Work' },
+            { id: 'work', type: 'script' as any, label: 'Work', config: { function: 'noop' } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [

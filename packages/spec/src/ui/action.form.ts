@@ -95,14 +95,30 @@ export const actionForm = defineForm({
         { field: 'operation', type: 'select', helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit.", options: [
           { label: 'Update the current record', value: 'update' },
         ] },
+        // #19332 G1b (ruling 5861442317, G1) — `patch` is a string-keyed record of
+        // values, so it takes `json`, the hint every structured row carries
+        // (`object.form.ts` `validations`); the renderer opens the raw JSON
+        // editor for a record node. Its gate is `undoable`'s: the parse refuses
+        // `patch` on an action without `operation: 'update'`, so the control is
+        // shown exactly where the value is accepted.
+        { field: 'patch', widget: 'json', visibleWhen: "data.operation == 'update'", helpText: "Static field values the update writes to the current record, e.g. {\"status\": \"done\"} — merged UNDER the values `params` collects, so a param of the same name wins. Written as the caller: the object's permissions, hooks and validations apply as for a user edit." },
         { field: 'undoable', type: 'boolean', visibleWhen: "data.operation == 'update'", helpText: 'Offer an Undo affordance after this update succeeds. The undo captures the prior value of every field the action writes — the merged bag, `patch` under the collected `params`. An action with no `operation` declares no write set, so there is nothing to capture.' },
         // `perRecord` carries an uppercase letter and `FormSelectOptionSchema`
         // values are system identifiers (`^[a-z][a-z0-9_.]*$`), so this enum
         // cannot be written as an inline option list — it derives from the
         // served schema and the contract rides the help text.
         { field: 'execution', helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record." },
+        // #19332 G1b — `description` is an I18nLabel (a string, or an inline
+        // locale map), the node `page.form.ts` `description` carries, so it copies
+        // that row: `widget: 'textarea'`. A passthrough hint, so a stored locale
+        // map resolves to its own branch and opens the raw JSON editor rather
+        // than being read as text.
+        { field: 'description', widget: 'textarea', helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads." },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
+        // `errorMessage` is the twin of the row above: same node (I18nLabel), same
+        // plain row, so the renderer derives the same face for both.
+        { field: 'errorMessage', helpText: 'Error message shown when the action fails, in place of the raw error.' },
         { field: 'refreshAfter', helpText: 'Refresh the list/page after action completes' },
         // `new-tab` is hyphenated, so the same system-identifier bound on
         // `FormSelectOptionSchema.value` applies: the enum derives.
@@ -125,6 +141,9 @@ export const actionForm = defineForm({
         // names, so an inline list would only restate them and could drift from
         // the registry the parse step resolves against.
         { field: 'requiresFeature', helpText: 'Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
+        // #19332 G1b — the RBAC gate, beside the feature gate. `string[]`, so the
+        // `app.form.ts` `requiredPermissions` face (`string-tags`).
+        { field: 'requiredPermissions', widget: 'string-tags', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them.' },
         // `shortcut` input removed with the key (#3896 close-out) — a form
         // input for an unenforced capability is the UI half of false compliance.
       ],
@@ -142,6 +161,11 @@ export const actionForm = defineForm({
         { field: 'recordIdParam', visibleWhen: "data.type == 'api'", colSpan: 1, helpText: 'Body parameter name for record ID' },
         { field: 'recordIdField', visibleWhen: "data.type == 'api' && data.recordIdParam", colSpan: 1, helpText: 'Field to use as record ID (default: "id")' },
         { field: 'bodyShape', visibleWhen: "data.type == 'api'", colSpan: 2, helpText: 'Request body structure (flat or nested)' },
+        // #19332 G1b — `bodyExtra` is a string-keyed record, so `json`, the same
+        // face as `patch`; gated like its request-shape siblings above, since it
+        // is the static body of a `type: 'api'` request and is refused beside
+        // `operation: 'update'`.
+        { field: 'bodyExtra', widget: 'json', visibleWhen: "data.type == 'api'", colSpan: 2, helpText: 'Static request-body fields for this api action, merged last so they override the collected params (e.g. {"resend": true}). Page-variable tokens (page.NAME in double braces) are resolved by the runtime. The payload goes here, never in params.' },
       ],
     },
   ],

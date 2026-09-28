@@ -150,7 +150,7 @@ describe('#14353 — the dead-end shape reports, by name, with consequence AND r
   it('[#15588/F1] the no-mail-transport rider is SCOPED to the default posture', () => {
     // ⛔ This rider was WRONG in the first version of this line, stated for
     // EVERY posture. The carve-out is an ADMISSION verdict, not a verification
-    // bypass, so on `open`/`email_domain` the INVITED login is created and
+    // bypass, so wherever verification is on the INVITED login is created and
     // then refused EMAIL_NOT_VERIFIED — and creating it SILENCES this report
     // on the way past. That is the loud-dead-end-to-quiet-dead-end transition
     // remedy (b) warns about, delivered by the primary remedy. The exact
@@ -158,10 +158,23 @@ describe('#14353 — the dead-end shape reports, by name, with consequence AND r
     const msg = resolveNoSignInAccountReport(DEAD_END)!;
     expect(msg).toContain('ADMISSION verdict, not a verification bypass');
     expect(msg).toContain(
-      "under the default 'invite_only' posture no mail transport is needed either",
+      "under the default 'invite_only' posture it follows that same declaration and is OFF by default, " +
+        'so no mail transport is needed either',
     );
     // the rider must name the invited login as the thing verification hits …
-    expect(msg).toContain('forces email verification on the INVITED login too');
+    expect(msg).toContain('the INVITED login meets the same email-verification rule as any sign-up');
+    // … and state that rule as the resolver ships it: `email_domain` forced
+    // outright, `open` forced unless the DEPLOYMENT opts out, and the console
+    // unable to make that opt-out. Each clause is driven against the wiring in
+    // the `#20389` describe below.
+    expect(msg).toContain("Under 'email_domain' verification is always ON");
+    expect(msg).toContain("under 'open' it is ON unless the DEPLOYMENT has itself declared it off");
+    expect(msg).toContain('a false stored only through the settings console is refused there');
+    // [#20389] ⛔ The unconditional form this message carried before `open`
+    // honoured a deployment's opt-out — it contradicted remedy (b) in the same
+    // message. Either spelling coming back reds here.
+    expect(msg).not.toMatch(/an 'open' or 'email_domain' posture forces email verification/i);
+    expect(msg).not.toMatch(/every posture other than 'invite_only'[^.]*FORCES email verification/i);
     // … and give the operator the ORDER, which is the actionable half
     expect(msg).toContain("close the posture back to 'invite_only' BEFORE that person registers");
     // [#15588/N2] the lookup lowercases, so a mixed-case row is never found
@@ -246,14 +259,23 @@ const invitedSignUp = (posture: AudiencePosture, hasPendingInvitation: boolean) 
     isBootstrap: false,
   });
 
-/** A manager carrying one audience declaration, for the wiring mirror. */
+/**
+ * A manager carrying one audience declaration, for the wiring mirror. The
+ * optional `emailAndPassword` block is the DEPLOYMENT's own declaration — the
+ * constructor config is the deployment's by definition (`assertAudienceConfig`
+ * runs there with `verificationDeclaredBy: 'deployment'`).
+ */
 const AUDIENCE_TEST_SECRET = 'test-secret-at-least-32-chars-long!!';
-const managerWith = (audience?: Record<string, unknown>) =>
+const managerWith = (
+  audience?: Record<string, unknown>,
+  emailAndPassword?: Record<string, unknown>,
+) =>
   new AuthManager({
     secret: AUDIENCE_TEST_SECRET,
     baseUrl: 'http://localhost:3000',
     dataEngine: engineOver({}).engine,
     ...(audience ? { audience } : {}),
+    ...(emailAndPassword ? { emailAndPassword } : {}),
   } as never);
 
 /** The declaration a widening posture needs to pass entry validation. */
@@ -328,12 +350,14 @@ describe('#15588 — the WARNING is true: ANY hand-written `sys_account` row sil
   });
 });
 
-describe('#15588 — the WARNING is true: widening the posture FORCES email verification on', () => {
-  it('`email_domain` and `open` both wire requireEmailVerification ON', () => {
-    // The manager forces it from `audiencePermitsSelfRegistration(posture)` and
-    // `getPublicConfig()` mirrors the wired flag, so this is the same fact the
-    // message reports: a login registered under a widened posture cannot sign
-    // in until a mail transport delivers the link.
+describe('#15588 — the WARNING is true: widening the posture forces email verification on BY DEFAULT', () => {
+  it('with nothing declared, `email_domain` and `open` both wire requireEmailVerification ON', () => {
+    // The wiring and `getPublicConfig()` both read
+    // `resolveEmailVerificationRequirement`, so this is the same fact the
+    // message reports: a login registered under a widened posture that has not
+    // opted out cannot sign in until a mail transport delivers the link. The
+    // `open` opt-out, and `email_domain` having none, are pinned in the
+    // `#20389` describe below.
     for (const posture of ['email_domain', 'open'] as const) {
       expect(
         managerWith(wideningAudience(posture)).getPublicConfig().emailPassword
@@ -349,10 +373,11 @@ describe('#15588 — the WARNING is true: widening the posture FORCES email veri
     expect(managerWith().getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
   });
 
-  it("every posture other than 'invite_only' is one that widens — the message's exact claim", () => {
-    // The message says "every posture other than 'invite_only'". A fourth
-    // posture that did NOT permit self-registration would make that sentence
-    // wrong, and this is where that is caught.
+  it('with nothing declared, exactly the postures that widen wire it ON — read off the vocabulary', () => {
+    // The message states the verification rule posture by posture. A fourth
+    // posture that did NOT permit self-registration yet forced verification
+    // (or the reverse) would leave that rule incomplete, and this is where
+    // that is caught.
     for (const posture of AUDIENCE_POSTURES) {
       expect(
         managerWith(
@@ -369,7 +394,7 @@ describe('#15588/F1 — the carve-out ADMITS, it does not EXEMPT: the rider\u201
   // mechanisms together — the carve-out and the verification wiring — because
   // the false claim was precisely that the first cancels the second.
 
-  it('a widened posture admits the INVITED creation AND still forces verification on it', () => {
+  it('with nothing declared, a widened posture admits the INVITED creation AND still forces verification on it', () => {
     for (const posture of AUDIENCE_POSTURES.filter(audiencePermitsSelfRegistration)) {
       // admitted by the carve-out …
       expect(invitedSignUp(posture, true), `posture ${posture}`).toMatchObject({ admit: true });
@@ -382,7 +407,7 @@ describe('#15588/F1 — the carve-out ADMITS, it does not EXEMPT: the rider\u201
     }
   });
 
-  it('ONLY the default posture is mail-transport-free — the half the message still promises', () => {
+  it('the default posture, verification undeclared, is mail-transport-free — the half the rider promises', () => {
     expect(invitedSignUp('invite_only', true)).toMatchObject({ admit: true });
     expect(managerWith().getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
   });
@@ -396,6 +421,60 @@ describe('#15588/F1 — the carve-out ADMITS, it does not EXEMPT: the rider\u201
       'admit',
       'grantPermissionSet',
     ]);
+  });
+});
+
+describe('#20389 — the rule the message states, driven against the wiring posture by posture', () => {
+  // The message now says: "Under 'email_domain' verification is always ON;
+  // under 'open' it is ON unless the DEPLOYMENT has itself declared it off
+  // (… a false stored only through the settings console is refused there);
+  // under the default 'invite_only' posture it follows that same declaration
+  // and is OFF by default". Each clause below drives the manager that wires
+  // it, so the day the rule moves, the sentence goes red with it.
+  const DEPLOYMENT_OPT_OUT = { requireEmailVerification: false };
+
+  it("`open` + the DEPLOYMENT's explicit false: the invited creation is admitted AND wired with verification OFF", () => {
+    expect(invitedSignUp('open', true)).toMatchObject({ admit: true });
+    expect(
+      managerWith(wideningAudience('open'), DEPLOYMENT_OPT_OUT).getPublicConfig().emailPassword
+        .requireEmailVerification,
+    ).toBe(false);
+  });
+
+  it('`open` + the same false stored only through the console: refused, and verification stays ON', () => {
+    const fromConsole = managerWith(wideningAudience('open'));
+    expect(() =>
+      fromConsole.applyConfigPatch({ emailAndPassword: DEPLOYMENT_OPT_OUT } as never, {
+        requireEmailVerificationFrom: 'console',
+      }),
+    ).toThrow(/posture 'open' FORCES email verification on unless the DEPLOYMENT turns it off/);
+    expect(fromConsole.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+    // CONTROL — the identical patch declared by the deployment is honoured, so
+    // the refusal above is the declarant's, not the value's.
+    const fromDeployment = managerWith(wideningAudience('open'));
+    fromDeployment.applyConfigPatch({ emailAndPassword: DEPLOYMENT_OPT_OUT } as never, {
+      requireEmailVerificationFrom: 'deployment',
+    });
+    expect(fromDeployment.getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+  });
+
+  it('`email_domain` has no opt-out: the deployment’s explicit false refuses the boot', () => {
+    expect(() => managerWith(wideningAudience('email_domain'), DEPLOYMENT_OPT_OUT)).toThrow(
+      /posture 'email_domain' opens self-registration, which FORCES email verification on/,
+    );
+    // CONTROL — the same declaration without the false boots, verification ON.
+    expect(
+      managerWith(wideningAudience('email_domain')).getPublicConfig().emailPassword
+        .requireEmailVerification,
+    ).toBe(true);
+  });
+
+  it('`invite_only` follows the declaration: OFF by default, ON when the deployment declares it', () => {
+    expect(managerWith().getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+    expect(
+      managerWith({ posture: 'invite_only' }, { requireEmailVerification: true }).getPublicConfig()
+        .emailPassword.requireEmailVerification,
+    ).toBe(true);
   });
 });
 

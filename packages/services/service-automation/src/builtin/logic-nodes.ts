@@ -42,6 +42,17 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
              *    node silently fell back to "consider every out-edge", which is
              *    the state #4414 measured (0 label matches across all example
              *    apps) and, on an unconditional sibling, ran both branches.
+             *
+             * On that second path the gateway is EXCLUSIVE (#15429): the
+             * engine's traversal takes the first conditioned out-edge that
+             * holds, in declaration order, and passes its siblings over; a
+             * decision declaring `config.mode: 'inclusive'` takes every one
+             * that holds. Both live in `AutomationEngine.traverseNext`, not
+             * here — this executor reads `conditions` and nothing else. The
+             * `mode` key itself is judged at registration: `registerFlow` parses
+             * every decision's config through the spec's `DecisionConfigSchema`
+             * and refuses a value outside the closed pair, or a `mode` beside a
+             * non-empty `conditions` list, with the schema's own sentence.
              */
             async execute(node, variables, _context) {
                 const config = node.config as Record<string, unknown> | undefined;

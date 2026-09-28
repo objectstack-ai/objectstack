@@ -138,6 +138,12 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
  * names no callable — so the node refuses, loudly, where it used to log a line
  * and report success. That flip is the whole point of the retirement, and it is
  * what these cases pin.
+ *
+ * Since #20316 the refusal lands one door earlier: `function` is the key the
+ * script contract requires, and the flow parse behind the conversion refuses a
+ * script node that leaves it out — so the stored flow no longer REGISTERS (at
+ * boot: skipped with a `failed to register flow` warn naming it), rather than
+ * registering and refusing at run time. Same verdict, named the same way.
  */
 describe('script retired branches, as a stored flow meets them (#4343)', () => {
     let engine: AutomationEngine;
@@ -155,11 +161,8 @@ describe('script retired branches, as a stored flow meets them (#4343)', () => {
         ['an inline body', { script: 'return { ok: true };' }],
         ['the bare marker', { actionType: 'invoke_function' }],
     ] as const)('%s no longer succeeds silently — it refuses, naming the callable it lacks', async (_name, config) => {
-        engine.registerFlow('script_flow', scriptFlow({ ...config }));
-        const result = await engine.execute('script_flow', {} as any);
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('does not satisfy the script contract');
-        expect(result.error).toContain('config.function');
+        expect(() => engine.registerFlow('script_flow', scriptFlow({ ...config }))).toThrow(/config leaves out `function`/);
+        expect(await engine.getFlow('script_flow')).toBeNull();
     });
 
     it('converts a shorthand `actionType` into the function it always named, and runs it', async () => {

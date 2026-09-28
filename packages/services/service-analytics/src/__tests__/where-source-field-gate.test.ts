@@ -341,7 +341,7 @@ describe('#5669 — the gate: a `where` over a missing field is a 400, not a dri
                 industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
                 legacy: { name: 'legacy', label: 'Legacy', type: 'string', sql: 'dropped_column' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated } = makeService({ cubes: [authored] });
 
@@ -442,7 +442,7 @@ describe('#5669 — the dataset face: refused before SQL exists, so nothing can 
             sql: 'SELECT * FROM crm_account',
             measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived], native: true });
 
@@ -514,7 +514,7 @@ describe('#5669 — what the gate must NOT do', () => {
             dimensions: {
                 assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
             },
-            public: false,
+            public: true,
         };
         const { service, aggregated, filters } = makeService({ cubes: [authored] });
 
@@ -542,7 +542,7 @@ describe('#5669 — what the gate must NOT do', () => {
                 revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'annual_revenue' },
             },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service, aggregated, filters } = makeService({ cubes: [authored] });
 
@@ -571,7 +571,7 @@ describe('#5669 — what the gate must NOT do', () => {
             sql: 'SELECT * FROM crm_account WHERE active = 1',
             measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [derived] });
 
@@ -604,7 +604,7 @@ describe('#5669 — what the gate must NOT do', () => {
             sql: 'crm_account',
             measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [joined] });
 
@@ -636,7 +636,7 @@ describe('#5669 — what the gate must NOT do', () => {
             sql: 'crm_account',
             measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [joined] });
 
@@ -707,7 +707,7 @@ describe('#5669 — what the gate must NOT do', () => {
                     sql: "CASE WHEN annual_revenue > 0 THEN 'yes' ELSE 'no' END",
                 },
             },
-            public: false,
+            public: true,
         };
         const { service } = makeService({ cubes: [computed] });
 

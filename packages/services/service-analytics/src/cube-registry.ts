@@ -10,7 +10,7 @@ import type { Cube } from '@objectstack/spec/data';
  * `CubeMeta` titles served by `GET /api/v1/analytics/meta`, and the strategy
  * chain resolves a query's cube through it.
  *
- * Three sources write to it, all of them from `AnalyticsService`:
+ * Two sources write to it, both of them configuration, from `AnalyticsService`:
  * 1. **Manifest definitions** — `AnalyticsServiceConfig.cubes` (`registerAll`),
  *    i.e. explicit cube definitions authored in `objectstack.config.ts`.
  * 2. **Compiled datasets** (ADR-0021) — `compileDataset()`'s Cube, registered
@@ -19,16 +19,21 @@ import type { Cube } from '@objectstack/spec/data';
  *    request's dataset into that call's own scope (#20356) — a registration
  *    from a request would replace, for every caller, whatever cube the name
  *    held.
- * 3. **Ad-hoc query inference** — `ensureCube` / `inferCubeFromQuery` mints a
- *    minimal Cube from the members an `AnalyticsQuery` references, once
- *    `assertInferableCube` (#3867) has confirmed the name is a registered
- *    object. It infers from the QUERY, never from the object's field schema.
+ *
+ * ⛔ No request writes it (#20381). The cube `ensureCube` / `inferCubeFromQuery`
+ * mints for an ad-hoc `query` / `sql` request that names no registered cube —
+ * from the members that QUERY references, once `assertInferableCube` (#3867)
+ * has confirmed the name is a registered object — lives in that call's own
+ * scope and is dropped with it, admitted or refused, like a measure appended
+ * to a configured cube. Registering it made `getMeta` list, to every caller,
+ * an object someone had queried and the member names they used.
  *
  * This list used to read "two sources: manifest definitions, and object schema
- * inference". Neither half was right: sources 2 and 3 were missing, and object
- * schema inference is `inferFromObject` below, which no path in this repository
- * calls (#15019). It is described at the method rather than advertised here,
- * because listing it would promise a source the platform does not deliver.
+ * inference". Neither half was right: the compiled datasets were missing, and
+ * object schema inference is `inferFromObject` below, which no path in this
+ * repository calls (#15019). It is described at the method rather than
+ * advertised here, because listing it would promise a source the platform does
+ * not deliver.
  */
 export class CubeRegistry {
   private cubes = new Map<string, Cube>();
@@ -81,7 +86,7 @@ export class CubeRegistry {
    *
    * ⚠️ Nothing in this repository calls this — the only in-tree caller is a unit
    * test, and every cube the platform registers itself comes from one of the
-   * three sources named on the class above (#15019). That is not the same thing
+   * two sources named on the class above (#15019). That is not the same thing
    * as unreachable: `CubeRegistry` is exported from the package entry and
    * `AnalyticsService.cubeRegistry` is public, so a consumer of
    * `@objectstack/service-analytics` can call it, and what it mints does reach
@@ -162,7 +167,8 @@ export class CubeRegistry {
       sql: objectName,
       measures,
       dimensions,
-      public: false,
+      // The schema default (visible) — a hidden cube is refused by every query door.
+      public: true,
     };
 
     this.register(cube);

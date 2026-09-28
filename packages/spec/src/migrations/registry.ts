@@ -5463,7 +5463,31 @@ const step18: MigrationStep = {
     + 'rename above: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` is no longer '
     + 'converted, because the whole block it lived in is now removed, and '
     + '`connector-health-and-trigger-durations-unit-in-key` keeps only `triggers[].interval` → '
-    + '`intervalSeconds`.',
+    + '`intervalSeconds`. '
+    + 'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
+    + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
+    + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
+    + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
+    + 'with two or more conditioned out-edges and no `conditions` list, so a flow written while '
+    + 'every true branch ran keeps its behaviour; it is a default flip, so it is retired from '
+    + 'the load path AND refused by the flow rehydration seam and the artifact-ingestion door, '
+    + 'and replays only here — the paired semantic entry carries the judgment the diff then '
+    + 'asks for. BREAKING for flows stored in `sys_metadata`, by maintainer ruling: such a '
+    + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
+    + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
+    + 'the one-line fix where a node meant every branch. '
+    + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
+    + 'key parsed and was stored at every list-view door and drew nothing: a list view\'s own '
+    + '`tabs` has no reader, the one component that would draw it has no production mount, '
+    + 'and the tab strip above an object\'s records is the saved-view switcher, which renders '
+    + 'one tab per `listViews` entry and reads no `tabs` key (`userFilters.tabs`, a different '
+    + 'key of the same element type, is read and rendered, and stays). The key is a '
+    + '`retiredKey()` tombstone on the list-view shape (its '
+    + 'prescription says how to move each tab to a named `listViews` entry); `ViewTabSchema` '
+    + 'itself stays, because the page-only `userFilters.tabs` preset bar reuses it and renders. '
+    + 'The D2 conversion `view-list-tabs-removed` strips the key from every list payload in '
+    + '`stack.views[]` as a lossless delete, and is retired from the load path, so authors are '
+    + 'refused at parse rather than rewritten.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5508,6 +5532,8 @@ const step18: MigrationStep = {
     'currency-config-precision-removed',
     'permission-rls-tags-removed',
     'action-aria-removed',
+    'flow-decision-mode-inclusive-explicit',
+    'view-list-tabs-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5909,6 +5935,49 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    // A declared-default correction plus the enforcement that makes the key real —
+    // the shape of `17.approval-escalation-enabled-default-flip`. There is no D2
+    // conversion: no spelling moves, and a written `public: false` is a legitimate
+    // value that the chain cannot tell from a materialized old default, so the
+    // judgement is the author's. The `data/Cube:public` row of
+    // `DEFAULT_CHANGES_BY_MAJOR` records the default move itself. No backticks in
+    // `surface`: the upgrade guide renders it inside a code span and a table cell.
+    {
+      id: 'analytics-cube-public-default-visible-enforced',
+      surface:
+        'data.Cube.public — an analytics cube that declares public: false, and every cube in an '
+        + 'artifact built by os compile before this release (the compiler writes the parsed stack, so '
+        + 'it carries a materialized public: false on each cube that omitted the key)',
+      replacement:
+        'nothing, to keep a cube queryable: cubes are visible by default. Delete an authored '
+        + '`public: false` that only restated the old default, and write it only on a cube that must '
+        + 'stay out of the analytics API. Recompile every `os compile` artifact built before this '
+        + 'release',
+      reason:
+        'A DECLARED-DEFAULT CORRECTION plus the enforcement that makes the key real. The analytics '
+        + 'cube schema declared `public` with a default of `false` under an access-control comment, '
+        + 'and nothing read it: `/analytics/meta` listed every cube and every query door answered it. '
+        + 'The analytics service now reads it. A cube declared `public: false` is left out of '
+        + '`/analytics/meta`, and `/analytics/query` and `/analytics/sql` refuse it with 404 '
+        + '`CUBE_NOT_FOUND` — the same refusal, byte for byte, that an unknown cube name gets, so the '
+        + 'refusal does not confirm a hidden cube exists. Enforcing the old default as declared would '
+        + 'have hidden every cube that omits the key, so the default moves to `true` in the same '
+        + 'change, and a cube that omits the key stays visible exactly as it was. Two holdings change '
+        + 'behaviour on upgrade. An authored `public: false` — including one copied from the example '
+        + 'app, which carried it — now hides the cube and refuses its queries. And an artifact built '
+        + 'by `os compile` before this release carries a materialized `public: false` on every cube '
+        + 'that omitted the key, because the compiler writes the parsed stack with its defaults '
+        + 'applied; a host that registers cubes from such an artifact hides all of them until the '
+        + 'artifact is recompiled. The key is visibility, not row security: records stay governed by '
+        + 'object permissions and row-level security on every door, and the metadata door keeps '
+        + 'serving cube definitions.',
+      acceptanceCriteria:
+        '`GET /analytics/meta` lists every cube your dashboards and reports query, and a query naming '
+        + 'each one answers 200. For each authored `public: false`, either delete it (the cube is meant '
+        + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
+        + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
+        + '`os compile` from this release or later.',
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -10563,6 +10632,71 @@ const step18: MigrationStep = {
         + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
         + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
     },
+    {
+      id: 'flow-decision-edge-branching-first-match',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'flow.nodes[].config.mode (decision) — an OMITTED mode on a decision that branches '
+        + 'on its out-edges and carries two or more conditioned ones',
+      replacement:
+        'nothing, where the out-edge conditions partition (exactly one can hold for any '
+        + 'record): an omitted `mode` now means exclusive, the first true edge in declaration '
+        + 'order wins, and the run is what it always was. `mode: \'inclusive\'` where the flow '
+        + 'RELIES on more than one branch running for one record — the value the D2 conversion '
+        + '`flow-decision-mode-inclusive-explicit` writes onto every such decision so nothing '
+        + 'changes silently. Where the conditions overlap by accident (a `!=` guard beside a '
+        + 'later `==` branch), neither: narrow them into a partition, or mark the fallback '
+        + '`isDefault: true`, and delete the written key.',
+      reason:
+        'A DEFAULT FLIP of a shipped node type, ruled rather than patched: the schema, the docs '
+        + 'and the engine\'s own comment all called an edge-branched decision an exclusive gateway '
+        + 'while the traversal took EVERY out-edge whose condition held, one after another, and '
+        + 'reported nothing — hotcrm#1555 rendered a refusal screen AND ran the conversion in one '
+        + 'execution. The traversal now matches the declaration (BPMN exclusive gateway, '
+        + 'Salesforce Flow Decision, n8n Switch default), and the every-true-edge behaviour is the '
+        + 'BPMN inclusive gateway an author must write down. The KEY converts mechanically and '
+        + 'does: `flow-decision-mode-inclusive-explicit` writes `mode: \'inclusive\'` wherever two '
+        + 'or more conditioned out-edges leave a decision that declares no `conditions` list, so '
+        + 'the migrated source runs exactly as before. What does NOT convert is the INTENT: the '
+        + 'count cannot tell a partition (where the key is redundant) from a reliance on '
+        + 'multi-branch runs (where it is load-bearing) from an accidental overlap (where the '
+        + 'old behaviour was the bug), so the mechanical edit list the chain replay prints is '
+        + 'where that judgment is made, node by node. And the conversion replays ONLY there: it is a '
+        + 'default flip, so the authoring funnel never rewrites a source written against the '
+        + 'new contract, and the automation engine\'s flow rehydration seam and the '
+        + 'artifact-ingestion door both refuse it by id (a code-shipped flow, a REST body, a Studio '
+        + 'save and a scaffolded artifact all arrive undated). BREAKING for stored rows, by '
+        + 'maintainer ruling: the promise that a flow keeps its behaviour is kept by authored '
+        + 'sources and built artifacts only. A decision stored in `sys_metadata` '
+        + 'with no `conditions` list, no `mode` and two or more conditioned out-edges takes the new '
+        + 'meaning on upgrade — it evaluates first-match — and nothing rewrites the row: no '
+        + 'stored-row migration, no cutoff, no read-path completion, because nothing about a stored '
+        + 'row says it was saved before the flip. The one-line fix, for a stored node that meant '
+        + 'every branch, is `mode: \'inclusive\'`; `os migrate meta --stored` lists every such node, '
+        + 'report only, so an operator can review the candidates before and after the upgrade.',
+      acceptanceCriteria:
+        'Review every `flow-decision-mode-inclusive-explicit` line the chain replay lists for '
+        + 'each authored stack: (1) where the two (or more) '
+        + 'out-edge conditions partition — a predicate and its negation, `>` beside `<=`, or a '
+        + 'guard beside `isDefault: true` — delete the written `mode`; the run is unchanged either '
+        + 'way and the exclusive default is the honest declaration; (2) where the flow relies on '
+        + 'more than one branch running for one record, keep `mode: \'inclusive\'`; (3) where the '
+        + 'conditions overlap by accident, narrow them into a partition and delete the key, then '
+        + 're-run the flow on a record that satisfied both and confirm exactly one successor '
+        + 'ran — the passed-over branch now leaves a `skipped` step in the run log. `os validate` '
+        + 'reports `flow-decision-inclusive-overlap` on every decision that keeps the key with '
+        + 'two or more conditioned out-edges, so the review list is the lint output. Then each '
+        + 'deployment: `os migrate meta --stored` lists, under `decisionModeReview`, every stored '
+        + 'decision with two or more conditioned out-edges and no `mode` — each one already '
+        + 'evaluates first-match, and the pass writes none of them — so where one of those nodes '
+        + 'meant every branch, declare `mode: \'inclusive\'` on it in the designer; a node '
+        + 'that declares `mode` either way leaves the list. A decision registering with '
+        + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
+        + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
+        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
     {
@@ -10645,6 +10779,76 @@ const step18: MigrationStep = {
         + '`issues[].path` names `edges[N].condition`, and for a node the refusal carries that same '
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
+    },
+    // ONE entry for the family, not one per node type: every member is the same
+    // decision — a node config its executor cannot run is refused where the flow
+    // is built, by one judge (`flowNodeConfigRefusals`), instead of registering
+    // and failing (or, for a branch with no label, misrouting) at run time.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-node-config-required-keys-refused',
+      surface:
+        'a flow node whose config leaves out a key its executor contract requires — objectName on '
+        + 'get_record / create_record / update_record / delete_record, recipients on notify (and title '
+        + 'when there is no template), url on http, function on script, flowName on subflow, collection '
+        + 'and flowName on map, collection on a loop that has a body, branches on parallel, try on '
+        + 'try_catch, and on screen each field name, each option value and label, and a lookup field '
+        + 'reference — and a decision node whose conditions is not an array, holds a branch that is not '
+        + 'an object, or holds a branch whose label is absent, null, blank or not a string; at any depth '
+        + 'including an ADR-0031 region body. Reachable wherever a flow is authored or stored: '
+        + 'defineStack({ flows }) sources, defineFlow(), an exported stack passed to objectstack validate, '
+        + 'a flow saved from the Studio flow designer (a node added and saved before it is configured; a '
+        + 'decision branch row whose label cell is empty; a screen field row whose name cell is empty), '
+        + 'and a flow row already sitting in sys_metadata',
+      replacement:
+        'the missing key, written on the node\'s `config` — the value the node was meant to act on '
+        + '(`objectName: \'account\'`, `url: \'https://…\'`, `collection: \'{rows}\'`, …). For a decision '
+        + 'branch, the label of the out-edge the branch should take (`{ label: \'approved\', expression: '
+        + '\'record.amount > 1000\' }`, beside an out-edge labelled `approved`), `conditions` written as an '
+        + 'array of such objects, and a bare predicate string moved under `expression`. To branch on the '
+        + 'out-edges instead, delete `conditions` and put each predicate on its edge\'s `condition`. A '
+        + 'legacy flat-graph `loop` (no `body`) needs no `collection` and is untouched',
+      reason:
+        'A flow node\'s `config` is an open record, so what its executor requires was checked by no build '
+        + 'door: `FlowSchema.parse`, `AutomationEngine.registerFlow` and `objectstack validate` all admitted '
+        + 'a node missing a key its executor contract requires, and the executor\'s own contract parse then '
+        + 'refused the node on every run that reached it — the config is metadata, so no rerun could '
+        + 'succeed. A decision branch with no label was worse: it never failed, the matched branch reported '
+        + 'no label and traversal took EVERY out-edge, so the flow ran green down the wrong paths. All '
+        + 'three doors now refuse these shapes through one judge, `flowNodeConfigRefusals`, which parses '
+        + 'each builtin node\'s config against the very contract its executor parses against '
+        + '(`getBuiltinNodeConfigContracts()`, reconciled against the executors\' own parse calls) and keeps '
+        + 'only the keys left out — a present value of the wrong type and an undeclared key are judged where '
+        + 'they were before — plus the decision branch shape its executor reads raw. A key a rule of the '
+        + 'contract requires (a notify with no template needs a title; a lookup screen field needs its '
+        + 'reference) is refused in the contract\'s own words. '
+        + '⚠️ No D2 conversion: the platform cannot know the object, URL, collection, function or '
+        + 'out-edge label the author left out, and no value it could write would keep what the flow did. '
+        + '⚠️ Where such a node already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not armed, '
+        + 'while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.fields.0.name`, `nodes.N.config.conditions.0.label`, or '
+        + 'the region path `nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same '
+        + 'path, and `validateStackExpressions` phrases it as `node \'fetch\' (get_record) config.objectName`. '
+        + 'For each hit write the key the node was meant to carry, per the replacement. Two proofs. (1) For '
+        + 'a stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it (the three boot paths spell it '
+        + '`[Automation] failed to register flow`, `[Automation] flow re-sync: failed to register flow` and '
+        + '`[Automation] cold-boot flow bind: failed to register flow`) — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. A node carrying every key its contract requires parses '
+        + 'and registers byte-identically to before, a decision with no `conditions` (or `conditions: null`, '
+        + 'or an empty list) still routes by its out-edges, and a legacy `loop` with no `body` still needs '
+        + 'no `collection`.',
     },
     // The ledger `predicate` slots' half of the blank-predicate rule. A SEPARATE
     // entry from `flow-edge-condition-evaluated-slot-source-required` on purpose:
@@ -11407,13 +11611,14 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names '
+        + 'against, `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8512 tracked files (0 across the '
-        + '8303 at 62597c588 too), against lit '
+        + 'the string debounceDelay each occur 0 times across its 9283 tracked files (0 across the '
+        + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
-        + 'which re-count to 13125 and 5043 respectively at 62597c588 and to 13347 and 5123 at '
-        + 'this pin (git grep -o -F, the method that reproduces every earlier count).',
+        + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
+        + 'f8a9d0fb0 and to 13745 and 5466 at this pin (git grep -o -F, the method that reproduces '
+        + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
@@ -11617,10 +11822,11 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
+        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
-        + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
+        + '9283 tracked files, against lit controls timeout 1172, RuntimeConfig 263 and resourceLimits '
+        + '2 on the same corpus (0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
       acceptanceCriteria:
@@ -11777,6 +11983,39 @@ const step18: MigrationStep = {
         + 'names fields that exist on the view\'s object with the direction the author intends, and '
         + 'the view loads — rather than failing at the renderer — with its rows in that order.',
     },
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion) — the D3 entry of the `view-list-tabs-removed`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). Registered keys: `ui/ListView:tabs` and `ui/ObjectListView:tabs`.
+    // The strip changes no screen — nothing ever drew the tabs — which is exactly
+    // why it cannot be the end of the migration: what the author wanted was named
+    // presets, and those are a `listViews` entry each.
+    {
+      id: 'list-view-tabs-retired',
+      surface: 'view.list.tabs / view.listViews.*.tabs — the list view\'s own tab definitions',
+      replacement: 'One named list view per tab, under the object\'s `listViews` — the saved-view '
+        + 'switcher above the object\'s records renders every entry as a tab. The tab\'s `name` '
+        + 'becomes the entry\'s key, its `label` the entry\'s `label`, and its `filter` rules join the '
+        + 'view\'s own `filter` on that entry, beside the `columns` the tab should show. A tab whose '
+        + '`view` already named a list view needs nothing more.',
+      reason: 'The D2 conversion `view-list-tabs-removed` deletes `tabs` from every list payload in '
+        + '`stack.views[]`, in all three persisted spellings, and the delete is lossless in pixels: no '
+        + 'renderer ever mounted a tab bar for the key, so a view that declared tabs has always drawn '
+        + 'without them, and it still does. The judgment the conversion cannot make is the author\'s '
+        + 'intent: each tab was a named preset the author wanted end users to switch to, and the '
+        + 'platform delivers that as a named list view, not as a sub-key of one. Which tabs deserve an '
+        + 'entry, what each should filter and show, and whether the switcher already lists an '
+        + 'equivalent, are the author\'s decisions. The tab keys with no list-view counterpart — '
+        + '`icon`, `order`, `pinned`, `isDefault`, `visible` — never had an effect either. One '
+        + 'boundary is the author\'s by construction: tabs declared under `objects[].listViews` are '
+        + 'reached by no conversion, so such an object is refused at its own door until edited by hand.',
+      acceptanceCriteria: 'No list view in `stack.views[]` or in any object `listViews` map declares '
+        + '`tabs`; the parse refuses the key by name at every list-view door. For each view that did: '
+        + 'every tab the author still wants is a `listViews` entry with its own `label`, `filter` and '
+        + '`columns`, and it appears as a tab in the switcher above the object\'s records and shows '
+        + 'the rows its filter selects; a tab nobody wants is simply gone. No page-level '
+        + '`userFilters` preset bar changes — that `tabs` is a different key, and it stays.',
+    },
     {
       id: 'logging-durations-unit-in-key',
       surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
@@ -11820,10 +12059,11 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
+        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
-        + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
+        + 'across its 9283 tracked files, against lit controls `useState` 2435 and `timeout` 1172 on '
+        + 'the same corpus (all four 0 across 8512, against 2391 and 1096, at f8a9d0fb0, and 0 across '
+        + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
         + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
@@ -14046,6 +14286,77 @@ const step18: MigrationStep = {
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
     },
+    // The cross-field comparison-class family, both arms in one entry: #20347
+    // refuses the comparison where it is authored (the lint rules behind
+    // os validate, and the permission save door), and #20355 refuses it where the
+    // row-level write check evaluates it. One classification decides both —
+    // crossFieldComparisonVerdict in @objectstack/spec/data, lifted from
+    // driver-sql's #5222 read boundary, which driver-sql now reads too. Recorded as
+    // its own entry because the surface an author rewrites is a CEL predicate string.
+    {
+      id: 'rls-predicate-cross-class-field-comparison-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing a field with another field (==, !=, >, >=, <, <=) where the two '
+        + 'declared columns share no comparison class: text against a number, a date against a '
+        + 'datetime, a boolean against text, and any column against a file field (file, image, avatar, '
+        + 'video, audio) or a formula field. In a filter passed to matchesFilterCondition together with '
+        + 'the object\'s declared columns (options.fields), a { $field } comparison under $eq, $ne, $gt, '
+        + '$gte, $lt or $lte between two such columns, and between a column and a json or multiple '
+        + 'field',
+      replacement:
+        'a comparison between two columns of one comparison class: a number with a number (number, '
+        + 'currency, percent, rating, slider, progress, summary), text with text (the string types, '
+        + 'autonumber, a single select or radio, a single lookup or user, a master_detail or a tree), a '
+        + 'boolean with a boolean, a date with a date, a datetime with a datetime, a time of day with a '
+        + 'time of day. '
+        + 'A file field and a formula field cannot be compared with another column at all: compare the '
+        + 'field with a literal or test it for null. If the two columns do hold comparable values, one '
+        + 'of them is declared with the wrong type, so correct that declaration rather than the '
+        + 'predicate. Comparisons between two columns of one class lower and evaluate exactly as before',
+      reason:
+        'A column-to-column comparison has one meaning only within one comparison class: across '
+        + 'classes SQLite orders every TEXT above every INTEGER while the in-process evaluator coerces '
+        + '("open" > 5 is false). A formula field is virtual, with no stored column to reference. The '
+        + 'file family is refused by name, whatever the deployment stores: during the ADR-0104 '
+        + 'dual-encoding window one media column can hold a bare id and another the JSON-quoted form of '
+        + 'the same id, so no comparison against the family is provably one answer on every path. '
+        + 'driver-sql has refused such a comparison on the read since #5222, so a policy written '
+        + 'record.status != record.amount (text and a number), record.status != record.photo (text and '
+        + 'an image) or record.status != record.is_open (text and a formula field) got three answers, '
+        + 'measured through the real plugin-security on driver-sql, on SQLite and PostgreSQL: '
+        + 'os validate called it valid, every read it scoped answered INVALID_FILTER / 400 and every '
+        + 'by-id update or delete it scoped 403, and an insert or update its check judged, or its using '
+        + 'standing in as the check, was admitted and stored, because the write check compared the two '
+        + 'raw values. The classification is now exported once from @objectstack/spec/data '
+        + '(crossFieldComparisonVerdict) and read by every judge. The authoring arm (#20347): the '
+        + 'rls-predicate-unenforceable rule refuses the comparison in using and check, on every '
+        + 'operation, at os validate, build and lint and at the metadata save door for a permission '
+        + 'set, and the sharing-rule-unlowerable-condition rule refuses it in a sharing-rule condition '
+        + 'at os validate, build and lint. The write-check arm (#20355): the row-level write gate hands '
+        + 'matchesFilterCondition the object\'s declared columns, and a comparison the classification '
+        + 'does not define is refused INVALID_FILTER / 400 for every insert and update the check judges, '
+        + 'before any record is read, with nothing stored; the message withholds the columns and the '
+        + 'server log names the policy and both. A comparison against a json or multiple field is now '
+        + 'refused by its declared type on the write too, where #19886 judged it by the value each '
+        + 'record held. driver-memory, a test driver with no field-reference arm, still reads such a '
+        + 'comparison as a literal. Shipped producers were counted before the change: no shipped '
+        + 'row-level policy or sharing-rule condition compares two fields of different classes. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which comparison the author meant, and rewriting it on the author\'s behalf would change '
+        + 'which rows and writes the policy admits, which is the policy author\'s decision. '
+        + 'ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Run os validate over your stack: it names every row-level or sharing-rule predicate that '
+        + 'compares two fields of different comparison classes, with both declarations. Rewrite each as '
+        + 'the replacement says. A policy that never passed os validate (stored before the authoring '
+        + 'arm, or written by another path) is refused at request time instead: every read it scopes '
+        + 'answers 400 on the SQL drivers, and so does every insert or update its check judges, so '
+        + 're-check what each such policy is meant to admit rather than assuming the writes it admitted '
+        + 'before were right.',
+    },
     // Stage 2e of #19886: the mirror of stage 2d's ordering refusal, with the list on
     // the RECORD's side. The shape is legal, a field ordered against one bound; what
     // the write-check evaluator now refuses is the VALUE the record holds there, a
@@ -15075,11 +15386,12 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8512 tracked '
-        + 'files at that sha, against lit controls window 3581, timeout 1096, period 171, '
-        + 'interval 179 and metrics 326 on that same corpus and sha (0 across 8303, against 3526 / '
-        + '1086 / 170 / 179 / 324, at 62597c588), so no pin bump is owed. '
+        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9283 tracked '
+        + 'files at that sha, against lit controls window 3681, timeout 1172, period 183, '
+        + 'interval 176 and metrics 340 on that same corpus and sha (0 across 8512, against 3581 / '
+        + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
+        + '324, at 62597c588), so no pin bump is owed. '
         + 'ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
@@ -15290,13 +15602,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8512 files '
-        + 'tracked at that sha (the 488 Span and 53 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9283 files '
+        + 'tracked at that sha (the 485 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 13347 hits for the bare token objectstack, '
-        + 'and 5123 for the package specifier @objectstack/spec (at 62597c588: 0 across 8303, '
-        + 'Span 486, 13125 and 5043).',
+        + 'two lit controls on that same corpus and sha: 13745 hits for the bare token objectstack, '
+        + 'and 5466 for the package specifier @objectstack/spec (at f8a9d0fb0: 0 across 8512, '
+        + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
         + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
@@ -15399,9 +15711,10 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
-        + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
-        + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
+        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells it 0 '
+        + 'times across 9283 tracked files, against lit controls `TTL` 181 and `tenant` 1185 on the '
+        + 'same corpus (0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
         + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '
@@ -20651,6 +20964,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ListView:pageName',
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion). `ListView.tabs` declared tab definitions for
+    // a multi-tab view interface, and no renderer ever drew them: a list view's own
+    // `tabs` has no reader, and objectui's `TabBar`, the one component that would
+    // draw it, has no production mount. The tab strip above an object's records is
+    // the saved-view switcher (`ViewTabBar`), which renders one tab per `listViews`
+    // entry and reads no `tabs` key. `userFilters.tabs`, a different key of the
+    // same element type, is read and rendered, and stays. Tombstoned with
+    // `retiredKey()` beside the `pageName` tombstone already on this shape;
+    // `ViewTabSchema` stays, reused by the page-only `userFilters.tabs` preset bar.
+    // D2: `view-list-tabs-removed`.
+    'ui/ListView:tabs',
     // #16885 — the list view's `navigation.view` binding, retired under ADR-0049
     // enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
     // #126 item 4, verbatim 「同意」, option B). The key's describe promised "the
@@ -20736,6 +21061,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ObjectListView:pageName',
+    // #20301 (ADR-0049 enforce-or-remove; triage verdict RETIRE under the
+    // maintainer's #18900 criterion). `ObjectListView.tabs` declared tab
+    // definitions for a multi-tab view interface, and no renderer ever drew them: a
+    // list view's own `tabs` has no reader, and objectui's `TabBar`, the one
+    // component that would draw it, has no production mount. The tab strip above an
+    // object's records is the saved-view switcher (`ViewTabBar`), which renders one
+    // tab per `listViews` entry and reads no `tabs` key. `userFilters.tabs`, a
+    // different key of the same element type, is read and rendered, and stays.
+    // Tombstoned with `retiredKey()` beside the `pageName` tombstone already on
+    // this shape; `ViewTabSchema` stays, reused by the page-only `userFilters.tabs`
+    // preset bar. D2: `view-list-tabs-removed`.
+    'ui/ObjectListView:tabs',
     // ADR-0090 D2 (no Profile concept) + ADR-0049 enforce-or-remove; maintainer
     // ruling 2026-09-12, decision batch #121 item 2, verbatim 「同意」.
     // `Page.assignedProfiles` was an authorable key named for the concept ADR-0090 D2

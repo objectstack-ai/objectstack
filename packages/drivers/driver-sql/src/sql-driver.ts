@@ -26,6 +26,12 @@ import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERI
 // `os generate migration` reads the SAME table, in both of its formats — that
 // shared table IS the repair, so ⛔ never restate one of its numbers here.
 import { numericColumnFor } from '@objectstack/spec/data';
+// [#20355] The cross-field comparison class, defined once in the spec (#20347,
+// lifted case for case from this driver's #5222 boundary). This driver READS it
+// — `crossFieldComparisonClass` below delegates — so the read it compiles and
+// the write check `@objectstack/formula` evaluates judge one comparison by one
+// rule.
+import { crossFieldColumnVerdict, type CrossFieldComparisonClass } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -2729,6 +2735,16 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * [#5222] The comparison class a declared field's stored column belongs to, or
  * `null` for a field no column-to-column comparison can be compiled against.
  *
+ * [#20355] The classification is the SPEC'S now — `crossFieldColumnVerdict`
+ * (`@objectstack/spec/data`), lifted case for case from this function by
+ * #20347 — and this function is its reader for the one thing the spec leaves
+ * to a driver: its internal aliases. The write check (`@objectstack/formula`'s
+ * `matchesFilterCondition`, handed the object's declared columns by the RLS
+ * write gate) and the authoring door (`@objectstack/lint`) read the same
+ * export, so a policy's comparison has one answer on the read, on the write
+ * and at `os validate`. The reasoning below is the classification's, kept
+ * here because this driver is where it was measured.
+ *
  * Cross-field comparison is only emitted between two columns of the SAME
  * class. One class = one storage shape on both sides of one row, which is what
  * makes the SQL answer provably the memory evaluator's answer (the cross-path
@@ -2771,19 +2787,22 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  */
 function crossFieldComparisonClass(
   decl: Record<string, unknown>,
-): 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time' | null {
+): CrossFieldComparisonClass | null {
   const type = String((decl as { type?: unknown }).type || 'string');
-  if (isMultiValuedColumn(type, decl)) return null;
-  if (type === 'formula') return null;
-  if (JSON_COLUMN_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type)) return null;
+  // [#20355] A declared `FieldType` is the spec's to classify — the one
+  // classification the write check and the authoring door read too. Its
+  // `multiple` reading is `isMultiValueField`'s, the same predicate
+  // `isMultiValuedColumn` asks.
+  const verdict = crossFieldColumnVerdict({ type, multiple: (decl as { multiple?: unknown }).multiple === true });
+  if (verdict !== undefined) return verdict.kind === 'class' ? verdict.class : null;
+  // A type outside `FieldType` is a driver-internal alias the spec does not
+  // judge (its module header: "a driver layers its own aliases above this
+  // table"). This driver's are read off its own column sets, never restated:
+  // `object` / `array` are JSON columns ({@link JSON_COLUMN_TYPES}), `integer` /
+  // `int` / `float` numeric ones ({@link NUMERIC_SCALAR_TYPES}), and everything
+  // else — the absent-type default `string` included — is stored as TEXT.
+  if (JSON_COLUMN_TYPES.has(type)) return null;
   if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
-  if (type === 'boolean' || type === 'toggle') return 'boolean';
-  if (type === 'date') return 'date';
-  if (type === 'datetime') return 'datetime';
-  if (type === 'time') return 'time';
-  // Everything else `createColumn` stores as TEXT: string/text/textarea/html/
-  // markdown/email/url/phone/password, select, lookup/user (row ids),
-  // autonumber, and the unknown-type default.
   return 'text';
 }
 
@@ -10905,14 +10924,39 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Reclaim free pages after bulk deletions (ADR-0057 §3.4). On SQLite this
-   * issues `PRAGMA incremental_vacuum`, returning freelist pages to the OS —
-   * it pairs with the `auto_vacuum=INCREMENTAL` default set in {@link connect}
-   * (files created before that default need one full `VACUUM` to adopt it).
-   * Postgres/MySQL manage space via their own vacuum/purge machinery, so this
-   * is a no-op there.
+   * runs `PRAGMA incremental_vacuum` TO COMPLETION, returning every freelist
+   * page — it pairs with the `auto_vacuum=INCREMENTAL` default set in
+   * {@link connect} (files created before that default need one full `VACUUM`
+   * to adopt it). Postgres/MySQL manage space via their own vacuum/purge
+   * machinery, so this is a no-op there.
+   *
+   * "To completion" is a property of how the statement is STEPPED, not of its
+   * text. SQLite's incremental-vacuum program frees one page per step and
+   * yields a column-less result row for it, so a caller that steps once frees
+   * one page. knex's better-sqlite3 client runs a statement that declares no
+   * result columns with `Statement.run()`, which steps it once: through
+   * `knex.raw` one call freed ONE page (freelist 300 → 299, read from a second
+   * connection). An explicit page count, `incremental_vacuum(N)`, freed one
+   * page too — the count is a ceiling, not what stops the loop. So that binding
+   * is driven through its own `exec()`, which steps every statement until
+   * SQLite reports done (300 → 0). sql.js needs nothing: `driver-sqlite-wasm`'s
+   * dialect already iterates every row a PRAGMA yields (300 → 0 through the
+   * `knex.raw` below). knex's node-sqlite3 client runs a raw statement with
+   * `Database.all()`, which reads every row too (read from knex's source; that
+   * binding is not installed in this repository).
    */
   async reclaimSpace(_options?: DriverOptions): Promise<void> {
     if (!this.isSqlite) return;
+    const client = this.knex.client;
+    if (client.driverName === 'better-sqlite3') {
+      const connection = await client.acquireConnection();
+      try {
+        connection.exec('PRAGMA incremental_vacuum');
+      } finally {
+        await client.releaseConnection(connection);
+      }
+      return;
+    }
     await this.knex.raw('PRAGMA incremental_vacuum');
   }
 

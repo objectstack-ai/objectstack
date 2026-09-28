@@ -95,7 +95,12 @@ export const DeliveryCube = defineCube({
   refreshKey: {
     every: '1 hour',
   },
-  public: false,
+  // No `public` key: the cube is VISIBLE, the default. It is this app's
+  // demonstration of the `/api/v1/analytics/*` surface (src/coverage.ts marks
+  // `analyticsCubes` demonstrated, and the platform checklist's dashboards item
+  // discovers and queries it there). `public: false` would hide it from
+  // `/analytics/meta` and refuse every query against it — this file authored
+  // exactly that, inertly, until the analytics service began reading the key.
 });
 
 export const allCubes = [DeliveryCube];

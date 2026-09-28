@@ -189,7 +189,7 @@ export const SysOauthApplication = ObjectSchema.create({
     {
       name: 'delete_oauth_application',
       label: 'Delete OAuth Application',
-      icon: 'trash-2',
+      icon: 'trash',
       variant: 'danger',
       mode: 'delete',
       locations: ['list_item', 'record_header'],

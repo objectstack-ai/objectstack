@@ -25,10 +25,10 @@
  * - The ADMITTED leg is the negative control a lazy fix loses: the request
  *   must still be served, from ITS definition — the driver sees the request's
  *   object, not the shared cube's.
- * - A `public: false` cube keeps its authored definition in the registry.
- *   Nothing on this tree reads `public` yet, so "stays hidden from meta" is
- *   not expressible here; what this pins is the precondition that leg needs:
- *   the entry a visibility filter would read is still the author's.
+ * - A `public: false` cube keeps its authored definition in the registry, and
+ *   stays hidden: `getMeta` omits it (`cube-visibility.ts`), so the observer's
+ *   discovery snapshot — taken before and after — never lists it, and the
+ *   entry the visibility filter reads is still the author's.
  * - CONTROL: a dataset registered at construction (`datasets`, the boot door)
  *   still serves by name, and a request under its name leaves its compiled
  *   scope — the definition-level `filter` the shared query applies — intact.
@@ -140,7 +140,8 @@ describe.each(STRATEGY_PATHS)('queryDataset leaves the shared registries alone �
   it('observer baseline: the authored cube and the saved dataset serve by name, on their own objects', async () => {
     const h = makeService(capabilities);
     const { meta, driven } = await observe(h);
-    expect(meta.map((c) => c.name).sort()).toEqual(['hidden_summary', 'open_summary', 'saved_summary']);
+    // `hidden_summary` declares `public: false`, so discovery omits it.
+    expect(meta.map((c) => c.name).sort()).toEqual(['open_summary', 'saved_summary']);
     expect(driven.map((c) => c.object)).toEqual(['open_obj', 'open_obj']);
     // The saved dataset's definition-level filter reaches the driver — the
     // compiled scope this card must leave in place.

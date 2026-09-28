@@ -33,6 +33,7 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 // The object-level read admission asked at this door, ahead of every strategy
 // — the layer the raw-SQL path could not inherit from the engine. See that
 // module's header for the request that reached the database without it.
@@ -855,13 +856,13 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
  *
  * - the SHARED scope — this service's `CubeRegistry` and compiled-dataset
  *   registry, which every caller reads and `getMeta` publishes: the configured
- *   cubes, the datasets `registerDataset` registered (the constructor's
- *   `datasets`, or an embedder), and what the ad-hoc path infers for a request
- *   the object-level admission ADMITTED (#20381);
+ *   cubes, and the datasets `registerDataset` registered (the constructor's
+ *   `datasets`, or an embedder). Configuration writes it; no request does;
  * - a REQUEST scope — one call's own, over the shared scope read-only: the
  *   dataset a `queryDataset` call compiled, under its own name, and whatever
- *   `ensureCube` mints during the call. Every door runs in one — `query()` and
- *   `generateSql()` too (#20381).
+ *   `ensureCube` mints during the call — the cube it infers for a name nothing
+ *   configured, or a measure it appends to one that was. Every door runs in
+ *   one — `query()` and `generateSql()` too (#20381).
  *
  * A request's dataset is that caller's definition, and a name it shares with a
  * shared cube is harmless only while the two never meet. Registering it made
@@ -869,11 +870,11 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
  * cube included — was replaced for every later reader, and the replacement
  * happened before any admission was asked, so a refused request left it
  * behind too. A request scope therefore has no path into the shared one: its
- * `register` writes only to itself, and it is dropped with the call. The ONE
- * write from a request into the shared scope is the ad-hoc doors' publication
- * of an inferred cube, made by the door after `callCtx` admitted the request
- * (`publishInferredCube`); a measure `ensureCube` appends to an existing cube
- * is never published.
+ * `register` writes only to itself, and it is dropped with the call. That holds
+ * for an ADMITTED request as well (#20381): a cube inferred for an ad-hoc query
+ * serves that query and nothing after it, so what `getMeta` lists never depends
+ * on who queried what since boot, and the next request of the same name infers
+ * again, through the same gates.
  */
 interface CubeScope {
   getCube(name: string): Cube | undefined;
@@ -1430,7 +1431,7 @@ export class AnalyticsService implements IAnalyticsService {
    * Any other error propagates untouched.
    */
   async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
-    return this.queryIn(this.requestScope(), queryInput, context, { publishInferred: true });
+    return this.queryIn(this.requestScope(), queryInput, context);
   }
 
   /**
@@ -1438,21 +1439,26 @@ export class AnalyticsService implements IAnalyticsService {
    * request scope: an empty one for `/analytics/query` (#20381), and the
    * compiled dataset's for the queries `queryDataset` runs through
    * `DatasetExecutor` (#20356). One body for both, so every gate below asks the
-   * same question whichever scope answers the name.
-   *
-   * [#20381] `publishInferred` is the ad-hoc door's alone: once `callCtx` has
-   * admitted the request, the cube `ensureCube` inferred for it is published
-   * to the shared registry. The dataset door publishes nothing.
+   * same question whichever scope answers the name. Neither door publishes
+   * what the call mints (#20381).
    */
   private async queryIn(
     scope: CubeScope,
     queryInput: AnalyticsQuery,
     context?: ExecutionContext,
-    door: { publishInferred?: boolean } = {},
   ): Promise<AnalyticsResult> {
     if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
     }
+    // `analytics_cube.public` — first, ahead of token resolution, cube
+    // inference, admission and every strategy: a hidden cube is refused
+    // whatever else the request carries, and the refusal leaves the registry
+    // exactly as it found it. Asked of `scope`, the same scope that answers
+    // the name below: a `queryDataset` call's own compiled cube (visible)
+    // answers its name there, so a dataset named like a hidden configured
+    // cube runs as itself instead of being refused — a refusal there would
+    // be an oracle for which names are hidden.
+    this.assertCubePublic(queryInput.cube, scope);
 
     // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
     // seam — before strategy selection — so every strategy compiles the same
@@ -1467,9 +1473,8 @@ export class AnalyticsService implements IAnalyticsService {
     const tokenCtx = filterTokenContextFrom(context, new Date());
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
-    const inferred = this.ensureCube(query, scope);
+    this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
-    if (door.publishInferred) this.publishInferredCube(inferred);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
       const strategy = this.resolveStrategy(query, ctx, skip);
@@ -1571,8 +1576,9 @@ export class AnalyticsService implements IAnalyticsService {
    * augmentation) stays here and is dropped with the call.
    *
    * [#20381] The ad-hoc doors (`query()`, `generateSql()`) run in one with no
-   * compiled dataset, so nothing they mint reaches the shared registry before
-   * `callCtx` has admitted the request — see {@link publishInferredCube}.
+   * compiled dataset, so nothing they mint reaches the shared registry — not
+   * before `callCtx` has admitted the request, and not after: an inferred cube
+   * is dropped with its call exactly as an appended measure is.
    */
   private requestScope(compiled?: CompiledDataset): CubeScope {
     const shared = this.sharedScope;
@@ -1586,25 +1592,6 @@ export class AnalyticsService implements IAnalyticsService {
         cubes.set(cube.name, cube);
       },
     };
-  }
-
-  /**
-   * [#20381] CubeRegistry source 3, and the one place a request writes it: the
-   * cube an ad-hoc door inferred for a request, entered into the shared
-   * registry AFTER `callCtx` admitted that request. A refused request leaves no
-   * trace; an admitted one leaves its inferred cube, which the next request
-   * resolves by name as before.
-   *
-   * Only an INFERRED cube is ever published. A measure `ensureCube` appended to
-   * a cube the registry already holds is the caller's, and stays in the call's
-   * scope: publishing it rewrote a configured cube for every caller. And a name
-   * the registry gained while this request was being admitted keeps what it
-   * gained — the first registration wins, so an authored cube is never
-   * replaced by an inferred one.
-   */
-  private publishInferredCube(inferred: Cube | undefined): void {
-    if (!inferred || this.sharedScope.getCube(inferred.name)) return;
-    this.sharedScope.register(inferred);
   }
 
   /**
@@ -2157,12 +2144,16 @@ export class AnalyticsService implements IAnalyticsService {
 
   /**
    * Get cube metadata for discovery.
+   *
+   * Only cubes the analytics API exposes are listed: a cube declared
+   * `public: false` is omitted, and asking for it by name answers `[]` — the
+   * same answer as a name no cube has (`cube-visibility.ts`).
    */
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
-    // If a fallback service is configured, merge its metadata with the registry
-    const cubes = cubeName
+    const cubes = (cubeName
       ? [this.cubeRegistry.get(cubeName)].filter(Boolean) as Cube[]
-      : this.cubeRegistry.getAll();
+      : this.cubeRegistry.getAll()
+    ).filter(isCubePublic);
 
     return cubes.map(cube => ({
       name: cube.name,
@@ -2187,6 +2178,9 @@ export class AnalyticsService implements IAnalyticsService {
     if (!queryInput.cube) {
       throw new Error('Cube name is required for SQL generation');
     }
+    // Same gate as `query()`: the dry-run door must not hand out the
+    // statement — the cube's measures, raw SQL included — of a hidden cube.
+    this.assertCubePublic(queryInput.cube, this.sharedScope);
 
     // [#12230] Same token seam as `query()` — the dry-run door must show the
     // statement that would actually run (a resolved user id in the params, or
@@ -2196,11 +2190,10 @@ export class AnalyticsService implements IAnalyticsService {
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
     // [#20381] Same request scope as `query()`: nothing minted here reaches the
-    // shared registry before `callCtx` has admitted the request.
+    // shared registry, admitted or refused.
     const scope = this.requestScope();
-    const inferred = this.ensureCube(query, scope);
+    this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
-    this.publishInferredCube(inferred);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 
@@ -2208,6 +2201,22 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   // ── Internal ─────────────────────────────────────────────────────
+
+  /**
+   * Refuse a query against a cube declared `public: false` with the SAME
+   * refusal an unknown name gets — `cubeNotFoundError`, byte for byte
+   * (`cube-visibility.ts` says why).
+   * A name with no registered cube passes: it is the ad-hoc path's to infer or
+   * refuse (`assertInferableCube`), and every cube that path mints is visible.
+   *
+   * The name is resolved through `scope` — the scope the rest of the call
+   * resolves it through — never the shared registry directly, so the gate and
+   * the query can never be asking about two different cubes.
+   */
+  private assertCubePublic(name: string, scope: CubeScope): void {
+    const cube = scope.getCube(name);
+    if (cube && !isCubePublic(cube)) throw cubeNotFoundError(name);
+  }
 
   /**
    * Ensure a cube exists for the given query and that it knows about every
@@ -2236,14 +2245,10 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * [#20356] "Registered" means registered in `scope`: the cube is read from it
    * and what this method mints is recorded in it — the call's own request
-   * scope, on every door, so nothing minted here reaches the shared registry.
-   *
-   * [#20381] Returns the cube it INFERRED (the no-cube branch), and nothing
-   * otherwise: the ad-hoc doors publish that one to the shared registry once
-   * the request is admitted ({@link publishInferredCube}). An augmented cube is
-   * not returned, because it is never published.
+   * scope, on every door, so nothing minted here reaches the shared registry
+   * (#20381: an inferred cube included, whatever the admission answers).
    */
-  private ensureCube(query: AnalyticsQuery, scope: CubeScope): Cube | undefined {
+  private ensureCube(query: AnalyticsQuery, scope: CubeScope): void {
     const name = query.cube!;
     let cube = scope.getCube(name);
 
@@ -2287,7 +2292,7 @@ export class AnalyticsService implements IAnalyticsService {
         `Define an explicit Cube in your stack for full control.`;
       if (isScalarMetric) this.logger.debug(message);
       else this.logger.warn(message);
-      return cube;
+      return;
     }
 
     // Cube exists — check for unknown measures referenced by the query and
@@ -2296,17 +2301,20 @@ export class AnalyticsService implements IAnalyticsService {
     //
     // [#5918] This is the SECOND measure mint, and it judges a dotted spelling
     // exactly as the ad-hoc one does — `mintableMeasureKey` owns the rule. It
-    // has to: the ad-hoc path REGISTERS what it infers, so from the second
-    // request onwards a cube minted moments ago by `inferCubeFromQuery` is
-    // "registered" and arrives here. Measured on `origin/main` `01faeb13a`,
-    // one service, two queries:
+    // has to: every cube that reaches this loop is one a caller did not mint in
+    // this request — a configured cube, a registered or requested dataset's —
+    // and the same spelling must get the same answer on it. When #5918 landed,
+    // the ad-hoc path also REGISTERED what it inferred, so a cube minted by
+    // `inferCubeFromQuery` arrived here from the second request onwards.
+    // Measured on `origin/main` `01faeb13a`, one service, two queries:
     //
     //   ① measures: ['count']                        → SELECT COUNT(*) … (warms the registry)
     //   ② measures: ['owner.region_count_distinct']   → SELECT COUNT(DISTINCT region) AS "owner.region_count_distinct"
     //
     // i.e. the silent wrong column #5918 reports, reached through this loop
-    // instead of that one. Refusing in only one of the two would have closed the
-    // cold request and left every warm one exactly as it was.
+    // instead of that one. [#20381] That route is gone — an inferred cube now
+    // lives only in its own request, so ② infers again — but the loop still
+    // serves every configured cube, where the same refusal holds.
     //
     // A measure the cube DECLARES is never minted, so it never reaches the
     // rule — including a declared DOTTED key, which `lookupMember` resolves by
@@ -2350,7 +2358,6 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
-    return undefined;
   }
 
   /**
@@ -2697,9 +2704,11 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * Rejects with `status: 404` / `code: 'CUBE_NOT_FOUND'` so the HTTP boundary
    * answers "no such cube" instead of letting the name reach the driver as a
-   * table and surfacing whatever the driver says about it. The message names
-   * both ways the request could be made valid, because from here the two are
-   * genuinely indistinguishable: register a Cube, or register the object.
+   * table and surfacing whatever the driver says about it. The refusal is
+   * `cubeNotFoundError`, shared byte for byte with the hidden-cube refusal, and
+   * its message names every way the request could be made valid, because to
+   * the caller they are deliberately indistinguishable: register a Cube,
+   * register the object, or remove a `public: false` that hides the cube.
    *
    * Skips when `isRegisteredObject` was not supplied — see the config field's
    * doc for why that tier is a deliberate stand-down and not a hole.
@@ -2718,15 +2727,9 @@ export class AnalyticsService implements IAnalyticsService {
       return;
     }
     if (isRegisteredObject(name)) return;
-    const err = new Error(
-      `Cube '${name}' not found: no cube is registered under that name, and it is not a ` +
-        `registered object either (a cube can only be auto-inferred from a registered object). ` +
-        `Define a Cube in your stack, or check the object name.`,
-    ) as Error & { code?: string; status?: number; cube?: string };
-    err.code = 'CUBE_NOT_FOUND';
-    err.status = 404;
-    err.cube = name;
-    throw err;
+    // The SAME refusal a hidden cube gets (`assertCubePublic`): a caller must
+    // not be able to tell "hidden" from "absent" (`cube-visibility.ts`).
+    throw cubeNotFoundError(name);
   }
 
   /** Build a minimal Cube from the fields referenced by an AnalyticsQuery. */
@@ -2862,7 +2865,11 @@ export class AnalyticsService implements IAnalyticsService {
       sql: cubeName,
       measures,
       dimensions,
-      public: false,
+      // Visible, and moot: this cube lives only in the request that minted it
+      // and is never registered (#20381), so no visibility verdict ever reads
+      // it — `getMeta` never sees it, and `assertCubePublic` runs before it
+      // exists. Kept as the literal the platform's own mints share.
+      public: true,
     };
   }
 
