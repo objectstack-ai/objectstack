@@ -199,27 +199,6 @@ export function createMetaDomain(deps: DomainHandlerDeps): DomainRoute {
 }
 
 /**
- * [#12702 · #20320] May this caller SAVE `:type/:name` on THIS transport? The
- * admission of the `PUT` branch below, spelled ONCE: that branch asks it, and
- * so does the `?state=draft` read's author exemption (ruling 5856774816,
- * item 1: 「whoever can save it must see it whole, or a save drops entries
- * silently」), which `MetaReadGateCaller.mayWriteItem` says must be the
- * transport's own save-door answer. A second spelling at the read could drift
- * from the door it stands for. `canonicalType` is the folded segment and
- * `activeOrganizationId` the one resolution the caller already made, so
- * authorization and scope read one value (#8919).
- */
-function metaSaveVerdict(ec: any, canonicalType: string, activeOrganizationId: string | undefined) {
-    return metaWriteCapabilityVerdict({
-        isSystem: ec?.isSystem === true,
-        systemPermissions: ec?.systemPermissions,
-        canonicalType,
-        activeOrganizationId,
-        operation: 'save',
-    });
-}
-
-/**
  * [#20320] The READ route shape this domain would serve `parts` with, as the
  * shared `isPublicAudienceRead` names it — or `undefined` for every shape that
  * is not one of this domain's list or item reads. This domain has no
@@ -379,8 +358,8 @@ const NAV_PRUNE_LOGGED = new Set<string>();
  *
  * [#20320] `mayWriteItem` — handed in only by a door whose policy honours the
  * author exemption (the `?state=draft` read): this transport's own save-door
- * answer ({@link metaSaveVerdict}), carried on a COPY of the context — the
- * same object serves every other consumer of this request.
+ * answer (`saveVerdict` in {@link handleMetadataRequest}), carried on a COPY of
+ * the context — the same object serves every other consumer of this request.
  */
 function metaItemReadGateSources(
     deps: DomainHandlerDeps,
@@ -530,6 +509,9 @@ async function answerMetaList(
     }
 }
 
+/** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
+type MetaSaveVerdict = (canonicalType: string, activeOrganizationId: string | undefined) => { allowed: boolean };
+
 /**
  * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
  * drafts — the pending draft ROW (ADR-0033), answered exactly as `RestServer`'s
@@ -543,9 +525,9 @@ async function answerMetaList(
  *    never the published item;
  *  - the per-caller gate under `STORED_VERSION_DOOR_POLICY` — the constant
  *    `RestServer`'s draft branch runs (#20290): per-caller arms only, and an
- *    app WHOLE for a caller this transport's save door admits
- *    ({@link metaSaveVerdict}, carried as `mayWriteItem`), pruned per caller
- *    for everyone else;
+ *    app WHOLE for a caller this transport's save door admits (`saveVerdict`,
+ *    the `PUT` branch's own admission, carried as `mayWriteItem`), pruned per
+ *    caller for everyone else;
  *  - the ADR-0106 mask for an object, as every object exit here runs it.
  *
  * Only an admitted caller arrives: the switch is declared with
@@ -558,6 +540,7 @@ async function readPendingDraft(
     name: string,
     packageId: string | undefined,
     previewDrafts: boolean,
+    saveVerdict: MetaSaveVerdict,
 ): Promise<HttpDispatcherResult> {
     const singularType = pluralToSingular(type);
     const protocol = await resolveProtocol(deps, context);
@@ -575,9 +558,7 @@ async function readPendingDraft(
     }
     if (envelope?.item == null) return { handled: true, response: deps.error('Not found', 404) };
 
-    const mayWriteItem = metaSaveVerdict(
-        context.executionContext, canonicalMetaUrlType(type), activeOrganizationId,
-    ).allowed;
+    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), activeOrganizationId).allowed;
     const gated = await gateMetaItemDocument(
         deps, context, protocol, singularType, name, envelope.item, STORED_VERSION_DOOR_POLICY, mayWriteItem,
     );
@@ -851,6 +832,27 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // Extract optional package filter from query string
         const packageId = query?.package || undefined;
 
+        // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS
+        // transport? The admission of the `PUT` branch below, spelled ONCE:
+        // that branch asks it, and so does the `?state=draft` read's author
+        // exemption (ruling 5856774816, item 1: 「whoever can save it must see
+        // it whole, or a save drops entries silently」), which
+        // `MetaReadGateCaller.mayWriteItem` says must be the transport's own
+        // save-door answer. A second spelling at the read could drift from the
+        // door it stands for. `canonicalType` is the folded segment and
+        // `activeOrganizationId` the one resolution each caller already made,
+        // so authorization and scope read one value.
+        const saveVerdict: MetaSaveVerdict = (canonicalType, activeOrganizationId) => {
+            const ec: any = _context.executionContext;
+            return metaWriteCapabilityVerdict({
+                isSystem: ec?.isSystem === true,
+                systemPermissions: ec?.systemPermissions,
+                canonicalType,
+                activeOrganizationId,
+                operation: 'save',
+            });
+        };
+
         // PUT /metadata/:type/:name (Save)
         //
         // [#8842] The condition is the METHOD alone. It used to be
@@ -910,14 +912,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // single-resolution shape the REST doors carry, #8919). Resolving
             // it is a session read, not a protocol probe: the 403-vs-501
             // discipline above is untouched.
-            const ec: any = _context.executionContext;
             // [#10503] Folded at the boundary, once — the verdict and the
             // scope decision below must read the same spelling.
             const canonicalType = canonicalMetaUrlType(type);
             const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
-            // [#20320] Spelled once ({@link metaSaveVerdict}), because the
+            // [#20320] Spelled once (`saveVerdict` above), because the
             // `?state=draft` read's author exemption asks this same question.
-            const verdict = metaSaveVerdict(ec, canonicalType, activeOrganizationId);
+            const verdict = saveVerdict(canonicalType, activeOrganizationId);
             if (!verdict.allowed) {
                 // `deps.error(msg, 403)` derives the code from the status —
                 // `PERMISSION_DENIED`, this transport's pinned spelling.
@@ -1136,7 +1137,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             && mayReadPendingDrafts(_context.executionContext);
 
         try {
-            if (isDraftRead) return await readPendingDraft(deps, _context, type, name, packageId, previewDrafts);
+            if (isDraftRead) return await readPendingDraft(deps, _context, type, name, packageId, previewDrafts, saveVerdict);
 
             // Try specific calls based on type
             if (type === 'objects' || type === 'object') {

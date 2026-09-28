@@ -1712,7 +1712,7 @@ export interface MetaListTranslationSources {
 }
 
 /**
- * [#6349 · #20320] Translate a metadata LIST — a bare array or the
+ * [#20320] Translate a metadata LIST — a bare array or the
  * `{ type, items }` envelope, answered in the shape it came in — for the
  * request's locale. `metaType` is the canonical singular (the caller folds its
  * URL segment once): `TRANSLATABLE_METADATA_TYPES` is singular-only, so a
