@@ -1412,16 +1412,39 @@ export class RemoteTransport {
         // real rows still come back; the unknown field is simply absent from
         // each row (it never existed). Mirrors the SqlDriver backstop — the
         // remote Turso path overrides find(), so it needs its own copy.
+        //
+        // [#20424] The copy now has the local ladder's two rungs and its
+        // terminal. The rungs, in `SqlDriver.findRows`' order: the projection
+        // first, then the ORDER BY (#3821: rows matter more than their order),
+        // each rebuilt with the caller's WHERE, which neither rung may drop.
+        // The terminal was `return []` here, on both the no-rung path and a
+        // failed rung, so an unresolvable column in the WHERE, or an ORDER BY
+        // on a column the table lacks, read as "there are no rows". The local
+        // face answers the first with `INVALID_FILTER` / 400 (#8790) and the
+        // second with its rows, unordered. Now the last error leaves this
+        // method as the backend raised it, and `TursoDriver` classifies it
+        // with the local face's own read-exit seam. The refusal and its code
+        // are the driver's, not this transport's.
+        const rungs: any[] = [];
         if (query?.fields && Array.isArray(query.fields) && query.fields.length > 0) {
+          rungs.push({ ...query, fields: undefined });
+        }
+        if (Array.isArray(query?.orderBy) && query.orderBy.some((item: any) => item?.field)) {
+          rungs.push({ ...query, fields: undefined, orderBy: undefined });
+        }
+        let lastError: unknown = error;
+        for (const rung of rungs) {
           try {
-            const fallback = this.buildSelectSQL(object, { ...query, fields: undefined }, table);
+            const fallback = this.buildSelectSQL(object, rung, table);
             const result = await this.client!.execute({ sql: fallback.sql, args: fallback.args });
             return this.mapRows(result);
-          } catch {
-            return [];
+          } catch (rungError) {
+            // The next, broader rung. The last one to fail names the column
+            // the WHERE still holds, once the projection and the sort are gone.
+            lastError = rungError;
           }
         }
-        return [];
+        throw lastError;
       }
       throw error;
     }
@@ -1626,19 +1649,18 @@ export class RemoteTransport {
       sql += ` GROUP BY ${groupBy.map((g) => `"${g.field}"`).join(', ')}`;
     }
 
-    try {
-      const result = await this.client!.execute({ sql, args });
-      return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
-    } catch (error: any) {
-      if (
-        error.message &&
-        (error.message.includes('no such table') ||
-          error.message.includes('no such column'))
-      ) {
-        return [];
-      }
-      throw error;
-    }
+    // [#20424] The backend's error leaves this method as it was raised. A
+    // catch here used to answer `no such table` and `no such column` with `[]`,
+    // so a table that is really absent, or a groupBy, aggregation or WHERE
+    // naming a declared field whose column is absent, read as "no data". The
+    // local face of the same driver refuses all of them. `TursoDriver`
+    // classifies the error with the local face's own aggregate seam
+    // (`SqlDriver.aggregateBackendFault`): `INVALID_FIELD` / 400 for a groupBy
+    // or aggregation column, `INVALID_FILTER` / 400 for a WHERE column, and
+    // `DATABASE_ERROR` / 500 for the rest. The catch arrived with this method's
+    // first version, with no comment, no pin and no case it was written for.
+    const result = await this.client!.execute({ sql, args });
+    return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
   }
 
   /**
