@@ -87,7 +87,7 @@ describe('[#20323] action-aria-removed (ADR-0087 D2)', () => {
   });
 
   it('the stored-row seam replays it, and the result parses against `ActionSchema`', () => {
-    const stored = { name: 'escalate_case', label: 'Escalate', type: 'script', aria: ARIA };
+    const stored = { name: 'escalate_case', label: 'Escalate', type: 'script', target: 'escalateCase', aria: ARIA };
     // Before: the retired key is refused at parse — the row a pre-retirement
     // author left behind would be badged invalid without the replay.
     expect(ActionSchema.safeParse(stored).success).toBe(false);
