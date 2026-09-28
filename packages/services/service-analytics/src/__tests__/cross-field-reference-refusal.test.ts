@@ -156,7 +156,7 @@ const CUBE: Cube = {
     amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
     budget: { name: 'budget', label: 'Budget', type: 'number', sql: 'budget' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 // ── The supported arm: routed, not refused ───────────────────────────────────

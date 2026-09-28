@@ -55,7 +55,7 @@ const cube: Cube = {
     assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
     score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
   },
-  public: false,
+  public: true,
 };
 
 const EPOCH_2025_06_18 = Date.parse('2025-06-18T00:00:00.000Z');

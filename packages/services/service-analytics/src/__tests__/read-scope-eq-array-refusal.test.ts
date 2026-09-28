@@ -154,7 +154,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     ['id', 'status'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 const QUERY = { cube: 'tickets', dimensions: ['id'], measures: ['n'] } as AnalyticsQuery;
 

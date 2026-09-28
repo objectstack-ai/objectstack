@@ -788,8 +788,11 @@ describe('FlowSchema', () => {
             id: 'process_response',
             type: 'script',
             label: 'Process Response',
+            // A registered function, the one thing a `script` node runs — the
+            // inline `script` key was retired, and the flow parse now refuses
+            // a `script` node with no `function` (the key its contract requires).
             config: {
-              script: 'return JSON.parse(response.body);',
+              function: 'parse_response',
             },
           },
           { id: 'end', type: 'end', label: 'End' },
@@ -1106,7 +1109,7 @@ describe('BPMN — Parallel Gateway & Join Gateway', () => {
         { id: 'finance_review', type: 'connector_action', label: 'Finance Review' },
         { id: 'legal_review', type: 'connector_action', label: 'Legal Review' },
         { id: 'join', type: 'join_gateway', label: 'Join — All Approved' },
-        { id: 'final_approve', type: 'update_record', label: 'Final Approve' },
+        { id: 'final_approve', type: 'update_record', label: 'Final Approve', config: { objectName: 'contract', filter: { id: '{record.id}' }, fields: { status: 'approved' } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -1193,9 +1196,9 @@ describe('BPMN — Default Sequence Flow (isDefault)', () => {
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'check_priority', type: 'decision', label: 'Check Priority' },
-        { id: 'high_path', type: 'update_record', label: 'High Priority Handler' },
-        { id: 'medium_path', type: 'update_record', label: 'Medium Priority Handler' },
-        { id: 'default_path', type: 'update_record', label: 'Default Handler' },
+        { id: 'high_path', type: 'update_record', label: 'High Priority Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
+        { id: 'medium_path', type: 'update_record', label: 'Medium Priority Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
+        { id: 'default_path', type: 'update_record', label: 'Default Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -1610,7 +1613,7 @@ describe('BPMN — Boundary Event', () => {
       type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
-        { id: 'api_call', type: 'http', label: 'Call External API', timeoutMs: 5000 },
+        { id: 'api_call', type: 'http', label: 'Call External API', timeoutMs: 5000, config: { url: 'https://api.example.com/v1/sync' } },
         {
           id: 'api_error_boundary',
           type: 'boundary_event',
@@ -1622,7 +1625,7 @@ describe('BPMN — Boundary Event', () => {
             errorCode: 'TIMEOUT',
           },
         },
-        { id: 'handle_error', type: 'update_record', label: 'Log Error' },
+        { id: 'handle_error', type: 'update_record', label: 'Log Error', config: { objectName: 'sync_log', filter: { id: '{record.id}' } } },
         { id: 'end_success', type: 'end', label: 'End Success' },
         { id: 'end_error', type: 'end', label: 'End Error' },
       ],

@@ -242,7 +242,8 @@ export async function createMcpConnector(opts: McpConnectorOptions): Promise<Mcp
         authentication: { type: 'none' },
         // Defaulted by ConnectorSchema; set explicitly so the literal satisfies
         // the (post-parse) Connector output type.
-        status: 'active',
+        // (`status: 'active'` stood here until the spec key was retired —
+        // ADR-0049: nothing ever read it.)
         enabled: true,
         // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049): it was
         // written here only so the literal satisfied the post-parse type, and

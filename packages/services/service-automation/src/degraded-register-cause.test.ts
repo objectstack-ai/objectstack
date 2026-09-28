@@ -95,7 +95,9 @@ function huskDef(name: string): Connector {
         name,
         label: name,
         type: 'api',
-        status: 'error',
+        // (`status: 'error'` stood here, mirroring the husk, until the spec key
+        // was retired — ADR-0049; the husk's degraded-ness is the registry's
+        // computed `state`.)
         enabled: true,
         authentication: { type: 'none' },
         requestTimeoutMs: 30000,

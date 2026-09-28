@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import {
   ConnectorFieldMappingSchema,
   ConnectorSchema,
-  WebhookConfigSchema,
 } from './connector.zod';
 
 // ─── [#5515] the L3 `Connector` example in SYNC_ARCHITECTURE.md ──────────────
@@ -262,29 +261,29 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
       };
       void c;
     `,
-    'webhook-retry-policy': `${HEAD}
+    // This probe used to author `webhooks[].retryPolicy` and pin TS2353 on the
+    // nested webhook shape. The whole nested array was retired since
+    // (ADR-0049 — a webhook inside a connector was never registered or
+    // delivered), so the example dropped its `webhooks` block and the probe now
+    // measures the stronger fact: the KEY is refused, whatever it holds — even
+    // a nested webhook that would have been well-formed.
+    'webhooks-retired': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         webhooks: [{
           name: 'order_created_webhook',
           url: 'https://api.objectstack.com/webhooks/sap/orders',
-          retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential', initialDelayMs: 1000 },
         }],
       };
       void c;
     `,
-    // The canonical spellings of all three, as one control: if this were red
-    // the three reds above would say nothing about the SPELLING.
+    // The canonical spelling of the surviving key, as one control: if this were
+    // red the reds above would say nothing about the SPELLING.
     'canonical-control': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
-        }],
-        webhooks: [{
-          name: 'order_created_webhook',
-          url: 'https://api.objectstack.com/webhooks/sap/orders',
-          events: ['record.created'],
         }],
       };
       void c;
@@ -329,13 +328,16 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
     expect(message).toContain("not assignable to type 'undefined'");
   });
 
-  it('`webhooks[].retryPolicy` does not exist on the webhook shape', () => {
-    const message = render(results.get('webhook-retry-policy')!);
-    expect(message).toContain('TS2353');
-    expect(message).toContain('retryPolicy');
+  it('`webhooks` itself is retired — the key no longer type-checks, whatever it holds', () => {
+    // Same compile-channel shape as the `transform` pair above: a `retiredKey()`
+    // input type is `undefined`, so tsc refuses without naming the key; the
+    // parse channel below carries the prescription.
+    const message = render(results.get('webhooks-retired')!);
+    expect(message).toContain('TS2322');
+    expect(message).toContain("not assignable to type 'undefined'");
   });
 
-  it('…while the canonical spellings of all three compile', () => {
+  it('…while the canonical spelling of the surviving key compiles', () => {
     expect(render(results.get('canonical-control')!)).toBe('');
   });
 });
@@ -346,20 +348,29 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
   // they get it wrong is the difference between a fixable mistake and a
   // mysterious one — and the three keys are told three different ways.
 
-  it('`retryPolicy` is a curated tombstone: the rejection names #3494 and says there is no replacement', () => {
-    // A KEY verdict on a `strictObject` surface, so the assertion is about
-    // `unrecognized_keys` and the guidance text attached to it.
-    const result = WebhookConfigSchema.safeParse({
-      name: 'order_created_webhook',
-      url: 'https://api.objectstack.com/webhooks/sap/orders',
-      events: ['record.created'],
-      retryPolicy: { maxRetries: 3, backoffStrategy: 'exponential', initialDelayMs: 1000 },
+  it('`webhooks` on a connector is a KEY verdict carrying the retirement prescription', () => {
+    // Was: "`retryPolicy` is a curated tombstone" on the nested webhook shape
+    // (`WebhookConfigSchema`). That shape left with `connector.webhooks`
+    // (ADR-0049), so the example's webhook block is refused one level up, by
+    // the key — and the prescription must send the author to the collection
+    // that IS delivered, not merely refuse. (`retryPolicy`'s own curated
+    // tombstone lives on the delivered `WebhookSchema` and is pinned there.)
+    const result = ConnectorSchema.safeParse({
+      name: 'sap_erp_connector',
+      label: 'SAP ERP Integration',
+      type: 'saas',
+      webhooks: [{
+        name: 'order_created_webhook',
+        url: 'https://api.objectstack.com/webhooks/sap/orders',
+        events: ['record.created'],
+      }],
     });
     expect(result.success).toBe(false);
-    const issues = result.error!.issues;
-    expect(issues[0]!.code).toBe('unrecognized_keys');
-    expect(issues[0]!.message).toContain('`retryPolicy` was removed');
-    expect(issues[0]!.message).toContain('There is no replacement');
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'webhooks');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.message).toMatch(/`connector\.webhooks` was removed/);
+    expect(issue!.message).toContain('top-level `webhooks:` collection');
   });
 
   it('`sourceField` / `targetField` are STRIPPED, and the mapping then fails on the missing canonical keys', () => {
@@ -468,7 +479,8 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
     const message = render(results.get('parsed-connector')!);
     // TS2739 on the innermost mismatch first: the parse supplies `direction`,
     // `realtimeSync`, `conflictResolution`, `batchSize`, `deleteMode` under
-    // `syncConfig` (and `enabled` / `status` one level up); `z.infer` demands
+    // `syncConfig` (and `enabled` one level up — `status` was one too, until
+    // ADR-0049 retired it); `z.infer` demands
     // them all of the author.
     expect(message).toMatch(/TS2739: .* is missing the following properties/);
     expect(message).toContain('direction');
@@ -489,6 +501,8 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
     expect(parsed.syncConfig!.direction).toBe('import');
     expect(parsed.syncConfig).not.toHaveProperty('schedule');
     expect(parsed.enabled).toBe(true);
-    expect(parsed.status).toBe('inactive');
+    // `status` used to be supplied here as `'inactive'`; the key is retired
+    // (ADR-0049) and a parse no longer emits it.
+    expect(parsed).not.toHaveProperty('status');
   });
 });

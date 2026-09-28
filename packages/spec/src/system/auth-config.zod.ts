@@ -393,8 +393,8 @@ const AUDIENCE_EMAIL_DOMAIN_SHAPE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[
  * against the LIVE config — by plugin-auth's entry validation
  * (`assertAudienceConfig`), because this schema guards the authoring surface
  * while the runtime receives plain objects; the two must refuse the same
- * shapes (ADR-0078: a declared-but-inert or open-but-unverified configuration
- * is refused at declaration, never silently accepted).
+ * shapes (ADR-0078: a declared-but-inert or domain-gated-but-unverified
+ * configuration is refused at declaration, never silently accepted).
  */
 export const AudienceConfigSchema = lazySchema(() => z.object({
   /**
@@ -405,13 +405,19 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
    *   (which admits the invitee's own sign-up), admin create-user / bulk
    *   import, SCIM provisioning, or an operator-registered identity provider.
    * - `email_domain`: self-registration is open ONLY to addresses whose domain
-   *   is on {@link allowedEmailDomains}. Email verification is forced on.
-   * - `open`: anyone may self-register. Email verification is forced on.
+   *   is on {@link allowedEmailDomains}. Email verification is forced on, with
+   *   no opt-out.
+   * - `open`: anyone may self-register. Email verification is forced on
+   *   unless the DEPLOYMENT declares `emailAndPassword.requireEmailVerification:
+   *   false` (its stack config, or `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`)
+   *   — honoured with a boot warning; a value stored only through the settings
+   *   console cannot turn it off.
    */
   posture: z.enum(AUDIENCE_POSTURES).default('invite_only').describe(
     'Who may self-register into this environment: invite_only (default — operator acts only), ' +
     'email_domain (allowlisted email domains), or open (anyone). ' +
-    'Any posture other than invite_only forces email verification on.',
+    'email_domain forces email verification on; open forces it on unless the deployment explicitly ' +
+    'sets emailAndPassword.requireEmailVerification to false.',
   ),
   /**
    * Required (non-empty) when `posture: 'email_domain'`; refused under any
@@ -580,9 +586,16 @@ export const AuthConfigSchema = lazySchema(() => z.object({
    * schema cannot see `emailAndPassword` from inside the sub-object, and the
    * runtime receives plain objects): a posture that permits self-registration
    * (`email_domain` / `open`) FORCES `emailAndPassword.requireEmailVerification`
-   * on — an explicit `requireEmailVerification: false` beside such a posture
-   * is refused loudly at boot (an unverified allowlisted-domain signup is
-   * colleague impersonation; it makes the domain gate decorative).
+   * on by default.
+   *
+   * - `email_domain`: an explicit `requireEmailVerification: false` is refused
+   *   loudly at boot (an unverified allowlisted-domain signup is colleague
+   *   impersonation; it makes the domain gate decorative).
+   * - `open`: an explicit `false` declared by the deployment (this config, or
+   *   `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`) is honoured, with one boot
+   *   warning, and `getPublicConfig()` advertises the value actually wired —
+   *   for a deployment with no mail transport, such as a pre-production one.
+   *   A `false` stored only through the settings console is still refused.
    */
   audience: AudienceConfigSchema.optional().describe(
     'Audience posture: who may self-register into this environment ' +

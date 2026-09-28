@@ -24,6 +24,7 @@ import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { EndConfigSchema } from './builtin-node-config.zod';
 import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from './approval.zod';
 export const FlowNodeAction = z.enum([
@@ -161,7 +162,11 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * executor's to close. One VALUE rule reaches into an open `config` at the
  * flow level without closing its key set (#17493): a blank string in a slot
  * the expression ledger declares with the `predicate` role is refused by the
- * `FlowSchema` superRefine — see the block there for its scope.
+ * `FlowSchema` superRefine — see the block there for its scope. A PRESENCE
+ * rule reaches in beside it, still without closing the key set (#20316): a
+ * key the node's executor contract requires, left out, and a `decision`
+ * branch list the executor cannot read — `flowNodeConfigRefusals`, in the
+ * same superRefine.
  */
 
 /**
@@ -1345,6 +1350,42 @@ export const FlowSchema = lazySchema(() => strictObject(
         ctx.addIssue({
           code: 'custom',
           path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(found.path)],
+          message: refusal.message,
+        });
+      }
+    });
+  }
+
+  // What a node's executor needs its `config` to carry (#20316) — the ONE
+  // judge `flowNodeConfigRefusals`, shared with `objectstack validate`'s
+  // expression pass, and met at `AutomationEngine.registerFlow` through this
+  // parse (it parses first). Two arms, both stated where they are judged:
+  //
+  //  - a key the node's EXECUTOR CONTRACT requires, left out — the contract
+  //    being the very schema the executor's `parseNodeConfig` call refuses the
+  //    node against at run time, so a flow carrying one used to register and
+  //    then fail every run that reached the node (`loop` with a `body` and no
+  //    `collection`, `map` with no `collection`, a CRUD node with no
+  //    `objectName`, …). Only ABSENCE is judged: a present value of the wrong
+  //    type, or an undeclared key, stays where it is judged today;
+  //  - a `decision` branch list the executor cannot read — `conditions` not an
+  //    array, a branch that is not an object, and a branch whose `label` is
+  //    absent, blank or not text. The last one never failed a run at all: the
+  //    matched branch reported no label, and traversal took EVERY out-edge.
+  //
+  // A PRESENCE rule, never a key-set closure: the node `config` stays the open
+  // record the header of this module describes. Walked with
+  // `collectFlowGraphs`, so a node inside an ADR-0031 region body is judged at
+  // the path the author wrote; a container's own judgement skips its regions'
+  // insides, which this same walk reaches as graphs of their own.
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      const type: unknown = (node as { type?: unknown } | null)?.type;
+      if (typeof type !== 'string') return;
+      for (const refusal of flowNodeConfigRefusals(type, (node as { config?: unknown }).config)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(refusal.path)],
           message: refusal.message,
         });
       }

@@ -15,6 +15,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+  flowNodeConfigRefusals,
   predicateSlotRefusal,
 } from '@objectstack/spec/automation';
 
@@ -2291,7 +2292,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       const badRegion = () => ({
         nodes: [
           { id: 'gate', type: 'decision', config: { condition: '{record.rating} >= 4' } },
-          { id: 'act', type: 'update_record' },
+          { id: 'act', type: 'update_record', config: { objectName: 'crm_lead' } },
         ],
         edges: [{ id: 'b1', source: 'gate', target: 'act', condition: '{record.status} == "open"' }],
       });
@@ -2341,7 +2342,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             body: {
               nodes: [
                 { id: 'gate', type: 'decision', config: { condition: 'record.rating >= 4' } },
-                { id: 'act', type: 'update_record' },
+                { id: 'act', type: 'update_record', config: { objectName: 'crm_lead' } },
               ],
               edges: [{ id: 'b1', source: 'gate', target: 'act', condition: 'record.status == "open"' }],
             },
@@ -3010,6 +3011,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // are `success` / `error`, SafeParseResult's own, so that excuse covers
       // both locals for one reason and masks no metadata read either.
       'blankRefusal',
+      // [#20316] The spec's node-config judge, one refusal at a time. Its keys
+      // are that helper's own `{ code, params, message, source, path }` —
+      // never metadata keys — and it is named to stay clear of the `message` /
+      // `source` receivers for the reason the two entries above record.
+      'configRefusal',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact
@@ -4465,6 +4471,66 @@ describe('a decision branch with no `expression` (#19961)', () => {
     expect(errorsOf({
       flows: [{ name: 'f', nodes: [{ id: 'form', type: 'screen', config: { fields: [{ name: 'amount', type: 'number' }] } }], edges: [] }],
     })).toHaveLength(0);
+  });
+});
+
+/**
+ * [#20316] What a node's executor needs its `config` to carry, at the THIRD
+ * door: `objectstack validate`'s expression pass.
+ *
+ * A key the node's executor contract requires, left out, and a `decision`
+ * branch list the executor cannot read, reported NOTHING here — the flow then
+ * registered and every run that reached the node failed there, or (a branch
+ * with no `label`) ran green down every out-edge. This pass now refuses them
+ * through `flowNodeConfigRefusals` — the same call, the same message, as
+ * `FlowSchema.parse` and `registerFlow`.
+ *
+ * ⚠️ Through the CLI, `objectstack validate` meets these shapes first at its
+ * schema step (`FlowSchema.parse` refuses them there, with the same message).
+ * This pass answers for a stack handed to `validateStackExpressions` directly,
+ * and it is what these pins drive.
+ */
+describe('node config an executor requires (#20316)', () => {
+  const stackWith = (node: Record<string, unknown>) => ({
+    flows: [{ name: 'config_flow', nodes: [{ id: 'start', type: 'start' }, { id: 'n', ...node }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it.each([
+    { type: 'loop', whole: { collection: '{rows}', body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
+    { type: 'map', whole: { collection: '{rows}', flowName: 'child_flow' }, key: 'collection' },
+    { type: 'get_record', whole: { objectName: 'account' }, key: 'objectName' },
+    { type: 'http', whole: { url: 'https://example.com/hook' }, key: 'url' },
+    { type: 'subflow', whole: { flowName: 'child_flow' }, key: 'flowName' },
+  ] as Array<{ type: string; whole: Record<string, unknown>; key: string }>)('$type without `$key` is refused; with it, nothing is', ({ type, whole, key }) => {
+    expect(errorsOf(stackWith({ type, config: whole }))).toHaveLength(0);
+    const authored = { ...whole };
+    delete authored[key];
+    const found = errorsOf(stackWith({ type, config: authored }));
+    expect(found.map((i) => [i.where, i.message, i.source])).toEqual([
+      [`flow 'config_flow' · node 'n' (${type}) config.${key}`, flowNodeConfigRefusals(type, authored)[0].message, ''],
+    ]);
+  });
+
+  it('a decision branch with no `label` is refused at the label; its labelled twin is not', () => {
+    const found = errorsOf(stackWith({ type: 'decision', config: { conditions: [{ expression: 'true' }] } }));
+    expect(found.map((i) => [i.where, i.message])).toEqual([[
+      "flow 'config_flow' · node 'n' (decision) config.conditions[0].label",
+      flowNodeConfigRefusals('decision', { conditions: [{ expression: 'true' }] })[0].message,
+    ]]);
+    expect(errorsOf(stackWith({ type: 'decision', config: { conditions: [{ label: 'y', expression: 'true' }] } }))).toHaveLength(0);
+  });
+
+  it('a decision branch that is a bare string is refused once, as a branch', () => {
+    const found = errorsOf(stackWith({ type: 'decision', config: { conditions: ['true'] } }));
+    expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (decision) config.conditions[0]"]);
+  });
+
+  it('a `script` with no `function` is ONE finding, the callable check\'s — it reads the pre-conversion spellings this pass may be handed', () => {
+    const found = errorsOf(stackWith({ type: 'script', config: {} }));
+    expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (script) callable"]);
+    expect(errorsOf(stackWith({ type: 'script', config: { functionName: 'recalc_totals' } }))).toHaveLength(0);
   });
 });
 

@@ -79,7 +79,7 @@ const CUBE: Cube = {
       { name: n, label: n, type: n === 'amount' ? 'number' : 'string', sql: n },
     ]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */

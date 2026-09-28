@@ -300,7 +300,7 @@ const CUBE: Cube = {
     code: { name: 'code', label: 'Code', type: 'string', sql: 'code' },
     score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const ROW_CASES: Array<{ name: string; filter: FilterCondition; expected: string[]; note: string }> = [

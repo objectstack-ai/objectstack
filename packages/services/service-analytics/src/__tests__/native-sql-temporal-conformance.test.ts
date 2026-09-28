@@ -70,7 +70,7 @@ const CUBE: Cube = {
     at: { name: 'at', label: 'At', type: 'time', sql: 'happened_at' },
     on: { name: 'on', label: 'On', type: 'time', sql: 'happened_on' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const resolveTokens = <T,>(filter: T): T =>
