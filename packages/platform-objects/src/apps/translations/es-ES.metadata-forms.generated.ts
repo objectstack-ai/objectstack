@@ -72,6 +72,34 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Campos buscables",
         helpText: "Nombres de campo con los que coincide la consulta $search (ADR-0061): el valor predeterminado del selector de registros, la búsqueda rápida de listas y la búsqueda global; una vista puede acotarlo. Sin definir, la búsqueda usa el campo de nombre/título más los campos de texto corto. Cada entrada debe nombrar un campo almacenado de este objeto: un nombre desconocido o un campo formula virtual se rechaza al publicar."
       },
+      fieldGroups: {
+        label: "Grupos de campos",
+        helpText: "Secciones ordenadas que agrupan los campos de este objeto en el formulario de entrada y en la página de detalle del registro (ADR-0085); el orden del array es el orden de visualización. Un campo se une a un grupo indicando su clave en el ajuste group del propio campo. Los campos sin grupo van después de los grupos, y un grupo al que no se une ningún campo no se dibuja."
+      },
+      "fieldGroups.key": {
+        label: "Clave",
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+      },
+      "fieldGroups.label": {
+        label: "Etiqueta",
+        helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.icon": {
+        label: "Icono",
+        helpText: "Nombre de icono Lucide que se muestra junto al encabezado en la página de detalle del registro (p. ej., \"banknote\"). El formulario de entrada no lo muestra."
+      },
+      "fieldGroups.description": {
+        label: "Descripción",
+        helpText: "Texto que se muestra bajo el encabezado, en el formulario de entrada y en la página de detalle del registro."
+      },
+      "fieldGroups.collapse": {
+        label: "Contraer",
+        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+      },
+      "fieldGroups.visibleWhen": {
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario de entrada muestra el grupo entero, encabezado incluido, solo mientras sea TRUE."
+      },
       fields: {
         label: "Campos",
         helpText: "Añade las columnas que almacenará este objeto"
@@ -268,6 +296,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       datasource: {
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
+      },
+      indexes: {
+        label: "Índices",
+        helpText: "Índices de base de datos de la tabla de este objeto. El driver SQL crea cada uno que le falte a la tabla cuando la sincroniza; una sincronización nunca elimina un índice."
+      },
+      "indexes.name": {
+        label: "Nombre",
+        helpText: "Nombre físico del índice. Sin definir: se genera a partir de la tabla y las columnas (p. ej., idx_task_status)."
+      },
+      "indexes.fields": {
+        label: "Campos",
+        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Nada los comprueba al guardar ni al publicar: un nombre que no sea una columna almacenada hace que el driver SQL omita el índice entero, con una advertencia en el registro del servidor."
+      },
+      "indexes.unique": {
+        label: "Único",
+        helpText: "Ámbito de unicidad (ADR-0120). Sin definir: no es único. El true desnudo obsoleto (significa global) no se ofrece; un índice que lo lleve lo conserva hasta que elijas un ámbito."
       },
       ownership: {
         label: "Propiedad",
