@@ -224,11 +224,11 @@ export const fieldForm = defineForm({
         //
         // `lookupColumns` is an array of a UNION (a field name, or a
         // `{field, label, width, type}` entry), so the ruling's union rule
-        // applies: `json`, ⛔ never `string-tags`, which reads each entry as a
-        // string and would write an object entry back as text. `json` is not a
-        // registered widget: the renderer derives the face from the stored
-        // value, so an object-entry list edits as rows and anything else opens
-        // the raw JSON editor.
+        // applies: `json`, ⛔ never `string-tags`, a chip input for strings only
+        // that renders each entry as chip text, so it cannot show or edit a
+        // stored object entry. `json` is not a registered widget: the renderer
+        // derives the face from the stored value, so an object-entry list edits
+        // as rows and anything else opens the raw JSON editor.
         { field: 'lookupColumns', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Columns of the record-picker table: field names of the referenced object, or {field, label, width, type} entries (e.g. ["name", {"field": "status", "label": "Stage"}]). Unset: derived from the referenced object.' },
         { field: 'lookupFilters', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Base filter on the picker\'s candidates, as {field, operator, value} rules on the referenced object — operator one of eq, ne, gt, lt, gte, lte, contains, in, notIn (e.g. [{"field": "status", "operator": "eq", "value": "active"}]). Applied to every picker surface, ANDed with any dependsOn filter.' },
         // `dependsOn` is an array of a union too (a field name, or `{field, param}`),
