@@ -154,7 +154,7 @@ export interface UninterpretableTemporalComparand {
    * whose UTC year falls outside 0..9999.
    */
   value: unknown;
-  /** The `where.…` (or `having.…`) key path the offending comparand sits at. */
+  /** The `where.…` (or `having.…`, `aggregations[i].filter.…`) key path the offending comparand sits at. */
   path: string;
 }
 
@@ -352,14 +352,19 @@ const DATE_YEAR_REMEDY =
  * reason its neighbour records: an injected read filter is the platform's own,
  * not a declaration the caller can fix, and refusing one would turn a policy
  * into a 400 nobody can act on.
+ *
+ * [#20334] `path` roots the refusal at the position the filter sits in:
+ * `where` by default, `aggregations[i].filter` for a per-aggregation filter,
+ * the root the list-shape and comparand-type doors already name there.
  */
 export function assertTemporalComparandsInterpretable(
   object: string,
   operation: string,
   schema: unknown,
   where: unknown,
+  path = 'where',
 ): void {
-  const hit = findUninterpretableTemporalComparand(schema, where);
+  const hit = findUninterpretableTemporalComparand(schema, where, path);
   if (!hit) return;
   // [#20240] A number or `Date` is judged on a `date` field for one reason
   // only — its day's year has no four-digit spelling — so it gets words that
@@ -384,20 +389,6 @@ export function assertTemporalComparandsInterpretable(
     + `data". The filter was NOT applied. ${REMEDY[hit.kind]}`,
   );
 }
-
-/**
- * [#20263] The remedy on a `having` column. No relative-date placeholder: the
- * engine does not resolve filter placeholders in `having` (only in `where` and
- * a per-aggregation `filter`), so naming `{30_days_ago}` here would send the
- * author to a spelling `having` compares as the literal text it is.
- */
-const HAVING_REMEDY: Record<TemporalComparandKind, string> = {
-  datetime:
-    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z"), a bare "YYYY-MM-DD" '
-    + '(read as midnight UTC), or epoch milliseconds.',
-  date: 'Write a "YYYY-MM-DD" calendar day.',
-  time: REMEDY.time,
-};
 
 /**
  * [#20263] Which aggregated column a `having` key names, in the words the
@@ -465,6 +456,6 @@ export function assertHavingTemporalComparandsInterpretable(
     `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
     + `which is not a ${hit.kind} value this platform can interpret. Compared with each group as `
     + 'written, it would keep no group or every group, a 200 indistinguishable from a real answer. '
-    + `The \`having\` was NOT applied. ${HAVING_REMEDY[hit.kind]}`,
+    + `The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
   );
 }

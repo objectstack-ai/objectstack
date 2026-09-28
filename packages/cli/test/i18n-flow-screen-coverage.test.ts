@@ -38,8 +38,9 @@
 // `authorWarn`, and `os lint` runs this bucket in the SAME pass as
 // `lintLivenessProperties`, so demanding the keys while the ledger warns
 // authors for writing them left the author with no move that satisfies both.
-// The bucket is now gated on that row, and it turns itself back on the day an
-// objectui screen-flow runner lands and the row flips.
+// The bucket is now gated on that row, and it turns itself back on the day the
+// row flips to `live` (dropping its `authorWarn`; for `flows` that waits on
+// #20318).
 //
 // So these pins are re-anchored, not retired: the mock below is the ledger
 // warning on nothing, i.e. exactly the post-flip world. Retiring them instead

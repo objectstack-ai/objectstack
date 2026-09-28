@@ -15,7 +15,7 @@ import type {
   IQueueService,
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
-import { renderTemplate, requireVars, htmlToText } from './template-engine.js';
+import { renderTemplate, renderPlainTextTemplate, requireVars, htmlToText } from './template-engine.js';
 import {
   SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
   encodeAttachmentsForRow,
@@ -1375,10 +1375,18 @@ export class EmailService implements IEmailService {
       ...(locale ? { locale } : {}),
       ...(input.timezone ? { timeZone: input.timezone } : {}),
     };
-    const subject = renderTemplate(row.subject, data, renderOpts);
+    // Each face is rendered in ITS OWN encoding. Only `body_html` is markup,
+    // so only it HTML-escapes its `{{x}}` holes. The subject (a mail header,
+    // an inbox title) and `body_text` (the plain-text part, an inbox body) are
+    // plain text: escaping there put `&amp;` into every link carrying a
+    // query string — a plain-text reader, or anyone copying the link, got a
+    // parameter named `amp;callbackURL` and lost the post-verification
+    // redirect. The derived fallback was already right: `htmlToText` decodes
+    // the entities the HTML render introduced.
+    const subject = renderPlainTextTemplate(row.subject, data, renderOpts);
     const html = renderTemplate(row.body_html, data, renderOpts);
     const text = row.body_text
-      ? renderTemplate(row.body_text, data, renderOpts)
+      ? renderPlainTextTemplate(row.body_text, data, renderOpts)
       : htmlToText(html);
 
     return { row, rendered: { subject, html, text } };

@@ -244,11 +244,13 @@ interface Action {
 
   // AI (ADR-0011)
   ai?: ActionAi;                // Opt-in AI tool exposure
-
-  // Misc
-  aria?: AriaProps;             // Accessibility attributes
 }
 ```
+
+An action has no `aria` block. Its accessible name is its required `label`: the
+visible button or menu-item text, and the `aria-label` of an icon-only action.
+To name the toolbar or list the actions sit in, author `aria` on the node that
+places them (`page.components[].aria` or the list view's `aria`).
 
 <Callout type="info">
 Action `name` is the configuration ID and **must** be lowercase `snake_case` (`approve_request`, not `approveRequest` or `Approve Request`). JavaScript function names referenced by `body`/`target` may still use camelCase.

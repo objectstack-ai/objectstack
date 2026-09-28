@@ -7,7 +7,7 @@ export const entry: SemanticMigration = {
   surface: '`DriverOptions.timeout` (data/driver.zod.ts) — the per-call options argument of every `IDataDriver` method',
   replacement: '`DriverOptions.timeoutMs` (milliseconds) — rename the key; the value is unchanged',
   reason:
-    'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
+    'Maintainer ruling 2026-09-02 on duration units (ruled B — no grandfathered baseline): the unit of a '
     + 'duration-shaped `z.number()` key lives in the key NAME, never only in the description. '
     + '`timeout` said "Timeout in ms" in prose and nothing else. Tombstoned with retiredKey '
     + '(`DriverOptionsSchema` is not strict, so a bare deletion would strip the old key in '

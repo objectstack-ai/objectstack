@@ -1,9 +1,44 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { renderTemplate, requireVars, htmlToText } from './template-engine.js';
+import { renderTemplate, renderPlainTextTemplate, requireVars, htmlToText } from './template-engine.js';
 
 describe('template-engine', () => {
+  // The plain-text face (`subject`, `body_text`): no HTML escaping at all.
+  // Expectations are literals; the last case runs the same inputs through the
+  // HTML face, which still escapes — so the pair pins the SWITCH, not a
+  // global change to escaping.
+  describe('renderPlainTextTemplate', () => {
+    it('renders a double-braced link with a literal &', () => {
+      expect(renderPlainTextTemplate('Open: {{url}}', { url: 'https://x.test/v?token=t&callbackURL=%2F' }))
+        .toBe('Open: https://x.test/v?token=t&callbackURL=%2F');
+    });
+
+    it('renders every character the HTML face escapes verbatim', () => {
+      expect(renderPlainTextTemplate('{{s}}', { s: `&<>"'` })).toBe(`&<>"'`);
+    });
+
+    it('renders triple braces verbatim too', () => {
+      expect(renderPlainTextTemplate('{{{s}}}', { s: 'a&b<c>' })).toBe('a&b<c>');
+    });
+
+    it('renders formatted holes verbatim', () => {
+      expect(renderPlainTextTemplate('{{ s | upper }}', { s: 'a&b' })).toBe('A&B');
+    });
+
+    it('keeps the shared lookup rules: missing → empty, non-hole left verbatim, scalars stringified', () => {
+      expect(renderPlainTextTemplate('a={{a}} b={{b}} n={{n}}', { a: 'A&', n: 3 })).toBe('a=A& b= n=3');
+      expect(renderPlainTextTemplate('{{ not a hole }}', {})).toBe('{{ not a hole }}');
+      expect(renderPlainTextTemplate('', { a: 1 })).toBe('');
+    });
+
+    it('control: the HTML face still escapes the same inputs', () => {
+      expect(renderTemplate('Open: {{url}}', { url: 'https://x.test/v?token=t&callbackURL=%2F' }))
+        .toBe('Open: https://x.test/v?token=t&amp;callbackURL=%2F');
+      expect(renderTemplate('{{ s | upper }}', { s: 'a&b' })).toBe('A&amp;B');
+    });
+  });
+
   describe('renderTemplate', () => {
     it('substitutes dotted paths', () => {
       expect(renderTemplate('Hi {{user.name}}', { user: { name: 'Alice' } }))
