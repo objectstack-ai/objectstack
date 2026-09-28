@@ -85,8 +85,8 @@ import { retiredKey } from '../shared/retired-key';
  *   "enableCrud": true,
  *   "enableMetadata": true,
  *   "enableBatch": true,
+ *   "enableOpenApi": true,
  *   "documentation": {
- *     "enabled": true,
  *     "title": "ObjectStack API"
  *   }
  * }
@@ -204,7 +204,24 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * API documentation configuration
    */
   documentation: z.object({
-    enabled: z.boolean().default(true).describe('Enable API documentation'),
+    /**
+     * [REMOVED in #20295] A second on/off switch for the OpenAPI document,
+     * retired under ADR-0049 enforce-or-remove: `normalizeConfig` copied it
+     * into the server's config and no site ever read it back, while the
+     * document's existence was — and is — decided by the sibling
+     * `enableOpenApi` at the mount (`registerRoutes`). Tombstoned rather than
+     * deleted: this inline object is a non-strict `z.object()`, so a bare
+     * deletion would strip `enabled: false` in silence and the author would
+     * keep believing the document is off (ADR-0104). Only this key retires
+     * here; the block's other members are a separate decision.
+     */
+    enabled: retiredKey(
+      '`api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
+      + 'nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling '
+      + '`api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; '
+      + '`api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` '
+      + 'viewer unmounted.',
+    ),
     title: z.string().default('ObjectStack API').describe('API documentation title'),
     description: z.string().optional().describe('API description'),
     version: z.string().optional().describe('Documentation version'),
@@ -221,13 +238,28 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   }).optional().describe('OpenAPI/Swagger documentation config'),
   
   /**
-   * Response format configuration
+   * [REMOVED in #20295] Server-wide toggles for the response envelope
+   * (`envelope`, `includeMetadata`, `includePagination`), retired as ONE key
+   * under ADR-0049 enforce-or-remove: `normalizeConfig` copied the block into
+   * the server's config and no site ever read it back, so `envelope: false`
+   * unwrapped no response. The removal, not the enforcement, is the call
+   * because a response shape is a fixed contract: each route answers in the
+   * response schema this package declares for it, which is what the client
+   * SDK parses and the served /openapi.json describes — a server-wide switch
+   * would fork every one of them, and mainstream data APIs keep theirs fixed.
+   * The whole container is the tombstone (the `crud.patterns` precedent): with
+   * all three members retired there is no live member left to hold it open.
+   * Tombstoned rather than deleted because this schema is not `.strict()`
+   * (ADR-0104).
    */
-  responseFormat: z.object({
-    envelope: z.boolean().default(true).describe('Wrap responses in standard envelope'),
-    includeMetadata: z.boolean().default(true).describe('Include response metadata (timestamp, requestId)'),
-    includePagination: z.boolean().default(true).describe('Include pagination info in list responses'),
-  }).optional().describe('Response format options'),
+  responseFormat: retiredKey(
+    '`api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted '
+    + "and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no "
+    + 'response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers '
+    + 'in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses '
+    + 'and the served /openapi.json describes, so no configuration changes them.',
+  ),
 }));
 
 export type RestApiConfig = z.input<typeof RestApiConfigSchema>;

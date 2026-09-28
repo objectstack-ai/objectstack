@@ -78,7 +78,20 @@ Top-level layout structures that define macro organization.
 
 A page is identified by `name` + `label`, and its content lives in `regions`,
 each holding typed `components`. There is no `context:` key — the binding is
-`object` plus `type` (`record` here).
+`object` plus `type` (`record` here). `page:header`'s `actions` are the **ids**
+of actions declared on that object — there is no built-in id registry, so
+`edit` / `delete` / `share` resolve nowhere (the host draws its own Edit /
+Delete chrome). Declare the action, placed at `record_header`, then name it:
+
+{/* os:check-yaml action */}
+```yaml
+name: send_statement
+label: Send Statement
+objectName: account
+type: flow
+target: account_statement
+locations: [record_header]
+```
 
 {/* os:check-yaml page */}
 ```yaml
@@ -93,7 +106,7 @@ regions:
       - type: page:header
         properties:
           title: Customer Details
-          actions: [edit, delete, share]
+          actions: [send_statement]
   - name: main
     components:
       - type: record:details
@@ -994,7 +1007,7 @@ regions:
       - type: page:header
         properties:
           title: Customer
-          actions: [edit, delete, share]
+          # `actions:` takes ids declared on `customer` — see Standard Template
 
   - name: main
     components:
