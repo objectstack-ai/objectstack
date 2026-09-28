@@ -695,9 +695,10 @@ export default class Compile extends Command {
       // 3d. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and so
       //     drop silently on the way to storage. PRE-parse, since the parse is
       //     what strips them. `defineStack` already warns for configs authored
-      //     through it; this covers the ones that skip it (a plain object
-      //     default-export, `strict: false`) and would otherwise emit an
-      //     artifact with the key quietly gone. Advisory, never fatal.
+      //     through it; this covers the ones that skip it (`strict: false`;
+      //     a plain-object default export no longer gets this far — step 1a
+      //     refuses it) and would otherwise emit an artifact with the key
+      //     quietly gone. Advisory, never fatal.
       //
       //     [#11643] FORMATTED HERE, once, and consumed by BOTH faces — the
       //     text block just below and the `--json` payload at the end of this
