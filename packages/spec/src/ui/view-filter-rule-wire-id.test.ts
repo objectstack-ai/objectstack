@@ -133,11 +133,13 @@ describe('#5114 — a console-written filter row, judged per door (#5074)', () =
     // The second carrier of `ViewFilterRuleSchema` in this file — the per-tab
     // filter Studio writes through the SAME builder widget, so it stamps the
     // same `id`. Probed at its own path because strictness does not recurse in
-    // either direction.
+    // either direction. [#20301] Carried by the `userFilters.tabs` preset bar
+    // since the list view's own `tabs` was retired; `ViewTabSchema` is the
+    // same item schema on both.
     expect(
       ViewMetadataSchema.safeParse({
         ...CONSOLE_PUT_BODY,
-        tabs: [{ name: 'won', label: 'Won', filter: [CONSOLE_FILTER_ROW] }],
+        userFilters: { element: 'tabs', tabs: [{ name: 'won', label: 'Won', filter: [CONSOLE_FILTER_ROW] }] },
       }).success,
     ).toBe(true);
   });

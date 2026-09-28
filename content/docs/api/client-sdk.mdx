@@ -227,6 +227,7 @@ const view = await client.meta.getItem('view', 'crm_lead.pipeline');
 // Per-item draft lifecycle (ADR-0033)
 await client.meta.publishItem('object', 'account', { message: 'go live' });
 await client.meta.rollbackItem('object', 'account', 3);
+// Authoring-only, like getHistory and listDrafts: without studio.access, setup.access or manage_metadata → 403 FORBIDDEN
 const diff = await client.meta.diffItem('object', 'account', { from: 2, to: 5 });
 
 // Introspection & governance

@@ -136,13 +136,13 @@ function twoPackageArtifact(): Record<string, unknown> {
     ],
     views: [
       {
-        name: 'pp_account_list',
+        name: 'pp_account',
         label: 'Account List',
         object: 'pp_account',
         list: { label: 'Account List', columns: ['name', 'industry'] },
       },
       {
-        name: 'pp_order_list',
+        name: 'pp_order',
         label: 'Order List',
         object: 'pp_order',
         list: { label: 'Order List', columns: ['name', 'account'] },

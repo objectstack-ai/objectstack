@@ -418,7 +418,7 @@ describe('ActionSchema', () => {
       const action: ActionType = {
         name: 'delete_record',
         label: 'Delete',
-        icon: 'trash-2',
+        icon: 'trash',
         target: 'delete_handler',
       };
 
@@ -806,7 +806,7 @@ describe('ActionSchema', () => {
       const deleteAction: ActionType = {
         name: 'delete_record',
         label: 'Delete',
-        icon: 'trash-2',
+        icon: 'trash',
         type: 'script',
         locations: ['record_more'],
         target: 'deleteRecord',

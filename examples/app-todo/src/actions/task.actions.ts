@@ -134,7 +134,7 @@ export const DeleteCompletedAction = defineAction({
   name: 'delete_completed',
   label: 'Delete Completed',
   objectName: 'todo_task',
-  icon: 'trash-2',
+  icon: 'trash',
   type: 'script',
   target: 'deleteCompletedTasks',
   locations: ['list_toolbar'],

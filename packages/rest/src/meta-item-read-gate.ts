@@ -45,8 +45,11 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
-import { logWarn } from './log.js';
+import { pluralToSingular } from '@objectstack/spec/shared';
+import { isEndpointMatchAuthority, selectServedEndpoints } from './served-endpoints.js';
+import { logError, logWarn } from './log.js';
 
 // ── The ports each transport supplies ─────────────────────────────────────────
 
@@ -205,6 +208,29 @@ export interface MetaReadGatePolicy {
      */
     app: 'gate' | 'author-exempt';
 }
+
+/**
+ * [#20156] The policy of the doors that serve STORED versions for authoring
+ * — the layered view (`/layers`, `?layers=`), `/diff` and [#20290] the
+ * plain read's `?state=draft` branch (the pending draft row, which Studio's
+ * designers merge over the layered view and save back). One constant, so
+ * they cannot come to disagree about the `app` row.
+ *
+ * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
+ * 5856866273): a caller who may write the app (the door's own save
+ * admission, carried on the caller as {@link MetaReadGateCaller.mayWriteItem})
+ * reads the full stored version, and every other caller who may open the app
+ * reads exactly what the plain read gives them, pruned. See
+ * {@link MetaReadGatePolicy.app}.
+ *
+ * [#20320] Moved here from `RestServer`, unchanged, so the runtime
+ * dispatcher's `?state=draft` item read runs the SAME constant instead of a
+ * copy of it.
+ */
+export const STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
+    arms: 'per-caller',
+    app: 'author-exempt',
+});
 
 // ── The gates' types ──────────────────────────────────────────────────────────
 
@@ -1490,4 +1516,459 @@ export function createMetaListReadGate(
     }
 
     return async (items) => items;
+}
+
+// ── Anonymous reachability of the `public` audience ───────────────────────────
+
+/**
+ * [#20320] The `/meta` READ route a transport is about to serve, named by its
+ * SHAPE in that transport's own route table — never by string-matching a
+ * request path, so a route added later cannot fall inside the exemption by
+ * accident, and a plural spelling cannot fall outside it (#3984).
+ *
+ *  - `list` — `GET /meta/:type`;
+ *  - `item` — `GET /meta/:type/:name`;
+ *  - `book-tree` — `GET /meta/book/:name/tree` (the type segment is literal).
+ *
+ * A transport names only the shapes it serves: `RestServer` all three, the
+ * runtime dispatcher `list` and `item` (it has no book-tree route).
+ */
+export type MetaPublicReadRoute = 'list' | 'item' | 'book-tree';
+
+/**
+ * [#3963 · #20320] Is this request a READ of the audience-gated book/doc
+ * surface — the one metadata surface whose own declaration (`book.audience`)
+ * can authorize an anonymous caller?
+ *
+ * Both transports' anonymous gates ask it, to grant an anonymous caller
+ * REACHABILITY of these reads, so `audience: 'public'` works on a
+ * secure-by-default deployment instead of only on one that opened its whole
+ * data plane (ADR-0046 §6.7). Authorization stays with the reads' own §6.7
+ * gate ({@link createMetaItemReadGate}, {@link createMetaListReadGate}), which
+ * admits `'public'` only: `org` and `{ permissionSet }` audiences still refuse
+ * an anonymous caller. Reads only — never a write or a publish — and book and
+ * doc only: every other type (object, field, view, flow, …) keeps the
+ * anonymous deny.
+ *
+ * Moved here from `RestServer` (#20320): the runtime dispatcher's `/meta`
+ * domain opened with an unconditional anonymous deny, so a `public` book
+ * answered `401` there while `RestServer` served it. One predicate, two
+ * transports — each passes its own method, route shape and raw `:type`
+ * segment, and the type is folded HERE, once.
+ */
+export function isPublicAudienceRead(
+    method: unknown,
+    route: MetaPublicReadRoute | undefined,
+    type: unknown,
+): boolean {
+    if (String(method ?? '').toUpperCase() !== 'GET') return false;
+    if (route === 'book-tree') return true;
+    if (route !== 'list' && route !== 'item') return false;
+    const folded = typeof type === 'string' ? pluralToSingular(type) : '';
+    return folded === 'book' || folded === 'doc';
+}
+
+// ── The list route's locale and translation ───────────────────────────────────
+
+/** The two request members a locale is read from — each transport hands in its own. */
+export interface MetaRequestHttp {
+    /** A `Headers`-like (`get`) or a plain header record. */
+    readonly headers?: unknown;
+    readonly query?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * [#20320] The request's locale, as every `/meta` answer reads it: the
+ * highest-priority `Accept-Language` tag, then a `?locale=` query parameter,
+ * then — when an i18n service is handed in — that service's default locale.
+ * `undefined` when no preference is expressed (the caller then serves
+ * untranslated metadata).
+ *
+ * Moved here, unchanged, from `RestServer.extractLocale` (which now
+ * delegates), so the runtime dispatcher reads the same locale from the same
+ * request instead of a second parse.
+ */
+export function metaRequestLocale(http: MetaRequestHttp | undefined, i18n?: unknown): string | undefined {
+    const headers: any = http?.headers;
+    let header: string | undefined;
+    if (headers) {
+        header = typeof headers.get === 'function'
+            ? headers.get('accept-language') ?? undefined
+            : headers['accept-language'] ?? headers['Accept-Language'];
+    }
+    // Shared parse — the dispatcher's execution context resolves the same
+    // header the same way, so a message and the labels around it can't
+    // disagree (#3957).
+    const preferred = preferredLocaleFromHeader(header);
+    if (preferred) return preferred;
+    // [#6877] The `typeof` guard sends a repeated `?locale=` to the i18n
+    // default rather than into the array arm. A guard, not the refusal gate:
+    // this helper is shared by ~10 routes and has no `res`, and the
+    // parameter's worst case is falling back to the default locale.
+    const queryLocale = http?.query?.locale;
+    if (typeof queryLocale === 'string' && queryLocale.length > 0) return queryLocale;
+    const service: any = i18n;
+    if (service && typeof service.getDefaultLocale === 'function') {
+        const def = service.getDefaultLocale();
+        if (typeof def === 'string' && def.length > 0) return def;
+    }
+    return undefined;
+}
+
+/**
+ * [#3786] Is `type` (the canonical singular) one `translateMetadataDocument`
+ * localizes? Derived from `TRANSLATABLE_METADATA_TYPES` in
+ * `@objectstack/spec/system`, the set that is itself derived from the
+ * translator table — so there is no second list to forget.
+ *
+ * Resolved lazily and memoised, so `@objectstack/spec/system`'s translators
+ * stay off the module-init path: the same `await import` the translate
+ * helpers perform, and a module-cache hit after the first call.
+ */
+let translatableMetaTypes: ReadonlySet<string> | undefined;
+export async function isTranslatableMetaType(type: string): Promise<boolean> {
+    if (!translatableMetaTypes) {
+        ({ TRANSLATABLE_METADATA_TYPES: translatableMetaTypes } = await import('@objectstack/spec/system'));
+    }
+    return translatableMetaTypes.has(type);
+}
+
+/**
+ * Build a `TranslationBundle` (`Record<locale, TranslationData>`) from an
+ * `II18nService` instance. `undefined` when no locales are registered, so
+ * callers can avoid translation work. (`RestServer.buildTranslationBundle`
+ * delegates here.)
+ */
+export function translationBundleOf(i18n: unknown): any | undefined {
+    const service: any = i18n;
+    if (!service || typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') {
+        return undefined;
+    }
+    const locales: string[] = service.getLocales();
+    if (!locales.length) return undefined;
+    const bundle: Record<string, any> = {};
+    for (const locale of locales) {
+        const data = service.getTranslations(locale);
+        if (data && typeof data === 'object') bundle[locale] = data;
+    }
+    return Object.keys(bundle).length ? bundle : undefined;
+}
+
+/**
+ * [#14882 · #15711] The `ResolveOptions` every metadata-document translation
+ * hands `@objectstack/spec/system`: the request's locale, the deployment's
+ * DECLARED fallback chain (`getFallbackLocale()`) and its DEFAULT locale
+ * (`getDefaultLocale()`). Both are feature-detected (optional on
+ * `II18nService`): a service that declares neither gets neither — the
+ * serving layer threads a declaration, it never invents one.
+ * `RestServer.translateOptionsFor`, whose docblock carries the history,
+ * delegates here.
+ */
+export function metaTranslateOptions(
+    i18n: unknown,
+    locale: string,
+): { locale: string; fallbackChain?: string[]; defaultLocale?: string } {
+    const service: any = i18n;
+    const fallback = service && typeof service.getFallbackLocale === 'function' ? service.getFallbackLocale() : undefined;
+    const def = service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
+    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+    if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
+    if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
+    return opts;
+}
+
+/**
+ * [#8284] The packaged (code-layer) base declaration of an OBJECT, for
+ * `translateObject`'s `packagedBase` — `undefined` on every uncertainty, which
+ * the spec-side rule reads as "no baseline known". Feature-detected on the
+ * protocol (`getPackagedObjectBase` is a server-only extension).
+ * `RestServer.packagedObjectBase`, whose docblock carries the rule, delegates
+ * here.
+ */
+export function packagedObjectBaseOf(protocol: unknown, type: string, name: unknown): unknown {
+    if (type !== 'object') return undefined;
+    if (typeof name !== 'string' || name === '') return undefined;
+    const p: any = protocol;
+    if (!p || typeof p.getPackagedObjectBase !== 'function') return undefined;
+    try {
+        return p.getPackagedObjectBase(name);
+    } catch {
+        return undefined;
+    }
+}
+
+/** How a transport reaches what the list translation reads. */
+export interface MetaListTranslationSources {
+    /** This request's i18n service, or `undefined` when the deployment has none. */
+    resolveI18nService(): Promise<unknown>;
+    /** This request's protocol, for the packaged object base; `undefined` when unreachable. */
+    resolveProtocol(): Promise<unknown>;
+    /**
+     * This request's locale ({@link metaRequestLocale} over the transport's own
+     * request) — with the i18n service handed in, its default locale is the
+     * last fallback; without it, only the request's own preference counts.
+     */
+    requestLocale(i18n?: unknown): string | undefined;
+}
+
+/**
+ * [#20320] Translate a metadata LIST — a bare array or the
+ * `{ type, items }` envelope, answered in the shape it came in — for the
+ * request's locale. `metaType` is the canonical singular (the caller folds its
+ * URL segment once): `TRANSLATABLE_METADATA_TYPES` is singular-only, so a
+ * plural spelling that reached it unfolded would skip the whole localization.
+ *
+ * A missing bundle is NOT a bail-out: `translateMetadataDocument` still
+ * applies built-in fallbacks (the injected system-field labels on custom
+ * objects). No locale is: nothing is translated then.
+ *
+ * `RestServer.translateMetaItems` delegates here, and the list chain
+ * ({@link createMetaListAnswer}) runs it as its last step on both transports.
+ */
+export async function translateMetaList(
+    sources: MetaListTranslationSources,
+    metaType: string,
+    items: unknown,
+): Promise<unknown> {
+    if (!(await isTranslatableMetaType(metaType))) return items;
+    const raw: any = items;
+    const arr: any[] | null = Array.isArray(raw)
+        ? raw
+        : (raw && typeof raw === 'object' && Array.isArray(raw.items) ? raw.items : null);
+    if (!arr) return items;
+    const i18n = await sources.resolveI18nService();
+    const bundle = translationBundleOf(i18n);
+    const locale = sources.requestLocale(i18n);
+    if (!locale) return items;
+    const { translateMetadataDocument } = await import('@objectstack/spec/system');
+    // [#8284] One protocol resolution for the whole page; the lookup itself is
+    // a synchronous in-memory registry read per element.
+    const p = metaType === 'object' ? await sources.resolveProtocol() : undefined;
+    // `getMetaItems` elements are metadata documents (the list envelope is the
+    // OUTER `{ type, items }`), so every element translates directly (#5563).
+    const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
+        ...metaTranslateOptions(i18n, locale),
+        packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+    }));
+    return Array.isArray(raw) ? translated : { ...raw, items: translated };
+}
+
+// ── THE list answer ───────────────────────────────────────────────────────────
+
+/** Everything {@link createMetaListAnswer} reads, supplied by the transport. */
+export interface MetaListAnswerSources extends MetaItemReadGateSources {
+    /**
+     * This request's locale, as {@link MetaListTranslationSources.requestLocale}
+     * reads it — the doc locale collapse asks it with no i18n service, so only
+     * the request's own preference counts there.
+     */
+    requestLocale(i18n?: unknown): string | undefined;
+    /**
+     * The translation step: {@link translateMetaList} over this transport's
+     * I/O, handed the folded `metaType`. A port rather than a call so each
+     * transport keeps ONE entry into it (`RestServer.translateMetaItems`).
+     */
+    translateList(metaType: string, items: unknown): Promise<unknown>;
+    /**
+     * [#5224] The endpoint matcher this request's `api` face asks — the
+     * `metadata` service occupying the slot, or `undefined`. It is PROBED here
+     * (`matchEndpoint` is optional on `IMetadataService`), so a transport hands
+     * in the occupant, not a verdict.
+     */
+    resolveEndpointMatcher(): Promise<unknown>;
+    /**
+     * [#5224] Say — once, in the transport's own words and naming its own
+     * remedy — that no matcher is reachable, so the `api` face lists what is
+     * STORED (Route & surface ownership rule 3: absence must be loud).
+     */
+    notifyMissingEndpointMatcher(surface: string): void;
+    /**
+     * [ADR-0106 D5(2)] The transport's own object mask over a non-empty
+     * `object` list: every item projected for this caller, or the object whose
+     * projection could not be evaluated (D6 tier 3 — the transport answers
+     * that fault, ⛔ never the list with a hole in it). A mask fault of any
+     * other kind is thrown. The mask stays the transport's for the gate's
+     * reason: each threads it through its own `fetch → mask → send` exit, and
+     * `RestServer` sets its own cache header from the posture.
+     */
+    maskObjects(items: any[]): Promise<{ ok: true; items: any[] } | { ok: false; object: string }>;
+}
+
+/** The request facts the list chain reads — no transport shape. */
+export interface MetaListRequest {
+    /** The SINGULAR type (the caller folds `/meta/docs` once, at its boundary). */
+    readonly metaType: string;
+    /** The list route's query. The chain reads `id`, `object` and `include` off it (and `locale`, through `requestLocale`). */
+    readonly query: Readonly<Record<string, unknown>> | undefined;
+    /**
+     * `?preview=draft`, ADMITTED — the transport's own declaration, made with
+     * its admission at the list entry (#20338) and ⛔ never re-read here. The
+     * `api` face is exempt for it.
+     */
+    readonly previewDrafts: boolean;
+}
+
+/**
+ * What the chain answers: the list to send (the input's shape — a bare array
+ * or the `{ type, items }` envelope), or the object whose mask could not be
+ * evaluated, which the transport answers as its D6 tier-3 fault.
+ */
+export type MetaListAnswer =
+    | { ok: true; data: unknown }
+    | { ok: false; object: string };
+
+/** The items of a list shape this chain serves, or `null` for anything else (left alone, never replaced). */
+function listItemsOf(raw: unknown): any[] | null {
+    if (Array.isArray(raw)) return raw;
+    return raw && typeof raw === 'object' && Array.isArray((raw as any).items) ? (raw as any).items : null;
+}
+
+/** `raw`'s shape around new items. */
+function withItems(raw: unknown, items: any[]): unknown {
+    return Array.isArray(raw) ? items : { ...(raw as any), items };
+}
+
+/**
+ * [#20320] THE answer of one `/meta/:type` LIST read, after the store read —
+ * one chain, called by both transports that serve that read.
+ *
+ * ## Why one chain
+ *
+ * `RestServer`'s `GET /meta/:type` ran every step below inline, and the runtime
+ * dispatcher's `/meta` list branch — the only answer on a host that mounts just
+ * the `${prefix}/*` catch-all — ran the per-caller gate (#20237), the object
+ * mask and the doc slim, the slim comparing the RAW segment. So the dispatcher
+ * listed every app for `?id=crm`, every view for `?object=lead`, doc bodies for
+ * `/meta/docs`, docs with their `translations` maps and in no locale, labels
+ * untranslated, and `api` declarations the runtime does not serve. Each
+ * transport now hands its store's answer to THIS function: a step added here
+ * reaches both, and `meta-list-projection-parity.test.ts` in
+ * `@objectstack/runtime` drives every type × query parameter × caller through
+ * both and holds the answers equal. ⛔ A list step is added HERE, never in a
+ * transport — one added in one of them is the defect this closed, reopened.
+ *
+ * ## The steps, in `RestServer`'s order (unchanged)
+ *
+ *  1. `api` — the served-set face (#5224): only the declarations the endpoint
+ *     matcher will serve, asked of the matcher itself. Exempt for an admitted
+ *     `?preview=draft` (that surface answers what is PENDING). A matcher throw
+ *     propagates: an unreadable store is never "nothing declared".
+ *  2. THE per-caller list gate ({@link createMetaListReadGate}) — before `?id=`
+ *     narrows (permission decides what exists for this caller; the filter
+ *     narrows within it, never the reverse, ADR-0045 §3), and on the raw doc
+ *     items, before the locale collapse (`_packageId` scopes membership).
+ *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); empty
+ *     and absent spellings mean no filter; no match is an EMPTY list, never a
+ *     404.
+ *  4. `view` — `?object=<object>` keeps the independent views bound to that
+ *     object, sorted by `order` then `name` (the switcher).
+ *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
+ *     `translations` map is dropped whatever the locale).
+ *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
+ *  7. `object` — the transport's ADR-0106 mask ({@link MetaListAnswerSources.maskObjects}).
+ *  8. The translation step ({@link translateMetaList}, reached through
+ *     {@link MetaListAnswerSources.translateList}).
+ *
+ * Every step keys on the FOLDED `metaType`, and a step leaves a shape it does
+ * not serve untouched. The input is never mutated. A gate or matcher input
+ * that cannot be read REJECTS: the transport answers that fault, ⛔ never the
+ * unfiltered list.
+ */
+export function createMetaListAnswer(
+    sources: MetaListAnswerSources,
+    request: MetaListRequest,
+): (raw: unknown) => Promise<MetaListAnswer> {
+    const { metaType, query } = request;
+    return async (raw) => {
+        let visible: unknown = raw;
+
+        // 1. [#5224] The `api` served-set face.
+        if (metaType === 'api' && !request.previewDrafts) {
+            const list = metaItemsArray(visible);
+            if (list.length > 0) {
+                const candidate = await sources.resolveEndpointMatcher();
+                if (!isEndpointMatchAuthority(candidate)) {
+                    sources.notifyMissingEndpointMatcher('GET /meta/api');
+                } else {
+                    const served = await selectServedEndpoints(list, candidate, {
+                        error: (message: string, meta?: unknown) =>
+                            meta === undefined ? logError(message) : logError(message, meta),
+                    });
+                    // The STORED item is what this face answers with — its
+                    // `_packageId` / `_provenance` / `_diagnostics` decorations
+                    // are what the Studio list reads.
+                    visible = withItems(visible, served.map((s) => s.item));
+                }
+            }
+        }
+
+        // 2. [#20237] THE per-caller list gate.
+        {
+            const list = listItemsOf(visible);
+            if (list) {
+                const judged = await createMetaListReadGate(sources, metaType)(list);
+                if (judged !== list) visible = withItems(visible, judged);
+            }
+        }
+
+        // 3. [#7566] `?id=<app>`.
+        const appIdFilter = metaType === 'app' ? query?.id : undefined;
+        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+            const list = listItemsOf(visible);
+            if (list) {
+                visible = withItems(visible, list.filter(
+                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
+                ));
+            }
+        }
+
+        // 4. `?object=<object>` — the view switcher.
+        if (metaType === 'view' && query?.object) {
+            const obj = String(query.object);
+            const list = listItemsOf(visible);
+            if (list) {
+                visible = withItems(visible, list
+                    .filter((v: any) => v && typeof v === 'object' && v.viewKind && v.object === obj)
+                    .sort((a: any, b: any) =>
+                        ((a.order ?? 0) as number) - ((b.order ?? 0) as number) ||
+                        String(a.name).localeCompare(String(b.name))));
+            }
+        }
+
+        // 5. ADR-0046 i18n: collapse each doc to the request locale.
+        if (metaType === 'doc') {
+            const locale = sources.requestLocale();
+            const { resolveDocLocale } = await import('@objectstack/spec/system');
+            const list = listItemsOf(visible);
+            if (list) {
+                visible = withItems(visible, list.map((it: any) =>
+                    it && typeof it === 'object' ? resolveDocLocale(it as any, locale) : it));
+            }
+        }
+
+        // 6. ADR-0046: the doc list omits `content` unless `?include=content`.
+        if (metaType === 'doc' && query?.include !== 'content') {
+            const list = listItemsOf(visible);
+            if (list) {
+                visible = withItems(visible, list.map((it: any) => {
+                    if (!it || typeof it !== 'object') return it;
+                    const { content: _content, ...rest } = it;
+                    return rest;
+                }));
+            }
+        }
+
+        // 7. [ADR-0106 D5(2)] The object mask — the transport's.
+        if (metaType === 'object') {
+            const list = metaItemsArray(visible);
+            if (list.length > 0) {
+                const masked = await sources.maskObjects(list);
+                if (!masked.ok) return masked;
+                visible = withItems(visible, masked.items);
+            }
+        }
+
+        // 8. The translation step ({@link translateMetaList}, through the transport's entry).
+        return { ok: true, data: await sources.translateList(metaType, visible) };
+    };
 }

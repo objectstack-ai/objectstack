@@ -70,10 +70,10 @@
  * author a message; admitting one that diverges costs a permission rule its
  * meaning.
  *
- * `crossFieldComparisonClass` in `@objectstack/driver-sql` is held to this
- * table by a pairwise parity test over every declared field type
- * (`sql-driver-20347-cross-field-class-parity.test.ts`), so the two cannot
- * disagree on a single pair while both exist.
+ * `crossFieldComparisonClass` in `@objectstack/driver-sql` delegates to
+ * {@link crossFieldColumnVerdict} for every declared field type, so the two
+ * cannot disagree on a single pair; the driver-internal aliases it keeps above
+ * this table are pinned by `sql-driver-20355-cross-field-class-driver-aliases.test.ts`.
  *
  * ## Declared types only
  *
