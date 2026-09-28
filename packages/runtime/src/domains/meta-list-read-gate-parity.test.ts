@@ -325,8 +325,8 @@ describe('[#20237] controls', () => {
         ]);
     });
 
-    it('an unauthenticated caller keeps its existing answer on every list: 401 UNAUTHENTICATED, before any read', async () => {
-        for (const row of ROWS) {
+    it('an unauthenticated caller keeps its existing answer on every list but doc and book: 401 UNAUTHENTICATED, before any read', async () => {
+        for (const row of ROWS.filter((r) => !['doc', 'book'].includes(singular(r.type)))) {
             const { list, protocol } = bootDispatcher('anonymous');
             const res = await list(row.type, row.query);
             expect({ status: res.status, code: res.code }, label(row)).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
@@ -335,13 +335,13 @@ describe('[#20237] controls', () => {
         }
     });
 
-    it('…which is STRICTER than RestServer for doc and book lists, where an anonymous caller reads the public ones (none here) — and neither transport serves gated content', async () => {
-        for (const type of ['doc', 'book']) {
-            const rest = await bootRest('anonymous').list(type, { include: 'content' });
-            expect(rest.status, type).toBe(200);
-            expect(rest.items, type).toEqual([]);
-            expect(text(rest), type).not.toContain(DOC_SECRET);
-            expect(text(rest), type).not.toContain(BOOK_SECRET);
+    it('[#20320] …and on doc and book lists answers what RestServer answers: the public ones (none here), never gated content', async () => {
+        for (const row of ROWS.filter((r) => ['doc', 'book'].includes(singular(r.type)))) {
+            const dispatcher = await bootDispatcher('anonymous').list(row.type, row.query);
+            const rest = await bootRest('anonymous').list(row.type, row.query);
+            expect({ status: rest.status, items: rest.items }, label(row)).toEqual({ status: 200, items: [] });
+            expect({ status: dispatcher.status, items: dispatcher.items }, label(row)).toEqual({ status: 200, items: [] });
+            for (const s of row.secrets) expect(text(dispatcher), label(row)).not.toContain(s);
         }
     });
 

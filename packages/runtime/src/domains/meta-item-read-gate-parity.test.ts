@@ -343,12 +343,19 @@ describe('[#20193] controls', () => {
         expect(fieldNames(holder.served)).toEqual(['amount', 'secret_margin']);
     });
 
-    it('an unauthenticated caller keeps its existing answer: 401 UNAUTHENTICATED, before any read', async () => {
+    it('an unauthenticated caller keeps its existing answer: 401 UNAUTHENTICATED — before any read for every type but doc and book', async () => {
         const { read, protocol } = bootDispatcher('anonymous');
-        const res = await read('/meta/doc/crm_admin_runbook');
+        const res = await read('/meta/app/crm');
         expect({ status: res.status, code: res.code }).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
         expect(protocol.getMetaItem).not.toHaveBeenCalled();
         expect(protocol.getMetaItems).not.toHaveBeenCalled();
+    });
+
+    it('[#20320] …and for a gated doc, from the ADR-0046 §6.7 audience gate, as on RestServer: reachability is not authorization', async () => {
+        const { read } = bootDispatcher('anonymous');
+        const res = await read('/meta/doc/crm_admin_runbook');
+        expect({ status: res.status, code: res.code }).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+        expect(text(res)).not.toContain(DOC_SECRET);
     });
 
     it('the plural spelling is the same read, gated the same way', async () => {
