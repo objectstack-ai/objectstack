@@ -1431,6 +1431,18 @@ describes. Run `os migrate meta --from 17` to list the mechanical edits for
 existing sources; apply them by hand.
 </Callout>
 
+<Callout type="warn">
+**A flow stored from the Studio takes the new meaning (breaking).** A decision
+saved in `sys_metadata` before protocol 18 — no `config.conditions`, no `mode`,
+two or more out-edges with a `condition` — runs **first-match** after the
+upgrade, and nothing rewrites the stored row: nothing about a row says it was
+saved before the change. `os migrate meta --stored` lists every such node (flow,
+node id, label and path) on a preview and an `--apply` run alike and writes
+nothing for it, so you can review them before and after upgrading. Where a node
+meant every branch, declare `config: { mode: 'inclusive' }` on it; declaring
+`mode` either way takes it off the list.
+</Callout>
+
 **Branch on the node** (Salesforce-style decision outcomes): the node declares
 `config.conditions[]` and traversal restricts itself to the out-edge whose
 `label` matches the first matching entry.

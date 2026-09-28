@@ -11770,9 +11770,14 @@ const permissionRlsTagsRemoved: MetadataConversion = {
  * none of them dated), and the artifact-ingestion door does
  * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `metadata-core/src/artifact-forward-conversion.ts`:
  * a scaffolded `^17.0.0` floor is a dependency range, not an age). ⛔ Not replayed over stored `sys_metadata`
- * flows by `os migrate meta --stored` either — that pass canonicalizes through
- * the same engine seam, and an operator-asserted rewrite of stored rows is a
- * separate plumbing, named by the D3 entry as the judgment still owed.
+ * flows either, by maintainer ruling (letter C on #15429): a stored row takes
+ * the first-match meaning on upgrade — BREAKING, stated in the D3 entry and the
+ * changeset with the one-line fix `mode: 'inclusive'` — with no stored-row
+ * rewrite, no cutoff and no read-path completion. `os migrate meta --stored`
+ * runs this entry's `apply` over each stored flow body only to LIST the nodes
+ * it would write (`collectDecisionModeReview` in
+ * `@objectstack/metadata-protocol`), discarding the result, so the review list
+ * and this predicate are one and the same.
  */
 const flowDecisionModeInclusiveExplicit: MetadataConversion = {
   id: 'flow-decision-mode-inclusive-explicit',

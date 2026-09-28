@@ -2,6 +2,8 @@
 "@objectstack/spec": minor
 "@objectstack/service-automation": minor
 "@objectstack/lint": minor
+"@objectstack/metadata-protocol": minor
+"@objectstack/metadata-core": patch
 ---
 
 feat(automation)!: an edge-branched `decision` is exclusive — the first out-edge whose condition holds, in declaration order, wins; `mode: 'inclusive'` takes every one (#15429)
@@ -48,14 +50,31 @@ conditions into a partition and delete the key. `os validate` reports
 `flow-decision-inclusive-overlap` on every decision that keeps the key with two or more
 conditioned out-edges, so the review list is the lint output.
 
-⚠️ **The conversion replays only where the operator asserts the source's age.** It is a default
-flip — the old shape still parses and now means exclusive — so the authoring funnel never
-rewrites a source written against this contract, the automation engine's flow rehydration seam
-refuses it by id (a code-shipped flow, a REST body and a Studio save all arrive there undated),
-and `os migrate meta --stored` canonicalizes through that same seam. A flow stored in
-`sys_metadata` from the Studio before this release, with two or more conditioned out-edges and
-no `mode`, now runs first-match and is rewritten by nothing: list those rows and declare `mode`
-on each in the designer.
+## BREAKING for flows stored in `sys_metadata` — maintainer ruling letter C on #15429
+
+A `decision` node stored in `sys_metadata` (a flow built or edited in the Studio designer) with
+**no `config.conditions`, no `mode`, and two or more out-edges carrying a `condition`** evaluates
+**first-match** after this upgrade: where it took every out-edge whose condition held, it now takes
+only the first one that holds, in the order the flow declares its edges. Nothing rewrites that row
+— no stored-row migration, no cutoff, no read-path completion — because nothing about a stored row
+says it was saved before the flip. The one-line fix, for a node that meant every branch:
+
+```ts
+{ id: 'route', type: 'decision', label: 'Route', config: { mode: 'inclusive' } }
+```
+
+`os migrate meta --stored` (and `POST /api/v1/meta/_migrate-stored`) lists every such node under
+`decisionModeReview` — flow row, node id, label and path — on a preview and an `--apply` run
+alike, and writes nothing for it: the list moves no row outcome, no count and no exit code, so an
+operator can review the candidates before and after the upgrade. A node leaves the list once it
+declares `mode`, either member. Every such node in the measured corpus below is a partition, where
+the new meaning runs exactly what the old one did.
+
+Authored sources and built artifacts keep the old behaviour instead, where the source's age is a
+fact: `os migrate meta --from 17` writes `mode: 'inclusive'` (above), while the authoring funnel,
+the automation engine's flow rehydration seam and the artifact-ingestion door all refuse the
+conversion by id — a default flip replayed there would turn a decision written today against this
+contract, where an omitted `mode` means exclusive, into an inclusive gateway.
 
 ## Reach, measured at landing
 

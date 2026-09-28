@@ -10360,11 +10360,15 @@ export class AutomationEngine implements IAutomationService {
         // does, so the run log says which branch won and which were passed
         // over. Until this change every true edge ran, one after another, under
         // a comment calling that "mutually exclusive": hotcrm#1555 rendered a
-        // refusal screen AND ran the conversion in one execution. Flows written
-        // against that behaviour are carried across by the ADR-0087 conversion
-        // `flow-decision-mode-inclusive-explicit` (`os migrate meta --from 17`),
-        // which writes the inclusive declaration onto them — see
-        // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` for why this seam does not.
+        // refusal screen AND ran the conversion in one execution. Authored
+        // sources written against that behaviour are carried across by the
+        // ADR-0087 conversion `flow-decision-mode-inclusive-explicit` (`os
+        // migrate meta --from 17`), which writes the inclusive declaration onto
+        // them — see `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` for why this seam
+        // does not. A flow stored in `sys_metadata` arrives here as stored and
+        // takes THIS reading (maintainer ruling letter C on #15429: no
+        // stored-row rewrite, no read-path completion); `os migrate meta
+        // --stored` lists such decisions for an operator to review.
         //
         // `mode: 'inclusive'` is the BPMN inclusive gateway: every edge whose
         // condition holds runs, one successor at a time (never `Promise.all` —

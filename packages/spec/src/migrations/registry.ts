@@ -5421,8 +5421,12 @@ const step18: MigrationStep = {
     + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
     + 'with two or more conditioned out-edges and no `conditions` list, so a flow written while '
     + 'every true branch ran keeps its behaviour; it is a default flip, so it is retired from '
-    + 'the load path AND refused by the flow rehydration seam, and replays only here — the '
-    + 'paired semantic entry carries the judgment the diff then asks for.',
+    + 'the load path AND refused by the flow rehydration seam and the artifact-ingestion door, '
+    + 'and replays only here — the paired semantic entry carries the judgment the diff then '
+    + 'asks for. BREAKING for flows stored in `sys_metadata`, by maintainer ruling: such a '
+    + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
+    + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
+    + 'the one-line fix where a node meant every branch.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',

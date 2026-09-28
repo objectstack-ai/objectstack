@@ -12,8 +12,11 @@
 // behaviour — mechanically, by the count, with no inference over the
 // conditions. This SEMANTIC entry is the judgment that count cannot make: on
 // most such decisions the branches partition and the written key changes
-// nothing, on the hotcrm#1555 shape it preserves a multi-branch run the author
-// never meant, and on a stored Studio flow no load seam writes it at all.
+// nothing, and on the hotcrm#1555 shape it preserves a multi-branch run the
+// author never meant. A flow STORED in `sys_metadata` is outside the
+// conversion by maintainer ruling (letter C on #15429): it takes the
+// first-match meaning on upgrade, BREAKING, and `os migrate meta --stored`
+// lists its candidates for review without writing them.
 import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
@@ -48,11 +51,17 @@ export const entry: SemanticMigration = {
     + 'old behaviour was the bug), so the mechanical edit list the chain replay prints is '
     + 'where that judgment is made, node by node. And the conversion replays ONLY there: it is a '
     + 'default flip, so the authoring funnel never rewrites a source written against the '
-    + 'new contract, the automation engine\'s flow rehydration seam refuses it by id (a '
-    + 'code-shipped flow, a REST body and a Studio save all arrive there undated), and the '
-    + 'stored-row pass (`os migrate meta --stored`) canonicalizes through that same seam — so '
-    + 'a decision saved from the Studio BEFORE this release, with two or more conditioned '
-    + 'out-edges and no `mode`, now runs first-match and is rewritten by nothing.',
+    + 'new contract, and the automation engine\'s flow rehydration seam and the '
+    + 'artifact-ingestion door both refuse it by id (a code-shipped flow, a REST body, a Studio '
+    + 'save and a scaffolded artifact all arrive undated). BREAKING for stored rows, by '
+    + 'maintainer ruling: the promise that a flow keeps its behaviour is kept by authored '
+    + 'sources and built artifacts only. A decision stored in `sys_metadata` '
+    + 'with no `conditions` list, no `mode` and two or more conditioned out-edges takes the new '
+    + 'meaning on upgrade — it evaluates first-match — and nothing rewrites the row: no '
+    + 'stored-row migration, no cutoff, no read-path completion, because nothing about a stored '
+    + 'row says it was saved before the flip. The one-line fix, for a stored node that meant '
+    + 'every branch, is `mode: \'inclusive\'`; `os migrate meta --stored` lists every such node, '
+    + 'report only, so an operator can review the candidates before and after the upgrade.',
   acceptanceCriteria:
     'Review every `flow-decision-mode-inclusive-explicit` line the chain replay lists for '
     + 'each authored stack: (1) where the two (or more) '
@@ -64,11 +73,12 @@ export const entry: SemanticMigration = {
     + 're-run the flow on a record that satisfied both and confirm exactly one successor '
     + 'ran — the passed-over branch now leaves a `skipped` step in the run log. `os validate` '
     + 'reports `flow-decision-inclusive-overlap` on every decision that keeps the key with '
-    + 'two or more conditioned out-edges, so the review list is the lint output. Then the '
-    + 'half no command reaches: list the `sys_metadata` flow rows of each deployment whose '
-    + 'decision nodes carry two or more conditioned out-edges and no `mode` — the stored '
-    + 'pass reports these rows canonical and rewrites nothing — and declare `mode` on each in '
-    + 'the Studio designer by the same three-way judgment. A decision registering with '
+    + 'two or more conditioned out-edges, so the review list is the lint output. Then each '
+    + 'deployment: `os migrate meta --stored` lists, under `decisionModeReview`, every stored '
+    + 'decision with two or more conditioned out-edges and no `mode` — each one already '
+    + 'evaluates first-match, and the pass writes none of them — so where one of those nodes '
+    + 'meant every branch, declare `mode: \'inclusive\'` on it in the designer; a node '
+    + 'that declares `mode` either way leaves the list. A decision registering with '
     + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
     + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
     + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '

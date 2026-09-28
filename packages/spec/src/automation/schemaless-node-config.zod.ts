@@ -520,14 +520,17 @@ export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
  * conditioned out-edges, because that is the shape in which more than one
  * branch can run for one record.
  *
- * Flows written while every true branch ran keep their behaviour through the
- * ADR-0087 D2 conversion `flow-decision-mode-inclusive-explicit`: `os migrate
- * meta --from 17` writes `mode: 'inclusive'` onto every edge-branched decision
- * with two or more conditioned out-edges, and the author deletes it where the
- * branches partition. It is a default flip, so no load seam replays it — the
- * authoring funnel is where a source written against THIS contract arrives,
- * and the flow rehydration seam cannot date a body — which is why the key has
- * to be written into the source, once, by the operator's own command.
+ * Authored sources written while every true branch ran keep their behaviour
+ * through the ADR-0087 D2 conversion `flow-decision-mode-inclusive-explicit`:
+ * `os migrate meta --from 17` writes `mode: 'inclusive'` onto every
+ * edge-branched decision with two or more conditioned out-edges, and the author
+ * deletes it where the branches partition. It is a default flip, so no load
+ * seam replays it — the authoring funnel is where a source written against THIS
+ * contract arrives, and the flow rehydration seam cannot date a body — which is
+ * why the key has to be written into the source, once, by the operator's own
+ * command. A flow STORED in `sys_metadata` is not rewritten at all (maintainer
+ * ruling letter C on #15429): it takes the first-match meaning on upgrade, and
+ * `os migrate meta --stored` lists each such decision for review.
  *
  * The legacy singular `config.condition` is a structural surface the engine
  * parse-validates on every node at registration but the decision executor never
@@ -561,9 +564,10 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
       + "siblings after it are not evaluated and record a skipped step); 'inclusive' = every one that holds, one "
       + 'after another. When none holds the isDefault edge runs either way. Refused beside a non-empty conditions '
       + 'list, which is first-match on its own: delete mode there, or move the branches onto the out-edges, delete '
-      + 'conditions, and keep mode. Flows written while every true branch ran keep that behaviour through the '
-      + 'os migrate meta --from 17 conversion, which writes mode: inclusive onto every edge-branched decision with '
-      + 'two or more conditioned out-edges.',
+      + 'conditions, and keep mode. Authored sources written while every true branch ran keep that behaviour '
+      + 'through the os migrate meta --from 17 conversion, which writes mode: inclusive onto every edge-branched '
+      + 'decision with two or more conditioned out-edges; a flow stored in sys_metadata is not rewritten and takes '
+      + 'the first-match reading on upgrade (os migrate meta --stored lists those decisions).',
     ),
 }).superRefine((config, ctx) => {
   // Ruling 5856786357 on #20168 (letter A): `mode` belongs to the
