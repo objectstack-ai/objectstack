@@ -16,6 +16,9 @@
  * | `{ n: { $lt: 'not-a-date' } }` | no group | c1–c4 | no group |
  * | `{ total: { $lt: 'not-a-date' } }` | no group | c1–c4 | c1–c4 |
  *
+ * [#20351] The two string rows are refused now, `INVALID_FILTER` / 400 before
+ * any read, by the engine's number-comparand door (the `REFUSED` table below).
+ *
  * The native path handed the SQL client's strings through (`"n": "2"`,
  * `"total": "500.000000000000000000000000000000"`); `SqlDriver.aggregate` now
  * presents them as numbers (`sql-driver-20335-aggregate-numeric-presentation.test.ts`
@@ -123,9 +126,16 @@ const KEPT: ReadonlyArray<readonly [string, Record<string, unknown>, string[]]> 
   ['sum $eq', { total: { $eq: 1200 } }, ['c2']],
   ['avg $in', { mean: { $in: [250, 600] } }, ['c1', 'c2']],
   ['avg $eq', { mean: { $eq: 50 } }, ['c3']],
-  ['a string $lt on count — no group', { n: { $lt: 'not-a-date' } }, []],
-  ['a string $lt on sum — no group', { total: { $lt: 'not-a-date' } }, []],
-  ['an extended-year ISO $gt on avg — no group', { mean: { $gt: '+010000-01-01T00:00:00.000Z' } }, []],
+];
+
+// [#20351] having · the refused key path — a string that names no number, on a
+// numeric column. These kept no group (c1–c4 on PostgreSQL's native path)
+// before the number-comparand door; they are refused now, before any read, on
+// every path, door and dialect.
+const REFUSED: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
+  ['a string $lt on count', { n: { $lt: 'not-a-date' } }, 'having.n.$lt'],
+  ['a string $lt on sum', { total: { $lt: 'not-a-date' } }, 'having.total.$lt'],
+  ['an extended-year ISO $gt on avg', { mean: { $gt: '+010000-01-01T00:00:00.000Z' } }, 'having.mean.$gt'],
 ];
 
 for (const cell of CELLS) {
@@ -184,6 +194,19 @@ for (const cell of CELLS) {
         }
         expect(answers.native).toStrictEqual(answers.rows);
       });
+
+      for (const [name, having, at] of REFUSED) {
+        it(`${name}: INVALID_FILTER / 400 at ${at} — engine and REST, native and rows`, async () => {
+          for (const path of ['native', 'rows'] as const) {
+            const err = await engine.aggregate(OBJECT, grouped(path, having)).then(() => null, (e: any) => e);
+            expect({ code: err?.code, status: err?.status }, `engine, ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+            const res = await post(grouped(path, having) as Record<string, unknown>);
+            expect(res._status, JSON.stringify(res._json)).toBe(400);
+            expect(res._json.code, `REST, ${path}`).toBe('INVALID_FILTER');
+            expect(res._json.error, `REST, ${path}`).toContain(at);
+          }
+        });
+      }
 
       for (const [name, having, kept] of KEPT) {
         it(`${name}: keeps ${kept.join(', ') || 'no group'} — engine and REST, native and rows`, async () => {

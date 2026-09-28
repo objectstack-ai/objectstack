@@ -74,7 +74,7 @@ export const hookForm = defineForm({
           { label: 'System (elevated)', value: 'system' },
           { label: 'User (triggering user)', value: 'user' },
         ] },
-        { field: 'condition', type: 'code', language: 'javascript', colSpan: 2, helpText: 'Optional formula — skip the hook when this evaluates to false' },
+        { field: 'condition', type: 'code', language: 'expression', colSpan: 2, helpText: 'CEL predicate — the hook runs only when TRUE' },
         {
           field: 'retryPolicy',
           type: 'composite',
