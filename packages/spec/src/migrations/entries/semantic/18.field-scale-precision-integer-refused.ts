@@ -21,8 +21,9 @@ export const entry: SemanticMigration = {
     + 'no enforcement at all: exactly the declared-but-inert shape that hides AI-authored '
     + 'metadata errors. The schema now refuses non-integer and negative values for both keys at '
     + 'parse time (`z.number().int().min(0)`, ADR-0078 declared=enforced). '
-    + '`CurrencyConfigSchema.precision` (under `currencyConfig`) is a different surface with its '
-    + 'own bounds and alias table and is unchanged.',
+    + '`CurrencyConfigSchema.precision` (under `currencyConfig`) was a different surface with '
+    + 'its own bounds and alias table — retired in this same protocol major by '
+    + '`currency-config-precision-removed`, not enforced here.',
   acceptanceCriteria:
     'Every field declaring `scale` or `precision` carries a non-negative integer. Well-formed '
     + 'declarations (`0`, `2`, any non-negative integer) parse byte-identically to before; '

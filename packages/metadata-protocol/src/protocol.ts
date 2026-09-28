@@ -11067,6 +11067,16 @@ export class ObjectStackProtocolImplementation implements
                 // was finding 1: the one wire path to aggregate() lost the
                 // clause before any executor could ever see it.
                 having: options.having,
+                // ADR-0061 `search` is declared on the query beside `groupBy` /
+                // `aggregations` with no carve-out, and the flat branch below
+                // hands it to `engine.find`. Leaving it out of THIS bag answered
+                // a grouped query under a search with the UNSEARCHED groups —
+                // no error, no warning. The engine expands it through the same
+                // expander `find` uses, so the header numbers are the grouping
+                // of exactly the rows the flat query returns. `searchFields` was
+                // validated above on both branches (#4254 gate).
+                search: options.search,
+                searchFields: options.searchFields,
                 context: options.context,
             } as any);
             // Apply limit client-side (EngineAggregateOptions doesn't carry limit).

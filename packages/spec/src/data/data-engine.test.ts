@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   DataEngineFilterSchema,
   DataEngineSortSchema,
@@ -545,6 +546,48 @@ describe('EngineAggregateOptionsSchema', () => {
       aggregations: [{ function: 'count', alias: 'n' }],
     });
     expect(result.success).toBe(false);
+  });
+
+  // ADR-0061 `search` on the aggregate verb. `QuerySchema.search` sits beside
+  // `groupBy` / `aggregations` with no carve-out, so the aggregate options
+  // declare the two keys the query options declare, and the engine expands them
+  // through the same expander. Before, a parse STRIPPED them (this schema is not
+  // strict) — the declaration-side half of a grouped answer under a search
+  // coming back unsearched.
+  it('keeps `search` (both forms) and `searchFields` through a parse', () => {
+    const bare = EngineAggregateOptionsSchema.parse({
+      groupBy: ['business_unit'],
+      aggregations: [{ function: 'count', alias: 'count' }],
+      search: 'harbour',
+      searchFields: ['business_unit'],
+    });
+    expect(bare.search).toBe('harbour');
+    expect(bare.searchFields).toEqual(['business_unit']);
+
+    const structured = EngineAggregateOptionsSchema.parse({
+      aggregations: [{ function: 'count', alias: 'count' }],
+      search: { query: 'harbour', fields: ['business_unit'] },
+    });
+    expect(structured.search).toMatchObject({ query: 'harbour', fields: ['business_unit'] });
+  });
+
+  it('refuses a `search` / `searchFields` value the query options refuse', () => {
+    for (const bad of [{ search: 42 }, { searchFields: 'business_unit' }, { searchFields: [1] }]) {
+      const agg = EngineAggregateOptionsSchema.safeParse({ aggregations: [{ function: 'count', alias: 'n' }], ...bad });
+      const find = EngineQueryOptionsSchema.safeParse(bad);
+      expect(agg.success, JSON.stringify(bad)).toBe(false);
+      expect(find.success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('declares `search` / `searchFields` exactly as EngineQueryOptionsSchema does — one contract on both read verbs', () => {
+    const aggShape = (EngineAggregateOptionsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
+    const findShape = (EngineQueryOptionsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
+    for (const key of ['search', 'searchFields'] as const) {
+      expect(aggShape[key], key).toBeDefined();
+      expect(z.toJSONSchema(aggShape[key] as z.ZodType, { io: 'input' }), key)
+        .toEqual(z.toJSONSchema(findShape[key] as z.ZodType, { io: 'input' }));
+    }
   });
 });
 

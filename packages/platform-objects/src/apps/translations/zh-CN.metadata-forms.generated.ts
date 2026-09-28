@@ -293,6 +293,26 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "校验规则",
         helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
+      activityMilestones: {
+        label: "活动里程碑",
+        helpText: "由字段到达某个值触发的时间线条目（ADR-0052 §5b.2）：当一次更新把被监视的字段变为该值时，审计插件会把该里程碑的摘要写入记录的活动时间线，代替字段变更条目。第一个匹配的里程碑生效。"
+      },
+      "activityMilestones.field": {
+        label: "字段",
+        helpText: "要监视的本对象字段名（例如 status）。保存或发布时不会检查它：不是本对象字段的名称永远不会触发。"
+      },
+      "activityMilestones.value": {
+        label: "值",
+        helpText: "字段必须变为的存储值，按文本精确比较——对于选择字段，填写选项值而不是其标签（例如 done）。数字或布尔字段上的里程碑永远不会触发。"
+      },
+      "activityMilestones.summary": {
+        label: "摘要",
+        helpText: "时间线文本（例如 \"Deal won: {name}\"）。{field_name} 标记取更新后记录中的值；查找、主从或用户字段的标记显示被引用记录的标题；不指向任何字段的标记显示为空。"
+      },
+      "activityMilestones.type": {
+        label: "类型",
+        helpText: "时间线条目的活动类型：内置类型（如 completed）或你自己的词，按原样存储。未设置：updated。"
+      },
       datasource: {
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
@@ -307,7 +327,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "字段",
-        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存或发布时不会检查它们：若某个名称不是已存储的列，SQL 驱动会跳过整个索引，并在服务器日志中记录一条警告。"
+        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存时不会检查它们；发布和 os validate 会拒绝不是本对象字段的名称。若某个字段不是已存储的列（例如公式字段），SQL 驱动会跳过整个索引，并在服务器日志中记录一条警告。"
       },
       "indexes.unique": {
         label: "唯一",
@@ -333,9 +353,61 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所需权限",
         helpText: "调用方访问本对象必须持有的能力（权限集的 systemPermissions），在增删改查授权之外额外检查（ADR-0066 D3）。列表限制所有操作；{read, create, update, delete} 映射只限制其中列出的操作。不声明或为空：不设能力门槛。"
       },
+      publicSharing: {
+        label: "公开分享",
+        helpText: "分享链接策略：本对象的记录能否通过任何持有者都能打开的链接发布，以及发布的条件。它不同于 sharingModel——后者与指定的用户和团队共享。未设置或关闭：无法创建链接，也没有链接能打开。"
+      },
+      "publicSharing.enabled": {
+        label: "已启用",
+        helpText: "允许为本对象的记录创建分享链接。每次访问链接时都会检查：关闭后所有已有链接都无法打开，重新开启后又会恢复服务。关闭（默认）：此处其他设置均不生效。"
+      },
+      "publicSharing.allowedAudiences": {
+        label: "允许的受众",
+        helpText: "新链接可以指定的受众；其他受众会被拒绝。未设置：仅限链接。每种受众都仍需要链接本身：signed in 还需要一位已登录的用户，email 还需要收件人地址在该链接的名单上。"
+      },
+      "publicSharing.allowedPermissions": {
+        label: "允许的权限",
+        helpText: "新链接可以授予的权限级别；其他级别会被拒绝。未设置：仅查看。"
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "最长有效天数",
+        helpText: "新链接可请求的最晚过期时间，按从现在起的天数计；更晚的会被拒绝。未设置：365。它不会强制设置过期时间：创建时未设置过期时间的链接永不过期。"
+      },
+      "publicSharing.redactFields": {
+        label: "脱敏字段",
+        helpText: "通过链接提供的每条记录中都会移除的本对象字段名，与受众无关；所有者自身的访问不受影响。不是本对象字段的名称会在发布时被拒绝。"
+      },
+      "publicSharing.eligibility": {
+        label: "资格条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status == 'published'）：仅当其为 TRUE 时才会创建链接；记录不再符合条件后，已有链接将无法打开。无法编译或求值出错的谓词会拒绝该链接。"
+      },
       managedBy: {
         label: "生命周期归属",
         helpText: "生命周期分类：platform（用户可增删改查）、config（管理员编写）、system-data（平台定义结构、管理员/用户可写数据）、engine-owned（引擎独占，用户不可写）、append-only（审计）、better-auth（身份）。UI 客户端据此推导 CRUD 能力，因此它决定用户在该对象记录上能做什么。"
+      },
+      userActions: {
+        label: "用户操作",
+        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。"
+      },
+      "userActions.create": {
+        label: "新建",
+        helpText: "“新建”按钮：打开则显示，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按当前范围内的记录控制该按钮，请在源码中编写该对象，它在每个工具栏上求值一次（在相关列表上是宿主记录）。"
+      },
+      "userActions.import": {
+        label: "导入",
+        helpText: "CSV 导入入口：打开则显示，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按当前范围内的记录控制该入口，请在源码中编写该对象，它在每个工具栏上求值一次。"
+      },
+      "userActions.edit": {
+        label: "编辑",
+        helpText: "编辑已有记录（行内和表单中）：打开则提供，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按每一行自身的记录控制，请在源码中编写该对象。"
+      },
+      "userActions.delete": {
+        label: "删除",
+        helpText: "行删除和批量删除：打开则提供，关闭则隐藏。已存储的 {enabled, visibleWhen, disabledWhen} 对象会逐键编辑；如需按每一行自身的记录控制，请在源码中编写该对象。"
+      },
+      "userActions.exportCsv": {
+        label: "导出 CSV",
+        helpText: "CSV 导出入口。未设置：显示，因为每个 managedBy 类别默认都提供导出。"
       },
       editMode: {
         label: "编辑方式",
@@ -621,6 +693,26 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       inlineTitle: {
         label: "内嵌表格标题",
         helpText: "父记录上内嵌主从表格的标题。"
+      },
+      inlineColumns: {
+        label: "内嵌表格列",
+        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当本字段设置了 inlineEdit（在源码中编写）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
+      },
+      "inlineColumns.name": {
+        label: "名称",
+        helpText: "该列显示和编辑的本（子）对象字段（例如 quantity）。保存或发布时不会检查它：不是本对象字段的名称会显示为普通文本列。"
+      },
+      "inlineColumns.label": {
+        label: "标签",
+        helpText: "列标题。未设置：使用该字段自身的标签。"
+      },
+      "inlineColumns.width": {
+        label: "宽度",
+        helpText: "固定列宽，单位为像素。未设置：按单元格类型确定宽度，文本列自适应伸展，数字、日期和选择列保持较窄。"
+      },
+      "inlineColumns.defaultHidden": {
+        label: "默认隐藏",
+        helpText: "让该列起初收在表格的列选择器中，而不是显示在屏幕上；用户可以将其显示出来。字段为必填的列始终显示。"
       },
       inlineAmountField: {
         label: "内嵌合计字段",

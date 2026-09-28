@@ -152,6 +152,8 @@ Options for DataEngine.aggregate operations
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
@@ -708,6 +710,8 @@ This schema accepts one of the following structures:
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 ---
@@ -898,6 +902,8 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 
 ### Nested Shape: `EngineAggregateOptions.context`
 
@@ -953,6 +959,19 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **alias** | `string` | ✅ | Result column alias |
 | **distinct** | `never` | optional | [REMOVED] `query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049) — exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory fallback deduplicated the values before applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL datasource: one query, two numbers, chosen by which backend happened to serve it. Both answers are plausible, so nothing surfaced the divergence. Delete the key. For a deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which every SQL face compiles to `COUNT(DISTINCT field)` and the in-memory fallback computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no backend ever computed them here, and a per-row measure that needs deduplicating is a modelling problem to fix in the data, not a flag on the read. |
 | **filter** | `any` | optional | Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate: lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it. |
+
+### Nested Shape: `EngineAggregateOptions.search`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **query** | `string` | ✅ | Search query text |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
+| **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
+| **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
+| **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results. |
+| **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer. |
+| **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights. |
 
 
 ---

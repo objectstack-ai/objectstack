@@ -237,6 +237,7 @@
     "EmptyOperatorExpansion": "src/data/filter-empty-operator.ts#EmptyOperatorExpansion (interface)",
     "EnableLike": "src/data/api-derivation.ts#EnableLike (interface)",
     "EngineAggregateOptions": "src/data/data-engine.zod.ts#EngineAggregateOptions (type)",
+    "EngineAggregateOptionsParsed": "src/data/data-engine.zod.ts#EngineAggregateOptionsParsed (type)",
     "EngineAggregateOptionsSchema": "src/data/data-engine.zod.ts#EngineAggregateOptionsSchema (const)",
     "EngineCountOptions": "src/data/data-engine.zod.ts#EngineCountOptions (type)",
     "EngineCountOptionsSchema": "src/data/data-engine.zod.ts#EngineCountOptionsSchema (const)",
