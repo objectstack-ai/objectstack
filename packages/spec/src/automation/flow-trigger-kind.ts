@@ -18,9 +18,11 @@
  * question "does this flow auto-launch?":
  *
  *   - `defineStack` refuses a stack whose flow resolves to a kind while
- *     `requires` omits `'triggers'` — the single token that installs every one
- *     of these triggers (`PLATFORM_CAPABILITY_PROVIDERS.triggers`). Without it
- *     the flow registers, validates, builds, and never fires.
+ *     `requires` omits `'triggers'` or `'automation'` — the pair that installs
+ *     every one of these triggers: `triggers` mounts the trigger plugins
+ *     (`PLATFORM_CAPABILITY_PROVIDERS.triggers`) and each installs its trigger
+ *     into the automation service `automation` mounts. Without either the flow
+ *     registers, validates, builds, and never fires.
  *   - `@objectstack/lint`'s `validate-flow-trigger-readiness` reads it as the
  *     auto-triggered predicate behind its draft-status rule.
  *
