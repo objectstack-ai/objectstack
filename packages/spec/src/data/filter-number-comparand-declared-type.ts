@@ -45,21 +45,23 @@
  *   `"1e-7"`.** Every string `String(n)` produces for a finite JS number is in
  *   the set and parses back to `n` (pinned as a round-trip property), so a
  *   caller who stringifies a number — a URL query (`?amount=5` is lowered to an
- *   implicit `{ amount: "5" }` filter), `URLSearchParams`, a CSV cell written by
- *   a spreadsheet — is never refused. That is why the exponent form is IN:
+ *   implicit `{ amount: "5" }` filter), `URLSearchParams`, a CSV cell holding a
+ *   plain number — is never refused. That is why the exponent form is IN:
  *   `String(1e-7)` is `"1e-7"` and `String(1e21)` is `"1e+21"`, and a grammar
  *   without it refuses the platform's own stringification of a legal number.
- *   Exponent strings are also read alike by the three measured backends: JS
- *   `Number()`, SQLite's numeric affinity (#20309's report measured `'1e3'`
- *   stored as the real 1000) and PostgreSQL's `numeric` input.
+ *   Exponent strings are also read alike beneath the door: JS `Number()`,
+ *   SQLite's numeric affinity (#20309's report measured `'1e3'` stored as the
+ *   real 1000) and PostgreSQL's `numeric` input, which documents the form (not
+ *   measured live in this change).
  * - **Refused: whitespace — `""`, `"  "`, `" 12 "`.** `Number()` reads `""` and
  *   `"  "` as 0 and trims padding; the write side's triage direction on #20309
  *   refuses whitespace-padded strings by name, and one grammar serves both
  *   sides. A blank comparand on a number field has no numeric reading: the
  *   write side turns a blank into `null` BEFORE the number arm (#20308), and
- *   the read side's per-type emptiness lowering gives a number field the null
- *   test alone (#20311, ruled B) — neither ever hands this grammar a blank, so
- *   a blank that reaches it is a mistake, and on PostgreSQL a 500.
+ *   on the read side the emptiness operator lowers to the null test on a
+ *   number field (`is_empty` → `$null`; #20311's ruling B keeps a number field
+ *   on null alone) — neither hands this grammar a blank, so a blank that
+ *   reaches it is a mistake, and on PostgreSQL a 500.
  * - **Refused: `"0x10"`, `"0o17"`, `"0b101"`.** `Number()` reads them; SQLite
  *   stores `'0x10'` as TEXT (measured on #20309); the write side's direction
  *   refuses hex by name.
@@ -70,11 +72,11 @@
  *   grouping is a presentation, not a number; `Number()` reads none of them.
  *   (The CSV import route's own cell reader strips such punctuation before it
  *   parses — an import-specific tolerance, deliberately not this grammar.)
- * - **Refused: `"+5"`, `".5"`, `"5."`, `"007"`.** `Number()` reads them and
- *   the backends agree on them, but none is a JSON number spelling and no
- *   measured producer writes one: `String(n)` never does, and a spreadsheet
- *   writes `0.5` and `5`. The stricter set costs nothing measured and keeps
- *   the grammar one sentence long.
+ * - **Refused: `"+5"`, `".5"`, `"5."`, `"007"`.** `Number()` reads them, but
+ *   none is a JSON number spelling and no measured producer writes one —
+ *   `String(n)` never does. They are refused for their spelling, not for a
+ *   divergence: the stricter set costs nothing measured and keeps the grammar
+ *   one sentence long.
  * - **Refused: a `{placeholder}`** — see below.
  *
  * ## The door's answer for a numeric string: NARROW it to its number
@@ -85,8 +87,9 @@
  * "store the parsed number" (#20309's census answer). Left as a string it is
  * read three ways again: JS equality and ordering coerce it (`12 == "12"`),
  * SQLite applies numeric affinity, and `driver-mongodb` compares by BSON type,
- * so `"12"` never equals a stored `12` there (read at source: that driver has
- * no numeric coercion; not measured live in this change).
+ * so `"12"` never equals a stored `12` there (read at source: its filter
+ * compiler coerces temporal comparands only; not measured live in this
+ * change).
  *
  * ## Which fields: the numeric class, by REFERENCE
  *
@@ -136,8 +139,9 @@
  * token in the filter vocabulary resolves to a user or organization id, a
  * `YYYY-MM-DD` day or an ISO instant (`resolveFilterToken`,
  * `@objectstack/core`), none of which is numeric — so a resolved token reaches
- * PostgreSQL as the same 500. The door runs before the token resolver, and it
- * refuses the placeholder there, as a placeholder
+ * PostgreSQL as the same 500. The engine's field-aware doors run BEFORE the
+ * token resolver (the temporal door records why), so this door meets the
+ * placeholder unresolved and refuses it there, as a placeholder
  * ({@link NonNumericStringForm} `placeholder`).
  *
  * ## The refusal words live here — {@link numberComparandRefusalMessage}
@@ -146,9 +150,10 @@
  * code is minted. The code is spelled as a literal for the reason
  * `filter-comparand-type.ts` records (`api/` imports `data/`), and the test
  * pins it to `StandardErrorCode`. The message names the field, its declared
- * type, the offending comparand, its position and what is wrong with it, and
- * stays inside the 500-character client bound, so the door prints the spec's
- * words rather than its own.
+ * type, the offending comparand, its position and what is wrong with it, all
+ * ahead of the remedy — the REST layer truncates a 4xx message at 500
+ * characters, and every case in the table fits whole (pinned) — so the door
+ * prints the spec's words rather than its own.
  *
  * ## How the engine suite consumes {@link NUMBER_COMPARAND_DOOR_CASES}
  *
@@ -255,10 +260,10 @@ export type NumericStringReading =
 const JS_DECIMAL_SPELLING = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const RADIX_PREFIX = /^[+-]?0[xXoObB]/;
 const NON_FINITE_WORD = /^[+-]?(?:infinity|inf|nan)$/i;
-const DIGIT_GROUP_SEPARATOR = /[,_'   ]/g;
+const DIGIT_GROUP_SEPARATOR = /[,_'\u00a0\u202f ]/g;
 
 function hasDigitSeparator(s: string): boolean {
-  if (!/\d[,_'   ]\d/.test(s)) return false;
+  if (!/\d[,_'\u00a0\u202f ]\d/.test(s)) return false;
   return JS_DECIMAL_SPELLING.test(s.replace(DIGIT_GROUP_SEPARATOR, ''));
 }
 
@@ -378,7 +383,12 @@ export function numberComparandDoorVerdict(
  * The refusal words
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/** What is wrong with the string, per form — the clause after "which is not a number:". */
+/**
+ * What is wrong with the string, per form — the clause after "which is not a
+ * number:". Each clause states only what holds for its form: `"+5"` is
+ * refused for its spelling alone, so its clause claims no divergence between
+ * backends, while the card's `"abc"` names the one it measured.
+ */
 const FORM_SENTENCE: Readonly<Record<NonNumericStringForm, string>> = {
   'empty': 'a blank string names no number (to match a missing value, write {"$eq": null}).',
   'padded': 'it carries surrounding whitespace.',
@@ -387,8 +397,18 @@ const FORM_SENTENCE: Readonly<Record<NonNumericStringForm, string>> = {
   'non-finite': 'Infinity, NaN and out-of-range values name no finite number.',
   'digit-separator': 'digit grouping and decimal commas are a locale spelling, not a number.',
   'non-json-spelling': 'a leading "+" or zero, or a bare leading or trailing ".", is not a JSON number.',
-  'not-a-number': 'it has no numeric reading.',
+  'not-a-number': 'it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).',
 };
+
+/**
+ * The consequence and the remedy, after the load-bearing head. Everything a
+ * caller must read to act — field, type, comparand, position, what is wrong —
+ * comes first, because the REST layer truncates a 4xx message at 500
+ * characters; this tail is what a very long field name pushes off the wire.
+ */
+const NUMBER_COMPARAND_REFUSAL_TAIL =
+  ' The filter was NOT applied. Write a number (12, -3.5, 1e3) or a string of exactly that JSON '
+  + 'spelling ("12").';
 
 /** Where the refused comparand sits, and what the door read there. */
 export interface NumberComparandRefusalSite {
@@ -417,9 +437,8 @@ export function numberComparandRefusalMessage(site: NumberComparandRefusalSite, 
     : `${site.declaredType} field returning ${site.returnType}`;
   return (
     `${context ? `${context}: ` : ''}filter on '${site.field}' compares a declared ${declared} against `
-    + `${shapePreview(site.value)} at ${site.path}, which is not a number: ${FORM_SENTENCE[site.form]} `
-    + 'The filter was NOT applied: as written, backends answer it differently (a database error on '
-    + 'PostgreSQL). Write a number (12, -3.5, 1e3), or a string holding exactly that JSON spelling ("12").'
+    + `${shapePreview(site.value)} at ${site.path}, which is not a number: ${FORM_SENTENCE[site.form]}`
+    + NUMBER_COMPARAND_REFUSAL_TAIL
   );
 }
 
@@ -480,8 +499,8 @@ export const NUMERIC_STRING_GRAMMAR_CASES: readonly NumericStringGrammarCase[] =
   refuse('abc', 'not-a-number', 'The card\'s own comparand.'),
   refuse('12abc', 'not-a-number', 'A numeric prefix does not make the string a number (no parseFloat reading).'),
   refuse('2026-01-01', 'not-a-number', 'A date is not a number.'),
-  refuse('１２', 'not-a-number', 'Full-width digits are not ASCII digits.'),
-  refuse('−3', 'not-a-number', 'U+2212 MINUS SIGN is not the ASCII hyphen-minus.'),
+  refuse('\uff11\uff12', 'not-a-number', 'Full-width digits are not ASCII digits.'),
+  refuse('\u22123', 'not-a-number', 'U+2212 MINUS SIGN is not the ASCII hyphen-minus.'),
   refuse('1e', 'not-a-number', 'An exponent marker needs digits.'),
   refuse('-', 'not-a-number', 'A sign alone.'),
 ];

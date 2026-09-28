@@ -223,16 +223,27 @@ describe('[#20336] numberComparandRefusalMessage', () => {
     for (const m of messages) expect(m).not.toMatch(/#\d/);
   });
 
-  it('stays inside the 500-character client bound at its longest', () => {
-    const longest = Math.max(...NON_NUMERIC_STRING_FORMS.map((form) => numberComparandRefusalMessage({
-      field: 'f'.repeat(64),
-      declaredType: 'formula',
-      returnType: 'number',
-      path: `aggregations[12].filter.${'f'.repeat(64)}.$between[1]`,
-      value: 'x'.repeat(200),
-      form,
-    }, `aggregate('${'o'.repeat(64)}')`).length));
-    expect(longest).toBeLessThanOrEqual(500);
+  it('stays inside the 500-character client bound for every refusal in the case table, at the longest position', () => {
+    for (const c of NUMBER_COMPARAND_DOOR_CASES.filter(isRefusal)) {
+      const message = numberComparandRefusalMessage({
+        field: c.key, declaredType: c.declaredType, returnType: c.returnType,
+        path: `aggregations[0].filter.${c.position}`, value: c.comparand as string, form: c.form,
+      }, `aggregate('${NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT}')`);
+      expect(message.length, c.name).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it('front-loads what a caller acts on: with 40-character names the head still ends inside the first 500 characters', () => {
+    const name = 'f'.repeat(40);
+    for (const form of NON_NUMERIC_STRING_FORMS) {
+      const message = numberComparandRefusalMessage({
+        field: name, declaredType: 'formula', returnType: 'number',
+        path: `aggregations[12].filter.${name}.$between[1]`, value: 'x'.repeat(200), form,
+      }, `aggregate('${'o'.repeat(40)}')`);
+      const head = message.slice(0, message.indexOf(' The filter was NOT applied'));
+      expect(head.length, form).toBeLessThanOrEqual(500);
+      expect(message.slice(0, 500), form).toContain(head);
+    }
   });
 });
 
