@@ -4912,6 +4912,30 @@ function viewItemArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny>(vie
 }
 
 /**
+ * [#19920] The static shape of one ViewItem arm, read off
+ * {@link viewItemArmShape} itself, so it cannot drift from what the arm is
+ * built from. It exists for the declaration emitter: {@link ViewItemSchema} and
+ * {@link ViewItemWireSchema} are annotated through it with
+ * `typeof ListViewSchema` / `typeof FormViewSchema`, which the `.d.ts` then
+ * names instead of spelling each config type out in full. Inferred, the two
+ * schemas and the `viewItem` member of {@link VIEW_METADATA_MEMBERS} each
+ * carried a full copy of both config types (+170 KB of `view.zod.d.ts`,
+ * measured); annotated, the file is smaller than when `config` was erased.
+ */
+type ViewItemArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = ReturnType<typeof viewItemArmShape<K, C>>;
+
+/**
+ * [#19920] {@link ViewItemArmShape} plus the wire arm's round-trip keys: the
+ * object spread {@link ViewItemWireSchema} builds each arm from, as one mapped
+ * object type rather than an intersection, so the annotation is IDENTICAL to
+ * the type the spread infers, not merely assignable to it.
+ */
+type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
+  [P in keyof (ViewItemArmShape<K, C> & ReturnType<typeof viewItemWireFields>)]:
+    (ViewItemArmShape<K, C> & ReturnType<typeof viewItemWireFields>)[P];
+};
+
+/**
  * [#9933] The per-user column layout the console's grid persists through the
  * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
  * where overlays are validated and deliberately NOT authorable.
@@ -5003,7 +5027,10 @@ const VIEW_ITEM_SURFACE = {
  * at all**, parsed clean. That is #1535's `workflows: [...]` replayed on the
  * surface with the highest author density in the file.
  */
-export const ViewItemSchema = lazySchema(() =>
+export const ViewItemSchema: z.ZodDiscriminatedUnion<[
+  z.ZodObject<ViewItemArmShape<'list', typeof ListViewSchema>, z.core.$strict>,
+  z.ZodObject<ViewItemArmShape<'form', typeof FormViewSchema>, z.core.$strict>,
+], 'viewKind'> = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
     strictObject(VIEW_ITEM_SURFACE, viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.'))),
     strictObject(VIEW_ITEM_SURFACE, viewItemArmShape('form', FormViewSchema.describe('Form view configuration.'))),
@@ -5051,7 +5078,10 @@ function viewItemWireFields() {
  * {@link stripViewConsoleDecorations} on the wire door — see that function for
  * why a recursive strip is the piece a posture flip cannot provide.
  */
-export const ViewItemWireSchema = lazySchema(() =>
+export const ViewItemWireSchema: z.ZodDiscriminatedUnion<[
+  z.ZodObject<ViewItemWireArmShape<'list', typeof ListViewSchema>, z.core.$strip>,
+  z.ZodObject<ViewItemWireArmShape<'form', typeof FormViewSchema>, z.core.$strip>,
+], 'viewKind'> = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
     z.object({
       ...viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.')),
@@ -5893,7 +5923,10 @@ export type ViewMetadataBranch = (typeof VIEW_METADATA_BRANCHES)[number];
 export const VIEW_METADATA_MEMBERS = {
   // 1. Standalone ViewItem record — nested config validated genuinely, and the
   //    WIRE variant, so Studio's round-trip keys have a declared home.
-  viewItem: ViewItemWireSchema,
+  // [#19920] The assertion changes no type (it is the schema's own); it makes
+  // the declaration emitter write `typeof ViewItemWireSchema` here instead of a
+  // third full copy of both config types (see {@link ViewItemArmShape}).
+  viewItem: ViewItemWireSchema as typeof ViewItemWireSchema,
   // 2. Non-empty defineView container.
   container: ViewContainerWireSchema,
   // 3/4. Flattened runtime overlay — inline ListView / FormView config + identity,
