@@ -1477,6 +1477,64 @@ const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new M
 ]);
 
 /**
+ * [#20335] What each declared aggregate function ANSWERS — a derived `number`,
+ * or a value OF the aggregated column — and therefore which read presentation
+ * {@link SqlDriver.aggregate} gives its result column.
+ *
+ * - `'number'` — `count`, `count_distinct`, `sum`, `avg`. A count or a total is
+ *   a number whatever the column held, and it is presented as one (`'number'`,
+ *   the presenter `formatOutput` applies to a numeric field on a `find()` row).
+ * - `'column'` — `min`, `max`. The answer is one of the column's own values, so
+ *   it takes that column's presentation ({@link SqlDriver.readPresentationKind}),
+ *   exactly as before this table existed.
+ *
+ * Why the `'number'` half needs presenting at all: the SQL client hands a
+ * result back as the wire type of the SQL expression, not as the platform's
+ * value type. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 through this
+ * driver's own connections: node-postgres parses `bigint` (OID 20 — `count`,
+ * and `sum` over an integer column) and `numeric` (OID 1700 — `sum` / `avg`
+ * over the exact-decimal numeric family, `avg` over an integer column) to
+ * STRINGS (`"2"`, `"500.000000000000000000000000000000"`), and mysql2 does the
+ * same for `DECIMAL` (`SUM` / `AVG`; its `COUNT` arrives as a number). The
+ * engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and SQLite answer
+ * numbers for the same query, so `having { n: { $in: [2] } }` kept c1, c2 on
+ * those and no group on PostgreSQL's native path.
+ *
+ * Keyed on the function the query ASKED for, never on whether a value looks
+ * numeric, and deliberately not gated by dialect: the presenter only rewrites a
+ * STRING, so a client that already answers a number (better-sqlite3, mysql2's
+ * `COUNT`) passes through untouched — measured byte-identical on SQLite — and
+ * no list of "string-answering dialects" exists to drift.
+ *
+ * ## The precision policy — one JS number, the loss declared
+ *
+ * The answer is `Number(text)`: an IEEE-754 double, on every dialect. A `sum` /
+ * `avg` over the exact-decimal column (`numeric(65,30)` / `DECIMAL(65,30)`)
+ * whose value needs more than a double's ~15-17 significant digits, or an
+ * integer at or above 2^53, is ROUNDED to the nearest double — declared, not
+ * silent: it is the same bound `formatOutput` already puts on a `find()` read of
+ * that column (#16318, `valueSchemaFor`'s `z.number().finite()`, ADR-0104 D1),
+ * and the bound the rows path has always had (`toNumber` sums JS doubles). A
+ * value-dependent type — a number when it fits, a string when it does not — was
+ * rejected: it would reopen this defect for exactly the large totals, where a
+ * `having` `$in` or a chart silently stops matching. Only a string `Number()`
+ * reads as NaN (PostgreSQL's `numeric` `'NaN'`) is left as written, the
+ * presenter's existing rule.
+ *
+ * A `Record` over `AggregationFunction` on purpose: a function that joins the
+ * declared vocabulary without an answer here fails `tsc` rather than reaching a
+ * caller unpresented.
+ */
+const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'column'>> = {
+  count: 'number',
+  count_distinct: 'number',
+  sum: 'number',
+  avg: 'number',
+  min: 'column',
+  max: 'column',
+};
+
+/**
  * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
  * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
  * "declared" has exactly one definition and this driver cannot drift from it.
@@ -9858,8 +9916,10 @@ export class SqlDriver implements IDataDriver {
     // GROUP BY bucket expression (#3773) and the result presentation (#3797).
     const table = this.coercionKey(builder);
 
-    // Result columns that carry a raw column VALUE (rather than a count/total
-    // derived from one), keyed by the column name the caller will read.
+    // Result columns and the presentation each takes, keyed by the column name
+    // the caller will read: a raw column VALUE (a group key, `min`/`max`) takes
+    // its column's presentation, and [#20335] a count or total derived from one
+    // takes the `'number'` presentation (see `AGGREGATE_ANSWER_KIND`).
     // Collected while the statement is built because that is the only point
     // where a column name and its meaning are both known: a `min()` lands under
     // its alias (never under the field name), and a date-BUCKETED column lands
@@ -10009,6 +10069,17 @@ export class SqlDriver implements IDataDriver {
           // their NULL passes through. See {@link foldEmptyAggregateAnswers}.
           const identity = emptyGroupValueFor(funcName);
           if (identity !== undefined) foldedOutput.set(agg.alias, identity);
+          // [#20335] A count or a total is presented as the number it is, on
+          // every dialect: node-postgres hands `bigint` / `numeric` back as a
+          // string and mysql2 `DECIMAL`, so without this the native path
+          // answered `"2"` where the rows path and SQLite answer `2`. Keyed on
+          // the function asked for; the precision policy (one JS double, the
+          // loss above a double's precision declared) is stated on
+          // `AGGREGATE_ANSWER_KIND`. The fold above runs first, so a folded
+          // `0` is already a number and passes through.
+          if (AGGREGATE_ANSWER_KIND[funcName] === 'number') {
+            presentedOutput.set(agg.alias, 'number');
+          }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
           // the only ones whose result still needs the column's presentation.
@@ -10016,7 +10087,7 @@ export class SqlDriver implements IDataDriver {
           // below lands under a dialect-dependent column name
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
-          if ((funcName === 'min' || funcName === 'max') && agg.field) {
+          if (AGGREGATE_ANSWER_KIND[funcName] === 'column' && agg.field) {
             // [#11152] A BOOLEAN aggregand is the ruled exception to "the
             // result still needs the column's presentation": the maintainer's
             // 2026-08-28 ruling (superseding #11249's `false`/`true`, which
@@ -15196,7 +15267,9 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Apply {@link presentReadValue} to the result columns a caller of
-   * `aggregate()` will read as column VALUES — group keys, and `min`/`max`.
+   * `aggregate()` will read as column VALUES — group keys, and `min`/`max` —
+   * and [#20335] to its counts and totals (`count`, `count_distinct`, `sum`,
+   * `avg`), which take the `'number'` presenter (`AGGREGATE_ANSWER_KIND`).
    *
    * Which columns those are cannot be recovered from the rows — the driver has
    * to be told, because the mapping from column name to meaning is only
