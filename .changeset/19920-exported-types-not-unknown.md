@@ -18,6 +18,6 @@ Four published type aliases were derived from a schema whose own static type era
 
 The types are the members' declared shapes, not the schemas' verdicts. Each schema still accepts some bodies its type refuses (the preprocess folds and strips) and still refuses some bodies its type admits (refinements are not types), so the schema remains the only judge.
 
-`JoinedReportBlock` is not changed by this change, and still resolves to `unknown`.
+`JoinedReportBlock` is not changed by this change. It stops resolving to `unknown` in its own entry (#19920).
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no export and no stored row changes and every runtime accept set is unchanged, so `objectstack migrate meta` has nothing to reach — and only TypeScript annotations narrow, whose channel is the consumer's compiler. -->

@@ -20,9 +20,10 @@ export const entry: SemanticMigration = {
   reason:
     'MySQL\'s only merge statement is `ON DUPLICATE KEY UPDATE`, which carries NO conflict '
     + 'target: knex drops the named keys before the statement leaves the process, so the '
-    + 'merge lands on whichever UNIQUE index the row collides with first. #8621 closed the '
-    + 'half where nothing backed a caller-named target and #8755 the half where a rival key '
-    + 'could absorb a caller-named one. This entry closes the residue those two left by '
+    + 'merge lands on whichever UNIQUE index the row collides with first. Two earlier '
+    + 'pre-flight refusals closed the half where no unique index backed a caller-named '
+    + 'target and the half where a rival unique key could absorb a caller-named one. This '
+    + 'entry closes the residue those two left by '
     + 'construction: the `conflictKeys`-less call and the `[\'id\']` call, which compile '
     + 'byte-identically and which no pre-flight can judge, because neither names anything.\n\n'
     + 'Measured on live MySQL 8.0.46 through the same knex + `mysql2` path `upsert` takes, '
@@ -32,7 +33,8 @@ export const entry: SemanticMigration = {
     + 'row, the SEEDED one, its `email` rewritten `d@b.com` -> `e@b.com`. The id the caller '
     + 'was handed back was in no row at all. The identical pair on SQLite raises `UNIQUE '
     + 'constraint failed: ….tax_id` and leaves the seeded row untouched.\n\n'
-    + 'Ruled 2026-08-15 on #8807, as a contract principle rather than a MySQL detail: *an '
+    + 'Ruled by the maintainer on 2026-08-15, as a contract principle rather than a MySQL '
+    + 'detail: *an '
     + '`upsert` must never modify a row whose identity the caller did not supply and whose '
     + 'conflict key it did not name.* Enforcement was delegated to the drivers lane with '
     + 'blanket refusal excluded by name — refusing every `conflictKeys`-less upsert on any '
@@ -43,7 +45,9 @@ export const entry: SemanticMigration = {
     + 'made a pre-flight refusal proportionate for a caller-named target does not exist '
     + 'here.\n\n'
     + 'So the enforcement is a post-hoc identity check instead, and it is exact rather than '
-    + 'heuristic: `id` is insert-only on the merge path since #8622, so a row merged on the '
+    + 'heuristic: `id` is insert-only on the merge path (made so once a merge on a '
+    + 'non-primary conflict key was measured rewriting the existing row\'s primary key), '
+    + 'so a row merged on the '
     + 'primary key always still carries the id the call supplied, and a row merged on any '
     + 'other key never does. Absence of that row after the statement is therefore a '
     + 'biconditional for "this landed on a row the caller never identified", which is why the '
@@ -56,7 +60,7 @@ export const entry: SemanticMigration = {
     + 'the D2 chain to rewrite and this entry is the notification channel. No mechanical '
     + 'rewrite exists: the platform cannot know which business key an unnamed merge meant, '
     + 'and guessing one would merge onto a row the caller never named, which is the defect. '
-    + '#8807, #8755, #8621, #8622, #8592, ADR-0112.',
+    + 'ADR-0112.',
   acceptanceCriteria:
     'On MySQL deployments only. For every object whose rows are written with `upsert` and '
     + 'whose table carries a UNIQUE key besides the primary key, confirm the writer either '

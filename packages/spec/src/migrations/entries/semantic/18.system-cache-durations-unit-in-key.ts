@@ -11,7 +11,11 @@ export const entry: SemanticMigration = {
   replacement: 'ttlSeconds and resetTimeoutSeconds — rename each key; both values, the 300 '
     + 'TTL default and the 30 reset default are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'These two are one entry because they are one file and one authoring session: a '
     + 'cache tier and the avalanche-prevention block that protects it. Each sat beside a '
     + 'number in a DIFFERENT unit with nothing at the authoring site to separate them — '
@@ -23,7 +27,7 @@ export const entry: SemanticMigration = {
     + 'the unknown-key error could not carry the rename. Why a semantic entry and not a D2 '
     + 'conversion: stack.zod.ts declares no cache collection, and neither a cache tier nor '
     + 'an avalanche-prevention block is a registered metadata kind stored as a sys_metadata '
-    + 'row, so the conversion chain has no seam that would see one. #15679, #14478, ADR-0087.',
+    + 'row, so the conversion chain has no seam that would see one. ADR-0087.',
   acceptanceCriteria:
     'Every author of a CacheTier spells ttlSeconds and every author of a '
     + 'CacheAvalanchePrevention spells circuitBreaker.resetTimeoutSeconds. Authoring either '

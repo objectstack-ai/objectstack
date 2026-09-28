@@ -1782,15 +1782,19 @@ export default defineStack({
 ```
 
 Registration is not arming. A `record_change`, `schedule`, `time_relative` or
-`api` flow fires only when its trigger is mounted, and the triggers ship
-separately (`@objectstack/trigger-*`) behind **one** capability token on the
-same stack: `requires: ['triggers']` (`automation` mounts the engine itself;
-neither is in the always-on slate an absent `requires` falls back to).
-`defineStack` refuses a stack that declares such a flow without the token,
-naming the flow, the trigger kind it resolved and the fix — because the
-alternative was measured: the flow registers, `os validate` and `os build`
-pass, and it never runs. A `screen` flow, or an `autolaunched` one you start
-by hand, owes nothing.
+`api` flow fires only when its trigger is installed, and that takes **both**
+capability tokens on the same stack: `requires: ['automation', 'triggers']`.
+The triggers ship separately (`@objectstack/trigger-*`, mounted by
+`triggers`), and each one installs itself into the automation engine
+(`@objectstack/service-automation`, mounted by `automation`) — with
+`triggers` alone the trigger plugins load, find no engine, and install
+nothing. Neither token implies the other, and neither is in the always-on
+slate an absent `requires` falls back to. `defineStack` refuses a stack that
+declares such a flow while `requires` lacks either token, naming the flow, the
+trigger kind it resolved and the fix for the tokens it is missing — because
+the alternative was measured: the flow registers, `os validate` and
+`os build` pass, and it never runs. A `screen` flow, or an `autolaunched` one
+you start by hand, owes nothing.
 
 The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration

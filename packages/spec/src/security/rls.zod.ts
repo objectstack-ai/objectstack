@@ -119,6 +119,24 @@ export const RLSOperation = z.enum(['select', 'insert', 'update', 'delete', 'all
 export type RLSOperation = z.input<typeof RLSOperation>;
 
 /**
+ * The upgrade prescription for the retired `rowLevelSecurity[].tags` (#20321).
+ * Declared above the schema that reads it: under `OS_EAGER_SCHEMAS=1` every
+ * `lazySchema` factory runs at module init in file order, and a `const` below
+ * its first eager reader is a TDZ error.
+ *
+ * ⚠️ The version sentence names the npm release this ships in, never the
+ * protocol major the migration entries are numbered at (ADR-0087, the level
+ * half of its 2026-09-13 amendment).
+ */
+const RLS_POLICY_TAGS_RETIRED =
+  '`rowLevelSecurity[].tags` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) '
+  + '— nothing ever read it: the RLS compiler never consulted a policy\'s tags and nothing else acted '
+  + 'on them, so a tag scoped, restricted and reported nothing. Delete the key. A tag never limited '
+  + 'whom a policy applies to; to do that, list the positions in `positions`. A policy is identified '
+  + 'by its `name` and its `object`; say why it exists in `description`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Row-Level Security Policy Schema
  * 
  * Defines a single RLS policy that filters records based on conditions.
@@ -222,8 +240,8 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   {
     surface: 'this RLS policy',
     // The suggestion pool is `Object.keys(shape)` minus anything that accepts
-    // nothing (#5593). `priority` is exactly that case and the exclusion is
-    // deliberate: it is a {@link retiredKey} tombstone, declared so its
+    // nothing (#5593). `priority` and `tags` are exactly that case and the
+    // exclusion is deliberate: each is a {@link retiredKey} tombstone, declared so its
     // rejection carries the upgrade prescription, never offered as a rename
     // target. The hand-transcribed list this replaced had to state the same
     // exclusion in prose and be trusted to keep it.
@@ -534,15 +552,24 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   ),
 
   /**
-   * Tags for policy categorization and reporting.
-   * Useful for governance, compliance, and auditing.
-   * 
-   * @example ["compliance", "gdpr", "pci"]
-   * @example ["multi-tenant", "security"]
+   * REMOVED — `tags` promised "categorization and reporting" for governance and
+   * compliance, and nothing ever read it (#20321, ADR-0049 enforce-or-remove).
+   *
+   * The census before removal found no reader in this repo, in objectui (the
+   * permission preview renders the policy COUNT, never a policy's fields; the
+   * policy editor neither seeds nor reads the key) or in cloud, and no writer
+   * in the examples, the default permission sets or cloud. The capability was
+   * judged by the maintainer's criterion for this family — does a mainstream
+   * platform have it? — and none does: Salesforce sharing rules, Dataverse
+   * security roles and PostgreSQL RLS policies carry no tag attribute, and
+   * compliance reporting there keys on the rule itself. On a SECURITY policy an
+   * inert free-form label is worse than dead: an author (very often an AI,
+   * ADR-0033) may write `tags: ['managers_only']` believing it scopes the
+   * policy, when only `positions` does. Tombstoned, like `priority` above, so
+   * the removal is audible (tsc `never` + the parse-time prescription) instead
+   * of an unknown-key verdict with no upgrade text.
    */
-  tags: z.array(z.string())
-    .optional()
-    .describe('Policy categorization tags'),
+  tags: retiredKey(RLS_POLICY_TAGS_RETIRED),
 }).superRefine((data, ctx) => {
   // Ensure at least one of USING or CHECK is provided
   if (!data.using && !data.check) {
