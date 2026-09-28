@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 212,
-    "droppedRefinementSites": 622,
+    "publishedSchemasWithDroppedRefinements": 211,
+    "droppedRefinementSites": 609,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -71,7 +71,6 @@
         "manifest.objects.element",
         "manifest.objects.element.fieldGroups",
         "manifest.objects.element.fields.out.valueType",
-        "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "manifest.objects.element.lifecycle",
         "manifest.pages.element",
@@ -174,7 +173,6 @@
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.out.valueType",
-        "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.pages.element",
@@ -262,7 +260,6 @@
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.out.valueType",
-        "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.pages.element",
@@ -311,7 +308,6 @@
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
-        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.pages.element",
@@ -353,7 +349,6 @@
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
         "data.fields.out.valueType",
-        "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.inlineColumns.element",
         "data.fields.out.valueType.relatedListFilter.lazy",
         "data.lifecycle",
@@ -535,11 +530,6 @@
         ""
       ]
     },
-    "data/CurrencyConfig": {
-      "sites": [
-        ""
-      ]
-    },
     "data/DataEngineAggregateOptions": {
       "sites": [
         "filter.options[1].lazy"
@@ -659,7 +649,6 @@
     "data/Field": {
       "sites": [
         "",
-        "currencyConfig",
         "inlineColumns.element",
         "relatedListFilter.lazy"
       ]
@@ -753,7 +742,6 @@
         "actions.element.in.params.element.in",
         "fieldGroups",
         "fields.out.valueType",
-        "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "lifecycle",
@@ -770,7 +758,6 @@
       "sites": [
         "",
         "fields.valueType",
-        "fields.valueType.currencyConfig",
         "fields.valueType.inlineColumns.element",
         "fields.valueType.relatedListFilter.lazy"
       ]
@@ -1002,7 +989,6 @@
     "system/AddFieldOperation": {
       "sites": [
         "field",
-        "field.currencyConfig",
         "field.inlineColumns.element",
         "field.relatedListFilter.lazy"
       ]
@@ -1025,7 +1011,6 @@
     "system/ChangeSet": {
       "sites": [
         "operations.element.options[0].field",
-        "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.inlineColumns.element",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[3].object",
@@ -1050,7 +1035,6 @@
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
         "object.fields.out.valueType",
-        "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.inlineColumns.element",
         "object.fields.out.valueType.relatedListFilter.lazy",
         "object.lifecycle",
@@ -1086,7 +1070,6 @@
     "system/MigrationOperation": {
       "sites": [
         "options[0].field",
-        "options[0].field.currencyConfig",
         "options[0].field.inlineColumns.element",
         "options[0].field.relatedListFilter.lazy",
         "options[3].object",

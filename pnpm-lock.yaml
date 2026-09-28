@@ -616,6 +616,15 @@ importers:
         specifier: ^4.6.1
         version: 4.6.1
     devDependencies:
+      '@objectstack/connector-mcp':
+        specifier: workspace:*
+        version: link:../connectors/connector-mcp
+      '@objectstack/connector-openapi':
+        specifier: workspace:*
+        version: link:../connectors/connector-openapi
+      '@objectstack/connector-rest':
+        specifier: workspace:*
+        version: link:../connectors/connector-rest
       '@objectstack/driver-turso':
         specifier: workspace:*
         version: link:../drivers/driver-turso

@@ -132,6 +132,9 @@
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
+    "@objectstack/connector-mcp": "workspace:*",
+    "@objectstack/connector-openapi": "workspace:*",
+    "@objectstack/connector-rest": "workspace:*",
     "@objectstack/driver-turso": "workspace:*",
     "@objectstack/plugin-dev": "workspace:*",
     "@oclif/plugin-help": "^6.2.58",

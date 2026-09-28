@@ -1332,7 +1332,7 @@ export const ERROR_CODE_LEDGER = {
     'STACK_NAMESPACE_PREFIX_INVALID',            // an object name lacks the `manifest.namespace` prefix
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
-    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
+    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the

@@ -102,10 +102,11 @@ async function generateAll(name: string, namespace?: string): Promise<Record<str
 /**
  * One stack holding every scaffold, under `manifest.namespace` when given.
  *
- * `requires: ['triggers']` is the HOST's declaration, not the scaffold's: the
- * flow scaffold is a `record_change` flow, and `defineStack` refuses such a
- * flow in a stack that does not require the trigger capability. That refusal
- * is about the host's capability list and has nothing to do with names.
+ * `requires: ['automation', 'triggers']` is the HOST's declaration, not the
+ * scaffold's: the flow scaffold is a `record_change` flow, and `defineStack`
+ * refuses such a flow in a stack that does not require the pair that installs
+ * its trigger (#20332). That refusal is about the host's capability list and
+ * has nothing to do with names.
  */
 function composedStack(artifacts: Record<string, Record<string, unknown>>, namespace?: string) {
   const stack: Record<string, unknown> = {
@@ -116,7 +117,7 @@ function composedStack(artifacts: Record<string, Record<string, unknown>>, names
       type: 'app',
       ...(namespace ? { namespace } : {}),
     },
-    requires: ['triggers'],
+    requires: ['automation', 'triggers'],
   };
   for (const [type, artifact] of Object.entries(artifacts)) {
     stack[singularToPlural(type)] = [artifact];
