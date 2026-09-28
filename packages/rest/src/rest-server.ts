@@ -1666,6 +1666,41 @@ function sendMetaItemAbsent(res: any): void {
 }
 
 /**
+ * [#20338] May this caller read PENDING metadata — a `sys_metadata` row in
+ * `state: 'draft'`, unpublished authoring work? THE question every door that
+ * asks the protocol for draft content asks first.
+ *
+ * ONE predicate, never a second rule: `isObjectSchemaMaskExempt`, the check
+ * `GET /meta/_drafts` has asked since #6599 — a system caller, or any holder of
+ * `studio.access`, `setup.access` or `manage_metadata`. Three texts declared
+ * this gate before any door but `_drafts` enforced it: the #9741 ruling
+ * (「declaration ≠ authorization … draft access stays admin-gated upstream」),
+ * ADR-0106 D4 (「draft/preview reads are admin-gated upstream already」) and
+ * ADR-0037's Risks row (「confirm/add a builder/admin role gate on the
+ * dispatcher reads」).
+ *
+ * What a door answers a caller this does not admit: NOT a refusal. It answers
+ * what it answers without the draft switch — the published version, pruned for
+ * that caller as the plain read prunes it, and for a name with nothing
+ * published that door's own absence — so the answer is byte-identical to a read
+ * that never named the switch and says nothing about whether a draft exists.
+ * `?preview=draft` already degrades to the published value when there is no
+ * draft; a caller who may not see drafts is answered the same way.
+ * `/meta/_drafts` alone refuses (403): it lists drafts and nothing else, so it
+ * has no published answer to fall back to.
+ *
+ * Builders are untouched: whoever this admits reads exactly what they read
+ * before (whole for an author on `?state=draft`, #20290; pruned per caller
+ * otherwise). The runtime dispatcher's `/meta` domain asks the same predicate
+ * through its own copy of this delegation. Every draft switch in this file is
+ * ledgered in `meta-draft-read-door-census.test.ts`, which also holds this
+ * function to a bare delegation.
+ */
+function mayReadPendingDrafts(caller: unknown): boolean {
+    return isObjectSchemaMaskExempt(caller);
+}
+
+/**
  * [#20156] What the per-caller read gate of `GET /meta/:type/:name` answers for
  * ONE document — see {@link RestServer.metaItemReadGate}, the one place it is
  * decided.
@@ -5673,8 +5708,11 @@ export class RestServer {
                         // unauthorized caller cannot use the 501-vs-200 answer to
                         // probe which kernels support drafts (same posture as
                         // `_migrate-stored` below).
+                        //
+                        // [#20338] Asked through {@link mayReadPendingDrafts},
+                        // the one question every draft door in this file asks.
                         const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        if (!isObjectSchemaMaskExempt(ctx)) {
+                        if (!mayReadPendingDrafts(ctx)) {
                             res.status(403).json({
                                 error: {
                                     code: 'FORBIDDEN',
@@ -5863,14 +5901,6 @@ export class RestServer {
                         // rule on a READ door, and why it throws instead of
                         // building a body.
                         await this.refuseUnknownMetaListType(p, req.params?.type);
-                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
-                        // overlays pending drafts on the active list, exactly as
-                        // the runtime dispatcher's /metadata/:type route does —
-                        // the console's draft preview (Live Canvas) reads THIS
-                        // route, so dropping the flag here silently renders the
-                        // published-only world.
-                        const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft';
                         // [#9454] The scoped listing is the second door the
                         // card measured absent (`?object=` unchanged after a
                         // runtime PUT). `getMetaItems` unions the env-wide and
@@ -5886,6 +5916,21 @@ export class RestServer {
                             // org-scope comment for the measurement.
                             canonicalMetaUrlType(req.params.type), listCtx?.tenantId,
                         );
+                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
+                        // overlays pending drafts on the active list, exactly as
+                        // the runtime dispatcher's /metadata/:type route does —
+                        // the console's draft preview (Live Canvas) reads THIS
+                        // route, so dropping the flag here silently renders the
+                        // published-only world.
+                        //
+                        // [#20338] …for a caller who may read drafts. Anyone
+                        // else is answered the list as if the switch were
+                        // absent — {@link mayReadPendingDrafts} says why that,
+                        // and not a refusal. Declared WITH its admission so no
+                        // later branch of this handler can read the switch past it.
+                        const previewDrafts = typeof req.query?.preview === 'string'
+                            && req.query.preview.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(listCtx);
                         // [#9741] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
                         // literal used to carry is retired now that the spec
@@ -6612,15 +6657,30 @@ export class RestServer {
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
                         const isAppType = metaType === 'app';
+                        // [#20338] The caller, resolved ABOVE the two draft
+                        // switches because each is admitted per caller; the
+                        // #9454 org resolution below reads the same value.
+                        // Memoised per request — not a new seam.
+                        const readCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#20338] Both draft switches are declared WITH their
+                        // admission ({@link mayReadPendingDrafts}). A caller who
+                        // may not read drafts is answered this read as if
+                        // neither switch were present — the published item,
+                        // pruned as the plain read prunes it, or its absence —
+                        // and no later branch re-reads `?state=` past the gate
+                        // (the uncached arm used to parse it a second time).
                         const isDraftRead = typeof req.query?.state === 'string'
-                            && req.query.state.toLowerCase() === 'draft';
+                            && req.query.state.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(readCtx);
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
                         // draft on the active item (draft wins, falls back to
                         // active). Must also bypass the cache: ETags are keyed
                         // on the published checksum, so a cached 304 would pin
                         // the preview to the stale published world.
                         const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft';
+                            && req.query.preview.toLowerCase() === 'draft'
+                            && mayReadPendingDrafts(readCtx);
                         // ADR-0048 — a `?package=` read is package-scoped
                         // (prefer-local). The cached path keys ETags on
                         // type+name only and does NOT thread `packageId` into
@@ -6706,8 +6766,7 @@ export class RestServer {
                         // two arms incapable of disagreeing about scope.
                         // ⚠️ NOT a new seam: memoised per request, and this
                         // handler resolves the same context again further down.
-                        const readCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#20338] `readCtx` is resolved above the draft switches.
                         const readOrganizationId = organizationIdForMetaRead(
                             // [#10340] FOLDED, not raw — see the PUT door's
                             // org-scope comment for the measurement.
@@ -6860,9 +6919,6 @@ export class RestServer {
                         } else {
                             // Non-cached version
                             const packageId = req.query?.package || undefined;
-                            const stateParam = typeof req.query?.state === 'string'
-                                ? req.query.state.toLowerCase()
-                                : undefined;
                             // [#9741] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
@@ -6874,7 +6930,9 @@ export class RestServer {
                                 type: req.params.type,
                                 name: req.params.name,
                                 packageId,
-                                ...(stateParam === 'draft' ? { state: 'draft' as const } : {}),
+                                // [#20338] The ADMITTED switches declared above,
+                                // never `req.query` re-read here.
+                                ...(isDraftRead ? { state: 'draft' as const } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
                                 // [#9454] The uncached arm — `dashboard`'s route
                                 // (`isDashboardType`), and every read the cache
@@ -6953,12 +7011,16 @@ export class RestServer {
                             // per-DEPLOYMENT gate: a nav entry or a widget whose
                             // service is merely off here is part of the stored
                             // draft, for every caller, as on `/layers`.
+                            // [#20338] "Every other caller" is every other caller
+                            // who may READ drafts: one who may not never reaches
+                            // this branch (`isDraftRead` is false for them), and
+                            // is served the published item under the policy above.
                             //
                             // [plural-spelling commit 83a3b1f2e] (the original
                             // card no longer resolves) Judged on the NORMALIZED
                             // `metaType`, like every gate here: `/meta/books/:name`
                             // is the canonical plural spelling (Prime Directive #3).
-                            const readPolicy: MetaReadGatePolicy = stateParam === 'draft'
+                            const readPolicy: MetaReadGatePolicy = isDraftRead
                                 ? RestServer.STORED_VERSION_DOOR_POLICY
                                 : { arms: 'all', app: 'gate' };
                             const verdict = await this.metaItemReadGate(
@@ -11229,7 +11291,14 @@ export class RestServer {
                     // equalling `'draft'`, so the Studio preview silently ran
                     // over PUBLISHED rows and looked like the draft had no data.
                     if (refuseRepeatedQueryParams(req, res, ['preview'])) return;
-                    const previewDrafts = body.previewDrafts === true || req.query?.preview === 'draft';
+                    // [#20338] …for a caller who may read drafts: both halves
+                    // serve unpublished work (a draft definition, a pending
+                    // seed's rows). Anyone else runs over the published
+                    // dataset and live rows, as if the flag were absent — a
+                    // draft-only `datasetName` is this door's own 404 —
+                    // {@link mayReadPendingDrafts} says why that, and not a refusal.
+                    const previewDrafts = (body.previewDrafts === true || req.query?.preview === 'draft')
+                        && mayReadPendingDrafts(context);
 
                     // Resolve the dataset definition: inline draft (Studio
                     // preview) or a saved dataset by name.
