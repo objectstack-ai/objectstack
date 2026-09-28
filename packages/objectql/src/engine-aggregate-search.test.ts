@@ -196,7 +196,7 @@ describe.each(TIERS)('aggregate honours `search` — %s tier', (tier) => {
         ];
         const answers: string[] = [];
         for (const c of cases) {
-            const flat = await engine.find('crm_account', { ...c } as any);
+            const flat = await engine.find('crm_account', { ...c });
             const grouped = await engine.aggregate('crm_account', { ...c, groupBy: ['region'], aggregations: COUNT });
             expect(byRegion(grouped), JSON.stringify(c)).toEqual(tally(flat));
             answers.push(JSON.stringify(byRegion(grouped)));
@@ -220,7 +220,7 @@ describe.each(TIERS)('aggregate honours `search` — %s tier', (tier) => {
         ];
         for (const bag of bags) {
             reads.length = 0;
-            await engine.find('crm_account', { ...bag } as any);
+            await engine.find('crm_account', { ...bag });
             const found = reads.find((r) => r.via === 'find')!;
             reads.length = 0;
             await engine.aggregate('crm_account', { ...bag, groupBy: ['region'], aggregations: COUNT });
@@ -236,7 +236,7 @@ describe.each(TIERS)('aggregate honours `search` — %s tier', (tier) => {
 
     it('the aggregate over a search equals the aggregate over the same filter written as `where`', async () => {
         reads.length = 0;
-        await engine.find('crm_account', { search: 'harbour', where: { status: 'open' } } as any);
+        await engine.find('crm_account', { search: 'harbour', where: { status: 'open' } });
         const expanded = reads.find((r) => r.via === 'find')!.ast.where;
 
         const viaSearch = await engine.aggregate('crm_account', {
