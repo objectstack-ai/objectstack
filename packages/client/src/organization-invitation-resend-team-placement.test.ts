@@ -65,9 +65,11 @@
  * `auth-login-register-envelope.test.ts`, which carries the same arrangement
  * and the same fix. Here, idle on 4 vCPU at `c74de10a9`, that cost put ① at
  * 1245 ms against 307-411 ms for the four later cases that run `arrange()`.
- * Under twenty-four CPU-bound busy loops, the load that reproduces CI's
- * failure in the sibling suites, ① timed out at vitest's 5000 ms
- * `testTimeout` while every other case passed.
+ * On the `Test Core` shard where a sibling suite went red (PR #20325's run),
+ * ① took 3599 ms here against 486-820 ms for the later cases that run
+ * `arrange()`. Under twenty-four CPU-bound busy loops on this box, the load
+ * that reproduces that red, ① timed out at vitest's 5000 ms `testTimeout` in
+ * every run.
  *
  * So the cost is now paid by a module-scope `await`, during COLLECTION, which
  * no vitest clock covers: `@vitest/runner@4.1.11` wraps hooks and test bodies

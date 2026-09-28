@@ -65,6 +65,15 @@
 // the cost moved out, the `60_000`s are gone and every case runs on the
 // default `testTimeout`.
 //
+// ⚠ What a window holds now is behaviour, and ① holds the most: the card's
+// whole probe, a sign-up plus five more calls that each check a password or a
+// TOTP code. It takes about 700 ms on 4 vCPU with the box otherwise quiet, and
+// a warm-up that ran the WHOLE probe left it no faster than this one does, so
+// none of that is loading. Under sixteen CPU-bound busy loops it took 4.1-4.2
+// s. Under twenty-four, the load that times out every one of these suites'
+// cold first cases, it reached the 5000 ms budget on its own work. If CI ever
+// reds it, the lever is that case's own work, ⛔ not a timeout.
+//
 // ⛔ It shares nothing a case asserts on. Its engine and manager are its own
 // and are destroyed before any case starts. Every case still builds a fresh
 // engine, a fresh `AuthManager` and a fresh sign-up. What it leaves warm is
