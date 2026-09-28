@@ -26,7 +26,9 @@ export const entry: SemanticMigration = {
     + 'parse time (ADR-0078 declared=enforced). Same no-type-gate rationale as the length '
     + 'pair entry (`ui-form-field-length-malformed-refused`): the row usually omits '
     + '`type`, so only value shape is checkable on this surface. '
-    + '⚠️ The gantt `scale` enum is a different surface and is unchanged. '
+    + '⚠️ The timeline view\'s `scale` enum (`TimelineConfigSchema.scale`) is a different '
+    + 'surface and is unchanged; the gantt view has no `scale` key at all — its own '
+    + 'granularity key is `viewMode`. '
     + '`CurrencyConfigSchema.precision` was also a different surface — retired in this '
     + 'same protocol major by `currency-config-precision-removed`, not enforced here.',
   acceptanceCriteria:
