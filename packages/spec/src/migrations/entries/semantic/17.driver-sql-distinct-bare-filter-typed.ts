@@ -13,7 +13,9 @@ export const entry: SemanticMigration = {
   reason:
     'This entry records a TYPE being added, not a surface being withdrawn, and it says '
     + 'so up front because the distinction decides who has to do anything. `distinct` is '
-    + 'not declared on `IDataDriver`, so #5181 / #6075 never reached it and it kept '
+    + 'not declared on `IDataDriver`, so neither the narrowing of `IDataDriver`\'s query '
+    + 'parameters to `DriverQuery` nor the follow-through that brought five drivers\' '
+    + 'implementations in line ever reached it, and it kept '
     + '`filters?: any` while its body said something far more specific — '
     + '`applyFilters(builder, filters)` is handed the ARGUMENT ITSELF, never a `.where` '
     + 'off it. ⚠️ RUNTIME BEHAVIOUR IS UNCHANGED by this entry\'s change: not one '
@@ -26,9 +28,9 @@ export const entry: SemanticMigration = {
     + 'orders" answered with EVERY product, silently. That spelling is now TS2345 at the '
     + 'call site. This is a driver CALL ARGUMENT — code, never stack metadata — so there '
     + 'is no source for the D2 chain to rewrite and deliberately no schema tombstone, the '
-    + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
-    + '(#5540), `actor-user-roles-to-positions` (#6011) and '
-    + '`driver-aggregate-undeclared-key-aliases-removed` (#6321) already carry. ⚠️ It '
+    + 'disposition `data-driver-find-stream-retired`, `storage-service-list-retired`, '
+    + '`actor-user-roles-to-positions` and '
+    + '`driver-aggregate-undeclared-key-aliases-removed` already carry. ⚠️ It '
     + 'differs from those four in ONE measured way a reader should not have to infer: '
     + 'because nothing changed at run time, an untyped JS caller is not affected BY THE '
     + 'UPGRADE at all. The entry is here for a different reason — such a caller is exactly '
@@ -41,9 +43,11 @@ export const entry: SemanticMigration = {
     + 'valid filter — one constraining columns named `object` and `where` — and so is a '
     + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
     + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
-    + 'BARE spelling returns the unfiltered set in silence — stayed open under the #5499 '
-    + 'freeze, which was lifted on 2026-08-11; it is still open, now unexcused rather than '
-    + 'deferred (#6320). ADR-0087, #6320.',
+    + 'BARE spelling returns the unfiltered set in silence — stayed open under the '
+    + 'maintainer\'s 2026-08-05 investment freeze on driver-memory, which was lifted on '
+    + '2026-08-11; it is still open, now unexcused rather than deferred (the measurement '
+    + 'that found the two drivers reading this argument differently split the fix: the sql '
+    + 'half is this entry, and the memory half was held back by that freeze). ADR-0087.',
   acceptanceCriteria:
     'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
     + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '

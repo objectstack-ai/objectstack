@@ -431,15 +431,16 @@ const joinAlias = (path: string): string => path.replace(/\./g, '__');
  * (the resolver takes `locale` positionally for exactly that reason).
  *
  * **A compiled Cube is a REGISTRY artifact, not a response.** `registerDataset`
- * writes it into `CubeRegistry` under the dataset's name, `queryDataset`
- * re-registers on every call, and `getMeta()` — the `/analytics/meta` face —
- * reads it back with **no execution context at all** (`IAnalyticsService.getMeta`
- * takes `cubeName?` and nothing else, and the route calls it without one). So
- * the request locale must NOT be baked in here: one `zh-CN` query would leave a
- * Chinese-labelled cube in a registry every later reader shares, and
- * `/analytics/meta` would answer whoever queried last. Request-scoped
- * resolution belongs where a request is in hand — `queryDataset`'s two field
- * enrichment sites, which read `context.locale`.
+ * writes it into `CubeRegistry` under the dataset's name, and `getMeta()` — the
+ * `/analytics/meta` face — reads it back with **no execution context at all**
+ * (`IAnalyticsService.getMeta` takes `cubeName?` and nothing else, and the route
+ * calls it without one). So the request locale must NOT be baked in here: a
+ * cube compiled at one caller's locale and registered would answer every later
+ * reader in that locale. `queryDataset` compiles through this same function and
+ * registers nothing (#20356), so there is one compilation for both doors and
+ * neither takes a locale. Request-scoped resolution belongs where a request is
+ * in hand — `queryDataset`'s two field enrichment sites, which read
+ * `context.locale`.
  *
  * **The fallback stays `d.name`, and that is safe against the `f.label == null`
  * guard** (#5199 route A / #6761). `Metric.label` and `Dimension.label` are
