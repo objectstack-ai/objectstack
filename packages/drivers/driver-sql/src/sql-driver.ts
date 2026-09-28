@@ -5424,7 +5424,7 @@ function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: nu
 /** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
 interface BetterSqlite3Connection {
   exec(sql: string): unknown;
-  pragma(source: string, options: { simple: true }): unknown;
+  pragma(source: string, options?: { simple: boolean }): unknown;
 }
 
 /**
