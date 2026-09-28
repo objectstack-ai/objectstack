@@ -358,6 +358,18 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     }
   });
 
+  it('a {placeholder} against a numeric `having` column is refused unresolved, as on `where` — before the resolver', async () => {
+    const err = await refusalOf(engine.aggregate(OBJECT, {
+      groupBy: ['f_text'],
+      aggregations: [{ function: 'count', alias: 'n' }],
+      having: { n: { $gte: '{not_a_token}' } },
+    } as EngineAggregateOptions));
+    expect({ code: err!.code, status: err!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(err!.message).toContain('having.n.$gte');
+    expect(err!.message).toContain('{placeholder}');
+    expect(reads).toHaveLength(0);
+  });
+
   it('a numeric string in `having` keeps the groups its number keeps; a text column is not this door\'s', async () => {
     const groups = async (having: FilterCondition) =>
       (await engine.aggregate(OBJECT, {
