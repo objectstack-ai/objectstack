@@ -51,11 +51,36 @@
  * (`'25:00'`), an Invalid Date and unparseable junk come back UNCHANGED rather
  * than as an invented value — a value the rule cannot interpret is never
  * silently rewritten, so junk keeps failing its comparison. Which comparands
- * are uninterpretable — a string this rule hands back unchanged, and [#20240] a
- * number or `Date` on a `date` column whose UTC year falls outside 0..9999, the
- * four-digit years a `YYYY-MM-DD` day can spell — is the question
+ * are uninterpretable — a string this rule hands back unchanged, and a value
+ * outside the supported years below — is the question
  * `isUninterpretableTemporalComparand` (`temporal-comparand.ts`) answers for
  * the doors that refuse them.
+ *
+ * ## [#20264] The supported years: 0001 to 9999, for `date` and `datetime`
+ *
+ * A `date` or `datetime` value names a year from 0001 to 9999, or it is
+ * refused: `INVALID_FILTER` / 400 as a comparand, at the engine's
+ * temporal-comparand door (`where`, a per-aggregation `filter`, `having`), and
+ * `VALIDATION_FAILED` / 400 as a written value, at the record validator. Both
+ * doors ask {@link isOutsideTemporalYearRange}, so there is one range.
+ *
+ * - Above 9999 the forms stop being fixed-width text: `toISOString()` spells
+ *   `+010000-01-01T00:00:00.000Z`, which sorts below every four-digit year, and
+ *   PostgreSQL refuses it.
+ * - Below 0001 there is year 0 and before. PostgreSQL's `DATE` and
+ *   `timestamptz` have no year 0 (`0000-06-15` is `date/time field value out of
+ *   range`), and a negative year's spelling (`-000001-…`) orders as no instant
+ *   does.
+ * - Every shipped backend holds 0001..9999 for a `date`. MySQL documents its
+ *   `DATETIME` from year 1000 only, and reads a stored `DATETIME` in years
+ *   0001..0099 back a century late through its client's instant parser (ADR-0053
+ *   D-F2 keeps that parser): a known misread inside the range, not something
+ *   this rule decides.
+ *
+ * The rule itself stays total: a year outside the range keeps the spelling
+ * `toISOString()` or the unpadded year gives it on the write and read paths
+ * that call this function — no ordered form is invented — and the doors refuse
+ * it before it gets there.
  */
 
 import type { TemporalComparandKind } from './temporal-comparand.js';
@@ -77,10 +102,10 @@ import type { TemporalComparandKind } from './temporal-comparand.js';
  *   read as the `Date` of that value and so its UTC calendar day (a time of
  *   day is dropped, never rounded); a string → its leading `YYYY-MM-DD`. The
  *   year of a `Date` or a number is padded to four digits (`0999-06-15`); a
- *   year below 0 or above 9999 has no `YYYY-MM-DD` form, keeps its unpadded
- *   spelling (`10000-01-01`, `-1-01-01`) for the write and read paths that
- *   call this rule, and is refused as a comparand by the temporal-comparand
- *   door.
+ *   year outside 0001..9999 has no `YYYY-MM-DD` form, keeps its unpadded
+ *   spelling (`10000-01-01`, `0-06-15`, `-1-01-01`) for the write and read
+ *   paths that call this rule, and is refused by the doors in front of them
+ *   (see the module note's supported years).
  * - `time`: a bare `HH:MM[:SS[.f…]]` in range → `HH:MM:SS`, `.fff` kept only
  *   when non-zero (fractions beyond milliseconds truncated); anything else is
  *   read as an INSTANT by the `datetime` rule and keeps its UTC time of day.
@@ -95,31 +120,80 @@ export function temporalStorageForm(value: unknown, kind: TemporalComparandKind)
 }
 
 function canonicalUtcDatetime(value: unknown): unknown {
-  if (value == null) return value;
+  const ms = instantMs(value);
+  return ms === undefined ? value : new Date(ms).toISOString();
+}
+
+/**
+ * The instant the `datetime` rule reads `value` as, in epoch milliseconds, or
+ * `undefined` when it reads none — the one reading {@link canonicalUtcDatetime}
+ * spells and [#20264] {@link isOutsideTemporalYearRange} takes the year of.
+ */
+function instantMs(value: unknown): number | undefined {
+  if (value == null) return undefined;
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? value : value.toISOString();
+    const t = value.getTime();
+    return Number.isNaN(t) ? undefined : t;
   }
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return value;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? value : d.toISOString();
+    if (!Number.isFinite(value)) return undefined;
+    const t = new Date(value).getTime();
+    return Number.isNaN(t) ? undefined : t;
   }
-  if (typeof value !== 'string') return value;
+  if (typeof value !== 'string') return undefined;
   const s = value.trim();
-  if (s === '') return value;
+  if (s === '') return undefined;
   // A bare integer (in either JS or string form) is epoch milliseconds — the
   // shape better-sqlite3 wrote for every `Date` bound before the canon (#3912).
-  if (/^-?\d+$/.test(s)) {
-    const d = new Date(Number(s));
-    return Number.isNaN(d.getTime()) ? value : d.toISOString();
-  }
+  if (/^-?\d+$/.test(s)) return instantMs(Number(s));
   const iso = /^\d{4}-\d{2}-\d{2}$/.test(s)
     ? `${s}T00:00:00.000Z`
     : /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)
       ? `${s.replace(' ', 'T')}Z`
       : s;
   const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+/** [#20264] The first and the last year a `date` or `datetime` value may name. */
+const FIRST_SUPPORTED_YEAR = 1;
+const LAST_SUPPORTED_YEAR = 9999;
+
+/**
+ * [#20264] Does `value` name a year outside 0001..9999 for a column of `kind`?
+ * The one range both doors ask — the temporal-comparand door on a comparand,
+ * the record validator on a written value; see the module note.
+ *
+ * The year is the one the kind's rule reads:
+ *
+ * - `datetime`: the UTC year of the instant {@link canonicalUtcDatetime}
+ *   reads, so `9999-12-31T23:59:59-01:00` (year 10000 in UTC) is outside and
+ *   `0001-01-01T00:00:00+08:00` (year 0 in UTC) is outside too.
+ * - `date`: a string's leading `YYYY-MM-DD` year; otherwise — a number, a
+ *   `Date`, or a string with no leading day that still names an instant, such
+ *   as `+010000-01-01T00:00:00.000Z` — the UTC year of that instant, whose UTC
+ *   calendar day the rule takes.
+ * - `time`: never. A wall clock has no year.
+ *
+ * A finite number past ±8.64e15 names an instant the `Date` type cannot hold,
+ * a year past ±271821, so it is outside. `null`, `NaN`, ±Infinity, an Invalid
+ * Date and a string that names no instant name no year: `false`, and whether
+ * such a value is refused is the caller's other question.
+ */
+export function isOutsideTemporalYearRange(value: unknown, kind: TemporalComparandKind): boolean {
+  if (kind === 'time') return false;
+  if (typeof value === 'number' && Number.isFinite(value) && instantMs(value) === undefined) return true;
+  let year: number | undefined;
+  if (kind === 'date' && typeof value === 'string') {
+    const day = /^(\d{4})-\d{2}-\d{2}/.exec(value.trim());
+    if (day) year = Number(day[1]);
+  }
+  if (year === undefined) {
+    const ms = instantMs(value);
+    if (ms === undefined) return false;
+    year = new Date(ms).getUTCFullYear();
+  }
+  return year < FIRST_SUPPORTED_YEAR || year > LAST_SUPPORTED_YEAR;
 }
 
 function canonicalCalendarDay(value: unknown): unknown {
@@ -135,12 +209,14 @@ function canonicalCalendarDay(value: unknown): unknown {
     // [#20240] The year is padded to four digits, the width `YYYY-MM-DD`
     // declares and the ISO-string and bare-day arms below already produce:
     // `0999-06-15`, never `999-06-15`, which sorted above every padded day as
-    // text (`'9' > '0'`). A year below 0 or above 9999 has no `YYYY-MM-DD`
-    // form at all; it keeps the spelling it always had, and the
-    // temporal-comparand door refuses it as a comparand before it reaches a
-    // comparison (`isUninterpretableTemporalComparand`, `temporal-comparand.ts`).
+    // text (`'9' > '0'`). [#20264] The padding covers 0001..0999, the padded
+    // part of the supported years: a year outside 0001..9999 — year 0
+    // included, which PostgreSQL's `DATE` does not have — has no `YYYY-MM-DD`
+    // form here; it keeps its unpadded spelling, and the doors refuse it
+    // before it reaches a comparison or a write
+    // ({@link isOutsideTemporalYearRange}).
     const y = instant.getUTCFullYear();
-    const yyyy = y >= 0 ? String(y).padStart(4, '0') : String(y);
+    const yyyy = y >= FIRST_SUPPORTED_YEAR ? String(y).padStart(4, '0') : String(y);
     const m = String(instant.getUTCMonth() + 1).padStart(2, '0');
     const d = String(instant.getUTCDate()).padStart(2, '0');
     return `${yyyy}-${m}-${d}`;
