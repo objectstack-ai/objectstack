@@ -18,7 +18,10 @@
  *
  *   - empty domain list under `email_domain`;
  *   - missing / forbidden (`admin_full_access`) self-registration permission set;
- *   - posture ≠ `invite_only` with verification explicitly off.
+ *   - `email_domain` with verification explicitly off (any source), and `open`
+ *     with verification off stored only through the console (#20389: the
+ *     `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override is the deployment's
+ *     opt-out and is honoured under `open`).
  *
  * Envelope note: refusals at THIS seam are log-line refusals (the binding runs
  * inside `applySettings`, not on an HTTP surface), so the assertions pin the
@@ -35,6 +38,7 @@ import type { PluginContext } from '@objectstack/core';
 import { AUDIENCE_POSTURES } from '@objectstack/spec/system';
 import { AuthPlugin } from './auth-plugin.js';
 import { AuthManager } from './auth-manager.js';
+import { OPEN_POSTURE_VERIFICATION_OFF_WARNING } from './audience-posture.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
@@ -122,6 +126,8 @@ describe('auth.audience_* — the settings switch surface (#11768)', () => {
 
   const errorLines = () =>
     (mockContext.logger.error as any).mock.calls.map((c: any[]) => String(c[0]));
+  const warnLines = () =>
+    (mockContext.logger.warn as any).mock.calls.map((c: any[]) => String(c[0]));
 
   // ── 1. The declaration reaches the runtime, whole, through ONE patch ─────
 
@@ -226,11 +232,12 @@ describe('auth.audience_* — the settings switch surface (#11768)', () => {
     expect(errorLines().some((m: string) => m.includes('admin_full_access'))).toBe(true);
   });
 
-  it('a self-registration posture with verification explicitly OFF is refused', async () => {
+  it('open with verification OFF stored only through the CONSOLE is refused — the console cannot make the opt-out', async () => {
     // The audience patch is applied AFTER the main patch, so the merged-result
     // validation judges it against the `require_email_verification: false`
-    // this same pass just applied — the #11739 "verification forced when
-    // posture permits self-registration" invariant, held through the new door.
+    // this same pass just applied. A console-stored value (source `global`) is
+    // not the deployment's declaration, so under `open` it stays the #11739
+    // contradiction (#20389 honours only the deployment's opt-out).
     const { manager } = await boot({
       settings: {
         require_email_verification: { value: false, source: 'global' },
@@ -238,11 +245,90 @@ describe('auth.audience_* — the settings switch surface (#11768)', () => {
         audience_self_registration_permission_set: { value: 'member_default', source: 'global' },
       },
     });
-    // The main patch itself applied…
+    // The main patch itself applied (legal under the standing invite_only)…
     expect((manager as any).config.emailAndPassword?.requireEmailVerification).toBe(false);
     // …and the audience that contradicts it was refused: standing rules.
     expect(manager.getAudience().posture).toBe('invite_only');
     expect(errorLines().some((m: string) => m.includes('requireEmailVerification'))).toBe(true);
+    expect(errorLines().some((m: string) => m.includes('unless the DEPLOYMENT turns it off'))).toBe(true);
+    expect(warnLines()).not.toContain(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
+  });
+
+  it('open with the OS_AUTH_REQUIRE_EMAIL_VERIFICATION env override OFF is honoured — the deployment declared it', async () => {
+    // Every key arrives as an env override (source `env`), the shape a
+    // deployment that configures itself only through OS_AUTH_* produces.
+    const { manager } = await boot({
+      settings: {
+        require_email_verification: { value: false, source: 'env' },
+        audience_posture: { value: 'open', source: 'env' },
+        audience_self_registration_permission_set: { value: 'member_default', source: 'env' },
+      },
+    });
+    expect(manager.getAudience().posture).toBe('open');
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+    expect(errorLines().filter((m: string) => /audience|verification/i.test(m))).toEqual([]);
+    // Loud: exactly one boot warning naming the posture and the consequence.
+    expect(warnLines().filter((m: string) => m === OPEN_POSTURE_VERIFICATION_OFF_WARNING)).toHaveLength(1);
+    expect(OPEN_POSTURE_VERIFICATION_OFF_WARNING).toContain("audience posture 'open'");
+    expect(OPEN_POSTURE_VERIFICATION_OFF_WARNING).toContain('invitation');
+    // A later settings pass re-applies the same declaration without a second warning.
+    for (const cb of subscribers) cb();
+    await vi.waitFor(() => expect(manager.getAudience().posture).toBe('open'));
+    expect(warnLines().filter((m: string) => m === OPEN_POSTURE_VERIFICATION_OFF_WARNING)).toHaveLength(1);
+  });
+
+  it('stack-config open + false AND the same env override: both doors agree, and sibling settings still apply', async () => {
+    // A host that maps the env var into its stack config (the constructor
+    // door) while the settings service ALSO carries it as an env override:
+    // the second door must agree, never refuse the pass — a refused main
+    // patch drops every sibling auth setting in it.
+    const { manager } = await boot({
+      pluginOptions: {
+        audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+        emailAndPassword: { requireEmailVerification: false },
+      },
+      settings: {
+        require_email_verification: { value: false, source: 'env' },
+        session_expiry_days: { value: 3, source: 'global' },
+      },
+    });
+    expect(manager.getAudience().posture).toBe('open');
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+    expect((manager as any).config.session?.expiresIn).toBe(3 * 86_400);
+    expect(warnLines().some((m: string) => m.includes('failed to apply auth settings'))).toBe(false);
+    expect(warnLines().filter((m: string) => m === OPEN_POSTURE_VERIFICATION_OFF_WARNING)).toHaveLength(1);
+  });
+
+  it('email_domain with the env override OFF is still refused — no source can turn verification off there', async () => {
+    const { manager } = await boot({
+      settings: {
+        require_email_verification: { value: false, source: 'env' },
+        audience_posture: { value: 'email_domain', source: 'env' },
+        audience_allowed_email_domains: { value: 'acme.com', source: 'env' },
+        audience_self_registration_permission_set: { value: 'member_default', source: 'env' },
+      },
+    });
+    expect(manager.getAudience().posture).toBe('invite_only'); // refused: standing rules
+    expect(
+      errorLines().some((m: string) =>
+        m.includes("posture 'email_domain' opens self-registration, which FORCES email verification on"),
+      ),
+    ).toBe(true);
+    expect(warnLines()).not.toContain(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
+  });
+
+  it('CONTROL — no opt-out warning when open keeps verification on', async () => {
+    const { manager } = await boot({
+      pluginOptions: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } },
+    });
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(true);
+    expect(warnLines()).not.toContain(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
+  });
+
+  it('CONTROL — no opt-out warning when invite_only turns verification off (nothing forced it there)', async () => {
+    const { manager } = await boot({ pluginOptions: { emailAndPassword: { requireEmailVerification: false } } });
+    expect(manager.getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+    expect(warnLines()).not.toContain(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
   });
 
   // ── 5. Composition: posture anchors the declaration ──────────────────────
