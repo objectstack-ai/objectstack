@@ -259,7 +259,7 @@ directory rather than per file.
 | `ai/` | 78 |
 | `api/` | 431 |
 | `identity/` | 32 |
-| `integration/` | 8 |
+| `integration/` | 5 |
 | `kernel/` | 247 |
 | `marketplace/` | 29 |
 | `qa/` | 6 |
