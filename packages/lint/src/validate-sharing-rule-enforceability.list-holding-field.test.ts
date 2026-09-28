@@ -209,11 +209,21 @@ describe('validateSharingRuleEnforceability — the one-value spellings stay CLE
     });
   }
 
-  it('a single-valued field of a multi-capable type is one value: `select`, `lookup`, `user`, `file`', () => {
-    for (const def of [{ type: 'select' }, { type: 'lookup', reference: 'account' }, { type: 'user' }, { type: 'file' }]) {
+  it('a single-valued field of a multi-capable type is one value: `select`, `lookup`, `user`', () => {
+    for (const def of [{ type: 'select' }, { type: 'lookup', reference: 'account' }, { type: 'user' }]) {
       const objects = [{ ...deal, fields: { ...deal.fields, subject: { label: 'Subject', ...def } } }, account];
       expect(validateSharingRuleEnforceability(stackWith('record.status != record.subject', objects)), def.type).toEqual([]);
     }
+  });
+
+  it('a single-valued `file` field is one value too — not this arm\'s; the comparison-class arm refuses it (#20347)', () => {
+    // It holds no list, so this arm stays silent; but the file family has no
+    // comparison class at all, so the #20347 arm refuses the comparison, once.
+    const objects = [{ ...deal, fields: { ...deal.fields, subject: { label: 'Subject', type: 'file' } } }, account];
+    const findings = validateSharingRuleEnforceability(stackWith('record.status != record.subject', objects));
+    expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
+    expect(findings[0].message).not.toContain('holds a list or');
+    expect(findings[0].message).toContain('share no comparison class');
   });
 });
 

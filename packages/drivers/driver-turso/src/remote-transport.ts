@@ -1370,11 +1370,28 @@ export class RemoteTransport {
   // ===================================
   // CRUD Operations
   // ===================================
+  //
+  // [#20107] Every data method below takes the OBJECT and the TABLE apart.
+  //
+  // `object` is the API name the caller asked for. The driver's rules are keyed
+  // by it (`filterColumnSql`, `nonTextColumn`), and every refusal names it,
+  // because it is the caller's own word. `table` is the physical table the
+  // statement is compiled against, which `TursoDriver` resolves the way
+  // `SqlDriver.getBuilder` resolves it for the local face: a federated
+  // object's `external.remoteName` (ADR-0015), otherwise the object's own name.
+  // Omitted, the object is its own table, which is true of every managed
+  // object and of every call a transport driven standalone receives.
+  //
+  // The two used to be one argument, so on this face a federated object was
+  // read from, and written to, a table named after the object. The remote
+  // table it declared was never reached. Every door but `aggregate` failed with
+  // the backend's own `no such table`, and `aggregate` answered an empty list,
+  // while the local face of the same driver answered from the mapped table.
 
-  async find(object: string, query: any): Promise<Record<string, unknown>[]> {
+  async find(object: string, query: any, table: string = object): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
 
-    const { sql, args } = this.buildSelectSQL(object, query);
+    const { sql, args } = this.buildSelectSQL(object, query, table);
 
     try {
       const result = await this.client!.execute({ sql, args });
@@ -1397,7 +1414,7 @@ export class RemoteTransport {
         // remote Turso path overrides find(), so it needs its own copy.
         if (query?.fields && Array.isArray(query.fields) && query.fields.length > 0) {
           try {
-            const fallback = this.buildSelectSQL(object, { ...query, fields: undefined });
+            const fallback = this.buildSelectSQL(object, { ...query, fields: undefined }, table);
             const result = await this.client!.execute({ sql: fallback.sql, args: fallback.args });
             return this.mapRows(result);
           } catch {
@@ -1421,9 +1438,9 @@ export class RemoteTransport {
    * missing. Neither the contract nor any caller outside these tests spelled it
    * that way, so the branch is gone here too: one driver, one spelling.
    */
-  async findOne(object: string, query: any): Promise<Record<string, unknown> | null> {
+  async findOne(object: string, query: any, table: string = object): Promise<Record<string, unknown> | null> {
     if (query && typeof query === 'object') {
-      const results = await this.find(object, { ...query, limit: 1 });
+      const results = await this.find(object, { ...query, limit: 1 }, table);
       return results[0] || null;
     }
 
@@ -1440,7 +1457,7 @@ export class RemoteTransport {
    * `SqlDriver.aggregate` and `TursoDriver.aggregate` took, because all three are
    * one door and a caller may not be told three different things about it.
    */
-  async aggregate(object: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
+  async aggregate(object: string, query: DriverQuery, table: string = object): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
     this.assertSafeIdentifier(object);
 
@@ -1592,7 +1609,7 @@ export class RemoteTransport {
 
     if (selectParts.length === 0) selectParts.push('*');
 
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${object}"`;
+    let sql = `SELECT ${selectParts.join(', ')} FROM ${this.tableSql(table)}`;
     const args: any[] = [];
 
     const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
@@ -1656,7 +1673,7 @@ export class RemoteTransport {
     return rows;
   }
 
-  async create(object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async create(object: string, data: Record<string, unknown>, table: string = object): Promise<Record<string, unknown>> {
     await this.ensureConnected();
 
     const { _id, ...rest } = data as any;
@@ -1672,12 +1689,12 @@ export class RemoteTransport {
     const placeholders = columns.map(() => '?').join(', ');
     const values = columns.map((col) => this.serializeValue(toInsert[col]));
 
-    const sql = `INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
+    const sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
     await this.client!.execute({ sql, args: values });
 
     // Fetch the inserted row to return complete record
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [toInsert.id],
     });
     const rows = this.mapRows(result);
@@ -1715,26 +1732,36 @@ export class RemoteTransport {
    * ⚠️ `upsert()` is deliberately untouched: an upsert never answers
    * "not found".
    */
-  async update(object: string, id: string | number, data: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  async update(
+    object: string,
+    id: string | number,
+    data: Record<string, unknown>,
+    table: string = object,
+  ): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
     const setClauses = columns.map((col) => `"${col}" = ?`).join(', ');
     const values = columns.map((col) => this.serializeValue(data[col]));
 
-    const sql = `UPDATE "${object}" SET ${setClauses} WHERE "id" = ?`;
+    const sql = `UPDATE ${this.tableSql(table)} SET ${setClauses} WHERE "id" = ?`;
     await this.client!.execute({ sql, args: [...values, id] });
 
     // Fetch updated row
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [id],
     });
     const rows = this.mapRows(result);
     return rows[0] ?? null;
   }
 
-  async upsert(object: string, data: Record<string, unknown>, conflictKeys?: string[]): Promise<Record<string, unknown>> {
+  async upsert(
+    object: string,
+    data: Record<string, unknown>,
+    conflictKeys?: string[],
+    table: string = object,
+  ): Promise<Record<string, unknown>> {
     await this.ensureConnected();
 
     const { _id, ...rest } = data as any;
@@ -1755,7 +1782,7 @@ export class RemoteTransport {
     const updateCols = columns.filter((c) => !mergeKeys.includes(c));
     const updateClauses = updateCols.map((col) => `"${col}" = excluded."${col}"`).join(', ');
 
-    let sql = `INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
+    let sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
     sql += ` ON CONFLICT(${mergeKeys.map((k) => `"${k}"`).join(', ')})`;
     if (updateClauses) {
       sql += ` DO UPDATE SET ${updateClauses}`;
@@ -1777,27 +1804,27 @@ export class RemoteTransport {
 
     // Fetch the result row
     const result = await this.client!.execute({
-      sql: `SELECT * FROM "${object}" WHERE "id" = ?`,
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [toUpsert.id],
     });
     const rows = this.mapRows(result);
     return rows[0] || toUpsert;
   }
 
-  async delete(object: string, id: string | number): Promise<boolean> {
+  async delete(object: string, id: string | number, table: string = object): Promise<boolean> {
     await this.ensureConnected();
     const result = await this.client!.execute({
-      sql: `DELETE FROM "${object}" WHERE "id" = ?`,
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [id],
     });
     return result.rowsAffected > 0;
   }
 
-  async count(object: string, query?: any): Promise<number> {
+  async count(object: string, query?: any, table: string = object): Promise<number> {
     await this.ensureConnected();
 
     const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
-    let sql = `SELECT COUNT(*) as count FROM "${object}"`;
+    let sql = `SELECT COUNT(*) as count FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args });
@@ -1828,11 +1855,16 @@ export class RemoteTransport {
    * The column is a REFERENCE, so it keeps the identifier gate, as
    * `aggregate()`'s group-by field does.
    */
-  compileDistinct(object: string, field: string, where: unknown): { sql: string; args: unknown[] } {
+  compileDistinct(
+    object: string,
+    field: string,
+    where: unknown,
+    table: string = object,
+  ): { sql: string; args: unknown[] } {
     this.assertSafeIdentifier(object);
     this.assertSafeIdentifier(field);
     const { whereClauses, args } = this.buildWhereSQL(object, where);
-    let sql = `SELECT DISTINCT "${field}" FROM "${object}"`;
+    let sql = `SELECT DISTINCT "${field}" FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
     return { sql, args };
   }
@@ -1841,36 +1873,44 @@ export class RemoteTransport {
   // Bulk Operations
   // ===================================
 
-  async bulkCreate(object: string, dataArray: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  async bulkCreate(
+    object: string,
+    dataArray: Record<string, unknown>[],
+    table: string = object,
+  ): Promise<Record<string, unknown>[]> {
     const results: Record<string, unknown>[] = [];
     for (const data of dataArray) {
-      const created = await this.create(object, data);
+      const created = await this.create(object, data, table);
       results.push(created);
     }
     return results;
   }
 
-  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, unknown> }>): Promise<Record<string, unknown>[]> {
+  async bulkUpdate(
+    object: string,
+    updates: Array<{ id: string | number; data: Record<string, unknown> }>,
+    table: string = object,
+  ): Promise<Record<string, unknown>[]> {
     const results: Record<string, unknown>[] = [];
     for (const { id, data } of updates) {
-      const updated = await this.update(object, id, data);
+      const updated = await this.update(object, id, data, table);
       if (updated) results.push(updated);
     }
     return results;
   }
 
-  async bulkDelete(object: string, ids: Array<string | number>): Promise<void> {
+  async bulkDelete(object: string, ids: Array<string | number>, table: string = object): Promise<void> {
     await this.ensureConnected();
     if (ids.length === 0) return;
 
     const placeholders = ids.map(() => '?').join(', ');
     await this.client!.execute({
-      sql: `DELETE FROM "${object}" WHERE "id" IN (${placeholders})`,
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" IN (${placeholders})`,
       args: ids as any[],
     });
   }
 
-  async updateMany(object: string, query: any, data: Record<string, unknown>): Promise<number> {
+  async updateMany(object: string, query: any, data: Record<string, unknown>, table: string = object): Promise<number> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
@@ -1878,18 +1918,18 @@ export class RemoteTransport {
     const setValues = columns.map((col) => this.serializeValue(data[col]));
 
     const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
-    let sql = `UPDATE "${object}" SET ${setClauses}`;
+    let sql = `UPDATE ${this.tableSql(table)} SET ${setClauses}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args: [...setValues, ...whereArgs] });
     return result.rowsAffected;
   }
 
-  async deleteMany(object: string, query: any): Promise<number> {
+  async deleteMany(object: string, query: any, table: string = object): Promise<number> {
     await this.ensureConnected();
 
     const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
-    let sql = `DELETE FROM "${object}"`;
+    let sql = `DELETE FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
     const result = await this.client!.execute({ sql, args });
@@ -2226,6 +2266,28 @@ export class RemoteTransport {
    */
   private aliasIdentifierSql(alias: string): string {
     return `"${String(alias).replace(/"/g, '""')}"`;
+  }
+
+  /**
+   * [#20107] Spell the table a data statement targets — see the note above
+   * {@link find} for where `table` comes from.
+   *
+   * A remote table name is ONE name, so it takes the treatment
+   * {@link aliasIdentifierSql} gives an output name: quoted, with any embedded
+   * quote doubled. Its qualifier is a separate key (`external.remoteSchema`),
+   * which SQLite has no namespace for. It is NOT held to
+   * {@link assertSafeIdentifier}: `external.remoteName` is authored as any
+   * string, since it names a table this platform does not own, and the local
+   * face reads such a table through knex's own identifier quoting. Refusing it
+   * here would make a name the local face reads (`order-lines`) unreadable on
+   * this one. Doubling the quote keeps it a name: nothing inside it can close
+   * the quoting and continue as grammar.
+   *
+   * For a managed object the table is the object's own snake_case name, and
+   * the statement is byte-for-byte the one this transport emitted before.
+   */
+  private tableSql(table: string): string {
+    return this.aliasIdentifierSql(table);
   }
 
   /**
@@ -2588,12 +2650,12 @@ export class RemoteTransport {
    * `orderBy` is likewise an ANSWER — #4363's carve-out for an unpaged
    * unordered read — and emitting no ORDER BY for it is correct.
    */
-  private buildSelectSQL(object: string, query: any): { sql: string; args: any[] } {
+  private buildSelectSQL(object: string, query: any, table: string): { sql: string; args: any[] } {
     const fields = query.fields && Array.isArray(query.fields) && query.fields.length > 0
       ? query.fields.map((f: string) => `"${this.mapSortField(f)}"`).join(', ')
       : '*';
 
-    let sql = `SELECT ${fields} FROM "${object}"`;
+    let sql = `SELECT ${fields} FROM ${this.tableSql(table)}`;
     const allArgs: any[] = [];
 
     // WHERE

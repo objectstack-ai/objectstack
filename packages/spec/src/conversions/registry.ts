@@ -44,6 +44,7 @@ import {
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
+import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -9198,8 +9199,9 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
       connectors: [
         // Minimal by the §3 disjointness contract: the retired key and nothing
         // else this major's other `connectors[]` entries also walk
-        // (`errorMapping`, `health.circuitBreaker.monitoringWindow`,
-        // `triggers[].interval`), so every notice here is attributable to this id.
+        // (`errorMapping`, `health` / `status` / `webhooks` — `health` once as
+        // `health.circuitBreaker.monitoringWindow` — and `triggers[].interval`),
+        // so every notice here is attributable to this id.
         { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
         // A connector that never authored the key keeps its identity — the
         // copy-on-write contract `stripKeys` / `mapCollection` are built on.
@@ -9428,54 +9430,40 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
 };
 
 /**
- * The two connector duration keys whose name carried no unit → suffixed
- * (protocol 18, #15680 for #14478): `health.circuitBreaker.monitoringWindow` →
- * `monitoringWindowMs`, and `triggers[].interval` → `intervalSeconds`.
+ * The connector duration key whose name carried no unit → suffixed (protocol
+ * 18, #15680 for #14478): `triggers[].interval` → `intervalSeconds`. The bare
+ * token `interval` means MILLISECONDS elsewhere in this same spec, so the
+ * identical spelling carried two units a thousandfold apart.
  *
- * One entry because they are one authored document and one authoring session —
- * a connector and the resilience block that guards it. The circuit-breaker case
- * is the sharpest in this card: `monitoringWindow` (ms) sat ONE key below
- * `resetTimeoutMs`, which already spelled its unit, so a single six-key shape
- * carried both conventions and a reader had no rule to apply, only two examples
- * that disagreed. The trigger case is the widest: the bare token `interval`
- * means MILLISECONDS elsewhere in this same spec, so the identical spelling
- * carried two units a thousandfold apart.
+ * ⚠️ This entry used to carry a SECOND rename, `health.circuitBreaker.
+ * monitoringWindow` → `monitoringWindowMs` — the sharpest case of that card:
+ * `monitoringWindow` (ms) sat ONE key below `resetTimeoutMs`, which already
+ * spelled its unit. That half was ABSORBED by `connector-resilience-keys-removed`
+ * (ADR-0049 enforce-or-remove, the same unreleased protocol step): the whole
+ * `health` block left the schema, so a breaker key renamed here would be
+ * stripped by the removal immediately after — a composition with no observable
+ * rename — and the table's disjoint-fixture contract cannot hold a fixture
+ * whose `health` block another entry deletes (`spec-property-retirement` §0,
+ * the `agent.knowledge` precedent). An author who still holds either spelling
+ * is served by the removal: its notice names `health`, and the tombstone's
+ * prescription names both `monitoringWindow` and `monitoringWindowMs`. The id
+ * keeps its original spelling on purpose — ids are how the chain, the step
+ * list and every published changelog refer to an entry.
  *
  * A published connector row lands whole in `sys_metadata` (`ConnectorSchema`'s
  * own docblock says so, which is why #7990 forbids inline secrets on it), so
- * the chain has a seam that sees both keys — hence a conversion rather than the
- * semantic entries this card's two runtime-emitted keys took.
- *
- * The two are walked in one pass but emit SEPARATELY: a connector may author
- * either, both, or neither, and an operator reading the notice list needs to see
- * which of its own keys moved. Retired from the load path, tombstoned at the
- * schema, replayable here.
+ * the chain has a seam that sees the key — hence a conversion. Retired from the
+ * load path, tombstoned at the schema, replayable here.
  */
 const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
   id: 'connector-health-and-trigger-durations-unit-in-key',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'connector.health.circuitBreaker.monitoringWindow, connector.triggers[].interval',
-  summary: "connector keys 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs' and 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; both values are unchanged)",
+  surface: 'connector.triggers[].interval',
+  summary: "connector key 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged. The breaker half, 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs', was absorbed by the removal of the whole 'health' block)",
   apply(stack, emit) {
     return mapCollection(stack, 'connectors', (connector, path) => {
       let next = connector;
-
-      const health = next.health;
-      if (isDict(health)) {
-        const breaker = health.circuitBreaker;
-        if (isDict(breaker)) {
-          const renamedBreaker = renameKey(breaker, 'monitoringWindow', 'monitoringWindowMs');
-          if (renamedBreaker) {
-            emit({
-              from: 'monitoringWindow',
-              to: 'monitoringWindowMs',
-              path: `${path}.health.circuitBreaker.monitoringWindowMs`,
-            });
-            next = { ...next, health: { ...health, circuitBreaker: renamedBreaker } };
-          }
-        }
-      }
 
       const triggers = next.triggers;
       if (Array.isArray(triggers)) {
@@ -9505,16 +9493,15 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
           name: 'billing_api',
           label: 'Billing API',
           type: 'rest',
-          health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindow: 120000 },
-          },
+          // No `health` block: `connector-resilience-keys-removed` strips it
+          // whole, so it may not appear in this fixture (disjointness, §3).
           triggers: [
             { key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 },
             // A webhook trigger authors no interval and keeps its identity.
             { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
           ],
         },
-        // A connector that authored neither key keeps its identity (copy-on-write).
+        // A connector that authored no trigger keeps its identity (copy-on-write).
         { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
       ],
     },
@@ -9524,9 +9511,6 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
           name: 'billing_api',
           label: 'Billing API',
           type: 'rest',
-          health: {
-            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindowMs: 120000 },
-          },
           triggers: [
             { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
             { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
@@ -9535,7 +9519,99 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
         { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `connector.health`, `connector.status` and `connector.webhooks` removed
+ * (protocol 18 — ADR-0049 enforce-or-remove, one batch for the family: the
+ * mainstream connector surface offers none of the three as author metadata, and
+ * what it does offer is already delivered here by other keys).
+ *
+ * Sixteen authorable keys, measured with zero reads outside `packages/spec`:
+ * the `health.healthCheck` probe (eight keys) and `health.circuitBreaker` (six)
+ * had no engine — nothing polled, counted consecutive failures or tripped a
+ * breaker; `status` was read by nothing (the runtime publishes a COMPUTED
+ * `state`, and participation is `enabled`); and a webhook nested in a
+ * connector was never registered as a `webhook` item, so it was never
+ * materialized into `sys_webhook` or delivered.
+ *
+ * A pure lossless delete, one notice per stripped key: none of the three ever
+ * had an effect to preserve. In particular the nested `webhooks` are STRIPPED,
+ * never MOVED to the top-level `webhooks:` collection — moving them would start
+ * deliveries this connector never made, which is an author's decision, not a
+ * mechanical repair (the family's D3 entry, `connector-resilience-keys-retired`,
+ * carries that judgement). The whole `health` block goes as one key, so this
+ * entry also serves an author still holding the pre-rename
+ * `circuitBreaker.monitoringWindow` spelling — the rename's breaker half was
+ * absorbed here (see `connector-health-and-trigger-durations-unit-in-key`).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones all three keys
+ * (`retiredKey`, tsc `never` + the parse-time prescription), so a live parse
+ * refuses loudly. This entry exists because a stored connector row CAN carry
+ * them — the `PUT /meta/connector/:name` door persisted what it parsed,
+ * including the materialized `status: 'inactive'` default — and the
+ * rehydration seam `applyConversionsToStoredItem('connector', row)` is live for
+ * this type; so 17.x rows replay clean, and `os migrate meta --from 17` lists
+ * the mechanical edits for author sources.
+ */
+const connectorResilienceKeysRemoved: MetadataConversion = {
+  id: 'connector-resilience-keys-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'connector.health / connector.status / connector.webhooks',
+  summary:
+    "connector keys 'health', 'status' and 'webhooks' removed (ADR-0049 — no connector health "
+    + 'probe or circuit breaker ever ran, nothing read an authored status (the runtime reports a '
+    + 'computed `state`), and a webhook nested in a connector was never registered or delivered. '
+    + 'The ConnectorHealth / HealthCheckConfig / CircuitBreakerConfig, ConnectorStatus and '
+    + 'WebhookConfig / WebhookEvent / WebhookSignatureAlgorithm shapes went with them)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['health', 'status', 'webhooks'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        {
+          name: 'erp_gateway',
+          label: 'ERP Gateway',
+          type: 'api',
+          // The measured shape: both resilience blocks, including the
+          // pre-rename `monitoringWindow` spelling this removal absorbed.
+          health: {
+            healthCheck: { enabled: true, intervalMs: 30000, endpoint: '/health', method: 'GET' },
+            circuitBreaker: { enabled: true, failureThreshold: 5, monitoringWindow: 120000, fallbackStrategy: 'cache' },
+          },
+          status: 'active',
+          webhooks: [{
+            name: 'erp_order_created',
+            url: 'https://example.invalid/erp/orders',
+            object: 'order',
+            triggers: ['create'],
+            events: ['sync.completed'],
+            signatureAlgorithm: 'hmac_sha512',
+          }],
+        },
+        // A stored 17.x row: the parse that wrote it materialized the
+        // `'inactive'` default, and nothing else of this family.
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas', status: 'inactive' },
+        // A connector that never authored any of the three keeps its identity —
+        // the copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        { name: 'erp_gateway', label: 'ERP Gateway', type: 'api' },
+        { name: 'hr_feed', label: 'HR Feed', type: 'saas' },
+        { name: 'crm_directory', label: 'CRM Directory', type: 'saas' },
+      ],
+    },
+    // Three from `erp_gateway` (health, status, webhooks — the nested keys
+    // leave with their block and are not counted), one from `hr_feed`.
+    expectedNotices: 4,
   },
 };
 
@@ -10113,6 +10189,93 @@ const chartConfigAriaRemoved: MetadataConversion = {
     },
     // One notice per stripped SITE — the widget's chart config and the report's
     // own chart — not one per key name.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `action.aria` removed (ADR-0049 enforce-or-remove; triage record 5860351140
+ * on #20323, following the `ChartConfig.aria` retirement `2bf6ef18d`).
+ *
+ * A pure lossless delete. Measured at the `.objectui-sha` pin `f8a9d0fb05`, no
+ * surface that renders an action reads the action's `aria` — every one of them
+ * derives the accessible name from the action's required `label` (visible
+ * text, or `aria-label` on the icon-only renderer and the overflow trigger), so
+ * the rendered DOM is byte-for-byte the same with or without the block. What
+ * the author meant by it is the paired D3 entry `action-aria-retired`'s
+ * business; this entry only removes the key.
+ *
+ * ⚠️ Coverage boundary — TWO authored sites, because `ActionSchema` is authored
+ * both as a stack collection and nested under its object (the walk
+ * `action-execute-to-target` established):
+ *
+ *   - `actions[]`
+ *   - `objects[].actions[]`
+ *
+ * Both are registered metadata kinds stored as `sys_metadata` rows, so the
+ * stored-row seams replay this entry too. A plugin's type-level
+ * `MetadataTypeRegistryEntry.actions` is code, not a stack source, and no
+ * walker reaches it; the tombstone refuses it at parse instead.
+ *
+ * A SEPARATE family rather than more coordinates on `chart-config-aria-removed`:
+ * that entry's identity is the chart config's measurement, and folding a
+ * differently-evidenced removal into it would misattribute this one in
+ * `spec-changes.json` and the upgrade guide — the reason that entry itself gave
+ * for not joining `dashboard-widget-action-aria-removed`.
+ */
+const actionAriaRemoved: MetadataConversion = {
+  id: 'action-aria-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'action.aria / object.actions[].aria',
+  summary:
+    "action key 'aria' removed (ADR-0049 enforce-or-remove — no action surface ever applied it; "
+    + "every renderer takes the accessible name from the action's required 'label', and the "
+    + "placing node's own 'aria' block names the region)",
+  apply(stack, emit) {
+    const strip = (action: Dict, path: string): Dict => stripKeys(action, ['aria'], emit, path);
+    const withTopLevel = mapCollection(stack, 'actions', strip);
+    return mapCollection(withTopLevel, 'objects', (obj, path) =>
+      mapCollection(obj, 'actions', (action, actionPath) => strip(action, `${path}.${actionPath}`)),
+    );
+  },
+  fixture: {
+    before: {
+      actions: [
+        {
+          name: 'escalate_case',
+          label: 'Escalate',
+          type: 'script',
+          icon: 'arrow-up',
+          aria: { ariaLabel: 'Escalate this case', role: 'button' },
+        },
+        // An action without the key passes through untouched.
+        { name: 'close_case', label: 'Close', type: 'script' },
+      ],
+      objects: [{
+        name: 'support_case',
+        label: 'Case',
+        actions: [{
+          name: 'reopen_case',
+          label: 'Reopen',
+          type: 'script',
+          aria: { ariaDescribedBy: 'reopen_help' },
+        }],
+      }],
+    },
+    after: {
+      actions: [
+        { name: 'escalate_case', label: 'Escalate', type: 'script', icon: 'arrow-up' },
+        { name: 'close_case', label: 'Close', type: 'script' },
+      ],
+      objects: [{
+        name: 'support_case',
+        label: 'Case',
+        actions: [{ name: 'reopen_case', label: 'Reopen', type: 'script' }],
+      }],
+    },
+    // One notice per stripped action — top-level and object-nested — and none
+    // for `close_case`.
     expectedNotices: 2,
   },
 };
@@ -11711,6 +11874,298 @@ const permissionRlsTagsRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `decision` edge branching became EXCLUSIVE — first match in declaration
+ * order — and taking every true branch is now the declared `mode: 'inclusive'`
+ * (protocol 18, #15429; maintainer ruling 「跟主流对齐」, 2026-09-23).
+ *
+ * Until this change an edge-branched decision (no `config.conditions`) took
+ * EVERY out-edge whose condition held, one after another, while its schema,
+ * its docs and the engine's own comment all called it an exclusive gateway. The
+ * traversal now takes the FIRST conditioned out-edge that holds, in the order
+ * the flow's `edges` array declares them — the BPMN exclusive gateway,
+ * Salesforce Flow's Decision, n8n's Switch default — and `mode: 'inclusive'`
+ * is what an author writes to take every one (the BPMN inclusive gateway).
+ *
+ * ## What this rewrites, and the one thing it does not infer
+ *
+ * A decision with no `conditions` list (absent or empty), no `mode` of its
+ * own, and TWO OR MORE out-edges carrying a `condition` (a `fault` edge is
+ * error routing, not a branch) gets `mode: 'inclusive'` written explicitly, so
+ * a flow written while every true branch ran keeps that behaviour under the
+ * exclusive traversal. One conditioned edge plus a default is left alone:
+ * first-match and every-true-edge cannot differ there, so there is nothing to
+ * preserve. A decision whose author already wrote `mode` — either member — has
+ * spoken and is left alone, which is also what makes a second replay a no-op.
+ *
+ * ⛔ No smarter inference: a pair of conditions that PROVABLY partition
+ * (`x == 'a'` beside `x != 'a'`) is rewritten too. First-match equals
+ * every-true-edge only when the conditions are exclusive, and the ruling's
+ * predicate is the count, not a decision procedure over CEL — the author then
+ * deletes the key where the branches partition, and the `os migrate meta` diff
+ * is where that judgment is made (the paired D3 entry
+ * `flow-decision-edge-branching-first-match` says how).
+ *
+ * Reaches the nodes inside ADR-0031 regions (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try` / `.catch`) through the
+ * shared slot table, judging each region's decisions against ITS OWN edges —
+ * a nested gate's out-edges live in the region, not in `flow.edges`.
+ *
+ * ## Where it replays — `os migrate meta --from 17`, and no load seam
+ *
+ * This is a DEFAULT FLIP, not a rename or a delete: the old shape (no `mode`)
+ * still parses and now MEANS exclusive, and the rewrite changes what it means.
+ * Such an entry is sound only where "this source predates the flip" is a fact,
+ * and that is the D3 chain alone — the operator asserts the source's age with
+ * `--from`. `retiredFromLoadPath: true` keeps it off the authoring funnel
+ * (`normalizeStackInput`), where an author who wrote two branches today, against
+ * the contract that says an omitted `mode` is exclusive, must not be rewritten
+ * into an inclusive gateway. The flag's jurisdiction ends there — its own
+ * docblock on `MetadataConversion` says so, and ADR-0087's 2026-07-31 addendum
+ * is why: data-at-rest seams replay retired entries on purpose — so every
+ * data-at-rest seam that opens the retired window has to refuse this id by
+ * name, on the artifact door's precedent for `app-hidden-to-unpublished`
+ * (#17885, `DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`):
+ * the automation engine's flow rehydration seam does
+ * (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in `service-automation/src/engine.ts`:
+ * `registerFlow` serves code-shipped flows, REST bodies and Studio saves alike,
+ * none of them dated), and the artifact-ingestion door does
+ * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `metadata-core/src/artifact-forward-conversion.ts`:
+ * a scaffolded `^17.0.0` floor is a dependency range, not an age). ⛔ Not replayed over stored `sys_metadata`
+ * flows either, by maintainer ruling (letter C on #15429): a stored row takes
+ * the first-match meaning on upgrade — BREAKING, stated in the D3 entry and the
+ * changeset with the one-line fix `mode: 'inclusive'` — with no stored-row
+ * rewrite, no cutoff and no read-path completion. `os migrate meta --stored`
+ * runs this entry's `apply` over each stored flow body only to LIST the nodes
+ * it would write (`collectDecisionModeReview` in
+ * `@objectstack/metadata-protocol`), discarding the result, so the review list
+ * and this predicate are one and the same.
+ */
+const flowDecisionModeInclusiveExplicit: MetadataConversion = {
+  id: 'flow-decision-mode-inclusive-explicit',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'flow.nodes[].config.mode (decision)',
+  summary:
+    "edge-branched decision with two or more conditioned out-edges and no `mode`: `mode: 'inclusive'` written "
+    + 'explicitly (#15429 — the traversal became exclusive, first match in declaration order; the key keeps the '
+    + 'every-true-edge behaviour those nodes had, and the author deletes it where the branches partition)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'flows', (flow, path) => rewriteDecisionModesInGraph(flow, path, emit, 0));
+  },
+  fixture: {
+    // DISJOINT from every other flow fixture: only `start` / `decision` / `end`
+    // / `loop` nodes, no key another entry rewrites, so the whole table hits
+    // only this one.
+    before: {
+      flows: [
+        {
+          name: 'lead_verdict',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            // The hotcrm#1555 shape: two conditioned out-edges that can BOTH
+            // hold for a confirmed record. Rewritten — every true branch ran.
+            { id: 'verdict', type: 'decision', label: 'Verdict?' },
+            { id: 'refuse', type: 'end', label: 'Refuse' },
+            { id: 'convert', type: 'end', label: 'Convert' },
+            // One guarded branch plus the default: first-match and
+            // every-true-edge agree, so there is nothing to preserve. Left alone.
+            { id: 'converted', type: 'decision', label: 'Already converted?' },
+            { id: 'abort', type: 'end', label: 'Abort' },
+            { id: 'proceed', type: 'end', label: 'Proceed' },
+            // The author already spoke. Left alone (and a second replay is a no-op).
+            { id: 'spoken', type: 'decision', label: 'Spoken', config: { mode: 'exclusive' } },
+            { id: 'a', type: 'end', label: 'A' },
+            { id: 'b', type: 'end', label: 'B' },
+            // A `conditions` list is first-match on its own and refuses `mode`. Left alone.
+            {
+              id: 'listed', type: 'decision', label: 'Listed',
+              config: { conditions: [{ label: 'Hot', expression: 'lead.score > 80' }] },
+            },
+            { id: 'hot', type: 'end', label: 'Hot' },
+            // The same two-branch shape inside a loop body, judged against the
+            // region's own edges. Rewritten.
+            {
+              id: 'sweep', type: 'loop', label: 'Sweep',
+              config: {
+                collection: '{leads}',
+                iteratorVariable: 'lead',
+                body: {
+                  nodes: [
+                    { id: 'gate', type: 'decision', label: 'Gate' },
+                    { id: 'x', type: 'end', label: 'X' },
+                    { id: 'y', type: 'end', label: 'Y' },
+                  ],
+                  edges: [
+                    { id: 'g1', source: 'gate', target: 'x', condition: "lead.status != 'suspected'" },
+                    { id: 'g2', source: 'gate', target: 'y', condition: { dialect: 'cel', source: "lead.status == 'confirmed'" } },
+                  ],
+                },
+              },
+            },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'verdict' },
+            { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'suspected'", label: 'Refuse' },
+            { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'", label: 'Convert' },
+            { id: 'e4', source: 'converted', target: 'abort', condition: "lead.status == 'converted'" },
+            { id: 'e5', source: 'converted', target: 'proceed', isDefault: true },
+            { id: 'e6', source: 'spoken', target: 'a', condition: 'x > 1' },
+            { id: 'e7', source: 'spoken', target: 'b', condition: 'x > 2' },
+            { id: 'e8', source: 'listed', target: 'hot', label: 'Hot' },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'lead_verdict',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'verdict', type: 'decision', label: 'Verdict?', config: { mode: 'inclusive' } },
+            { id: 'refuse', type: 'end', label: 'Refuse' },
+            { id: 'convert', type: 'end', label: 'Convert' },
+            { id: 'converted', type: 'decision', label: 'Already converted?' },
+            { id: 'abort', type: 'end', label: 'Abort' },
+            { id: 'proceed', type: 'end', label: 'Proceed' },
+            { id: 'spoken', type: 'decision', label: 'Spoken', config: { mode: 'exclusive' } },
+            { id: 'a', type: 'end', label: 'A' },
+            { id: 'b', type: 'end', label: 'B' },
+            {
+              id: 'listed', type: 'decision', label: 'Listed',
+              config: { conditions: [{ label: 'Hot', expression: 'lead.score > 80' }] },
+            },
+            { id: 'hot', type: 'end', label: 'Hot' },
+            {
+              id: 'sweep', type: 'loop', label: 'Sweep',
+              config: {
+                collection: '{leads}',
+                iteratorVariable: 'lead',
+                body: {
+                  nodes: [
+                    { id: 'gate', type: 'decision', label: 'Gate', config: { mode: 'inclusive' } },
+                    { id: 'x', type: 'end', label: 'X' },
+                    { id: 'y', type: 'end', label: 'Y' },
+                  ],
+                  edges: [
+                    { id: 'g1', source: 'gate', target: 'x', condition: "lead.status != 'suspected'" },
+                    { id: 'g2', source: 'gate', target: 'y', condition: { dialect: 'cel', source: "lead.status == 'confirmed'" } },
+                  ],
+                },
+              },
+            },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'verdict' },
+            { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'suspected'", label: 'Refuse' },
+            { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'", label: 'Convert' },
+            { id: 'e4', source: 'converted', target: 'abort', condition: "lead.status == 'converted'" },
+            { id: 'e5', source: 'converted', target: 'proceed', isDefault: true },
+            { id: 'e6', source: 'spoken', target: 'a', condition: 'x > 1' },
+            { id: 'e7', source: 'spoken', target: 'b', condition: 'x > 2' },
+            { id: 'e8', source: 'listed', target: 'hot', label: 'Hot' },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * The ruling's predicate, as a number: an edge-branched decision is rewritten
+ * when at least this many of its out-edges carry a `condition`. Below it,
+ * first-match and every-true-edge cannot differ.
+ */
+const DECISION_MODE_INCLUSIVE_MIN_CONDITIONED_EDGES = 2;
+
+/**
+ * Depth ceiling for the region recursion — mirrors the walkers' ceiling
+ * (`walk.ts`, `control-flow.zod.ts`): a self-referencing region in a
+ * hand-built stack must not recurse without bound.
+ */
+const DECISION_MODE_REGION_DEPTH_CEILING = 32;
+
+/** An edge whose `condition` carries a predicate — bare text, or the parsed `{ dialect, source }` envelope. */
+function edgeCarriesCondition(edge: Record<string, unknown>): boolean {
+  const c = edge.condition;
+  if (typeof c === 'string') return c.trim() !== '';
+  if (isDict(c)) return typeof c.source === 'string' && c.source.trim() !== '';
+  return false;
+}
+
+/**
+ * One graph — a flow, or one ADR-0031 region — for
+ * {@link flowDecisionModeInclusiveExplicit}: rewrite its own decisions against
+ * its own `edges`, then descend into each node's region slots. Copy-on-write:
+ * the same reference comes back when nothing under it changed.
+ */
+function rewriteDecisionModesInGraph(
+  graph: Record<string, unknown>,
+  path: string,
+  emit: (detail: ConversionApplication) => void,
+  depth: number,
+): Record<string, unknown> {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return graph;
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isDict) : [];
+  let changed = false;
+  const nextNodes = nodes.map((node, i) => {
+    if (!isDict(node)) return node;
+    const nodePath = `${path}.nodes[${i}]`;
+    let next = node;
+
+    if (node.type === 'decision') {
+      const cfg = isDict(node.config) ? node.config : {};
+      const declaresBranches = Array.isArray(cfg.conditions) && cfg.conditions.length > 0;
+      if (!declaresBranches && !('mode' in cfg)) {
+        const conditioned = edges.filter(
+          (e) => e.source === node.id && e.type !== 'fault' && edgeCarriesCondition(e),
+        ).length;
+        if (conditioned >= DECISION_MODE_INCLUSIVE_MIN_CONDITIONED_EDGES) {
+          next = { ...node, config: { ...cfg, mode: 'inclusive' } };
+          emit({
+            from: `mode unset (${conditioned} conditioned out-edges; every one whose condition held was taken)`,
+            to: 'inclusive',
+            path: `${nodePath}.config.mode`,
+          });
+        }
+      }
+    }
+
+    if (depth < DECISION_MODE_REGION_DEPTH_CEILING) {
+      const slots = typeof next.type === 'string' ? FLOW_REGION_SLOTS_BY_TYPE.get(next.type) : undefined;
+      if (slots && isDict(next.config)) {
+        let nextConfig = next.config;
+        for (const slot of slots) {
+          const raw = nextConfig[slot.key];
+          if (slot.arity === 'many') {
+            if (!Array.isArray(raw)) continue;
+            let branchesChanged = false;
+            const nextBranches = raw.map((branch, bi) => {
+              if (!isDict(branch)) return branch;
+              const mapped = rewriteDecisionModesInGraph(branch, `${nodePath}.config.${slot.key}[${bi}]`, emit, depth + 1);
+              if (mapped !== branch) branchesChanged = true;
+              return mapped;
+            });
+            if (branchesChanged) nextConfig = { ...nextConfig, [slot.key]: nextBranches };
+          } else {
+            if (!isDict(raw)) continue;
+            const mapped = rewriteDecisionModesInGraph(raw, `${nodePath}.config.${slot.key}`, emit, depth + 1);
+            if (mapped !== raw) nextConfig = { ...nextConfig, [slot.key]: mapped };
+          }
+        }
+        if (nextConfig !== next.config) next = { ...next, config: nextConfig };
+      }
+    }
+
+    if (next !== node) changed = true;
+    return next;
+  });
+  return changed ? { ...graph, nodes: nextNodes } : graph;
+}
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -11808,6 +12263,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     apiEndpointCacheTtlToCacheTtlSeconds,
     dashboardRefreshIntervalToRefreshIntervalSeconds,
     connectorHealthAndTriggerDurationsUnitInKey,
+    // AFTER the duration renames above: it strips the whole `health` block, and
+    // an author's pre-rename breaker key must end with the block gone.
+    connectorResilienceKeysRemoved,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
     viewPageMountRemoved,
@@ -11824,6 +12282,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     formLayoutInlineGridToVertical,
     currencyConfigPrecisionRemoved,
     permissionRlsTagsRemoved,
+    actionAriaRemoved,
+    flowDecisionModeInclusiveExplicit,
   ],
 };
 

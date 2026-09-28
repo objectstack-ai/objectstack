@@ -479,10 +479,12 @@ so its column shows the tenant default. The cube query on this page carries no c
 
 ### `GET /analytics/meta`
 
-Get metadata for all registered cubes. Cubes are explicitly defined (via `defineCube`
-or the analytics service's `cubes` config) — a cube referenced by a query that isn't
-yet registered is lazily auto-inferred from that query's shape, but metadata isn't
-proactively generated for every object.
+Get metadata for all registered cubes, except those declared `public: false`, which are
+omitted (and refused by `POST /analytics/query` and `POST /analytics/sql` with the same
+`404 CUBE_NOT_FOUND` an unknown cube name gets). Cubes are explicitly defined (via
+`defineCube` or the analytics service's `cubes` config) — a cube referenced by a query
+that isn't yet registered is lazily auto-inferred from that query's shape, but metadata
+isn't proactively generated for every object.
 
 Pass `?cube=<name>` to filter the listing to a single cube (this is what
 `client.analytics.meta(cube)` sends).

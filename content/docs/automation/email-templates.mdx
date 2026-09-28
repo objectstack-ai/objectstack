@@ -64,12 +64,16 @@ rather than silently sending nothing.
 ## Placeholders
 
 Subject and both bodies are rendered by a deliberately tiny mustache-style
-renderer:
+renderer. Escaping follows the face: only `bodyHtml` is markup, so only
+`bodyHtml` HTML-escapes its values. `subject` and `bodyText` are plain text and
+render every value verbatim — an `&` in a link stays `&`, so the plain-text part
+never needs triple braces.
 
 - `{{path.to.value}}` — dotted-path lookup against the send's `data` object,
-  **HTML-escaped**.
-- `{{{path.to.value}}}` — the same value, *not* escaped. Use it only for
-  pre-rendered HTML fragments such as a URL you are dropping into `href`.
+  **HTML-escaped in `bodyHtml`**, verbatim in `subject` and `bodyText`.
+- `{{{path.to.value}}}` — the same value, *not* escaped even in `bodyHtml`. Use
+  it only for pre-rendered HTML fragments such as a URL you are dropping into
+  `href`.
 - `{{ order.total | currency:EUR }}` / `{{ ts | datetime }}` — an optional
   formatter from the shared formula whitelist, so money and dates render the
   same way they do in-app. `datetime` honours the reference timezone the caller

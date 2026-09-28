@@ -9,26 +9,26 @@ import {
   SyncStrategySchema,
   ConnectorConflictResolutionSchema,
   
-  // Webhook
-  WebhookConfigSchema,
-  WebhookEventSchema,
-  
+  // (The connector-nested webhook shape — `WebhookConfigSchema` /
+  // `WebhookEventSchema` — was retired with `connector.webhooks`, ADR-0049;
+  // `connector-resilience-keys-retirement.test.ts` pins its absence.)
+
   // Retry (rate limiting retired in #4911 — see the pin block at the bottom)
   RetryConfigSchema,
   
   // Base Connector
   ConnectorSchema,
   ConnectorTypeSchema,
-  ConnectorStatusSchema,
 
   // Action + its declared upstream effect (#4395)
   ConnectorActionSchema,
   ConnectorActionEffectSchema,
 
-  // Health & Circuit Breaker
-  HealthCheckConfigSchema,
-  CircuitBreakerConfigSchema,
-  ConnectorHealthSchema,
+  // (Health & circuit breaker — `HealthCheckConfigSchema`,
+  // `CircuitBreakerConfigSchema`, `ConnectorHealthSchema` — and
+  // `ConnectorStatusSchema` were retired with `connector.health` /
+  // `connector.status`, ADR-0049; pinned in
+  // `connector-resilience-keys-retirement.test.ts`.)
 
   // Trigger (declared-but-unread, #3197 — the pin block at the bottom judges
   // its unit-carrying key name, not a runtime it does not have)
@@ -38,7 +38,6 @@ import {
   type Connector,
   type ConnectorFieldMapping,
   type DataSyncConfig,
-  type WebhookConfig,
 
   // The `/meta/connector/:name` door's schema (#6245) — `ConnectorSchema` plus
   // the ADR-0097 cross-field rules. The envelope pins below drive BOTH, because
@@ -278,56 +277,13 @@ describe('DataSyncConfigSchema', () => {
 });
 
 // ============================================================================
-// Webhook Configuration Tests
+// Webhook Configuration Tests — RETIRED
 // ============================================================================
-
-describe('WebhookConfigSchema', () => {
-  it('should accept valid webhook configuration', () => {
-    const webhook: WebhookConfig = {
-      name: 'test_webhook',
-      url: 'https://api.example.com/webhooks',
-      events: ['record.created', 'record.updated'],
-      secret: 'webhook-secret',
-      signatureAlgorithm: 'hmac_sha256',
-    };
-    
-    expect(() => WebhookConfigSchema.parse(webhook)).not.toThrow();
-  });
-  
-  it('should use default values', () => {
-    const webhook = {
-      name: 'default_webhook',
-      url: 'https://api.example.com/webhooks',
-      events: ['record.created'],
-    };
-    
-    const parsed = WebhookConfigSchema.parse(webhook);
-    expect(parsed.signatureAlgorithm).toBe('hmac_sha256');
-    expect(parsed.timeoutMs).toBe(30000);
-  });
-
-  // #4001 batch 11 closed the BASE (`automation/webhook.zod.ts`), and zod
-  // carries both the strictness and the base's error map through `.extend()`.
-  // That is the trap the ledger records as finding 16 — a base tightened for
-  // one surface silently retightening another — so it is asserted here, on the
-  // extension's own file, rather than left for someone to discover.
-  it('inherits the base webhook\'s strictness through `.extend()` (#4001)', () => {
-    const result = WebhookConfigSchema.safeParse({
-      name: 'test_webhook', url: 'https://api.example.com/webhooks', notAKey: 1,
-    });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
-  });
-
-  it('still accepts the two keys the extension adds', () => {
-    // The base names `signatureAlgorithm` in `extraKeys` so a typo of it is
-    // still suggestible on this surface, where the base has never heard of it.
-    expect(WebhookConfigSchema.safeParse({
-      name: 'test_webhook', url: 'https://api.example.com/webhooks',
-      events: ['record.created'], signatureAlgorithm: 'hmac_sha512',
-    }).success).toBe(true);
-  });
-});
+// (`WebhookConfigSchema` tests lived here until the connector-nested `webhooks`
+// shape was retired under ADR-0049 — a webhook nested in a connector was never
+// registered or delivered. The retirement is pinned in
+// `connector-resilience-keys-retirement.test.ts`; the delivered webhook shape is
+// `automation/webhook.zod.ts`, tested beside it.)
 
 // ============================================================================
 // Retry Tests
@@ -432,7 +388,6 @@ describe('ConnectorSchema', () => {
         type: 'api-key',
         key: 'test-key',
       },
-      status: 'inactive',
       enabled: true,
     };
     
@@ -479,18 +434,12 @@ describe('ConnectorSchema', () => {
           target: 'external_id',
         },
       ],
-      webhooks: [
-        {
-          name: 'connector_webhook',
-          url: 'https://api.example.com/webhook',
-          events: ['record.created'],
-        },
-      ],
+      // `webhooks` and `status` were authored here until ADR-0049 retired them
+      // with `health` (`connector-resilience-keys-retirement.test.ts`).
       // `rateLimitConfig` was authored here until #4911 retired it.
       retryConfig: {
         maxAttempts: 3,
       },
-      status: 'active',
       enabled: true,
       metadata: {
         version: '1.0',
@@ -500,144 +449,17 @@ describe('ConnectorSchema', () => {
     const parsed = ConnectorSchema.parse(connector);
     expect(parsed.description).toBe('A comprehensive connector');
     expect(parsed.fieldMappings).toHaveLength(1);
-    expect(parsed.webhooks).toHaveLength(1);
     expect(parsed.metadata?.version).toBe('1.0');
   });
 });
 
 // ============================================================================
-// Health Check Configuration Tests
+// Health Check / Circuit Breaker / Connector Health Tests — RETIRED
 // ============================================================================
-
-describe('HealthCheckConfigSchema', () => {
-  it('should accept minimal health check config', () => {
-    const config = HealthCheckConfigSchema.parse({
-      enabled: true,
-    });
-
-    expect(config.enabled).toBe(true);
-    expect(config.intervalMs).toBe(60000);
-    expect(config.timeoutMs).toBe(5000);
-    expect(config.expectedStatus).toBe(200);
-    expect(config.unhealthyThreshold).toBe(3);
-    expect(config.healthyThreshold).toBe(1);
-  });
-
-  it('should accept full health check config', () => {
-    const config = HealthCheckConfigSchema.parse({
-      enabled: true,
-      intervalMs: 30000,
-      timeoutMs: 10000,
-      endpoint: '/health',
-      method: 'HEAD',
-      expectedStatus: 204,
-      unhealthyThreshold: 5,
-      healthyThreshold: 2,
-    });
-
-    expect(config.endpoint).toBe('/health');
-    expect(config.method).toBe('HEAD');
-    expect(config.expectedStatus).toBe(204);
-  });
-
-  it('should accept all HTTP methods for health check', () => {
-    const methods = ['GET', 'HEAD', 'OPTIONS'] as const;
-    methods.forEach(method => {
-      const config = HealthCheckConfigSchema.parse({ enabled: true, method });
-      expect(config.method).toBe(method);
-    });
-  });
-});
-
-// ============================================================================
-// Circuit Breaker Configuration Tests
-// ============================================================================
-
-describe('CircuitBreakerConfigSchema', () => {
-  it('should accept minimal circuit breaker config', () => {
-    const config = CircuitBreakerConfigSchema.parse({
-      enabled: true,
-    });
-
-    expect(config.enabled).toBe(true);
-    expect(config.failureThreshold).toBe(5);
-    expect(config.resetTimeoutMs).toBe(30000);
-    expect(config.halfOpenMaxRequests).toBe(1);
-    expect(config.monitoringWindowMs).toBe(60000);
-  });
-
-  it('should accept full circuit breaker config', () => {
-    const config = CircuitBreakerConfigSchema.parse({
-      enabled: true,
-      failureThreshold: 10,
-      resetTimeoutMs: 60000,
-      halfOpenMaxRequests: 3,
-      monitoringWindowMs: 120000,
-      fallbackStrategy: 'cache',
-    });
-
-    expect(config.failureThreshold).toBe(10);
-    expect(config.fallbackStrategy).toBe('cache');
-  });
-
-  it('should accept all fallback strategies', () => {
-    const strategies = ['cache', 'default_value', 'error', 'queue'] as const;
-    strategies.forEach(strategy => {
-      const config = CircuitBreakerConfigSchema.parse({
-        enabled: true,
-        fallbackStrategy: strategy,
-      });
-      expect(config.fallbackStrategy).toBe(strategy);
-    });
-  });
-});
-
-// ============================================================================
-// Connector Health Configuration Tests
-// ============================================================================
-
-describe('ConnectorHealthSchema', () => {
-  it('should accept empty health config', () => {
-    const health = ConnectorHealthSchema.parse({});
-
-    expect(health.healthCheck).toBeUndefined();
-    expect(health.circuitBreaker).toBeUndefined();
-  });
-
-  it('should accept combined health check and circuit breaker', () => {
-    const health = ConnectorHealthSchema.parse({
-      healthCheck: {
-        enabled: true,
-        intervalMs: 30000,
-        endpoint: '/ping',
-      },
-      circuitBreaker: {
-        enabled: true,
-        failureThreshold: 3,
-        fallbackStrategy: 'queue',
-      },
-    });
-
-    expect(health.healthCheck?.enabled).toBe(true);
-    expect(health.circuitBreaker?.fallbackStrategy).toBe('queue');
-  });
-
-  it('should accept connector with health config', () => {
-    const connector = ConnectorSchema.parse({
-      name: 'resilient_connector',
-      label: 'Resilient Connector',
-      type: 'api',
-      authentication: { type: 'none' },
-      health: {
-        healthCheck: { enabled: true },
-        circuitBreaker: { enabled: true, failureThreshold: 5 },
-      },
-    });
-
-    expect(connector.health?.healthCheck?.enabled).toBe(true);
-    expect(connector.health?.circuitBreaker?.failureThreshold).toBe(5);
-  });
-});
+// (`HealthCheckConfigSchema`, `CircuitBreakerConfigSchema` and
+// `ConnectorHealthSchema` tests lived here until `connector.health` was retired
+// under ADR-0049 — no connector probe or breaker ever ran. The retirement is
+// pinned in `connector-resilience-keys-retirement.test.ts`.)
 
 // ─── [#4911] Outbound rate limiting retired — with the [#4684] pin folded in ──
 //
@@ -1213,19 +1035,10 @@ describe('ADR-0010 protection envelope (#6362)', () => {
     expect(parsed._packageId).toBe('com.acme.billing');
   });
 
-  it('WebhookConfigSchema — the nested webhook — preserves it as well', () => {
-    // `WebhookConfigSchema` extends `WebhookSchema`, which has carried the
-    // spread since #4001 batch 11. Pinned here so the inherited behaviour
-    // cannot regress silently through a future `.extend()`/`.omit()` on the
-    // connector side.
-    const parsed = WebhookConfigSchema.parse({
-      name: 'billing_events',
-      url: 'https://example.com/hooks/billing',
-      ...STAMPED_ENVELOPE,
-    });
-    expect(parsed._packageId).toBe('com.acme.billing');
-    expect(parsed._provenance).toBe('package');
-  });
+  // (A fifth case pinned the envelope through `WebhookConfigSchema`, the
+  // connector-nested webhook. That shape was retired with `connector.webhooks`
+  // under ADR-0049; the delivered `WebhookSchema` it extended keeps the spread
+  // and is pinned beside it in `automation/`.)
 });
 
 // ─── [#14676] `connector.errorMapping` RETIRED, with the three defs it carried ──
@@ -1471,7 +1284,8 @@ describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + Connector
     for (const name of [
       'ConnectorSchema',
       'DeclarativeConnectorEntrySchema',
-      'ConnectorHealthSchema',
+      // (`ConnectorHealthSchema` stood here as a survivor until `connector.health`
+      // was itself retired, ADR-0049 — `connector-resilience-keys-retirement.test.ts`.)
       'RetryConfigSchema',
       'ConnectorFieldMappingSchema',
     ]) {
@@ -1509,22 +1323,18 @@ describe('[#14676] ADR-0087 registration', () => {
   });
 });
 
-// #15680 (stack card 5/6 of #14478) — ruling B. Both old spellings are
-// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
-// never on a bare `toThrow()`. Neither shape is strict, so without the
-// tombstones the old keys would be STRIPPED in silence: a breaker would fall
-// back to its 60-second default window while the author believed they had
-// widened it, and a polling trigger would lose its cadence entirely.
+// #15680 (stack card 5/6 of #14478) — ruling B. The old trigger spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. The shape is not strict, so without the
+// tombstone the old key would be STRIPPED in silence and a polling trigger
+// would lose its cadence entirely.
+//
+// This block also pinned the breaker half of the same card —
+// `CircuitBreakerConfig.monitoringWindow` → `monitoringWindowMs` and the
+// `resetTimeoutMs` neighbour. That half left with the whole `health` block
+// (ADR-0049, `connector-resilience-keys-retirement.test.ts`), which pins that
+// both breaker spellings now meet the `health` prescription.
 describe('connector durations carry their unit (#15680)', () => {
-  it('REFUSES the retired `monitoringWindow` with the rename in the message', () => {
-    const result = CircuitBreakerConfigSchema.safeParse({ enabled: true, monitoringWindow: 120000 });
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'monitoringWindow');
-    expect(issue).toBeDefined();
-    expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain('`CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs`');
-  });
-
   it('REFUSES the retired trigger `interval` with the rename in the message', () => {
     const result = ConnectorTriggerSchema.safeParse({
       key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60,
@@ -1536,15 +1346,9 @@ describe('connector durations carry their unit (#15680)', () => {
     expect(issue!.message).toContain('`ConnectorTrigger.interval` was renamed to `intervalSeconds`');
   });
 
-  it('accepts both new spellings and keeps the 60000 breaker default', () => {
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).monitoringWindowMs).toBe(60000);
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true, monitoringWindowMs: 120000 }).monitoringWindowMs).toBe(120000);
+  it('accepts the new trigger spelling', () => {
     expect(ConnectorTriggerSchema.parse({
       key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60,
     }).intervalSeconds).toBe(60);
-  });
-
-  it('leaves `resetTimeoutMs` alone — it already carried its unit, and is the neighbour that made the bare `monitoringWindow` a collision', () => {
-    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).resetTimeoutMs).toBe(30000);
   });
 });

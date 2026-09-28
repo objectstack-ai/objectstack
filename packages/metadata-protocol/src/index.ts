@@ -159,6 +159,7 @@ export type {
 
 export { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 export type {
+  StoredDecisionModeReview,
   StoredFlowCanonicalization,
   StoredMigrationNotice,
   StoredMigrationOutcome,

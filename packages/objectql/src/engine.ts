@@ -10995,11 +10995,22 @@ export class ObjectQL implements IObjectQLEngine {
    * reference when the tree holds no placeholder, which is every internal query.
    * An unresolvable placeholder throws (see the resolver's module doc) — the one
    * outcome an author can act on.
+   *
+   * [#20334] `position` names the AST's filter slot: `where` (every read verb)
+   * or `having` (`aggregate`). One resolver for both, so a placeholder reads the
+   * same in either position: `{current_year_start}` resolves, and an unknown one
+   * is `FILTER_TOKEN_UNKNOWN` / 400. The resolver needs no field type — it walks
+   * values, never keys — so a `having` keyed by aggregate aliases resolves as a
+   * `where` keyed by fields does.
    */
-  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
-    if (!ast || ast.where == null) return;
+  private resolveWhereTokens(
+    ast: QueryAST | undefined,
+    execCtx?: ExecutionContext,
+    position: 'where' | 'having' = 'where',
+  ): void {
+    if (!ast || ast[position] == null) return;
     // [#20157] Through the stage function the judge also calls.
-    ast.where = resolveWhereFilterTokens(ast.where, execCtx);
+    ast[position] = resolveWhereFilterTokens(ast[position], execCtx);
   }
 
   /**
@@ -16286,8 +16297,12 @@ export class ObjectQL implements IObjectQLEngine {
               // `$contains` over a numeric column in ONE aggregation's filter is
               // the same silent zero at a second filter position, and a door that
               // spoke on `where` alone would answer one mistake two ways within a
-              // single verb.
-              assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // single verb. [#20334] Rooted at this position, as the shape door
+              // above is: the refusal said `at where.amount.$contains`, a `where`
+              // the author did not write.
+              assertTextOperatorTargetsAreStringCapable(
+                  object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
+              );
               // [#20148] …and the TEMPORAL-comparand door, fourth here as it is
               // fourth on `where`'s seam (#8690) — the same function, against the
               // object's declared fields, since this filter reads the object's
@@ -16299,7 +16314,11 @@ export class ObjectQL implements IObjectQLEngine {
               // driver-memory and driver-sql, through the engine and REST.
               // Before the token resolver below, as there, so a `{placeholder}`
               // is stepped around and resolved (or refused) a moment later.
-              assertTemporalComparandsInterpretable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20334] Rooted at this position too: the refusal said
+              // `at where.placed_on.$gt`.
+              assertTemporalComparandsInterpretable(
+                  object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
+              );
               // [#20122] …and the two doors `having` took at its own entry
               // (#20099), so a refusal here is the FILTER's, never the data's:
               //  1. the comparand-TYPE door `where` takes in
@@ -16469,6 +16488,16 @@ export class ObjectQL implements IObjectQLEngine {
               });
           }
       }
+      // [#20334] …and in `having`, through the resolver `where` takes, so a
+      // relative-date token compares as the day it names rather than as its own
+      // text, and an unknown one is `FILTER_TOKEN_UNKNOWN` / 400 (it kept no
+      // group with a 200). Both `applyHaving` doors below read `ast.having`, so
+      // one call covers the native and the rows path, before any driver read.
+      // After every `having` door above, as `where`'s resolution follows its
+      // doors: the temporal door steps around a `{placeholder}` exactly as
+      // `where`'s does (so, as there, the resolved value is not judged again),
+      // and the other doors judged a string that resolves to a string.
+      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, 'having');
 
       await this.executeWithMiddleware(opCtx, async () => {
         const ast = opCtx.ast as QueryAST;

@@ -12,7 +12,8 @@ export const entry: SemanticMigration = {
     + 'has always read; nothing selects a WASM build of libSQL, and a runtime that cannot load native '
     + 'bindings uses the remote arm (`libsql://` / `https://`), which needs none',
   reason:
-    'ADR-0049 enforce-or-remove, ruled per key on the card that measured them (#16024): both keys '
+    'ADR-0049 enforce-or-remove, ruled per key by the maintainer on 2026-09-06, once all three '
+    + 'of this package\'s unread config keys had been measured: both keys '
     + 'were declared on the package schema with a describe promising behaviour ("Local file path for '
     + 'embedded replica", "Use WASM build for edge/browser environments") and were read by no code '
     + '— the driver names the replica file via `url`, and no mechanism picks a WASM build. Forwarding '
@@ -23,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'carry them, and a value that never did anything has no lossless rewrite — the key is deleted by '
     + 'hand. Both stay declared on the package schema as `z.never()` tombstones (the shape is a plain '
     + 'z.object, so a bare deletion would strip in silence) carrying this prescription. The third key '
-    + 'the same card measured, `TursoDriverConfig.timeout`, was forwarded rather than removed and '
+    + 'the same measurement found, `TursoDriverConfig.timeout`, was forwarded rather than removed and '
     + 'needs no entry. ADR-0049, ADR-0087.',
   acceptanceCriteria:
     'No `TursoConfigSchema.parse(…)` input spells `localPath` or `wasm`; authoring either fails to '

@@ -41,7 +41,7 @@ const cube: Cube = {
     assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
     title: { name: 'title', label: 'Title', type: 'string', sql: 'title' },
   },
-  public: false,
+  public: true,
 };
 
 /**

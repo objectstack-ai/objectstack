@@ -48,6 +48,17 @@ export const objectForm = defineForm({
         // object row has nothing to point at).
         { field: 'nameField', type: 'text', colSpan: 1, helpText: 'Field whose value titles each record (e.g. "name", "subject"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews.' },
         { field: 'isSystem', type: 'boolean', colSpan: 1, helpText: 'System object (protected from deletion; defaults sharing to public)' },
+        // #20349 — the object's two own field-name LISTS, beside the `nameField`
+        // pointer. Free text, the `view.form.ts` `searchableFields` row's face:
+        // `string-tags` is a chip input over `string[]`, which is exactly this
+        // node. A field picker is not an option here — `field-multi` takes its
+        // catalog from the draft's `object` / `objectName` / `data.object` /
+        // `interfaceConfig.source`, and an object draft carries none of them, so
+        // it would offer an empty list. A misspelt entry is not dropped quietly:
+        // the publish door refuses it (`object-field-ref-unknown`,
+        // `searchable-field-unknown`, both at `error`), and so does `os validate`.
+        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
+        { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
       ],
     },
     {
@@ -429,6 +440,37 @@ export const objectForm = defineForm({
           { label: 'Public read/write — everyone reads and writes', value: 'public_read_write' },
           { label: 'Controlled by parent — derived from the master record', value: 'controlled_by_parent' },
         ] },
+        // #20349 — the two ADR-0066 access keys, beside `sharingModel`, the third
+        // leg of the same story (grant coverage, capability gate, record
+        // visibility).
+        //
+        // `access` is a strict object with ONE enum member, both of whose values
+        // are spellable option values, so it takes the `lifecycle` row's face: a
+        // composite over a select. The sub-row is declared rather than derived
+        // so its label and help text reach the translation catalogs, which a
+        // schema-derived sub-field never does.
+        {
+          field: 'access',
+          type: 'composite',
+          helpText: "Wildcard-grant posture (ADR-0066 D2). Absent resolves to public. It decides whether a permission set's '*' object grant covers this object; record visibility between users is sharingModel.",
+          fields: [
+            { field: 'default', type: 'select', helpText: "public: covered by '*' wildcard grants. private: needs an explicit per-object grant, and is exempt from wildcard row-level security.", options: [
+              { label: 'Public — covered by wildcard (*) grants', value: 'public' },
+              { label: 'Private — needs an explicit per-object grant', value: 'private' },
+            ] },
+          ],
+        },
+        // `requiredPermissions` is a UNION — `string[]` or a strict
+        // `{read, create, update, delete}` map — so it takes `json`, the
+        // `validations` row's hint, and ⛔ never `string-tags`: that widget reads
+        // a non-array as `[]` and its first edit writes the list back, so a
+        // stored per-operation map would be silently replaced. `json` is not a
+        // registered widget, so the renderer resolves the face from the stored
+        // value's union branch instead: a stored map renders the map's four
+        // sub-keys and an edit merges into the stored object, a stored list
+        // renders a list input. On a create the first branch (the list)
+        // renders; the map arm is written in source or reached once stored.
+        { field: 'requiredPermissions', widget: 'json', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold to reach this object, checked in addition to CRUD grants (ADR-0066 D3). A list gates every operation; a {read, create, update, delete} map gates only the operations it lists. Absent or empty: no capability gate.' },
         // No inline `options` here, and that is a CONSTRAINT rather than a
         // preference: `FormSelectOptionSchema.value` is a system identifier
         // (`^[a-z][a-z0-9_.]*$`), so the four hyphenated members of this enum —

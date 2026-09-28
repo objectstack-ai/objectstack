@@ -142,11 +142,9 @@
     "src/integration/connector.test.ts": {
       "TS6133: 'BasicAuthSchema' is declared but its value is never read.": 1,
       "TS6133: 'BearerAuthSchema' is declared but its value is never read.": 1,
-      "TS6133: 'ConnectorStatusSchema' is declared but its value is never read.": 1,
       "TS6133: 'ConnectorTypeSchema' is declared but its value is never read.": 1,
       "TS6133: 'NoAuthSchema' is declared but its value is never read.": 1,
-      "TS6133: 'SyncStrategySchema' is declared but its value is never read.": 1,
-      "TS6133: 'WebhookEventSchema' is declared but its value is never read.": 1
+      "TS6133: 'SyncStrategySchema' is declared but its value is never read.": 1
     },
     "src/kernel/cluster.test.ts": {
       "TS6133: 'ServiceClusterScopeSchema' is declared but its value is never read.": 1,
@@ -236,9 +234,7 @@
       "TS6133: 'measureDoors' is declared but its value is never read.": 1
     },
     "src/ui/report.test.ts": {
-      "TS18046: 'b' is of type 'unknown'.": 1,
-      "TS18048: 'r.blocks' is possibly 'undefined'.": 1,
-      "TS2571: Object is of type 'unknown'.": 1
+      "TS18048: 'r.blocks' is possibly 'undefined'.": 1
     },
     "src/ui/view.test.ts": {
       "TS2322: Type 'string' is not assignable to type '…'.": 1,

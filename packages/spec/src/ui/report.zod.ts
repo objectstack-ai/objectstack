@@ -203,8 +203,15 @@ const JOINED_CONTAINER_CHART_REFUSED =
  * - A block is drawn as a table and has no `chart` key: #20161 removed it,
  *   because nothing ever drew it. Writing it is refused with the upgrade
  *   prescription (the `guidance` entry below).
+ *
+ * [#19920] Carries its inferred type, not a `z.ZodTypeAny` annotation. That
+ * annotation erased the block's shape, so {@link JoinedReportBlock} and every
+ * `blocks[]` element of {@link Report} / {@link ReportParsed} were `unknown`
+ * and any value type-checked against them. It dodged no TS7056 (measured: none
+ * without it); what it bought was declaration size, the block's shape being
+ * emitted once here and once inside `ReportSchema`'s `blocks`.
  */
-export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObject({
+export const JoinedReportBlockSchema = lazySchema(() => strictObject({
   surface: 'this joined report block',
   history:
     'Until this shape was closed these were dropped silently — the block still rendered, '
@@ -543,7 +550,19 @@ export const ReportSchema = lazySchema(() => strictObject({
   }
 }));
 
+/**
+ * One sub-report of a `type: 'joined'` report (input shape): the input type of
+ * {@link JoinedReportBlockSchema}.
+ *
+ * [#19920] Was `unknown` while that schema was annotated `z.ZodTypeAny`.
+ * `joined-report-block-type.test.ts` pins that `unknown`, an undeclared key and
+ * the retired `chart` are refused here. A static type, not the schema's
+ * verdict: the `order` check against the selected dimensions and measures is a
+ * refinement, not a type, so `JoinedReportBlockSchema` remains the only judge.
+ */
 export type JoinedReportBlock = z.input<typeof JoinedReportBlockSchema>;
+/** Post-parse shape of {@link JoinedReportBlock} — defaults applied, transforms run (ADR-0122). */
+export type JoinedReportBlockParsed = z.infer<typeof JoinedReportBlockSchema>;
 
 /**
  * Report Types

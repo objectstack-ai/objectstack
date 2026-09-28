@@ -144,7 +144,7 @@ export interface TextOperatorOverNonTextField {
   returnType?: string;
   /** The text operator aimed at it. */
   operator: TextFilterOperator;
-  /** The `where.…` key path the offending operator sits at. */
+  /** The `where.…` (or `aggregations[i].filter.…`) key path the offending operator sits at. */
   path: string;
 }
 
@@ -245,14 +245,19 @@ export function findTextOperatorOverNonTextField(
  * envelope (#5869 / #7047), naming the field and its declared type as the
  * ruling requires. No code is minted: `INVALID_FILTER` already exists
  * (`StandardErrorCode`, `packages/spec/src/api/errors.zod.ts`).
+ *
+ * [#20334] `path` roots the refusal at the position the filter sits in:
+ * `where` by default, `aggregations[i].filter` for a per-aggregation filter,
+ * the root the list-shape and comparand-type doors already name there.
  */
 export function assertTextOperatorTargetsAreStringCapable(
   object: string,
   operation: string,
   schema: unknown,
   where: unknown,
+  path = 'where',
 ): void {
-  const hit = findTextOperatorOverNonTextField(schema, where);
+  const hit = findTextOperatorOverNonTextField(schema, where, path);
   if (!hit) return;
   const declared = hit.returnType === undefined
     ? `${hit.declaredType} field`

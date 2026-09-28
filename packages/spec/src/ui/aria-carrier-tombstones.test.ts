@@ -7,6 +7,8 @@ import { ChartConfigSchema } from './chart.zod';
 import { PageSchema, PageComponentSchema } from './page.zod';
 import { ReportChartSchema } from './report.zod';
 import { ListViewSchema } from './view.zod';
+import { ActionSchema } from './action.zod';
+import { ObjectSchema } from '../data/object.zod';
 
 /**
  * The two `aria` tombstones must not point at each other (#6756).
@@ -242,6 +244,79 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
     const message = messageOf(ReportChartSchema.safeParse(reportChartWithAria));
     expect(message).toContain('`ChartConfig.aria`');
     expect(message).toContain('`report.blocks[].chart.aria`');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // The fourth member (#20323): `action.aria`. Graded `live` in
+  // `liveness/action.json` on an uncited "PARTIAL" note with no reader behind
+  // it — at the `.objectui-sha` pin `f8a9d0fb05` no surface that renders an
+  // action reads the action's `aria`. Joined here for the reason the chart
+  // member gave: every new `aria` tombstone is one more prescription that can
+  // go stale at its siblings.
+  //
+  // Its replacement channel differs from the chart's, and that difference is
+  // what is pinned: the accessible name that IS applied is the action's own
+  // required `label` (visible text, or `aria-label` on the icon-only renderer),
+  // and a REGION name belongs to the node that places the actions — the page
+  // component or the list view, both asserted live in the ground truth above.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const actionWithAria = { name: 'escalate_case', label: 'Escalate', target: 'noop', aria: ARIA };
+
+  it('the action tombstone fires and prescribes the label and the placing node, never a retired carrier', () => {
+    const message = messageOf(ActionSchema.safeParse(actionWithAria));
+
+    // Anti-vacuity: `ActionSchema` is a `strictObject`, so a deleted tombstone
+    // still refuses the key — as a generic unrecognized-key rejection that
+    // cannot carry this opening clause. DISAPPEARANCE fails here.
+    expect(
+      message,
+      'the action `aria` prescription must still be reachable through the parse',
+    ).toContain('`action.aria` was removed');
+
+    // The channel that IS applied on the action itself — naming it is the
+    // reason the key could be REMOVED rather than enforced.
+    expect(message, 'the prescription must name the action\'s own accessible name').toContain('`label`');
+
+    // The placing node's vocabulary, and the two live nodes that carry it.
+    for (const key of ['`ariaLabel`', '`ariaDescribedBy`', '`role`']) {
+      expect(message, `the prescription must name ${key}`).toContain(key);
+    }
+    for (const live of ['`page.components[].aria`', 'list view `aria`']) {
+      expect(message, `the prescription must name ${live}`).toContain(live);
+    }
+
+    // ...and nothing retired, by exact spelling.
+    expect(message, 'must not point at `app.aria`').not.toMatch(/app\.aria/i);
+    expect(message, 'must not point at `dashboard.widgets[].aria`').not.toMatch(/dashboard\.widgets\[\]\.aria/i);
+    expect(message, 'must not point at the retired chart config block').not.toMatch(/chartConfig\.aria|ChartConfig\.aria/);
+
+    // None of the above bought by weakening the prescription itself.
+    expect(message).toContain('Delete the key.');
+    expect(message).toContain('os migrate meta --from 17');
+    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
+  });
+
+  it('the action tombstone refuses on the object-nested coordinate too', () => {
+    // `ObjectSchema.actions` is `z.array(ActionSchema)`, so the same tombstone
+    // answers there — the second site the D2 conversion walks.
+    const result = ObjectSchema.safeParse({ name: 'support_case', label: 'Case', actions: [actionWithAria] });
+    const message = messageOf(result);
+    expect(message).toContain('`action.aria` was removed');
+  });
+
+  it('control: the same action without `aria` parses, and a sibling node\'s `aria` still does', () => {
+    const withoutAria = { name: 'escalate_case', label: 'Escalate', target: 'noop' };
+    expect(ActionSchema.safeParse(withoutAria).success, 'an aria-less action').toBe(true);
+    // The sibling node the prescription sends the author to, with the SAME
+    // block — the retirement is a key retirement on one schema, never a
+    // withdrawal of the shared `AriaProps` shape.
+    expect(PageComponentSchema.safeParse({
+      type: 'record:quick_actions', properties: {}, aria: ARIA,
+    }).success, '`page.components[].aria` on the node that places record actions').toBe(true);
+    expect(ListViewSchema.safeParse({
+      type: 'grid', columns: ['name'], aria: { ariaLabel: 'Open cases', ariaDescribedBy: 'cases_help', role: 'region' },
+    }).success, 'the list view `aria`, all three keys').toBe(true);
   });
 
   it('the two former alias spellings refuse instead of renaming onto the tombstone', () => {
