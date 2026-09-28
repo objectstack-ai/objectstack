@@ -166,26 +166,11 @@ export const viewForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'userFilters', type: 'composite', helpText: 'Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets' },
-        {
-          field: 'tabs',
-          type: 'repeater',
-          helpText: 'In-view filter tabs — each tab applies its own filter rules',
-          // Row-property names (#17508): every authorable row property, `label`
-          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
-          // emits a catalog key per column and the panel keeps its schema-derived
-          // widgets (no `type` here).
-          fields: [
-            { field: 'name', label: 'Name' },
-            { field: 'label', label: 'Label' },
-            { field: 'icon', label: 'Icon' },
-            { field: 'view', label: 'List View' },
-            { field: 'filter', label: 'Filter' },
-            { field: 'order', label: 'Display Order' },
-            { field: 'pinned', label: 'Pinned' },
-            { field: 'isDefault', label: 'Default Tab' },
-            { field: 'visible', label: 'Visible' },
-          ],
-        },
+        // [#20301] The `tabs` repeater was REMOVED with the key it wrote — now a
+        // `retiredKey()` tombstone on `ListViewSchema` (no renderer ever mounted a
+        // tab bar for it). A form input for an unwritable key is the
+        // false-compliant UI half of a retirement; named presets are `listViews`
+        // entries, each a tab in the saved-view switcher.
         { field: 'appearance', type: 'composite', helpText: 'allowedVisualizations: which renderers users may switch between' },
         { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles: sort / search / filter / row height' },
         { field: 'addRecord', type: 'composite' },
