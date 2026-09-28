@@ -53,7 +53,7 @@ import {
 // `kernel/Manifest:loading` precedent). The D3 semantic entry
 // `rest-api-endpoint-handler-status-retired` carries the prescription.
 //
-// On the assertion set (the #8586 / #11846 precedent): a schema refusal
+// On the assertion set (the #8586 / commit 0c2334f6c precedent): a schema refusal
 // raises a `ZodError` whose issues carry `code` and `path` but no ADR-0112
 // `status` — that envelope belongs to the API error surface. So these pins
 // assert the strongest set this surface really has: refusal, the issue

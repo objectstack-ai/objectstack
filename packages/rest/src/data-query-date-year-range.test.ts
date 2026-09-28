@@ -27,9 +27,9 @@
  * string for 0999-06-15 answer one count at every position; and a number or
  * `Date` whose day falls in a year below 0 or above 9999 is refused
  * `INVALID_FILTER` / 400 before any read, as its ISO string already was, at
- * `where` and the per-aggregation `filter`. `having` does not reach the
- * temporal-comparand door for any comparand, a string included, so its
- * out-of-range cells are not this file's.
+ * `where` and the per-aggregation `filter`. [#20263] `having` reaches the same
+ * door since, by the same predicate; its out-of-range cells are pinned in
+ * `data-query-having-temporal-door.test.ts`, not in this file.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';

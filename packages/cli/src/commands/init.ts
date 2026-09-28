@@ -20,6 +20,7 @@ import {
 } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
+import { GENERATOR_SCAFFOLD_TARGETS } from './generate.js';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -571,6 +572,140 @@ export function renderPnpmWorkspaceYaml(
   ].join('\n');
 }
 
+// ─── Wired barrels (#20215) ──────────────────────────────────────────
+
+/**
+ * Every directory `os generate` writes into, with the `defineStack` key its
+ * barrel is wired under — DERIVED from the generator roster, so `os init` and
+ * `os g` cannot disagree about where a type lives or what it is collected as,
+ * and a generator added later is wired by every template that wires the rest.
+ *
+ * ## The defect (#20215)
+ *
+ * The `app` and `plugin` configs imported `./src/objects` alone. `os g view`,
+ * `action`, `flow`, `dashboard`, `app` and `skill` each wrote a scaffold and a
+ * barrel that nothing imported, and `os validate` then exited 0 with
+ * `UI: 0 Apps` and `Logic: 0 Flows` — the road step "a scaffolded project
+ * validates" held only because nothing generated was ever looked at.
+ *
+ * ## Why the templates wire every barrel, and `os g` never edits a config
+ *
+ * The alternative was `os g` inserting an import and a key into the config it
+ * finds. That is a config EDITOR, and a config is the author's file: reordered,
+ * split across variables, `.js` / `.mjs`, fed from `packages[]`. Wiring every
+ * barrel here, once, changes no file the author has touched, and a project
+ * this command did not shape still hears whether a scaffold arrived — `os g`
+ * loads the config after writing and says so (see `utils/scaffold-wiring.ts`).
+ * The measurement behind the choice is recorded on the pull request that made
+ * it.
+ */
+export const SCAFFOLD_WIRED_BARRELS: readonly { type: string; dir: string; stackKey: string }[] =
+  GENERATOR_SCAFFOLD_TARGETS.map((t) => ({ type: t.type, dir: t.defaultDir, stackKey: t.stackKey }));
+
+/**
+ * The union of the capability tokens the scaffolds need to run — today the
+ * `flow` scaffold's pair. Declared by every template that wires the `flows`
+ * barrel: without `triggers` a record-change flow makes `defineStack` refuse
+ * the config, so the first `os g flow` would break the project, and without
+ * `automation` the server loads the flow and never runs it.
+ */
+export const SCAFFOLD_WIRED_REQUIRES: readonly string[] = [
+  ...new Set(GENERATOR_SCAFFOLD_TARGETS.flatMap((t) => t.requires)),
+];
+
+/**
+ * The import lines, one per wired barrel, bound under its stack key, and the
+ * one helper the collection keys read them through.
+ *
+ * ## Why `exportsOf` and not `Object.values`
+ *
+ * `Object.values(barrel)` is the idiom the example apps use, and it is right
+ * for a barrel that exports something. For an EMPTY barrel it does not
+ * type-check: with no export to infer from, TypeScript takes the element type
+ * from `defineStack`'s own collection type, whose name-keyed map branch makes
+ * `name` optional, and the list it then infers is assignable to neither
+ * branch — measured, `tsc --noEmit` refused the `actions`, `flows`,
+ * `dashboards` and `apps` keys of a fresh project (TS2322), while `views` and
+ * `skills`, which have no map form, passed. `exportsOf` takes its element type
+ * from the barrel alone: `never[]` while the barrel exports nothing, and the
+ * exported type once it does, so a fresh project passes its own `typecheck`
+ * and a filled one is checked exactly as strictly as before.
+ */
+function renderWiredImports(): string {
+  return [
+    ...SCAFFOLD_WIRED_BARRELS.map((b) => `import * as ${b.stackKey} from './${b.dir}';`),
+    '',
+    '// Every value a barrel exports, as the list a stack key takes: typed by what',
+    '// the barrel exports, and an empty list while it exports nothing yet.',
+    'const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);',
+  ].join('\n');
+}
+
+/** The `requires` entry and the collection keys inside `defineStack({ … })`. */
+function renderWiredStackKeys(): string {
+  const requires = SCAFFOLD_WIRED_REQUIRES.map((t) => `'${t}'`).join(', ');
+  return [
+    `  // What the files \`objectstack generate\` writes need in order to run. A`,
+    `  // flow that starts on a record change is fired by 'triggers' and run by`,
+    `  // 'automation': without 'triggers' this config stops loading once it holds`,
+    `  // such a flow, and without 'automation' the server loads the flow and never`,
+    `  // runs it. Both can go if this project will never hold a flow.`,
+    `  requires: [${requires}],`,
+    '',
+    `  // Every directory \`objectstack generate\` writes into is wired here: its`,
+    `  // index.ts exports what the directory holds, and each list below hands`,
+    `  // those exports to the stack. \`objectstack generate view NAME\` adds a file`,
+    `  // and one export line, and the view is part of this stack with no edit to`,
+    `  // this file. A directory that is not wired here is never loaded, and`,
+    `  // \`objectstack validate\` neither counts nor checks what it holds.`,
+    ...SCAFFOLD_WIRED_BARRELS.map((b) => `  ${b.stackKey}: exportsOf(${b.stackKey}),`),
+  ].join('\n');
+}
+
+/**
+ * The barrel `os init` writes for a wired directory its template puts nothing
+ * in. `export {}` makes it a module, so the config's `import * as` resolves to
+ * an empty namespace and `exportsOf` to `[]` — a key `os validate` counts at
+ * zero rather than an import that fails.
+ */
+function renderEmptyWiredBarrel(stackKey: string, type: string): string {
+  return `// The ${stackKey} in this directory. \`objectstack generate ${type} NAME\` writes one
+// here and adds its export line below. objectstack.config.ts hands every
+// export of this file to the stack, so a ${type} exported here is part of it,
+// and a ${type} file this index does not export is never loaded.
+export {};
+`;
+}
+
+/**
+ * The renderers of the empty wired barrels, which {@link writeTemplateSrcFiles}
+ * writes only where no file exists. `os init` without a name scaffolds into
+ * the current directory, which may already hold a `src/views/index.ts` of the
+ * author's; the config wires whatever that file exports, so keeping it loses
+ * nothing, and overwriting it would. Keyed by renderer rather than by path, so
+ * a barrel a template writes WITH content (`src/objects/index.ts`) keeps the
+ * write it always had.
+ */
+const EMPTY_WIRED_BARRELS = new WeakSet<(name: string, namespace: string) => string>();
+
+/**
+ * `srcFiles` plus an empty barrel for every wired directory the template does
+ * not already write an `index.ts` into.
+ */
+function withWiredBarrels(
+  srcFiles: Record<string, (name: string, namespace: string) => string>,
+): Record<string, (name: string, namespace: string) => string> {
+  const out = { ...srcFiles };
+  for (const b of SCAFFOLD_WIRED_BARRELS) {
+    const barrel = `${b.dir}/index.ts`;
+    if (barrel in out) continue;
+    const render = () => renderEmptyWiredBarrel(b.stackKey, b.type);
+    EMPTY_WIRED_BARRELS.add(render);
+    out[barrel] = render;
+  }
+  return out;
+}
+
 export const TEMPLATES: Record<string, {
   description: string;
   dependencies: Record<string, string>;
@@ -614,7 +749,7 @@ export const TEMPLATES: Record<string, {
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
-import * as objects from './src/objects';
+${renderWiredImports()}
 
 // This file is a MODULE, and the whole module is the stack: the default
 // export below is the base, and every NAMED export is merged onto it as a
@@ -640,10 +775,10 @@ export default defineStack({
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
-  objects: Object.values(objects),
+${renderWiredStackKeys()}
 });
 `,
-    srcFiles: {
+    srcFiles: withWiredBarrels({
       'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
       'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
@@ -683,7 +818,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 
 export default ${toCamelCase(namespace)}Item;
 `,
-    },
+    }),
   },
 
   plugin: {
@@ -708,7 +843,7 @@ export default ${toCamelCase(namespace)}Item;
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
-import * as objects from './src/objects';
+${renderWiredImports()}
 
 // This file is a MODULE, and the whole module is the stack: the default
 // export below is the base, and every NAMED export is merged onto it as a
@@ -735,10 +870,10 @@ export default defineStack({
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
-  objects: Object.values(objects),
+${renderWiredStackKeys()}
 });
 `,
-    srcFiles: {
+    srcFiles: withWiredBarrels({
       'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
       'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
@@ -764,7 +899,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 
 export default ${toCamelCase(namespace)}Item;
 `,
-    },
+    }),
   },
 
   empty: {
@@ -890,6 +1025,10 @@ export function writeTemplateSrcFiles(
     const resolvedPath = filePath.replace(/__name__/g, namespace);
     const fullPath = path.join(targetDir, resolvedPath);
     const dir = path.dirname(fullPath);
+
+    // An empty wired barrel is written only where none exists (#20215): see
+    // EMPTY_WIRED_BARRELS for the author's file this would overwrite.
+    if (EMPTY_WIRED_BARRELS.has(contentFn) && fs.existsSync(fullPath)) continue;
 
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

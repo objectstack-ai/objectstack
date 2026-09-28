@@ -24,7 +24,9 @@
  * refusals from being satisfied by a command that refuses everything: in the
  * SAME namespaced project `os g object order_line` generates, prefixed; and in
  * the SAME broken project `os g dashboard sales` generates, because a
- * dashboard names no object and never reads the config.
+ * dashboard names no object, so it does not refuse on a config that does not
+ * load (it reads the config since #20215, to say whether the scaffold reached
+ * the stack, and here it says that cannot be told).
  *
  * The residual refusal's rule is compared against what
  * `validateObjectNamespacePrefix` itself says about the prefixed name, so the

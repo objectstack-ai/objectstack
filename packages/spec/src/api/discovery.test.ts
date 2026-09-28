@@ -1241,7 +1241,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
     }
   });
 
-  // [#6287] `preview` was one of this fixture's three examples until the fold
+  // [commit 84c86fb45] `preview` was one of this fixture's three examples until the fold
   // table grew a row for it. The RULE is unchanged and still pinned — an
   // unrecognised spelling never claims production — but `preview` is no longer
   // an example of one: it is a declared `EnvironmentTypeSchema` member with a
@@ -1272,7 +1272,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
 });
 
 /**
- * [#6287] Every `EnvironmentType` member folds by DECLARATION, not by fallback.
+ * [commit 84c86fb45] Every `EnvironmentType` member folds by DECLARATION, not by fallback.
  *
  * Before this, five of the seven members had a row in the fold table and
  * `preview` / `trial` fell through `?? 'development'` — a fold nobody had
@@ -1330,7 +1330,7 @@ describe('[#6287] the fold table is total over EnvironmentType', () => {
 
   it('rejects a fold table that misses a member — the exhaustiveness gate itself', () => {
     // ⚠️ This assertion is made by `tsc`, not by vitest, and that is the point.
-    // A RUNTIME exhaustiveness test cannot see the defect #6287 reported: the
+    // A RUNTIME exhaustiveness test cannot see the defect commit 84c86fb45 repaired: the
     // fallback and three declared rows all produce `'development'`, so calling
     // `resolveDiscoveryEnvironment('preview')` returned an identical answer
     // whether a row existed or the `??` invented one. Such a test would have
@@ -1350,12 +1350,12 @@ describe('[#6287] the fold table is total over EnvironmentType', () => {
     //     exported, and exporting it to satisfy a test would put a private
     //     lookup on this package's public surface. That edit is a deliberate,
     //     visible change to a line whose own comment forbids it, not the silent
-    //     drift #6287 was about — the drift was a member that nobody had to
+    //     drift commit 84c86fb45 closed — the drift was a member that nobody had to
     //     touch anything to omit.
     // `packages/spec`'s test layer IS type-checked (`tsconfig.test.json`, named
     // in the `typecheck` script since #5286) and this file carries no entry in
     // `test-typecheck-debt.json`, so the directive is live, not phantom.
-    // @ts-expect-error [#6287] `trial` has no fold — a partial table must not type-check.
+    // @ts-expect-error [commit 84c86fb45] `trial` has no fold — a partial table must not type-check.
     const missingTrial: Record<EnvironmentType, DiscoveryEnvironment> = {
       production: 'production',
       sandbox: 'sandbox',

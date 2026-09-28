@@ -285,11 +285,13 @@ describe('#11389 — a Postgres `date` never becomes a JS Date', () => {
     expect((sqlite as any).knex.client.config.pool?.afterCreate).toBeUndefined();
 
     // MySQL keeps exactly the UTC-session hook of #3942 — the date fix must not
-    // have displaced it, and mysql2 needs no parser override (its DATE arrives
-    // at UTC midnight because `withUtcSession` pins `connection.timezone: 'Z'`).
+    // have displaced it. Its DATE takes no type parser either: since #20280 the
+    // connection asks mysql2 for the DATE's wire text (`dateStrings`), which no
+    // process clock can move.
     const mysql = make({ client: 'mysql2', connection: 'mysql://u:p@host:3306/d' });
     expect(typeof (mysql as any).knex.client.config.pool?.afterCreate).toBe('function');
     expect((mysql as any).knex.client.config.connection.timezone).toBe('Z');
+    expect((mysql as any).knex.client.config.connection.dateStrings).toEqual(['DATE']);
   });
 });
 
@@ -422,10 +424,12 @@ function declareZoneSweep(cell: DialectCell): void {
 
 declareDialectCell(PG_CELL, 'date calendar-day zone invariance (#11389)', declareZoneSweep);
 // MySQL is in the matrix because it is the dialect that PROVES the asymmetry:
-// mysql2 materialises a DATE at local midnight too, exactly like pg, and is
-// nevertheless correct today because `withUtcSession` already pins
-// `connection.timezone: 'Z'` (#3942). Losing that pin would reproduce #11389
-// one dialect over, and this cell is what would say so.
+// under its default `'local'` zone mysql2 materialises a DATE at local
+// midnight, exactly like pg. It was correct because `withUtcSession` pins
+// `connection.timezone: 'Z'` (#3942), and since #20280 the connection asks for
+// the DATE's wire text (`dateStrings`), which no zone reaches at all. Losing
+// both pins would reproduce #11389 one dialect over, and this cell is what
+// would say so.
 declareDialectCell(MYSQL_CELL, 'date calendar-day zone invariance (#11389)', declareZoneSweep);
 
 // ── The raw wire form, on a live server ─────────────────────────────────────

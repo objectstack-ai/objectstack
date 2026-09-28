@@ -10,9 +10,12 @@
  *   `$and` / `$or` / `$not` member — the shared comparand face's reach, which
  *   every schema carrying a `FilterCondition` gets;
  * - the analytics carriers' nested-relation walk
- *   (`refuseNestedRelationComparands`, `../ui/dataset.zod.ts`), over the
- *   entries INSIDE a nested-relation condition, which the analytics `where`
- *   door flattens to dotted members and judges like any other entry.
+ *   (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`),
+ *   over the entries INSIDE a nested-relation condition, which the analytics
+ *   `where` door flattens to dotted members and judges like any other entry.
+ *   Every stored filter charted through that door declares it: a dataset
+ *   `filter`, a measure `filter`, a dashboard widget `filter`, and a report's
+ *   and a joined report block's `runtimeFilter`.
  *
  * So a slot is judged one way whichever reach finds it, and a rule added here
  * reaches both.
@@ -32,6 +35,24 @@
  * `driver-mongodb`, the read-scope compiler, the analytics `where` door): the
  * comparand is not a boolean (#5347 / #5369).
  *
+ * The comparand-TYPE face (`normalizeFilterComparandTypes`,
+ * `./filter-comparand-type.ts`, the #7872 ruling's accepted set `string |
+ * number | bigint | boolean | null | Date`) is called read-only the same way,
+ * on the field entry the query doors hand it: it refuses a plain object where
+ * a scalar belongs (`{ $eq: { a: 1 } }`), a `Map`, a class instance, a
+ * function, a Symbol, `undefined`, and a bigint beyond ±2^53, as a comparand
+ * and as a list member — and passes what it passes: the six accepted types, a
+ * `{ $field }` reference, and a bigint within ±2^53, which it would narrow to
+ * its number on a query and which the save door keeps as written. Before it,
+ * every save door accepted each of those and the analytics door refused each
+ * on chart. The document is judged, never rewritten.
+ *
+ * One slot raises ONE refusal: the first the query doors give, in their order
+ * — the shape face, then the type face, then the flag rule (`parseFilterAST`,
+ * the engine seam and the analytics door all run them in that order). So
+ * `$null: { a: 1 }` reads as the type face's refusal, as it does on chart, and
+ * never as two issues at one path.
+ *
  * ## The words
  *
  * - The equality and `$ne` slots: the face's own sentence, from the builders
@@ -45,6 +66,9 @@
  *   wording for those shapes.
  * - A non-boolean flag: the query faces' sentence (see
  *   {@link nonBooleanFlagComparandMessage}).
+ * - A comparand the type face refuses: the type face's own sentence, less its
+ *   ` at <path>` clause (see {@link comparandTypeRefusalAtSave}). Nothing of it
+ *   is restated here.
  *
  * None carries the face's ` at <path>` clause: the issue's own `path` carries
  * the location, which a refinement cannot see from inside the document.
@@ -62,6 +86,7 @@
 
 import type { z } from 'zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
+import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import {
   IN_OPERATOR_SPELLINGS,
   NIN_OPERATOR_SPELLINGS,
@@ -269,11 +294,85 @@ function nonBooleanFlagComparandMessage(op: string, field: string, value: unknow
 }
 
 /**
- * Raise, as `custom` issues under `slotPath`, every refusal the query faces
- * give for ONE comparand slot: the comparand-shape face's verdict on the slot,
- * and — for the two boolean flags, which that face does not judge — the flag
- * rule. `op` is `undefined` for an implicit-equality comparand, and `slotPath`
- * is then the field's own path. `slots` is `FieldOperatorsSchema`.
+ * Ask the comparand-TYPE face about one field entry (`{ stage: <spec> }`), the
+ * hand-over the analytics door and the engine seam make. Returns the face's
+ * refusal, or `undefined` when it accepts. Read-only: the face's narrowed copy
+ * (a bigint within ±2^53, as its number) is discarded, because the save door
+ * judges the document and never rewrites it.
+ *
+ * Only the face's own envelope (`INVALID_FILTER`) is read as a verdict, as in
+ * {@link comparandShapeFaceRefusal}.
+ */
+function comparandTypeFaceRefusal(entry: Record<string, unknown>): Error | undefined {
+  try {
+    normalizeFilterComparandTypes(entry);
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'INVALID_FILTER') return error as Error;
+    throw error;
+  }
+  return undefined;
+}
+
+/**
+ * The type face's refusal of ONE slot, located and in its own words, or
+ * `undefined` when the face passes the slot.
+ *
+ * - **The verdict** is the face's, twice over. On the whole field entry
+ *   (`fieldSpec`) first, because the face classifies the entry before it
+ *   judges an operator: a spec carrying a string `$field` is a field reference
+ *   it steps around whole, whatever sits beside it. Then on the one-slot node,
+ *   so each refused slot of an entry is reported at its own path.
+ * - **The location.** The face judges a list operator's members one by one and
+ *   stops at the first it refuses; that member is found by asking the face
+ *   about each member alone, and the issue sits at it (`stage.$in.1`), as the
+ *   shape arms' null member does. Anything else sits at the slot.
+ * - **The words** are the face's message with its ` at where.<slot>` clause
+ *   removed — the one clause this door cannot write truthfully, since a
+ *   refinement cannot see where it sits in the document (the issue's `path`
+ *   says). The clause removed is the one the face was handed (`where`, its
+ *   default root, plus this slot), so nothing is parsed out of the text. Should
+ *   the face ever spell its location differently, the clause is not found and
+ *   the face's whole message is reported, location included, rather than a
+ *   guess — `filter-save-door-face-parity.test.ts` fails on that text.
+ */
+function comparandTypeRefusalAtSave(
+  field: string,
+  op: string | undefined,
+  comparand: unknown,
+  fieldSpec: unknown,
+): SaveDoorRefusal | undefined {
+  if (comparandTypeFaceRefusal({ [field]: fieldSpec }) === undefined) return undefined;
+  const slot = (value: unknown): Record<string, unknown> =>
+    (op === undefined ? { [field]: value } : { [field]: { [op]: value } });
+  const face = comparandTypeFaceRefusal(slot(comparand));
+  if (face === undefined) return undefined;
+  let at: number[] = [];
+  let location = op === undefined ? `where.${field}` : `where.${field}.${op}`;
+  if (op !== undefined && Array.isArray(comparand)) {
+    const member = comparand.findIndex((value) => comparandTypeFaceRefusal(slot([value])) !== undefined);
+    if (member !== -1) {
+      at = [member];
+      location = `${location}[${member}]`;
+    }
+  }
+  const clause = ` at ${location} `;
+  const message = face.message.includes(clause) ? face.message.replace(clause, ' ') : face.message;
+  return { at, message };
+}
+
+/**
+ * Raise, as ONE `custom` issue under `slotPath`, the first refusal the query
+ * faces give for ONE comparand slot, in their order: the comparand-shape
+ * face's verdict on the slot, then the comparand-type face's, then — for the
+ * two boolean flags, which neither face judges as a flag — the flag rule. `op`
+ * is `undefined` for an implicit-equality comparand, and `slotPath` is then
+ * the field's own path. `slots` is `FieldOperatorsSchema`. `fieldSpec` is the
+ * whole value of the field entry the slot sits in — the operator map, or the
+ * implicit comparand itself (the default) — which the type face classifies
+ * before it judges the slot.
+ *
+ * Returns whether the slot was refused, so a walk with arms of its own on the
+ * same slot can stay silent rather than raise a second issue at one path.
  */
 export function reportQueryFaceRefusals(
   ctx: z.RefinementCtx,
@@ -282,14 +381,16 @@ export function reportQueryFaceRefusals(
   op: string | undefined,
   comparand: unknown,
   slots: OperatorSlots,
-): void {
-  const refusals: SaveDoorRefusal[] = [];
-  const face = comparandShapeFaceRefusal(op === undefined ? { [field]: comparand } : { [field]: { [op]: comparand } });
-  if (face) refusals.push(comparandShapeRefusalAtSave(slots, field, op, comparand, face));
-  if (op !== undefined && BOOLEAN_FLAG_OPERATORS.has(op) && typeof comparand !== 'boolean') {
-    refusals.push({ at: [], message: nonBooleanFlagComparandMessage(op, field, comparand) });
+  fieldSpec: unknown = op === undefined ? comparand : { [op]: comparand },
+): boolean {
+  let refusal: SaveDoorRefusal | undefined;
+  const shapeFace = comparandShapeFaceRefusal(op === undefined ? { [field]: comparand } : { [field]: { [op]: comparand } });
+  if (shapeFace) refusal = comparandShapeRefusalAtSave(slots, field, op, comparand, shapeFace);
+  refusal ??= comparandTypeRefusalAtSave(field, op, comparand, fieldSpec);
+  if (refusal === undefined && op !== undefined && BOOLEAN_FLAG_OPERATORS.has(op) && typeof comparand !== 'boolean') {
+    refusal = { at: [], message: nonBooleanFlagComparandMessage(op, field, comparand) };
   }
-  for (const refusal of refusals) {
-    ctx.addIssue({ code: 'custom', path: [...slotPath, ...refusal.at], message: refusal.message });
-  }
+  if (refusal === undefined) return false;
+  ctx.addIssue({ code: 'custom', path: [...slotPath, ...refusal.at], message: refusal.message });
+  return true;
 }
