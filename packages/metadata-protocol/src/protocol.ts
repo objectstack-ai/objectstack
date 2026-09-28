@@ -176,6 +176,7 @@ import type {
     StoredMigrationRow,
     StoredMigrationTodo,
 } from './stored-migration.js';
+import { collectDecisionModeReview } from './stored-migration.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -16682,6 +16683,20 @@ export class ObjectStackProtocolImplementation implements
      * - `source: 'migrate-stored'` — so a history diff distinguishes a
      *   canonicalization pass from an edit someone made.
      *
+     * ## What it lists and never writes
+     *
+     * `decisionModeReview` (#15429, maintainer ruling letter C): every stored
+     * `decision` node with no `conditions` list, no `mode` and two or more
+     * conditioned out-edges. Such a node took every true branch before
+     * protocol 18 and takes the first one now, and a stored row keeps that
+     * new meaning — the D2 entry that writes `mode: 'inclusive'` replays only
+     * over authored sources (`os migrate meta --from 17`), where the operator
+     * asserts the source's age; nothing asserts a row's. The list is the
+     * operator's review of that change, before and after the upgrade: it is
+     * built from the stored body with the D2 entry's own predicate
+     * ({@link collectDecisionModeReview}), it is the same on preview and apply,
+     * and it moves no row outcome, no count and no verdict.
+     *
      * ## What it declines to touch, and says so
      *
      * This section documents the function's FULL internal surface, which is
@@ -16808,6 +16823,7 @@ export class ObjectStackProtocolImplementation implements
             skipped: 0,
             failed: 0,
             rows: [],
+            decisionModeReview: [],
         };
 
         // Two scoped queries rather than one unfiltered scan: `state` is an
@@ -16912,6 +16928,29 @@ export class ObjectStackProtocolImplementation implements
                     reason: `the stored body is not valid JSON (${e?.message ?? String(e)})`,
                 });
                 continue;
+            }
+
+            // [#15429, ruling C] The decision review list — REPORT ONLY. A stored
+            // decision with no `conditions` list, no `mode` and two or more
+            // conditioned out-edges took every true branch before protocol 18
+            // and takes the first one now; by ruling the row keeps that new
+            // meaning (no pass rewrites it — nothing can say the row predates
+            // the flip), and this names each such node so an operator can find
+            // the one that MEANT every branch. Read off the stored body BEFORE
+            // the canonicalizer and with no engine, so the list is the same
+            // whether the row below converts, is skipped for want of an
+            // engine, or fails; it touches no count, no outcome and no write.
+            if (singular === 'flow') {
+                for (const node of collectDecisionModeReview(body)) {
+                    report.decisionModeReview.push({
+                        id: base.id,
+                        name: base.name,
+                        organizationId,
+                        packageId,
+                        state,
+                        ...node,
+                    });
+                }
             }
 
             // Flow rows need the automation engine's live executor registry for

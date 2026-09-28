@@ -316,8 +316,30 @@ export function resolveInstalledSpecVersion(): string | null {
  *   materialization path, and `os migrate meta --from <=16`, where the
  *   operator asserts the source's age) — this door is neither, so it opts out
  *   rather than the entry ceasing to fire.
+ * - `flow-decision-mode-inclusive-explicit` (#15429, maintainer ruling
+ *   「跟主流对齐」): writes `mode: 'inclusive'` onto an edge-branched `decision`
+ *   (no `conditions` list) that has two or more conditioned out-edges, so a
+ *   flow written while every true branch ran keeps that behaviour now that the
+ *   traversal is exclusive (first true edge in declaration order). Both shapes
+ *   are legal and mean different things — an omitted `mode` IS the exclusive
+ *   gateway, by the contract on `DecisionConfigSchema` — so the rewrite is a
+ *   reinterpretation, sound only where "this source predates the flip" is a
+ *   fact. Here it is a guess: the trigger is the artifact's declared
+ *   `engines.protocol` floor, and `^17.0.0` is the range `create-objectstack`
+ *   stamps, so an app scaffolded today, whose author wrote two branches
+ *   against the contract that says an omitted `mode` is exclusive, lands
+ *   inside the window and would be handed an inclusive gateway it never
+ *   asked for — the ruled default made unobservable for every artifact-deployed
+ *   app. The entry is sound at exactly one seam: `os migrate meta --from 17`,
+ *   where the operator asserts the source's age and reviews the diff. The
+ *   automation engine's flow rehydration seam refuses it by id for the same
+ *   reason (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in
+ *   `packages/services/service-automation/src/engine.ts`); this door does too.
  */
-const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = ['app-hidden-to-unpublished'];
+const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
+  'app-hidden-to-unpublished',
+  'flow-decision-mode-inclusive-explicit',
+];
 
 /**
  * The per-entry half of the window, for a floor at or above the runtime label:

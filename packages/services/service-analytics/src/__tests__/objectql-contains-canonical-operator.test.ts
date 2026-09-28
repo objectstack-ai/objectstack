@@ -86,7 +86,7 @@ const CUBE: Cube = {
     id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
     stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
   },
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 const query = (where: unknown): AnalyticsQuery =>

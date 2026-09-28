@@ -31,7 +31,7 @@ const ordersCube: Cube = {
       granularities: ['day', 'week', 'month'],
     },
   },
-  public: false,
+  public: true,
 };
 
 const baseQuery: AnalyticsQuery = {

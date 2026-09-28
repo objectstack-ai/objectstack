@@ -33,6 +33,7 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 // The object-level read admission asked at this door, ahead of every strategy
 // — the layer the raw-SQL path could not inherit from the engine. See that
 // module's header for the request that reached the database without it.
@@ -1453,6 +1454,15 @@ export class AnalyticsService implements IAnalyticsService {
     if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
     }
+    // `analytics_cube.public` — first, ahead of token resolution, cube
+    // inference, admission and every strategy: a hidden cube is refused
+    // whatever else the request carries, and the refusal leaves the registry
+    // exactly as it found it. Asked of `scope`, the same scope that answers
+    // the name below: a `queryDataset` call's own compiled cube (visible)
+    // answers its name there, so a dataset named like a hidden configured
+    // cube runs as itself instead of being refused — a refusal there would
+    // be an oracle for which names are hidden.
+    this.assertCubePublic(queryInput.cube, scope);
 
     // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
     // seam — before strategy selection — so every strategy compiles the same
@@ -2157,12 +2167,16 @@ export class AnalyticsService implements IAnalyticsService {
 
   /**
    * Get cube metadata for discovery.
+   *
+   * Only cubes the analytics API exposes are listed: a cube declared
+   * `public: false` is omitted, and asking for it by name answers `[]` — the
+   * same answer as a name no cube has (`cube-visibility.ts`).
    */
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
-    // If a fallback service is configured, merge its metadata with the registry
-    const cubes = cubeName
+    const cubes = (cubeName
       ? [this.cubeRegistry.get(cubeName)].filter(Boolean) as Cube[]
-      : this.cubeRegistry.getAll();
+      : this.cubeRegistry.getAll()
+    ).filter(isCubePublic);
 
     return cubes.map(cube => ({
       name: cube.name,
@@ -2187,6 +2201,9 @@ export class AnalyticsService implements IAnalyticsService {
     if (!queryInput.cube) {
       throw new Error('Cube name is required for SQL generation');
     }
+    // Same gate as `query()`: the dry-run door must not hand out the
+    // statement — the cube's measures, raw SQL included — of a hidden cube.
+    this.assertCubePublic(queryInput.cube, this.sharedScope);
 
     // [#12230] Same token seam as `query()` — the dry-run door must show the
     // statement that would actually run (a resolved user id in the params, or
@@ -2208,6 +2225,22 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   // ── Internal ─────────────────────────────────────────────────────
+
+  /**
+   * Refuse a query against a cube declared `public: false` with the SAME
+   * refusal an unknown name gets — `cubeNotFoundError`, byte for byte
+   * (`cube-visibility.ts` says why).
+   * A name with no registered cube passes: it is the ad-hoc path's to infer or
+   * refuse (`assertInferableCube`), and every cube that path mints is visible.
+   *
+   * The name is resolved through `scope` — the scope the rest of the call
+   * resolves it through — never the shared registry directly, so the gate and
+   * the query can never be asking about two different cubes.
+   */
+  private assertCubePublic(name: string, scope: CubeScope): void {
+    const cube = scope.getCube(name);
+    if (cube && !isCubePublic(cube)) throw cubeNotFoundError(name);
+  }
 
   /**
    * Ensure a cube exists for the given query and that it knows about every
@@ -2697,9 +2730,11 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * Rejects with `status: 404` / `code: 'CUBE_NOT_FOUND'` so the HTTP boundary
    * answers "no such cube" instead of letting the name reach the driver as a
-   * table and surfacing whatever the driver says about it. The message names
-   * both ways the request could be made valid, because from here the two are
-   * genuinely indistinguishable: register a Cube, or register the object.
+   * table and surfacing whatever the driver says about it. The refusal is
+   * `cubeNotFoundError`, shared byte for byte with the hidden-cube refusal, and
+   * its message names every way the request could be made valid, because to
+   * the caller they are deliberately indistinguishable: register a Cube,
+   * register the object, or remove a `public: false` that hides the cube.
    *
    * Skips when `isRegisteredObject` was not supplied — see the config field's
    * doc for why that tier is a deliberate stand-down and not a hole.
@@ -2718,15 +2753,9 @@ export class AnalyticsService implements IAnalyticsService {
       return;
     }
     if (isRegisteredObject(name)) return;
-    const err = new Error(
-      `Cube '${name}' not found: no cube is registered under that name, and it is not a ` +
-        `registered object either (a cube can only be auto-inferred from a registered object). ` +
-        `Define a Cube in your stack, or check the object name.`,
-    ) as Error & { code?: string; status?: number; cube?: string };
-    err.code = 'CUBE_NOT_FOUND';
-    err.status = 404;
-    err.cube = name;
-    throw err;
+    // The SAME refusal a hidden cube gets (`assertCubePublic`): a caller must
+    // not be able to tell "hidden" from "absent" (`cube-visibility.ts`).
+    throw cubeNotFoundError(name);
   }
 
   /** Build a minimal Cube from the fields referenced by an AnalyticsQuery. */
@@ -2862,7 +2891,10 @@ export class AnalyticsService implements IAnalyticsService {
       sql: cubeName,
       measures,
       dimensions,
-      public: false,
+      // Visible: this cube is minted FOR the request that names it and is
+      // registered, so the next request resolves it from the registry — where
+      // a hidden verdict would refuse the very KPI path that minted it.
+      public: true,
     };
   }
 

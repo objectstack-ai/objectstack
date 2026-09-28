@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The refusal codes this file's two refusal producers — `predicateSlotRefusal`
- * and `structuralConditionRefusal` — carry beside their English message.
+ * The refusal codes this file's three refusal producers — `predicateSlotRefusal`,
+ * `structuralConditionRefusal` and (#20316) `flowNodeConfigRefusals` — carry
+ * beside their English message.
  *
  * A localized designer keys its own catalogue row to the `code` and fills it
  * from the `params`; API callers, `registerFlow` and `objectstack validate`
@@ -26,6 +27,8 @@ import {
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
   predicateSlotRefusal,
   structuralConditionRefusal,
+  type FlowNodeConfigRefusal,
+  type FlowNodeConfigRefusalCode,
   type FlowSlotRefusalCode,
   type FlowSlotRefusalParams,
   type PredicateSlotRefusal,
@@ -34,6 +37,8 @@ import {
   type StructuralConditionRefusalCode,
 } from './flow-node-expression-paths.js';
 import * as automation from './index.js';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
+import { NotifyConfigSchema } from './io-node-config.zod.js';
 
 /** What one refusal says, whichever producer said it. */
 interface Said {
@@ -52,6 +57,45 @@ interface Pin<C extends FlowSlotRefusalCode> {
 
 const slot = (value: unknown) => (): Said | undefined => predicateSlotRefusal(value);
 const structural = (value: unknown) => (): Said | undefined => structuralConditionRefusal(value);
+/** The ONE refusal a node config provokes — two would make the pin ambiguous. */
+const nodeConfig = (nodeType: string, config: unknown) => (): Said | undefined => {
+  const refusals = flowNodeConfigRefusals(nodeType, config);
+  expect(refusals).toHaveLength(1);
+  return refusals[0];
+};
+
+const CONDITIONS_NOT_ARRAY = (found: string): string =>
+  `A decision's \`conditions\` is its ordered branch list — an array of \`{ label, expression }\` — and this one is ${found}. `
+  + 'The decision executor iterates it, so a run that reaches the node fails there (a string is iterated character '
+  + 'by character, each character a branch with no `expression`). Write the branches as an array, or delete '
+  + '`conditions` and route by the out-edges\' own `condition`s.';
+
+const BRANCH_NOT_OBJECT = (path: string, found: string): string =>
+  `A decision branch is an object — \`{ label, expression }\` — and \`${path}\` is ${found}. The decision executor `
+  + 'reads `label` and `expression` off every branch it reaches, so this one has neither and a run that reaches it '
+  + 'fails at the node. Write it as `{ label: \'approved\', expression: \'record.amount > 1000\' }` — the label of '
+  + 'the out-edge it routes to, and a bare CEL predicate; a predicate written as a bare string belongs under '
+  + '`expression`.';
+
+const LABEL_MISSING = (path: string, found: string): string =>
+  'A decision branch routes by its `label`: the first branch whose `expression` holds is taken, and the run continues '
+  + `down the out-edge carrying that label. \`${path}\` holds ${found}, and that names no out-edge — so when this `
+  + 'branch matches, the node reports no branch it can route, and traversal considers EVERY out-edge instead, as if '
+  + 'the decision declared no branches: an unconditional labelled out-edge and the default out-edge both run. Write '
+  + 'the label of the out-edge this branch should take (`label: \'approved\'` for the out-edge labelled `approved`). '
+  + 'To branch on the out-edges instead, delete `conditions` and put each predicate on its edge\'s `condition`.';
+
+const KEY_MISSING = (nodeType: string, key: string): string =>
+  `This \`${nodeType}\` node's config leaves out \`${key}\`, which the ${nodeType} contract requires. Its executor `
+  + 'parses the config against that contract before it does anything else and refuses the node without it — so the '
+  + 'flow registers, and then every run that reaches this node fails there; the config is metadata, and re-running '
+  + `changes nothing. Write \`${key}\` on the node's \`config\`.`;
+
+/** The notify contract's own words for a node with no content source — read, never re-spelled. */
+const NOTIFY_TITLE_RULE = (() => {
+  const own = NotifyConfigSchema.safeParse({ recipients: ['u1'] });
+  return own.success ? '' : own.error.issues.find((i) => i.path.join('.') === 'title')?.message ?? '';
+})();
 
 const MISSING_TAIL =
   ' where the slot is required: a decision branch is `{ label, expression }` and its `expression` is not optional, '
@@ -158,6 +202,97 @@ const PINS: { readonly [C in FlowSlotRefusalCode]: readonly [Pin<C>, ...Pin<C>[]
     { produce: structural(Symbol('s')), params: { found: 'symbol' }, message: shape('a symbol'), source: '' },
     { produce: structural(() => 1), params: { found: 'function' }, message: shape('a function'), source: '' },
   ],
+  'decision-conditions-not-array': [
+    { produce: nodeConfig('decision', { conditions: {} }), params: { found: 'object' }, message: CONDITIONS_NOT_ARRAY('an object'), source: '' },
+    { produce: nodeConfig('decision', { conditions: 'true' }), params: { found: 'string' }, message: CONDITIONS_NOT_ARRAY('a string'), source: '' },
+    { produce: nodeConfig('decision', { conditions: 5 }), params: { found: 'number' }, message: CONDITIONS_NOT_ARRAY('a number'), source: '' },
+  ],
+  'decision-branch-not-object': [
+    {
+      produce: nodeConfig('decision', { conditions: ['true'] }),
+      params: { index: 0, found: 'string' },
+      message: BRANCH_NOT_OBJECT('conditions[0]', 'a string'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [{ label: 'a', expression: 'x' }, null] }),
+      params: { index: 1, found: 'null' },
+      message: BRANCH_NOT_OBJECT('conditions[1]', '`null`'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [['true']] }),
+      params: { index: 0, found: 'array' },
+      message: BRANCH_NOT_OBJECT('conditions[0]', 'an array'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [42] }),
+      params: { index: 0, found: 'number' },
+      message: BRANCH_NOT_OBJECT('conditions[0]', 'a number'),
+      source: '',
+    },
+  ],
+  'decision-branch-label-missing': [
+    {
+      produce: nodeConfig('decision', { conditions: [{ expression: 'true' }] }),
+      params: { index: 0, found: 'absent' },
+      message: LABEL_MISSING('conditions[0].label', 'nothing — the key is absent'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [{ label: null, expression: 'true' }] }),
+      params: { index: 0, found: 'null' },
+      message: LABEL_MISSING('conditions[0].label', '`null`'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [{ label: 'a', expression: 'x' }, { label: ' \t', expression: 'true' }] }),
+      params: { index: 1, found: 'blank' },
+      message: LABEL_MISSING('conditions[1].label', 'a string that is blank after trimming'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [{ label: 42, expression: 'true' }] }),
+      params: { index: 0, found: 'number' },
+      message: LABEL_MISSING('conditions[0].label', 'a number'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('decision', { conditions: [{ label: { text: 'yes' }, expression: 'true' }] }),
+      params: { index: 0, found: 'object' },
+      message: LABEL_MISSING('conditions[0].label', 'an object'),
+      source: '',
+    },
+  ],
+  'node-config-key-missing': [
+    {
+      produce: nodeConfig('loop', { iteratorVariable: 'row', body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } }),
+      params: { nodeType: 'loop', key: 'collection' },
+      message: KEY_MISSING('loop', 'collection'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('map', { flowName: 'child' }),
+      params: { nodeType: 'map', key: 'collection' },
+      message: KEY_MISSING('map', 'collection'),
+      source: '',
+    },
+    {
+      produce: nodeConfig('screen', { fields: [{ label: 'Tier' }] }),
+      params: { nodeType: 'screen', key: 'fields[0].name' },
+      message: KEY_MISSING('screen', 'fields[0].name'),
+      source: '',
+    },
+  ],
+  'node-config-key-required-by-rule': [
+    {
+      produce: nodeConfig('notify', { recipients: ['u1'] }),
+      params: { nodeType: 'notify', key: 'title' },
+      message: NOTIFY_TITLE_RULE,
+      source: '',
+    },
+  ],
 };
 
 describe('flow slot refusal codes — one pin per code (code, params, unchanged message)', () => {
@@ -174,6 +309,10 @@ describe('flow slot refusal codes — one pin per code (code, params, unchanged 
       }
     });
   }
+
+  it('the rule-required pin reads a real sentence off the notify contract, not an empty one', () => {
+    expect(NOTIFY_TITLE_RULE.length).toBeGreaterThan(40);
+  });
 
   it('the structural lead sentence is the published constant, byte for byte', () => {
     expect(STRUCTURAL_CONDITION_SHAPE_REFUSAL).toBe(STRUCTURAL_LEAD);
@@ -217,6 +356,31 @@ const PREDICATE_SLOT_CODES: ReadonlySet<PredicateSlotRefusalCode> = new Set<Pred
 const STRUCTURAL_CODES: ReadonlySet<StructuralConditionRefusalCode> = new Set<StructuralConditionRefusalCode>([
   'structural-condition-shape',
 ]);
+const NODE_CONFIG_CODES: ReadonlySet<FlowNodeConfigRefusalCode> = new Set<FlowNodeConfigRefusalCode>([
+  'decision-conditions-not-array',
+  'decision-branch-not-object',
+  'decision-branch-label-missing',
+  'node-config-key-missing',
+  'node-config-key-required-by-rule',
+]);
+
+/** Node configs of every shape, per node type — the sweep judges whatever each one provokes. */
+const CONFIG_SWEEP: ReadonlyArray<readonly [string, unknown]> = [
+  ...SWEEP.map((value) => ['decision', { conditions: value }] as const),
+  ...SWEEP.map((value) => ['decision', { conditions: [value] }] as const),
+  ...SWEEP.map((value) => ['decision', { conditions: [{ label: value, expression: 'true' }] }] as const),
+  ['decision', undefined],
+  ['decision', {}],
+  ['get_record', {}],
+  ['get_record', undefined],
+  ['get_record', { objectName: 'account' }],
+  ['notify', { recipients: ['u1'] }],
+  ['notify', {}],
+  ['loop', {}],
+  ['loop', { body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } }],
+  ['screen', { fields: [{ label: 'x', options: [{}] }] }],
+  ['assignment', {}],
+];
 
 describe('flow slot refusal codes — the closed set', () => {
   it('has a pin for every code, and no pin for a code outside the set', () => {
@@ -225,8 +389,25 @@ describe('flow slot refusal codes — the closed set', () => {
     for (const code of FLOW_SLOT_REFUSAL_CODES) expect(code).toMatch(/^[a-z]+(?:-[a-z]+)+$/);
   });
 
-  it('splits between the two producers with nothing left over', () => {
-    expect([...PREDICATE_SLOT_CODES, ...STRUCTURAL_CODES].sort()).toEqual([...FLOW_SLOT_REFUSAL_CODES].sort());
+  it('splits between the three producers with nothing left over', () => {
+    expect([...PREDICATE_SLOT_CODES, ...STRUCTURAL_CODES, ...NODE_CONFIG_CODES].sort()).toEqual([...FLOW_SLOT_REFUSAL_CODES].sort());
+  });
+
+  it('every flowNodeConfigRefusals on the sweep carries a node-config code and a path, and every code is reached', () => {
+    const provoked = new Set<string>();
+    let refused = 0;
+    for (const [nodeType, config] of CONFIG_SWEEP) {
+      for (const refusal of flowNodeConfigRefusals(nodeType, config)) {
+        refused++;
+        expect(NODE_CONFIG_CODES.has(refusal.code)).toBe(true);
+        expect(typeof refusal.params).toBe('object');
+        expect(refusal.path.length).toBeGreaterThan(0);
+        expect(refusal.source).toBe('');
+        provoked.add(refusal.code);
+      }
+    }
+    expect(refused).toBeGreaterThan(40);
+    expect([...provoked].sort()).toEqual([...NODE_CONFIG_CODES].sort());
   });
 
   it('is published from the automation entry, frozen', () => {
@@ -284,6 +465,10 @@ describe('flow slot refusal codes — the closed set', () => {
     const noStructuralCode: StructuralConditionRefusal = { message: 'm', source: '' };
     // @ts-expect-error — each producer emits only its own codes: a structural refusal is never a predicate-slot code.
     const foreignCode: StructuralConditionRefusal = { message: 'm', source: '', code: 'predicate-slot-blank', params: {} };
-    expect([noCode, wrongParams, noStructuralCode, foreignCode]).toHaveLength(4);
+    // @ts-expect-error — a node config refusal carries its `path` inside the config.
+    const noPath: FlowNodeConfigRefusal = { message: 'm', source: '', code: 'node-config-key-missing', params: { nodeType: 'loop', key: 'collection' } };
+    // @ts-expect-error — `node-config-key-missing` names the node type and the key, never a `found`.
+    const wrongNodeParams: FlowNodeConfigRefusal = { message: 'm', source: '', path: 'x', code: 'node-config-key-missing', params: { found: 'absent' } };
+    expect([noCode, wrongParams, noStructuralCode, foreignCode, noPath, wrongNodeParams]).toHaveLength(6);
   });
 });

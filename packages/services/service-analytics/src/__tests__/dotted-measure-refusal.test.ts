@@ -320,7 +320,7 @@ describe('[#5918] the warm registry gets the same answer as the cold one', () =>
       sql: 'crm_account',
       measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
       dimensions: {},
-      public: false,
+      public: true,
     };
     const { error, sqls } = await run(
       { cube: 'crm_account', measures: ['owner.region_count_distinct'] },
@@ -382,7 +382,7 @@ describe('[#5918] the surfaces the ruling leaves alone', () => {
         },
       },
       dimensions: {},
-      public: false,
+      public: true,
     };
     const { error, sqls } = await run(
       { cube: 'crm_account', measures: ['owner.amount_sum'] },

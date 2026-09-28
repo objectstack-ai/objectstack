@@ -307,7 +307,7 @@ const CUBE: Cube = {
   dimensions: Object.fromEntries(
     [['id', 'string'], ['amt', 'number'], ['stage', 'string']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 describe('[#20010] every analytics face refuses before anything runs (real engine)', () => {

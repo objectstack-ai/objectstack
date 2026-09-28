@@ -62,7 +62,7 @@ const usersCube: Cube = {
   dimensions: {
     id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
   },
-  public: false,
+  public: true,
 };
 
 /**

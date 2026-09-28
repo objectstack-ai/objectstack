@@ -66,13 +66,18 @@ The two halves reach different audiences, which is why they shipped together:
    nothing read — and then refuses, naming the `function` it does not have,
    instead of logging a line and reporting success as it used to.
 
-`decision` stays export-only: nothing parses it at run time. It may carry no
-`conditions` at all when it branches purely on edge predicates, its executor
-reads `conditions` and nothing else, and its one other key — `mode` — is
-declared AHEAD of the engine change that reads it (#15429; see
-`DecisionConfigSchema`). Its enforcement remains the objectui
-reconciliation test, which is what #4278 was actually about (a form
-authoring keys nothing reads).
+`decision` is parsed at **registration**, for one key (#15429): the
+automation engine's `registerFlow` runs every decision node's config through
+`DecisionConfigSchema` and refuses the flow on any issue rooted at
+`mode` — a value outside the closed pair, or a `mode` beside a non-empty
+`conditions` list — with this schema's own sentence, and `os validate`
+reports the same issues as `flow-decision-mode-invalid`, so the two doors
+cannot disagree. A decision may carry no `conditions` at all when it
+branches purely on edge predicates; its executor reads `conditions` and
+nothing else, and the engine's traversal reads `mode`. Its strictness
+(unknown keys) still binds at authoring, in the published JSON Schema and in
+the objectui reconciliation test, which is what #4278 was actually about (a
+form authoring keys nothing reads).
 
 Undeclared aliases are NOT part of these contracts: `subflow`'s historical
 `flow` spelling graduated into the ADR-0087 D2 conversion
@@ -96,9 +101,10 @@ door in front of its author, and the class it structurally could not cover is
 precisely the class with no second door. Closing these shapes is therefore
 not a duplicate check for `script` and `subflow`; it is their first one.
 
-`decision` is still export-only, so its strictness binds at authoring
-(`tsc`), in the published JSON Schema, and in objectui's reconciliation —
-not at run time. It is closed anyway, because the campaign's whole finding
+`decision`'s strictness binds at authoring (`tsc`), in the published JSON
+Schema, and in objectui's reconciliation — not at run time, where the
+registration reader judges `mode` alone (#15429). It is closed anyway,
+because the campaign's whole finding
 is that a shape left open accretes a test, a form and a fixture that assert
 the openness, and then closing it is a migration instead of an edit.
 
@@ -137,7 +143,7 @@ const result = DecisionConditionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **conditions** | `{ label: string; expression: string }[]` | optional | Ordered decision branches (first true expression wins; omit to branch purely on edge conditions) |
-| **mode** | `Enum<'exclusive' \| 'inclusive'>` | optional | Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: 'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); 'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, an edge-branched decision takes every out-edge whose condition holds, whatever this says. Refused beside a non-empty conditions list, which is first-match on its own: delete mode there, or move the branches onto the out-edges, delete conditions, and keep mode. |
+| **mode** | `Enum<'exclusive' \| 'inclusive'>` | optional | Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: 'exclusive' = only the first, in the order the edges are declared (what an omitted mode means; the siblings after it are not evaluated and record a skipped step); 'inclusive' = every one that holds, one after another. When none holds the isDefault edge runs either way. Refused beside a non-empty conditions list, which is first-match on its own: delete mode there, or move the branches onto the out-edges, delete conditions, and keep mode. Authored sources written while every true branch ran keep that behaviour through the os migrate meta --from 17 conversion, which writes mode: inclusive onto every edge-branched decision with two or more conditioned out-edges; a flow stored in sys_metadata is not rewritten and takes the first-match reading on upgrade (os migrate meta --stored lists those decisions). |
 
 ### Nested Shape: `DecisionConfig.conditions[number]`
 

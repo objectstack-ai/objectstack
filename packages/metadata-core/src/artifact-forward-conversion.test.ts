@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ObjectStackDefinitionSchema, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, applyConversions, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import {
   applyArtifactForwardConversions,
   parseRangeFloor,
@@ -541,6 +541,108 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
     const grant = (result.definition as typeof def).permissions[0]!.objects.fwd_deal;
     expect(grant.allowRestore, 'the 17.2.0 retirement is not replayed for a 17.4.0 floor').toBe(true);
     expect(issuePaths(result.definition)).toEqual(['permissions.0.objects.fwd_deal.allowRestore']);
+  });
+});
+
+/**
+ * #15429 — the second member of the DEFAULT-FLIP class this door refuses.
+ *
+ * `flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto an
+ * edge-branched `decision` with two or more conditioned out-edges, so a flow
+ * written while every true branch ran keeps that behaviour now that the
+ * traversal is exclusive. An omitted `mode` IS the exclusive gateway by the
+ * contract on `DecisionConfigSchema`, so the rewrite reinterprets a legal
+ * shape — sound only where the source's age is a fact (`os migrate meta
+ * --from 17`, the operator's assertion). At this door the trigger is the
+ * artifact's declared `engines.protocol` floor, and `^17.0.0` is what
+ * `create-objectstack` stamps: an app scaffolded today, authored against the
+ * exclusive contract, lands inside the window. Replaying the entry here would
+ * hand it an inclusive gateway it never asked for — the #17885 shape, on a
+ * key whose omission is the ruled default.
+ *
+ * Same four legs as the block above: SUBJECT (window open, no `mode`
+ * written) · the strict parse the door feeds · NEGATIVE (window shut) ·
+ * FIRING CONTROL (the entry WOULD rewrite this very fixture with the window
+ * open and no refusal, so the subject leg cannot pass vacuously).
+ */
+describe('the artifact door never writes `mode: inclusive` onto an authored exclusive decision (#15429)', () => {
+  /** One edge-branched decision with two conditioned out-edges and no `mode` — the shape the entry rewrites. */
+  const twoBranchDecisionDefinition = (protocolRange: string) => ({
+    manifest: {
+      id: 'app.example.leads', name: 'leads', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    flows: [{
+      name: 'lead_verdict',
+      label: 'Lead verdict',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'verdict', type: 'decision', label: 'Verdict?' },
+        { id: 'refuse', type: 'end', label: 'Refuse' },
+        { id: 'convert', type: 'end', label: 'Convert' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'verdict' },
+        { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'suspected'", label: 'Refuse' },
+        { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'", label: 'Convert' },
+      ],
+    }],
+  });
+  const ID = 'flow-decision-mode-inclusive-explicit';
+  const verdictNodeOf = (definition: unknown) =>
+    (definition as { flows: { nodes: { id: string; config?: Record<string, unknown> }[] }[] })
+      .flows[0]!.nodes.find((n) => n.id === 'verdict')!;
+
+  it('leaves the decision without `mode` on an artifact the retired window IS open for', () => {
+    const def = twoBranchDecisionDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    // ⭐ ANTI-VACUITY: the window really is open on this input.
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.authoredFloor).toBe('17.0.0');
+
+    const verdict = verdictNodeOf(result.definition);
+    expect(verdict.config, 'the authored exclusive gateway is untouched').toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+    // Copy-on-write: nothing was recognized, so the same reference comes back.
+    expect(result.definition).toBe(def);
+  });
+
+  it('registers the decision without `mode` — asserted AFTER the strict parse the door feeds', () => {
+    const def = twoBranchDecisionDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('converted-forward');
+
+    const parsed = ObjectStackDefinitionSchema.parse(result.definition);
+    const registered = verdictNodeOf(parsed);
+    expect(Object.keys(registered.config ?? {}), 'what registration receives').not.toContain('mode');
+  });
+
+  it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {
+    const def = twoBranchDecisionDefinition('^99.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('authored-current');
+    expect(result.notices).toEqual([]);
+    expect(verdictNodeOf(result.definition).config).toBeUndefined();
+  });
+
+  /**
+   * ⭐ FIRING CONTROL — the entry WOULD rewrite this exact fixture: the same
+   * bytes through the primitive with the retired window open and no refusal
+   * come back inclusive, with the entry's own notice. A door that had merely
+   * stopped recognizing the shape, or a fixture the entry never matched, would
+   * go green above and prove nothing; this leg is what makes the subject a
+   * reading of the refusal.
+   */
+  it('FIRING CONTROL — without the refusal, the same fixture IS rewritten to `mode: inclusive`', () => {
+    const notices: ConversionNotice[] = [];
+    const rewritten = applyConversions(twoBranchDecisionDefinition('^17.0.0'), {
+      includeRetired: true,
+      onNotice: (n) => notices.push(n),
+    });
+    expect(verdictNodeOf(rewritten).config).toEqual({ mode: 'inclusive' });
+    expect(notices.map((n) => n.conversionId)).toContain(ID);
   });
 });
 
