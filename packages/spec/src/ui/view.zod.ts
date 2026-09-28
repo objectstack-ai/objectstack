@@ -5060,11 +5060,11 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  */
 const ViewColumnStateSchema = z.object({
   order: z.array(z.string()).optional()
-    .describe('Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored).'),
+    .describe('Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored).'),
   widths: z.record(z.string(), z.number()).optional()
-    .describe('Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored).'),
+    .describe('Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored).'),
 }).describe(
-  'Runtime-only personalization overlay key: the per-user column layout (order/widths) the console grid '
+  'Runtime-only personalization overlay key: the column layout (order/widths) the console grid '
   + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
 );
 
@@ -5207,7 +5207,7 @@ function viewItemWireFields() {
     // key arrives at THIS member's top level; declaring it validates the
     // shape where `.strip()` used to let it ride through unchecked.
     columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)'),
+      .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
   };
 }
 
