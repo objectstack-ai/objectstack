@@ -224,7 +224,7 @@ describe.each(TIERS)('aggregate honours `search` — %s tier', (tier) => {
             await engine.aggregate('crm_account', { ...bag, groupBy: ['region'], aggregations: COUNT });
             const aggregated = aggregateRead(reads, tier);
             expect(aggregated.ast.where, JSON.stringify(bag)).toEqual(found.ast.where);
-            expect(JSON.stringify(aggregated.ast.where)).toContain('$icontains');
+            expect(JSON.stringify(aggregated.ast.where ?? null)).toContain('$icontains');
             for (const key of ['search', 'searchFields']) {
                 expect(found.ast, `find: ${key}`).not.toHaveProperty(key);
                 expect(aggregated.ast, `aggregate: ${key}`).not.toHaveProperty(key);
@@ -351,7 +351,7 @@ describe('every option aggregate declares is one it executes', () => {
             call: { groupBy: ['region'], aggregations: COUNT, search: 'harbour' },
             expect: ({ ast }, result) => {
                 expect(ast.search).toBeUndefined();
-                expect(JSON.stringify(ast.where)).toContain('$icontains');
+                expect(JSON.stringify(ast.where ?? null)).toContain('$icontains');
                 expect(byRegion(result)).toEqual({ east: 2, west: 1 });
             },
         },
@@ -360,8 +360,8 @@ describe('every option aggregate declares is one it executes', () => {
             expect: ({ ast }, result) => {
                 expect(ast.searchFields).toBeUndefined();
                 // Narrowed to the one requested column, not the default set.
-                expect(JSON.stringify(ast.where)).toContain('city');
-                expect(JSON.stringify(ast.where)).not.toContain('"name"');
+                expect(JSON.stringify(ast.where ?? null)).toContain('city');
+                expect(JSON.stringify(ast.where ?? null)).not.toContain('"name"');
                 expect(byRegion(result)).toEqual({ east: 1 });
             },
         },
