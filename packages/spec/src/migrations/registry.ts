@@ -11246,13 +11246,14 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names '
+        + 'against, `.objectui-sha` = `__PIN40__` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8512 tracked files (0 across the '
-        + '8303 at 62597c588 too), against lit '
+        + 'the string debounceDelay each occur 0 times across its 9265 tracked files (0 across the '
+        + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
-        + 'which re-count to 13125 and 5043 respectively at 62597c588 and to 13347 and 5123 at '
-        + 'this pin (git grep -o -F, the method that reproduces every earlier count).',
+        + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
+        + 'f8a9d0fb0 and to 13675 and 5457 at this pin (git grep -o -F, the method that reproduces '
+        + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
@@ -11438,10 +11439,11 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
+        + '`.objectui-sha` = `__PIN40__`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
-        + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
+        + '9265 tracked files, against lit controls timeout 1172, RuntimeConfig 263 and resourceLimits '
+        + '2 on the same corpus (0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
         + '#14478, ADR-0087.',
@@ -11638,10 +11640,11 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
+        + 'objectui checkout — `.objectui-sha` = `__PIN40__` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
-        + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
+        + 'across its 9265 tracked files, against lit controls `useState` 2433 and `timeout` 1172 on '
+        + 'the same corpus (all four 0 across 8512, against 2391 and 1096, at f8a9d0fb0, and 0 across '
+        + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
         + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
@@ -14874,11 +14877,12 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8512 tracked '
-        + 'files at that sha, against lit controls window 3581, timeout 1096, period 171, '
-        + 'interval 179 and metrics 326 on that same corpus and sha (0 across 8303, against 3526 / '
-        + '1086 / 170 / 179 / 324, at 62597c588), so no pin bump is owed. '
+        + '`.objectui-sha` = `__PIN40__`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9265 tracked '
+        + 'files at that sha, against lit controls window 3678, timeout 1172, period 183, '
+        + 'interval 176 and metrics 340 on that same corpus and sha (0 across 8512, against 3581 / '
+        + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
+        + '324, at 62597c588), so no pin bump is owed. '
         + '#15939, #15679, #14478, ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
@@ -15070,13 +15074,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8512 files '
-        + 'tracked at that sha (the 488 Span and 53 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `__PIN40__` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9265 files '
+        + 'tracked at that sha (the 485 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 13347 hits for the bare token objectstack, '
-        + 'and 5123 for the package specifier @objectstack/spec (at 62597c588: 0 across 8303, '
-        + 'Span 486, 13125 and 5043).',
+        + 'two lit controls on that same corpus and sha: 13675 hits for the bare token objectstack, '
+        + 'and 5457 for the package specifier @objectstack/spec (at f8a9d0fb0: 0 across 8512, '
+        + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
         + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
@@ -15171,9 +15175,10 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
-        + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
-        + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
+        + 'objectui checkout — `.objectui-sha` = `__PIN40__` — spells it 0 '
+        + 'times across 9265 tracked files, against lit controls `TTL` 181 and `tenant` 1173 on the '
+        + 'same corpus (0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
         + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '

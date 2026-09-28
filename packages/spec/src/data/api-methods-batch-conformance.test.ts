@@ -61,16 +61,24 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `f8a9d0fb0`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-24 — previously measured at `62597c588`, `87af769e9`,
-  // `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before that at
-  // `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
-  // `6314e87f2`. On the hop off `62597c588`, `ObjectGrid.tsx` changed again
-  // (18 insertions, 5 deletions: objectui#10083's `rowActionsDeclared` row-menu
-  // signal and objectui#9909's currency display locale), none of it inside the
-  // selection block, which only MOVED: `ObjectGrid.tsx:4032-4059` here, still
-  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the
-  // same reading below. `ObjectGrid.tsx` changed across the move off
+  // (`.objectui-sha` = `__PIN9__`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-28 — previously measured at `f8a9d0fb0`, `62597c588`,
+  // `87af769e9`, `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before
+  // that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
+  // `6314e87f2`. On the hop off `f8a9d0fb0`, `ObjectGrid.tsx` changed hard
+  // (745 insertions, 161 deletions: objectui#7189's server-side grid grouping
+  // and objectui#10881's grouped-grid refusal among them), none of it inside
+  // the selection block, which only MOVED: `ObjectGrid.tsx:4605-4632` here
+  // (`4032-4059` at `f8a9d0fb0`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the same reading
+  // below — the one edit in the surrounding selection-mode region (from its
+  // `Determine selection mode` comment to `singleSelection`) is a comment tag
+  // (`[#3720]` -> `[objectstack#3720]`). On the hop off
+  // `62597c588`, `ObjectGrid.tsx` changed too (18 insertions, 5 deletions:
+  // objectui#10083's `rowActionsDeclared` row-menu signal and objectui#9909's
+  // currency display locale), none of it inside the selection block, which
+  // only MOVED then as well (`4024-4051` to `4032-4059`), re-READ with the
+  // same reading. `ObjectGrid.tsx` changed across the move off
   // `87af769e9` too (119 insertions, 9 deletions), and THAT time the selection block's CONTENT
   // moved, not only its position: objectui#10218 (`62597c588` itself)
   // rewrote the `selection` arm to "presence enables; an explicit off wins",
@@ -91,12 +99,13 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
   // describing the wrong function. The second claim,
   // `hooks/useBulkExecutor.ts:298-303`, sits in a file that is byte-identical
-  // to `62597c588` and to `87af769e9` on the last two hops (it last changed on the hop off `53ded82bf`, 36
+  // to `f8a9d0fb0`, to `62597c588` and to `87af769e9` on the last three hops
+  // (`git diff --quiet`; it last changed on the hop off `53ded82bf`, 36
   // insertions, 22 deletions, when it was re-READ rather than carried on file
   // identity): the six lines hash to
   // `01083348330f10a201cdf1078b4c21c236402b6a` at every one of those pins and
   // still end on
-  // `label = 'bulk delete'`, the line the `284-288` span cited six
+  // `label = 'bulk delete'`, the line the `284-288` span cited nine
   // pins ago stopped short of, truncating the second of the two branches it
   // names (byte-identity is never taken as proof an anchor is right):
   //

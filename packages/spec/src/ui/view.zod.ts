@@ -3209,13 +3209,18 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `form.tsx` changed on
-   * this hop only in its registration's input list, objectui#9910's
-   * `children` slot, and `spanLadderFor` at `:204-231` is byte-identical, so it
-   * still emits the ladder; `plugin-form`'s `autoLayout.ts` is byte-identical
-   * to `62597c588`, where `form.tsx` was byte-identical to `87af769e9`).
+   * (`.objectui-sha` = `__PIN9__`, re-read 2026-09-28: `form.tsx` changed on
+   * this hop — 64 insertions, 3 deletions: the named clear-on-hide notice,
+   * objectui#8070, and a cascade clear that writes `null`, objectui#10291 —
+   * all of it below `spanLadderFor`, which is still `:204-231` byte-identical,
+   * and its one call site moved `:2787` -> `:2848` inside a span that is
+   * byte-identical too, so it still emits the ladder; `plugin-form`'s
+   * `autoLayout.ts` is byte-identical to `f8a9d0fb0` and `62597c588`, so
+   * `resolveColSpan` is still `:154`. At `f8a9d0fb0` (2026-09-24) `form.tsx`
+   * had changed only in its registration's input list, objectui#9910's
+   * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `__PIN12__`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
