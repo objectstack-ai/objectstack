@@ -47,8 +47,9 @@ export interface ApplyConversionsOptions {
    * can turn it off); flow rehydration in the automation engine; and the
    * artifact-ingestion door (`applyArtifactForwardConversions` in
    * `@objectstack/metadata-core`, reached from two callers), which opens the
-   * window by comparing the artifact's declared `engines.protocol` floor with
-   * the running spec version. A stored row, a stored flow and a built artifact
+   * window per entry by comparing the artifact's declared `engines.protocol`
+   * floor with the running spec version and with the entry's own
+   * `retiredAfter`. A stored row, a stored flow and a built artifact
    * have no author to teach, so each replays the FULL chain, retired entries
    * included — ADR-0087's `## Addendum (2026-07-31)` for the first two, the
    * #12772 ruling for the third. The fixture CI sets it as well, so graduated
