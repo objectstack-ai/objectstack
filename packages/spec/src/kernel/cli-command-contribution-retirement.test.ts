@@ -19,7 +19,7 @@ import {
 // commit, 146f448a5, with positive controls — the full record lives in the
 // retirement block inside the zod module):
 //
-//   1. CARRIER — after #10724, `manifest.contributes.commands` is a
+//   1. CARRIER — after commit be21955ba, `manifest.contributes.commands` is a
 //      `retiredKey()` tombstone: no manifest surface could legally carry a
 //      command-contribution entry, so the exported schema advertised a shape
 //      whose only declared carrier rejects it. The manifest never referenced
@@ -36,7 +36,7 @@ import {
 // a D2 conversion — `RETIRED_DEFS_BY_MAJOR[18]` plus the D3 semantic entry
 // `cli-command-contribution-retired` ARE the declaration.
 //
-// Form follows #11825 / #8715 / #4988: resolved symbol identity over every
+// Form follows #11825 / commit 2c86fe3ea / #4988: resolved symbol identity over every
 // public entry via the build-time `export-origins/` artifact.
 describe('[#12007] kernel/ CLICommandContribution retirement', () => {
   /** The 2 names the retired def exported (1 schema const + 1 type). */

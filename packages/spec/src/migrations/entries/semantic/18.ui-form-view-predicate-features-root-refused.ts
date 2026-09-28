@@ -14,8 +14,9 @@ export const entry: SemanticMigration = {
     + 'is mechanical: a feature-flag gate and a record-state gate answer different '
     + 'questions, so the author chooses which surface the gate belongs on.',
   reason:
-    'objectstack#12665, ruled 2026-08-27 on objectui#6262 (option B — vocabulary '
-    + 'narrowing): one authored form view is served on two kinds of route, and a '
+    'Ruled by the maintainer on 2026-08-27 (option B — vocabulary narrowing: a form view may '
+    + 'not name `features.*` in a predicate, and the authoring door refuses it loudly): one '
+    + 'authored form view is served on two kinds of route, and a '
     + '`features.*` predicate got two verdicts from the same text. Inside an app '
     + '(`/apps/:appName/*`) the root resolves against the real auth-config flags; on the '
     + 'standalone form routes (`/forms/:name`, public `/f/:slug`) no app context exists, '

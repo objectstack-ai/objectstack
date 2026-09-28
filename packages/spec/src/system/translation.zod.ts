@@ -1175,10 +1175,13 @@ const appTranslationDataShape = () => ({
    * per-app bundle would ask every app to re-translate the platform (maintainer
    * ruling on #7646).
    *
-   * ⚠️ The runner half is a separate, downstream change: this declares the
-   * vocabulary and closes it, and no shipped runner reads it yet — see the
-   * `flows` row in `liveness/translation.json`, which is `planned` and carries
-   * that warning for authors.
+   * The runner half was a separate, downstream change, and it has landed
+   * client-side for the per-screen copy. objectui's `FlowRunner` reads
+   * `screens` (each screen's `title`, and each field's `label` and
+   * `placeholder`), measured at the `.objectui-sha` pin `f8a9d0fb`. The flow's own
+   * `label` is read by nothing yet. See the `flows` rows in
+   * `liveness/translation.json`: `screens` is `live`, `label` stays `planned`,
+   * and the group's author warning names the unread half.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',
