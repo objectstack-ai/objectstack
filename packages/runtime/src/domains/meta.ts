@@ -510,7 +510,10 @@ async function answerMetaList(
 }
 
 /** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
-type MetaSaveVerdict = (canonicalType: string, activeOrganizationId: string | undefined) => { allowed: boolean };
+type MetaSaveVerdict = (
+    canonicalType: string,
+    activeOrganizationId: string | undefined,
+) => ReturnType<typeof metaWriteCapabilityVerdict>;
 
 /**
  * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
