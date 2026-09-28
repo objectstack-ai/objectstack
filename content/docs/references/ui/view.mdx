@@ -2256,9 +2256,10 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
-| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored) |
+| **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
+| **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
+| **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
@@ -2327,8 +2328,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 
@@ -2356,9 +2357,10 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
-| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored) |
+| **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
+| **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
+| **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
 
@@ -2402,8 +2404,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 
