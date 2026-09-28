@@ -1,6 +1,6 @@
 ---
 title: Protocol
-description: Protocol protocol schemas
+description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilities and 133 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -1644,9 +1644,9 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
 | **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | optional |  |
-| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional |  |
 | **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
-| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
+| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -1716,7 +1716,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
-| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `integer` | optional | Number of columns for the form body |
 | **title** | `string` | optional | Form title |
 | **description** | `string` | optional | Form description |
@@ -1801,7 +1801,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
-| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `integer` | optional | Number of columns for the form body |
 | **title** | `string` | optional | Form title |
 | **description** | `string` | optional | Form description |

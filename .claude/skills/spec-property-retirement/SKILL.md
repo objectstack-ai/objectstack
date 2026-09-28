@@ -40,11 +40,11 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       `rls.enabled` 曾是「证据错误的 live」而实际**无人读取** —— disabled 的
       policy 仍在贡献它的授权。那个键最后是**被强制执行**,不是被删除。功能存在时,强制
       执行赢。
-- [ ] **它是文档形状的吗?** `hook.label`、`hook.description`、`flow.description`
-      没有运行时消费者,但被**有意保留** —— 它们为下一个读者(按 ADR-0033,常是模
-      型)记录意图。把豁免写进台账 `note`,下次审计不再重审。良性展示元数据
-      (`description`、`tags`、`icon`)永远谈不上「误导」;不要标 `authorWarn`,也
-      不要退役它。
+- [ ] **主流平台有没有这个能力?** 声明而未执行的键每族问这句,按维护者原话(裁决评论
+      `5727134555`):「有 ⇒ 补消费端(一次做对);没有 ⇒ 退役,而不是看仓里有没有人读」。
+      文档形状的键(`hook.label`、`flow.description`)为下一个读者记录意图(ADR-0033),是「有」的
+      一例:补渲染、不退役,判定写进台账 `note`,下次审计不再重审。`description`、`tags`、`icon`
+      不自动豁免:RLS 策略的 `tags` 主流没有 ⇒ 退役。`authorWarn` 另按 README 判。
 - [ ] **有已承诺的路线图吗?** 那就是 `experimental` + `.describe()` 里的
       `[EXPERIMENTAL — not enforced]` 标记,不是删除。
 - [ ] **同 major 记账。** 同一个*未发布 major* 里更早的 conversion 改名了你现在要删
@@ -58,7 +58,7 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       `live-elsewhere` 一节。
 - [ ] **零编写实例普查要并跑一个同族已知存活的键作对照**,两读数都报;同得零即没测出。
 - [ ] **拿 `cross-repo` 行当论据,就当刻重核路径与行号**:漂了读作重新取证,⛔ 不是 `dead`。
-- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才是退役的证据。
+- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才证 `dead`。
 
 ## 1. 裁判是构建,不是台账
 
@@ -174,8 +174,8 @@ conversion 已不再覆盖的那位。
 `spec-changes.json`、生成的 upgrade guide 与 `spec_changes` MCP 工具才是主通道,不
 注册它们就一直空着。
 
-⚠ **这是两个独立义务,其中只有一个是字符串匹配。** registry 条目是门禁读的;
-conversion 是消费者跟的。两个都要写。
+⚠ **这是三个独立义务,其中只有一个是字符串匹配。** registry 条目是门禁读的;
+conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都要写。
 
 - [ ] **一条 `MetadataConversion`**,在 `packages/spec/src/conversions/registry.ts`:
       kebab-case 的 `id` 以 `-removed` 结尾、`toMajor`、每键一条
@@ -203,9 +203,7 @@ conversion 是消费者跟的。两个都要写。
 - [ ] **`surface` 保持散文 —— 它不再被匹配。** 按作者写元数据的方式写
       (`flow.nodes[].outputSchema`),那也是 upgrade guide 打印的。多键 conversion
       仍用恰好 `' / '` 连接子句(tool 清扫以来的 house style)。下游不再有任何东西
-      从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:门
-      (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
-      表,再没有任何规则从 `surface` 解析归属。
+      从它解析归属 —— 那个职责移给了上面的条目。
 - [ ] **`retiredFromLoadPath: true`** —— 退役恒真,但管辖权只有 authoring 漏斗
       `normalizeStackInput`;三处 data-at-rest seam 以 `includeRetired: true` 故意重放退役
       条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
@@ -231,8 +229,10 @@ conversion 是消费者跟的。两个都要写。
       `retiredFromLoadPath`。你的 transform 不属于这些形状,就自己证明幂等 —— CLI
       e2e(`packages/cli/test/migrate-meta.e2e.test.ts`)会 replay 迁移后的快照并断
       言 `applied` 为空。
-- [ ] **没有 source 可重写的响应面键**,改注册成 `SemanticMigration`(D3
-      `semantic[]`),`reason` 与 `acceptanceCriteria` 非空 ——
+- [ ] **每个退役家族一条 D3 `semantic` 条目**(`SemanticMigration`;按家族,不按键),
+      即使 D2 conversion 无损也欠 —— D2 只承载机械数据修复。`reason`(升级方仍欠的判断)
+      与 `acceptanceCriteria` 非空;一条一个文件,见 `packages/spec/src/migrations/entries/`
+      的 README。**没有 source 可重写的响应面键**写不出 conversion,只走这一条 ——
       `EnhancedApiError.fieldErrors` 是成品示例。
 
 ## 4. 面清单
@@ -248,7 +248,7 @@ conversion 是消费者跟的。两个都要写。
       窄全盲(#3883 从 `defineAction` 的输入删了三个键,快照没动)。它的门还住在另
       一个 workflow(`TypeScript Type Check`,不是 `Check Generated Artifacts`),读
       的是构建出的 `dist/*.d.ts`。
-- [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目**(§3)。
+- [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目 + 每家族一条 D3 `semantic` 条目**(§3)。
 - [ ] **Liveness 台账** —— 按 §2 的路线表,带 `verifiedAt`。更新 README 的按类型行
       **连同计数**(那张表狠狠漂过一次;用 README 里的 python 片段重新生成计数,不
       要手改)。

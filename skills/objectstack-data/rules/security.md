@@ -20,14 +20,11 @@ export const salesUser = definePermissionSet({
 // defineStack({ permissions: [salesUser], ... })
 ```
 
-- **Stack key: `permissions`.** The collection is named for the metadata kind,
-  not for the factory, so `definePermissionSet()` output goes into
-  `defineStack({ permissions: [...] })`. `permissionSets:` is **refused at
-  load** — the top level is strict, so the stack fails with an
+- **Stack key: `permissions`** (named for the metadata kind, not the factory).
+  `permissionSets:` is **refused at load** — the strict top level fails with an
   `Unrecognized key(s) on this stack definition` error naming the key, never a
-  silent drop. `ObjectStackDefinitionSchema`
-  (`node_modules/@objectstack/spec/src/stack.zod.ts`) is the enumeration of
-  record; `objectstack-platform` lists every top-level key.
+  silent drop; `ObjectStackDefinitionSchema`
+  (`node_modules/@objectstack/spec/src/stack.zod.ts`) is the enumeration of record.
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
@@ -35,7 +32,7 @@ export const salesUser = definePermissionSet({
 - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** It may carry app
   capabilities declared under `capabilities:` (`defineCapability`) and granted via
   `systemPermissions`; lint and boot refuse a platform capability or undeclared name there.
-- Combine with `enable.apiMethods` to also restrict the HTTP surface.
+- `enable.apiMethods` also restricts the HTTP surface.
 
 ## Assigning a permission set to a user
 
@@ -43,16 +40,15 @@ Declaring a set grants nobody anything — an assignment is **data**: one row in
 the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
 carrying `user_id`, `permission_set_id`, and an optional `organization_id`
 (`null` = every org context). Optional `valid_from` / `valid_until` bound a
-half-open window checked at resolution time; `granted_by` is stamped by the
-gate on insert — never author it.
+half-open window; `granted_by` is stamped by the gate on insert — never author
+it.
 
 ⚠️ **`permission_set_id` takes the `sys_permission_set` RECORD ID, not the set's
-`name`.** Grants resolve by loading `sys_permission_set` **by `id`**, so a `name`
-in that field matches nothing, raises no error, and silently grants nothing.
-Declared sets are upserted by `name` with a **generated** `id` on `kernel:ready`
-(ADR-0086 D5) — that id differs per environment, so resolve it first.
+`name`** — a `name` there matches nothing, raises no error, and silently grants
+nothing. Declared sets are upserted by `name` with a **generated** `id` on
+`kernel:ready` (ADR-0086 D5) — that id differs per environment, so resolve it first.
 
-Assignment is therefore two calls, both `POST /api/v1/data/{object}`
+Assignment is two calls, both `POST /api/v1/data/{object}`
 (`…/query` with a QueryAST body for the read): look up the set's `id` in
 `sys_permission_set` by `name`, then insert
 `{ user_id, permission_set_id, organization_id }` into
@@ -69,10 +65,19 @@ enforcing code path (explaining another user needs `manage_users`).
 
 The **enforced** RLS surface is a list of `rowLevelSecurity` policies on a
 **permission set / profile** (`PermissionSetSchema.rowLevelSecurity`), *not* a
-CEL predicate on the object. Each policy carries a `using` (read filter) and/or
-`check` (write filter) **string** predicate. The compiler ANDs `using` into
-every read for users carrying that set; `check` gates writes. (`@objectstack/plugin-security`
-re-reads the target row through the write filter before single-id `update`/`delete`.)
+CEL predicate on the object. Each policy's `using` and/or `check` is a **string**
+predicate. `using` admits rows: what a `select` policy lets the
+caller read, and the existing rows an `update`/`delete` policy lets it change
+or remove; on a read the applicable `using` OR-combine, then AND into the query.
+`check` is judged on every row an `insert`/`update` writes (array inserts and
+`multi: true` included; one failing row refuses the write), chosen per
+operation: when any applicable policy declares `check`, only those decide
+(OR-combined); else each applicable `using` stands in. A non-blank `check` on a
+`select`/`delete` policy is refused. Default deny, among the policies that
+apply: a row none admits is denied, an unevaluable policy fails closed; when
+none applies the policies restrict nothing (the tenant wall still applies) — an
+`update`/`delete` target with no write-class `using` is bounded by the caller's
+`select` policies.
 
 ```typescript
 // in a permission set (definePermissionSet)
@@ -81,8 +86,8 @@ rowLevelSecurity: [
     name: 'own_records',
     object: 'account',                       // REQUIRED per policy
     operation: 'all',                        // singular: select|insert|update|delete|all
-    using: 'owner_id == current_user.id',    // read scope
-    check: 'owner_id == current_user.id',    // write scope
+    using: 'owner_id == current_user.id',    // rows readable / targetable
+    check: 'owner_id == current_user.id',    // every row written
   },
   {
     name: 'org_isolation',
@@ -97,8 +102,8 @@ Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
 `&&`/`||`/`!`, and `== null` checks all lower to a pushdown filter. **No** cross-object
 traversal or subqueries — those are a compile error (ADR-0055), never silently dropped.
-A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated** bridge
-(emits a warning) but should be authored in CEL. The compiler resolves these
+A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated**
+bridge (warns). The compiler resolves these
 `current_user.*` placeholders:
 
 | Placeholder | Resolves to |
@@ -109,12 +114,10 @@ A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated*
 | `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
 | `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
 
-- Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts` (policy shape),
-  `node_modules/@objectstack/spec/src/security/rls.zod.ts` (predicate grammar).
-- Owner-scoping shortcut: the built-in `member_default` set already owner-scopes
-  writes via `owner_only_writes` / `owner_only_deletes`, and an object's
-  `sharingModel` (ADR-0056 D1)
-  is the declarative way to set the org-wide default — prefer those over
+- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts` (policy
+  shape, predicate grammar, `check` composition).
+- Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
+  `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
 
 ## Sensitive fields — `secret` type + `requiredPermissions`
@@ -135,11 +138,10 @@ fields: {
 }
 ```
 
-**Per-field access gating — `requiredPermissions` (ADR-0066 D3).** Capabilities
-required to READ/EDIT the field. A field declaring `requiredPermissions` is
-**masked on read and denied on write** unless the caller holds ALL listed
-capabilities — an AND-gate that is strictest-wins over permission-set field
-grants. Enforced by plugin-security's FieldMasker.
+**Per-field access gating — `requiredPermissions` (ADR-0066 D3).** A field
+declaring `requiredPermissions` is **masked on read and denied on write** unless
+the caller holds ALL listed capabilities — an AND-gate that is strictest-wins
+over permission-set field grants.
 
 ```typescript
 fields: {
@@ -190,8 +192,8 @@ none — e.g. identity tables a plugin writes via its own adapter
   crossing takes a *true platform admin* (the superuser bit **and** a
   platform-exclusive capability: `manage_metadata`, `manage_platform_settings`,
   `studio.access`, `manage_users`) on one of those same postures. So an org
-  admin holding the superuser bit stays org-scoped, and on an ordinary tenant
-  object nobody crosses — the admin sees 0 rows too.
+  admin with the superuser bit stays org-scoped; on an ordinary tenant object
+  nobody crosses (the admin sees 0 rows too).
 
 **Recipe — env-global, admin-only object that admins can fully see:**
 
@@ -208,7 +210,7 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > `member_default` baseline is **not** one of them: it is explicit-allow and
 > grants only the objects it names.) `requiredPermissions` *by itself* leaves the
 > object a tenant object, so the wall keeps denying the untagged rows and even a
-> platform admin sees nothing. The pair is the correct combo (admin sees all,
-> non-admins 403), and `requiredPermissions` is the half that holds however
-> permissive the caller's grants are — it is an AND-gate checked **before** the
-> CRUD grant. Posture model: ADR-0066; tenant wall: ADR-0095 D1.
+> platform admin sees nothing. The pair is the correct combo; `requiredPermissions`
+> is the half that holds however permissive the caller's grants are (an AND-gate
+> checked **before** the CRUD grant). Posture model: ADR-0066; tenant wall:
+> ADR-0095 D1.
