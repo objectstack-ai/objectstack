@@ -10863,6 +10863,7 @@ const viewListTabsRemoved: MetadataConversion = {
   id: 'view-list-tabs-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.list.tabs / view.listViews.*.tabs — the list view\'s own tab definitions',
   summary:
     "list-view key 'tabs' removed (ADR-0049 enforce-or-remove — parsed and stored, drawn by nothing: no "
