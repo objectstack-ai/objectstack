@@ -57,8 +57,9 @@ const scalarConfig: ViewItem = { name: 'crm_lead.x', object: 'crm_lead', viewKin
 const listConfigOnFormArm: ViewItem = { name: 'crm_lead.x', object: 'crm_lead', viewKind: 'form', config: LIST_CONFIG };
 // @ts-expect-error -- the same on the wire member.
 const wireScalarConfig: ViewItemWire = { name: 'crm_lead.x', object: 'crm_lead', viewKind: 'list', config: 42 };
+// Wrapped, never called: the factory parses, and this body is refused at runtime too.
 // @ts-expect-error -- and on `defineViewItem`'s parameter.
-const definedScalarConfig = defineViewItem({ name: 'crm_lead.x', object: 'crm_lead', viewKind: 'list', config: 42 });
+const definedScalarConfig = () => defineViewItem({ name: 'crm_lead.x', object: 'crm_lead', viewKind: 'list', config: 42 });
 // @ts-expect-error -- the `viewItem` member of ViewMetadata carries the same config type.
 const metadataScalarConfig: ViewMetadata = { name: 'crm_lead.x', object: 'crm_lead', viewKind: 'list', config: 42 };
 // @ts-expect-error -- …and of ViewMetadataParsed.
