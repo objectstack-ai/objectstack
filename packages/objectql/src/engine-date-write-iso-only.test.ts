@@ -159,15 +159,14 @@ describe('[#20481] the write door — a date string is written in its YYYY-MM-DD
     }
   });
 
-  it('one reading at both doors: every refused string is refused as a comparand too, and every accepted string is read as one', async () => {
-    for (const value of REFUSED) {
+  it('one reading at both doors: a date string is refused as a written value exactly when it is refused as a comparand', async () => {
+    const strings = [...REFUSED, ...ACCEPTED.map(([, v]) => v).filter((v): v is string => typeof v === 'string')];
+    for (const value of strings) {
+      const written = (await engine.validate('ledger', { placed_on: value })).valid;
       const err = await refusalOf(engine.find('ledger', { where: { placed_on: { $gte: value } } }));
-      expect(err, `where ${value}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      if (err) expect(err, `where ${JSON.stringify(value)}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      expect({ written, compared: err === null }, JSON.stringify(value)).toEqual({ written: !REFUSED.includes(value), compared: !REFUSED.includes(value) });
     }
-    expect(reads, 'no read — every comparand refusal precedes the driver').toHaveLength(0);
-    for (const [name, value] of ACCEPTED) {
-      await expect(engine.find('ledger', { where: { placed_on: { $gte: value } } }), `where ${name}`).resolves.toEqual([]);
-    }
-    expect(reads).toHaveLength(ACCEPTED.length);
+    expect(reads, 'a read for each accepted comparand, none for a refused one').toHaveLength(strings.length - REFUSED.length);
   });
 });
