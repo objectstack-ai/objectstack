@@ -3,8 +3,8 @@
 /**
  * `os migrate meta` — the guidance it prints for the ADR-0087 semantic entries
  * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`, `driver-*`,
- * `kernel-*`, `system-*`) states each lesson in words and carries no tracker
- * number.
+ * `kernel-*`, `system-*`, `datasource-*`, `filter-*`, `action-*`, `data-*`,
+ * `element-*`) states each lesson in words and carries no tracker number.
  *
  * ## What this pins
  *
@@ -73,7 +73,10 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const TRACKER_ID = /#\d{4,5}\b/;
 
 /** The families this pin holds, selected by entry-id prefix. */
-const COVERED_PREFIXES = ['engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-'];
+const COVERED_PREFIXES = [
+  'engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-',
+  'datasource-', 'filter-', 'action-', 'data-', 'element-',
+];
 
 /**
  * The entries rewritten when each family was brought to this line — the
@@ -81,6 +84,25 @@ const COVERED_PREFIXES = ['engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'sy
  * is held by its prefix and needs no row here.
  */
 const REWRITTEN = [
+  'action-bulk-dispatch-contract-undeclared',
+  'action-descriptor-is-async-retired',
+  'action-descriptor-resume-authority-default-flip',
+  'action-engine-facade-find-query-envelope',
+  'action-session-roles-to-positions',
+  'data-driver-find-stream-retired',
+  'data-driver-query-omit-object',
+  'data-engine-batch-retired',
+  'data-field-changed-event-retired',
+  'data-file-value-duration-unit-in-key',
+  'data-nosql-query-options-timeout-unit-in-key',
+  'datasource-config-inline-credential-refused',
+  'datasource-config-mongo-options-credential-refused',
+  'datasource-config-placeholder-refused',
+  'datasource-config-postgres-url-unparseable-refused',
+  'datasource-config-url-query-credential-refused',
+  'datasource-config-url-userinfo-refused',
+  'datasource-credentialsref-mongo-composed-no-username-refused',
+  'datasource-credentialsref-mongo-url-no-user-refused',
   'driver-aggregate-undeclared-key-aliases-removed',
   'driver-capabilities-inert-bits-removed',
   'driver-options-timeout-to-timeout-ms',
@@ -88,11 +110,25 @@ const REWRITTEN = [
   'driver-sql-unresolvable-where-column-refused',
   'driver-sql-upsert-cross-row-identity-merge-refused',
   'driver-turso-config-local-path-wasm-retired',
+  'element-data-source-and-object-block-filter-rule-array',
+  'element-number-filter-rule-array',
+  'element-record-picker-filter-rule-array',
   'engine-dotted-filter-refused',
   'engine-dotted-projection-refused',
   'engine-find-formula-filter-refused',
   'engine-find-formula-order-by-refused',
   'engine-update-upsert-retired',
+  'filter-between-blank-endpoint-refused',
+  'filter-between-field-reference-endpoint-refused',
+  'filter-comparand-types-and-widget-nested-slots-refused-at-save',
+  'filter-equality-array-comparand-refused',
+  'filter-equality-array-comparand-refused-at-save',
+  'filter-icontains-comparand-refused-at-parse',
+  'filter-ne-array-comparand-refused',
+  'filter-preset-ordering-comparand-refused',
+  'filter-query-face-comparands-refused-at-save',
+  'filter-regex-options-retired',
+  'filter-text-operator-declared-type-refused',
   'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
   'kernel-context-preview-mode-retired',
   'kernel-event-bus-retention-unit-in-key',

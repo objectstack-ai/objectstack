@@ -24,8 +24,9 @@ export const entry: SemanticMigration = {
     + 'wrong one. On a view rule an OMITTED value is untouched — absence is not a comparand '
     + 'and this rule says nothing about it',
   reason:
-    '#19514, out of objectui#9050 ruling C-prime (maintainer 2026-09-20, verbatim, '
-    + 'untranslated): 「the differences are the protocol\'s to close」. The platform already '
+    'The protocol half of the maintainer\'s 2026-09-20 ruling (option C-prime) on the console\'s '
+    + 'filter converter, whose first rule reads, verbatim and untranslated: 「the differences are '
+    + 'the protocol\'s to close」. The platform already '
     + 'DECLARED both refusals, as data, in this package: FILTER_TEXT_CASES carries a '
     + 'REJECTION row for an empty comparand and one for a non-string comparand, each with '
     + 'code INVALID_FILTER and each requiring the refusal to name the operator. All five '
@@ -38,7 +39,8 @@ export const entry: SemanticMigration = {
     + 'declared-not-enforced shape ADR-0049 exists to close. '
     + 'The narrowing is DERIVED from the table, not transcribed beside it: both doors call '
     + 'the published predicate isRefusedTextComparand and the published reason text '
-    + 'textComparandRefusalReason, the pair lifted into this package at #18113 for exactly '
+    + 'textComparandRefusalReason, the pair published in this package beside FILTER_TEXT_CASES '
+    + 'for exactly '
     + 'this reason, so a row added to the table reaches both doors without an edit at either. '
     + '$contains, $startsWith, '
     + '$endsWith, $like and $ilike keep the answer they give today, '

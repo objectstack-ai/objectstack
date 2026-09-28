@@ -36,7 +36,7 @@ export const entry: SemanticMigration = {
     + '`DataEngineBatchRequestSchema`, so a `retiredKey()` prescription would have no one '
     + 'to reach; its three `authorable-surface.json` baseline lines and its '
     + '`json-schema.manifest.json` entry are dropped in the same change, deliberately. '
-    + 'The enforced channel is tsc. ADR-0049 / ADR-0078, #4618.',
+    + 'The enforced channel is tsc. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No code calls `engine.batch(...)` and no type references `DataEngineBatchRequest`; '
     + 'in-process multi-write atomicity goes through `IObjectQLEngine.transaction(cb)`, a '

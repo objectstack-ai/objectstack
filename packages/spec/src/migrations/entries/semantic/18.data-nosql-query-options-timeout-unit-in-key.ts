@@ -8,7 +8,9 @@ export const entry: SemanticMigration = {
     + 'unit (data/driver-nosql.zod.ts)',
   replacement: 'timeoutMs — rename the key; the value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02): the unit of a duration-shaped '
+    + 'z.number() lives in the key NAME or in a unit-carrying value, never only in the describe '
+    + 'prose, and no existing offender is grandfathered. '
     + 'It stands alone because it is the only offender on its file. The neighbour is what '
     + 'makes it a real hazard rather than a naming preference: batchSize sits directly beside '
     + 'it, a plain row COUNT with the same z.number().int().positive() shape and the same '
@@ -19,7 +21,7 @@ export const entry: SemanticMigration = {
     + 'the failure a driver timeout exists to prevent. Why a semantic entry and not a D2 '
     + 'conversion: these options are a per-call driver argument, reached only through '
     + 'AggregationPipeline.options, which no stack.zod.ts collection declares and no '
-    + 'sys_metadata row stores, so the chain has no seam. #15680, #14478, ADR-0087.',
+    + 'sys_metadata row stores, so the chain has no seam. ADR-0087.',
   acceptanceCriteria:
     'Every caller that passes NoSQL query options spells timeoutMs. Authoring timeout fails '
     + 'to compile (input type `never`) and fails to parse with the rename prescription. '

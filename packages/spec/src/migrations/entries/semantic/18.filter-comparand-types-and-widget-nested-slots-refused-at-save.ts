@@ -38,9 +38,10 @@ export const entry: SemanticMigration = {
     + 'string resolved at request time (such as {current_user_id} or {today}) and a bigint '
     + 'within 2^53 are untouched, and the save door keeps a bigint as written',
   reason:
-    'The save door narrows to exactly what the query faces already refuse (#20116, stage 2 of '
-    + 'the collector). The comparand-type face (normalizeFilterComparandTypes, the #7872 '
-    + 'ruling\'s accepted set) refuses these values on every query: parseFilterAST, the engine '
+    'The save door narrows to exactly what the query faces already refuse (the second stage '
+    + 'of closing the family of comparand shapes the save door accepted and the query faces '
+    + 'refused). The comparand-type face (normalizeFilterComparandTypes, the accepted set the '
+    + 'maintainer ruled on 2026-08-12: string, number, bigint, boolean, null and Date) refuses these values on every query: parseFilterAST, the engine '
     + 'seam, the analytics where door and the read-scope compiler all run it. Measured on '
     + 'origin/main 17bd3187 before the change: FilterConditionSchema, a dataset filter, a '
     + 'dataset measure filter, a dashboard widget filter, a report runtimeFilter and a joined '

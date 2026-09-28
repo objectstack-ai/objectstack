@@ -356,3 +356,44 @@ describe('[#20408] a session claim the resolver DROPPED scopes nothing, on eithe
         expect(landed(d.protocol)).toEqual(landed(r.protocol));
     });
 });
+
+// ── [#20478] The layered view, on both of its spellings ───────────────────────
+
+/**
+ * The layered view reads `getMetaItemLayered` in the caller's partition, as the
+ * plain read does (#9454) — and, on both transports now, through the one chain
+ * (`createMetaLayeredAnswer`), which takes that partition from the VETTED
+ * organization (`metaReadOrganizationId`). The dispatcher served neither
+ * spelling before: the route answered `404 ROUTE_NOT_FOUND` and the flag the
+ * plain read, so these rows had no layered answer there to scope at all.
+ */
+describe('[#20478] the layered view scopes a caller to the organization RestServer scopes them to', () => {
+    const SPELLINGS = [
+        ['/layers', '/meta/view/lead_all/layers', {}],
+        ['?layers=true', '/meta/view/lead_all', { layers: 'true' }],
+    ] as const;
+    const layers = (a: Answer) => ({ status: a.status, overlay: a.data?.overlay?.label, effective: a.data?.effective?.label });
+
+    for (const [spelling, path, query] of SPELLINGS) {
+        it(`${spelling}: a CURRENT member reads its own organization's overlay on both transports (control)`, async () => {
+            for (const boot of [bootDispatcher, bootRest]) {
+                const { call } = boot();
+                expect(layers(await call('GET', 'member', path, query))).toEqual({ status: 200, overlay: 'Alpha pipeline', effective: 'Alpha pipeline' });
+            }
+        });
+
+        it(`${spelling}: the ex-member reads the env-wide row on both transports — never the left organization's overlay`, async () => {
+            const d = bootDispatcher();
+            const r = bootRest();
+            const dispatcher = await d.call('GET', 'exmember', path, query);
+            const rest = await r.call('GET', 'exmember', path, query);
+            expect(layers(rest)).toEqual({ status: 200, overlay: 'All leads', effective: 'All leads' });
+            expect(layers(dispatcher)).toEqual(layers(rest));
+            expect(JSON.stringify(dispatcher.data)).not.toContain('Alpha');
+            // The partition each transport asked for: none — the claim was dropped.
+            const asked = (p: ReturnType<typeof protocolDouble>) => p.getMetaItemLayered.mock.calls.map(([req]: any[]) => req.organizationId);
+            expect(asked(r.protocol)).toEqual([undefined]);
+            expect(asked(d.protocol)).toEqual(asked(r.protocol));
+        });
+    }
+});

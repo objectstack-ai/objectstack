@@ -13,9 +13,9 @@ export const entry: SemanticMigration = {
     'handle stored at `external.credentialsRef`), or a direct `external.credentialsRef` ' +
     'secrets-store reference',
   reason:
-    'The #7990 closure refused the inline credential KEYS and #8082 refused the URL userinfo ' +
-    'spelling; the query string was the third spelling of the identical secret, one syntax ' +
-    'over (#8337). `libsql://x.turso.io?authToken=eyJ…` landed in `sys_metadata` cleartext ' +
+    'The inline-credential closure refused the credential KEYS and the next refusal the URL ' +
+    'userinfo spelling; the query string was the third spelling of the identical secret, one ' +
+    'syntax over. `libsql://x.turso.io?authToken=eyJ…` landed in `sys_metadata` cleartext ' +
     'exactly as `config.authToken` did — and at connect `@libsql/core` assigns the URL token ' +
     'OVER the binder-injected one (measured), so the workaround also silently defeated the ' +
     'bound secret; `pg-connection-string` likewise honours `?password=` over userinfo ' +
@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     'source-file transform cannot do — auto-stripping the parameter alone would silently ' +
     'drop a live credential instead. Do not substitute a `${…}` placeholder into the URL: ' +
     'placeholders in authored metadata are resolved by nothing and reach the database client ' +
-    'verbatim (#8078, measured).',
+    'verbatim (measured when the inline-credential refusal was built).',
   acceptanceCriteria:
     'Every datasource parses with no credential-bearing query parameter in `config.url` / ' +
     '`config.syncUrl` (no `?authToken=` on turso, no `?password=` on postgres); each ' +

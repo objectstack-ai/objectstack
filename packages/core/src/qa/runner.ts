@@ -1,7 +1,51 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import * as QA from '@objectstack/spec/qa';
-import { TestExecutionAdapter } from './adapter.js';
+import type { TargetServices, TestExecutionAdapter } from './adapter.js';
+
+/**
+ * A scenario's verdict. `skipped` is its own outcome, not a kind of pass or
+ * fail: the scenario never ran because a `requires` entry was unmet, so it
+ * proved nothing — a report counts it separately and never as passed.
+ */
+export type TestResultStatus = 'passed' | 'failed' | 'skipped';
+
+/** One `TestScenario.requires` entry that did not hold. */
+export interface UnmetRequirement {
+  /** The `requires` key the entry sits under. */
+  key: 'params' | 'services';
+  /** The entry: the environment variable or the service key. */
+  name: string;
+  /** Why it is unmet, in one clause — what was observed instead. */
+  detail: string;
+}
+
+/** Why a scenario was skipped instead of run. */
+export interface SkipReport {
+  /**
+   * The sentence a report prints: every unmet entry by key and name and, when
+   * a service is unmet, the services the target does declare available.
+   */
+  reason: string;
+  /** Each unmet entry, in `requires` order (`params` first, then `services`). */
+  unmet: UnmetRequirement[];
+  /**
+   * The services the target declares `enabled` with status `available`,
+   * sorted — present whenever a `services` requirement was judged. Empty when
+   * the target's services could not be read.
+   */
+  availableServices?: string[];
+}
+
+/** Options for {@link TestRunner}. */
+export interface TestRunnerOptions {
+  /**
+   * The environment `requires.params` is judged against. Defaults to this
+   * process's own environment — the process running the suite (`os test`),
+   * never the target server's, which no suite can observe.
+   */
+  env?: Readonly<Record<string, string | undefined>>;
+}
 
 /**
  * One scenario's outcome, carrying the names a report leads with.
@@ -24,7 +68,19 @@ export interface TestResult {
   scenarioName: string;
   /** `TestScenario.description`, when the author wrote one. */
   description?: string;
+  /**
+   * The verdict. `skipped` means a `requires` entry was unmet and no step —
+   * setup included — ran; {@link skipped} says which entry and why.
+   */
+  status: TestResultStatus;
+  /**
+   * `status === 'passed'`. A skipped scenario is `passed: false` — it proved
+   * nothing — but it is not a failure either: read `status` to tell the two
+   * apart.
+   */
   passed: boolean;
+  /** Present exactly when `status` is `skipped`. */
+  skipped?: SkipReport;
   steps: StepResult[];
   error?: unknown;
   duration: number;
@@ -72,8 +128,36 @@ function containsInapplicableHint(actual: unknown): string {
   );
 }
 
+/**
+ * One discovery `services` entry is AVAILABLE exactly when the target says
+ * `enabled: true` and `status: 'available'` — both halves, because they answer
+ * different questions (ADR-0076 D12): `enabled` is "the slot is filled",
+ * `status` is whether what fills it is the real thing rather than a stub or a
+ * degraded fallback.
+ */
+function isAvailable(entry: unknown): boolean {
+  if (entry === null || typeof entry !== 'object') return false;
+  const info = entry as { enabled?: unknown; status?: unknown };
+  return info.enabled === true && info.status === 'available';
+}
+
+/** Why a required service is unmet, from what the target said about it. */
+function describeUnavailable(entry: unknown, target: TargetServices): string {
+  if (target.services === undefined) {
+    return `not judgeable: the target's services could not be read (${target.source})`;
+  }
+  if (entry === undefined) return 'not declared by the target';
+  if (entry === null || typeof entry !== 'object') return 'declared by the target in an unreadable shape';
+  const info = entry as { enabled?: unknown; status?: unknown };
+  return `not available on the target (enabled: ${String(info.enabled)}, status: ${String(info.status)})`;
+}
+
 export class TestRunner {
-  constructor(private adapter: TestExecutionAdapter) {}
+  private readonly env: Readonly<Record<string, string | undefined>>;
+
+  constructor(private adapter: TestExecutionAdapter, options: TestRunnerOptions = {}) {
+    this.env = options.env ?? (typeof process === 'undefined' ? {} : process.env);
+  }
 
   async runSuite(suite: QA.TestSuite): Promise<TestResult[]> {
     const results: TestResult[] = [];
@@ -85,6 +169,23 @@ export class TestRunner {
 
   async runScenario(scenario: QA.TestScenario): Promise<TestResult> {
     const startTime = Date.now();
+
+    // Preconditions first: a scenario whose `requires` does not hold runs no
+    // step at all — setup included, since setup can write records.
+    const skipped = await this.judgeRequirements(scenario);
+    if (skipped) {
+      return {
+        scenarioId: scenario.id,
+        scenarioName: scenario.name,
+        description: scenario.description,
+        status: 'skipped',
+        passed: false,
+        skipped,
+        steps: [],
+        duration: Date.now() - startTime,
+      };
+    }
+
     const context: Record<string, unknown> = {}; // Variable context
     
     // Initialize context from initial payload if needed? Currently schema doesn't have initial context prop on Scenario
@@ -100,6 +201,7 @@ export class TestRunner {
              scenarioId: scenario.id,
              scenarioName: scenario.name,
              description: scenario.description,
+             status: 'failed',
              passed: false,
              steps: [],
              error: `Setup failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -156,11 +258,69 @@ export class TestRunner {
       scenarioId: scenario.id,
       scenarioName: scenario.name,
       description: scenario.description,
+      status: scenarioPassed ? 'passed' : 'failed',
       passed: scenarioPassed,
       steps: stepResults,
       error: scenarioError,
       duration: Date.now() - startTime
     };
+  }
+
+  /**
+   * Judge `TestScenario.requires` (ADR-0049: declared is enforced; ruled B).
+   * Returns the skip report when an entry is unmet, `undefined` when every
+   * entry holds or the scenario declares none.
+   *
+   * - `params`: each variable must be set to a non-empty value in {@link env}
+   *   — the process running the suite. Empty counts as unset: a CI secret that
+   *   is not configured arrives as an empty string, and a scenario that needs
+   *   it cannot run on it.
+   * - `services`: each key must be declared by the target `enabled` with
+   *   `status === 'available'` — the discovery document's own verdict
+   *   (ADR-0076 D12), read through the adapter's one probe of the run. A
+   *   target whose services cannot be read declares none, so every service
+   *   requirement is unmet and the reason says why.
+   *
+   * Every unmet entry is reported, not just the first, so one run tells the
+   * author everything the target is missing.
+   */
+  private async judgeRequirements(scenario: QA.TestScenario): Promise<SkipReport | undefined> {
+    const requires = scenario.requires;
+    if (!requires) return undefined;
+    const unmet: UnmetRequirement[] = [];
+
+    for (const name of requires.params ?? []) {
+      const value = this.env[name];
+      if (value === undefined) {
+        unmet.push({ key: 'params', name, detail: 'not set in the environment of the process running the suite' });
+      } else if (value === '') {
+        unmet.push({ key: 'params', name, detail: 'set to an empty value in the environment of the process running the suite' });
+      }
+    }
+
+    const services = requires.services ?? [];
+    let availableServices: string[] | undefined;
+    if (services.length > 0) {
+      const target: TargetServices = this.adapter.readTargetServices
+        ? await this.adapter.readTargetServices()
+        : { source: 'the execution adapter does not report the target\'s services' };
+      const declared = target.services ?? {};
+      availableServices = Object.keys(declared).filter((key) => isAvailable(declared[key])).sort();
+      for (const name of services) {
+        if (isAvailable(declared[name])) continue;
+        unmet.push({ key: 'services', name, detail: describeUnavailable(declared[name], target) });
+      }
+    }
+
+    if (unmet.length === 0) return undefined;
+    const clauses = unmet.map((u) => `requires.${u.key} '${u.name}' is ${u.detail}`);
+    let reason = `${clauses.join('; ')}.`;
+    if (availableServices !== undefined && unmet.some((u) => u.key === 'services')) {
+      reason += availableServices.length > 0
+        ? ` The target declares available: ${availableServices.join(', ')}.`
+        : ' The target declares no service available.';
+    }
+    return { reason, unmet, ...(availableServices !== undefined ? { availableServices } : {}) };
   }
 
   private async runStep(step: QA.TestStep, context: Record<string, unknown>): Promise<unknown> {
