@@ -74,7 +74,15 @@ type Door = {
   readonly authorExtendsLog?: true;
   /** The refusal fires only when the array IS the `where` root — no merged arm. */
   readonly rootOnly?: true;
+  /**
+   * [#20444] Put the driver in the state the refusal needs before each case —
+   * for a refusal no filter alone can reach on this fixture's SQLite client.
+   */
+  readonly setup?: (driver: SqlDriver) => void;
 };
+
+/** [#20444] A column no field of the fixture declares. */
+const UNDECLARED_COL = 'secret_undeclared_col';
 
 const DOORS: readonly Door[] = [
   // ── #20039: the class this file closes ────────────────────────────────────
@@ -219,6 +227,30 @@ const DOORS: readonly Door[] = [
     where: () => ({ [POLICY_COL]: { $exists: SECRET } }),
     secrets: [POLICY_COL, SECRET],
     klass: 'Operator "$exists" in this filter requires a boolean comparand',
+  },
+  // ── #20444: the staged `$empty` operator, born in the seam ──────────────────
+  {
+    builder: 'nonBooleanEmptyComparandError',
+    where: () => ({ [POLICY_COL]: { $empty: SECRET } }),
+    secrets: [POLICY_COL, SECRET],
+    klass: 'Operator "$empty" in this filter requires a boolean comparand',
+  },
+  {
+    builder: 'undeclaredEmptyOperatorFieldError',
+    where: () => ({ [UNDECLARED_COL]: { $empty: true } }),
+    secrets: [UNDECLARED_COL],
+    klass: 'targets a field whose declaration this driver does not hold',
+  },
+  {
+    builder: 'emptyListUnsupportedDialectError',
+    where: () => ({ [JSON_COL]: { $empty: false } }),
+    secrets: [JSON_COL],
+    klass: 'whose empty list is tested with a JSON function that differs per SQL dialect',
+    // A knex client this driver does not model (mssql, oracle) reads as the
+    // `'unknown'` dialect, where the multi-value row has no construct.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'dialectName', { get: () => 'unknown', configurable: true });
+    },
   },
 ];
 
@@ -396,6 +428,10 @@ describe('[#20039] every filter-compile refusal × filter-subtree provenance', (
 
   for (const door of DOORS) {
     describe(door.builder, () => {
+      beforeEach(() => {
+        door.setup?.(driver);
+      });
+
       it('policy-marked ⇒ same code and status, operands WITHHELD, and in the server log', async () => {
         expectWithheld(await refusalOf(markFilterSubtreeProvenance(door.where(), 'policy')), door);
       });

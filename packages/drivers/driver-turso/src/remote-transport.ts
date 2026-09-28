@@ -34,6 +34,10 @@ import {
 // on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
 // [#20041] And the U+0000 gate beside the dangling-escape one.
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table (ruling A on #20399, record 5865693155), asked of
+// the spec per compile rather than restated here.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark's consumer half — same resolution the
 // SqlDriver family applies, so which transport answered stays unobservable.
 import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -206,6 +210,11 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$ilike',
   '$null',
   '$exists',
+  // [#20444] The staged emptiness flag, declared by `FieldOperatorsSchema` and
+  // compiled here by the field's declared row — listed for the reason `$like`
+  // is: the LOCAL twin compiles it, and a transport refusing what its own local
+  // mode answers is the fork the `turso-local-remote-*` suites exist to prevent.
+  '$empty',
 ] as const;
 
 /**
@@ -440,6 +449,10 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // `$null: true` and `$exists: false` are the same question, so these two
     // arms are each other's MIRROR, not each other's copy.
     case '$exists': return value === false;
+    // [#20444] Null counts as empty on every row of the ruled table, so a NULL
+    // column satisfies `$empty: true` and fails its complement — the answer
+    // `driver-sql`'s table gives, read by identity like the two above.
+    case '$empty': return value === true;
     // Negative-polarity set / substring tests hold vacuously for an absent
     // value — the #5298 half of the ruling.
     case '$nin': return true;
@@ -459,6 +472,9 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
     case '$null':
     case '$exists':
+    // [#20444] Spells its NULL case out in both polarities, so it is TOTAL —
+    // see {@link RemoteTransport.pushEmptyOperator}.
+    case '$empty':
       return true;
     // A null comparand makes these null PREDICATES too, not comparisons — see
     // the `$eq` / `$ne` arms of the emitter. [#6050] `undefined` dropped here
@@ -1131,6 +1147,18 @@ export type FilterColumnSqlResolver = (
 export type NonTextColumnResolver = (object: string, field: string) => boolean;
 
 /**
+ * [#20444] A field's DECLARED value shape — its `type` and `multiple`, the
+ * slice `expandEmptyOperator` reads — or `undefined` when the declaration is
+ * not held. Injected by TursoDriver exactly the way
+ * {@link NonTextColumnResolver} is, and answered from the same registration
+ * (`registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` fills
+ * `SqlDriver.valueShapeFields`), so this transport and its local twin read one
+ * declaration. Absent (a transport driven standalone), every field reads as
+ * undeclared and `$empty` is refused rather than guessed.
+ */
+export type DeclaredValueShapeResolver = (object: string, field: string) => ValueShapeFieldDef | undefined;
+
+/**
  * Remote transport that executes all queries via @libsql/client.
  *
  * Handles SQL generation, filter compilation, and result mapping for
@@ -1170,6 +1198,13 @@ export class RemoteTransport {
    * which is what this transport could say before it was handed the rule.
    */
   private nonTextColumn: NonTextColumnResolver | null = null;
+
+  /**
+   * [#20444] The driver's declared value shape for a field — see
+   * {@link setDeclaredValueShapeResolver}. Absent means "no declaration is
+   * held", and `$empty` is refused rather than answered by a guessed row.
+   */
+  private declaredValueShape: DeclaredValueShapeResolver | null = null;
 
   /**
    * [#7929] Where the withheld half of a redacted refusal is written.
@@ -1318,6 +1353,18 @@ export class RemoteTransport {
    */
   setNonTextColumnResolver(resolver: NonTextColumnResolver): void {
     this.nonTextColumn = resolver;
+  }
+
+  /**
+   * [#20444] Hand this transport the driver's declared value shape per field,
+   * so `$empty` compiles the field's declared row of the ruled table
+   * ({@link pushEmptyOperator}). Same shape as
+   * {@link setNonTextColumnResolver} and for the same reason: the declaration
+   * lives on the driver, and this transport asks rather than re-deriving a row
+   * from a value it will only see at run time.
+   */
+  setDeclaredValueShapeResolver(resolver: DeclaredValueShapeResolver): void {
+    this.declaredValueShape = resolver;
   }
 
   /**
@@ -3277,6 +3324,16 @@ export class RemoteTransport {
               // `$null: true` and `$exists: false` are one question asked twice.
               clauses.push(`${column} IS ${opValue === false ? 'NULL' : 'NOT NULL'}`);
               break;
+            // [#20444] `$empty` — the staged emptiness flag, answered by the
+            // field's DECLARED row of the ruled table on the plain column (a
+            // presence question like the two above, so no storage form applies).
+            // Refused, as its two siblings are, unless the comparand is boolean.
+            case '$empty':
+              if (typeof opValue !== 'boolean') {
+                throw this.nonBooleanEmptyComparand(object, key, opValue, value);
+              }
+              this.pushEmptyOperator(clauses, args, object, key, column, opValue, value);
+              break;
             default:
               // Declared = enforced. This arm used to compile ANY unknown
               // operator to `column = ?` against its comparand — so a
@@ -3869,6 +3926,118 @@ export class RemoteTransport {
         `IS NOT NULL for anything but false, a \`=== true\` test compiles IS NULL for anything but ` +
         `true. Note "false" the STRING is truthy, so it landed on the side opposite the false it was ` +
         `written to mean (objectstack#5369, objectstack#5903).`,
+    );
+  }
+
+  /**
+   * [#20444] The error for an `$empty` whose comparand is not a boolean —
+   * `driver-sql`'s `nonBooleanEmptyComparandError`, one package over, in this
+   * transport's location convention. `FieldOperatorsSchema` declares
+   * `$empty: z.boolean()`, and the spec's save door refuses anything else.
+   */
+  private nonBooleanEmptyComparand(object: string, field: string, value: unknown, subtree?: unknown): Error {
+    const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
+    return this.withheldRefusal(
+      '[RemoteTransport] Operator "$empty" in this filter requires a boolean comparand (true or ' +
+        'false). @objectstack/spec FieldOperatorsSchema declares $empty as a boolean, and a ' +
+        'non-boolean is refused rather than coerced: true asks for the empty rows, false for their ' +
+        'exact complement, and any other value would land on whichever side a compiler defaults to. ' +
+        'The field it was aimed at and the value it received are withheld from the message; the ' +
+        'full diagnostic is in the server log.',
+      subtree,
+      `[RemoteTransport] Operator "$empty" on field "${field}" requires a boolean comparand (true or ` +
+        `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$empty. ` +
+        `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+        `empty rows, false for their exact complement.`,
+    );
+  }
+
+  /**
+   * [#20444] Compile `{ field: { $empty: true | false } }` by the field's
+   * DECLARED row of the ruled 「is empty」 table — ruling B on #20311 (record
+   * 5861435168), spelled as this operator by ruling A on #20399 (record
+   * 5865693155) — through the spec's one expansion, `expandEmptyOperator`:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` | `col IS NULL` | `col IS NOT NULL` |
+   * | `text` | `(col IS NULL OR col = ?)`, `''` bound | `(col IS NOT NULL AND col <> ?)` |
+   * | `multi_value` | `(col IS NULL OR L)` | `(col IS NOT NULL AND NOT L)` |
+   *
+   * The SQL is the local twin's (`SqlDriver.applyEmptyOperator`) on its SQLite
+   * dialect — libSQL IS SQLite, where a multi-value field is a TEXT column
+   * holding JSON — so `L` is `driver-sql`'s SQLite construct, `json_valid`
+   * asked first inside a lazily evaluated `CASE` so a malformed cell answers
+   * FALSE rather than failing the statement, `json_type` beside
+   * `json_array_length` so a non-array JSON value is not an empty list. The
+   * `turso-local-remote-*` parity suites hold the two faces to one row set.
+   *
+   * Every clause is parenthesised as ONE conjunct — this transport joins a
+   * node's clauses with a bare ` AND `, so a loose `OR` would bind looser than
+   * it and widen the filter — and TOTAL (never UNKNOWN), so the `$not` rewrite
+   * needs no guard for it ({@link operatorIsNullTotal}).
+   *
+   * Refused, before anything is pushed: a field whose declaration the driver
+   * does not hold (or a transport nobody handed the resolver), because a row
+   * of the table cannot be read off a value this transport sees only at run
+   * time.
+   */
+  private pushEmptyOperator(
+    clauses: string[],
+    args: any[],
+    object: string,
+    field: string,
+    column: string,
+    empty: boolean,
+    subtree: unknown,
+  ): void {
+    const shape = this.declaredValueShape?.(object, field);
+    if (!shape) throw this.undeclaredEmptyOperatorField(object, field, subtree);
+    const expansion = expandEmptyOperator(shape);
+    switch (expansion.arm) {
+      case 'null_only':
+        clauses.push(`${column} IS ${empty ? 'NULL' : 'NOT NULL'}`);
+        return;
+      case 'text':
+        clauses.push(empty ? `(${column} IS NULL OR ${column} = ?)` : `(${column} IS NOT NULL AND ${column} <> ?)`);
+        args.push('');
+        return;
+      case 'multi_value': {
+        const list =
+          `(CASE WHEN json_valid(${column}) THEN json_type(${column}) = 'array' ` +
+          `AND json_array_length(${column}) = 0 ELSE 0 END)`;
+        clauses.push(empty ? `(${column} IS NULL OR ${list})` : `(${column} IS NOT NULL AND NOT ${list})`);
+        return;
+      }
+      default: {
+        // A closed union of three rows; a fourth is a spec change this
+        // transport was not taught, and it must fail loudly.
+        const unknownArm: never = expansion.arm;
+        throw new Error(`[RemoteTransport] no $empty arm for the declared row ${JSON.stringify(unknownArm)}`);
+      }
+    }
+  }
+
+  /**
+   * [#20444] `$empty` aimed at a field whose declaration this transport was not
+   * handed — `driver-sql`'s `undeclaredEmptyOperatorFieldError`, whose withheld
+   * sentence this one is behind the `[RemoteTransport]` prefix (the declaration
+   * the caller is missing is the DRIVER's registry, which this transport reads),
+   * in this transport's location convention.
+   */
+  private undeclaredEmptyOperatorField(object: string, field: string, subtree?: unknown): Error {
+    const why =
+      "What counts as empty is the field's DECLARED row of the ruled table — null or '' for a " +
+      'text-like type, null or [] for a multi-value field, null only for every other type — so ' +
+      'the operator is refused rather than guessed. Filter on a declared field, or use "$null" for ' +
+      '"has no value".';
+    return this.withheldRefusal(
+      '[RemoteTransport] Operator "$empty" in this filter targets a field whose declaration this ' +
+        `driver does not hold (no declared type). ${why} The field is withheld from the message; ` +
+        'the full diagnostic is in the server log.',
+      subtree,
+      `[RemoteTransport] Operator "$empty" on field '${object}.${field}' targets a field whose ` +
+        `declaration this driver does not hold (no declared type). ${why}`,
     );
   }
 

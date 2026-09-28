@@ -2120,7 +2120,7 @@ const ObjectSchemaBase = strictObject(
     field: z.string().describe('Field to watch (typically a status/stage select).').meta({ title: 'Field' }),
     value: z.string().describe('The value the field must transition INTO to fire the milestone.').meta({ title: 'Value' }),
     summary: z.string().describe('Activity summary template; {field} tokens interpolate the record value. e.g. "Deal won: {name}".').meta({ title: 'Summary' }),
-    type: z.string().optional().describe('Activity type for the emitted row (default "completed").').meta({ title: 'Type' }),
+    type: z.string().optional().describe('Activity type for the emitted row — left unset, it keeps the update row\'s kind, "updated" (a milestone only fires on an update).').meta({ title: 'Type' }),
   })).optional().describe('Declarative semantic activity milestones — emit a templated timeline row when a field transitions into a value, no hook code (ADR-0052 §5b.2).'),
 
   // ADR-0020: record state machines are not a separate `stateMachines` map —

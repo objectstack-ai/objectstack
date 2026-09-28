@@ -10,6 +10,9 @@ import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectst
 // the same translation `formula` evaluates and the same pattern `driver-sql`
 // hands to LIKE/GLOB, so this face cannot answer a pattern differently.
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion — the field's declared row of
+// the ruled 「is empty」 table, asked of the spec by the live query path.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -26,6 +29,9 @@ import {
   filterNodeListExpectedError,
   malformedBetweenError,
   nonBooleanNullComparandError,
+  // [#20444] The `$empty` refusals — a non-boolean flag, an undeclared field.
+  nonBooleanEmptyComparandError,
+  undeclaredEmptyOperatorFieldError,
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
   unsupportedFilterError,
@@ -302,6 +308,22 @@ interface MemoryTransaction {
 }
 
 /**
+ * [#20444] Each field's declared value shape — the `type` and `multiple` slice
+ * `expandEmptyOperator` reads — for the fields that declare a `type`. The RAW
+ * `type` is read: a field with none has no row of the ruled 「is empty」 table,
+ * and inventing one here would answer `$empty` with a row nobody declared.
+ */
+function indexValueShapes(fields: Record<string, unknown> | undefined): Map<string, ValueShapeFieldDef> {
+  const out = new Map<string, ValueShapeFieldDef>();
+  for (const [name, def] of Object.entries(fields ?? {})) {
+    const type = (def as { type?: unknown } | null | undefined)?.type;
+    if (typeof type !== 'string' || type === '') continue;
+    out.set(name, { type, multiple: (def as { multiple?: unknown }).multiple === true });
+  }
+  return out;
+}
+
+/**
  * In-Memory Driver for ObjectStack
  *
  * An implementation of the ObjectStack Driver Protocol powered by Mingo — a
@@ -396,6 +418,17 @@ export class InMemoryDriver implements IDataDriver {
    * for it: the driver does not guess types from values.
    */
   private temporalFields: Map<string, Map<string, TemporalFieldKind>> = new Map();
+
+  /**
+   * [#20444] Each declared field's value shape — its `type` and `multiple`, the
+   * slice the spec's `expandEmptyOperator` reads — per object, populated by
+   * {@link syncSchema} beside {@link temporalFields} and with its lifetime. The
+   * live query path answers `$empty` by the field's DECLARED row from it
+   * ({@link emptyOperatorCondition}); a field it does not hold (an object never
+   * synced, a field its schema does not name, one declared with no `type`) is
+   * refused rather than answered by a row read off the data.
+   */
+  private valueShapes: Map<string, Map<string, ValueShapeFieldDef>> = new Map();
 
   /**
    * [#13197, #13239] Declared unique constraints per object, populated by
@@ -1507,7 +1540,19 @@ export class InMemoryDriver implements IDataDriver {
           result[key] = value;
           continue;
         }
-        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
+        // [#20444] `$empty` lowers to a condition of its OWN, AND-ed beside the
+        // field's other operators rather than written into their operator map:
+        // its multi-value row is an OR over two tests, which no single mingo
+        // field operator spells, and a separate conjunct can never contest a
+        // lowered key with a sibling operator (the #13524 clobber class).
+        let fieldOps: Record<string, any> = value;
+        if (Object.prototype.hasOwnProperty.call(value, '$empty')) {
+          const { $empty: flag, ...rest } = value as Record<string, any>;
+          extraAndConditions.push(this.emptyOperatorCondition(object, key, flag, `${here}.$empty`));
+          if (Object.keys(rest).length === 0) continue;
+          fieldOps = rest;
+        }
+        const normalized = this.normalizeFieldOperators(fieldOps, this.temporalKind(object, key), key, here);
         // [#13524] Lowered writes whose mingo key was already taken by a
         // sibling operator on the same field. They cannot be merged without one
         // of the two constraints silently overwriting the other, so each
@@ -1769,6 +1814,52 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
+   * [#20444] Lower `{ field: { $empty: true | false } }` to a mingo condition
+   * by the field's DECLARED row of the ruled 「is empty」 table — ruling B on
+   * #20311 (record 5861435168), spelled as this operator by ruling A on #20399
+   * (record 5865693155) — through the spec's one expansion,
+   * `expandEmptyOperator`, against the declaration {@link syncSchema} recorded:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` | `{ f: { $eq: null } }` | `{ f: { $ne: null } }` |
+   * | `text` | `{ f: { $in: [null, ''] } }` | `{ f: { $nin: [null, ''] } }` |
+   * | `multi_value` | `{ $or: [{ f: { $eq: null } }, { f: { $size: 0 } }] }` | the same pair under `$nor` |
+   *
+   * `null` in a mingo equality matches a missing key as well as a stored null,
+   * so both readings of "no value" are empty on every row — the answer the
+   * `$null` arm already gives. The empty list is tested with `$size: 0`, never
+   * as an equality comparand: measured on mingo 7.2, `$in: [null, []]` does NOT
+   * match a stored `[]` (mingo intersects an array value with the list), and
+   * `$eq: []` also matches an array holding an empty array.
+   *
+   * The flag's boolean shape was settled by `assertFilterConditionShape` before
+   * this ran; the re-check is the totality floor a translator owes itself.
+   */
+  private emptyOperatorCondition(object: string | undefined, field: string, flag: unknown, path: string): Record<string, any> {
+    if (typeof flag !== 'boolean') throw nonBooleanEmptyComparandError(field, flag, path);
+    const shape = object ? this.valueShapes.get(object)?.get(field) : undefined;
+    if (!shape) throw undeclaredEmptyOperatorFieldError(field, path);
+    const expansion = expandEmptyOperator(shape);
+    switch (expansion.arm) {
+      case 'null_only':
+        return { [field]: flag ? { $eq: null } : { $ne: null } };
+      case 'text':
+        return { [field]: flag ? { $in: [null, ''] } : { $nin: [null, ''] } };
+      case 'multi_value': {
+        const branches = [{ [field]: { $eq: null } }, { [field]: { $size: 0 } }];
+        return flag ? { $or: branches } : { $nor: branches };
+      }
+      default: {
+        // A closed union of three rows; a fourth is a spec change this driver
+        // was not taught, and it must fail loudly rather than answer for it.
+        const unknownArm: never = expansion.arm;
+        throw unsupportedFilterError(`No $empty arm for the declared row ${JSON.stringify(unknownArm)}.`);
+      }
+    }
+  }
+
+  /**
    * Escape special regex characters for safe literal matching.
    */
   private escapeRegex(str: string): string {
@@ -2000,6 +2091,9 @@ export class InMemoryDriver implements IDataDriver {
     // (ADR-0053 D-B3) and, like it, is idempotent.
     const kinds = indexTemporalFields(schema?.fields);
     this.temporalFields.set(object, kinds);
+    // [#20444] …and each field's declared value shape, in the same pass, for
+    // the `$empty` operator's declared row.
+    this.valueShapes.set(object, indexValueShapes(schema?.fields));
     // [#13197, #13239] Learn the object's unique constraints in the same pass —
     // BOTH declaration surfaces `driver-sql` materializes uniqueness from:
     // field-level `unique` and object-level `indexes[]` entries carrying

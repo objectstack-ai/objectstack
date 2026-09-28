@@ -1762,4 +1762,16 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'constructor there is one stamp site, and rows for packages that stamp nothing ' +
       'would be the dead weight this file\'s gate refuses.',
   },
+  {
+    package: '@objectstack/runtime',
+    code: 'TENANT_SCOPE_REQUIRED',
+    registeredUnder: '@objectstack/metadata-protocol',
+    reason: 'The door mirrors the producer\'s refusal; it is not a second emitter. ' +
+      '`DELETE /packages/:id` (domains/packages.ts, `requireUninstallOrganizationScope`) asks ' +
+      '`deletePackage`\'s organization-scope question BEFORE `registry.uninstallPackage`, and ' +
+      'answers with the code `deletePackage` refuses with (#7780), so a refused uninstall ' +
+      'changes nothing (#20492). The door never sends `allTenants`, so its condition is exactly ' +
+      'the producer\'s "no organization"; the protocol keeps its own refusal as the second line ' +
+      'and stays the registered emitter.',
+  },
 ];

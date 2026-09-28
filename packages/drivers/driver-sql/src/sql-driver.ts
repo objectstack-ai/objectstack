@@ -32,6 +32,12 @@ import { numericColumnFor } from '@objectstack/spec/data';
 // the write check `@objectstack/formula` evaluates judge one comparison by one
 // rule.
 import { crossFieldColumnVerdict, type CrossFieldComparisonClass } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion (ruling A on #20399, record
+// 5865693155): the field's declared row of the ruled 「is empty」 table, asked
+// of the spec at compile time by {@link SqlDriver.applyEmptyOperator} against
+// the declaration {@link SqlDriver.valueShapeFields} recorded. This driver keeps
+// no copy of the table.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -1964,6 +1970,24 @@ function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null 
 }
 
 /**
+ * [#20444] The declared value shape of every field that declares a `type` —
+ * the {@link SqlDriver.valueShapeFields} entry for one object. Reads the RAW
+ * `type`, deliberately not the `field.type || 'string'` default the column
+ * registries apply: a field with no type has no row of the ruled 「is empty」
+ * table, and inventing `'string'` for it here would answer `$empty` with a row
+ * nobody declared.
+ */
+function declaredValueShapes(fields: Record<string, unknown> | undefined): Record<string, ValueShapeFieldDef> {
+  const shapes: Record<string, ValueShapeFieldDef> = {};
+  for (const [name, field] of Object.entries(fields ?? {})) {
+    const type = (field as { type?: unknown } | null | undefined)?.type;
+    if (typeof type !== 'string' || type === '') continue;
+    shapes[name] = { type, multiple: (field as { multiple?: unknown }).multiple === true };
+  }
+  return shapes;
+}
+
+/**
  * [#17231] ADR-0113's physical column constraint, asked once for every column
  * {@link SqlDriver.createColumn} builds.
  *
@@ -2441,7 +2465,7 @@ function retiredFilterOperatorError(
  */
 const SUPPORTED_FILTER_OPERATORS_SENTENCE =
   'Supported operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, ' +
-  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.';
+  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists, $empty.';
 
 /**
  * An operator outside the emitter's vocabulary and outside the retired table.
@@ -4406,6 +4430,135 @@ function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
   );
 }
 
+// ── [#20444] The `$empty` operator ───────────────────────────────────────────
+
+/**
+ * [#20444] A non-boolean `$empty` comparand. `FieldOperatorsSchema` declares
+ * `$empty: z.boolean()`, and the spec's save door already refuses anything else
+ * (`filter-save-door-refusals.ts` counts it among the boolean flags beside
+ * `$null` / `$exists`). Refused here on the validating walk for the reason its
+ * two siblings are: a two-branch emitter has a DEFAULT side, and a third value
+ * would silently land on it.
+ */
+function nonBooleanEmptyComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    'Operator "$empty" in this filter requires a boolean comparand (true or false). ' +
+      '@objectstack/spec FieldOperatorsSchema declares $empty as a boolean, and a non-boolean is ' +
+      'refused rather than coerced: true asks for the empty rows, false for their exact ' +
+      'complement, and any other value would land on whichever side a compiler defaults to. The ' +
+      'field it was aimed at and the value it received are withheld from the message; the full ' +
+      'diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+      `empty rows, false for their exact complement.`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] `$empty` aimed at a column whose DECLARATION this driver does not
+ * hold — a table created outside `initObjects` / `registerObjectMetadata` /
+ * `registerExternalObject`, a builtin column no field declares (`id`), or a
+ * field declared with no `type`.
+ *
+ * What counts as empty is the field's declared row of the ruled table (null or
+ * `''` for a text-like type, null or `[]` for a multi-value field, null only
+ * for every other type), so without the declaration there is no answer to
+ * compile. The spec's by-value reading — the one it gives the faces that hold
+ * NO field declarations — has no SQL form here: `amount = ''` is a type error
+ * on PostgreSQL, and an empty list is only recognisable as JSON. So the filter
+ * is refused rather than guessed.
+ */
+function undeclaredEmptyOperatorFieldError(field: string, subtree?: unknown): Error {
+  const why =
+    "What counts as empty is the field's DECLARED row of the ruled table — null or '' for a " +
+    'text-like type, null or [] for a multi-value field, null only for every other type — so ' +
+    'the operator is refused rather than guessed. Filter on a declared field, or use "$null" for ' +
+    '"has no value".';
+  return withheldFilterError(
+    'Operator "$empty" in this filter targets a field whose declaration this driver does not ' +
+      `hold (no declared type). ${why} The field is withheld from the message; the full ` +
+      'diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" targets a field whose declaration this driver does not ` +
+      `hold (no declared type). ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] `$empty` on a multi-value field, over a knex client whose dialect
+ * this driver does not model (`dialectName === 'unknown'`). The empty list is
+ * tested with a JSON function that differs per dialect and none of the three
+ * this driver speaks parses everywhere, so the multi-value row has no construct
+ * there. The text and null-only rows need no dialect and compile everywhere.
+ */
+function emptyListUnsupportedDialectError(field: string, subtree?: unknown): Error {
+  const why =
+    'a multi-value field, whose empty list is tested with a JSON function that differs per SQL ' +
+    'dialect, and this connection\'s dialect is not one this driver models (SQLite, PostgreSQL, ' +
+    'MySQL). It is refused rather than guessed; "$null" answers "has no value" on every dialect.';
+  return withheldFilterError(
+    `Operator "$empty" in this filter targets ${why} The field is withheld from the message; the ` +
+      'full diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" targets ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] "Is this stored JSON value the empty list?", as ONE boolean SQL
+ * expression that is FALSE — never NULL, never an error — for every other
+ * stored JSON value, or `null` for a dialect with no construct.
+ *
+ * A multi-value field is a JSON column here ({@link SqlDriver.jsonColumn}: TEXT
+ * on SQLite, `json` on PostgreSQL and MySQL — {@link isMultiValuedColumn} keys
+ * the DDL), so the question is asked of the stored JSON, never as a `$eq: []`
+ * comparand (ruling 乙 on #19757 refuses an empty list in the equality slot, and
+ * this operator does not reopen it).
+ *
+ * - **SQLite** — the column is TEXT, so bytes that are not JSON are physically
+ *   storable (the legacy form {@link jsonMembershipPredicate} guards the same
+ *   way). `json_valid` is asked first, inside a `CASE` whose branches are
+ *   evaluated lazily, so a malformed cell answers FALSE rather than failing the
+ *   statement; `json_type` keeps a non-array JSON value (for which
+ *   `json_array_length` answers 0) from counting as an empty list.
+ * - **PostgreSQL** — `json` has no equality operator, so the value is compared
+ *   as `jsonb`, whose equality is structural (`[ ]` equals `[]`).
+ * - **MySQL** — `JSON_LENGTH` answers 0 for an empty OBJECT too, so the type is
+ *   asked beside it.
+ *
+ * The same three constructs `service-analytics`' SQL compilers emit for the
+ * same row (`empty-operator-sql.ts`); that package depends on no driver, so
+ * the construct is restated rather than imported, and both are held to the
+ * ruled table by their own suites.
+ */
+function emptyJsonListPredicate(
+  dialect: SqlDialectName,
+  field: string,
+): { sql: string; bindings: string[] } | null {
+  switch (dialect) {
+    case 'sqlite':
+      return {
+        sql:
+          "(CASE WHEN json_valid(??) THEN json_type(??) = 'array' AND json_array_length(??) = 0 " +
+          'ELSE 0 END)',
+        bindings: [field, field, field],
+      };
+    case 'postgres':
+      return { sql: "(CAST(?? AS jsonb) = CAST('[]' AS jsonb))", bindings: [field] };
+    case 'mysql':
+      return { sql: "(JSON_TYPE(??) = 'ARRAY' AND JSON_LENGTH(??) = 0)", bindings: [field, field] };
+    default:
+      return null;
+  }
+}
+
 /**
  * [#6050] `undefined` in a COMPARAND position.
  *
@@ -4802,6 +4955,17 @@ function classifyFilterKey(
     throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`, value);
   }
 
+  // [#20444] `$empty`'s comparand is a boolean by the same declaration, refused
+  // on the same walk for the same evaluation-order reason — its own `if`, not a
+  // loop over a flag list, for the reason the `$exists` gate above gives.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$empty') &&
+    typeof value.$empty !== 'boolean'
+  ) {
+    throw nonBooleanEmptyComparandError(key, value.$empty, `${here}.$empty`, value);
+  }
+
   // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
   // refused on this walk for the same evaluation-order reason as the two gates
   // above: an empty comparand makes the predicate match every row, and a gate
@@ -4920,6 +5084,10 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // made #5347 rewrite the `$null` arm does not exist here, because both
     // spellings agree on both surviving values.
     case '$exists': return value === false;
+    // [#20444] Null counts as empty on EVERY row of the ruled table, so a NULL
+    // column satisfies `$empty: true` and fails its complement. The walk refuses
+    // a non-boolean before this table is consulted.
+    case '$empty': return value === true;
     // Negative-polarity set/substring tests: "not among" / "does not contain"
     // hold vacuously for a value that is absent.
     case '$nin': return true;
@@ -4949,6 +5117,11 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
     case '$null':
     case '$exists':
+    // [#20444] `$empty` spells its NULL case out in both polarities —
+    // `(col IS NULL OR …)` / `(col IS NOT NULL AND NOT …)`, the `…` FALSE and
+    // never NULL for a stored value ({@link emptyJsonListPredicate}) — so it
+    // is TRUE or FALSE for every row and `NOT` over it is the exact complement.
+    case '$empty':
       return true;
     // A null comparand makes these null PREDICATES too (see the `$eq`/`$ne`
     // arms of the emitter below), not comparisons.
@@ -5621,6 +5794,29 @@ export class SqlDriver implements IDataDriver {
   protected knex: Knex;
   protected config: Knex.Config;
   protected jsonFields: Record<string, string[]> = {};
+  /**
+   * [#20444] Each field's DECLARED value shape — its `type` and `multiple`, the
+   * slice {@link expandEmptyOperator} reads — per table, filled at the same
+   * three places {@link jsonFields} is ({@link registerManagedObjectMetadata},
+   * {@link registerExternalObject} and the shard alias), from the declaration
+   * and nothing else.
+   *
+   * It is the one input the `$empty` operator needs that no other registry
+   * holds: `jsonFields` cannot say it, because a structured JSON type (`json`,
+   * `address`, …) is a JSON column whose row of the ruled table is null-only,
+   * while a multi-value field is a JSON column whose row counts `[]`; and no
+   * registry here names the text-like types at all.
+   *
+   * A field declared with no `type` is not recorded, and neither is a column no
+   * field declares (`id`, a table built outside this driver's registration), so
+   * `$empty` on either is refused ({@link undeclaredEmptyOperatorFieldError})
+   * rather than answered by a guessed row. A declared type the spec does not
+   * list among the text-like or multi-value types — including the
+   * driver-internal aliases an introspected or test object carries (`string`,
+   * `object`, `array`) — takes the row the spec's expansion gives it, which is
+   * null-only.
+   */
+  protected valueShapeFields: Record<string, Record<string, ValueShapeFieldDef>> = {};
   /**
    * SINGLE-VALUE file-family columns per table (`image` / `file` / `avatar` /
    * `video` / `audio`), filled at the same two registration sites as
@@ -11493,6 +11689,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected aliasShardBookkeeping(base: string, shard: string): void {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
+    this.valueShapeFields[shard] = this.valueShapeFields[base] ?? {};
     this.mediaFields[shard] = this.mediaFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
@@ -11663,6 +11860,8 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[key] = jsonCols;
+    // [#20444] The declared value shapes `$empty` expands — see {@link valueShapeFields}.
+    this.valueShapeFields[key] = declaredValueShapes(schema.fields);
     this.mediaFields[key] = mediaCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
@@ -11778,6 +11977,8 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[tableName] = jsonCols;
+    // [#20444] The declared value shapes `$empty` expands — see {@link valueShapeFields}.
+    this.valueShapeFields[tableName] = declaredValueShapes(obj.fields);
     this.mediaFields[tableName] = mediaCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
@@ -15914,6 +16115,100 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#20444] The field's DECLARED value shape, or `undefined` when this driver
+   * holds no declaration for it — see {@link valueShapeFields}. Keyed like
+   * {@link isJsonColumn}: the registry key the builder's table resolves to and
+   * the LOCAL field name. `driver-turso`'s remote transport asks the same
+   * question through this method, so its two faces read one registry.
+   */
+  protected declaredValueShape(table: string | null | undefined, localField: string): ValueShapeFieldDef | undefined {
+    if (!table) return undefined;
+    const shapes = this.valueShapeFields[table];
+    return shapes && Object.prototype.hasOwnProperty.call(shapes, localField) ? shapes[localField] : undefined;
+  }
+
+  /**
+   * [#20444] Compile `{ field: { $empty: true | false } }` — the staged
+   * emptiness operator, answered by the field's DECLARED row of the ruled
+   * 「is empty」 table (ruling B on #20311, record 5861435168; spelled as this
+   * operator by ruling A on #20399, record 5865693155), through the spec's one
+   * expansion, {@link expandEmptyOperator}:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` (every other type) | `col IS NULL` | `col IS NOT NULL` |
+   * | `text` (the text-like types) | `(col IS NULL OR col = '')` | `(col IS NOT NULL AND col <> '')` |
+   * | `multi_value` (a list-valued field) | `(col IS NULL OR L)` | `(col IS NOT NULL AND NOT L)` |
+   *
+   * `L` is {@link emptyJsonListPredicate}, the dialect's test for "this stored
+   * JSON value is the empty list". An empty list is tested as a STORED VALUE,
+   * never bound as a `$eq: []` comparand (ruling 乙 on #19757 still refuses an
+   * empty list there).
+   *
+   * Every predicate is TOTAL — TRUE or FALSE on every row, never UNKNOWN —
+   * because both polarities spell the NULL case out and `L` is never NULL for a
+   * stored value. So a `$not` over `$empty` needs no guard
+   * ({@link operatorIsNullTotal} answers `true` for it) and `NOT (…)` is the
+   * exact complement, with no three-valued-logic hole. Each predicate is one
+   * knex group, so its `OR` can never re-associate with a sibling conjunct.
+   *
+   * Refused, before anything is emitted: a field with no declaration here
+   * ({@link undeclaredEmptyOperatorFieldError}), and the multi-value row on a
+   * dialect this driver does not model ({@link emptyListUnsupportedDialectError}).
+   *
+   * ⚠️ Staged: `$empty` is not in `FILTER_OPERATORS` yet (the maintainer's
+   * amendment of ruling A, record 5868169573: 「照 $like 先例分阶段」), so the
+   * engine's front door still refuses it; this arm answers a caller that
+   * reaches the driver directly, and it is what the flip card turns on.
+   */
+  private applyEmptyOperator(
+    builder: any,
+    logicalOp: 'and' | 'or',
+    table: string | null | undefined,
+    localField: string,
+    field: string,
+    empty: boolean,
+    // The field's operator map — the node a refusal is resolved against (#8220).
+    subtree: unknown,
+  ): void {
+    const shape = this.declaredValueShape(table, localField);
+    if (!shape) throw undeclaredEmptyOperatorFieldError(field, subtree);
+    const expansion = expandEmptyOperator(shape);
+    const method = logicalOp === 'or' ? 'orWhere' : 'where';
+    switch (expansion.arm) {
+      case 'null_only':
+        builder[
+          empty
+            ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
+            : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')
+        ](field);
+        return;
+      case 'text':
+        builder[method]((qb: any) => {
+          if (empty) qb.whereNull(field).orWhere(field, '');
+          else qb.whereNotNull(field).andWhere(field, '<>', '');
+        });
+        return;
+      case 'multi_value': {
+        const list = emptyJsonListPredicate(this.dialectName, field);
+        if (!list) throw emptyListUnsupportedDialectError(field, subtree);
+        builder[method]((qb: any) => {
+          if (empty) qb.whereNull(field).orWhereRaw(list.sql, list.bindings);
+          else qb.whereNotNull(field).andWhereRaw(`NOT ${list.sql}`, list.bindings);
+        });
+        return;
+      }
+      default: {
+        // The spec's `EmptyOperatorArm` is a closed union of the three rows
+        // above; a fourth reaching here is a spec change this driver was not
+        // taught, and it must fail loudly rather than answer for it.
+        const unknownArm: never = expansion.arm;
+        throw new Error(`[sql-driver] no $empty arm for the declared row ${JSON.stringify(unknownArm)}`);
+      }
+    }
+  }
+
+  /**
    * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
    * that the column it was aimed at cannot give a meaningful answer for.
    *
@@ -16592,6 +16887,15 @@ export class SqlDriver implements IDataDriver {
           // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
           if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
             this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
+            continue;
+          }
+          // [#20444] `$empty` — answered by the field's DECLARED row of the
+          // ruled table, AFTER every refusal above (its non-boolean comparand
+          // was refused on the walk) and BEFORE the calendar-day rewrites,
+          // the comparand coercion and the normalised-column emitter: its
+          // flag is not a value of the column, so none of them applies.
+          if (rawOp === '$empty') {
+            this.applyEmptyOperator(builder, logicalOp, table, localField, field, opValue === true, value);
             continue;
           }
           // Calendar-day upper bounds first (#3777): `$lte` on a bare

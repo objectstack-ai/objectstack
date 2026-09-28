@@ -283,6 +283,46 @@ describe('#8798 — a history-table outage now answers the same way for every ty
     });
 });
 
+type Seed = { version: number; op: string; body: Record<string, unknown> | null };
+/**
+ * History rows in version order, plus the active and draft rows they left
+ * behind. Shared by the #20397 and #20451 blocks below, both about the
+ * DEFAULT range; the REST file names the real writes each lineage mirrors.
+ */
+function seedLineage(
+    tables: Record<string, Array<Record<string, unknown>>>,
+    type: string,
+    name: string,
+    history: Seed[],
+    rows: { active?: Seed; draft?: Seed },
+) {
+    const base = { organization_id: null, type, name };
+    history.forEach((h, i) => {
+        tables.sys_metadata_history!.push({
+            ...base,
+            id: `h_${h.version}`,
+            version: h.version,
+            event_seq: i + 1,
+            operation_type: h.op,
+            metadata: h.body == null ? null : JSON.stringify(h.body),
+            checksum: h.body == null ? null : hashSpec(h.body),
+            recorded_at: new Date(i + 1).toISOString(),
+        });
+    });
+    for (const state of ['active', 'draft'] as const) {
+        const row = rows[state];
+        if (!row) continue;
+        tables.sys_metadata!.push({
+            ...base,
+            id: `m_${state}`,
+            state,
+            version: row.version,
+            metadata: JSON.stringify(row.body),
+            checksum: hashSpec(row.body!),
+        });
+    }
+}
+
 /**
  * [#20397] The DEFAULT range (no `toVersion`) labels its to side with the
  * version whose body it compares.
@@ -297,42 +337,6 @@ describe('#8798 — a history-table outage now answers the same way for every ty
  * real REST stack are `packages/rest/src/meta-diff-default-range-labels.test.ts`.
  */
 describe('#20397 — the default range labels the to side with the active row\'s own version', () => {
-    type Seed = { version: number; op: string; body: Record<string, unknown> | null };
-    /** History rows in version order, plus the active and draft rows they left behind. */
-    function seedLineage(
-        tables: Record<string, Array<Record<string, unknown>>>,
-        type: string,
-        name: string,
-        history: Seed[],
-        rows: { active?: Seed; draft?: Seed },
-    ) {
-        const base = { organization_id: null, type, name };
-        history.forEach((h, i) => {
-            tables.sys_metadata_history!.push({
-                ...base,
-                id: `h_${h.version}`,
-                version: h.version,
-                event_seq: i + 1,
-                operation_type: h.op,
-                metadata: h.body == null ? null : JSON.stringify(h.body),
-                checksum: h.body == null ? null : hashSpec(h.body),
-                recorded_at: new Date(i + 1).toISOString(),
-            });
-        });
-        for (const state of ['active', 'draft'] as const) {
-            const row = rows[state];
-            if (!row) continue;
-            tables.sys_metadata!.push({
-                ...base,
-                id: `m_${state}`,
-                state,
-                version: row.version,
-                metadata: JSON.stringify(row.body),
-                checksum: hashSpec(row.body!),
-            });
-        }
-    }
-
     for (const type of [ORDINARY_TYPE, 'app']) {
         it(`${type}: with a draft pending, toVersion is the active row's version and the answer is the explicit range's`, async () => {
             const { engine, tables } = makeStubEngine();
@@ -434,5 +438,213 @@ describe('#20397 — the default range labels the to side with the active row\'s
             removed: [{ path: 'name', value: 'item' }, { path: 'label', value: 'Two' }],
             changed: [],
         });
+    });
+});
+
+/**
+ * [#20451] With no `fromVersion`, the from side is the NEAREST EARLIER history
+ * row whose body DIFFERS from the to side's, by the diff's own equality:
+ * `diffShallow`'s three buckets all empty means equal, and a body-less row (a
+ * delete's tombstone) compares as `{}` — so the walk stops on it.
+ *
+ * A draft save appends a history row and a publish appends the promoted body
+ * again as the next one, so the row immediately before a published version
+ * repeats its body. The old rule (the row immediately before) answered "no
+ * changes" right after every publish. The lineages below are the ones the REST
+ * pins in `packages/rest/src/meta-diff-default-range-labels.test.ts` write
+ * through the real routes; here they are seeded, beside this file's
+ * read-counting double.
+ */
+describe('#20451 — the default from side is the nearest earlier row whose body differs from the to side\'s', () => {
+    const everythingAdded = (body: Record<string, unknown>) =>
+        Object.entries(body).map(([path, value]) => ({ path, value }));
+
+    it('v1 active, a v2 draft save, a v3 publish: 1 → 3, the change the publish carried, in ONE history read', async () => {
+        const { engine, tables, historyReads } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const b = { name: 'item', label: 'B' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'create', body: b },
+            { version: 3, op: 'publish', body: b },
+        ], { active: { version: 3, op: 'publish', body: b } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(historyReads()).toBe(1);
+        expect(res).toEqual({
+            type: ORDINARY_TYPE,
+            name: 'item',
+            fromVersion: 1,
+            toVersion: 3,
+            added: [],
+            removed: [],
+            changed: [{ path: 'label', from: 'A', to: 'B' }],
+        });
+        expect(res).toEqual(await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item', fromVersion: 1, toVersion: 3 }));
+    });
+
+    it('the same lineage with a v4 draft pending still answers 1 → 3: the draft is neither side', async () => {
+        const { engine, tables } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const b = { name: 'item', label: 'B' };
+        const c = { name: 'item', label: 'C pending' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'create', body: b },
+            { version: 3, op: 'publish', body: b },
+            { version: 4, op: 'create', body: c },
+        ], { active: { version: 3, op: 'publish', body: b }, draft: { version: 4, op: 'create', body: c } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(res.fromVersion).toBe(1);
+        expect(res.toVersion).toBe(3);
+        expect(res.changed).toEqual([{ path: 'label', from: 'A', to: 'B' }]);
+        expect(JSON.stringify(res)).not.toContain('C pending');
+    });
+
+    it('an explicit range names exactly its versions: 2 → 3 over that lineage is still "no changes"', async () => {
+        const { engine, tables } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const b = { name: 'item', label: 'B' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'create', body: b },
+            { version: 3, op: 'publish', body: b },
+        ], { active: { version: 3, op: 'publish', body: b } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item', fromVersion: 2, toVersion: 3 });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: 2, toVersion: 3, added: [], removed: [], changed: [],
+        });
+    });
+
+    it('an explicit `toVersion` alone keeps its version, and the from side walks back from ITS body', async () => {
+        const { engine, tables } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const b = { name: 'item', label: 'B' };
+        const c = { name: 'item', label: 'C' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'create', body: b },
+            { version: 3, op: 'publish', body: b },
+            { version: 4, op: 'update', body: c },
+        ], { active: { version: 4, op: 'update', body: c } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item', toVersion: 3 });
+
+        expect(res.fromVersion).toBe(1);
+        expect(res.toVersion).toBe(3);
+        expect(res.changed).toEqual([{ path: 'label', from: 'A', to: 'B' }]);
+    });
+
+    it('create, delete, draft save, publish: 2 → 4, everything added — the body-less delete row differs, so the walk stops on it', async () => {
+        const { engine, tables } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const a2 = { name: 'item', label: 'A2', columns: ['name'] };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'delete', body: null },
+            { version: 3, op: 'create', body: a2 },
+            { version: 4, op: 'publish', body: a2 },
+        ], { active: { version: 4, op: 'publish', body: a2 } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE,
+            name: 'item',
+            fromVersion: 2,
+            toVersion: 4,
+            added: everythingAdded(a2),
+            removed: [],
+            changed: [],
+        });
+    });
+
+    it('create, delete, active recreate: 2 → 3, everything added — the answer the immediately-previous rule gave', async () => {
+        const { engine, tables } = makeStubEngine();
+        const a = { name: 'item', label: 'A' };
+        const b = { name: 'item', label: 'B' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: a },
+            { version: 2, op: 'delete', body: null },
+            { version: 3, op: 'create', body: b },
+        ], { active: { version: 3, op: 'create', body: b } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+        // Naming the tombstone as the to side: an absent body is `{}` there
+        // too, so the walk passes nothing and lands on v1, as it always did.
+        const deletion: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item', toVersion: 2 });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: 2, toVersion: 3, added: everythingAdded(b), removed: [], changed: [],
+        });
+        expect(deletion).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: 1, toVersion: 2, added: [], removed: everythingAdded(a), changed: [],
+        });
+    });
+
+    it('a brand-new item draft-saved then published: null → 2, everything added — no earlier row differs', async () => {
+        const { engine, tables } = makeStubEngine();
+        const n = { name: 'item', label: 'New' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: n },
+            { version: 2, op: 'publish', body: n },
+        ], { active: { version: 2, op: 'publish', body: n } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: null, toVersion: 2, added: everythingAdded(n), removed: [], changed: [],
+        });
+    });
+
+    it('a single version: null → 1, everything added', async () => {
+        const { engine, tables } = makeStubEngine();
+        const only = { name: 'item', label: 'Only' };
+        seedLineage(tables, ORDINARY_TYPE, 'item', [
+            { version: 1, op: 'create', body: only },
+        ], { active: { version: 1, op: 'create', body: only } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: ORDINARY_TYPE, name: 'item' });
+
+        expect(res).toEqual({
+            type: ORDINARY_TYPE, name: 'item', fromVersion: null, toVersion: 1, added: everythingAdded(only), removed: [], changed: [],
+        });
+    });
+
+    it('the walk compares RAW bodies: a credential-only rotation stops it, and the served values stay redacted', async () => {
+        // The #8671 ruling (diff raw, redact what is emitted) applies to the
+        // walk's comparison too. Compared redacted, the two bodies below are
+        // equal and the walk would pass the rotation by.
+        const { engine, tables } = makeStubEngine();
+        const config = (password: string) => ({ host: 'db.internal', username: 'reporting', password });
+        const old = { name: 'warehouse', label: 'Warehouse', driver: 'postgres', config: config('hunter2-old') };
+        const rotated = { name: 'warehouse', label: 'Warehouse', driver: 'postgres', config: config('hunter3-new') };
+        seedLineage(tables, 'datasource', 'warehouse', [
+            { version: 1, op: 'create', body: old },
+            { version: 2, op: 'create', body: rotated },
+            { version: 3, op: 'publish', body: rotated },
+        ], { active: { version: 3, op: 'publish', body: rotated } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.diffMetaItem({ type: 'datasource', name: 'warehouse' });
+
+        expect(res.fromVersion).toBe(1);
+        expect(res.toVersion).toBe(3);
+        expect(res.changed.map((e: { path: string }) => e.path)).toEqual(['config']);
+        expect(JSON.stringify(res)).not.toContain('hunter2-old');
+        expect(JSON.stringify(res)).not.toContain('hunter3-new');
     });
 });

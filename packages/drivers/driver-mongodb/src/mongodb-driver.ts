@@ -8,7 +8,7 @@
  * ObjectStack's query protocol, aggregations, transactions, and streaming.
  */
 
-import type { DriverOptions } from '@objectstack/spec/data';
+import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import {
   MongoClient,
@@ -21,7 +21,23 @@ import {
   type MongoClientOptions,
 } from 'mongodb';
 import { nanoid } from 'nanoid';
-import { translateFilter } from './mongodb-filter.js';
+import { translateFilter, type ValueShapeResolver } from './mongodb-filter.js';
+
+/**
+ * [#20444] Each field's declared value shape — the `type` and `multiple` slice
+ * `expandEmptyOperator` reads — for the fields that declare a `type`. The RAW
+ * `type` is read: a field with none has no row of the ruled 「is empty」 table,
+ * and inventing one here would answer `$empty` with a row nobody declared.
+ */
+function indexValueShapes(fields: Record<string, unknown> | undefined): Map<string, ValueShapeFieldDef> {
+  const out = new Map<string, ValueShapeFieldDef>();
+  for (const [name, def] of Object.entries(fields ?? {})) {
+    const type = (def as { type?: unknown } | null | undefined)?.type;
+    if (typeof type !== 'string' || type === '') continue;
+    out.set(name, { type, multiple: (def as { multiple?: unknown }).multiple === true });
+  }
+  return out;
+}
 import {
   coerceTemporalValue,
   indexTemporalFields,
@@ -180,6 +196,16 @@ export class MongoDBDriver implements IDataDriver {
    */
   private temporalFields = new Map<string, Map<string, TemporalFieldKind>>();
 
+  /**
+   * [#20444] Each declared field's value shape — its `type` and `multiple`, the
+   * slice the spec's `expandEmptyOperator` reads — per object, populated by
+   * {@link syncSchema} beside {@link temporalFields} and for the same reason:
+   * the `$empty` operator is answered by the field's DECLARED row, and a field
+   * this map does not hold is refused rather than given a row guessed from the
+   * data.
+   */
+  private valueShapes = new Map<string, Map<string, ValueShapeFieldDef>>();
+
   constructor(config: MongoDBDriverConfig) {
     // Refuse to even EXIST in a multi-tenant deployment (#3724). The check is
     // repeated in `connect()`; construction just fails earliest, before a host
@@ -336,7 +362,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
     const findOptions = this.buildFindOptions(query, session);
 
     const cursor = collection.find(filter, findOptions);
@@ -356,7 +382,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
     // `singleRowLookup`: honour the caller's ordering, impose none of our own —
     // the engine sends `limit: 1`, which is indistinguishable from "page one of
     // a walk with page size 1", and the two want opposite things
@@ -501,7 +527,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = query?.where ? translateFilter(query.where, this.temporalKindFor(object)) : {};
+    const filter = query?.where ? translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object)) : {};
     return await collection.countDocuments(filter, { session });
   }
 
@@ -572,7 +598,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
     const { _id, id, ...rawUpdate } = data;
     const updateData: Record<string, unknown> = { ...this.toStorageForms(object, rawUpdate) };
     updateData.updated_at = new Date();
@@ -590,7 +616,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
     const result = await collection.deleteMany(filter, { session });
     return result.deletedCount;
   }
@@ -624,6 +650,9 @@ export class MongoDBDriver implements IDataDriver {
       limit: query.limit,
       offset: query.offset,
       temporalKind: this.temporalKindFor(object),
+      // [#20444] …and the declared value shapes, so `$empty` in the `$match`
+      // answers the row `find()` answers.
+      valueShape: this.valueShapeFor(object),
     });
 
     const results = await collection.aggregate(pipeline, { session }).toArray();
@@ -665,6 +694,8 @@ export class MongoDBDriver implements IDataDriver {
     // Learn which fields are temporal BEFORE any write can land, so the write
     // path and the filter path share one storage convention (#4047).
     this.temporalFields.set(object, indexTemporalFields(objectDef.fields));
+    // [#20444] …and each field's declared value shape, for `$empty`.
+    this.valueShapes.set(object, indexValueShapes(objectDef.fields));
     await syncCollectionSchema(this.db, object, objectDef);
   }
 
@@ -688,7 +719,7 @@ export class MongoDBDriver implements IDataDriver {
 
   async explain(object: string, query: DriverQuery, _options?: DriverOptions): Promise<unknown> {
     const collection = this.getCollection(object);
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
     const explanation = await collection.find(filter).explain('executionStats');
     return explanation;
   }
@@ -798,6 +829,17 @@ export class MongoDBDriver implements IDataDriver {
     const kinds = this.temporalFields.get(object);
     if (!kinds || kinds.size === 0) return undefined;
     return (field: string) => kinds.get(field);
+  }
+
+  /**
+   * [#20444] The declared-value-shape lookup for one object, handed to
+   * {@link translateFilter} so `$empty` translates the field's declared row.
+   * `undefined` for an undeclared object — `$empty` is then refused.
+   */
+  private valueShapeFor(object: string): ValueShapeResolver | undefined {
+    const shapes = this.valueShapes.get(object);
+    if (!shapes || shapes.size === 0) return undefined;
+    return (field: string) => shapes.get(field);
   }
 
   /**
