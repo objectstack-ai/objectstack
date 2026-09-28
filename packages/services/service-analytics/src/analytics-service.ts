@@ -856,9 +856,12 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
  * - the SHARED scope — this service's `CubeRegistry` and compiled-dataset
  *   registry, which every caller reads and `getMeta` publishes: the configured
  *   cubes, the datasets `registerDataset` registered (the constructor's
- *   `datasets`, or an embedder), and what the ad-hoc path infers;
- * - a REQUEST scope — the dataset one `queryDataset` call compiled, visible to
- *   that call only, under its own name, over the shared scope read-only.
+ *   `datasets`, or an embedder), and what the ad-hoc path infers for a request
+ *   the object-level admission ADMITTED (#20381);
+ * - a REQUEST scope — one call's own, over the shared scope read-only: the
+ *   dataset a `queryDataset` call compiled, under its own name, and whatever
+ *   `ensureCube` mints during the call. Every door runs in one — `query()` and
+ *   `generateSql()` too (#20381).
  *
  * A request's dataset is that caller's definition, and a name it shares with a
  * shared cube is harmless only while the two never meet. Registering it made
@@ -866,7 +869,11 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
  * cube included — was replaced for every later reader, and the replacement
  * happened before any admission was asked, so a refused request left it
  * behind too. A request scope therefore has no path into the shared one: its
- * `register` writes only to itself, and it is dropped with the call.
+ * `register` writes only to itself, and it is dropped with the call. The ONE
+ * write from a request into the shared scope is the ad-hoc doors' publication
+ * of an inferred cube, made by the door after `callCtx` admitted the request
+ * (`publishInferredCube`); a measure `ensureCube` appends to an existing cube
+ * is never published.
  */
 interface CubeScope {
   getCube(name: string): Cube | undefined;
@@ -1005,7 +1012,7 @@ export class AnalyticsService implements IAnalyticsService {
     // per query in `callCtx(context)` so it can resolve the active tenant.
     this.baseCtx = {
       // The shared scope's reads. `callCtx` answers them from the call's own
-      // scope, which for every door but `queryDataset` is this same one.
+      // request scope, which reads this one through (#20356, #20381).
       ...this.cubeReads(this.sharedScope),
       queryCapabilities: config.queryCapabilities || (() => DEFAULT_CAPABILITIES),
       executeRawSql: config.executeRawSql,
@@ -1423,19 +1430,25 @@ export class AnalyticsService implements IAnalyticsService {
    * Any other error propagates untouched.
    */
   async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
-    return this.queryIn(this.sharedScope, queryInput, context);
+    return this.queryIn(this.requestScope(), queryInput, context, { publishInferred: true });
   }
 
   /**
-   * {@link query} with the cube name resolved through `scope`: the shared scope
-   * for `/analytics/query`, and a request scope for the queries `queryDataset`
-   * runs through `DatasetExecutor` (#20356). One body for both, so every gate
-   * below asks the same question whichever scope answers the name.
+   * {@link query} with the cube name resolved through `scope`, the call's own
+   * request scope: an empty one for `/analytics/query` (#20381), and the
+   * compiled dataset's for the queries `queryDataset` runs through
+   * `DatasetExecutor` (#20356). One body for both, so every gate below asks the
+   * same question whichever scope answers the name.
+   *
+   * [#20381] `publishInferred` is the ad-hoc door's alone: once `callCtx` has
+   * admitted the request, the cube `ensureCube` inferred for it is published
+   * to the shared registry. The dataset door publishes nothing.
    */
   private async queryIn(
     scope: CubeScope,
     queryInput: AnalyticsQuery,
     context?: ExecutionContext,
+    door: { publishInferred?: boolean } = {},
   ): Promise<AnalyticsResult> {
     if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
@@ -1454,8 +1467,9 @@ export class AnalyticsService implements IAnalyticsService {
     const tokenCtx = filterTokenContextFrom(context, new Date());
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
-    this.ensureCube(query, scope);
+    const inferred = this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
+    if (door.publishInferred) this.publishInferredCube(inferred);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
       const strategy = this.resolveStrategy(query, ctx, skip);
@@ -1551,23 +1565,46 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * [#20356] The {@link CubeScope} one `queryDataset` call runs in: the call's
+   * [#20356] The {@link CubeScope} one call runs in: a `queryDataset` call's
    * own compiled dataset answers its name, every other name reads the shared
-   * scope, and what the call mints (`ensureCube`'s measure augmentation) stays
-   * here and is dropped with the call.
+   * scope, and what the call mints (`ensureCube`'s inference or measure
+   * augmentation) stays here and is dropped with the call.
+   *
+   * [#20381] The ad-hoc doors (`query()`, `generateSql()`) run in one with no
+   * compiled dataset, so nothing they mint reaches the shared registry before
+   * `callCtx` has admitted the request — see {@link publishInferredCube}.
    */
-  private requestScope(compiled: CompiledDataset): CubeScope {
-    const name = compiled.cube.name;
+  private requestScope(compiled?: CompiledDataset): CubeScope {
     const shared = this.sharedScope;
-    const cubes = new Map<string, Cube>([[name, compiled.cube]]);
+    const cubes = new Map<string, Cube>();
+    if (compiled) cubes.set(compiled.cube.name, compiled.cube);
     return {
       getCube: (cubeName) => cubes.get(cubeName) ?? shared.getCube(cubeName),
       getCompiledDataset: (cubeName) =>
-        cubeName === name ? compiled : shared.getCompiledDataset(cubeName),
+        compiled && cubeName === compiled.cube.name ? compiled : shared.getCompiledDataset(cubeName),
       register: (cube) => {
         cubes.set(cube.name, cube);
       },
     };
+  }
+
+  /**
+   * [#20381] CubeRegistry source 3, and the one place a request writes it: the
+   * cube an ad-hoc door inferred for a request, entered into the shared
+   * registry AFTER `callCtx` admitted that request. A refused request leaves no
+   * trace; an admitted one leaves its inferred cube, which the next request
+   * resolves by name as before.
+   *
+   * Only an INFERRED cube is ever published. A measure `ensureCube` appended to
+   * a cube the registry already holds is the caller's, and stays in the call's
+   * scope: publishing it rewrote a configured cube for every caller. And a name
+   * the registry gained while this request was being admitted keeps what it
+   * gained — the first registration wins, so an authored cube is never
+   * replaced by an inferred one.
+   */
+  private publishInferredCube(inferred: Cube | undefined): void {
+    if (!inferred || this.sharedScope.getCube(inferred.name)) return;
+    this.sharedScope.register(inferred);
   }
 
   /**
@@ -2158,8 +2195,12 @@ export class AnalyticsService implements IAnalyticsService {
     const tokenCtx = filterTokenContextFrom(context, new Date());
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
-    this.ensureCube(query, this.sharedScope);
-    const ctx = await this.callCtx(query, context, tokenCtx, this.sharedScope);
+    // [#20381] Same request scope as `query()`: nothing minted here reaches the
+    // shared registry before `callCtx` has admitted the request.
+    const scope = this.requestScope();
+    const inferred = this.ensureCube(query, scope);
+    const ctx = await this.callCtx(query, context, tokenCtx, scope);
+    this.publishInferredCube(inferred);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 
@@ -2194,11 +2235,15 @@ export class AnalyticsService implements IAnalyticsService {
    * naming a real mistake either way.
    *
    * [#20356] "Registered" means registered in `scope`: the cube is read from it
-   * and what this method mints is recorded in it. On the shared scope that is
-   * the service's registry; on a `queryDataset` call's scope it is the call's
-   * own, so augmenting a request's dataset never reaches the shared registry.
+   * and what this method mints is recorded in it — the call's own request
+   * scope, on every door, so nothing minted here reaches the shared registry.
+   *
+   * [#20381] Returns the cube it INFERRED (the no-cube branch), and nothing
+   * otherwise: the ad-hoc doors publish that one to the shared registry once
+   * the request is admitted ({@link publishInferredCube}). An augmented cube is
+   * not returned, because it is never published.
    */
-  private ensureCube(query: AnalyticsQuery, scope: CubeScope): void {
+  private ensureCube(query: AnalyticsQuery, scope: CubeScope): Cube | undefined {
     const name = query.cube!;
     let cube = scope.getCube(name);
 
@@ -2242,7 +2287,7 @@ export class AnalyticsService implements IAnalyticsService {
         `Define an explicit Cube in your stack for full control.`;
       if (isScalarMetric) this.logger.debug(message);
       else this.logger.warn(message);
-      return;
+      return cube;
     }
 
     // Cube exists — check for unknown measures referenced by the query and
@@ -2305,6 +2350,7 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
+    return undefined;
   }
 
   /**
