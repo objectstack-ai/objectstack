@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20397] `GET /meta/:type/:name/diff` with no `from` / `to` compares the
- * previous version with the CURRENT one, and labels each side with the version
+ * [#20397] `GET /meta/:type/:name/diff` with no `from` / `to` compares an
+ * earlier version with the CURRENT one, and labels each side with the version
  * whose body it is.
  *
  * ## The defect
