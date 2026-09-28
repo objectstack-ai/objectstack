@@ -80,17 +80,19 @@
  *   refusal there would turn every authored assignment seed into a failed boot
  *   that succeeds on the second one. It also covers invitation acceptance and
  *   the platform's own bootstraps;
- * - a value the engine answers itself: `null` or a blank string (`required`),
- *   or one whose `String()` form is longer than the column (`max_length`).
- *   Nothing else is the engine's: its `text` validation reads `String(value)`
- *   and refuses no number, boolean, object or array, and the write stores it
- *   with `201` (measured over SQLite: `123`, `true`, `{}` and `['x']` all
- *   stored). So those are judged by their string form — a scalar by
- *   `String(value)`, an object or array by its JSON text — and refused like
- *   any name no catalog row carries. The stored text is the driver's, not
- *   that string form (SQLite stores `123` as `'123.0'`), so a non-string whose
- *   string form happens to equal a catalog name is accepted and resolves
- *   nothing: the engine's `text` leniency, outside this refusal;
+ * - a value the engine answers itself, and only those: `null` or a blank
+ *   string (`required`); one whose `String()` form is longer than the column
+ *   (`max_length`); and an operator object, a plain object carrying a declared
+ *   filter operator as an own key such as `{ $in: [...] }` (`invalid_type`,
+ *   #5922, mirrored from the engine's own predicate). The engine's `text`
+ *   validation refuses no other number, boolean, object or array, and the
+ *   write stores it with `201` (measured over SQLite: `123`, `true`, `{}`,
+ *   `{ a: 1 }` and `['x']` all stored). So those are judged by their string
+ *   form — a scalar by `String(value)`, an object or array by its JSON text —
+ *   and refused like any name no catalog row carries. The stored text is the
+ *   driver's, not that string form (SQLite stores `123` as `'123.0'`), so a
+ *   non-string whose string form happens to equal a catalog name is accepted
+ *   and resolves nothing: the engine's `text` leniency, outside this refusal;
  * - an update the engine refuses on its own dispatch predicate.
  *
  * ## Where it runs
@@ -129,11 +131,19 @@
  * composition, or the read throws) refuses nothing — an integrity check that
  * cannot run must not invent a rejection, the stance the engine's own lookup
  * probe takes. A failed read is reported at `warn`: the write proceeds, and the
- * operator is told the check did not run.
+ * operator is told the check did not run. A name the query layer would read as
+ * a filter placeholder (`{…}`) is not a failed read: it is compared literally
+ * (`catalogCarries`), so its verdict never falls open.
  */
 
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import {
+  ALL_OPERATORS,
+  RETIRED_FILTER_OPERATORS,
+  classifyFilterToken,
+  isPlainRecord,
+} from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 
@@ -204,7 +214,8 @@ function rowsOf(data: unknown): any[] {
  * text (`{}`, `["x"]`) — never `String(['x'])`, which reads `'x'` and would
  * accept an array naming a real position that then resolves nothing. It is not
  * the stored text, which is the driver's (SQLite stores `123` as `'123.0'`).
- * `undefined` for a value that is no JSON value at all.
+ * `undefined` only for `null`, `undefined`, a symbol, a function, and an object
+ * that can be neither serialised nor stringified; a bigint is `String(value)`.
  */
 function stringForm(value: unknown): string | undefined {
   switch (typeof value) {
@@ -234,15 +245,40 @@ function stringForm(value: unknown): string | undefined {
 }
 
 /**
+ * [#5922] The filter-operator keys the engine refuses as a `text` value: the
+ * spec's `ALL_OPERATORS` plus the retired ones, the same two inputs as
+ * `FILTER_OPERATOR_KEYS` in `@objectstack/objectql`'s `record-validator.ts`.
+ */
+const FILTER_OPERATOR_KEYS: ReadonlySet<string> = new Set<string>([
+  ...ALL_OPERATORS,
+  ...Object.keys(RETIRED_FILTER_OPERATORS),
+]);
+
+/**
+ * [#5922] Is this an operator object — a `where` node pasted into the write —
+ * which the engine itself refuses on a `text` field (`invalid_type`)? A narrow
+ * mirror of `filterOperatorKeysIn` in `record-validator.ts`, module-private
+ * there: the spec's `isPlainRecord` test, no `Date`, and at least one own key in
+ * {@link FILTER_OPERATOR_KEYS}. ⛔ Not a `$`-prefix test: `{ $foo: 1 }` carries
+ * no declared operator, the engine stores it, and it is judged here.
+ */
+function isFilterOperatorObject(value: unknown): boolean {
+  if (!isPlainRecord(value) || value instanceof Date) return false;
+  return Object.keys(value).some((key) => FILTER_OPERATOR_KEYS.has(key));
+}
+
+/**
  * The name this refusal judges a `position` value by, or `undefined` for a
- * value the engine answers itself: `null` and a blank string (`required`), and
- * a value whose `String()` form is longer than the column (`max_length`, which
- * the engine reads on `String(value)` for every type). Every other value is
- * judged, strings or not (module note, "Which writes it judges").
+ * value the engine answers itself: `null` and a blank string (`required`), a
+ * value whose `String()` form is longer than the column (`max_length`, which
+ * the engine reads on `String(value)` for every type), and an operator object
+ * (`invalid_type`, #5922). Every other value is judged, strings or not (module
+ * note, "Which writes it judges").
  */
 function judgedName(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value === 'string' && value.trim() === '') return undefined;
+  if (isFilterOperatorObject(value)) return undefined;
   let engineForm: string;
   try {
     engineForm = String(value);
@@ -333,9 +369,9 @@ export async function namesWithoutCatalogRow(
   const readCtx = catalogReadContext(context);
   const missing: string[] = [];
   for (const name of names) {
-    let rows: unknown;
+    let carried: boolean;
     try {
-      rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { name }, limit: 1, context: readCtx });
+      carried = await catalogCarries(ql, name, readCtx);
     } catch (e) {
       logger?.warn?.(
         `[security] the ${POSITION_CATALOG_OBJECT} catalog could not be read, so a ` +
@@ -345,9 +381,32 @@ export async function namesWithoutCatalogRow(
       );
       return null;
     }
-    if (!Array.isArray(rows) || rows.length === 0) missing.push(name);
+    if (!carried) missing.push(name);
   }
   return missing;
+}
+
+/**
+ * Does the catalog, read under `readCtx`, hold a row whose `name` is exactly
+ * `name`? A name the query layer would read as a filter PLACEHOLDER (a
+ * fully-wrapped `{…}`, recognised by the spec's `classifyFilterToken`, the
+ * predicate `@objectstack/core`'s `resolveFilterTokens` applies to every `where`
+ * comparand) cannot go in `where` as itself: an unknown token throws
+ * `FILTER_TOKEN_UNKNOWN` and a known one is replaced by its value, so the read
+ * would fail open or judge a different name. Such a name is compared here
+ * instead, against the catalog names that share its first character.
+ */
+async function catalogCarries(ql: any, name: string, readCtx: Record<string, unknown>): Promise<boolean> {
+  if (classifyFilterToken(name) === null) {
+    const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { name }, limit: 1, context: readCtx });
+    return Array.isArray(rows) && rows.length > 0;
+  }
+  const rows = await ql.find(POSITION_CATALOG_OBJECT, {
+    where: { name: { $startsWith: name.charAt(0) } },
+    fields: ['name'],
+    context: readCtx,
+  });
+  return Array.isArray(rows) && rows.some((row: any) => row?.name === name);
 }
 
 /**
@@ -367,6 +426,9 @@ export async function idSpellingHints(
   if (!ql || typeof ql.find !== 'function') return hints;
   const readCtx = catalogReadContext(context);
   for (const value of values) {
+    // A placeholder-shaped value is never a record id, and in `where` it would
+    // be resolved as a filter token rather than compared (see catalogCarries).
+    if (classifyFilterToken(value) !== null) continue;
     try {
       const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { id: value }, limit: 1, context: readCtx });
       const row = Array.isArray(rows) ? rows[0] : null;

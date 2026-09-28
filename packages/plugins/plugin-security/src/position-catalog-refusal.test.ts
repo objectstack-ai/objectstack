@@ -416,6 +416,52 @@ describe('a non-string position is judged by its string form', () => {
     expect((await assignmentsOf(h, 'u_nsu'))[0]?.position).toBe('qa_auditor');
   });
 
+  it('an operator object is the engine\'s to refuse: invalid_type (#5922), never reference_not_found', async () => {
+    const h = await boot();
+    for (const position of [{ $in: ['x'] }, { $in: [], a: 1 }]) {
+      const label = JSON.stringify(position);
+      const env = envelopeOf(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: 'u_op', position }, { context: ADMIN } as any,
+      )));
+      expect([env.code, env.status], label).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields[0], label).toMatchObject({ field: 'position', code: 'invalid_type' });
+    }
+    expect(await assignmentsOf(h, 'u_op')).toHaveLength(0);
+  });
+
+  it('an object with no declared operator key is judged: { a: 1 } and { $foo: 1 } are refused reference_not_found', async () => {
+    const h = await boot();
+    for (const [position, text] of [[{ a: 1 }, '{"a":1}'], [{ $foo: 1 }, '{"$foo":1}']] as const) {
+      const env = envelopeOf(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: 'u_plain', position }, { context: ADMIN } as any,
+      )));
+      expect([env.code, env.status], text).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields[0], text).toMatchObject({ field: 'position', code: 'reference_not_found', value: text });
+      expect(env.fields[0].message, text).toBe(positionNotInCatalogMessage(text));
+    }
+    expect(await assignmentsOf(h, 'u_plain')).toHaveLength(0);
+    // Judged, not failed open: the catalog read never gave up on these names.
+    expect(h.warn.mock.calls.filter((c) => String(c[0]).includes('could not be read'))).toHaveLength(0);
+  });
+
+  it('a placeholder-shaped name is compared literally, never resolved as a filter token', async () => {
+    const h = await boot();
+    for (const text of ['{nope_tok}', '{current_user_id}']) {
+      const env = envelopeOf(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: 'u_tok', position: text }, { context: ADMIN } as any,
+      )));
+      expect([env.code, env.status], text).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields[0], text).toMatchObject({ field: 'position', code: 'reference_not_found', value: text });
+    }
+    // A catalog row that really carries such a name is found, so the predicate holds.
+    await h.engine.insert('sys_position', { id: 'pos_lit', name: '{lit_pos}', label: 'Literal', active: true }, { context: SYS } as any);
+    const created = await h.engine.insert(
+      'sys_user_position', { user_id: 'u_tok_ok', position: '{lit_pos}' }, { context: ADMIN } as any,
+    );
+    expect(created).toMatchObject({ position: '{lit_pos}' });
+    expect(h.warn.mock.calls.filter((c) => String(c[0]).includes('could not be read'))).toHaveLength(0);
+  });
+
   it("update by id: 123 echoed over a stored '123' is an unchanged value, not judged", async () => {
     const h = await boot();
     // A row written where it is not judged (a system write), whose text names no catalog row.
