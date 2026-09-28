@@ -568,7 +568,8 @@
         "$TURBO_ROOT$/examples/**/*.mdx",
         "$TURBO_ROOT$/examples/**/*.yaml",
         "$TURBO_ROOT$/examples/**/*.yml",
-        "$TURBO_ROOT$/content/**"
+        "$TURBO_ROOT$/content/**",
+        "$TURBO_ROOT$/examples/*/src/**/*.ts"
       ]
     },
     "@objectstack/core#test:repo": {
