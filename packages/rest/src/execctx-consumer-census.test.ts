@@ -163,6 +163,15 @@ function metaProtocol(doc: any) {
             if (k === 'getMetaItems') return vi.fn(async () => [doc]);
             if (k === 'getMetaItem') return vi.fn(async () => ({ type: doc.type, name: doc.name, item: doc }));
             if (k === 'getMetaItemCached') return undefined;
+            // [#20507] The layered read in its own shape, `doc` at the code
+            // layer. The generic answer below carries no layer at all, which
+            // the layered chain answers as the name's absence (404), so the
+            // `/layers` row would stop reaching the answer it measures.
+            if (k === 'getMetaItemLayered') {
+                return vi.fn(async () => ({
+                    type: doc.type, name: doc.name, code: doc, overlay: null, overlayScope: null, effective: doc,
+                }));
+            }
             return vi.fn(async () => ({ ok: true, rows: [], data: [], items: [doc], total: 1 }));
         },
     });
