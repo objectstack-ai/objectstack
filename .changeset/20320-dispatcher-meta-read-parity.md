@@ -1,11 +1,11 @@
 ---
-'@objectstack/rest': patch
+'@objectstack/rest': minor
 '@objectstack/runtime': patch
 ---
 
 fix(rest, runtime): the runtime dispatcher's `/meta` reads answer what `RestServer`'s answer — one list chain, one `public`-audience predicate, and the `?state=draft` read (#20320)
 
-Clause-②: no
+Clause-②: yes (widening) — `@objectstack/rest`'s root entry gains five value exports (`createMetaListAnswer`, `translateMetaList`, `metaRequestLocale`, `isPublicAudienceRead`, `STORED_VERSION_DOOR_POLICY`) and six type exports (`MetaListAnswer`, `MetaListAnswerSources`, `MetaListRequest`, `MetaListTranslationSources`, `MetaPublicReadRoute`, `MetaRequestHttp`), so its published surface grows; nothing it exported before is removed, renamed or narrowed. `@objectstack/runtime` publishes no new surface and stays a `patch`.
 
 A host that mounts only the `${prefix}/*` catch-all (`createHonoApp`, and any
 adapter written on the public `HttpDispatcher` API) serves `/meta` through the
