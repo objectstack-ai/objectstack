@@ -160,7 +160,7 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
  * the resolver, treated as ungated (custom actions were never gated by
  * `apiMethods`).
  *
- * [#6259] The `batch: 'bulk'` row was removed, and the line above no longer
+ * [#6259] The `batch: 'bulk'` row was removed by commit 6968885ef, and the line above no longer
  * calls `batch` a runtime `callData` action. It was the one entry with no
  * producer on either side: `callData` branches on a closed set that has not
  * contained `batch` since that arm was retired (#5856), and every REST caller

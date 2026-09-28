@@ -201,7 +201,7 @@ describe('PostgresConfigSchema', () => {
  * The describe text always documented the postgres URL grammar; until #9091
  * the value was only string-scanned (credentials #8082/#8337, placeholders
  * #8336) because the SHARED helper's refusal to parse is load-bearing for
- * mongo's multi-host/`+srv` forms (#8696). The parse question is asked
+ * mongo's multi-host/`+srv` forms (commit 90a12fb18). The parse question is asked
  * per-driver, of `pg`'s own parser (`pg-connection-string`).
  *
  * Envelope note (the standing minimum for rejection pins): the zod issue's

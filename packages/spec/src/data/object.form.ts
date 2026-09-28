@@ -253,7 +253,7 @@ export const objectForm = defineForm({
             // the option shape is strict and has never declared `icon`, so a
             // Lucide name typed there was an `unrecognized_keys` refusal at
             // publish — the author found out at the 422, the same
-            // offer-vs-door class #11410 and #12868 retired elsewhere.
+            // offer-vs-door class #11410 and commit c459da6bc retired elsewhere.
             //
             // Remove rather than declare, on a premise measured for THIS
             // surface rather than inherited from #5016's action-param reading:

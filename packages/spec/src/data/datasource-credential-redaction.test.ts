@@ -233,7 +233,7 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
     // `urlUserinfoUsername` shares the password half's boundary parse by
     // construction; this pins the redactor to the same grammar from the other
     // side: stripping the password must never move or rewrite the username the
-    // #8696 injection path will read off the redacted/stored row.
+    // commit 90a12fb18's injection path will read off the redacted/stored row.
     for (const url of [...CARRYING, ...CREDENTIAL_FREE]) {
       expect(urlUserinfoUsername(redactUrlPassword(url)), url).toBe(urlUserinfoUsername(url));
     }
@@ -412,7 +412,7 @@ describe('passthrough secret redaction (#9040) — the nested spellings the key-
           keyVaultNamespace: 'encryption.__keyVault',
           kmsProviders: {
             // The identity halves the client also reads are NOT credential
-            // material (#8876's asymmetry) and stay served.
+            // material (commit d634e665b's asymmetry) and stay served.
             aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE' },
             azure: { tenantId: 'tenant-id', clientId: 'client-id' },
             gcp: { email: 'svc@example.iam.gserviceaccount.com' },

@@ -519,7 +519,7 @@ describe('HookContextSchema', () => {
     });
   });
 
-  // [#13644] The declared referential-cleanup marker. The parse legs matter
+  // [commit 34ce8e7db] The declared referential-cleanup marker. The parse legs matter
   // because this schema is non-strict in the STRIPPING sense: an UNDECLARED
   // key is silently dropped by `.parse()` (the `roles` tombstone above is the
   // history), so "the engine sets it" is worthless unless the schema declares

@@ -10,7 +10,7 @@
  * tree, an aliased node under conflicting arms — must land on `null`, never on
  * `'author'`.
  *
- * [#8836] The last block pins the one shape that does NOT land there — a
+ * [commit 1850ebbb0] The last block pins the one shape that does NOT land there — a
  * vouchable filter object reused across requests — and the caller-side
  * invariant that keeps it out of reach. Grep for "may outlive the request".
  */
@@ -164,7 +164,7 @@ describe('resolveFilterSubtreeProvenance', () => {
 });
 
 /**
- * [#8836, from the #8794 survey] The invariant the fail-closed direction
+ * [commit 1850ebbb0, from the survey it records] The invariant the fail-closed direction
  * silently depends on, made executable:
  *
  * > no filter object that can be vouched `'author'` may outlive the request
@@ -182,7 +182,7 @@ describe('resolveFilterSubtreeProvenance', () => {
  * `options.where` itself or on the arms of a pure `$and` root). So the guard
  * this block can offer is that the consequence stays visible and stays
  * asserted: a future change that makes any expectation below go red is a
- * change to the mark's mechanism, which #8794's ruling routes to a spec-seat
+ * change to the mark's mechanism, which the survey's ruling (commit 1850ebbb0) routes to a spec-seat
  * ruling BEFORE implementation — not something to fix by editing these
  * numbers.
  */

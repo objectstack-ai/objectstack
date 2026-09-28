@@ -12,10 +12,10 @@ import { z } from 'zod';
  * `FeedItemType` is not backend-free: it has no backend *import*, yet it is the
  * TARGET of the map UI consumers apply to the `sys_activity.type` column — a
  * backend *coupling* — and that column's vocabulary is OPEN and
- * author-extensible (maintainer ruling 2026-08-24, #11507). `FeedItemType` is
+ * author-extensible (maintainer ruling 2026-08-24, commit 88b9d749a). `FeedItemType` is
  * therefore the built-in guidance half of that map, never the value domain of
  * an authoring surface: `RecordActivityProps.types` accepts contributed kinds
- * beyond it (#11658), and consumers must map unknown `sys_activity.type` values
+ * beyond it (commit 1a6a19c31), and consumers must map unknown `sys_activity.type` values
  * to a fallback rather than drop them. `SYS_ACTIVITY_BUILTIN_TYPES` below is
  * the published built-in vocabulary of the `sys_activity.type` column,
  * co-located with `FeedItemType` because UI consumers map one onto the other.
@@ -66,7 +66,7 @@ export type FeedFilterMode = z.input<typeof FeedFilterMode>;
  * ## Built-in set, NOT the column's value domain
  *
  * `sys_activity.type` is an OPEN, author-extensible vocabulary (maintainer
- * ruling 2026-08-24, #11507): this list is the floor the platform itself writes
+ * ruling 2026-08-24, commit 88b9d749a): this list is the floor the platform itself writes
  * and offers in pickers/filters, never the ceiling of legal values. An app may
  * contribute its own values — the sanctioned authoring channel is
  * `activityMilestones[].type` (ADR-0052 §5b.2, `z.string()`, forwarded
@@ -77,7 +77,7 @@ export type FeedFilterMode = z.input<typeof FeedFilterMode>;
  *
  * - ⛔ Never use it to validate, reject, or filter OUT values. A row whose
  *   `type` is not in this set is legitimate; render it (generic fallback), do
- *   not drop it. Every CLOSED map over this vocabulary is a bug (#11507).
+ *   not drop it. Every CLOSED map over this vocabulary is a bug (commit 88b9d749a).
  * - It is deliberately a plain `as const` tuple rather than a `z.enum`: a Zod
  *   schema here would read as a validator and quietly re-close the vocabulary.
  * - This is a different vocabulary from {@link FeedItemType}: `FeedItemType` is
@@ -108,7 +108,7 @@ export const SYS_ACTIVITY_BUILTIN_TYPES = [
 /**
  * One built-in `sys_activity.type` value — derived from
  * {@link SYS_ACTIVITY_BUILTIN_TYPES}. The column's runtime value domain is
- * wider (`string`): the vocabulary is open and author-extensible (#11507), so
+ * wider (`string`): the vocabulary is open and author-extensible (commit 88b9d749a), so
  * code that READS rows must type the column as `string` and treat this union as
  * the known-built-in narrowing only.
  */
