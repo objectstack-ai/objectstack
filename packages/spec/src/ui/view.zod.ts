@@ -4895,8 +4895,15 @@ function viewItemBaseShape() {
  * derive-by-reference; the fork PD#12 exists to prevent). The two differ in
  * exactly two ways, both visible at the call site: the unknown-key posture, and
  * the round-trip keys the wire arm additionally declares.
+ *
+ * [#19920] `config` is generic, like `viewKind`, so each arm's static type
+ * carries its own config schema's type. Typed `z.ZodTypeAny`, it erased
+ * `config` to `unknown` on both arms of {@link ViewItem} and
+ * {@link ViewItemWire}, and through the `viewItem` member on every union type
+ * read off {@link VIEW_METADATA_MEMBERS}: `config: 42` type-checked while both
+ * doors refuse it.
  */
-function viewItemArmShape<K extends 'list' | 'form'>(viewKind: K, config: z.ZodTypeAny) {
+function viewItemArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny>(viewKind: K, config: C) {
   return {
     viewKind: z.literal(viewKind),
     config,
@@ -5255,8 +5262,14 @@ function overlayViewKindArmMismatch(kind: 'list' | 'form'): string {
  * unjudged; the list member likewise accepted a `viewKind: 'form'` body that
  * carried list `columns`. The conversions walk (`mapViewPayloads`) already
  * picked an overlay's family from `viewKind`; now the parse does too.
+ *
+ * [#19920] …and so does the static type: generic in `K`, so `z.enum([kind])`
+ * keeps the arm's literal. With a `'list' | 'form'` parameter it widened to
+ * that union on both members, and a list-shaped body naming
+ * `viewKind: 'form'` type-checked, through the list member, as every union
+ * type read off {@link VIEW_METADATA_MEMBERS}, while both doors refuse it.
  */
-function flattenedViewOverlayFields(kind: 'list' | 'form') {
+function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
   return {
     // No grammar, deliberately: the write path stamps this name rather than an
     // author writing it, so a flat overlay name is legal here while the SAME
@@ -6700,6 +6713,15 @@ export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBr
  * union's `.check()` transforms nothing), so every parse result is a value of this type.
  * `view-metadata-type.test.ts` pins that `unknown` is refused here and that a parsed body of each
  * member type-checks.
+ *
+ * [#19920] One default is applied by the parse but absent from this type. The flattened list
+ * overlay member (`VIEW_METADATA_MEMBERS.listOverlay`) declares `type` without the list shape's
+ * `.default('grid')`, so its checks can tell a column-less patch from a full config, and
+ * re-applies the default in `.overwrite(applyListOverlayTypeDefault)`. An `.overwrite()` returns
+ * the member's own output type, so on that member `type` stays optional here, while every body
+ * that member parses comes back with `type` set: `'grid'` when the body named none. On that
+ * member `type` and `columns` are also typed `unknown`: `listOverlayPatchFields` reads both off
+ * the list shape through an untyped cast.
  */
 export type ViewMetadataParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;
