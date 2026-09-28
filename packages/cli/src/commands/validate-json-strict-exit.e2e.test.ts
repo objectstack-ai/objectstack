@@ -111,11 +111,24 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { linkSpec } from '../../test/helpers/define-stack-fixture.js';
+
+/**
+ * The fixture projects are `defineStack` configs (`os validate` refuses any
+ * other default export — #20367 ruling B), so each OS-tmpdir project gets a
+ * `node_modules/@objectstack/spec` link to the package this one depends on —
+ * the `test/helpers/define-stack-fixture.ts` spelling, local here because this
+ * file lives under `src/`, outside the test helpers' tsconfig root.
+ */
+const SPEC_PACKAGE_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+function linkSpec(dir: string): void {
+  mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+  symlinkSync(SPEC_PACKAGE_ROOT, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
+}
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../../bin/run-dev.js');
