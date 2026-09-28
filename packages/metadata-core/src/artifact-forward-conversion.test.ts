@@ -98,8 +98,12 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
   });
 
   it('REFUSES the amnesty for an artifact authored at the current spec version — no blanket strip', () => {
-    const def = legacyPermissionDefinition('^17.2.0');
-    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.2.0' });
+    // "Current" for THIS registry: every retirement it carries is stamped
+    // `retiredAfter` 17.4.0 or earlier, so a 17.5.0 floor on a 17.5.0 runtime
+    // predates none of them. (A floor at the label that DOES predate one opens
+    // the per-entry window instead — the #20390 block below.)
+    const def = legacyPermissionDefinition('^17.5.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.5.0' });
 
     expect(result.verdict).toBe('authored-current');
     expect(result.notices).toEqual([]);
@@ -402,6 +406,155 @@ describe('the artifact door never turns an authored `hidden: true` into an unpub
 });
 
 /**
+ * [#20390] The per-entry window — `retiredAfter` (ruling 5865890672, letter A).
+ *
+ * Between two releases `main` refuses keys the NEXT release retires while its
+ * package label still reads the LAST release. A label-only window therefore
+ * read an artifact built by that last release as "authored current" and let
+ * the strict parse refuse it — the measured cloud re-cut: a 17.4.0-built
+ * artifact with dashboard charts and page `assignedProfiles` could not boot on
+ * a runtime built from `main` (label 17.4.0, retirements stamped for 17.5.0).
+ *
+ * The rule: entry E replays when `floor < runtime` OR `floor <= E.retiredAfter`.
+ * The runtime label is injected so each leg names the release it models; the
+ * registry is always this tree's real one, whose 17.5.0 retirements carry
+ * `retiredAfter: '17.4.0'` (pinned against the tarballs in spec's census test).
+ */
+describe('[#20390] the per-entry window — an artifact built by the last release boots on unreleased main', () => {
+  /** The shape the published 17.4.0 CLI emits for a chart widget and an assigned page. */
+  const builtBy174 = (protocolRange: string) => ({
+    manifest: {
+      id: 'com.example.forward-probe', namespace: 'fwd', name: 'forward_probe', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    objects: [{
+      name: 'fwd_deal', label: 'Deal', sharingModel: 'private',
+      fields: { stage: { type: 'text', label: 'Stage' }, amount: { type: 'number', label: 'Amount' } },
+    }],
+    datasets: [{
+      name: 'fwd_deal_metrics', label: 'Deal metrics', object: 'fwd_deal',
+      dimensions: [{ name: 'stage', field: 'stage' }],
+      measures: [{ name: 'amount', aggregate: 'sum', field: 'amount' }],
+    }],
+    dashboards: [{
+      name: 'fwd_pipeline', label: 'Pipeline',
+      widgets: [{
+        id: 'amount_by_stage', title: 'Amount by stage', type: 'bar',
+        dataset: 'fwd_deal_metrics', dimensions: ['stage'], values: ['amount'],
+        chartConfig: {
+          type: 'bar',
+          xAxis: { field: 'stage', showGridLines: true, logarithmic: false },
+          yAxis: [{ field: 'amount', showGridLines: true, logarithmic: false }],
+          showLegend: true, showDataLabels: false,
+        },
+        layout: { x: 0, y: 0, w: 6, h: 4 },
+      }],
+    }],
+    pages: [{
+      name: 'fwd_deal_desk', label: 'Deal Desk', type: 'app', template: 'default', regions: [],
+      isDefault: false, assignedProfiles: ['sales_manager'], kind: 'full',
+    }],
+  });
+
+  /** The retired-key sites the 17.5.0 cohort refuses in {@link builtBy174}. */
+  const RETIRED_SITES = [
+    'dashboards.0.widgets.0.chartConfig.type',
+    'dashboards.0.widgets.0.chartConfig.xAxis',
+    'dashboards.0.widgets.0.chartConfig.yAxis',
+    'pages.0.assignedProfiles',
+  ];
+
+  const issuePaths = (value: unknown): string[] => {
+    const parsed = ObjectStackDefinitionSchema.safeParse(value);
+    return parsed.success ? [] : parsed.error.issues.map((i) => i.path.join('.')).sort();
+  };
+
+  const byConversion = (notices: readonly ArtifactConversionNotice[]) => {
+    const counts: Record<string, number> = {};
+    for (const n of notices) counts[n.conversionId] = (counts[n.conversionId] ?? 0) + 1;
+    return counts;
+  };
+
+  it('premise: unconverted, this tree refuses the 17.4.0-built shape at exactly the retired sites', () => {
+    expect(issuePaths(builtBy174('^17.4.0'))).toEqual(RETIRED_SITES);
+  });
+
+  // Pin (4): the regression case from the card's acceptance.
+  it('unreleased main (label 17.4.0), artifact at the last release (^17.4.0): the 17.5.0 retirements replay and the parse passes', () => {
+    const def = builtBy174('^17.4.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    expect(result.verdict).toBe('converted-retired-after');
+    expect(result.authoredFloor).toBe('17.4.0');
+    expect(byConversion(result.notices)).toEqual({
+      'page-assigned-profiles-removed': 1,
+      'dashboard-widget-chart-config-structure-removed': 3,
+    });
+    expect(result.notices.map((n) => n.path).sort()).toEqual([
+      'dashboards[0].widgets[0].chartConfig.type',
+      'dashboards[0].widgets[0].chartConfig.xAxis',
+      'dashboards[0].widgets[0].chartConfig.yAxis',
+      'pages[0].assignedProfiles',
+    ]);
+    // What the door hands the strict parse now boots.
+    expect(issuePaths(result.definition)).toEqual([]);
+    // The door names what opened it: each retirement this runtime enforces past
+    // the floor, with the release it retired after — never a default flip.
+    const replayed = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
+    expect(replayed.get('page-assigned-profiles-removed')).toBe('17.4.0');
+    expect(replayed.get('dashboard-widget-chart-config-structure-removed')).toBe('17.4.0');
+    expect(replayed.has('flow-decision-mode-inclusive-explicit')).toBe(false);
+    expect([...new Set(replayed.values())]).toEqual(['17.4.0']);
+  });
+
+  // Pin (3): the boundary the per-entry rule must keep.
+  it('an artifact whose floor is exactly 17.5.0 on a 17.5.0-labelled runtime is refused, not converted', () => {
+    const def = builtBy174('^17.5.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.5.0' });
+
+    expect(result.verdict).toBe('authored-current');
+    expect(result.notices).toEqual([]);
+    expect(result.replayedRetirements).toEqual([]);
+    expect(result.definition).toBe(def);
+    // The strict parse the door feeds refuses every retired site, tombstones included.
+    expect(issuePaths(result.definition)).toEqual(RETIRED_SITES);
+  });
+
+  it('after the release (label 17.5.0) the same ^17.4.0 artifact converts through the label half — the rule reduces to the old one', () => {
+    const result = applyArtifactForwardConversions(builtBy174('^17.4.0'), { runtimeSpecVersion: '17.5.0' });
+    expect(result.verdict).toBe('converted-forward');
+    // The label half names no per-entry reason: the whole chain replays on one.
+    expect(result.replayedRetirements).toEqual([]);
+    expect(byConversion(result.notices)).toEqual({
+      'page-assigned-profiles-removed': 1,
+      'dashboard-widget-chart-config-structure-removed': 3,
+    });
+    expect(issuePaths(result.definition)).toEqual([]);
+  });
+
+  /**
+   * Inside the open per-entry window, an entry the floor post-dates still
+   * refuses: `permission-allow-restore-purge-removed` shipped retired in 17.2.0
+   * (`retiredAfter` 17.1.0), so a ^17.4.0 artifact carrying `allowRestore: true`
+   * meets its tombstone although the 17.5.0 entries replay beside it. A key
+   * retired at V stays a loud refusal for anything authored at >= V.
+   */
+  it('replays only the entries the floor predates — an older retirement still meets its tombstone', () => {
+    const def = {
+      ...builtBy174('^17.4.0'),
+      permissions: [{ name: 'fwd_agent', label: 'Agent', objects: { fwd_deal: { allowRead: true, allowRestore: true } } }],
+    };
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    expect(result.verdict).toBe('converted-retired-after');
+    expect(result.notices.map((n) => n.conversionId)).not.toContain('permission-allow-restore-purge-removed');
+    const grant = (result.definition as typeof def).permissions[0]!.objects.fwd_deal;
+    expect(grant.allowRestore, 'the 17.2.0 retirement is not replayed for a 17.4.0 floor').toBe(true);
+    expect(issuePaths(result.definition)).toEqual(['permissions.0.objects.fwd_deal.allowRestore']);
+  });
+});
+
+/**
  * #15429 — the second member of the DEFAULT-FLIP class this door refuses.
  *
  * `flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto an
@@ -474,6 +627,22 @@ describe('the artifact door never writes `mode: inclusive` onto an authored excl
     const parsed = ObjectStackDefinitionSchema.parse(result.definition);
     const registered = verdictNodeOf(parsed);
     expect(Object.keys(registered.config ?? {}), 'what registration receives').not.toContain('mode');
+  });
+
+  /**
+   * [#20390] The per-entry window does not reopen it either. The entry is
+   * stamped `retiredAfter: '17.4.0'`, so a ^17.4.0 floor on a runtime still
+   * labelled 17.4.0 is inside ITS per-entry window — and the door's refusal
+   * list is still read first, before any version is.
+   */
+  it('stays refused inside the per-entry window too — the refusal list is read before retiredAfter', () => {
+    const def = twoBranchDecisionDefinition('^17.4.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    // ⭐ ANTI-VACUITY: the per-entry window really is open on this input.
+    expect(result.verdict).toBe('converted-retired-after');
+    expect(verdictNodeOf(result.definition).config).toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
   });
 
   it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {

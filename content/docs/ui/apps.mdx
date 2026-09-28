@@ -379,12 +379,13 @@ an app an author may not open is refused on these doors too. Reading a
 needs an authoring capability (`studio.access`, `setup.access` or
 `manage_metadata`: the check `GET /api/v1/meta/_drafts` makes). A caller
 without one is answered as if the parameter were absent: the published app,
-or `404` for an app that has never been published. `/diff`, and the change log
-`/history` beside it, need that capability outright: both read the version log,
-which records a draft save like any other, so they have no published-only
-answer to fall back to. A caller without one is refused with `403`, as
-`GET /api/v1/meta/_drafts` refuses, before anything is read — the same answer
-whether or not the app exists.
+or `404` for an app that has never been published. `/diff`, the change log
+`/history` beside it and the protection-audit trail `/audit` need that
+capability outright: the version log and the audit trail each record a draft
+save like any other, so none of them has a published-only answer to fall back
+to. A caller without one is refused with `403`, as `GET /api/v1/meta/_drafts`
+refuses, before anything is read — the same answer whether or not the app
+exists.
 
 `visible` did **not** move server-side with them, and that asymmetry is
 deliberate: CEL is evaluated in the browser because server-side evaluation needs

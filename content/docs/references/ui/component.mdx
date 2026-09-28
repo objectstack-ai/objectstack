@@ -1,7 +1,7 @@
 ---
 title: Component schema — UI Protocol reference
 navTitle: Component
-description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProps and 37 more — each property with its type, default and a TypeScript example."
+description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProps and 43 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Component schemas of the ObjectStack UI Protocol: AIChatWindowProp
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -40,6 +40,115 @@ const result = AIChatWindowProps.parse(data);
 | **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+
+---
+
+## ActionButtonProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Action name, forwarded to the action runner. Optional: an inline page button is not a registered object action, and without a name the runner dispatches on `actionType` alone |
+| **label** | `string` | optional | Button text. A literal string, placed as-is — localize through the translation bundle entry for this component id, not an inline locale map |
+| **icon** | `string` | optional | Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon) |
+| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`: on a page component `type` is the component itself |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Button variant — the Button primitive's vocabulary, plus `primary`, which renders as `default` (renderer default: `default`) |
+| **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon' \| 'md'>` | optional | Button size — the Button primitive's vocabulary, plus `md`, which renders as `default` (renderer default: `default`) |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the button is not rendered when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the button is shown but cannot be pressed while it is TRUE. Omit for never-disabled |
+| **params** | `any` | optional | Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs; an object is forwarded as the static parameter values |
+| **description** | `string` | optional | Action description, forwarded to the runner — the parameter dialog shows it under its title |
+| **target** | `string` | optional | Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType` |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
+| **endpoint** | `string` | optional | API endpoint for an `api` action, forwarded to the runner |
+| **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
+| **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
+| **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
+| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **confirmText** | `string` | optional | Confirmation question asked before the action runs |
+| **successMessage** | `string` | optional | Toast shown when the action succeeds |
+| **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |
+| **refreshAfter** | `boolean` | optional | Refresh the surrounding data after the action runs |
+| **undoable** | `boolean` | optional | Offer an Undo affordance after an update action |
+| **recordIdField** | `string` | optional | Row field whose value identifies the record the action acts on |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
+| **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
+| **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
+| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
+
+
+---
+
+## ActionGroupProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actions** | `Record<string, any>[]` | optional | The actions in this group, in order — each an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, …); a member's executor is its `type` |
+| **display** | `Enum<'inline' \| 'dropdown'>` | optional | Display mode: `inline` renders every action as a button row; `dropdown` renders one trigger button and lists the actions in its menu (renderer default: `inline`) |
+| **location** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>` | optional | Render only the members whose `locations` include this location. Omit to render every member |
+| **label** | `string` | optional | Dropdown trigger text (renderer default: `Actions`). Inline mode renders no group label. A literal string — localize through the translation bundle entry for this component id |
+| **icon** | `string` | optional | Lucide icon name on the dropdown trigger. Inline mode renders no group icon |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'>` | optional | Button variant for the dropdown trigger and for every inline member that sets none — the Button primitive's vocabulary (renderer default: `outline`) |
+| **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon'>` | optional | Button size for the dropdown trigger and for every inline member that sets none — the Button primitive's vocabulary |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate for the whole group — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds. Omit for always-visible |
+
+
+---
+
+## ActionIconProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Action name, forwarded to the action runner; also the `aria-label` when there is no `label`. Optional, as for `action:button` |
+| **label** | `string` | optional | Accessible label and tooltip text (and its first letter stands in when no icon resolves). A literal string — localize through the translation bundle entry for this component id |
+| **icon** | `string` | optional | Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`) |
+| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type` |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Button variant — the Button primitive's vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`) |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is FALSE. Omit for always-visible |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the icon is shown but cannot be pressed while it is TRUE. Omit for never-disabled |
+| **description** | `string` | optional | Action description — the tooltip text when there is no `label`, and forwarded to the runner for the parameter dialog |
+| **params** | `any` | optional | Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values |
+| **target** | `string` | optional | Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType` |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
+| **endpoint** | `string` | optional | API endpoint for an `api` action, forwarded to the runner |
+| **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
+| **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
+| **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
+| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **confirmText** | `string` | optional | Confirmation question asked before the action runs |
+| **successMessage** | `string` | optional | Toast shown when the action succeeds |
+| **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |
+| **refreshAfter** | `boolean` | optional | Refresh the surrounding data after the action runs |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
+| **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
+| **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
+| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
+
+
+---
+
+## ActionMenuProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actions** | `Record<string, any>[]` | optional | The menu's actions, in order — each an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member's executor is its `type` |
+| **label** | `string` | optional | Trigger text and accessible label; omit for an icon-only trigger labelled "More actions". A literal string — localize through the translation bundle entry for this component id |
+| **icon** | `string` | optional | Lucide icon name on the trigger (renderer default: the horizontal ellipsis) |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'>` | optional | Trigger button variant — the Button primitive's vocabulary (renderer default: `ghost`) |
+| **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon'>` | optional | Trigger button size — the Button primitive's vocabulary (renderer default: `icon`) |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate for the whole menu — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; a predicate that fails to evaluate hides it. Omit for always-visible |
 
 
 ---
@@ -84,6 +193,26 @@ const result = AIChatWindowProps.parse(data);
 | **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+
+---
+
+## ElementDefinitionListProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **items** | `{ term: string; description?: any }[]` | optional | Term/description pairs, in order. Omitted or empty renders the "No details" empty state |
+| **columns** | `Enum<1 \| 2>` | optional | Grid columns from the small breakpoint up — the NUMBER `1` or `2` (renderer default: 1) |
+| **inline** | `boolean` | optional | Put each term and its description on one baseline-aligned row instead of stacking them |
+
+### Nested Shape: `ElementDefinitionListProps.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The term — rendered as the row's label, as-is |
+| **description** | `any` | optional | The value shown under (or beside) the term — a string or number as-is, an object as JSON; omitted renders an em dash |
 
 
 ---
@@ -250,6 +379,49 @@ Sort field and direction pair
 | **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+
+---
+
+## ElementRepeaterProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object whose records the list repeats over — required: without it the list never queries |
+| **titleField** | `string` | optional | Field shown first on each line, emphasized |
+| **fields** | `(string \| { field: string })[]` | optional | Fields shown after the title on each line, in order — a bare field name, or `{ field }` |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing the records — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` in this map shares |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order — `[{ field, order }]` |
+| **limit** | `integer` | optional | Maximum records fetched and shown |
+| **emptyText** | `string` | optional | Copy shown when the query returns no records (renderer default: "No records"). A literal string — localize through the translation bundle entry for this component id |
+| **divided** | `boolean` | optional | Draw a separator between lines (renderer default: true) |
+
+### Nested Shape: `ElementRepeaterProps.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name |
+
+### Nested Shape: `ElementRepeaterProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ElementRepeaterProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 
 ---

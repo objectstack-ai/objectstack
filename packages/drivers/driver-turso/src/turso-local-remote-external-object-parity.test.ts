@@ -45,8 +45,9 @@
  * ## Reverse verification, directions predicted BEFORE running
  *
  * - `remoteTableFor` returning the object name: sections 1 and 2 go RED, with
- *   `no such table: ext_t` on every door but `aggregate`, and `[]` in place of
- *   the sum there. In section 3 the declared table stays `absent_t` but the
+ *   `no such table: ext_t` on every door, `aggregate` included, which refuses
+ *   it as `DATABASE_ERROR` / 500 (before #20424 it answered `[]` in place of
+ *   the sum). In section 3 the declared table stays `absent_t` but the
  *   backend's phrase names `ext_gone`, so the phrase assertion goes RED.
  * - `remoteReadExit` rethrowing the error unchanged: section 3 goes RED on
  *   `code` (`SQLITE_ERROR`) and `status` (`undefined`).

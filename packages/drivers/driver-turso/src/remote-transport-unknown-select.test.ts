@@ -51,12 +51,23 @@ describe('RemoteTransport unknown-$select column', () => {
     expect(calls[1].sql).toMatch(/SELECT \* FROM "product"/);
   });
 
-  it('still returns empty when even SELECT * fails (e.g. unknown table)', async () => {
-    const { t } = transportWithClient(async () => {
+  // [#20424] This case REPLACES the pin 'still returns empty when even SELECT *
+  // fails (e.g. unknown table)', which asserted `[]` for exactly this input.
+  // `[]` was the defect: a column the WHERE still names once the projection is
+  // gone is a predicate that never ran, and "no rows" is a false answer to it.
+  // The transport now raises the backend's error from the last rung, and
+  // `TursoDriver` classifies it (`INVALID_FILTER` / 400, the local face's
+  // answer). The same input, the opposite assertion.
+  it('raises the last rung\'s error when even SELECT * fails, instead of answering []', async () => {
+    const { t, calls } = transportWithClient(async () => {
       throw new Error('SQLITE_ERROR: no such column: status');
     });
-    const result = await t.find('ghost', { fields: ['id', 'status'], limit: 10 });
-    expect(result).toEqual([]);
+    await expect(t.find('ghost', { fields: ['id', 'status'], limit: 10 })).rejects.toThrow(
+      /no such column: status/,
+    );
+    // The projection attempt, then the one rung this query has.
+    expect(calls).toHaveLength(2);
+    expect(calls[1].sql).toMatch(/SELECT \* FROM "ghost"/);
   });
 
   it('propagates non-column errors instead of hiding them as empty', async () => {
