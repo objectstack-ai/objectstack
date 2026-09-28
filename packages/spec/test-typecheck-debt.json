@@ -234,9 +234,7 @@
       "TS6133: 'measureDoors' is declared but its value is never read.": 1
     },
     "src/ui/report.test.ts": {
-      "TS18046: 'b' is of type 'unknown'.": 1,
-      "TS18048: 'r.blocks' is possibly 'undefined'.": 1,
-      "TS2571: Object is of type 'unknown'.": 1
+      "TS18048: 'r.blocks' is possibly 'undefined'.": 1
     },
     "src/ui/view.test.ts": {
       "TS2322: Type 'string' is not assignable to type '…'.": 1,

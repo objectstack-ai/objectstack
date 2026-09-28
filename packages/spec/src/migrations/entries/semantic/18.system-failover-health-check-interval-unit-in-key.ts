@@ -9,7 +9,11 @@ export const entry: SemanticMigration = {
   replacement: 'healthCheckIntervalSeconds — rename the key; the value and the 30 default '
     + 'are unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on '
+    + '2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions '
+    + 'a schema declares on the key itself): the unit of a '
+    + 'duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never '
+    + 'only in the describe prose, and no existing offender is grandfathered. '
     + 'It stands alone because its file has exactly one offender left — and because the key '
     + 'directly beside it is the counter-example that shows where the line falls. '
     + 'FailoverConfig.dns.ttl is also a bare-named duration in seconds, and it is NOT renamed: '
@@ -19,7 +23,7 @@ export const entry: SemanticMigration = {
     + 'repo, so the exemption does not reach it. Tombstoned with retiredKey(); the shape is '
     + 'not strict, so a bare deletion would strip in silence. Why a semantic entry and not a '
     + 'D2 conversion: stack.zod.ts declares no disasterRecovery collection and a failover '
-    + 'config is host configuration, never a stored sys_metadata row. #15679, #14478, ADR-0087.',
+    + 'config is host configuration, never a stored sys_metadata row. ADR-0087.',
   acceptanceCriteria:
     'Every FailoverConfig author spells healthCheckIntervalSeconds; authoring '
     + 'healthCheckInterval fails to compile (input type `never`) and fails to parse with the '

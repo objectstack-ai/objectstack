@@ -1055,16 +1055,18 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
  * `i18n/missing-*` family. Under `--i18n-strict` the demand side is an error,
  * so a project could be *forced* to author keys it is then warned for.
  *
- * ⛔ The warn side is not the bug and must not be softened: no shipped runner
- * reads the group, so a translated wizard string really is stored and never
- * shown. The demand is the half that is premature.
+ * ⛔ The warn side is not the bug and must not be softened. Only part of the
+ * group is read: the console's screen-flow runner reads `screens`, but the
+ * flow's own `label` is read by nothing yet (#20318), so a translated flow
+ * label really is stored and never shown. The warn is group-level, so it still
+ * covers the whole group. The demand is the half that is premature.
  *
  * ## Shape
  *
  * Group-general, not `flows`-specific, and read from the ledger rather than a
- * switch of our own: the day the objectui screen-flow runner lands and the row
- * flips to `live` (dropping its `authorWarn`), the bucket turns itself back on
- * with no edit here — and any FUTURE group that acquires a warn is covered on
+ * switch of our own: the day the row flips to `live` (dropping its
+ * `authorWarn`; for `flows` that waits on #20318), the bucket turns itself back
+ * on with no edit here — and any FUTURE group that acquires a warn is covered on
  * the day it is marked, rather than re-opening this collision one group at a
  * time.
  *
