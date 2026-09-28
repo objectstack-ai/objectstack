@@ -1555,10 +1555,12 @@ const EXISTS_PREDICATE_DESCRIPTION =
  * module is evaluated inside the `field.zod` ↔ `field-value.zod` import cycle,
  * where reading a set at module scope is not safe under `OS_EAGER_SCHEMAS=1`.
  *
- * The last sentence is load-bearing too: the operator is STAGED (the
+ * The last sentences are load-bearing too: the operator is STAGED (the
  * maintainer's amendment of ruling A, record 5868169573, 「照 $like 先例分阶段」),
- * so an author reading this description is told that every executor refuses
- * it today rather than discovering it as a 400 — see {@link FILTER_OPERATORS}.
+ * so an author reading this description is told that no face answers it yet —
+ * the query executors refuse it, and `@objectstack/formula`'s write-side
+ * matcher answers its fail-closed `false` — rather than discovering either
+ * at run time. The measured per-face table is on {@link FILTER_OPERATORS}.
  */
 const EMPTY_PREDICATE_DESCRIPTION =
   'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
@@ -1568,9 +1570,9 @@ const EMPTY_PREDICATE_DESCRIPTION =
   + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
   + '(the empty list); every other type = null only. A face that holds no field declaration '
   + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
-  + 'backends and absent from FILTER_OPERATORS, so every query executor refuses it '
-  + '(INVALID_FILTER) until each has its arm; the view operators is_empty / is_not_empty '
-  + 'still lower to $null.';
+  + 'backends and absent from FILTER_OPERATORS. Until each face has its arm, the query '
+  + 'executors refuse it and the write-side check matcher matches no record; the view '
+  + 'operators is_empty / is_not_empty still lower to $null.';
 
 /**
  * Special check operators for null, existence and emptiness.
@@ -3160,6 +3162,43 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * quietly answers a different question is strictly worse than one that
  * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
  * the #6520 direction — tracked as the follow-up filed on #7536.
+ *
+ * ## `$empty` is STAGED here too (#20311)
+ *
+ * Declared by {@link SpecialOperatorSchema} and {@link FieldOperatorsSchema},
+ * its description the ruled per-type 「is empty」 table (ruling B on #20311,
+ * record 5861435168; the spelling is ruling A on #20399, record 5865693155),
+ * with {@link expandEmptyOperator} / {@link isEmptyFilterValue} as the one
+ * expansion every face calls — and deliberately ABSENT from this array (the
+ * maintainer's amendment of ruling A, record 5868169573: 「照 $like 先例分阶段」),
+ * for the mechanism measured above: membership is what `driver-memory`'s gate
+ * accepts, and its matcher's `default:` arm lets the row pass.
+ *
+ * No face answers it yet. Measured with this declaration built, a hand-authored
+ * `{ f: { $empty: true } }` (and `false`, and nested under `$and`):
+ *
+ * | face | `$empty` today |
+ * |---|---|
+ * | `driver-sql` — measured on it; `driver-sqlite-wasm` and `driver-turso`'s local transport inherit its compiler | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-turso` remote transport | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-memory` — query path and reference matcher | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-mongodb` | REFUSES — `INVALID_FILTER` / 400 |
+ * | objectql `having` | REFUSES — `INVALID_FILTER` / 400 |
+ * | `service-analytics` — the `where` lowering passes it on, the compile after it | REFUSES — `INVALID_FILTER` / 400 |
+ * | `service-analytics` — the read-scope SQL compiler | REFUSES, fail-closed — `READ_SCOPE_COMPILE_FAILED` / 500 |
+ * | `@objectstack/formula` `matchesFilterCondition` | answers `false` for every record, flag `true` or `false` — its decided fail-closed posture for an operator it has no arm for, the same answer an undeclared name gets |
+ *
+ * Nothing DROPS it, which is what the staging exists to guarantee. The formula
+ * row is the one that is not loud, and it is not a widening: that face judges
+ * a write-side `check`, where `false` denies the write. It is still the thing
+ * its own docblock calls "the same defect under a new name" for a DECLARED
+ * operator, so its arm is owed by its lane card like every other face's.
+ *
+ * Clearing the staging is the FLIP CARD's — the last card of ruling A's
+ * sequence, after one compile-surface lane card per face has given that face
+ * its arm: it adds `$empty` here, empties it out of
+ * `filter-operator-vocabulary.test.ts`' `STAGED_AHEAD_OF_BACKENDS`, and flips
+ * the `is_empty` / `is_not_empty` lowering from `$null` to `$empty`.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.

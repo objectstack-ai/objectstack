@@ -85,9 +85,9 @@ describe('#20311 §1 — the $empty description is the ruled per-type table', ()
     + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
     + '(the empty list); every other type = null only. A face that holds no field declaration '
     + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
-    + 'backends and absent from FILTER_OPERATORS, so every query executor refuses it '
-    + '(INVALID_FILTER) until each has its arm; the view operators is_empty / is_not_empty '
-    + 'still lower to $null.';
+    + 'backends and absent from FILTER_OPERATORS. Until each face has its arm, the query '
+    + 'executors refuse it and the write-side check matcher matches no record; the view '
+    + 'operators is_empty / is_not_empty still lower to $null.';
 
   it('the enforced copy and the documentation copy carry the same string, and it is the table', () => {
     expect(descriptionOf(FieldOperatorsSchema.shape, '$empty')).toBe(RULED_TABLE);
