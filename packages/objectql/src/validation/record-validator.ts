@@ -26,8 +26,9 @@
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
  *  - number types   an array, boolean or object is `invalid_number`, never
- *                   coerced (#20309); a number, or a string by `Number()`,
- *                   must be finite
+ *                   coerced (#20309); a number must be finite, and a string
+ *                   must be one the spec's numeric grammar reads
+ *                   (`parseNumericString`) — stored as that number
  *  - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
  *                   since #20386; it takes neither `scale` nor `precision`)
  *  - `scale`        more decimal places than the field's STORED allowance →
@@ -81,6 +82,7 @@ import {
   COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
+  parseNumericString,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isOutsideTemporalYearRange } from '@objectstack/core';
@@ -660,6 +662,96 @@ function normalizeBlankTypedRow(fields: Record<string, FieldDef>, row: unknown):
 }
 
 /**
+ * [#20309] The declared types the record validator's number arm judges: the
+ * spec's numeric class minus its server-computed class, both read as constants.
+ * One predicate for the arm and for {@link normalizeNumericStringValues}, so
+ * what is judged and what is rewritten cannot drift apart.
+ */
+function isJudgedNumberType(type: string): boolean {
+  return NUMERIC_VALUE_TYPES.has(type) && !COMPUTED_VALUE_TYPES.has(type);
+}
+
+/**
+ * [#20309] A STRING on a number-typed field that the platform's numeric grammar
+ * reads is written as the NUMBER it denotes — so what the record validator's
+ * number arm judges is what the driver stores.
+ *
+ * The grammar is the spec's one, `parseNumericString` (`@objectstack/spec/data`,
+ * #20336): a JSON number literal naming a finite double. The filter door
+ * narrows a comparand by the same reading. ⛔ No second grammar here: its case
+ * table (`NUMERIC_STRING_GRAMMAR_CASES`) decides hex, padded, exponent and
+ * every other form, and this function pre-decides none of them.
+ *
+ * "Number-typed" is exactly what the arm judges ({@link isJudgedNumberType}),
+ * on exactly the fields `validateRecord` walks: never a `SKIP_FIELDS` name, a
+ * `system` or a `readonly` field. A value nobody judges is not rewritten.
+ *
+ * ## Why the door has to say it
+ *
+ * The arm judged `Number(value)` while the write carried `value`, so an
+ * accepted string reached the driver as sent: memory stored `'12'` and read it
+ * back as the string `'12'`, while SQLite's column affinity stored the plain
+ * forms as numbers but kept `'0x10'` as TEXT (read back as 16). One write, two
+ * stored shapes. A shipped producer sends numeric strings — objectui's CSV
+ * import legacy per-row fallback posts the raw cell — so the census answer on
+ * #20309 accepts the grammar's strings and stores their number rather than
+ * refusing every string.
+ *
+ * ## What it does NOT touch
+ *
+ * ⛔ A string the grammar does not read: it stays as sent, and the number arm
+ * refuses it with `invalid_number`. (A blank never reaches here as a string on
+ * these types: {@link normalizeBlankTypedValues} made it `null` first.) ⛔ Every
+ * non-string value, of any type. ⛔ `summary` and the other computed types,
+ * whose value's shape is their producer's (the seat ruling on #20308).
+ *
+ * ## Where it runs
+ *
+ * Beside {@link normalizeBlankTypedValues}, at the same three points of
+ * `ObjectQL` — `insert()`, `update()` and `validate()` (the dry run) — before
+ * anything reads the payload, so the middleware, the caller snapshots, the
+ * hooks, the `readonlyWhen` locks and the validator all see the number. Every
+ * REST, batch and import door reaches the engine through those methods. ⛔ No
+ * driver copy. A value a `before*` hook writes after the door is the hook's
+ * own and is not rewritten; the arm still judges it by the same grammar.
+ *
+ * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
+ * them, pure — the same reference comes back when nothing changed, else a
+ * shallow copy (per row, and a copied array).
+ */
+export function normalizeNumericStringValues<T>(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: T,
+): T {
+  const fields = objectSchema?.fields;
+  if (!fields || !data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    let rows: unknown[] | undefined;
+    for (let i = 0; i < data.length; i++) {
+      const row = normalizeNumericStringRow(fields, data[i]);
+      if (row !== data[i]) (rows ??= data.slice())[i] = row;
+    }
+    return (rows ?? data) as T;
+  }
+  return normalizeNumericStringRow(fields, data) as T;
+}
+
+function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknown): unknown {
+  if (!isPlainRecord(row)) return row;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(row)) {
+    if (typeof value !== 'string' || SKIP_FIELDS.has(name)) continue;
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+    if (!def || def.system || def.readonly || !isJudgedNumberType(def.type)) continue;
+    const n = parseNumericString(value);
+    if (n === undefined) continue;
+    (out ??= { ...row })[name] = n;
+  }
+  return out ?? row;
+}
+
+/**
  * Coerce `boolean`-typed fields from their SQL storage form (integer `0`/`1`,
  * or the strings `'0'`/`'1'`/`'true'`/`'false'`) into real JS booleans, on a
  * SHALLOW COPY of `row`. SQLite/libsql have no native boolean, so a driver
@@ -931,17 +1023,23 @@ function validateOne(
   // to parse, so the arm refuses it and never silently alters it (the #7501
   // posture). A number is judged as itself and written as itself.
   //
-  // ⛔ A STRING is still judged by `Number()` and written as sent, exactly as
-  // before this change. Which strings a number field accepts is a separate
-  // decision: it waits on the producer census and on the platform's one
-  // numeric grammar, which belongs to `@objectstack/spec` (#20336), never to a
-  // second copy here.
-  if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
+  // [#20309] A STRING is judged by the platform's one numeric grammar,
+  // `parseNumericString` (`@objectstack/spec/data`, #20336), never by
+  // `Number()` and ⛔ never by a second grammar here. `Number()` also read a
+  // radix literal (`'0x10'`), a whitespace-padded one (`' 12 '`) and the
+  // non-JSON spellings `'+5'` / `'.5'` / `'5.'` / `'007'` as finite, so those
+  // were accepted and are now `invalid_number`; the grammar's case table
+  // decides every form. An admitted string is judged as the number it denotes,
+  // and `normalizeNumericStringValues` has already written that number into
+  // the payload at the door, so the driver stores what was judged. `min`,
+  // `max`, `scale` and `precision` below read that number, as they read a
+  // number.
+  if (isJudgedNumberType(t)) {
     if (typeof value !== 'number' && typeof value !== 'string') {
       return fail('invalid_number');
     }
-    const n = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(n)) {
+    const n = typeof value === 'number' ? value : parseNumericString(value);
+    if (n === undefined || !Number.isFinite(n)) {
       return fail('invalid_number');
     }
     // `min` / `max` bind on every type through this door, `progress` included.

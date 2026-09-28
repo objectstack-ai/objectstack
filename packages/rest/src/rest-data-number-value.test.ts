@@ -18,12 +18,20 @@
  *
  * Controls: `[5, 7]` and `{}` were already refused and still are; a JS number
  * is stored as a SQLite `real` (`integer` on `rating`) and read back
- * unchanged; a blank is still stored as `null` (#20308). A string is not
- * judged differently here: that half waits on #20336.
+ * unchanged; a blank is still stored as `null` (#20308).
+ *
+ * The string half (#20309, second part), measured on `origin/main` 851af0c27
+ * with this harness before it: `'0x10'` answered 201 and SQLite stored the TEXT
+ * `'0x10'` (read back as 16), and `' 12 '`, `'+5'`, `'.5'`, `'5.'`, `'007'`
+ * answered 201 and were stored as numbers by the column's affinity. A string
+ * is now read by the spec's numeric grammar (`parseNumericString`): an
+ * admitted one is stored as its number (a SQLite `real`, `integer` on
+ * `rating`), one the grammar refuses answers `400` / `invalid_number` and
+ * nothing is written. The grammar's own case table drives both halves.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { COMPUTED_VALUE_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { COMPUTED_VALUE_TYPES, NUMERIC_STRING_GRAMMAR_CASES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -151,5 +159,76 @@ describe('REST write doors on SQLite: a number field refuses a non-number (#2030
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'num_rest' }, { id: 'e1', ...Object.fromEntries(JUDGED.map((t) => [f(t), ''])) });
     expect(res.status).toBe(201);
     for (const t of JUDGED) expect(await ctx.cell('e1', f(t)), t).toEqual({ v: null, c: 'null' });
+  });
+});
+
+/** The spec grammar's own verdicts (#20336), blank rows aside (#20308 owns them). */
+const ADMITTED = NUMERIC_STRING_GRAMMAR_CASES.flatMap((c) => (c.numeric ? [[JSON.stringify(c.input), c.input, c.value] as const] : []));
+const REFUSED_STRINGS = NUMERIC_STRING_GRAMMAR_CASES.flatMap((c) => (!c.numeric && c.form !== 'empty' ? [[JSON.stringify(c.input), c.input] as const] : []));
+
+describe('REST write doors on SQLite: a number field reads a string by the spec numeric grammar (#20309)', () => {
+  let ctx: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => { ctx = await boot(); });
+
+  const expectRefused = (res: { status: number; body: any }, field: string) => {
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(res.body.fields.map((x: any) => [x.field, x.code])).toEqual([[field, 'invalid_number']]);
+  };
+  const expectRowRefused = (res: { status: number; body: any }) => {
+    expect(res.body.results.map((r: any) => [r.success, r.errors?.[0]?.code])).toEqual([[false, 'VALIDATION_FAILED']]);
+  };
+  const expectRowOk = (res: { status: number; body: any }) => {
+    expect(res.body.results.map((r: any) => r.success)).toEqual([true]);
+  };
+  /** SQLite's storage class for a stored number: an integral value in the `rating` column is `integer`,
+   *  unless it is past the 64-bit integer range (`1e21`), which stays `real`. */
+  const classOf = (type: string, n: number) => (type === 'rating' && Number.isSafeInteger(n) ? 'integer' : 'real');
+
+  describe.each(JUDGED)('%s', (type) => {
+    const col = f(type);
+
+    it.each(ADMITTED)('%s: POST, batch create, PATCH, batch update and updateMany store the number', async (_l, input, value) => {
+      // `-0` is stored as the number 0: SQLite keeps no negative zero.
+      const expected = { v: Object.is(value, -0) ? 0 : value, c: classOf(type, value) };
+
+      expect((await ctx.call('POST', '/api/v1/data/:object', { object: 'num_rest' }, { id: 's1', [col]: input })).status).toBe(201);
+      expect(await ctx.cell('s1', col)).toEqual(expected);
+
+      expectRowOk(await ctx.call('POST', '/api/v1/data/:object/batch', { object: 'num_rest' },
+        { operation: 'create', records: [{ data: { id: 's2', [col]: input } }] }));
+      expect(await ctx.cell('s2', col)).toEqual(expected);
+
+      for (const [door, send] of [
+        ['PATCH', (id: string) => ctx.call('PATCH', '/api/v1/data/:object/:id', { object: 'num_rest', id }, { [col]: input })],
+        ['batch update', (id: string) => ctx.call('POST', '/api/v1/data/:object/batch', { object: 'num_rest' },
+          { operation: 'update', records: [{ id, data: { [col]: input } }] })],
+        ['updateMany', (id: string) => ctx.call('POST', '/api/v1/data/:object/updateMany', { object: 'num_rest' },
+          { records: [{ id, data: { [col]: input } }] })],
+      ] as const) {
+        const id = `u_${door.replace(' ', '_')}`;
+        await ctx.engine.insert('num_rest', { id, [col]: 7 });
+        const res = await send(id);
+        expect(res.status, door).toBeLessThan(300);
+        expect(await ctx.cell(id, col), door).toEqual(expected);
+      }
+    });
+
+    it.each(REFUSED_STRINGS)('%s: POST and batch create write no row; PATCH, batch update and updateMany leave the stored number', async (_l, input) => {
+      expectRefused(await ctx.call('POST', '/api/v1/data/:object', { object: 'num_rest' }, { id: 'c1', [col]: input }), col);
+      expect(await ctx.cell('c1', col)).toBeUndefined();
+
+      expectRowRefused(await ctx.call('POST', '/api/v1/data/:object/batch', { object: 'num_rest' },
+        { operation: 'create', records: [{ data: { id: 'c2', [col]: input } }] }));
+      expect(await ctx.cell('c2', col)).toBeUndefined();
+
+      await ctx.engine.insert('num_rest', { id: 'u1', [col]: 7 });
+      expectRefused(await ctx.call('PATCH', '/api/v1/data/:object/:id', { object: 'num_rest', id: 'u1' }, { [col]: input }), col);
+      expectRowRefused(await ctx.call('POST', '/api/v1/data/:object/batch', { object: 'num_rest' },
+        { operation: 'update', records: [{ id: 'u1', data: { [col]: input } }] }));
+      expectRowRefused(await ctx.call('POST', '/api/v1/data/:object/updateMany', { object: 'num_rest' },
+        { records: [{ id: 'u1', data: { [col]: input } }] }));
+      expect(await ctx.cell('u1', col)).toEqual({ v: 7, c: type === 'rating' ? 'integer' : 'real' });
+    });
   });
 });

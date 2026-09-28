@@ -1150,15 +1150,26 @@ export class AnalyticsServicePlugin implements Plugin {
       // `formula` on the compatibility table's storage ground, so the pair no
       // longer reaches a response for a type to describe. ⛔ Carrying the key
       // on regardless would relay metadata into a seam nothing reads.
+      //
+      // [#20445] `multiple` IS read: with `type` it is the field's declared
+      // value shape, the input of the `$empty` operator's per-type expansion
+      // on the three SQL compilers (`declaredValueShape`). Relayed as the
+      // field declares it, so a `multiple: true` lookup is list-valued there
+      // exactly as it is in `driver-sql`'s storage.
       sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; max?: number; currencyConfig?: { currencyMode?: string; defaultCurrency?: string } }
+          | {
+              type?: string;
+              multiple?: boolean;
+              max?: number;
+              currencyConfig?: { currencyMode?: string; defaultCurrency?: string };
+            }
           | undefined;
         if (!f) return undefined;
         const fixedCurrency = f.currencyConfig?.currencyMode === 'fixed'
           ? f.currencyConfig.defaultCurrency
           : undefined;
-        return { type: f.type, max: f.max, defaultCurrency: fixedCurrency };
+        return { type: f.type, multiple: f.multiple === true, max: f.max, defaultCurrency: fixedCurrency };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the

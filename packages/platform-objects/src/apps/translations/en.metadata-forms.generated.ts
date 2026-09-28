@@ -903,7 +903,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       condition: {
         label: "Condition",
-        helpText: "Optional formula — skip the hook when this evaluates to false"
+        helpText: "CEL predicate — the hook runs only when TRUE"
       },
       retryPolicy: {
         label: "Retry Policy",
