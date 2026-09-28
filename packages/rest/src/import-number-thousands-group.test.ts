@@ -4,31 +4,38 @@
  * [#20497] `POST /api/v1/data/:object/import` reads a comma in a number cell
  * as a thousands separator ONLY where it groups thousands — 1 to 3 leading
  * digits, then groups of exactly three, and only before any `.` — and refuses
- * every other comma as the row's `invalid_number` error, on `InMemoryDriver`
- * and on `SqlDriver` (better-sqlite3 `:memory:`), through the real route.
+ * every other comma as that row's `invalid_number` error, through the real
+ * route over a real `SqlDriver` (better-sqlite3 `:memory:`).
  *
- * Measured on the base (`9449512a31`) through this route, JSON rows,
- * `writeMode: 'insert'`, both drivers alike:
+ * Measured through this route, JSON rows, `writeMode: 'insert'`, on
+ * `InMemoryDriver` and on `SqlDriver` (better-sqlite3) alike, at the base
+ * (`9449512a31`) and at the head of the PR that landed this file:
  *
  * | cell | base: stored · answer | head |
  * |:--|:--|:--|
- * | `'3,14'` | `314` · ok 1, errors 0 | row refused, `invalid_number` |
- * | `'1,5'` | `15` · ok 1, errors 0 | row refused, `invalid_number` |
- * | `'1.000,5'` | `1.0005` · ok 1, errors 0 | row refused, `invalid_number` |
- * | `'1,2,3'` | `123` · ok 1, errors 0 | row refused, `invalid_number` |
+ * | `'3,14'` | `314` · ok 1, errors 0 | row refused, `invalid_number`, nothing stored |
+ * | `'1,5'` | `15` · ok 1, errors 0 | row refused, `invalid_number`, nothing stored |
+ * | `'1.000,5'` | `1.0005` · ok 1, errors 0 | row refused, `invalid_number`, nothing stored |
+ * | `'1,2,3'` | `123` · ok 1, errors 0 | row refused, `invalid_number`, nothing stored |
  * | `'1,000'` / `'12,345.67'` / `'(1,234)'` | `1000` / `12345.67` / `-1234` | unchanged |
+ *
+ * The `InMemoryDriver` row is this file's by construction, not by a second
+ * arm: the cell is judged by the import's own reader (`parseNumberCell`)
+ * before any driver is reached, so one verdict holds on every driver. A test
+ * import of `@objectstack/driver-memory` is also not this file's to add — its
+ * test consumers are a ruled, ledgered set
+ * (`scripts/driver-memory-census.ledger.json`, `pnpm check:driver-memory-census`).
  *
  * The plain create door already answered `400 VALIDATION_FAILED` with field
  * code `invalid_number` for each of the four; the import row now answers the
- * same code. The reader's own case table (every documented form, the spec
- * grammar's rows, the comma probes) is `import-coerce.test.ts`'s
- * `parseNumberCell` block; this file pins the door, per driver.
+ * same code. The reader's own case table (every documented form, the comma
+ * probes) is `import-coerce.test.ts`'s `parseNumberCell` block; this file pins
+ * the door.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 
@@ -52,12 +59,11 @@ const ADMITTED: ReadonlyArray<readonly [cell: string, stored: number]> = [
   ['(1,234)', -1234],
 ];
 
-const DRIVERS = [
-  ['InMemoryDriver', () => new InMemoryDriver({ persistence: false })],
-  ['SqlDriver (better-sqlite3)', () => new SqlDriver({
+function makeSqliteDriver() {
+  return new SqlDriver({
     client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
-  })],
-] as const;
+  });
+}
 
 function createMockServer() {
   const noop = () => {};
@@ -81,10 +87,10 @@ afterEach(async () => {
   }
 });
 
-async function boot(makeDriver: () => unknown) {
+async function boot() {
   const engine = new ObjectQL();
   liveEngines.push(engine);
-  engine.registerDriver(makeDriver() as any, true);
+  engine.registerDriver(makeSqliteDriver(), true);
   await engine.init();
   engine.registry.registerObject(LEDGER as any);
   await engine.syncSchemas();
@@ -110,9 +116,9 @@ async function boot(makeDriver: () => unknown) {
   };
 }
 
-describe.each(DRIVERS)('[#20497] /import — a comma is read only as a thousands group (%s)', (_name, makeDriver) => {
+describe('[#20497] /import — a comma is read only as a thousands group', () => {
   let ctx: Awaited<ReturnType<typeof boot>>;
-  beforeEach(async () => { ctx = await boot(makeDriver); });
+  beforeEach(async () => { ctx = await boot(); });
 
   it.each(REFUSED)('refuses %j as that row\'s invalid_number error and writes its sibling row', async (cell) => {
     const res = await ctx.importRows({

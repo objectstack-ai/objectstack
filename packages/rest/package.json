@@ -39,7 +39,6 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
-    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
