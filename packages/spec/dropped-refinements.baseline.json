@@ -1209,6 +1209,11 @@
         "filter.element"
       ]
     },
+    "ui/ElementRepeaterProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
     "ui/FormField": {
       "sites": [
         "in.publicPicker.filter.element"

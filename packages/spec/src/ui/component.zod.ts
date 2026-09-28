@@ -2845,6 +2845,14 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
+ * bare-string arm of the condition union normalizes to the canonical
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ */
+export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
 
 /**
  * `action:icon` — an icon-only action button with a tooltip
@@ -2915,6 +2923,14 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
+ * bare-string arm of the condition union normalizes to the canonical
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ */
+export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
 /**
  * The member list `action:group` and `action:menu` both read — a LIST, as the
@@ -2991,6 +3007,14 @@ export const ActionGroupPropsSchema = lazySchema(() => strictObject({
   visible: actionCondition().optional()
     .describe('Visibility predicate for the whole group — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds. Omit for always-visible'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ActionGroupProps = z.input<typeof ActionGroupPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on `visible` — the
+ * bare-string arm of the condition union normalizes to the canonical
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ */
+export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
 
 /**
  * `action:menu` — a dropdown ("more") menu of actions
@@ -3030,6 +3054,14 @@ export const ActionMenuPropsSchema = lazySchema(() => strictObject({
   visible: actionCondition().optional()
     .describe('Visibility predicate for the whole menu — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; a predicate that fails to evaluate hides it. Omit for always-visible'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ActionMenuProps = z.input<typeof ActionMenuPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on `visible` — the
+ * bare-string arm of the condition union normalizes to the canonical
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ */
+export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 
 /**
  * `element:definition-list` — a compact key/value `<dl>`
@@ -3085,6 +3117,12 @@ export const ElementDefinitionListPropsSchema = lazySchema(() => strictObject({
   inline: z.boolean().optional()
     .describe('Put each term and its description on one baseline-aligned row instead of stacking them'),
 }));
+/**
+ * Author state (ADR-0122). No `XParsed`: the tree carries no default, transform,
+ * catch or pipe, so the two shapes coincide and the schema is pinned isomorphic in
+ * `type-alias-convention.pin.test.ts` instead.
+ */
+export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPropsSchema>;
 
 /**
  * `element:repeater` — a data-bound, chrome-free list: one line per record
@@ -3158,6 +3196,15 @@ export const ElementRepeaterPropsSchema = lazySchema(() => strictObject({
   divided: z.boolean().optional()
     .describe('Draw a separator between lines (renderer default: true)'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ElementRepeaterProps = z.input<typeof ElementRepeaterPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `ViewFilterRuleSchema`, whose `operator` is
+ * normalized on parse (why `ViewFilterRuleParsed` exists), the route
+ * `element:number` and `element:record_picker` took.
+ */
+export type ElementRepeaterPropsParsed = z.infer<typeof ElementRepeaterPropsSchema>;
 
 /**
  * ----------------------------------------------------------------------

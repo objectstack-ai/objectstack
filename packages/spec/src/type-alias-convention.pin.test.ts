@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 786 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1498,6 +1498,11 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
 // each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
 // three `XParsed` aliases are declared and the three pins deleted.
+// #20371 — `element:definition-list` (`ElementDefinitionListPropsSchema`),
+// default-free on the same principle: the renderer's one-column and
+// "No details" fallbacks stay the renderer's facts. Its five sibling rows from
+// that card carry an expression or a filter rule and declare `XParsed` instead.
+export type Iso_ui_component__ElementDefinitionListPropsSchema = Assert<Eq< z.input< typeof M170.ElementDefinitionListPropsSchema >, z.infer< typeof M170.ElementDefinitionListPropsSchema > >>;
 export type Iso_ui_component__ObjectFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
 export type Iso_ui_component__ObjectMasterDetailFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
 export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
@@ -1658,7 +1663,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 786 isomorphic pins', () => {
+  it('still declares all 787 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2305,7 +2310,19 @@ describe('ADR-0122 type-alias convention', () => {
     // touch disjoint pins (M22's three, M14's one); #17158 landed first, so
     // this entry's arrow starts from its 787. The count below was re-derived
     // from the merged file, not added up. -1 removed.
-    expect(pins).toHaveLength(786);
+    //
+    // 786 -> 787 is #20371's `ElementDefinitionListPropsSchema` — the
+    // `element:definition-list` row of `ComponentPropsMap` (ui/component.zod.ts,
+    // module slot M170), the (RISE) case once. Isomorphism MEASURED, not
+    // assumed: a strict item of one `z.string()` and one `z.unknown()`, a
+    // `z.literal([1, 2])` and a `z.boolean()`, every member optional but the
+    // item's `term`, with no `.default()`, `.transform()`, `.catch()` or
+    // `.pipe()` anywhere. Its five siblings in that card are NOT here: the four
+    // `action:*` rows carry `EvaluatedExpressionInputSchema` on `visible` (and
+    // `disabled`), whose bare-string arm transforms to the canonical envelope,
+    // and `element:repeater` carries `ViewFilterRuleSchema` on `filter` — so
+    // each declares an `XParsed` alias instead. +1 added.
+    expect(pins).toHaveLength(787);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
