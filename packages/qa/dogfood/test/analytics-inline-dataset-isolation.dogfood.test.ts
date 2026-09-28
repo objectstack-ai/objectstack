@@ -83,7 +83,8 @@ const HIDDEN_SUMMARY: Cube = {
 const isolationStack = defineStack({
   manifest: {
     id: 'com.dogfood.analytics-inline-isolation',
-    namespace: 'isolation',
+    // The fixture objects' own prefix — they are reused, not renamed.
+    namespace: 'admission',
     version: '0.0.0',
     type: 'app',
     name: 'Analytics Inline Dataset Isolation Fixture',
