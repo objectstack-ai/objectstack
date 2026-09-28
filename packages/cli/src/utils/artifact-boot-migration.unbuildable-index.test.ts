@@ -37,7 +37,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver, buildIndexName } from '@objectstack/driver-sql';
 import { runArtifactBootMigrationGate } from './artifact-boot-migration.js';
-import { driftTarget, groupByCategory, renderPlan } from './schema-migrate.js';
+import { driftTarget, groupByCategory, renderPlan, type SqlDriverLike } from './schema-migrate.js';
 
 const T = 'os20432_boot';
 const INDEX = buildIndexName(T, ['statsu'], true);
@@ -78,8 +78,16 @@ describe('the unbuildable_index drift op through the CLI (#20432)', () => {
     const info: string[] = [];
     const warn: string[] = [];
 
+    // The gate's two members, delegated to the REAL driver. `bootSchemaStack`
+    // reaches the driver by duck type, and `SqlDriver` keeps `config`
+    // protected, so the class itself is not assignable to `SqlDriverLike`.
+    const real = driver;
+    const gateDriver: SqlDriverLike = {
+      detectManagedDrift: () => real.detectManagedDrift(),
+      applyMigrationEntries: (entries, opts) => real.applyMigrationEntries(entries, opts),
+    };
     const verdict = await runArtifactBootMigrationGate({
-      driver,
+      driver: gateDriver,
       artifactDisplay: 'https://artifacts.example.com/app.json',
       info: (m) => info.push(m),
       warn: (m) => warn.push(m),
