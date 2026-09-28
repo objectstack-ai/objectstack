@@ -13535,6 +13535,53 @@ const step18: MigrationStep = {
         + 'label and value can still tell what the icon was meant to say. Any tooling that generated '
         + 'highlight entries (a code generator, a template) no longer emits the key.',
     },
+    // #20295 (family `rest-api-retire`, rank 9 of the #18900 census; triage graded
+    // it RETIRE by the maintainer's criterion) — the D3 entry of the family (ruling
+    // B on #17152: one D3 entry per retirement family). Registered keys:
+    // `api/RestApiConfig:responseFormat` and `api/RestApiConfig:documentation.enabled`
+    // — four ledger keys, since `responseFormat` retires whole with its three
+    // members. No D2 conversion: a `RestServerConfig` is plugin TS configuration,
+    // never a stack collection member or a stored row (the
+    // `rest-server-config-dead-keys-retired` precedent on the four sibling
+    // sub-objects), so this entry is where the prescription reaches
+    // `os migrate meta`, the upgrade guide and `spec-changes.json`.
+    {
+      id: 'rest-api-config-dead-keys-retired',
+      surface: 'restServer.api.responseFormat / restServer.api.documentation.enabled',
+      replacement:
+        '(removed — delete each key; neither had an effect to preserve. Whether the server publishes its '
+        + 'OpenAPI document and the docs viewer is `api.enableOpenApi`, the switch the mount already reads. '
+        + 'Response shapes are fixed — each route answers in the response schema `@objectstack/spec/api` '
+        + 'declares for it — and are not a server-wide option, so there is no replacement for `responseFormat`.)',
+      reason:
+        'The `rest_api` liveness census found every member of these two keys `dead`: `normalizeConfig` '
+        + 'parsed them, applied their defaults and copied them into the REST server\'s config, and no site '
+        + 'ever read them back. So `responseFormat.envelope: false` unwrapped no response, '
+        + '`includeMetadata` and `includePagination` gated nothing, and `documentation.enabled: false` '
+        + 'turned no document off — the document\'s existence was, and is, decided by `api.enableOpenApi` at '
+        + 'the mount. Enforce-or-remove (ADR-0049) resolved both to REMOVE: mainstream data APIs keep a '
+        + 'fixed response envelope that no administrator toggles server-wide, a configurable envelope would '
+        + 'fork the declared response shapes the client SDK parses and the served /openapi.json describes, '
+        + 'and `documentation.enabled` duplicates a switch that is already enforced. `RestApiConfigSchema` '
+        + 'and its inline `documentation` '
+        + 'block are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone and its ledger row '
+        + 'stays `dead` with a REMOVED note. No stored or built artifact carries either key, so no emitted '
+        + 'default needs to be tolerated as residue: the config is a construction argument that is parsed and '
+        + 'consumed in the same process. The consumer still owes the judgment because a host that WROTE '
+        + '`envelope: false` or `documentation.enabled: false` believed its clients saw a different shape or '
+        + 'no document, and only that host knows which clients were built on the belief.',
+      acceptanceCriteria:
+        'No `RestServerConfig` value passed to the REST plugin carries `api.responseFormat` or '
+        + '`api.documentation.enabled` — a config that does now fails `RestServer` construction (and so '
+        + 'the REST plugin\'s `start`) with the retirement prescription, naming the key and '
+        + '`RestApiConfigSchema`, instead of being accepted and ignored; `tsc` refuses the key at the '
+        + 'authoring site (`never`). A host that meant "serve no OpenAPI document" sets `api.enableOpenApi: '
+        + 'false` and sees `GET /openapi.json` and `GET /docs` unmounted. Every client that parses REST '
+        + 'responses reads each route\'s declared response shape. Every LIVE key of the `api` block — '
+        + 'including `documentation`\'s other members — parses byte-identically to before, and the mounted '
+        + 'REST surface is unchanged: '
+        + 'neither key ever reached it.',
+    },
     {
       id: 'rest-api-endpoint-handler-status-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
@@ -17225,6 +17272,41 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // A nested key of an inline block, so it has no line of its own in
     // `authorable-surface/` (the `kernel/Manifest:contributes.routes` shape).
     'api/MetadataEndpointsConfig:endpoints.schema',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: 0 read
+    // sites outside `normalizeConfig` and the normalized-config type; re-measured on
+    // origin/main 4e0f72e8, objectui at its pin f8a9d0fb and cloud at 96eb092 — all
+    // clean against lit controls). Tombstoned with `retiredKey()` inside the live
+    // `documentation` block — a tombstone whose siblings keep parsing, because only
+    // this member retires here. No D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration, never a stack collection member or a `sys_metadata` row. D3
+    // semantic entry `rest-api-config-dead-keys-retired`. Registered under 18 for the
+    // launch-window reason its neighbours state.
+    //
+    // `documentation.enabled` was a second on/off switch for the OpenAPI document:
+    // `api.enableOpenApi` decides the mount, and this key was consulted nowhere.
+    // Nested key of an inline block — no `authorable-surface/` line of its own.
+    'api/RestApiConfig:documentation.enabled',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: every
+    // member of the block `dead`, 0 read sites outside `normalizeConfig` and the
+    // normalized-config type; re-measured on origin/main 4e0f72e8, objectui at its
+    // pin f8a9d0fb and cloud at 96eb092 — all clean against lit controls).
+    // `RestApiConfigSchema` is a non-strict `z.object()`, so the route is a
+    // `retiredKey()` tombstone (a bare deletion would strip the key silently), the
+    // ledger row stays `dead` with a REMOVED note, and there is no D2 conversion: a
+    // `RestServerConfig` is plugin TS configuration, never a stack collection member
+    // or a `sys_metadata` row — the `api/RestServerConfig:openApi31` precedent, and
+    // the `rest-server-config-dead-keys-retired` one on the four sibling
+    // sub-objects. D3 semantic entry `rest-api-config-dead-keys-retired`. Registered
+    // under 18 for the launch-window reason its neighbours state.
+    //
+    // `responseFormat` is retired WHOLE — `envelope`, `includeMetadata` and
+    // `includePagination` were its only members and none was ever read, so there is
+    // no live member left to hold the container open (the `crud.patterns`
+    // precedent). A response shape is a fixed contract — each route's declared
+    // response schema, which the client SDK parses — not a server-wide option.
+    'api/RestApiConfig:responseFormat',
     // #15677 (stack card 2/6 of #14478) — ruling B; the seconds half of the pair
     // documented on `api/RestApiEndpoint:timeout`. Renamed to `cacheTtlSeconds`;
     // the value is unchanged. Tombstoned with `retiredKey()`; disposition and

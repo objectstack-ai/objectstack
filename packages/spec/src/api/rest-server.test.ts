@@ -114,22 +114,25 @@ describe('RestApiConfigSchema', () => {
   });
 
   describe('Documentation Configuration', () => {
+    // `documentation.enabled` is a retiredKey() tombstone since #20295 — its
+    // refusal, prescription and tsc pins live in
+    // `rest-api-config-dead-keys-retirement.test.ts`. The block's other
+    // members are live-parsed here, unchanged.
     it('should accept basic documentation config', () => {
       const config = RestApiConfigSchema.parse({
         documentation: {
-          enabled: true,
           title: 'My API',
         },
       });
 
-      expect(config.documentation?.enabled).toBe(true);
       expect(config.documentation?.title).toBe('My API');
+      // The retired switch is no longer defaulted into the parsed block.
+      expect(config.documentation).not.toHaveProperty('enabled');
     });
 
     it('should accept complete documentation config', () => {
       const config = RestApiConfigSchema.parse({
         documentation: {
-          enabled: true,
           title: 'ObjectStack API',
           description: 'Complete API for ObjectStack platform',
           version: '1.0.0',
@@ -152,33 +155,10 @@ describe('RestApiConfigSchema', () => {
     });
   });
 
-  describe('Response Format Configuration', () => {
-    it('should accept response format config', () => {
-      const config = RestApiConfigSchema.parse({
-        responseFormat: {
-          envelope: true,
-          includeMetadata: true,
-          includePagination: true,
-        },
-      });
-
-      expect(config.responseFormat?.envelope).toBe(true);
-      expect(config.responseFormat?.includeMetadata).toBe(true);
-      expect(config.responseFormat?.includePagination).toBe(true);
-    });
-
-    it('should accept minimal response format', () => {
-      const config = RestApiConfigSchema.parse({
-        responseFormat: {
-          envelope: false,
-          includeMetadata: false,
-          includePagination: false,
-        },
-      });
-
-      expect(config.responseFormat?.envelope).toBe(false);
-    });
-  });
+  // `Response Format Configuration` — REMOVED (#20295, ADR-0049): the two
+  // accept cases here pinned a block nothing ever read. `responseFormat` is a
+  // retiredKey() tombstone now; its refusal, prescription and tsc pins live in
+  // `rest-api-config-dead-keys-retirement.test.ts`.
 });
 
 describe('CrudOperation', () => {
@@ -663,15 +643,9 @@ describe('Integration Tests', () => {
         enableBatch: true,
         enableDiscovery: true,
         documentation: {
-          enabled: true,
           title: 'ObjectStack API',
           description: 'REST API for ObjectStack platform',
           version: '1.0.0',
-        },
-        responseFormat: {
-          envelope: true,
-          includeMetadata: true,
-          includePagination: true,
         },
       },
       crud: {
