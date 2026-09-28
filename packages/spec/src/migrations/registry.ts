@@ -16071,9 +16071,11 @@ const step18: MigrationStep = {
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
       // span already, and a nested backtick would close it.
       surface:
-        'data.TursoConfig (a turso / libsql datasource.config), the published TursoConfigSchema mirror '
-        + 'of @objectstack/driver-turso, and the TursoDriver constructor — mode replica with no syncUrl '
-        + '(or an empty one) is now refused, on mode',
+        'data.TursoConfig (a turso / libsql datasource.config) and the TursoDriver constructor of '
+        + '@objectstack/driver-turso — mode replica with no syncUrl (or an empty one) is now refused, on '
+        + 'mode at authoring and at construction. The published TursoConfigSchema mirror of '
+        + '@objectstack/driver-turso carries the same text for parity but declares no mode key and strips '
+        + 'an authored one, so it cannot see a forced mode and still accepts the config as a local file',
       replacement:
         'the configuration the author meant. An embedded replica names the remote it replicates from: '
         + 'keep the file: url and set syncUrl to the libsql or https Turso endpoint, for example url '
