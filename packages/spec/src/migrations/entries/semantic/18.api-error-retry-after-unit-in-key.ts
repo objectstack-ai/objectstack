@@ -7,7 +7,7 @@ export const entry: SemanticMigration = {
   surface: 'EnhancedApiError.retryAfter (api/errors.zod.ts) — the ADR-0112 error envelope on the wire',
   replacement: 'retryAfterSeconds — rename the key; the value (seconds) is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B of 2026-09-02 on duration-shaped keys: the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
     + 'BREAKING ON THE WIRE, and ruled in deliberately: the ruling puts the ~16 runtime-emitted '
     + 'measurements in scope because they are read by humans and agents even if nobody authors '
     + 'them, and names ApiError.retryAfter explicitly, with its own BREAKING note. The ambiguity '
@@ -21,7 +21,7 @@ export const entry: SemanticMigration = {
     + 'green grep for `retry-after` in transport code as leftover work. A SEMANTIC entry rather '
     + 'than a D2 conversion because an error envelope is emitted, never stored: it is not a stack '
     + 'collection member and never a sys_metadata row, so the conversion chain has no seam that '
-    + 'would see one. #15677, #14478, ADR-0087, ADR-0112.',
+    + 'would see one. ADR-0087, ADR-0112.',
   acceptanceCriteria:
     'No producer emits `retryAfter` on an ApiError envelope and no consumer reads it; the old '
     + 'spelling is a retiredKey() tombstone that fails tsc at the construction site and fails the '

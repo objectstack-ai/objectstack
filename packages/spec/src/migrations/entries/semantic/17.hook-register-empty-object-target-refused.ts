@@ -12,14 +12,16 @@ export const entry: SemanticMigration = {
     + "a global hook, `object: '*'` or no `object` key at all; for a cancelled scope, widen "
     + '`object` or drop the overlapping names from `excludeObjects`',
   reason:
-    '#4281 ruled that an empty hook target is not "no target" and closed the shape at the '
+    'An earlier breaking fix established that an empty hook target is not "no target" and '
+    + 'closed the shape at the '
     + "two METADATA doors — `HookSchema.object`'s refine and `hook-binder.ts`'s "
     + '`normalizeObjects`. `engine.registerHook`, the CODE door, goes through neither, so '
     + 'all three spellings still registered, each producing a defect the author did not '
     + "write: `''` is FALSY, so the allow face was skipped entirely and the entry became a "
-    + "GLOBAL hook (#4281's headline failure mode — blank intent taking the broadest "
+    + "GLOBAL hook (that fix's headline failure mode — blank intent taking the broadest "
     + "possible blast radius); `[]` and `['']` are truthy but admit no object name, so the "
-    + 'entry could never fire. #5928 then added the `excludeObjects` face, which brought a '
+    + 'entry could never fire. The later `excludeObjects` face (a hook global except for the '
+    + 'objects it names) then brought a '
     + 'fourth shape reached by arithmetic rather than by one bad name: an `object` list '
     + 'every member of which is also excluded admits nothing, so that entry can never fire '
     + 'either. All four are ADR-0078 silently-inert declarations, and all four are now '
@@ -31,7 +33,7 @@ export const entry: SemanticMigration = {
     + "the MATCHING read be changed instead: teaching the matcher that `''` is an "
     + 'unmatchable name would silently convert a hook firing on every object into one '
     + 'firing on none — the same class of defect pointing the other way, which is why '
-    + '#5928 declined to do it in passing.\n\n'
+    + 'the `excludeObjects` change declined to do it in passing.\n\n'
     + 'This is a RUNTIME registration API, not stored metadata, so — like '
     + '`hook-context-session-roles-retired` at this step — there is no `sys_metadata` row '
     + 'for the D2 chain to rewrite and the ledger entry is the notification channel. One '
@@ -41,8 +43,7 @@ export const entry: SemanticMigration = {
     + 'a blank `objectName` used to bind a trigger to EVERY object in the tenant. It now '
     + "fails to bind instead, loudly — the automation engine's per-flow bind guard warns "
     + 'and the `kernel:bootstrapped` binding audit re-reports it — which is the correct '
-    + 'end state, but it is an observable change for that flow. #6573, #4281, #4001, '
-    + '#5928, ADR-0078.',
+    + 'end state, but it is an observable change for that flow. ADR-0078.',
   acceptanceCriteria:
     'No `registerHook` call site passes an empty `object` target, and none passes an '
     + '`excludeObjects` list covering every name in its `object` list. Every `record-change` '
