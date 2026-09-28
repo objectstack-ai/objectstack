@@ -5201,8 +5201,9 @@ function viewSwitcherRowStateFields() {
 function viewItemWireFields() {
   return {
     ...viewSwitcherRowStateFields(),
-    // [#9933] Same disposition as the switcher keys: console state written
-    // through the `view` metadata API. `updateView` PUTs
+    // Same disposition as the switcher keys: console state written through
+    // the `view` metadata API ({@link ViewColumnStateSchema} carries the
+    // key's own ruling). `updateView` PUTs
     // `{ ...current, ...partial }`, so on a standalone ViewItem record the
     // key arrives at THIS member's top level; declaring it validates the
     // shape where `.strip()` used to let it ride through unchecked.
