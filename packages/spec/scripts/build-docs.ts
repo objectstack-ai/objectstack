@@ -62,6 +62,12 @@ import {
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { formatSplitEntryCoverage, splitEntryCoverage } from './lib/split-entries';
 import { renderSchemaSection } from './lib/schema-section';
+import {
+  categoryIndexDescription,
+  modulePageDescription,
+  yamlDescription,
+  type DescriptionSource,
+} from './lib/page-description';
 import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
@@ -455,6 +461,9 @@ function generateMarkdown(schemaName: string, schema: any, category: string, _zo
  */
 const PAGE_SECTION_LEVEL = 2;
 
+/** Which rule of `lib/page-description.ts` produced each module page's description, tallied for the run summary. */
+const descriptionSources: Record<DescriptionSource, number> = { docblock: 0, 'docblock+schemas': 0, schemas: 0 };
+
 function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, content: any}>, category: string): string {
   const zodTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   
@@ -462,21 +471,31 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   const sourceRel = sourcePathFor(category, zodFile);
   const sourcePath = sourceRel ? path.join(REPO_ROOT, sourceRel) : undefined;
   let fileDesc = '';
-  if (sourcePath && fs.existsSync(sourcePath)) {
+  const source = sourcePath && fs.existsSync(sourcePath) ? fs.readFileSync(sourcePath, 'utf-8') : null;
+  if (source !== null) {
       // `category` is what a path written relative to the module's own
       // directory is relative TO — without it the renderer cannot tell which
       // `auth.zod.ts` a neighbour reference means, and until #6484 it was never
       // told, so those references shipped as plain prose.
-      fileDesc = renderFileDescription(fs.readFileSync(sourcePath, 'utf-8'), {
+      fileDesc = renderFileDescription(source, {
         fromCategory: category,
         sourcePathToDocsRoute,
         sectionLevel: PAGE_SECTION_LEVEL,
       });
   }
 
+  // The search-result line, read from the same doc block as `fileDesc` — the
+  // rule and its fallbacks live in `lib/page-description.ts` (#12238).
+  const description = modulePageDescription(source, {
+    title: zodTitle,
+    categoryTitle: CATEGORIES[category],
+    schemaNames: schemas.map(s => s.name),
+  });
+  descriptionSources[description.from]++;
+
   let md = `---\n`;
   md += `title: ${zodTitle}\n`;
-  md += `description: ${zodTitle} protocol schemas\n`;
+  md += `description: ${yamlDescription(description.text)}\n`;
   md += `---\n\n`;
   md += AUTO_GENERATED_BANNER;
   
@@ -909,7 +928,7 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
 
   let mdx = `---\n`;
   mdx += `title: ${title}\n`;
-  mdx += `description: Complete reference for all ${title.toLowerCase()} schemas\n`;
+  mdx += `description: ${yamlDescription(categoryIndexDescription(title, cards.length))}\n`;
   mdx += `---\n\n`;
   mdx += AUTO_GENERATED_BANNER;
   
@@ -1099,6 +1118,14 @@ if (managedCount > 0) {
     }
   }
 }
+
+// Which rule wrote each module page's search-result line — a module that falls
+// back to its schema names is one whose doc block says nothing a reader can use.
+console.log(
+  `ℹ reference descriptions: ${descriptionSources.docblock} from the module doc block, ` +
+    `${descriptionSources['docblock+schemas']} doc block + schema names, ` +
+    `${descriptionSources.schemas} from schema names alone (no usable doc block)`,
+);
 
 // 5. Disposition: write the tree, or report drift against it.
 flush({

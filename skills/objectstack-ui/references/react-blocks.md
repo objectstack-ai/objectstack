@@ -41,7 +41,7 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `onError` | `(error: Error) => void` | callback |  | Called when the save fails. |
 | `onCancel` | `() => void` | callback |  | Called when the user cancels. |
 | `submitHandler` | `(values) => any \| Promise<any>` | callback |  | Custom persistence instead of the default create/update. |
-| `layout` | `'vertical' \| 'horizontal' \| 'inline' \| 'grid'` | data |  | Field layout direction |
+| `layout` | `'vertical' \| 'horizontal'` | data |  | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | `columns` | `integer` | data |  | Number of columns for the form body |
 | `tabPosition` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Tab strip position (tabbed forms) |
 | `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Drawer side (drawer forms) |

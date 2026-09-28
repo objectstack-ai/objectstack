@@ -3531,6 +3531,43 @@ export type ObjectCalendarProps = z.input<typeof ObjectCalendarPropsSchema>;
  */
 export type ObjectCalendarPropsParsed = z.infer<typeof ObjectCalendarPropsSchema>;
 
+// `object-form` `layout` retired-value prescriptions (#20221, ADR-0049
+// enforce-or-remove). Declared with `//` on purpose — the
+// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too: build-docs
+// takes a file's first JSDoc per exported symbol, and these need no doc page.
+// This is an enum-VALUE narrowing, so there is no `retiredKey()` tombstone to
+// hang the prescription on — the enum's own error map carries it, keyed on
+// `issue.input` so only a value which used to be legal gets the "was removed"
+// message (the `record:chatter` `position` precedent, #8762).
+//
+// Measured at the `.objectui-sha` pin `f8a9d0fb0`: neither value ever had a
+// behaviour of its own. The simple arm folds both to 'vertical'
+// (`ObjectForm.tsx:1406-1410`, under the comment "Map 'grid' and 'inline' to
+// 'vertical' as fallback"); the drawer and modal arms (`ObjectForm.tsx:463`,
+// `:499`) and `DrawerForm.tsx:575` / `ModalForm.tsx:597` pass only 'vertical'
+// and 'horizontal' through; `TabbedForm.tsx:556`, `SplitForm.tsx:445` and
+// `WizardForm.tsx:1075` hard-code 'vertical'. Multi-column — what 'grid' would
+// mean — is `columns`, which the renderer honours under every arm; 'inline' is
+// a toolbar / filter-row pattern, not a record-form layout. The ADR-0087
+// conversion `form-layout-inline-grid-to-vertical` rewrites both values to
+// 'vertical' (behaviour-preserving, `columns` untouched) for stored rows and
+// `os migrate meta`. `FormViewSchema.layout` (view.zod.ts) carries the same
+// narrowing under its own surface name.
+const OBJECT_FORM_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
+  ['grid', "'grid' was removed from the `object-form` `layout` enum in @objectstack/spec 17.5.0 "
+    + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
+    + "`object-form` presentation folds it to 'vertical'. Write 'vertical', or omit `layout` "
+    + "('vertical' is the renderer default); for a multi-column form set `columns` (e.g. "
+    + '`columns: 2`), which the renderer honours under either layout. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+  ['inline', "'inline' was removed from the `object-form` `layout` enum in @objectstack/spec 17.5.0 "
+    + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
+    + "`object-form` presentation folds it to 'vertical', and a row of inline inputs is a "
+    + "toolbar / filter-row pattern, not a record-form layout. Write 'vertical', or omit "
+    + "`layout` ('vertical' is the renderer default). "
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+]);
+
 /**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
  * the sub-forms it forwards the whole bag into: `TabbedForm`, `WizardForm`,
@@ -3541,6 +3578,13 @@ export type ObjectCalendarPropsParsed = z.infer<typeof ObjectCalendarPropsSchema
  * designer palette agree. Callbacks (`onSuccess`, `submitHandler`, …) and the
  * controlled `open` state are React-tier props, not authorable metadata — the
  * react tier publishes those separately (`react-blocks.ts`).
+ *
+ * `layout` is the one enum that entered through two declarations and not a
+ * read: at `eb7f586b` the registry `inputs` and the designer palette offered
+ * `inline` and `grid`, but the renderer leg never agreed — `ObjectForm.tsx`
+ * already folded both to `vertical`. Both are retired (ADR-0049 enforce-or-
+ * remove, #20221); the `OBJECT_FORM_LAYOUT_RETIRED` comment block above
+ * carries the measurement and the prescription each one gets.
  */
 export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-form`',
@@ -3553,8 +3597,12 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   mode: z.enum(['create', 'edit', 'view']).optional().describe('Form mode'),
   formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
     .describe('Form presentation'),
-  layout: z.enum(['vertical', 'horizontal', 'inline', 'grid']).optional().describe('Field layout'),
-  columns: z.number().optional().describe('Field columns in grid layout'),
+  layout: z.enum(['vertical', 'horizontal'], {
+    error: (issue) =>
+      typeof issue.input === 'string' ? OBJECT_FORM_LAYOUT_RETIRED.get(issue.input) : undefined,
+  }).optional()
+    .describe("Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns`"),
+  columns: z.number().optional().describe('Number of field columns (multi-column forms), honoured under either `layout`'),
   fields: z.array(z.unknown()).optional().describe('Limit/order the fields shown'),
   customFields: z.unknown().optional().describe('Custom field definitions merged into the generated set'),
   sections: z.array(z.unknown()).optional()
