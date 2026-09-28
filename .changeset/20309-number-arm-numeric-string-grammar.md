@@ -13,16 +13,20 @@ narrowing: a string that `Number()` reads as a finite number but the platform's
 numeric grammar does not is now refused with `400 VALIDATION_FAILED` /
 `invalid_number`. It used to be accepted.
 
-**FROM → TO, and the one-line fix.** These strings, written to one of those
-fields, were accepted and are now refused, with nothing written:
+**What a caller sees, before → after.** One of these strings written to one of
+those fields: `201`, stored as sent (memory kept the string; SQLite kept
+`'0x10'` as TEXT and the others as numbers by column affinity) → `400
+VALIDATION_FAILED` with the field code `invalid_number`, nothing stored. The
+REST create, batch, update and updateMany routes all answer it, and `validate`
+(the dry run) predicts it. The forms:
 
 - a radix literal: `'0x10'`, `'0X1A'`, `'0o17'`, `'0b101'`;
 - a whitespace-padded number: `' 12 '`, `'12\n'`, `'\t-3'`;
 - a spelling that is not a JSON number: `'+5'`, `'.5'`, `'5.'`, `'007'`.
 
-Fix: send a JS number, or the number's plain JSON spelling — `'16'`, `'12'`,
-`'-3'`, `'5'`, `'0.5'`, `'7'`. `String(n)` of any finite number always
-qualifies, exponent forms included (`'1e-7'`, `'1e+21'`).
+The fix, when a write is refused: send a JS number, or the number's plain JSON
+spelling — `'16'`, `'12'`, `'-3'`, `'5'`, `'0.5'`, `'7'`. `String(n)` of any
+finite number always qualifies, exponent forms included (`'1e-7'`, `'1e+21'`).
 
 ## What was wrong
 
