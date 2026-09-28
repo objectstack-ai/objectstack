@@ -19,7 +19,9 @@ export const entry: SemanticMigration = {
     + 'passed in, so the map carried a second copy of facts the caller already held. '
     + "They existed for exactly one consumer — the import dry run's hand-copied "
     + 'pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`, '
-    + 'framework#3956) — and #4633 ruling D retired that mirror (PR #6532): the dry run '
+    + 'added when the dry run was found skipping the field-level validation the real write ran) '
+    + '— and the maintainer\'s 2026-08-06 ruling D (a validate-only protocol operation, so the '
+    + 'dry run\'s prediction is the engine\'s verdict by construction) retired that mirror: the dry run '
     + "now asks `DataProtocol.validateData` for the engine's verdict, which reads the "
     + "object's own schema. That left all eight computed on every import and read by "
     + 'NOTHING, which is the declared-and-unread shape ADR-0049 exists for; a constraint '
@@ -30,8 +32,8 @@ export const entry: SemanticMigration = {
     + "verify, plugin-auth, plugin-dev) and the `objectui` sibling; plugin-auth's "
     + 'identity import forwards `prepared.metaMap` into `runImport` but reads only the '
     + 'presentation keys through `coerceRow`. '
-    + 'Why this needs a ledger entry despite that sweep: it is the `findStream` (#4484) / '
-    + '`IStorageService.list` (#5540) / `actor-user-roles-to-positions` (#6011) '
+    + 'Why this needs a ledger entry despite that sweep: it is the `findStream` / '
+    + '`IStorageService.list` / `actor-user-roles-to-positions` '
     + 'disposition — a published TS surface with NO spec schema, so there is no '
     + '`retiredKey()` tombstone and no parse rejection that could carry a prescription, '
     + 'and the ledger is the only channel that reaches an upgrader. It is if anything '
@@ -45,7 +47,8 @@ export const entry: SemanticMigration = {
     + 'remain fully authorable on a field definition and fully enforced by the engine, '
     + 'which is where they always lived. The only place these eight are ever spelled is '
     + "inside a consumer's own TypeScript, so no `objectstack migrate meta` transform can "
-    + 'reach them. ADR-0049 / ADR-0087, #6536 (the sweep PR #6532 deliberately deferred).',
+    + 'reach them. ADR-0049 / ADR-0087; this is the removal the dry-run change deliberately '
+    + 'deferred to a sweep of its own.',
   acceptanceCriteria:
     'No code of yours reads any of the eight off a `buildFieldMetaMap` / '
     + '`prepareImportRequest` result. Grep your sources for `.required` / `.hasDefault` / '

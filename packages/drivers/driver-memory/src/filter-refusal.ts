@@ -364,6 +364,13 @@ export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
   '$like',
   '$ilike',
+  // [#20444] The staged emptiness flag, admitted BY HAND for the reason the
+  // `$like` paragraph above gives, and under its ordering rule: both arms land
+  // with this entry — the reference matcher judges the stored value
+  // (`isEmptyFilterValue`, the spec's reading for a face holding no field
+  // declaration) and the live query path the field's DECLARED row
+  // (`expandEmptyOperator`, from the declaration `syncSchema` recorded).
+  '$empty',
 ]);
 
 /** The vocabulary as it appears in a refusal message, in declaration order. */
@@ -608,6 +615,42 @@ export function nonBooleanNullComparandError(field: string, value: unknown, path
       `compiled IS NOT NULL (anything but true), and this driver's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+  );
+}
+
+/**
+ * [#20444] A non-boolean `$empty` comparand. The leading sentence is
+ * `driver-sql`'s `nonBooleanEmptyComparandError`, verbatim — one condition,
+ * one wording (#5240).
+ */
+export function nonBooleanEmptyComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+      `empty rows, false for their exact complement.`,
+  );
+}
+
+/**
+ * [#20444] `$empty` on the live query path, aimed at a field this driver holds
+ * no declaration for — an object never passed through `syncSchema`, a field
+ * its schema does not name, or one declared with no `type`.
+ *
+ * What counts as empty is the field's DECLARED row of the ruled table, and the
+ * live path reads it from the declaration rather than from a value, so without
+ * one there is no answer to give: refused, never guessed. The reference matcher
+ * (`memory-matcher.ts`) is the face that holds NO declarations at all, and it
+ * judges the stored value instead — the spec's reading for such a face.
+ */
+export function undeclaredEmptyOperatorFieldError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$empty" on field "${field}" at ${path} targets a field whose declaration this ` +
+      `driver does not hold (no declared type — the object's schema was never synced, or does not ` +
+      `declare the field). What counts as empty is the field's DECLARED row of the ruled table — ` +
+      `null or '' for a text-like type, null or [] for a multi-value field, null only for every ` +
+      `other type — so the operator is refused rather than guessed. Declare the field, or use ` +
+      `"$null" for "has no value".`,
   );
 }
 
@@ -894,6 +937,13 @@ function assertFieldConstraintShape(
     // being answered silently, differently, by each face.
     if (op === '$null' && typeof spec[op] !== 'boolean') {
       throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
+    }
+    // [#20444] `$empty`'s comparand is a boolean by the same declaration
+    // (`FieldOperatorsSchema`), refused on this walk for the same reason: both
+    // faces of this package evaluate `true` / `false` exhaustively, so a third
+    // value would land on whichever side each arm happens to default to.
+    if (op === '$empty' && typeof spec[op] !== 'boolean') {
+      throw nonBooleanEmptyComparandError(field, spec[op], `${path}.$empty`);
     }
     // [#16810] An ARRAY comparand on a single-value comparison — the operator
     // spelling of the implicit-equality position refused at the top of this
