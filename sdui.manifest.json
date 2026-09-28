@@ -27,7 +27,7 @@
         {
           "name": "sort",
           "type": "array",
-          "description": "Initial sort order, `[{ field, order }]`. The canonical spelling — the deprecated single-sort `defaultSort` is only read when this is absent."
+          "description": "Initial sort order, `[{ field, order }]`. The only sort spelling this block reads — the retired single-sort `defaultSort` is refused by the protocol and ignored by the renderer."
         },
         {
           "name": "pagination",
@@ -668,7 +668,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them."
         },
         {
           "name": "calendar",
@@ -730,12 +730,22 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them."
         },
         {
           "name": "gantt",
           "type": "object",
           "description": "startDateField, endDateField, titleField, progressField, percentageField, colorField, dependenciesField"
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a gantt carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` charts those rows, `{ provider: 'object', object }` queries that object and `{ provider: 'api', read }` reads through that request. A bare array is not this key’s shape and is not a record source: the gantt falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a gantt carrying both charts these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
         },
         {
           "name": "dataSource",
@@ -778,12 +788,22 @@
         {
           "name": "objectName",
           "type": "string",
-          "required": true
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-map` schema refuses a block that declares none of them."
         },
         {
           "name": "map",
           "type": "object",
           "description": "latitudeField, longitudeField, titleField"
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a map carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` plots those rows and `{ provider: 'object', object }` queries that object, both narrowed by `filter` and ordered by `sort`. The `api` provider is not implemented on the map and plots no markers. A bare array is not this key’s shape and is not a record source: the map falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a map carrying both plots these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
         },
         {
           "name": "dataSource",
@@ -913,7 +933,7 @@
         {
           "name": "drillDown",
           "type": "object",
-          "description": "Click-through config that opens the records behind the number."
+          "description": "Click-through config that opens the records behind the number. `drillDown.filter` and `drillDown.mode` do not apply to a metric, which has no clicked point to filter by and no row to open, so the list is always scoped by this block’s own `filter`; a drill `filter` belongs on `object-chart` or `object-pivot`, and `mode` on `object-data-table`."
         },
         {
           "name": "dataSource",
@@ -2641,6 +2661,741 @@
           "name": "html",
           "type": "string",
           "description": "Raw HTML content"
+        }
+      ]
+    },
+    "h1": {
+      "type": "h1",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h2": {
+      "type": "h2",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h3": {
+      "type": "h3",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h4": {
+      "type": "h4",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h5": {
+      "type": "h5",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "h6": {
+      "type": "h6",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "p": {
+      "type": "p",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "a": {
+      "type": "a",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "href",
+          "type": "string"
+        },
+        {
+          "name": "target",
+          "type": "string"
+        },
+        {
+          "name": "rel",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "blockquote": {
+      "type": "blockquote",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "cite",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "pre": {
+      "type": "pre",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "code": {
+      "type": "code",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "strong": {
+      "type": "strong",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "em": {
+      "type": "em",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "b": {
+      "type": "b",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "i": {
+      "type": "i",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "u": {
+      "type": "u",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "small": {
+      "type": "small",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "mark": {
+      "type": "mark",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "sub": {
+      "type": "sub",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "sup": {
+      "type": "sup",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "del": {
+      "type": "del",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ins": {
+      "type": "ins",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "abbr": {
+      "type": "abbr",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ul": {
+      "type": "ul",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "ol": {
+      "type": "ol",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "li": {
+      "type": "li",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dl": {
+      "type": "dl",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dt": {
+      "type": "dt",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "dd": {
+      "type": "dd",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "figure": {
+      "type": "figure",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "figcaption": {
+      "type": "figcaption",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "img": {
+      "type": "img",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "src",
+          "type": "string"
+        },
+        {
+          "name": "alt",
+          "type": "string"
+        },
+        {
+          "name": "width",
+          "type": "number"
+        },
+        {
+          "name": "height",
+          "type": "number"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        }
+      ]
+    },
+    "hr": {
+      "type": "hr",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "br": {
+      "type": "br",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "time": {
+      "type": "time",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "dateTime",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "address": {
+      "type": "address",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "cite": {
+      "type": "cite",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "q": {
+      "type": "q",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "cite",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "span": {
+      "type": "span",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Inline content, rendered ahead of `value`"
+        }
+      ]
+    },
+    "table": {
+      "type": "table",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "caption",
+          "type": "string"
+        },
+        {
+          "name": "footer",
+          "type": "string"
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "description": "Array of { header, accessorKey, className, cellClassName, width }"
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Array of objects"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "label": {
+      "type": "label",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "aside": {
+      "type": "aside",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "main": {
+      "type": "main",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "header": {
+      "type": "header",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "nav": {
+      "type": "nav",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "footer": {
+      "type": "footer",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "section": {
+      "type": "section",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
+        }
+      ]
+    },
+    "article": {
+      "type": "article",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     }

@@ -81,7 +81,7 @@ export const SysTeam = ObjectSchema.create({
       // organizationId defaults to the caller's active org when omitted.
       name: 'remove_team',
       label: 'Delete Team',
-      icon: 'trash-2',
+      icon: 'trash',
       variant: 'danger',
       mode: 'delete',
       locations: ['list_item'],

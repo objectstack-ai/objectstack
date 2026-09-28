@@ -197,7 +197,7 @@ export const SysSsoProvider = ObjectSchema.create({
     {
       name: 'delete_sso_provider',
       label: 'Delete SSO Provider',
-      icon: 'trash-2',
+      icon: 'trash',
       variant: 'danger',
       mode: 'delete',
       locations: ['list_item', 'record_header'],
