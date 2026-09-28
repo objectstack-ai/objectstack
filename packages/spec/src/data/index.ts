@@ -82,6 +82,14 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// [#20347] The cross-field COMPARISON CLASS — which two declared columns a
+// field-to-field comparison (`{ a: { $eq: { $field: 'b' } } }` and its five
+// sibling operators) may put on either side: six classes over the existing
+// value-class sets, three families with none (a list or an object, the file
+// family, formula), and a pure verdict over two declared types. Lifted case
+// for case from driver-sql's #5222 boundary so every judge — the authoring
+// door, driver-sql, the write check — reads one definition.
+export * from './filter-cross-field-comparison-class';
 // [#20336] The NUMBER-comparand declared-type door — the contract half of the
 // triage direction: a non-numeric STRING compared against a field whose
 // declared type is numeric (`NUMERIC_VALUE_TYPES`, by reference; `formula` by

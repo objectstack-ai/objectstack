@@ -76,9 +76,10 @@
  *    For a NEW address, widening does create the account, and then
  *    `audiencePermitsSelfRegistration(posture)` drives `createAuthInstance()`
  *    to wire `requireEmailVerification: true` (mirrored by
- *    `getPublicConfig()`), so that login is refused `EMAIL_NOT_VERIFIED` at
- *    first sign-in — no login at all on a deployment with no mail transport,
- *    which is the shape a locked-out self-hosted install usually is.
+ *    `getPublicConfig()`) unless an `open` deployment declared it off itself
+ *    (#20389), so that login is refused `EMAIL_NOT_VERIFIED` at first
+ *    sign-in — no login at all on a deployment with no mail transport, which
+ *    is the shape a locked-out self-hosted install usually is.
  *
  * The message deliberately does NOT describe what a SEEDED person's own
  * re-registration answers: that response is #15587's surface and is being
@@ -488,7 +489,8 @@ export function resolveNoSignInAccountReport(
     'self-registration is a user-CREATION path, so it cannot hand a login to somebody whose ' +
     `'${SystemObjectName.USER}' row already exists, and NO posture changes that. Widening only ever ` +
     "admits a NEW address — and then every posture other than 'invite_only' ('open', " +
-    "'email_domain') FORCES email verification ON, so that login is refused EMAIL_NOT_VERIFIED at " +
+    "'email_domain') FORCES email verification ON unless an 'open' deployment has itself declared it " +
+    'off, so that login is refused EMAIL_NOT_VERIFIED at ' +
     'its first sign-in until a mail transport delivers the link, and a locked-out self-hosted ' +
     'install usually has none. Nothing here happens by itself.'
   );
