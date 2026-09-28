@@ -65,7 +65,7 @@
 // in `withTimeout(...)` and awaits the file import bare. This is the repo's
 // convention: "clocked windows measure behaviour, never loading" (AGENTS.md,
 // Build & Test; `check:test-source-alias`). The warm-up is the file's own
-// `signedIn()`, the arrangement six of the seven cases run, so no list of
+// `signedIn()`, the arrangement five of the seven cases run, so no list of
 // loads can drift from what the cases really pay.
 //
 // ⛔ It shares nothing a case asserts on. Its engine and manager are its own
