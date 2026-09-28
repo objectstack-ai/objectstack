@@ -25,12 +25,14 @@
  * `9-03-04` as year 9 but stored `99-03-04` as 1999-03-04.
  *
  * The write path is asserted on the STORED text, read by a raw cast
- * (`storedText`), never through the driver's read path. On MySQL that path
- * hands a year below 100 back a century late: mysql2 rebuilds a `DATE` as
+ * (`storedText`), and not only through the driver's read path. On MySQL that
+ * path handed a year below 100 back a century late: mysql2 rebuilt a `DATE` as
  * `new Date(Date.UTC(y, m - 1, d))` (`parseDate`, with the driver's
  * `timezone: 'Z'`), and `Date.UTC` maps years 0..99 to 1900..1999, so a stored
- * `0009-03-04` is presented as `1909-03-04`. That is a read-path defect of its
- * own, unchanged by this card and reported beside it. Each row below asserts
+ * `0009-03-04` was presented as `1909-03-04`. That read-path defect was
+ * reported beside this card and closed by #20280, which reads a MySQL `DATE`
+ * as its wire text, so the write-path cell reads the year-9 row back through
+ * the driver on every dialect too. Each row below asserts
  * one answer for the number, its `Date` and its ISO string, plus a 2026
  * control. A year below 0 or above 9999 is refused
  * as a comparand one layer up, at the engine's temporal-comparand door
@@ -147,6 +149,8 @@ function measure(cell: DialectCell): void {
       await driver.update(WRITES, 'w2', { placed_on: new Date(Y0099) }, NO_AUDIT);
       expect(await stored('w1')).toBe('0009-03-04');
       expect(await stored('w2')).toBe('0099-03-04');
+      // [#20280] …and so does a year below 100, MySQL included.
+      expect((await driver.findOne(WRITES, { where: { id: 'w1' } }, NO_AUDIT))?.placed_on).toBe('0009-03-04');
       // …so the stored day and a comparand for it are one day.
       expect(await ids(WRITES, { placed_on: { $eq: '0009-03-04' } })).toEqual(['w1']);
       expect(await ids(WRITES, { placed_on: { $eq: new Date(Y0099) } })).toEqual(['w2']);
