@@ -208,6 +208,14 @@ export default defineConfig({
         find: /^@objectstack\/service-datasource$/,
         replacement: path.resolve(__dirname, '../services/service-datasource/src/index.ts'),
       },
+      // #20497 — `import-number-thousands-group.test.ts` drives `/import` on
+      // `InMemoryDriver` beside `SqlDriver`. Aliased to source for the same
+      // reason as the two above: a new unaliased artifact import is refused by
+      // `scripts/check-test-source-alias.mjs`, whose ledger is shrink-only.
+      {
+        find: /^@objectstack\/driver-memory$/,
+        replacement: path.resolve(__dirname, '../drivers/driver-memory/src/index.ts'),
+      },
     ],
   },
 });
