@@ -8,7 +8,8 @@
  *
  * ## The defect
  *
- * Three texts declare that gate — the #9741 ruling (「declaration ≠
+ * Three texts declare that gate — the maintainer ruling recorded in commit
+ * 2a29caa's changeset, whose card no longer resolves (「declaration ≠
  * authorization … draft access stays admin-gated upstream」), ADR-0106 D4
  * (「draft/preview reads are admin-gated upstream already」) and ADR-0037's
  * Risks row (「confirm/add a builder/admin role gate on the dispatcher

@@ -1674,7 +1674,8 @@ function sendMetaItemAbsent(res: any): void {
  * ONE predicate, never a second rule: `isObjectSchemaMaskExempt`, the check
  * `GET /meta/_drafts` has asked since #6599 — a system caller, or any holder of
  * `studio.access`, `setup.access` or `manage_metadata`. Three texts declared
- * this gate before any door but `_drafts` enforced it: the #9741 ruling
+ * this gate before any door but `_drafts` enforced it: the maintainer ruling
+ * recorded in commit 2a29caa's changeset, whose card no longer resolves
  * (「declaration ≠ authorization … draft access stays admin-gated upstream」),
  * ADR-0106 D4 (「draft/preview reads are admin-gated upstream already」) and
  * ADR-0037's Risks row (「confirm/add a builder/admin role gate on the
