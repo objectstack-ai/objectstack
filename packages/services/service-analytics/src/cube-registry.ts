@@ -14,7 +14,11 @@ import type { Cube } from '@objectstack/spec/data';
  * 1. **Manifest definitions** — `AnalyticsServiceConfig.cubes` (`registerAll`),
  *    i.e. explicit cube definitions authored in `objectstack.config.ts`.
  * 2. **Compiled datasets** (ADR-0021) — `compileDataset()`'s Cube, registered
- *    under the dataset's name by `queryDataset`.
+ *    under the dataset's name by `registerDataset`: the constructor's
+ *    `datasets`, or an embedder. ⛔ Never by `queryDataset`, which compiles a
+ *    request's dataset into that call's own scope (#20356) — a registration
+ *    from a request would replace, for every caller, whatever cube the name
+ *    held.
  * 3. **Ad-hoc query inference** — `ensureCube` / `inferCubeFromQuery` mints a
  *    minimal Cube from the members an `AnalyticsQuery` references, once
  *    `assertInferableCube` (#3867) has confirmed the name is a registered

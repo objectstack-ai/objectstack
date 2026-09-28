@@ -1004,7 +1004,7 @@ function listHoldingDeclaration(meta: GraphField | undefined): string | null {
 }
 
 /** One lowered comparison between two columns, at least one of which holds a list or an object. */
-interface ListHoldingComparison {
+export interface ListHoldingComparison {
   /** The comparison as the author wrote it, back in CEL. */
   written: string;
   /** Each list-holding column, with what it is declared as. */
@@ -1017,8 +1017,11 @@ interface ListHoldingComparison {
  * the object graph. A column the graph cannot answer for (an object outside the
  * stack, no field map, a name it does not declare) is not judged here; the
  * reference pass above owns an unknown name.
+ *
+ * Exported for `validate-sharing-rule-enforceability.ts`, which judges the same
+ * class on a sharing rule's lowered `condition`: one classification, two rules.
  */
-function listHoldingComparisons(
+export function listHoldingComparisons(
   graph: ObjectGraph,
   object: string,
   filter: Record<string, unknown>,

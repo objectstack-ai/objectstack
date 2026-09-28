@@ -844,6 +844,46 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
 };
 
 /**
+ * [#20356] The name-keyed cube reads ONE call resolves against, and the place
+ * that call records a cube it mints.
+ *
+ * A query names its cube (`AnalyticsQuery.cube`), and everything after that
+ * resolves the NAME: `ensureCube`'s existence and source-field gates, the
+ * object-level admission and the read scopes (`queryObjects`), and every
+ * strategy through its context — `getCube`, the join allowlist
+ * (`getAllowedRelationships`) and the dataset scope (`getDatasetScope`), the
+ * last two read off the COMPILED dataset. A name has one of two meanings:
+ *
+ * - the SHARED scope — this service's `CubeRegistry` and compiled-dataset
+ *   registry, which every caller reads and `getMeta` publishes: the configured
+ *   cubes, the datasets `registerDataset` registered (the constructor's
+ *   `datasets`, or an embedder), and what the ad-hoc path infers;
+ * - a REQUEST scope — the dataset one `queryDataset` call compiled, visible to
+ *   that call only, under its own name, over the shared scope read-only.
+ *
+ * A request's dataset is that caller's definition, and a name it shares with a
+ * shared cube is harmless only while the two never meet. Registering it made
+ * it every caller's: whatever the registry held under the name — an authored
+ * cube included — was replaced for every later reader, and the replacement
+ * happened before any admission was asked, so a refused request left it
+ * behind too. A request scope therefore has no path into the shared one: its
+ * `register` writes only to itself, and it is dropped with the call.
+ */
+interface CubeScope {
+  getCube(name: string): Cube | undefined;
+  getCompiledDataset(name: string): CompiledDataset | undefined;
+  /** Record a cube this call minted — `ensureCube`'s inference or augmentation. */
+  register(cube: Cube): void;
+}
+
+/** The strategy context's three name-keyed reads, answered from one {@link CubeScope}. */
+interface CubeReads {
+  getCube(name: string): Cube | undefined;
+  getAllowedRelationships(cubeName: string): Set<string> | undefined;
+  getDatasetScope(cubeName: string): DatasetScope | undefined;
+}
+
+/**
  * AnalyticsService — Multi-driver analytics orchestrator.
  *
  * Implements `IAnalyticsService` by delegating to a priority-ordered
@@ -869,8 +909,16 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly readScopeProvider?: AnalyticsServiceConfig['getReadScope'];
   /** Object-level read-admission provider (bound per call to the request context). */
   private readonly readAdmissionProvider?: ObjectReadAdmissionProvider;
-  /** Compiled datasets by name — feeds the join allowlist (D-C) and queryDataset. */
+  /**
+   * Compiled datasets by name, as `registerDataset` registered them — feeds the
+   * shared scope's join allowlist (D-C) and dataset scope. `queryDataset`
+   * never writes here (#20356): its dataset lives in a request scope.
+   */
   private readonly datasetRegistry = new Map<string, CompiledDataset>();
+  /** [#20356] The registry-backed {@link CubeScope} every caller shares. */
+  private readonly sharedScope: CubeScope;
+  /** The configured join-allowlist hook for cubes that are not compiled datasets. */
+  private readonly configuredAllowedRelationships?: AnalyticsServiceConfig['getAllowedRelationships'];
   /** Optional object-graph resolver used when compiling datasets. */
   private readonly relationshipResolver?: RelationshipResolver;
   private readonly sourceFieldMeta?: AnalyticsServiceConfig['sourceFieldMeta'];
@@ -916,6 +964,11 @@ export class AnalyticsService implements IAnalyticsService {
   constructor(config: AnalyticsServiceConfig = {}) {
     this.logger = config.logger || createLogger({ level: 'info', format: 'pretty' });
     this.cubeRegistry = new CubeRegistry();
+    this.sharedScope = {
+      getCube: (name) => this.cubeRegistry.get(name),
+      getCompiledDataset: (name) => this.datasetRegistry.get(name),
+      register: (cube) => this.cubeRegistry.register(cube),
+    };
 
     // Register pre-defined cubes
     if (config.cubes) {
@@ -924,6 +977,7 @@ export class AnalyticsService implements IAnalyticsService {
 
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
+    this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
     this.labelResolver = config.labelResolver;
@@ -951,26 +1005,13 @@ export class AnalyticsService implements IAnalyticsService {
     // Build the context-independent strategy context. `getReadScope` is bound
     // per query in `callCtx(context)` so it can resolve the active tenant.
     this.baseCtx = {
-      getCube: (name) => this.cubeRegistry.get(name),
+      // The shared scope's reads. `callCtx` answers them from the call's own
+      // scope, which for every door but `queryDataset` is this same one.
+      ...this.cubeReads(this.sharedScope),
       queryCapabilities: config.queryCapabilities || (() => DEFAULT_CAPABILITIES),
       executeRawSql: config.executeRawSql,
       executeAggregate: config.executeAggregate,
       fallbackService: config.fallbackService,
-      // Prefer a compiled dataset's declared relationships (D-C join allowlist);
-      // fall back to any explicitly-configured provider for legacy cubes.
-      getAllowedRelationships: (cubeName: string) =>
-        this.datasetRegistry.get(cubeName)?.allowedRelationships
-        ?? config.getAllowedRelationships?.(cubeName),
-      // [#10298] The compiled dataset's definition-level filter and its
-      // per-measure filters — the half of the declaration the Cube model has
-      // no room for. Same shape and same registry as `getAllowedRelationships`
-      // directly above: answered for a cube that IS a compiled dataset,
-      // `undefined` for every other cube.
-      getDatasetScope: (cubeName: string) => {
-        const compiled = this.datasetRegistry.get(cubeName);
-        if (!compiled) return undefined;
-        return { filter: compiled.filter, measureFilters: compiled.measureFilters };
-      },
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
       coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
@@ -1115,15 +1156,44 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * The strategy context's name-keyed reads, answered from `scope` (#20356).
+   *
+   * - `getCube` — the cube the name means in this call.
+   * - `getAllowedRelationships` — a compiled dataset's declared relationships
+   *   (D-C join allowlist) win; the configured hook answers only for a cube
+   *   that is not a compiled dataset in this scope (legacy hand-authored cubes).
+   * - [#10298] `getDatasetScope` — the compiled dataset's definition-level
+   *   filter and its per-measure filters, the half of the declaration the Cube
+   *   model has no room for. Same source as the allowlist: answered for a cube
+   *   that IS a compiled dataset, `undefined` for every other cube.
+   */
+  private cubeReads(scope: CubeScope): CubeReads {
+    return {
+      getCube: (name: string) => scope.getCube(name),
+      getAllowedRelationships: (cubeName: string) =>
+        scope.getCompiledDataset(cubeName)?.allowedRelationships
+        ?? this.configuredAllowedRelationships?.(cubeName),
+      getDatasetScope: (cubeName: string) => {
+        const compiled = scope.getCompiledDataset(cubeName);
+        if (!compiled) return undefined;
+        return { filter: compiled.filter, measureFilters: compiled.measureFilters };
+      },
+    };
+  }
+
+  /**
    * Build a per-call StrategyContext that binds the read-scope provider to the
    * current request's ExecutionContext (ADR-0021 D-C). The strategy then sees a
-   * `getReadScope(objectName)` that already knows the active tenant.
+   * `getReadScope(objectName)` that already knows the active tenant, and cube
+   * reads answered from the call's {@link CubeScope} (#20356).
    */
   private async callCtx(
     query: AnalyticsQuery,
     context: ExecutionContext | undefined,
     tokenCtx: FilterTokenResolutionContext,
+    scope: CubeScope,
   ): Promise<DatasetScopedStrategyContext> {
+    const reads = this.cubeReads(scope);
     // [#12230] The dataset-scope channel (#10298) hands the strategy the
     // REGISTRY's compiled filter/measureFilters — shared across requests, so
     // it still carries the authored `{current_user_id}` literally. On the
@@ -1133,7 +1203,7 @@ export class AnalyticsService implements IAnalyticsService {
     // #10298's "redundant and idempotent" claim holds only for token-free
     // filters. Resolve the channel per request, with the SAME instant as the
     // query's own fields.
-    const getDatasetScope = this.resolvedDatasetScopeGetter(tokenCtx);
+    const getDatasetScope = this.resolvedDatasetScopeGetter(tokenCtx, reads.getDatasetScope);
     // The OBJECT-LEVEL gate, ahead of everything else on this path — including
     // the early return below, which is why it is not folded into the
     // read-scope pre-pass: a deployment that wired an admission provider and no
@@ -1142,20 +1212,21 @@ export class AnalyticsService implements IAnalyticsService {
     // read"). `callCtx` is the ONE thing `query()` and `generateSql()` share,
     // so gating it covers the direct `/analytics/query` door, the `/analytics/sql`
     // echo door and — through `DatasetExecutor` — every dataset door.
-    await this.assertReadAdmitted(this.queryObjects(query), context);
+    await this.assertReadAdmitted(this.queryObjects(query, scope), context);
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:
     // a deployment with no `getReadScope` provider is exactly the one that most
     // needs the engine to scope for it.
-    if (!this.readScopeProvider) return { ...this.baseCtx, context, getDatasetScope };
+    if (!this.readScopeProvider) return { ...this.baseCtx, ...reads, context, getDatasetScope };
     // Pre-resolve the read scope for every object the strategy will scan (base
     // + all declared joins) BEFORE the synchronous SQL builder runs, since the
     // provider may be async (the production `security.getReadFilter` bridge).
     // The strategy then reads each object's filter synchronously from the map.
-    const scopes = await this.resolveReadScopes(query, context);
+    const scopes = await this.resolveReadScopes(query, context, scope);
     return {
       ...this.baseCtx,
+      ...reads,
       context,
       getDatasetScope,
       getReadScope: (objectName: string) => scopes.get(objectName) ?? null,
@@ -1203,9 +1274,10 @@ export class AnalyticsService implements IAnalyticsService {
    */
   private resolvedDatasetScopeGetter(
     tokenCtx: FilterTokenResolutionContext,
+    getRawDatasetScope: CubeReads['getDatasetScope'],
   ): (cubeName: string) => DatasetScope | undefined {
     return (cubeName: string) => {
-      const scope = this.baseCtx.getDatasetScope?.(cubeName);
+      const scope = getRawDatasetScope(cubeName);
       if (!scope) return scope;
       const filter = resolveFilterTokens(scope.filter, tokenCtx);
       const measureFilters = resolveFilterTokens(scope.measureFilters, tokenCtx);
@@ -1229,10 +1301,16 @@ export class AnalyticsService implements IAnalyticsService {
    * An unregistered cube yields the empty set — the query fails its own
    * cube-existence gate downstream, and inventing an object name here would
    * gate something the request never named.
+   *
+   * [#20356] The cube is resolved through the call's `scope`, the SAME scope
+   * the strategy reads, so the objects admitted and scoped are the objects the
+   * strategy will scan. For `queryDataset` that is the caller's own compiled
+   * dataset — never a shared cube that happens to carry its name, whose objects
+   * would gate a read the request never makes and leave its own read ungated.
    */
-  private queryObjects(query: AnalyticsQuery): Set<string> {
+  private queryObjects(query: AnalyticsQuery, scope: CubeScope): Set<string> {
     if (!query.cube) return new Set<string>();
-    const cube = this.cubeRegistry.get(query.cube);
+    const cube = scope.getCube(query.cube);
     return cube ? this.cubeObjects(cube) : new Set<string>();
   }
 
@@ -1304,13 +1382,14 @@ export class AnalyticsService implements IAnalyticsService {
    */
   private async resolveReadScopes(
     query: AnalyticsQuery,
-    context?: ExecutionContext,
+    context: ExecutionContext | undefined,
+    scope: CubeScope,
   ): Promise<Map<string, FilterCondition>> {
     const map = new Map<string, FilterCondition>();
     const provider = this.readScopeProvider;
     if (!provider || !query.cube) return map;
 
-    for (const object of this.queryObjects(query)) {
+    for (const object of this.queryObjects(query, scope)) {
       let filter: FilterCondition | null | undefined;
       try {
         filter = await provider(object, context);
@@ -1345,6 +1424,20 @@ export class AnalyticsService implements IAnalyticsService {
    * Any other error propagates untouched.
    */
   async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
+    return this.queryIn(this.sharedScope, queryInput, context);
+  }
+
+  /**
+   * {@link query} with the cube name resolved through `scope`: the shared scope
+   * for `/analytics/query`, and a request scope for the queries `queryDataset`
+   * runs through `DatasetExecutor` (#20356). One body for both, so every gate
+   * below asks the same question whichever scope answers the name.
+   */
+  private async queryIn(
+    scope: CubeScope,
+    queryInput: AnalyticsQuery,
+    context?: ExecutionContext,
+  ): Promise<AnalyticsResult> {
     if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
     }
@@ -1368,8 +1461,8 @@ export class AnalyticsService implements IAnalyticsService {
     const tokenCtx = filterTokenContextFrom(context, new Date());
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
-    this.ensureCube(query);
-    const ctx = await this.callCtx(query, context, tokenCtx);
+    this.ensureCube(query, scope);
+    const ctx = await this.callCtx(query, context, tokenCtx, scope);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
       const strategy = this.resolveStrategy(query, ctx, skip);
@@ -1426,15 +1519,16 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Compile a `dataset` (ADR-0021) and register its Cube + join allowlist so it
-   * can be queried by name. Idempotent (re-registering overwrites). Returns the
-   * compiled dataset.
+   * Compile a `dataset` (ADR-0021) with this service's probes. Pure: it
+   * registers nothing, and both dataset doors compile through it — the
+   * registration door {@link registerDataset} and the request door
+   * {@link queryDataset}, which never registers (#20356).
    */
-  registerDataset(dataset: Dataset): CompiledDataset {
+  private compile(dataset: Dataset): CompiledDataset {
     // #5115 — the datasource/federation probes turn a cross-datasource join
-    // from a query-time explosion into a registration-time rejection. Both are
+    // from a query-time explosion into a compile-time rejection. Both are
     // optional and tiered "cannot answer, do not block" inside the compiler.
-    const compiled = compileDataset(dataset, this.relationshipResolver, {
+    return compileDataset(dataset, this.relationshipResolver, {
       getObjectDatasource: this.getObjectDatasource,
       isExternalObject: this.isExternalObject,
       // [#16737 / #16099] …and the aggregate × field-type compatibility table
@@ -1445,16 +1539,69 @@ export class AnalyticsService implements IAnalyticsService {
       declaredFieldType: (object: string, field: string) =>
         this.sourceFieldMeta?.(object, field)?.type,
     });
+  }
+
+  /**
+   * Compile a `dataset` (ADR-0021) and register its Cube + join allowlist in the
+   * SHARED registry, so every caller can query it by name and `getMeta` lists
+   * it. This is the configuration door — the constructor's `datasets`, or an
+   * embedder holding the service — and it overwrites whatever the registry held
+   * under the name, which is why no request path calls it: `queryDataset`
+   * compiles into a request scope instead (#20356). Idempotent. Returns the
+   * compiled dataset.
+   */
+  registerDataset(dataset: Dataset): CompiledDataset {
+    const compiled = this.compile(dataset);
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);
     return compiled;
   }
 
   /**
+   * [#20356] The {@link CubeScope} one `queryDataset` call runs in: the call's
+   * own compiled dataset answers its name, every other name reads the shared
+   * scope, and what the call mints (`ensureCube`'s measure augmentation) stays
+   * here and is dropped with the call.
+   */
+  private requestScope(compiled: CompiledDataset): CubeScope {
+    const name = compiled.cube.name;
+    const shared = this.sharedScope;
+    const cubes = new Map<string, Cube>([[name, compiled.cube]]);
+    return {
+      getCube: (cubeName) => cubes.get(cubeName) ?? shared.getCube(cubeName),
+      getCompiledDataset: (cubeName) =>
+        cubeName === name ? compiled : shared.getCompiledDataset(cubeName),
+      register: (cube) => {
+        cubes.set(cube.name, cube);
+      },
+    };
+  }
+
+  /**
+   * [#20356] The face `DatasetExecutor` queries through for one `queryDataset`
+   * call. `query()` is {@link queryIn} over the call's scope — the same body,
+   * gates and strategy chain as {@link query}, with the cube name answered by
+   * the call's own dataset. `getMeta` is the shared discovery, unchanged: the
+   * executor never asks it, and a request's dataset is not published.
+   */
+  private scopedService(scope: CubeScope): IAnalyticsService {
+    return {
+      query: (query, context) => this.queryIn(scope, query, context),
+      getMeta: (cubeName) => this.getMeta(cubeName),
+    };
+  }
+
+  /**
    * Execute a semantic-layer dataset (ADR-0021). Compiles the dataset (saved or
-   * inline draft — Studio preview), registers its Cube + join allowlist, then
-   * runs the selection through the `DatasetExecutor` with the request context so
-   * tenant/RLS scoping (D-C) is applied. See {@link IAnalyticsService.queryDataset}.
+   * inline draft — Studio preview) for THIS call, then runs the selection
+   * through the `DatasetExecutor` with the request context so tenant/RLS
+   * scoping (D-C) is applied. See {@link IAnalyticsService.queryDataset}.
+   *
+   * [#20356] Nothing here writes the shared registries. The compiled dataset
+   * lives in a request scope: its name means the caller's definition for this
+   * call's queries and nothing else, so a dataset named like a configured cube
+   * neither replaces that cube nor re-publishes it, whatever the request's
+   * admission answers.
    */
   async queryDataset(
     dataset: Dataset,
@@ -1462,7 +1609,7 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
-    const compiled = this.registerDataset(dataset);
+    const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 
     // ── ADR-0037 P3 — draft data preview ────────────────────────────────────
@@ -1580,7 +1727,11 @@ export class AnalyticsService implements IAnalyticsService {
     // a confident empty chart. See {@link hasDeclaredErrorEnvelope}.
     let result: AnalyticsResult;
     try {
-      result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
+      // [#20356] Through the call's own scope, never `this`: every query the
+      // executor issues resolves `compiled`'s name to `compiled`, with no
+      // registry write before, during or after admission.
+      const scoped = this.scopedService(this.requestScope(compiled));
+      result = await new DatasetExecutor(scoped, orderLabels).execute(compiled, selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
       // envelope reader serves it (4xx as itself; a declared 5xx relayed with
@@ -2021,8 +2172,8 @@ export class AnalyticsService implements IAnalyticsService {
     const tokenCtx = filterTokenContextFrom(context, new Date());
     const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
-    this.ensureCube(query);
-    const ctx = await this.callCtx(query, context, tokenCtx);
+    this.ensureCube(query, this.sharedScope);
+    const ctx = await this.callCtx(query, context, tokenCtx, this.sharedScope);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 
@@ -2067,10 +2218,15 @@ export class AnalyticsService implements IAnalyticsService {
    * They run in request-key order (measures → dimensions/timeDimensions →
    * where), so a query that gets several wrong is answered about one at a time,
    * naming a real mistake either way.
+   *
+   * [#20356] "Registered" means registered in `scope`: the cube is read from it
+   * and what this method mints is recorded in it. On the shared scope that is
+   * the service's registry; on a `queryDataset` call's scope it is the call's
+   * own, so augmenting a request's dataset never reaches the shared registry.
    */
-  private ensureCube(query: AnalyticsQuery): void {
+  private ensureCube(query: AnalyticsQuery, scope: CubeScope): void {
     const name = query.cube!;
-    let cube = this.cubeRegistry.get(name);
+    let cube = scope.getCube(name);
 
     if (!cube) {
       // [#3867] Auto-inference below sets `cube.sql = name`, so from here on
@@ -2096,7 +2252,7 @@ export class AnalyticsService implements IAnalyticsService {
       // `cube.dimensions` — which on this path was minted from this very query,
       // bogus spelling included.
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
-      this.cubeRegistry.register(cube);
+      scope.register(cube);
       // A scalar query — only measures, no grouping (no `dimensions`/
       // `timeDimensions`) — is the first-class "metric over an object" path
       // (e.g. the `object-metric` KPI widget). Auto-inferring a count/sum cube
@@ -2164,7 +2320,7 @@ export class AnalyticsService implements IAnalyticsService {
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
       // measure must be judged against the same bag the strategy will read.
       this.assertWhereFields(query, augmented, Object.keys(cube.dimensions));
-      this.cubeRegistry.register(augmented);
+      scope.register(augmented);
       this.logger.debug(
         `[Analytics] Augmented cube "${name}" with inferred measures: ${Object.keys(extraMeasures).join(',')}`,
       );

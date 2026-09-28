@@ -348,12 +348,13 @@ export default ${toCamelCase(name)}Action;
      *
      * It declares what it needs to run (#20215): {@link FLOW_SCAFFOLD_REQUIRES}.
      * `defineStack` refuses a record-change flow in a stack whose `requires`
-     * lacks `triggers`, and a stack that has `triggers` but not `automation`
-     * loads it and never runs it — measured on `os serve`: "1 flow(s) declared
-     * but the automation engine is not enabled — they will never run", each
-     * trigger plugin "NOT installed". So both tokens are declared here, `os
-     * init` declares the union, `os g flow` names any the stack is missing, and
-     * the emitted file says so in its own header.
+     * lacks `triggers` or `automation` (#20332): the trigger installs into the
+     * automation service, so a stack with `triggers` alone used to load the flow
+     * and never run it — measured on `os serve`: "1 flow(s) declared but the
+     * automation engine is not enabled — they will never run", each trigger
+     * plugin "NOT installed" — and is now refused instead. So both tokens are
+     * declared here, `os init` declares the union, `os g flow` names any the
+     * stack is missing, and the emitted file says so in its own header.
      */
     namesObject: true,
     itemName: (name: string) => `${toSnakeCase(name)}_flow`,
@@ -365,8 +366,8 @@ export default ${toCamelCase(name)}Action;
  *
  * Starts when a record changes, so the stack that carries it must declare
  * requires: [${FLOW_SCAFFOLD_REQUIRES.map((t) => `'${t}'`).join(', ')}]. The 'triggers' capability
- * fires the flow and 'automation' runs it: without 'triggers' the config does
- * not load, and without 'automation' the server loads the flow and never runs it.
+ * fires the flow and 'automation' runs it: without either one the config does
+ * not load.
  */
 const ${toCamelCase(name)}Flow: Automation.Flow = {
   name: '${toSnakeCase(name)}_flow',

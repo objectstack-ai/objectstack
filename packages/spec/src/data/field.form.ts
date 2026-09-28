@@ -75,7 +75,12 @@ export const fieldForm = defineForm({
         // Number field options
         { field: 'min', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Minimum value' },
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },
-        { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Decimal places (e.g., 2 for $10.50)' },
+        // #19992 — the help text follows the key's describe ("Total digits")
+        // and the object designer's quick-add row (`object.form.ts`): the old
+        // "Decimal places (e.g., 2 for $10.50)" taught the one reading the
+        // contract refuses. A currency's decimal places are its ISO 4217 minor
+        // unit and are declared nowhere.
+        { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Total digits' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
         // `FieldSchema` accepts each key on any type, and each is mirrored from

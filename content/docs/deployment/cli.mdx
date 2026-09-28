@@ -33,9 +33,14 @@ This scaffolds a working project with `objectstack.config.ts`, a sample object, 
 
 ```bash
 os generate object customer    # Add a Customer object
-os generate action approve     # Add an action
-os generate flow onboarding    # Add an automation flow
+os generate flow customer      # Add an automation flow on it
+os generate action customer    # Add an action on it that runs the flow
 ```
+
+Each command writes a file and its export line, and the starter's config already
+wires every directory they write into, so all three are part of the stack. The
+flow and the action bind to the object named like them, which is why the object
+comes first: an action bound to an object the stack does not declare is refused.
 
 ### Launch the dev server
 
@@ -739,8 +744,8 @@ the view and the action listed under
 renamed out of that page's `support_desk_` namespace into `my_app_`. That page's `support`
 app is **not** added, and a zero count is never printed, which is why the `UI:` row reads
 `1 Views  1 Actions` with no `Apps`. The walkthrough's `os generate` commands are **not**
-part of the fixture — run those as well and the summary gains `my_app_customer` and a
-`Logic:` row. Timings are machine identity, and the rule count and artifact size track the
+part of the fixture — run those as well and the summary gains `my_app_customer`, a second
+action and a `Logic:` row. Timings are machine identity, and the rule count and artifact size track the
 CLI version; everything else is fixture identity and reproduces.
 </Callout>
 
@@ -1410,7 +1415,8 @@ else a scaffold names (an action's, flow's or app's own `name`) is prefixed.
 
 **Every scaffold reaches the stack, or the command says it does not.** The
 `objectstack.config.ts` that `os init` writes for the `app` and `plugin`
-templates wires every directory in the table below: it imports each
+templates, and the one the `npm create objectstack` starter ships, wires every
+directory in the table below: it imports each
 `src/<dir>/index.ts` barrel and hands its exports to `defineStack` under the key
 in the **Collected as** column, so a file `os g` writes there is part of the
 stack with no edit to the config. It also declares
@@ -1421,19 +1427,18 @@ After writing, `os g` loads the config again and says which of these holds:
   checks it.
 - **Not wired**: the config loads and its stack does not carry the item, or
   there is no config. This is what happens with a config that imports
-  `./src/objects` alone, as `os init` projects from earlier releases and the
-  `npm create objectstack` starter do. The file is written, the config is left
+  `./src/objects` alone, as projects that `os init` and `npm create objectstack`
+  scaffolded in earlier releases do. The file is written, the config is left
   as it was, and the command prints the import and the `defineStack` key that
   wire the directory.
-- **Cannot run**: the stack carries a flow, and its `requires` lacks
-  `automation`. The config loads and the server never runs the flow. The
-  command prints the whole `requires` list to use.
 - **Refused**: the config loaded before the command wrote anything and no
   longer loads with the new file in place, because the stack refuses it. Two
   examples are an action or app bound to an object nobody declared, and a flow
-  in a stack without `triggers`. The command removes what it wrote, so the
-  project is as it was, and exits 1 with the stack's own reason. Generate the
-  object first (`os g object customer`), then what binds to it.
+  in a stack whose `requires` lacks `triggers` or `automation` (`defineStack`
+  refuses a record-change flow without both). The command removes what it
+  wrote, so the project is as it was, and exits 1 with the stack's own reason.
+  Generate the object first (`os g object customer`), then what binds to it,
+  and declare `requires: ['automation', 'triggers']` before `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
 command only loads it.
