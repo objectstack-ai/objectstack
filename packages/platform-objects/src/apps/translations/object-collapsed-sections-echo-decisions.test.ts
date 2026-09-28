@@ -900,10 +900,15 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // `requiredPermissions` — a label and a help text each, three rows and six
     // leaves, all eighteen translated leaves authored by the same card. `advanced`
     // reads 46 → 52; `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(61);
+    // 69 since #19332 flight G2a: that flight gave `advanced` the `indexes`
+    // repeater beside `datasource` — the row and its three declared sub-rows
+    // (`name`, `fields`, `unique`), a label and a help text each, four rows and
+    // eight leaves, all twenty-four translated leaves authored by the same
+    // flight. `advanced` reads 52 → 60; `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(69);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(52);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(60);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
@@ -917,7 +922,10 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // gave `basics` the object's two own field-name lists, `highlightFields` and
     // `searchableFields`, beside `nameField` — four leaves, their twelve
     // translated leaves authored by that card, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(100);
+    // 114 since #19332 flight G2a gave `basics` the `fieldGroups` repeater — the
+    // row and its six declared sub-rows, fourteen leaves, their forty-two
+    // translated leaves authored by that flight, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(114);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

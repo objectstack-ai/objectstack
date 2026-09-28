@@ -1126,7 +1126,12 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `requiredWhen` and `requiredPermissions`, and the action form's
       // `patch`, `description`, `errorMessage`, `requiredPermissions` and
       // `bodyExtra` — authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(633);
+      // 644 since #19332 flight G2a: eleven new row labels — the object form's
+      // `fieldGroups` repeater (and its `key`, `label`, `icon`, `description`,
+      // `collapse` and `visibleWhen` sub-rows) and its `indexes` repeater (and
+      // its `name`, `fields` and `unique` sub-rows) — authored in all three
+      // locales.
+      expect(translated.length, `${locale} positive control`).toBe(644);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
