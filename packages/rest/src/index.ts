@@ -86,11 +86,34 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // audience prunes, the app nav filter and the dashboard widget gate — over the
 // same ports. The judge answers the pruned ITEMS; each caller rewraps them in
 // its own list envelope.
-export { createMetaItemReadGate, createMetaListReadGate } from './meta-item-read-gate.js';
+//
+// [#20320] …and everything else the two transports' `/meta` reads must answer
+// alike: the list route's whole post-read chain (`createMetaListAnswer` — the
+// `api` served-set face, the list gate, `?id=`, `?object=`, the doc locale
+// collapse and slim, the transport's object mask, the translation
+// `translateMetaList`), the one locale parse it reads (`metaRequestLocale`),
+// the anonymous gates'
+// `public`-audience predicate (`isPublicAudienceRead`) and the stored-version
+// doors' policy (`STORED_VERSION_DOOR_POLICY`, which `?state=draft` runs).
+export {
+    createMetaItemReadGate,
+    createMetaListReadGate,
+    createMetaListAnswer,
+    isPublicAudienceRead,
+    metaRequestLocale,
+    STORED_VERSION_DOOR_POLICY,
+    translateMetaList,
+} from './meta-item-read-gate.js';
 export type {
     MetaItemReadGateSources,
     MetaItemReadRefusal,
     MetaItemReadVerdict,
+    MetaListAnswer,
+    MetaListAnswerSources,
+    MetaListRequest,
+    MetaListTranslationSources,
+    MetaPublicReadRoute,
     MetaReadGateCaller,
     MetaReadGatePolicy,
+    MetaRequestHttp,
 } from './meta-item-read-gate.js';

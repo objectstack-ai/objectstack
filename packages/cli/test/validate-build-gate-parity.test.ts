@@ -47,9 +47,10 @@ const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
  * the whole point of the file.
  *
  * ⭐ [#18491] This roster is now CLOSED rather than advisory: every bare
- * identifier either command calls must appear in exactly one of the three
- * ledgers in this file — here, in {@link BUILD_ONLY_GATES}, or in
- * {@link NOT_A_GATE} with the reason it is not a gate. A name nobody
+ * identifier either command calls must appear in exactly one of the
+ * ledgers in this file — here, in {@link BUILD_ONLY_GATES}, in
+ * {@link VALIDATE_ONLY_GATES} (#20331), or in {@link NOT_A_GATE} with the
+ * reason it is not a gate. A name nobody
  * classified fails, so a gate arrives here by being ADDED to the commands, not
  * by being spelled a particular way.
  */
@@ -139,6 +140,32 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
     'next to the config. Rewriting a committed snapshot is not a read-only operation.',
   diffAccessMatrix: 'The comparison half of the same D6 snapshot gate.',
   buildRuntimeBundle: 'Emits the objectstack-runtime.{hash}.mjs sibling module. Artifact output by definition.',
+};
+
+/**
+ * Gates `os validate` runs that `os build` does not — the SUPERSET direction of
+ * this file's contract, which leaves `os validate` stricter than the build and
+ * never weaker than it.
+ *
+ * ⭐ [#20331] Why this ledger exists. Before it, the closed roster had no honest
+ * place for a gate wired into `validate.ts` alone: SHARED_NON_REGISTRY_GATES
+ * asserts both commands call it, BUILD_ONLY_GATES is the opposite direction,
+ * and a NOT_A_GATE row would be the false statement that ledger's header
+ * warns about. Each entry here is a written claim that the BUILD lacks a gate
+ * `os validate` has — a real gap in the build's direction, reported and not
+ * closed — with the reason it was not wired there.
+ *
+ * ⛔ Pruned both ways by `every VALIDATE_ONLY_GATES entry is still
+ * validate-only` below: a row whose gate `validate.ts` no longer calls is
+ * stale, and a row whose gate `compile.ts` now calls too belongs in
+ * SHARED_NON_REGISTRY_GATES instead.
+ */
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  findViewContainerNameRefusals:
+    '[#20331] The boot registrar\'s divergent view-container `name` refusal ' +
+    '(`viewContainerNameRefusal`, @objectstack/objectql), judged at author time by the same function ' +
+    'boot throws the answer of. Wired into validate.ts only, by that card\'s scope: `os build` still ' +
+    'emits an artifact carrying such a container, which the runtime refuses when it loads it.',
 };
 
 /**
@@ -317,6 +344,7 @@ const PARITY_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts'];
 const CLASSIFIED: ReadonlySet<string> = new Set([
   ...SHARED_NON_REGISTRY_GATES,
   ...Object.keys(BUILD_ONLY_GATES),
+  ...Object.keys(VALIDATE_ONLY_GATES),
   ...NOT_A_GATE_NAMES,
 ]);
 
@@ -808,9 +836,10 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
         `${unclassified.join(', ')}.\n` +
         `Every call site must land in exactly one ledger. If it is an artifact-level gate, wire it ` +
         `into BOTH commands and add it to SHARED_NON_REGISTRY_GATES; if it genuinely cannot run ` +
-        `read-only, add it to BUILD_ONLY_GATES with a reason; if it is not a gate at all, add it to ` +
-        `NOT_A_GATE under the reason that says so. Registering it in ` +
-        `packages/lint/src/authoring-rules.ts instead is better than all three — then all THREE ` +
+        `read-only, add it to BUILD_ONLY_GATES with a reason; if validate.ts runs it and compile.ts ` +
+        `deliberately does not, add it to VALIDATE_ONLY_GATES with the reason the build lacks it; if ` +
+        `it is not a gate at all, add it to NOT_A_GATE under the reason that says so. Registering it in ` +
+        `packages/lint/src/authoring-rules.ts instead is better than all four — then all THREE ` +
         `authoring commands get it and no roster row is needed.`,
     ).toEqual([]);
   });
@@ -928,6 +957,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     const buckets: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
       ['SHARED_NON_REGISTRY_GATES', new Set(SHARED_NON_REGISTRY_GATES)],
       ['BUILD_ONLY_GATES', new Set(Object.keys(BUILD_ONLY_GATES))],
+      ['VALIDATE_ONLY_GATES', new Set(Object.keys(VALIDATE_ONLY_GATES))],
       ['NOT_A_GATE', NOT_A_GATE_NAMES],
     ];
     const doubled = [...CLASSIFIED].filter(
@@ -995,6 +1025,19 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     // A ratchet nobody prunes rots into a permission slip.
     const stale = Object.keys(BUILD_ONLY_GATES).filter((g) => !calls('compile.ts', g));
     expect(stale, `BUILD_ONLY_GATES entries compile.ts no longer calls: ${stale.join(', ')}`).toEqual([]);
+  });
+
+  it('every VALIDATE_ONLY_GATES entry is still validate-only', () => {
+    // [#20331] Pruned in BOTH directions, because the row makes two claims:
+    // validate runs the gate, and the build does not.
+    const stale = Object.keys(VALIDATE_ONLY_GATES).filter((g) => !calls('validate.ts', g));
+    expect(stale, `VALIDATE_ONLY_GATES entries validate.ts no longer calls: ${stale.join(', ')}`).toEqual([]);
+    const nowShared = Object.keys(VALIDATE_ONLY_GATES).filter((g) => calls('compile.ts', g));
+    expect(
+      nowShared,
+      `compile.ts now calls ${nowShared.join(', ')} too — the build gap is closed. Move the row to ` +
+        `SHARED_NON_REGISTRY_GATES, where both commands are held to it.`,
+    ).toEqual([]);
   });
 
   /**

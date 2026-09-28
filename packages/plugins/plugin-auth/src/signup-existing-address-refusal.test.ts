@@ -27,8 +27,10 @@
  *  - So no insert is attempted and nothing is swallowed. Case ① asserts that
  *    directly by counting engine `insert` calls across the request.
  *  - And the POSTURE is not the cause: it is only what turns the shield on. A
- *    self-registration-permitting posture FORCES `requireEmailVerification`
- *    (`createAuthInstance`). Case ⓪ holds the posture CONSTANT at the
+ *    self-registration-permitting posture forces `requireEmailVerification`
+ *    on by default (`createAuthInstance` — always under `email_domain`, and
+ *    under `open` unless the deployment declared it off, #20389). Case ⓪
+ *    holds the posture CONSTANT at the
  *    `invite_only` default and moves only that flag — 422 becomes the
  *    synthetic 200 — which is what makes "before the uniqueness refusal" a
  *    measurement rather than a reading of vendor source.
