@@ -203,11 +203,11 @@ const swapServerOnlyGrammarArm: Plugin = {
  * mark-compact (`--trace-gc`); peak RSS is the peak anonymous RSS of the whole
  * process tree:
  *
- *     pass                                live heap   peak RSS   wall
- *     duplicate check on (before)          5658 MB    6177 MB    181-194s
- *     noCheck (this config)                5083 MB    5889 MB    134s
- *     one program, grouping patched         1379 MB    3749 MB     53s
- *     `tsc --noEmit`, whole package        1103 MB    1149 MB     18s
+ *     pass                              live heap   peak RSS   wall
+ *     duplicate check on (before)         5658 MB    6177 MB    181-194s
+ *     noCheck (this config)               5083 MB    5889 MB    134s
+ *     one program, grouping patched       1379 MB    3749 MB     53s
+ *     `tsc --noEmit`, whole package       1103 MB    1149 MB     18s
  *
  * The third row was measured with the grouping patched in a copy of tsup
  * outside this tree. It shows what cutting the program count is worth.
