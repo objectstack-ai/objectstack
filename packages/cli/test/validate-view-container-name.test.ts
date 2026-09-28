@@ -40,6 +40,8 @@ import { childEnv } from './helpers/serve-process.js';
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
+/** A cold `tsx` spawn of the CLI source entry runs well past vitest's 5 s default. */
+const SPAWN_TIMEOUT_MS = 120_000;
 
 interface Run {
   code: number;
@@ -159,26 +161,26 @@ describe('#20331 — os validate refuses what the boot registrar refuses, in its
     expect(row.code).toBe(boot.code);
     expect(row.httpStatus).toBe(boot.httpStatus);
     expect(row.path).toBe('views[0]');
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('the text face exits 1 and prints the same words', async () => {
     const run = await runCli(['validate'], dirs.divergent);
     expect(run.code).toBe(1);
     expect(run.stdout).not.toContain('Validation passed');
     expect(run.stdout).toContain(bootRefusal(stack('order_line')).message);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('CONTROL: a container whose `name` matches its object validates', async () => {
     const run = await runCli(['validate', '--json'], dirs.matching);
     const payload = payloadOf(run, 'matching --json');
     expect(payload.valid, JSON.stringify(payload.errors ?? payload.error)).toBe(true);
     expect(run.code).toBe(0);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('CONTROL: a container with no `name` validates — the shape boot also accepts', async () => {
     const run = await runCli(['validate', '--json'], dirs.anonymous);
     const payload = payloadOf(run, 'anonymous --json');
     expect(payload.valid, JSON.stringify(payload.errors ?? payload.error)).toBe(true);
     expect(run.code).toBe(0);
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
