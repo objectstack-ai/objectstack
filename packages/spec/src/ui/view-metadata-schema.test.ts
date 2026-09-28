@@ -272,11 +272,25 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       ['a switcher-reorder PUT', { sortOrder: 3, object: 'crm_lead', viewKind: 'list' }],
       ['a column-only overlay', { columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
       ['a filter-only overlay', { filter: [{ field: 'name', operator: 'contains', value: 'x' }], object: 'crm_lead', viewKind: 'form' }],
-      ['a hide PUT', { hidden: true, object: 'crm_lead', viewKind: 'form' }],
       ['an order-only overlay', { order: 2, object: 'crm_lead', viewKind: 'form' }],
       ['a renamed view that still carries its config', { label: 'New name', columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
     ])('leaves %s alone', (_label, body) => {
       expect(ViewMetadataSchema.safeParse(body).success).toBe(true);
+    });
+
+    // [#20230] The hide PUT left the list above: the overlay's `hidden` is a
+    // retired key (ADR-0049), read by nothing and written by no platform
+    // surface. It is still DECLARED — a tombstone — so the precondition stays
+    // inert on it, and the refusal belongs to the overlay member, carrying the
+    // retirement prescription at the key.
+    it('REFUSES a hide PUT on a real view at the member, with the retirement prescription', () => {
+      const bound = { object: 'crm_lead', viewKind: 'form' } as const;
+      const r = ViewMetadataSchema.safeParse({ ...bound, hidden: true });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues[0]!.code).toBe('invalid_union');
+      expect(r.error.issues[0]!.message).toMatch(/^`view\.hidden` was removed in @objectstack\/spec 17\.5\.0/);
+      expect(JSON.stringify(r.error.issues)).not.toContain('Not a `view` body');
     });
 
     // [#7741] The same shapes with NO baseline to inherit identity from are now
@@ -342,8 +356,12 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     it('…but identity PLUS any real view key is fine — leanness is not the bar', () => {
       // [#7741] "identity" here means the FULL binding pair: `object` alone or
       // `viewKind` alone is half a binding and the members refuse it now.
-      expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', viewKind: 'form', hidden: true }).success).toBe(true);
+      expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', viewKind: 'form', order: 2 }).success).toBe(true);
       expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', viewKind: 'list', isPinned: true }).success).toBe(true);
+      // [#20230] …a RETIRED key is not a real view key: `hidden` used to stand
+      // in the first line above, and the same identity plus it is refused now.
+      const identity = { name: 'v', object: 'o', viewKind: 'form' } as const;
+      expect(ViewMetadataSchema.safeParse({ ...identity, hidden: true }).success).toBe(false);
     });
 
     it('leaves non-objects to the union — it judges objects only', () => {

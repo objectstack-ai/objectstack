@@ -220,7 +220,10 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
  * earlier — at the route's schema door — and the block above no longer claims
  * them. [#20116] A fourth joined them: the one-bound `$between`, once
  * `FilterConditionSchema` began refusing on save every comparand slot the
- * shared comparand-shape face refuses on query.
+ * shared comparand-shape face refuses on query. [#20116, stage 2] Then the
+ * comparand-TYPE face's JSON-representable cells — a plain object where one
+ * value belongs, as the comparand or as a list member — once that schema asked
+ * the type face too.
  *
  * ⚠️ This is a CODE change on a live wire surface, so it is recorded with the
  * measurement that justifies it rather than as a test edit. Since #17551 the
@@ -236,6 +239,8 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
  * | `{ $not: 5 }`                      | refused at the schema | refused at the schema |
  * | `{ stage: {} }`                    | passes the schema     | passes the schema     |
  * | `{ amount: { $between: [10] } }`   | refused at the schema (#20116) | refused at the schema (#20116) |
+ * | `{ stage: { $eq: { a: 1 } } }`     | refused at the schema (#20116 stage 2) | refused at the schema (#20116 stage 2) |
+ * | `{ stage: { $in: ['won', { a: 1 }] } }` | refused at the schema (#20116 stage 2) | refused at the schema (#20116 stage 2) |
  * | `{ $nor: [{…}] }`                  | passes the schema     | passes the schema     |
  * | `{ $or: [] }`                      | passes the schema     | passes the schema     |
  *
@@ -269,6 +274,23 @@ describe('[#17551] the structurally-malformed filter spellings are refused at th
       runtimeFilter: { amount: { $between: [10] } },
       member: 'selection.runtimeFilter.amount.$between',
       sentence: /^Operator "\$between" on field "amount" requires a \[min, max\] value array\. Received array \(\[10\]\)\. A range needs exactly two bounds/,
+    },
+    {
+      // [#20116, stage 2] Before, this crossed the schema and the normalizer
+      // refused it `INVALID_FILTER` / 400 in the comparand-TYPE face's words
+      // (`at where.stage.$eq`). The schema door now asks that face on save and
+      // prints the same sentence less its location, located on the member.
+      name: 'a plain object where a single value belongs',
+      runtimeFilter: { stage: { $eq: { a: 1 } } },
+      member: 'selection.runtimeFilter.stage.$eq',
+      sentence: /^Filter comparand is a plain object \(\{"a":1\}\), which no driver can compare\. A comparison value must be a string, number, bigint, boolean, null or Date\./,
+    },
+    {
+      // [#20116, stage 2] The same face, on a list member: located on the member.
+      name: 'a plain object as an $in member',
+      runtimeFilter: { stage: { $in: ['won', { a: 1 }] } },
+      member: 'selection.runtimeFilter.stage.$in.1',
+      sentence: /^Filter comparand is a plain object \(\{"a":1\}\), which no driver can compare\./,
     },
   ];
 

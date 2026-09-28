@@ -99,7 +99,7 @@ describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
     expect(() => defineStack({ manifest, apis: [validObjectEndpoint, validFlowEndpoint] })).not.toThrow();
   });
 
-  // [#10338] The acceptance half of the ruling that made `target` optional:
+  // [commit d2619fd0c] The acceptance half of the ruling that made `target` optional:
   // an `object_operation` endpoint is addressed by `objectParams.object` /
   // `.operation`, and NO consumer reads `target` for that type (executor,
   // OpenAPI enrichment and this gate all branch on `objectParams` alone) — so
@@ -312,7 +312,7 @@ describe('[#5111] gate (a) — the supported subset (mirrors `planEndpointTarget
     expect(message).toMatch(/names no target flow/);
   });
 
-  // [#10338] `target` is optional in the VOCABULARY (an `object_operation`
+  // [commit d2619fd0c] `target` is optional in the VOCABULARY (an `object_operation`
   // author no longer writes a dead string), so omission now reaches this gate
   // instead of dying as a Zod `invalid_type` — and the gate is what holds the
   // requirement for `type: 'flow'`. The issue path is asserted too: the author

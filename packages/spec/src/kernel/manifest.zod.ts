@@ -32,7 +32,7 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  * by nothing at all. A grant declared here records which surfaces were
  * consented to and REFUSES NOTHING today — authoring this block does not
  * confine the plugin. The per-plugin context that would make it refuse is
- * the ADR-0025 materialize seam (#17147).
+ * the ADR-0025 materialize seam (measured and recorded in commit aaacf1d5c).
  *
  * The consented set reaches the runtime on the environment artifact
  * envelope — `EnvironmentArtifactSchema.grantedPermissions`
@@ -190,7 +190,7 @@ export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
  *
  * So a present `integrity` map is evidence that the publisher checked its own
  * bytes, never that anything re-checked them after publish. The enforce leg
- * is tracked on #11331.
+ * is unbuilt, and belongs to that future runtime loader.
  */
 export const PluginIntegritySchema = z
   .record(z.string(), z.string())
@@ -548,7 +548,7 @@ export const ManifestSchema = strictObject({
   dependencies: z.record(z.string(), z.string()).optional().describe('Package dependencies'),
 
   /**
-   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   * REMOVED (commit dce5cd4f0, ADR-0049 enforce-or-remove).
    *
    * `configuration` declared a per-plugin settings surface — `{ title,
    * properties }`, a simplified JSON-Schema map — and NOTHING read the
@@ -580,12 +580,12 @@ export const ManifestSchema = strictObject({
    * Contribution Points (VS Code Style).
    *
    * TEN MEMBERS REMOVED in v17.x (ADR-0049 enforce-or-remove): nine at
-   * #10724 — `events`, `menus`, `themes`, `translations`, `actions`,
+   * commit be21955ba — `events`, `menus`, `themes`, `translations`, `actions`,
    * `drivers`, `fieldTypes`, `functions`, `commands` — and `routes` at
-   * #10726, its own enforce-or-remove fork, maintainer-ruled Option B
+   * commit bc56e1881, its own enforce-or-remove fork, maintainer-ruled Option B
    * 2026-08-22 (remove; author-facing materials redirect to the imperative
-   * `http.server` mount) once the cloud census (#10812) closed clean. The
-   * census behind them (#10627, re-verified at claim time, three repos with
+   * `http.server` mount) once the cloud census closed clean (2026-08-24). The
+   * census behind them (recorded in commit be21955ba, re-verified at claim time, three repos with
    * control probes) measured exactly ONE non-test read of
    * `manifest.contributes` in the entire monorepo —
    * `packages/objectql/src/engine.ts` reading `kinds` — so every other
@@ -637,7 +637,7 @@ export const ManifestSchema = strictObject({
       description: z.string().optional().describe('Description of what this kind represents'),
     })).optional().describe('Metadata kind identifiers this package registers'),
 
-    /** REMOVED (#10724) — the declaration drove nothing; subscribe in plugin code. */
+    /** REMOVED (commit be21955ba) — the declaration drove nothing; subscribe in plugin code. */
     events: retiredKey(
       '`manifest.contributes.events` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read the list: its only in-repo ' +
@@ -647,7 +647,7 @@ export const ManifestSchema = strictObject({
       'the enforced channel; record lifecycle hooks register on the data engine.',
     ),
 
-    /** REMOVED (#10724) — use app `navigation` / `manifest.navigationContributions`. */
+    /** REMOVED (commit be21955ba) — use app `navigation` / `manifest.navigationContributions`. */
     menus: retiredKey(
       '`manifest.contributes.menus` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — no renderer ever read it; two alias maps already ' +
@@ -656,7 +656,7 @@ export const ManifestSchema = strictObject({
       '`manifest.navigationContributions` (ADR-0029 D7), which the engine registers.',
     ),
 
-    /** REMOVED (#10724) — this `{id,label,path}` shape had no reader anywhere. */
+    /** REMOVED (commit be21955ba) — this `{id,label,path}` shape had no reader anywhere. */
     themes: retiredKey(
       '`manifest.contributes.themes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — it never had an effect: theme registration reaches ' +
@@ -666,7 +666,7 @@ export const ManifestSchema = strictObject({
       '`themes` collection instead.',
     ),
 
-    /** REMOVED (#10724) — use the `translation` metadata type / stack `translations`. */
+    /** REMOVED (commit be21955ba) — use the `translation` metadata type / stack `translations`. */
     translations: retiredKey(
       '`manifest.contributes.translations` was removed in @objectstack/spec 17 ' +
       '(ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
@@ -676,7 +676,7 @@ export const ManifestSchema = strictObject({
       'which the engine registers and the i18n pipeline serves.',
     ),
 
-    /** REMOVED (#10724) — use the stack `actions` collection / `registerAction`. */
+    /** REMOVED (commit be21955ba) — use the stack `actions` collection / `registerAction`. */
     actions: retiredKey(
       '`manifest.contributes.actions` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it; actions declared here were ' +
@@ -685,7 +685,7 @@ export const ManifestSchema = strictObject({
       '`engine.registerAction`.',
     ),
 
-    /** REMOVED (#10724) — a driver is a `driver.*` kernel service, not a declaration. */
+    /** REMOVED (commit be21955ba) — a driver is a `driver.*` kernel service, not a declaration. */
     drivers: retiredKey(
       '`manifest.contributes.drivers` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — it never had an effect: a storage driver is wired ' +
@@ -694,7 +694,7 @@ export const ManifestSchema = strictObject({
       'way, not by this declaration. Delete the key.',
     ),
 
-    /** REMOVED (#10724) — no field-type registration seam exists. */
+    /** REMOVED (commit be21955ba) — no field-type registration seam exists. */
     fieldTypes: retiredKey(
       '`manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — there is no `registerFieldType` seam anywhere: ' +
@@ -704,7 +704,7 @@ export const ManifestSchema = strictObject({
       'declaration.',
     ),
 
-    /** REMOVED (#10724) — use `defineStack({ functions })` → `registerFunction`. */
+    /** REMOVED (commit be21955ba) — use `defineStack({ functions })` → `registerFunction`. */
     functions: retiredKey(
       '`manifest.contributes.functions` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it; ObjectQL functions declared ' +
@@ -713,7 +713,7 @@ export const ManifestSchema = strictObject({
       '`engine.registerFunction`.',
     ),
 
-    /** REMOVED (#10726) — mount code-handler routes on the `http.server` service; declarative endpoints are `defineStack({ apis })`. */
+    /** REMOVED (commit bc56e1881) — mount code-handler routes on the `http.server` service; declarative endpoints are `defineStack({ apis })`. */
     routes: retiredKey(
       '`manifest.contributes.routes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it: the HttpDispatcher never ' +
@@ -726,7 +726,7 @@ export const ManifestSchema = strictObject({
     ),
 
     /**
-     * REMOVED (#10724) — CLI commands are oclif-auto-discovered, never resolved
+     * REMOVED (commit be21955ba) — CLI commands are oclif-auto-discovered, never resolved
      * from this declaration. The JSDoc that used to sit here described
      * Commander.js runtime resolution as current behaviour; that contradicted
      * `cli-extension.zod.ts`, which records the oclif migration: "The
@@ -757,7 +757,7 @@ export const ManifestSchema = strictObject({
   data: z.array(SeedSchema).optional().describe('Initial seed data (prefer top-level data field)'),
 
   /**
-   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   * REMOVED (commit dce5cd4f0, ADR-0049 enforce-or-remove).
    *
    * `capabilities` carried the whole `PluginCapabilityManifestSchema` block —
    * `implements`, `provides`, `requires`, `extensionPoints`, `extensions` —
@@ -785,7 +785,7 @@ export const ManifestSchema = strictObject({
   ),
 
   /**
-   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   * REMOVED (commit dce5cd4f0, ADR-0049 enforce-or-remove).
    *
    * `extensions` was an untyped escape hatch — `z.record(z.string(),
    * z.unknown())` — with zero readers anywhere, so whatever an author parked
@@ -930,7 +930,7 @@ export const ManifestSchema = strictObject({
    * Computed at build and self-checked at the `os plugin publish` preflight
    * (#13464); unpack-time re-verification is NOT implemented and is owned by
    * the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-   * control plane. Enforce leg tracked on #11331.
+   * control plane. The enforce leg is unbuilt.
    * See {@link PluginIntegritySchema}.
    */
   integrity: PluginIntegritySchema.optional()

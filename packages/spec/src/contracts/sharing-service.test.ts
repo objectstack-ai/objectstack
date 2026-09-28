@@ -514,15 +514,15 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
 });
 
 /**
- * [#6523 / #6206 ruling default] The shared enforcement context is the FULL
+ * [commit aa4b90d9a, full-envelope default] The shared enforcement context is the FULL
  * envelope — the fourth and widest narrow twin, converged.
  *
  * ## What the ruling decided, and what this card applied it to
  *
- * #6206 (maintainer, 2026-08-07) set the governance default: enforcement
+ * The maintainer ruling of 2026-08-07 (landed in commit d7e0b4212) set the governance default: enforcement
  * converges on the complete `resolveAuthzContext` envelope and keeps NO
  * per-site subset contracts. Its sweep reached one site — share-link (#6430 /
- * PR #6511). `SharingExecutionContext` (exported from `sharing-service.ts`
+ * commit d7e0b4212). `SharingExecutionContext` (exported from `sharing-service.ts`
  * until #7218 retired it) was the fourth and by far the widest
  * twin: six declared fields serving **36 signatures across three contracts**
  * (`ISharingService` + `ISharingRuleService` here, `IApprovalService`,
@@ -550,14 +550,14 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
  * / `org_user_ids` / `tabPermissions` with **no `as any`**, which under the old
  * signature was TS2339 on each field (TS2551 on `tabPermissions` — tsc
  * suggests `permissions`, the very near-miss the narrow type invited) — that
- * is this file's before-red direction, and it is the MIRROR of PR #6511's,
+ * is this file's before-red direction, and it is the MIRROR of commit d7e0b4212's,
  * which was TS2353 at a call site stating a trimmed envelope; (3) that the
  * narrow shape stays RETIRED — #7218 deleted the exported type once every
  * implementation had been re-annotated, and the specimen below keeps the
  * refusal enforceable so the convergence cannot be undone by re-declaring the
  * six-field subset under any name.
  *
- * NOT PINNED, on purpose, and for exactly the reason PR #6511 recorded: there
+ * NOT PINNED, on purpose, and for exactly the reason commit d7e0b4212 recorded: there
  * is no `@ts-expect-error` asserting that a six-field context is REJECTED
  * where an `ExecutionContext` is expected, because it is not.
  * Structural subtyping accepts it — all six fields exist in the wider type
@@ -575,7 +575,7 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
  * `Refute` assertions in the first case would have had nothing to refute and
  * would have been dropped, which is the quiet way a convergence gets undone:
  * re-declaring these six fields under a new name is exactly the per-site
- * subset the #6206 ruling removed, and this type is what makes that re-narrowing
+ * subset the full-envelope ruling removed, and this type is what makes that re-narrowing
  * red instead of invisible.
  *
  * ⛔ Not a vocabulary to reach for, and not to be exported from this file.
@@ -645,7 +645,7 @@ describe('[#6523] sharing / approval enforcement takes the full ExecutionContext
     // down as a VARIABLE — not as an inline literal. That is deliberate, and it
     // is why reverting this card produces no TS2353 here: excess-property
     // checking would fire only on an inline literal, and inline-literal damage
-    // is PR #6511's direction (a caller stating a trimmed envelope), not this
+    // is commit d7e0b4212's direction (a caller stating a trimmed envelope), not this
     // one. Here the value was always whole and always assignable; only the
     // READ above was blocked. Measured on the revert: 22 errors on this file,
     // TS2339/TS2551 on the four reads and TS2344/TS2322 on the identity pins,
@@ -688,7 +688,7 @@ describe('[#6523] sharing / approval enforcement takes the full ExecutionContext
     >;
     const shapeUnchanged: _ShapeUnchanged = true;
 
-    // The honest half, exactly as PR #6511 recorded it for its own twin: this
+    // The honest half, exactly as commit d7e0b4212 recorded it for its own twin: this
     // assignment is LEGAL and compiles. Six optional fields, all present in the
     // wider type — so the boundary is held by the declared parameter type and
     // the caller's obligation, never by tsc. An `@ts-expect-error` here would

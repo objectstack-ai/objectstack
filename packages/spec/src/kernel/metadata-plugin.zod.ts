@@ -117,14 +117,14 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // ADR-0088: `router`/`function`/`service` are NOT metadata kinds — they are
   // code contributions: imperative `http.server` mounts + declarative `apis:`
   // (router — the manifest `contributes.routes` spelling never delivered and
-  // was retired, #10726), `defineStack({ functions })` (function —
-  // `contributes.functions` was retired unread, #10724), and the
+  // was retired, commit bc56e1881), `defineStack({ functions })` (function —
+  // `contributes.functions` was retired unread, commit be21955ba), and the
   // plugin/service registry itself (service).
   //
   // [#5271, part of #5206] `api` is the ONE declarative endpoint ITEM kind, and
   // it is NOT a reversal of the `router` retirement above: `router` was retired
   // as a KIND because its delivered form (the imperative `http.server` mount;
-  // the `contributes.routes` spelling never delivered and was retired, #10726)
+  // the `contributes.routes` spelling never delivered and was retired, commit bc56e1881)
   // is a code contribution. A single `ApiEndpoint` — a
   // stable URL plus a policy layer over an existing pipeline — is a declarative
   // artifact, and it passes all three clauses of ADR-0088's admission test:
@@ -218,7 +218,7 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
    * Used to discover metadata files on disk.
    *
    * ⚠️ DISCOVERY IS THE LEAST EXERCISED OF THIS FIELD'S USES (#12075, recorded
-   * beside the declaration by #12165). The only reader that actually globs
+   * beside the declaration by commit b307bfd2a). The only reader that actually globs
    * these patterns is `MetadataPlugin._loadFromFileSystem`
    * (`packages/metadata/src/plugin.ts`), reached on exactly ONE branch:
    * `eager` bootstrap (the default) AND no `options.artifactSource`.
@@ -235,7 +235,7 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
    *
    * ⛔ Do not read that as "this field is inert". Its VALUES have live readers
    * that never glob: the CLI derives every scaffolded file name from them
-   * (#11071, pinned by `cli/test/generate-file-name-registry-parity.test.ts`),
+   * (commit 50fb191dc, pinned by `cli/test/generate-file-name-registry-parity.test.ts`),
    * and `codeOnlySourceHint` reads `filePatterns[0]` back as the prescription
    * in a 403 `not_creatable` refusal — which the `capability` and `api`
    * entries of `DEFAULT_METADATA_TYPE_REGISTRY` below already lean on.
@@ -492,7 +492,7 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
   storage: MetadataManagerConfigSchema.describe('Storage backend configuration'),
 
   /**
-   * REMOVED in v17 (#13135, ADR-0049 enforce-or-remove; re-charter of #12057).
+   * REMOVED in v17 (commit 9e0ba21a1, ADR-0049 enforce-or-remove; re-charter of #12057).
    *
    * `customizationPolicies` embedded the paper metadata-customization
    * protocol's `CustomizationPolicySchema` (lockedFields / customizableFields
@@ -520,7 +520,7 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
   ),
 
   /**
-   * REMOVED in v17 (#13135, ADR-0049 enforce-or-remove; re-charter of #12057).
+   * REMOVED in v17 (commit 9e0ba21a1, ADR-0049 enforce-or-remove; re-charter of #12057).
    *
    * `mergeStrategy` embedded the paper protocol's `MergeStrategyConfigSchema`
    * (keep-custom / accept-incoming / three-way-merge) and was read by
@@ -827,7 +827,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // default — these bind to routes and side-effects. Promote individually if
   // a concrete need appears."). `page`/`app`/`action`/`dataset` were ROLLED
   // BACK from an unratified `true` by the 2026-08-08 maintainer ruling on
-  // #6483 (same verdict family as `flow`, #6283): no promotion ADR exists,
+  // ADR-0005, landed in commit ee58392e1 (same verdict family as `flow`, #6283): no promotion ADR exists,
   // and no live org-scoped overlay rows were found in-repo. `dataset` is
   // absent from the table, so it takes the amendment's default for new types
   // — `allowOrgOverride: false` until an admission pair (overlay schema + a
@@ -847,7 +847,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
   // `action` was additionally the #6283 `flow` shape exactly: its own row
   // declares `supportsOverlay: false`, so `allowOrgOverride: true` granted a
-  // write nothing could ever read back — the #6190 phantom. (ADR-0005, #6483)
+  // write nothing could ever read back — the #6190 phantom. (ADR-0005, commit ee58392e1)
   { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
@@ -1068,7 +1068,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
   // creatable for AI/authors. loadOrder last (references docs).
   //
-  // `allowOrgOverride: false` — ROLLED BACK from an unratified `true` (#6483,
+  // `allowOrgOverride: false` — ROLLED BACK from an unratified `true` (commit ee58392e1,
   // ADR-0005). The "render-time like view/dashboard" argument that used to
   // sit here is only half of ADR-0005's admission pair; the WRITTEN
   // render-only rationale ratified into the whitelist table was never filed,
@@ -1082,7 +1082,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Security Protocol
   //
   // `permission` / `position`: `allowOrgOverride: false` — ROLLED BACK from
-  // an unratified `true` (#6483, 2026-08-08 maintainer ruling; same verdict
+  // an unratified `true` (commit ee58392e1, 2026-08-08 maintainer ruling; same verdict
   // family as `flow`, #6283). ADR-0005's security row says ❌ outright:
   // "Authorization correctness; overlays would create silent privilege
   // drift" — a per-org overlay of a packaged permission set IS that drift,
@@ -1090,7 +1090,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // amendment's `false` default for new types. Zero live org-scoped overlay
   // rows for either type in-repo at rollback.
   //
-  // Blast radius, measured while landing #6483: plugin-security's ADR-0094
+  // Blast radius, measured while landing commit ee58392e1: plugin-security's ADR-0094
   // write-through (`permission-set-projection.ts`) routes data-door edits of
   // permission sets into `saveMetaItem`. Runtime-created sets — including
   // package-bound rows MATERIALIZED through the metadata door, whose
@@ -1187,7 +1187,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // type and giving it a real history path are the same piece of work.
   { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
   // `tool` / `skill`: `allowOrgOverride: false` — ROLLED BACK from an
-  // unratified `true` (#6483, 2026-08-08 maintainer ruling). ADR-0005's ai
+  // unratified `true` (commit ee58392e1, 2026-08-08 maintainer ruling). ADR-0005's ai
   // row says ❌: "Behavioural contracts with model providers; treat like
   // flows" — and `flow` itself was rolled back by #6283 on that very row.
   // ADR-0063 §2's model (tenants extend the platform by AUTHORING skills +

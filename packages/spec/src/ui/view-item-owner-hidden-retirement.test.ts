@@ -19,9 +19,10 @@
  *      would be a silent strip (ADR-0104). Every door that carries a ViewItem
  *      record therefore refuses, with the prescription.
  *   2. The flattened-overlay members declare their OWN `owner` / `hidden`
- *      (`flattenedViewOverlayFields()`) on a different door this retirement
- *      does not touch. Pinned as a BOUNDARY, so a later reader does not read
- *      the overlay's acceptance as a half-done retirement.
+ *      (`flattenedViewOverlayFields()`) on a different door. [#20230] That
+ *      door's pair is retired too, with these same texts, and its full pin set
+ *      is `view-overlay-owner-hidden-retirement.test.ts`; the BOUNDARY pin
+ *      below moved with it, from "still parses" to "refused, same text".
  *   3. D2 conversion `view-item-owner-hidden-removed` (step 18), scoped to the
  *      record spelling, reaching both collections a record travels in: `views`
  *      (stack sources, and the stored-row seam's `{ views: [row] }`) and the
@@ -156,12 +157,18 @@ describe('view item owner/hidden retirement — the tombstones, at every door th
     }
   });
 
-  it('BOUNDARY: a flattened overlay (no `config`) still declares its own `owner` / `hidden` — a different door', () => {
-    // Not a half-done retirement: the overlay members are a lean
-    // personalization PUT, declared separately (`flattenedViewOverlayFields()`),
-    // and outside this card. If they are retired later, this pin moves with them.
-    const overlay = { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'form', hidden: true, owner: 'usr_7' };
-    expect(ViewMetadataSchema.safeParse(overlay).success).toBe(true);
+  it('BOUNDARY, moved: a flattened overlay (no `config`) is refused with the SAME prescription — the other door, retired too', () => {
+    // [#20230] The overlay members declared their own `owner` / `hidden`
+    // (`flattenedViewOverlayFields()`), a lean personalization PUT outside
+    // #20085. They are now tombstoned with this file's texts; the overlay
+    // door's full pin set lives in `view-overlay-owner-hidden-retirement.test.ts`.
+    for (const [key, value, prescription] of RETIRED) {
+      const overlay = { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'form', [key]: value };
+      const r = ViewMetadataSchema.safeParse(overlay);
+      expect(r.success, `an overlay carrying \`${key}\``).toBe(false);
+      if (r.success) continue;
+      expect(r.error.issues[0]!.message).toMatch(prescription);
+    }
   });
 
   it('fails tsc at the authoring site: the input type of both keys is `never`', () => {
@@ -200,12 +207,13 @@ describe('view item owner/hidden retirement — the D2 conversion', () => {
     expect(ViewMetadataSchema.safeParse(rehydrated).success).toBe(true);
   });
 
-  it('reaches the assembled-manifest `viewItems` channel, and leaves overlays and containers alone', () => {
+  it('reaches the assembled-manifest `viewItems` channel, leaves overlays to their own entry and containers alone', () => {
     const { stack, notices } = collectConversionNotices(
       {
         viewItems: [
           { ...RECORD, hidden: false },
-          // A flattened overlay in the same channel: its door still declares `hidden`.
+          // A flattened overlay in the same channel. [#20230] Its `hidden` is
+          // retired too, and stripped by the OVERLAY entry, never by this one.
           { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'list', hidden: true },
         ],
         // A container carries neither key and has no top-level `config`: untouched.
@@ -213,12 +221,14 @@ describe('view item owner/hidden retirement — the D2 conversion', () => {
       },
       { includeRetired: true },
     );
-    expect(notices.map((n) => n.path)).toEqual(['viewItems[0].hidden']);
-    expect(notices.every((n) => n.conversionId === 'view-item-owner-hidden-removed')).toBe(true);
+    expect(notices.map((n) => [n.conversionId, n.path])).toEqual([
+      ['view-item-owner-hidden-removed', 'viewItems[0].hidden'],
+      ['view-overlay-owner-hidden-removed', 'viewItems[1].hidden'],
+    ]);
     expect(stack).toEqual({
       viewItems: [
         RECORD,
-        { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'list', hidden: true },
+        { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'list' },
       ],
       views: [{ object: 'crm_lead', list: { type: 'grid', columns: ['name'] } }],
     });
@@ -262,14 +272,15 @@ describe('view item owner/hidden retirement — ADR-0087 registration', () => {
 // ⭐ `owner` and `hidden` are among the commonest key names in this tree (field
 // `hidden`, app `hidden`, column `hidden`, record `owner` …), so a textual
 // matcher would be all noise. The matcher is STRUCTURAL instead: an offender is
-// one object literal (or one YAML mapping) whose OWN keys include `viewKind`,
-// `config` and `owner` or `hidden` — the ViewItem record spelling, and nothing
-// else. A flattened overlay (no `config`) is the other door and is not matched.
+// one object literal (or one YAML mapping) whose OWN keys include `viewKind`
+// and `owner` or `hidden` — the ViewItem record spelling (with `config`) and,
+// since #20230, the flattened overlay spelling (without it): both doors of the
+// family. A container never carries `viewKind`, so it is not matched.
 //
 // The bound, stated: a record assembled by SPREAD (`{ ...record, hidden: true }`)
 // or computed keys is invisible to a text walk; `docs/**`, `.claude/**`,
 // `.github/**` and the repo-root files are outside the radius.
-describe('tree-scoped absence: no ViewItem record inside the declared radius still carries owner/hidden', () => {
+describe('tree-scoped absence: no ViewItem record or flattened overlay inside the declared radius still carries owner/hidden', () => {
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
@@ -288,11 +299,13 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
    * spell the retired keys on a record.
    */
   const EXCLUDED = new Set([
-    // The tombstone itself — and the flattened-overlay door's own shape, whose
-    // `config: z.undefined()` guard sits beside that door's `owner` / `hidden`
-    // (schema source, not an authoring; measured as the one hit before this
-    // exclusion). Its examples live in doc comments, which the lexer skips.
+    // The tombstones themselves — both doors' shapes (schema source, not an
+    // authoring; the overlay door's `config: z.undefined()` guard sits beside
+    // its tombstones, measured as the one hit before this exclusion). Its
+    // examples live in doc comments, which the lexer skips.
     'packages/spec/src/ui/view.zod.ts',
+    // [#20230] The overlay door's own pins author the retired keys on purpose.
+    'packages/spec/src/ui/view-overlay-owner-hidden-retirement.test.ts',
     // This pin names the keys to assert their absence.
     THIS_FILE,
   ]);
@@ -311,7 +324,7 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
 
   const isOffendingKeySet = (keys: Set<string>): boolean =>
-    keys.has('viewKind') && keys.has('config') && RETIRED_KEYS.some((k) => keys.has(k));
+    keys.has('viewKind') && RETIRED_KEYS.some((k) => keys.has(k));
 
   /**
    * One pass over JS/TS/JSON text: a stack of bracket frames, each `{` frame
@@ -454,9 +467,12 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
     expect(offendersIn('.yaml', 'views:\n  - name: a.b\n    viewKind: list\n    config:\n      type: grid\n    hidden: true\n')).toEqual([3]);
     expect(offendersIn('.md', "Prose.\n\n```ts\nsave({ viewKind: 'list', config: {}, owner: 'u1' });\n```\n")).toEqual([4]);
     expect(offendersIn('.md', 'Prose.\n\n```yaml\nviewKind: list\nconfig: {}\nhidden: true\n```\n')).toEqual([4]);
+    // [#20230] A flattened overlay — no `config`, the other door of the family, retired too.
+    expect(offendersIn('.ts', "put({ name: 'a.b', object: 'a', viewKind: 'list', hidden: true })")).toEqual([1]);
+    expect(offendersIn('.yaml', '- name: a.b\n  object: a\n  viewKind: form\n  owner: u1\n')).toEqual([3]);
     // Neighbours that must NOT match.
-    // A flattened overlay — no `config`, the other door.
-    expect(offendersIn('.ts', "put({ name: 'a.b', object: 'a', viewKind: 'list', hidden: true })")).toEqual([]);
+    // A container: no `viewKind` of its own, and the keys on a nested slot.
+    expect(offendersIn('.ts', "defineView({ list: { type: 'grid', columns: [{ field: 'x', hidden: true }] } })")).toEqual([]);
     // A record without the keys; the keys on a NESTED object inside `config`.
     expect(offendersIn('.ts', "({ viewKind: 'list', config: { columns: [{ field: 'x', hidden: true }] } })")).toEqual([]);
     // A `sys_view_definition` row: `view_kind`, and `viewKind` only read off an object.
@@ -479,7 +495,7 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
     expect(vanished.length).toBe(before + 1);
   });
 
-  it('no ViewItem record carrying owner/hidden survives inside the declared radius', () => {
+  it('no ViewItem record or flattened overlay carrying owner/hidden survives inside the declared radius', () => {
     const offenders: string[] = [];
     let visited = 0;
     let recordBearing = 0;
@@ -510,6 +526,6 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
     // record were really judged.
     expect(visited).toBeGreaterThan(1000);
     expect(recordBearing).toBeGreaterThan(50);
-    expect(offenders, 'a ViewItem record carrying `owner`/`hidden` means the retirement is being undone').toEqual([]);
+    expect(offenders, 'a view record or overlay carrying `owner`/`hidden` means the retirement is being undone').toEqual([]);
   });
 });

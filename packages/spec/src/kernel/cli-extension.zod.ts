@@ -68,7 +68,7 @@ import { z } from 'zod';
 //
 // The pair described a "CLI Command Contribution declaration in the manifest"
 // and claimed to be "retained for backward compatibility and for describing
-// command metadata in plugin manifests" — but after #10724 tombstoned
+// command metadata in plugin manifests" — but after commit be21955ba tombstoned
 // `manifest.contributes.commands` (see `manifest.zod.ts`), no manifest surface
 // could legally carry these entries: the exported schema advertised a shape
 // whose only declared carrier rejects it. It was never referenced by
