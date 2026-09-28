@@ -82,8 +82,8 @@ import {
   reconcileStateCountTotals,
   renderStateCountShards,
   sumStateCounts,
-  writeStateCountShards,
 } from './readme-table.mts';
+import { writeTextShardDir } from '../lib/sharded-artifacts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -148,7 +148,7 @@ if (totalErrors.length) {
   process.exit(1);
 }
 
-const { written, removed } = writeStateCountShards(join(ledgerRoot, STATE_COUNTS_DIR), renderStateCountShards(rows));
+const { written, removed } = writeTextShardDir(join(ledgerRoot, STATE_COUNTS_DIR), renderStateCountShards(rows));
 const legacy = join(ledgerRoot, LEGACY_STATE_COUNTS_FILE);
 const legacyRemoved = existsSync(legacy);
 if (legacyRemoved) rmSync(legacy);

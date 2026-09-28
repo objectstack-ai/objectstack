@@ -26,15 +26,14 @@ import {
   foldStateCounts,
   formatStateCountsTotal,
   parseStateTable,
-  readStateCountShards,
   reconcileReadmeTable,
   reconcileStateCountTotals,
   reconcileStateCounts,
   renderStateCountShard,
   renderStateCountShards,
   sumStateCounts,
-  writeStateCountShards,
 } from './readme-table.mts';
+import { readTextShardDir, writeTextShardDir } from '../lib/sharded-artifacts';
 
 /** A miniature README with the same section shape as the real one. */
 function readme({
@@ -466,7 +465,7 @@ describe('reconcileStateCounts — what it must catch', () => {
 // The shard directory on a real disk: the writer the generator calls and the
 // reader the gate calls, round-tripped, so the two cannot disagree about what
 // "the directory" contains.
-describe('writeStateCountShards / readStateCountShards', () => {
+describe('the shard directory on disk — writeTextShardDir / readTextShardDir', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), 'os-state-count-shards-'));
@@ -474,26 +473,26 @@ describe('writeStateCountShards / readStateCountShards', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('reads a missing directory as null, never as an empty set', () => {
-    expect(readStateCountShards(path.join(dir, 'absent'))).toBeNull();
+    expect(readTextShardDir(path.join(dir, 'absent'))).toBeNull();
   });
 
   it('writes every shard once, then rewrites ONLY the shard whose bytes moved', () => {
-    const first = writeStateCountShards(dir, renderStateCountShards(COUNTS));
+    const first = writeTextShardDir(dir, renderStateCountShards(COUNTS));
     expect(first.written.sort()).toEqual(['api.md', 'field.md', 'object.md']);
-    expect(readStateCountShards(dir)).toEqual(renderStateCountShards(COUNTS));
+    expect(readTextShardDir(dir)).toEqual(renderStateCountShards(COUNTS));
 
     const moved = COUNTS.map((r) => (r.type === 'field' ? { ...r, live: r.live - 1, dead: r.dead + 1 } : r));
-    const second = writeStateCountShards(dir, renderStateCountShards(moved));
+    const second = writeTextShardDir(dir, renderStateCountShards(moved));
     expect(second).toEqual({ written: ['field.md'], removed: [] });
   });
 
   it('prunes a shard no type renders, and anything else in the directory', () => {
-    writeStateCountShards(dir, renderStateCountShards(COUNTS));
+    writeTextShardDir(dir, renderStateCountShards(COUNTS));
     writeFileSync(path.join(dir, 'ghost.md'), 'stray');
     mkdirSync(path.join(dir, 'nested'));
-    const r = writeStateCountShards(dir, renderStateCountShards(COUNTS.slice(0, 2)));
+    const r = writeTextShardDir(dir, renderStateCountShards(COUNTS.slice(0, 2)));
     expect(r.removed.sort()).toEqual(['api.md', 'ghost.md', 'nested/']);
-    expect([...readStateCountShards(dir)!.keys()].sort()).toEqual(['field.md', 'object.md']);
+    expect([...readTextShardDir(dir)!.keys()].sort()).toEqual(['field.md', 'object.md']);
   });
 });
 

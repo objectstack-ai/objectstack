@@ -245,7 +245,6 @@ import {
   foldStateCounts,
   formatStateCountsTotal,
   parseStateTable,
-  readStateCountShards,
   reconcileReadmeTable,
   reconcileStateCountTotals,
   reconcileStateCounts,
@@ -253,6 +252,7 @@ import {
   sumStateCounts,
   type StateCountsTotal,
 } from './readme-table.mts';
+import { readTextShardDir } from '../lib/sharded-artifacts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -1250,7 +1250,7 @@ if (!existsSync(readmeFile)) {
   const counts = reconcileStateCounts({
     table: stateTable,
     rendered: renderStateCountShards(countRows),
-    onDisk: readStateCountShards(join(ledgerRoot, STATE_COUNTS_DIR)),
+    onDisk: readTextShardDir(join(ledgerRoot, STATE_COUNTS_DIR)),
     legacyOnDisk: existsSync(join(ledgerRoot, LEGACY_STATE_COUNTS_FILE)),
   });
   report.countsArtifactErrors = counts.artifactErrors;

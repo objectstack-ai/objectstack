@@ -195,8 +195,14 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // the arithmetic composes on a merge, the judgement does not, so they had to
   // stop living in one file. The ledger itself stays hand-written and is NOT
   // driver-managed — regenerating prose would delete somebody's evidence.
+  //
+  // #20361 SHARDED it — one `<dir>.md` per source directory, the cross-directory
+  // totals summed by the gate instead of committed — because the single file's
+  // global section and posture total were rewritten by every schema PR, and in
+  // the driver-less server-side merge two PRs in different directories conflicted
+  // on them. A same-directory pair is the residue this row still routes.
   {
-    path: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+    path: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts/**',
     gen: 'gen:strictness-ledger',
     check: 'check:strictness-ledger',
   },

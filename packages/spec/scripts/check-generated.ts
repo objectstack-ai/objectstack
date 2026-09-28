@@ -139,10 +139,13 @@ const GATED: ReadonlyArray<{
   // audits source too (a hand-written row must name a live sited file), which is
   // why the `gen:` fixes only half of what it can report — the other half is a
   // ledger edit, and the failure says which.
+  //
+  // A DIRECTORY since #20361, one shard per source directory and no committed
+  // cross-directory total, for the reason its liveness neighbour below is one.
   {
     check: 'check:strictness-ledger',
     gen: 'gen:strictness-ledger',
-    artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+    artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts/',
   },
   // Moved out of NO_GENERATOR at #7377, by the same precedent as its neighbour
   // above and for the same measured reason: the liveness README's "Current state"

@@ -72,8 +72,7 @@
 // STILL NOT CHECKED, and it must stay that way: the Notes cell's CONTENT. A
 // manufactured Note is worse than a missing row.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { reconcileTextShardDir } from '../lib/sharded-artifacts';
 
 /** One parsed row of the "Current state" table. */
 export interface StateTableRow {
@@ -531,49 +530,6 @@ export function formatStateCountsTotal(total: StateCountsTotal): string {
   return `${STATUS_COLUMNS.map((c) => `${total[c]} ${c}`).join(' · ')} = ${total.classified} classified`;
 }
 
-/**
- * Read the shard directory as the gate compares it: every entry's bytes, keyed by
- * name, or `null` when the directory does not exist. A subdirectory is keyed with
- * a trailing `/` and no bytes, so it can only ever surface as a stray — nothing in
- * a generator-owned directory is skipped silently.
- */
-export function readStateCountShards(dir: string): Map<string, string> | null {
-  if (!existsSync(dir)) return null;
-  const out = new Map<string, string>();
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isFile()) out.set(entry.name, readFileSync(join(dir, entry.name), 'utf8'));
-    else out.set(`${entry.name}/`, '');
-  }
-  return out;
-}
-
-/**
- * Write every shard whose bytes changed, and prune everything else in the
- * directory. An unchanged shard is not rewritten, so a regeneration touches
- * exactly the types whose counts moved — the locality this layout is for — and
- * the returned lists say which, so the generator can print them.
- */
-export function writeStateCountShards(
-  dir: string,
-  shards: ReadonlyMap<string, string>,
-): { written: string[]; removed: string[] } {
-  mkdirSync(dir, { recursive: true });
-  const written: string[] = [];
-  for (const [name, text] of shards) {
-    const file = join(dir, name);
-    if (existsSync(file) && readFileSync(file, 'utf8') === text) continue;
-    writeFileSync(file, text);
-    written.push(name);
-  }
-  const removed: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (shards.has(entry.name)) continue;
-    rmSync(join(dir, entry.name), { recursive: true, force: true });
-    removed.push(entry.isFile() ? entry.name : `${entry.name}/`);
-  }
-  return { written, removed };
-}
-
 /** What `reconcileStateCounts` found. Separate from `ReadmeReconciliation` on purpose — one population per failure heading. */
 export interface StateCountsReconciliation {
   /** A shard is absent, stale or stray, the directory is gone, or the retired single file came back. */
@@ -622,7 +578,7 @@ export function reconcileStateCounts({
   table: ParsedStateTable;
   /** What `renderStateCountShards` produces from the gate's report right now. */
   rendered: ReadonlyMap<string, string>;
-  /** The shard directory as `readStateCountShards` reads it, or `null` when it does not exist. */
+  /** The shard directory as `readTextShardDir` reads it, or `null` when it does not exist. */
   onDisk: ReadonlyMap<string, string> | null;
   /** Whether the retired single-file artifact is still on disk beside the shards. */
   legacyOnDisk: boolean;
@@ -631,28 +587,24 @@ export function reconcileStateCounts({
   const rowSetErrors: string[] = [];
   const handCountErrors: string[] = [];
 
-  if (onDisk === null) {
+  const shards = reconcileTextShardDir({ displayDir: STATE_COUNTS_PATH, rendered, onDisk });
+  if (shards.missingDir) {
     artifactErrors.push(`${STATE_COUNTS_PATH} is MISSING — the table's numbers are published by nothing.`);
-  } else {
-    for (const [name, text] of rendered) {
-      const current = onDisk.get(name);
-      if (current === undefined) {
-        artifactErrors.push(`${STATE_COUNTS_PATH}${name} is MISSING — a governed type whose counts nothing publishes.`);
-      } else if (current !== text) {
-        artifactErrors.push(
-          `${STATE_COUNTS_PATH}${name} is STALE — it does not match what the gate measures right now.\n` +
-            `    ${firstStateCountsDifference(current, text)}`,
-        );
-      }
-    }
-    for (const name of [...onDisk.keys()].sort()) {
-      if (rendered.has(name)) continue;
-      artifactErrors.push(
-        `${STATE_COUNTS_PATH}${name} is STRAY — no governed type renders it. The directory is ` +
-          'generator-owned: a type that left GOVERNED, or a file written by hand, and either way ' +
-          'numbers nothing re-renders.',
-      );
-    }
+  }
+  for (const p of shards.missing) {
+    artifactErrors.push(`${p} is MISSING — a governed type whose counts nothing publishes.`);
+  }
+  for (const { name, onDisk: current, expected } of shards.stale) {
+    artifactErrors.push(
+      `${name} is STALE — it does not match what the gate measures right now.\n` +
+        `    ${firstStateCountsDifference(current, expected)}`,
+    );
+  }
+  for (const p of shards.stray) {
+    artifactErrors.push(
+      `${p} is STRAY — no governed type renders it. The directory is generator-owned: a type ` +
+        'that left GOVERNED, or a file written by hand, and either way numbers nothing re-renders.',
+    );
   }
   if (legacyOnDisk) {
     artifactErrors.push(
