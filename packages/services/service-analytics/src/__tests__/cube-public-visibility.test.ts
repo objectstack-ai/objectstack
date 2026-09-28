@@ -28,11 +28,13 @@
  *   key (input shape, and parsed through `CubeSchema` the way `defineCube` does),
  *   are listed and answered;
  * - the three INTERNAL producers (`inferCubeFromQuery`, `compileDataset`,
- *   `CubeRegistry.inferFromObject`) mint visible cubes, so the ad-hoc KPI path
- *   and the dataset door — whose `DatasetExecutor` queries run through the
- *   same gate, asked of the call's own request scope — keep answering after
- *   the flag became enforced, and a dataset named like a hidden cube runs as
- *   itself rather than answering in a way that would reveal the hidden name.
+ *   `CubeRegistry.inferFromObject`) mint visible cubes — moot for the first,
+ *   whose cube is never registered (#20381), so no visibility verdict reads
+ *   it — so the ad-hoc KPI path and the dataset door (whose `DatasetExecutor`
+ *   queries run through the same gate, asked of the call's own request scope)
+ *   keep answering after the flag became enforced, and a dataset named like a
+ *   hidden cube runs as itself rather than answering in a way that would
+ *   reveal the hidden name.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -191,17 +193,18 @@ describe('analytics_cube.public — the controls stay open', () => {
 });
 
 describe('analytics_cube.public — the internal producers mint visible cubes', () => {
-  it('the ad-hoc KPI path: an inferred cube is answered again on the next request, and listed', async () => {
+  it('the ad-hoc KPI path: an inferred cube is answered on every request, and never registered or listed', async () => {
     const { service, aggregated } = makeService([]);
 
     await service.query({ cube: 'crm_account', measures: ['count'] });
-    // The first request REGISTERED the inferred cube; the second resolves it
-    // from the registry, which is where a hidden verdict would now refuse it.
+    // [#20381] The first request's inferred cube stayed in that request, so
+    // the second infers again — nothing registered under the name that a
+    // hidden verdict could ever refuse it by.
     await service.query({ cube: 'crm_account', measures: ['count'] });
 
     expect(aggregated).toEqual(['crm_account', 'crm_account']);
-    expect(service.cubeRegistry.get('crm_account')?.public).toBe(true);
-    expect((await service.getMeta()).map((c) => c.name)).toEqual(['crm_account']);
+    expect(service.cubeRegistry.get('crm_account')).toBeUndefined();
+    expect((await service.getMeta()).map((c) => c.name)).toEqual([]);
   });
 
   it('the dataset door: `queryDataset` runs its compiled cube through the same gate, and it answers', async () => {

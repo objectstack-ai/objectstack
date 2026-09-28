@@ -2865,9 +2865,10 @@ export class AnalyticsService implements IAnalyticsService {
       sql: cubeName,
       measures,
       dimensions,
-      // Visible: this cube is minted FOR the request that names it and is
-      // registered, so the next request resolves it from the registry — where
-      // a hidden verdict would refuse the very KPI path that minted it.
+      // Visible, and moot: this cube lives only in the request that minted it
+      // and is never registered (#20381), so no visibility verdict ever reads
+      // it — `getMeta` never sees it, and `assertCubePublic` runs before it
+      // exists. Kept as the literal the platform's own mints share.
       public: true,
     };
   }
