@@ -110,8 +110,17 @@ const CODE_PKG = {
     name: 'Code Defined', objects: [{ name: 'code_lead', fields: { title: { type: 'text' } } }],
 };
 
+/**
+ * [#20492] The admin's session carries an organization, backed by a
+ * membership: `DELETE /packages/:id` refuses an uninstall that names none
+ * before anything else runs (as the persisted delete itself does), and the
+ * rows under test here are the ones a completed uninstall serves.
+ */
+const ORG = 'org_acme';
+
 /** The permission store the shared authz resolver reads, in its shipped shapes. */
 const TABLES: Record<string, any[]> = {
+    sys_member: [{ user_id: 'u_admin', organization_id: ORG, role: 'member' }],
     sys_user: [{ id: 'u_admin', email: 'u_admin@example.com' }],
     sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg' }],
     sys_permission_set: [
@@ -161,7 +170,7 @@ function dispatcher(manifests: any[], protocol?: unknown): HttpDispatcher {
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
     };
-    const auth = { api: { getSession: async () => ({ user: { id: 'u_admin' } }) } };
+    const auth = { api: { getSession: async () => ({ user: { id: 'u_admin' }, session: { activeOrganizationId: ORG } }) } };
     const services: Record<string, unknown> = { objectql: ql, auth, ...(protocol ? { protocol } : {}) };
     return new HttpDispatcher({
         getState: () => 'running',

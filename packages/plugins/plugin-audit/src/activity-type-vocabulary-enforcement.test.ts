@@ -266,15 +266,13 @@ describe('[#8203] sys_activity.type — the writers emit declared values', () =>
   });
 
   /**
-   * The real default when a milestone omits `type`. Pinned because the spec's
-   * own field description says otherwise — `object.zod.ts` documents
-   * `activityMilestones[].type` as 'Activity type for the emitted row (default
-   * "completed")', while the code default is `activityTypeFor(action)` and a
-   * milestone can only fire on the UPDATE branch, making it `updated`.
-   * Filed separately; pinned here so the divergence is measured rather than
-   * argued from either side's prose.
+   * The real default when a milestone omits `type`: `activityTypeFor(action)`,
+   * and a milestone can only fire on the UPDATE branch, so the emitted row is
+   * `updated`. `object.zod.ts`'s `activityMilestones[].type` describe states
+   * this default (#20494); pinned here so the runtime behaviour stays
+   * measured, not just described.
    */
-  it('a milestone without `type` emits `updated` — not the "completed" the spec text claims', async () => {
+  it('a milestone without `type` keeps the update row\'s kind, `updated`', async () => {
     const { engine, storeFor } = await boot();
     await engine.insert('biz_ticket', { id: 't3', title: 'Three', stage: 'open' });
     await moveStage(engine, 't3', 'plain');
