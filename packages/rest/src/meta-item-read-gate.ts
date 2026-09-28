@@ -60,7 +60,7 @@
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
-import { resolveObjectSortability, type GetMetaItemLayeredRequest } from '@objectstack/spec/api';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import {
     ObjectSchemaMaskEvaluationError,
@@ -2496,36 +2496,11 @@ const META_ITEM_LAYERS = ['effective', 'code', 'overlay'] as const;
 /** The layers in the order the ADR-0106 mask projects them. */
 const META_ITEM_MASKED_LAYERS = ['code', 'overlay', 'effective'] as const;
 
-/** Everything {@link createMetaLayeredAnswer} reads, supplied by the transport. */
-export interface MetaLayeredAnswerSources extends MetaItemReadGateSources {
-    /**
-     * The protocol's layered read (`getMetaItemLayered`), handed the request
-     * this chain builds — the item, its `?package=` scope (ADR-0048) and the
-     * caller's organization — plus whatever the transport scopes every read by
-     * itself (`RestServer`: its environment). A THROW propagates: the transport
-     * answers that fault, ⛔ never a layered view with a layer missing.
-     *
-     * ⚠️ {@link MetaReadGateAudienceSources.resolveCaller} MUST carry
-     * {@link MetaReadGateCaller.mayWriteItem} here — the transport's own save
-     * door's admission of the item — because the layered view is a door that
-     * honours the author exemption ({@link STORED_VERSION_DOOR_POLICY}). Absent
-     * reads as `false`: every caller is served the pruned layers.
-     */
-    readLayered(request: GetMetaItemLayeredRequest): Promise<unknown>;
-}
-
 /** The request facts the layered chain reads — no transport shape. */
 export interface MetaLayeredRequest {
-    /**
-     * The `:type` segment AS RECEIVED. The protocol folds it at its own
-     * boundary, so it is handed down unfolded (a pre-fold here would hide a
-     * drift between the two from the protocol's tests); the gate and the
-     * organization are decided on the fold, here.
-     */
-    readonly type: string;
+    /** The SINGULAR type (the caller folds `/meta/apps/:name` once, at its boundary). */
+    readonly metaType: string;
     readonly name: string;
-    /** `?package=` — ONE owning package (ADR-0048), or `undefined`. */
-    readonly packageId?: string;
     /**
      * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
      * resolved by the transport BEFORE the read, the not-applicable passthrough
@@ -2554,23 +2529,30 @@ export type MetaLayeredAnswer =
 /**
  * [#5882 · #20156 · #20478] THE answer of the layered view — the three-layer
  * diagnostic projection (`code` / `overlay` / `effective`) declared by
- * `GetMetaItemLayeredResponseSchema` — on both of its spellings
- * (`GET /meta/:type/:name/layers`, and the deprecated `?layers=` flag on the item
- * read), on both transports.
+ * `GetMetaItemLayeredResponseSchema` — after the store read, on both of its
+ * spellings (`GET /meta/:type/:name/layers`, and the deprecated `?layers=` flag
+ * on the item read), on both transports.
  *
- * ## Why here
+ * ## Why one chain
  *
  * `RestServer` served both spellings through one private helper, and the
  * runtime dispatcher — the only answer on a host that mounts just the
  * `${prefix}/*` catch-all — served neither: the route answered a located
  * `404 ROUTE_NOT_FOUND`, and the flag answered the PLAIN read's
  * `{ type, name, item }` with a `200`, so a client reading `overlay` or
- * `effective` there read `undefined`, and an author was served the item pruned
- * where ruling 5856774816 serves it whole. The helper moved here, unchanged, and
- * each transport supplies only its I/O. ⛔ A step is added HERE, never in a
- * transport — one added in one of them is the defect this closed, reopened.
+ * `effective` there read `undefined`, and an author was served the app pruned
+ * where ruling 5856774816 serves it whole. Everything the helper did after the
+ * read moved here, unchanged, and each transport hands its read's answer to
+ * THIS function. ⛔ A step is added HERE, never in a transport — one added in
+ * one of them is the defect this closed, reopened.
  * `meta-list-projection-parity.test.ts` in `@objectstack/runtime` drives both
  * spellings through both transports.
+ *
+ * The read stays each transport's, in the caller's VETTED partition
+ * ({@link metaReadOrganizationId} over the folded type — the partition the plain
+ * read reads, [#9454] so an author who has just saved an org overlay is not
+ * shown `overlay: null`) and its `?package=` scope (ADR-0048), exactly as the
+ * item read's does ({@link createMetaItemAnswer}).
  *
  * Not translated and not cached, both deliberately: this is a diagnostic view of
  * what is STORED at each layer, so locale-collapsing it (or serving it from the
@@ -2578,72 +2560,69 @@ export type MetaLayeredAnswer =
  *
  * ## The steps, in `RestServer`'s order (unchanged)
  *
- *  1. The read, scoped to the caller's VETTED organization
- *     ({@link metaReadOrganizationId} over the folded type — the partition the
- *     plain read reads, [#9454] so an author who has just saved an org overlay
- *     is not shown `overlay: null`) and to `?package=` (ADR-0048).
- *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first,
- *     under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only (these are
- *     STORED versions, which Studio's designer loads and saves back), and
- *     ruling 5856774816 — a caller who may write an app reads every layer
- *     whole, and any other caller who may open it reads each layer pruned,
- *     exactly as the plain read prunes it. Every layer is judged before any is
- *     served, so a refusal sends nothing of the others.
- *  3. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
+ *  1. [#20156] THE per-caller gate on EVERY present layer, `effective` first
+ *     (it is what the plain read serves, so its refusal is the plain read's
+ *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
+ *     (these are STORED versions, which Studio's designer loads and saves
+ *     back), and ruling 5856774816 — a caller who may write the item reads
+ *     every layer whole, and any other caller who may open it reads each layer
+ *     pruned, exactly as the plain read prunes it. ⚠️ So the transport's
+ *     {@link MetaReadGateAudienceSources.resolveCaller} MUST carry
+ *     {@link MetaReadGateCaller.mayWriteItem} — its own save door's admission;
+ *     absent reads as `false` (every caller pruned). Every layer is judged
+ *     before any is served, so a refusal sends nothing of the others.
+ *  2. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
  *
- * The protocol's answer is never mutated. A layer the gate or the mask leaves
- * as it was is served as it was, and every other key of the answer
+ * The protocol's answer is never mutated. A layer the gate or the mask leaves as
+ * it was is served as it was, and every other key of the answer
  * (`overlayScope`, `_diagnostics`, the ADR-0010 protection envelope) rides
  * through untouched. With nothing behind the name the protocol answers every
- * layer `null`, and so does this chain: no layer is present to judge.
+ * layer `null`, and so does this chain: no layer is present to judge. A gate
+ * input that cannot be read REJECTS: the transport answers that fault, ⛔ never
+ * a layered view with a layer missing.
  */
-export async function createMetaLayeredAnswer(
-    sources: MetaLayeredAnswerSources,
+export function createMetaLayeredAnswer(
+    sources: MetaItemReadGateSources,
     request: MetaLayeredRequest,
-): Promise<MetaLayeredAnswer> {
-    const { type, name, packageId, maskPosture } = request;
+): (layered: unknown) => Promise<MetaLayeredAnswer> {
+    const { metaType, name, maskPosture } = request;
+    return async (raw) => {
+        const layered = raw as Record<string, unknown> | null | undefined;
 
-    // 1. [#9454 · #20408] The read, in the caller's vetted partition.
-    const organizationId = metaReadOrganizationId(type, await sources.resolveCaller());
-    const layered: any = await sources.readLayered({
-        type,
-        name,
-        ...(packageId ? { packageId } : {}),
-        ...(organizationId ? { organizationId } : {}),
-    });
-
-    // 2. [#20156] THE per-caller gate, on every present layer.
-    const served = new Map<string, unknown>();
-    {
-        const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
-        const judge = createMetaItemReadGate(
-            sources, pluralToSingular(type), name, present.map((layer) => layered[layer]), STORED_VERSION_DOOR_POLICY,
-        );
-        for (const layer of present) {
-            const verdict = await judge(layered[layer]);
-            if (verdict.kind === 'refuse') return verdict;
-            served.set(layer, verdict.document);
+        // 1. [#20156] THE per-caller gate, on every present layer.
+        const served = new Map<string, unknown>();
+        {
+            const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
+            const judge = createMetaItemReadGate(
+                sources, metaType, name, present.map((layer) => layered![layer]), STORED_VERSION_DOOR_POLICY,
+            );
+            for (const layer of present) {
+                const verdict = await judge(layered![layer]);
+                if (verdict.kind === 'refuse') return verdict;
+                served.set(layer, verdict.document);
+            }
         }
-    }
 
-    // 3. [ADR-0106 D5(4)] The mask, on every layer.
-    let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
-    for (const layer of META_ITEM_MASKED_LAYERS) {
-        const document = served.has(layer) ? served.get(layer) : layered?.[layer];
-        const masked = projectMetaObjectSchema(maskPosture, document);
-        if (!masked.ok) return { kind: 'mask-fault', object: name };
-        cacheControl ??= masked.cacheControl;
-        if (masked.document !== document) served.set(layer, masked.document);
-    }
+        // 2. [ADR-0106 D5(4)] The mask, on every layer.
+        let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
+        for (const layer of META_ITEM_MASKED_LAYERS) {
+            const document = served.has(layer) ? served.get(layer) : layered?.[layer];
+            const masked = projectMetaObjectSchema(maskPosture, document);
+            if (!masked.ok) return { kind: 'mask-fault', object: name };
+            cacheControl ??= masked.cacheControl;
+            if (masked.document !== document) served.set(layer, masked.document);
+        }
 
-    if (!layered || typeof layered !== 'object') {
-        return cacheControl ? { kind: 'serve', layered, cacheControl } : { kind: 'serve', layered };
-    }
-    const answer: Record<string, unknown> = { ...layered };
-    for (const [layer, document] of served) answer[layer] = document;
-    return cacheControl ? { kind: 'serve', layered: answer, cacheControl } : { kind: 'serve', layered: answer };
+        let answer: unknown = raw;
+        if (layered && typeof layered === 'object') {
+            const replaced: Record<string, unknown> = { ...layered };
+            for (const [layer, document] of served) replaced[layer] = document;
+            answer = replaced;
+        }
+        return cacheControl ? { kind: 'serve', layered: answer, cacheControl } : { kind: 'serve', layered: answer };
+    };
 }
 
 // ── THE book tree ─────────────────────────────────────────────────────────────

@@ -107,12 +107,12 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // context (`metaCallerOrganizationId`, and `metaReadOrganizationId` for a read
 // of one type).
 //
-// [#20478] …and the layered view's, on both of its spellings: the whole answer
-// (`createMetaLayeredAnswer` — the read in the caller's vetted partition, the
-// per-caller gate on every layer under the stored-version doors' policy, the
-// object mask and its cache posture), the deprecated `?layers=` flag's parse
-// (`wantsMetaItemLayers`) and the headers it is served under
-// (`metaItemLayersDeprecationHeaders`).
+// [#20478] …and the layered view's, on both of its spellings: its post-read
+// chain (`createMetaLayeredAnswer` — the per-caller gate on every layer under
+// the stored-version doors' policy, the object mask and its cache posture), the
+// deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
+// is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
+// transport's, scoped by `metaReadOrganizationId`.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -142,7 +142,6 @@ export type {
     MetaItemReadVerdict,
     MetaItemRequest,
     MetaLayeredAnswer,
-    MetaLayeredAnswerSources,
     MetaLayeredRequest,
     MetaListAnswer,
     MetaListAnswerSources,

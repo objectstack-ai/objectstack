@@ -77,7 +77,6 @@ import {
     type MetaItemAnswerSources,
     type MetaItemReadGateSources,
     type MetaLayeredAnswer,
-    type MetaLayeredAnswerSources,
     type MetaListAnswerSources,
     type MetaListTranslationSources,
     type MetaPublicReadRoute,
@@ -773,20 +772,22 @@ type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol
 
 /**
  * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
- * deprecated `?layers=` flag on the item read — through THE layered chain
- * (`createMetaLayeredAnswer`, the one `RestServer` serves both spellings
- * through; ⛔ no step lives here) and write its answer on this transport's wire.
+ * deprecated `?layers=` flag on the item read: read the protocol's
+ * `getMetaItemLayered` exactly as `RestServer`'s layered read reads it, hand the
+ * answer to THE layered chain (`createMetaLayeredAnswer`, the one `RestServer`
+ * serves both spellings through; ⛔ no step lives here) and write its answer on
+ * this transport's wire.
  *
- * The chain reads the protocol's `getMetaItemLayered` in the caller's VETTED
- * organization ({@link metaReadOrganizationId}, the partition the plain read
- * reads) and `?package=` scope, judges every present layer under
- * `STORED_VERSION_DOOR_POLICY` — whole for a caller this transport's save door
- * admits ({@link metaSaveVerdictOf}, carried as `mayWriteItem`), pruned as the
- * plain read prunes it for everyone else (ruling 5856774816) — and projects
- * every layer through the ADR-0106 mask under the posture resolved before the
- * read. The dispatcher served neither spelling: the route answered a located
- * `404 ROUTE_NOT_FOUND`, and the flag answered the PLAIN read's
- * `{ type, name, item }` with a `200`.
+ * The read is scoped to the caller's VETTED organization
+ * ({@link metaReadOrganizationId}, the partition the plain read reads — ⛔ never
+ * the session's claim as stored) and to `?package=` (ADR-0048). The chain
+ * judges every present layer under `STORED_VERSION_DOOR_POLICY` — whole for a
+ * caller this transport's save door admits ({@link metaSaveVerdictOf}, carried
+ * as `mayWriteItem`), pruned as the plain read prunes it for everyone else
+ * (ruling 5856774816) — and projects every layer through the ADR-0106 mask
+ * under the posture resolved before the read. The dispatcher served neither
+ * spelling: the route answered a located `404 ROUTE_NOT_FOUND`, and the flag
+ * answered the PLAIN read's `{ type, name, item }` with a `200`.
  *
  * The answers, in this transport's envelope, with `RestServer`'s status and
  * code: the layered answer (no `Vary`: it is not translated; `private,
@@ -806,15 +807,22 @@ async function answerMetaLayered(
     request: { type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture },
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
+    const { type, name, packageId, maskPosture } = request;
     const caller = context.executionContext as MetaReadGateCaller | undefined;
-    const mayWriteItem = metaSaveVerdictOf(context)(canonicalMetaUrlType(request.type), metaCallerOrganizationId(caller)).allowed;
-    const sources: MetaLayeredAnswerSources = {
-        ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
-        readLayered: (layeredRequest) => protocol.getMetaItemLayered(layeredRequest),
-    };
+    const organizationId = metaReadOrganizationId(type, caller);
+    const mayWriteItem = metaSaveVerdictOf(context)(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
     let answer: MetaLayeredAnswer;
     try {
-        answer = await createMetaLayeredAnswer(sources, request);
+        const layered = await protocol.getMetaItemLayered({
+            type,
+            name,
+            ...(packageId ? { packageId } : {}),
+            ...(organizationId ? { organizationId } : {}),
+        });
+        answer = await createMetaLayeredAnswer(
+            metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+            { metaType: pluralToSingular(type), name, maskPosture },
+        )(layered);
     } catch (e: any) {
         return withHeaders(deps.errorFromThrown(e, 500), headers);
     }

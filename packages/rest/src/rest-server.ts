@@ -3716,16 +3716,15 @@ export class RestServer {
      * old spelling answers *the same body* — two copies would let that stop
      * being true without anything failing.
      *
-     * [#20478] …and behind two TRANSPORTS: the answer is
-     * `createMetaLayeredAnswer` in `./meta-item-read-gate.ts` — the read in the
-     * caller's vetted organization (#9454) and `?package=` scope (ADR-0048), THE
-     * per-caller gate on every layer under the stored-version doors' policy
-     * (#20156, ruling 5856774816: whole for whoever may write the item, pruned
-     * as the plain read prunes it for everyone else), and the ADR-0106 mask on
-     * every layer with its cache posture — which the runtime dispatcher serves
-     * both spellings through too. ⛔ A step is added there, never here. This
-     * method keeps what is this transport's own: the ingress refusal of a
-     * repeated `?package=`, its environment, and its wire.
+     * [#20478] …and behind two TRANSPORTS: everything after the store read is
+     * `createMetaLayeredAnswer` in `./meta-item-read-gate.ts` — THE per-caller
+     * gate on every layer under the stored-version doors' policy (#20156,
+     * ruling 5856774816: whole for whoever may write the item, pruned as the
+     * plain read prunes it for everyone else) and the ADR-0106 mask on every
+     * layer with its cache posture — which the runtime dispatcher serves both
+     * spellings through too. ⛔ A step is added there, never here. The read
+     * stays this transport's, scoped by `metaReadOrganizationId`, the one
+     * answer the dispatcher's layered read asks.
      *
      * Not translated and not cached, both deliberately: this is a diagnostic
      * view of what is STORED at each layer, so locale-collapsing it (or serving
@@ -3739,36 +3738,56 @@ export class RestServer {
         p: any,
         maskPosture: ObjectSchemaMaskPosture,
     ): Promise<void> {
+        // ADR-0048 — thread `?package=` so the layered (Studio editor) view is
+        // package-scoped; the editor passes the edited item's owning package,
+        // not the studio app's.
+        //
         // [#6877] ONE owning package, so repetition is refused rather than
         // resolved: `?package=a&package=b` used to reach
         // `getMetaItemLayered({ packageId: ['a','b'] })`. Gated in the helper,
         // not in its two callers, so both entry points answer identically.
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+        const layeredPackageId = req.query?.package || undefined;
+        // [#9454] State the ORG scope, exactly as the `/published` overlay read
+        // already does. Without it the layered view resolved the env-wide row
+        // only, so an author who had just saved an org overlay opened Studio to
+        // `overlay: null` and the code layer — the write receipted as live, the
+        // editor reporting it absent. This is the DIAGNOSTIC view of what is
+        // stored per layer, so an unstated scope does not merely miss a row: it
+        // misreports the very thing being diagnosed.
+        // ⚠️ NOT a new org-resolution seam — `resolveExecCtx` is memoised per
+        // request (WeakMap keyed by `req`), the same result 40+ handlers here
+        // already share. Registry-gated via `organizationIdForMetaRead` so a
+        // non-overridable type keeps reading env-wide (see that predicate for
+        // why naming the org unconditionally would resurrect #6190's phantoms).
+        const layeredCtx = await this.resolveExecCtx(environmentId, req)
+            .catch(rethrowAuthzStoreUnavailable);
+        // [#10340] FOLDED, not raw — see the PUT door's org-scope comment for
+        // the measurement. [#20478] Asked of `metaReadOrganizationId` (the
+        // same fold over the vetted `tenantId`), the one answer the runtime
+        // dispatcher's layered read asks too.
+        const layeredOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, layeredCtx);
+        // [#9741] This door never carried an `as any`, but `p: any` meant its
+        // request literal was never checked either — the same blind spot with
+        // a different spelling. Typing the literal (spec shape + the
+        // transport-level `environmentId`, see `TransportScopedMetaRequest`)
+        // makes an undeclared key a compile error here too.
+        const layeredRequest: TransportScopedMetaRequest<GetMetaItemLayeredRequest> = {
+            type: req.params.type,
+            name: req.params.name,
+            ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+            ...(environmentId ? { environmentId } : {}),
+            ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
+        };
+        const layered = await p.getMetaItemLayered(layeredRequest);
+        // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
+        // the shared chain. The stored-version doors honour the author
+        // exemption, so the caller carries this transport's save-door
+        // admission (`metaItemReadGateSources(…, true)`).
         const answer = await metaReadGate.createMetaLayeredAnswer(
-            {
-                // [#20156] The stored-version doors honour the author exemption,
-                // so the caller carries this transport's save-door admission.
-                ...this.metaItemReadGateSources(environmentId, req, p, true),
-                // [#9741] Typed: the spec shape plus the transport-level
-                // `environmentId` (see `TransportScopedMetaRequest`), so an
-                // undeclared key is a compile error here too.
-                readLayered: (request) => {
-                    const layeredRequest: TransportScopedMetaRequest<GetMetaItemLayeredRequest> = {
-                        ...request,
-                        ...(environmentId ? { environmentId } : {}),
-                    };
-                    return p.getMetaItemLayered(layeredRequest);
-                },
-            },
-            {
-                type: req.params.type,
-                name: req.params.name,
-                // ADR-0048 — the editor passes the edited item's owning
-                // package, not the studio app's.
-                packageId: req.query?.package || undefined,
-                maskPosture,
-            },
-        );
+            this.metaItemReadGateSources(environmentId, req, p, true),
+            { metaType: RestServer.metaTypeSingular(req.params.type), name: req.params.name, maskPosture },
+        )(layered);
         switch (answer.kind) {
             case 'refuse':
                 RestServer.sendMetaReadRefusal(res, answer.refusal);
