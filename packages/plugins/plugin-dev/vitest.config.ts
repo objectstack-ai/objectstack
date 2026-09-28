@@ -62,6 +62,14 @@ export default defineConfig({
       },
       { find: /^@objectstack\/platform-objects$/, replacement: path.resolve(__dirname, '../../platform-objects/src/index.ts') },
       { find: /^@objectstack\/plugin-security$/, replacement: path.resolve(__dirname, '../plugin-security/src/index.ts') },
+      // [#20376] The setup / account app packages. `dev-plugin.ts` names them with
+      // literal `import('…')` specifiers now, so `check:test-source-alias` sees
+      // both and, unaliased, both resolve through `exports` to `dist/`. Every
+      // suite here mocks them; the mocks and the imports resolve through these
+      // same entries. Their own imports (`@objectstack/platform-objects/apps`,
+      // `@objectstack/spec/system`) are already aliased above and below.
+      { find: /^@objectstack\/setup$/, replacement: path.resolve(__dirname, '../../apps/setup/src/index.ts') },
+      { find: /^@objectstack\/account$/, replacement: path.resolve(__dirname, '../../apps/account/src/index.ts') },
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
       // Subpath BEFORE the bare package: `@objectstack/core` is a PREFIX match with a

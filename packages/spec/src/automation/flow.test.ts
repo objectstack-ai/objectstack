@@ -1106,8 +1106,8 @@ describe('BPMN — Parallel Gateway & Join Gateway', () => {
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'fork', type: 'parallel_gateway', label: 'Fork — Parallel Approval' },
-        { id: 'finance_review', type: 'connector_action', label: 'Finance Review' },
-        { id: 'legal_review', type: 'connector_action', label: 'Legal Review' },
+        { id: 'finance_review', type: 'connector_action', label: 'Finance Review', connectorConfig: { connectorId: 'finance_desk', actionId: 'request_review' } },
+        { id: 'legal_review', type: 'connector_action', label: 'Legal Review', connectorConfig: { connectorId: 'legal_desk', actionId: 'request_review' } },
         { id: 'join', type: 'join_gateway', label: 'Join — All Approved' },
         { id: 'final_approve', type: 'update_record', label: 'Final Approve', config: { objectName: 'contract', filter: { id: '{record.id}' }, fields: { status: 'approved' } } },
         { id: 'end', type: 'end', label: 'End' },
