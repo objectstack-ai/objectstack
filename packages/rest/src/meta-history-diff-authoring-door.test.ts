@@ -269,7 +269,8 @@ describe('[#20378] a member without an authoring capability is refused /diff and
         const { door, draftVersion } = await boot();
         const v = await draftVersion('app', 'atlas');
         const plain = await door('member', '/diff', 'app', 'atlas');
-        for (const query of [{ from: '0', to: String(v) }, { from: String(v - 1), to: String(v) }, { from: 'abc' }]) {
+        const ranges: Record<string, string>[] = [{ from: '0', to: String(v) }, { from: String(v - 1), to: String(v) }, { from: 'abc' }];
+        for (const query of ranges) {
             const res = await door('member', '/diff', 'app', 'atlas', query);
             expect(envelope(res), JSON.stringify(query)).toEqual({ status: 403, code: 'FORBIDDEN' });
             expect(res.body, JSON.stringify(query)).toEqual(plain.body);
