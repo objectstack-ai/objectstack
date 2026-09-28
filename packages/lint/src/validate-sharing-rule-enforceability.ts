@@ -136,6 +136,21 @@
  * the graph cannot answer for — an object this stack does not declare, a field
  * map it cannot read, a name it does not declare — is not judged here.
  *
+ * ## A field compared with a field of another comparison class (#20347)
+ *
+ * `record.status != record.amount` (text vs number) and
+ * `record.status != record.photo` (text vs a single image) hold no list, so the
+ * arm above lets them through, and they lower and are seeded just the same. The
+ * criteria query they run meets the same driver-sql check one clause later:
+ * driver-sql compiles a column-to-column comparison only between two columns of
+ * ONE comparison class and refuses the file family and formula fields outright,
+ * with the same `INVALID_FILTER` / 400 the list-holding class gets — so the
+ * consequence above holds word for word. The classification is the spec's
+ * (`crossFieldComparisonVerdict`, `@objectstack/spec/data`), read through the
+ * RLS rule's `crossClassComparisons`, which leaves every comparison against a
+ * list or an object to the arm above: one comparison, one finding. Same id, for
+ * the same reason the arm above keeps it.
+ *
  * ## What this rule deliberately does NOT do
  *
  *  - **It does not re-implement `isMatchAllCriteria`.** The seeder's second
@@ -167,12 +182,19 @@
 import { compileCelToFilter } from '@objectstack/formula';
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
-import { listHoldingComparisons } from './validate-rls-predicate-enforceability.js';
+import {
+  CROSS_CLASS_REMEDY,
+  CROSS_CLASS_SENTENCE,
+  crossClassComparisons,
+  describeCrossClassComparisons,
+  listHoldingComparisons,
+} from './validate-rls-predicate-enforceability.js';
 
 /**
  * A `condition` the runtime cannot evaluate as written: outside the pushdown
  * subset (the rule is never seeded), or a lowered comparison with a field that
- * holds a list or an object (seeded, and it grants nothing).
+ * holds a list or an object, or between two fields that share no comparison
+ * class (seeded, and it grants nothing).
  */
 export const SHARING_RULE_UNLOWERABLE_CONDITION = 'sharing-rule-unlowerable-condition';
 /** A `condition` reading `current_user.*` — unresolvable when grants are materialized. */
@@ -273,6 +295,41 @@ function listHoldingFinding(
       'value with one value, and cannot test membership in a list another column holds. Compare with a ' +
       "single-valued column, or with a literal — \"one of these values\" is `record.status in ['open', " +
       "'pending']` — or keep the value the rule keys on in a single-valued field and compare with that.",
+  };
+}
+
+/**
+ * The finding for a lowered `condition` that compares two fields sharing no
+ * comparison class — text vs number, or a file / formula field — or `null`
+ * when it compares none (see this file's header). The classification is the
+ * spec's, read through the RLS rule's `crossClassComparisons`; the consequence
+ * is the list-holding arm's, because driver-sql refuses both classes with the
+ * same check on the same criteria query.
+ */
+function crossClassFinding(
+  graph: ObjectGraph,
+  object: string,
+  filter: Record<string, unknown>,
+  at: { where: string; path: string; source: string },
+): SharingRuleEnforceabilityFinding | null {
+  const comparisons = crossClassComparisons(graph, object, filter);
+  if (comparisons.length === 0) return null;
+  return {
+    severity: 'error',
+    rule: SHARING_RULE_UNLOWERABLE_CONDITION,
+    where: at.where,
+    path: at.path,
+    message:
+      `Sharing-rule condition \`${at.source}\` lowers, but compares two fields that share no comparison class: ` +
+      `${describeCrossClassComparisons(comparisons)}. ${CROSS_CLASS_SENTENCE}: the rule is seeded into ` +
+      '`sys_sharing_rule`, but every criteria query it runs is refused on the SQL drivers (`INVALID_FILTER` / ' +
+      "400: driver-sql refuses the comparison by the two columns' declared types), and `SharingRuleService` " +
+      'reads a refused query as matching no record. No `sys_record_share` grant is ever materialised, at boot ' +
+      'or on any later write, and the only signal is a WARN line in the server log. The rule is declared and ' +
+      'grants nothing.',
+    hint:
+      `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal — "one of these ` +
+      "values\" is `record.status in ['open', 'pending']` — or test a file field with `!= null`.",
   };
 }
 
@@ -543,6 +600,12 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
         ? listHoldingFinding(graph, object, result.filter as Record<string, unknown>, { where, path, source })
         : null;
       if (listHolding) findings.push(listHolding);
+      // [#20347] …and when it compares two fields that share no comparison
+      // class — refused by the same driver check, the same way (file header).
+      const crossClass = graph
+        ? crossClassFinding(graph, object, result.filter as Record<string, unknown>, { where, path, source })
+        : null;
+      if (crossClass) findings.push(crossClass);
       return;
     }
     // Syntax belongs to `validateStackExpressions`, which already gates this
