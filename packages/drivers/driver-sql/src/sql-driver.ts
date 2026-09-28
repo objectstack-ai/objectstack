@@ -15199,7 +15199,9 @@ export class SqlDriver implements IDataDriver {
    * the audit-stamp fold run everywhere (`datetime` and `audit_timestamp`
    * since #13973, [ADR-0053 D-F1] — the former SQLite-only and the latter
    * absent before, which handed the two live dialects' `Date` through), the
-   * numeric coercion is SQLite-only, and the boolean coercion runs on SQLite
+   * numeric coercion runs everywhere (#16318 for a declared numeric column;
+   * [#20335] for `aggregate()`'s counts and totals, `AGGREGATE_ANSWER_KIND`),
+   * and the boolean coercion runs on SQLite
    * and MySQL (#11782 — the two dialects whose stored boolean is a number).
    * {@link readPresentationKind} does the dialect gating for the scalar kinds,
    * so by the time one arrives here the dialect is settled.
