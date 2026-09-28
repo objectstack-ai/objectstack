@@ -6,6 +6,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { DateGranularity } from '../data/query.zod';
 import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
@@ -868,8 +869,15 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   actionType: retiredKey(WIDGET_ACTION_RETIRED('actionType')),
   actionIcon: retiredKey(WIDGET_ACTION_RETIRED('actionIcon')),
 
-  /** Presentation-scope filter (MongoDB-style), ANDed into the dataset query as `runtimeFilter`. */
-  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)').meta({ title: 'Filter' }),
+  /**
+   * Presentation-scope filter (MongoDB-style), ANDed into the dataset query as
+   * `runtimeFilter`. [#20116] It is charted through the analytics `where` door
+   * like a dataset's own `filter`, so it is an analytics carrier: a comparand
+   * that door refuses INSIDE a nested relation
+   * (`{ acct: { stage: { $in: ['won', null] } } }`) is refused on save too —
+   * see {@link analyticsCarrierFilter} (`./analytics-carrier-filter.ts`).
+   */
+  filter: analyticsCarrierFilter().describe('Presentation-scope filter (runtimeFilter)').meta({ title: 'Filter' }),
 
   /**
    * Period-over-period comparison window.

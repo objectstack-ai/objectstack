@@ -3515,10 +3515,14 @@ export function resolveFlowScreenTitle(
  * ⚠️ Deliberately NOT registered in {@link translateMetadataDocument}'s
  * dispatch table: that table reaches the REST metadata boundary by itself
  * (`TRANSLATABLE_METADATA_TYPES` drives `@objectstack/rest`, #3786), which
- * would stand up a shipped reader of the `flows` group while its liveness
- * rows are `planned` — the wiring decision (server-side vs client-side
- * application) belongs to the downstream runner card of #11287, and the
- * ledger flip rides that card, not this one.
+ * would make it a server-side reader of the `flows` group. The wiring
+ * decision (server-side vs client-side application) belonged to the
+ * downstream runner card of #11287, and that card took the client side.
+ * objectui's `FlowRunner` overlays `flows.<flow>.screens` on the screen it
+ * draws, read at the `.objectui-sha` pin `f8a9d0fb`, and the ledger's
+ * `flows.screens` row is `live` citing it. This function stays unregistered
+ * because the server-side route is not the one taken. `flows.<flow>.label`
+ * has no reader on either side yet, so its ledger row stays `planned`.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,
