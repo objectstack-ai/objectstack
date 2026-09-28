@@ -81,24 +81,24 @@ const CUBE: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    orders_count: { name: 'orders_count', label: 'Count', type: 'count', sql: '*' },
-    total: { name: 'total', label: 'Total', type: 'sum', sql: 'amount' },
-    avg_amount: { name: 'avg_amount', label: 'Avg', type: 'avg', sql: 'amount' },
-    min_amount: { name: 'min_amount', label: 'Min', type: 'min', sql: 'amount' },
-    max_amount: { name: 'max_amount', label: 'Max', type: 'max', sql: 'amount' },
-    buyers: { name: 'buyers', label: 'Buyers', type: 'count_distinct', sql: 'buyer' },
+    orders_count: { label: 'Count', type: 'count', sql: '*' },
+    total: { label: 'Total', type: 'sum', sql: 'amount' },
+    avg_amount: { label: 'Avg', type: 'avg', sql: 'amount' },
+    min_amount: { label: 'Min', type: 'min', sql: 'amount' },
+    max_amount: { label: 'Max', type: 'max', sql: 'amount' },
+    buyers: { label: 'Buyers', type: 'count_distinct', sql: 'buyer' },
     margin: {
-      name: 'margin', label: 'Margin', type: 'number',
+      label: 'Margin', type: 'number',
       sql: 'SUM(revenue) / NULLIF(SUM(cost), 0)',
     },
     top_status: {
-      name: 'top_status', label: 'Top status', type: 'string',
+      label: 'Top status', type: 'string',
       sql: "MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END)",
     },
-    any_paid: { name: 'any_paid', label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
+    any_paid: { label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
   },
   joins: { account: { name: 'crm_account' } },
 } as never;
@@ -113,8 +113,8 @@ const DRIFT_CUBE: Cube = {
   name: 'orders_drift',
   title: 'Orders drift',
   sql: 'orders',
-  measures: { weird: { name: 'weird', label: 'Weird', type: 'median', sql: 'amount' } },
-  dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+  measures: { weird: { label: 'Weird', type: 'median', sql: 'amount' } },
+  dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
 } as never;
 
 type Refusal = Error & {

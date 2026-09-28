@@ -446,16 +446,16 @@ export const opportunityCube = defineCube({
   title: 'Opportunities',
   sql: 'opportunity',            // underlying object name (snake_case)
   public: true,
-  measures: {
-    count:  { name: 'count',  label: 'Count',        type: 'count', sql: '*' },
-    amount: { name: 'amount', label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
+  measures: {                    // the record KEY is the member's name — no inner `name`
+    count:  { label: 'Count',        type: 'count', sql: '*' },
+    amount: { label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
   },
-  dimensions: {
-    stage:            { name: 'stage',            label: 'Stage',    type: 'string', sql: 'stage' },
-    close_date:       { name: 'close_date',       label: 'Close',    type: 'time',   sql: 'close_date',
+  dimensions: {                  // queried as `opportunity.<key>`, e.g. `opportunity.stage`
+    stage:            { label: 'Stage',    type: 'string', sql: 'stage' },
+    close_date:       { label: 'Close',    type: 'time',   sql: 'close_date',
                         granularities: ['day', 'week', 'month', 'quarter', 'year'] },
-    account_industry: { name: 'account_industry', label: 'Industry', type: 'string', sql: 'account.industry' },
-    owner:            { name: 'owner',            label: 'Owner',    type: 'string', sql: 'owner' },
+    account_industry: { label: 'Industry', type: 'string', sql: 'account.industry' },
+    owner:            { label: 'Owner',    type: 'string', sql: 'owner' },
   },
 });
 ```

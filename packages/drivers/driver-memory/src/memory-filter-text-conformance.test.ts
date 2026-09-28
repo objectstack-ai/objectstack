@@ -215,14 +215,14 @@ describe('[#6682] the analytics face answers the same text rules', () => {
     title: 'Texts',
     sql: TABLE,
     measures: {
-      count: { name: 'count', label: 'Count', type: 'count', sql: 'id' },
+      count: { label: 'Count', type: 'count', sql: 'id' },
     },
     dimensions: {
-      id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-      name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
+      id: { label: 'Id', type: 'string', sql: 'id' },
+      name: { label: 'Name', type: 'string', sql: 'name' },
       // [#14079] The fixture's non-string column, declared as the number it is
       // so the `score` rows reach this face through its own vocabulary.
-      score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
+      score: { label: 'Score', type: 'number', sql: 'score' },
     },
   } as unknown as Cube;
 

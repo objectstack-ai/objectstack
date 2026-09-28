@@ -343,8 +343,8 @@ describe('[#13926] `applyReadScope` guards the JOINED object\'s scope too', () =
     name: 'sales',
     title: 'Sales',
     sql: 'opportunity',
-    measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-    dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' } },
+    measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+    dimensions: { region: { label: 'Region', type: 'string', sql: 'account.region' } },
     public: true,
   };
 

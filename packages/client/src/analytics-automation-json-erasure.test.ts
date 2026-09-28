@@ -121,10 +121,10 @@ const ACCOUNT_CUBE: Cube = {
     title: 'Accounts',
     sql: 'crm_account',
     measures: {
-        account_count: { name: 'account_count', label: 'Account count', type: 'count', sql: '*' },
+        account_count: { label: 'Account count', type: 'count', sql: '*' },
     },
     dimensions: {
-        industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
+        industry: { label: 'Industry', type: 'string', sql: 'industry' },
     },
 };
 

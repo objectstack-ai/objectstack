@@ -159,14 +159,14 @@ const joinedCube: Cube = {
   title: 'Sales by account',
   sql: 'opportunity',
   measures: {
-    revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' },
-    avg_deal: { name: 'avg_deal', label: 'Avg deal', type: 'avg', sql: 'amount' },
-    remote_sum: { name: 'remote_sum', label: 'Remote', type: 'sum', sql: 'account.balance' },
+    revenue: { label: 'Revenue', type: 'sum', sql: 'amount' },
+    avg_deal: { label: 'Avg deal', type: 'avg', sql: 'amount' },
+    remote_sum: { label: 'Remote', type: 'sum', sql: 'account.balance' },
   },
   dimensions: {
-    stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
-    region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' },
-    opened: { name: 'opened', label: 'Opened', type: 'time', sql: 'account.created_at' },
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
+    region: { label: 'Region', type: 'string', sql: 'account.region' },
+    opened: { label: 'Opened', type: 'time', sql: 'account.created_at' },
   },
   joins: {
     account: { name: 'account' },
@@ -179,8 +179,8 @@ const countOnlyCube: Cube = {
   name: 'pipeline',
   title: 'Pipeline',
   sql: 'crm_opportunity',
-  measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+  measures: { count: { label: 'Count', type: 'count', sql: '*' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
   public: true,
 };
 
@@ -538,7 +538,7 @@ describe('[#5716] the verdicts that deliberately stay an undeclared 500', () => 
     // invariant it sits beside.
     const offSpec = {
       ...countOnlyCube,
-      measures: { median_deal: { name: 'median_deal', label: 'Median', type: 'median', sql: 'amount' } },
+      measures: { median_deal: { label: 'Median', type: 'median', sql: 'amount' } },
     } as unknown as Cube;
 
     const err = await refusalFrom(() =>

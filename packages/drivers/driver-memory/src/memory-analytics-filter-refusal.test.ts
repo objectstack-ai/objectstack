@@ -48,15 +48,15 @@ const CUBE: Cube = {
   title: 'Deals',
   sql: 'deals',
   measures: {
-    count: { name: 'count', label: 'Deal Count', type: 'count', sql: 'id' },
-    totalAmount: { name: 'total_amount', label: 'Total', type: 'sum', sql: 'amount' },
+    count: { label: 'Deal Count', type: 'count', sql: 'id' },
+    totalAmount: { label: 'Total', type: 'sum', sql: 'amount' },
   },
   dimensions: {
-    stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
-    owner: { name: 'owner', label: 'Owner', type: 'string', sql: 'owner' },
-    name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
-    amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
-    closedAt: { name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at' },
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
+    owner: { label: 'Owner', type: 'string', sql: 'owner' },
+    name: { label: 'Name', type: 'string', sql: 'name' },
+    amount: { label: 'Amount', type: 'number', sql: 'amount' },
+    closedAt: { label: 'Closed At', type: 'time', sql: 'closed_at' },
   },
   public: true,
 };

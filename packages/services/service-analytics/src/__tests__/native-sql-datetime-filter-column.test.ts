@@ -34,12 +34,12 @@ const cube: Cube = {
   name: 'compliance',
   title: 'Compliance',
   sql: 'compliance_assessment',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
     // Dimension id deliberately differs from the column, so a hook that fires on
     // `assessed_at` proves the storage target resolved the real column.
-    assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
-    title: { name: 'title', label: 'Title', type: 'string', sql: 'title' },
+    assessed: { label: 'Assessed', type: 'time', sql: 'assessed_at' },
+    title: { label: 'Title', type: 'string', sql: 'title' },
   },
   public: true,
 };

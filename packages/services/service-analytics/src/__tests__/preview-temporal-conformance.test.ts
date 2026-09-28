@@ -87,8 +87,8 @@ describe('preview-evaluator — timeDimensions.dateRange temporal conformance', 
   const CUBE = {
     name: 'conformance_ds',
     sql: 'conformance',
-    dimensions: { id: { name: 'id', type: 'string', sql: 'id' } },
-    measures: { count: { name: 'count', type: 'count', sql: '*' } },
+    dimensions: { id: { type: 'string', sql: 'id' } },
+    measures: { count: { type: 'count', sql: '*' } },
   } as unknown as Cube;
 
   for (const c of TEMPORAL_CASES) {

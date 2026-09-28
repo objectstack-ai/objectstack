@@ -111,8 +111,8 @@ const bareCube: Cube = {
   name: 'pipeline',
   title: 'Pipeline',
   sql: 'crm_opportunity',
-  measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+  measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
   public: true,
 };
 

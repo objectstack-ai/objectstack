@@ -50,7 +50,7 @@ const CUBE: Cube = {
   name: 'logic',
   title: 'Logic',
   sql: 't',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
     ['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'].map((n) => [
       n,

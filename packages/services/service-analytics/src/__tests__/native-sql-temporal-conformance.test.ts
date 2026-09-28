@@ -64,11 +64,11 @@ const CUBE: Cube = {
   name: 'conformance',
   title: 'Conformance',
   sql: 'conformance',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    at: { name: 'at', label: 'At', type: 'time', sql: 'happened_at' },
-    on: { name: 'on', label: 'On', type: 'time', sql: 'happened_on' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    at: { label: 'At', type: 'time', sql: 'happened_at' },
+    on: { label: 'On', type: 'time', sql: 'happened_on' },
   },
   public: true,
 } as unknown as Cube;
