@@ -100,7 +100,9 @@ function makeDriver(native: boolean) {
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
         async find(_o: string, ast: any, opts: any) {
             reads.push({ via: 'find', ast: { ...ast }, opts });
-            return ROWS.filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+            const matched = ROWS.filter((r) => matches(r, ast?.where));
+            const page = typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+            return page.map((r) => ({ ...r }));
         },
         async findOne() { return null; },
         async create(_o: string, d: any) { return d; },
