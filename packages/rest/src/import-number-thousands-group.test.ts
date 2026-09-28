@@ -114,29 +114,31 @@ describe.each(DRIVERS)('[#20497] /import — a comma is read only as a thousands
   let ctx: Awaited<ReturnType<typeof boot>>;
   beforeEach(async () => { ctx = await boot(makeDriver); });
 
-  it('refuses each decimal-comma / stray-comma cell per row and stores the admitted controls', async () => {
-    const cells = [...REFUSED, ...ADMITTED.map(([cell]) => cell)];
+  it.each(REFUSED)('refuses %j as that row\'s invalid_number error and writes its sibling row', async (cell) => {
     const res = await ctx.importRows({
       format: 'json', writeMode: 'insert',
-      rows: cells.map((amount, i) => ({ id: `r${i}`, amount })),
+      rows: [{ id: 'bad', amount: cell }, { id: 'good', amount: 7 }],
     });
 
     expect(res._status ?? 200).toBe(200);
-    expect(res._json).toMatchObject({
-      total: cells.length, ok: ADMITTED.length, errors: REFUSED.length, created: ADMITTED.length,
+    expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
+    expect(res._json.results[0]).toMatchObject({
+      row: 1, ok: false, action: 'failed', field: 'amount', code: 'invalid_number',
     });
-    for (const [i] of REFUSED.entries()) {
-      expect(res._json.results[i]).toMatchObject({
-        row: i + 1, ok: false, action: 'failed', field: 'amount', code: 'invalid_number',
-      });
-      // Refused, not stored as some other number.
-      expect(await ctx.engine.findOne(OBJECT, { where: { id: `r${i}` } })).toBeNull();
-    }
-    for (const [j, [, stored]] of ADMITTED.entries()) {
-      const i = REFUSED.length + j;
-      expect(res._json.results[i]).toMatchObject({ row: i + 1, ok: true, action: 'created' });
-      expect((await ctx.engine.findOne(OBJECT, { where: { id: `r${i}` } }))?.amount).toBe(stored);
-    }
+    // Refused, not stored as some other number.
+    expect(await ctx.engine.findOne(OBJECT, { where: { id: 'bad' } })).toBeNull();
+    expect((await ctx.engine.findOne(OBJECT, { where: { id: 'good' } }))?.amount).toBe(7);
+  });
+
+  it.each(ADMITTED)('admits the thousands grouping %j and stores %s', async (cell, stored) => {
+    const res = await ctx.importRows({
+      format: 'json', writeMode: 'insert',
+      rows: [{ id: 'r', amount: cell }],
+    });
+
+    expect(res._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+    expect(res._json.results[0]).toMatchObject({ row: 1, ok: true, action: 'created' });
+    expect((await ctx.engine.findOne(OBJECT, { where: { id: 'r' } }))?.amount).toBe(stored);
   });
 
   it('gives the same verdicts to quoted CSV cells', async () => {

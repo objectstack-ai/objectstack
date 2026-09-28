@@ -61,7 +61,7 @@ describe('parseNumberCell', () => {
     ['$1,000', 1000],
     ['1,234%', 1234],
     ['1,000e3', 1_000_000],
-  ])('admits the well-formed thousands grouping %j as %d', (cell, n) => {
+  ])('admits the well-formed thousands grouping %j as %s', (cell, n) => {
     expect(parseNumberCell(cell)).toBe(n);
   });
 
