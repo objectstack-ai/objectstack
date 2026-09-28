@@ -160,7 +160,9 @@ const additiveProject = (): Record<string, unknown> => {
  */
 const additiveNoI18nProject = (): Record<string, unknown> => {
   const composed = composeStacks(
-    [modulePackage(), { ...corePackage(), translations: undefined } as ObjectStackDefinition],
+    // `Object.assign` onto the BUILT stack, not a spread copy: a copy drops the
+    // provenance mark and `composeStacks` refuses it (#20367 ruling B).
+    [modulePackage(), Object.assign(corePackage(), { translations: undefined }) as ObjectStackDefinition],
     { manifest: 'preserve' },
   ) as unknown as Record<string, unknown>;
   delete composed.translations;   // absent already since #14512; deleted so the
