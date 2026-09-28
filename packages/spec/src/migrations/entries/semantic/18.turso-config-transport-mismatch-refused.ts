@@ -43,8 +43,10 @@ export const entry: SemanticMigration = {
     + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
     + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
     + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
-    + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
-    + 'the first four shapes there already); what changes is that creating, testing or editing '
+    + 'when they load, so a stored row still reaches the constructor as written; the constructor '
+    + 'refuses the first four shapes there already and, since #20200, also refuses syncUrl under '
+    + 'a forced remote mode and sync with no syncUrl when the datasource boots. What changes here '
+    + 'is that creating, testing or editing '
     + 'its config through the datasource admin service, defineStack or os validate is refused at '
     + 'the key. Measured on this tree at the change: no example, template, published skill or '
     + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',

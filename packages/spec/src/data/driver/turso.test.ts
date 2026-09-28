@@ -312,7 +312,7 @@ describe('TursoConfigSchema refuses what the turso driver refuses (#19977)', () 
     }
   });
 
-  it("`syncUrl` under a forced `mode: 'remote'` — the driver ignores it, so it is refused on `syncUrl`", () => {
+  it("`syncUrl` under a forced `mode: 'remote'` — the driver refuses it when it starts, so it is refused on `syncUrl`", () => {
     for (const config of [
       { url: 'libsql://db.turso.io', mode: 'remote', syncUrl: 'libsql://db.turso.io' },
       { url: 'libsql://db.turso.io', mode: 'remote', syncUrl: 'libsql://db.turso.io', sync: { intervalSeconds: 60 } },
@@ -321,7 +321,7 @@ describe('TursoConfigSchema refuses what the turso driver refuses (#19977)', () 
       const { path, message } = refusal(config);
       expect(path).toBe('syncUrl');
       expect(message).toContain("`syncUrl` configures an embedded replica, but `mode: 'remote'`");
-      expect(message).toContain('never hands `syncUrl` to the remote client and runs no sync');
+      expect(message).toContain('builds no replica: the turso driver refuses this configuration when it starts.');
       expect(message).toContain('For a remote database, drop `syncUrl` (and `sync`).');
       expect(message).toContain("For an embedded replica, drop `mode` and point `url` at a local file beside `syncUrl`: `url: 'file:./data/replica.db'`.");
     }

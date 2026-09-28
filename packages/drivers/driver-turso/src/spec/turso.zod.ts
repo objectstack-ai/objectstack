@@ -260,8 +260,8 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
       path: 'syncUrl',
       message:
         "`syncUrl` configures an embedded replica, but `mode: 'remote'` sends every read and write "
-        + 'straight to `url` and builds no replica: the turso driver never hands `syncUrl` to the '
-        + 'remote client and runs no sync, so the setting changes nothing. For a remote database, '
+        + 'straight to `url` and builds no replica: the turso driver refuses this configuration when '
+        + 'it starts. For a remote database, '
         + `drop ${syncUrlKeys}. For an embedded replica, drop \`mode\` and point \`url\` at a local `
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
