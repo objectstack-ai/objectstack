@@ -166,11 +166,13 @@ Answered in remote mode, differently from local mode:
   presentation (a declared boolean reads back as `true` / `false`), and an
   unknown column refused with `INVALID_FIELD` / 400. A tenant-scoped call is
   refused (table above), because no remote read applies the tenant scope.
-- **`reclaimSpace()`** sends the statement local mode issues,
-  `PRAGMA incremental_vacuum`, to the remote database. It returns free pages
-  only on a database whose `auto_vacuum` mode is `INCREMENTAL`: local mode sets
-  that mode when it connects, and remote mode does not. A server that refuses
-  the statement answers `DATABASE_ERROR` / 500.
+- **`reclaimSpace()`** reads `PRAGMA freelist_count` from the remote database
+  and, when there are free pages, runs the statement local mode issues,
+  `PRAGMA incremental_vacuum`, to completion there (through the client's
+  `executeMultiple()`). It returns free pages only on a database whose
+  `auto_vacuum` mode is `INCREMENTAL`: local mode sets that mode when it
+  connects, and remote mode does not. A server that refuses either statement
+  answers `DATABASE_ERROR` / 500.
 - **`supportsRotation`** is `false`. The lifecycle service reads it, and for an
   object that declares `lifecycle.storage.strategy: 'rotation'` it then takes the
   path it has for a driver that cannot shard: an age-based reap bounded by the

@@ -10924,14 +10924,39 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Reclaim free pages after bulk deletions (ADR-0057 §3.4). On SQLite this
-   * issues `PRAGMA incremental_vacuum`, returning freelist pages to the OS —
-   * it pairs with the `auto_vacuum=INCREMENTAL` default set in {@link connect}
-   * (files created before that default need one full `VACUUM` to adopt it).
-   * Postgres/MySQL manage space via their own vacuum/purge machinery, so this
-   * is a no-op there.
+   * runs `PRAGMA incremental_vacuum` TO COMPLETION, returning every freelist
+   * page — it pairs with the `auto_vacuum=INCREMENTAL` default set in
+   * {@link connect} (files created before that default need one full `VACUUM`
+   * to adopt it). Postgres/MySQL manage space via their own vacuum/purge
+   * machinery, so this is a no-op there.
+   *
+   * "To completion" is a property of how the statement is STEPPED, not of its
+   * text. SQLite's incremental-vacuum program frees one page per step and
+   * yields a column-less result row for it, so a caller that steps once frees
+   * one page. knex's better-sqlite3 client runs a statement that declares no
+   * result columns with `Statement.run()`, which steps it once: through
+   * `knex.raw` one call freed ONE page (freelist 300 → 299, read from a second
+   * connection). An explicit page count, `incremental_vacuum(N)`, freed one
+   * page too — the count is a ceiling, not what stops the loop. So that binding
+   * is driven through its own `exec()`, which steps every statement until
+   * SQLite reports done (300 → 0). sql.js needs nothing: `driver-sqlite-wasm`'s
+   * dialect already iterates every row a PRAGMA yields (300 → 0 through the
+   * `knex.raw` below). knex's node-sqlite3 client runs a raw statement with
+   * `Database.all()`, which reads every row too (read from knex's source; that
+   * binding is not installed in this repository).
    */
   async reclaimSpace(_options?: DriverOptions): Promise<void> {
     if (!this.isSqlite) return;
+    const client = this.knex.client;
+    if (client.driverName === 'better-sqlite3') {
+      const connection = await client.acquireConnection();
+      try {
+        connection.exec('PRAGMA incremental_vacuum');
+      } finally {
+        await client.releaseConnection(connection);
+      }
+      return;
+    }
     await this.knex.raw('PRAGMA incremental_vacuum');
   }
 
