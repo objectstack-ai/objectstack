@@ -577,8 +577,11 @@ this step.
   answer the `invite_only` default already gives for an address the directory
   holds, so the widened posture buys that person no login and their sign-in
   stays `401`. A fresh address does get an account, but every posture other
-  than `invite_only` forces email verification on, so its first sign-in is
-  refused `403 EMAIL_NOT_VERIFIED` until a mail transport delivers the link.
+  than `invite_only` forces email verification on (unless an `open` deployment
+  has itself declared it off — see
+  [Email verification under each posture](#email-verification-under-each-posture)),
+  so its first sign-in is refused `403 EMAIL_NOT_VERIFIED` until a mail
+  transport delivers the link.
 - **A hand-written credential row authenticates nothing.** The `sys_account`
   row shape is public; the format of the secret stored in its `password`
   column is the platform's own. A row carrying a plaintext password is refused
@@ -632,6 +635,30 @@ refusal above for a silent success, which is the shape that behaviour exists to
 remove. If you run a real internet-facing `open` deployment and want that
 trade, open an issue saying so: it is a per-deployment decision, waiting on a
 deployment that needs it.
+
+### Email verification under each posture
+
+- **`invite_only`** follows `auth.require_email_verification`
+  (`OS_AUTH_REQUIRE_EMAIL_VERIFICATION`), off by default.
+- **`email_domain`** forces verification on, and an explicit `false` is
+  refused: the domain allowlist is the only gate there, so an unverified
+  sign-up could claim a colleague's address.
+- **`open`** forces verification on too, **unless the deployment turns it
+  off**: set `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`, or
+  `emailAndPassword.requireEmailVerification: false` in the stack config. A
+  sign-up is then signed in at once and no verification mail is sent.
+
+The `open` opt-out is for a deployment with no mail transport that trusts
+whoever can reach it, such as a pre-production environment. It is loud and it
+has a cost:
+
+- The boot logs one warning naming the posture and the consequence, and
+  `/api/v1/auth/config` reports `requireEmailVerification: false` — the value
+  actually wired.
+- Anyone can register an address they do not control. An organization
+  invitation sent to that address can then be accepted by that account.
+- It is the deployment's to declare. A `false` stored only through the
+  settings console is refused under `open`, and verification stays on.
 
 ## Go-live
 

@@ -394,8 +394,25 @@ export const CubeSchema = lazySchema(() => strictObject(
       },
     ).optional(),
 
-    /** Access Control */
-    public: z.boolean().default(false),
+    /**
+     * Visibility on the analytics API (the Cube.dev `public` semantics).
+     *
+     * Defaults to VISIBLE. `false` hides the cube from discovery
+     * (`GET /analytics/meta`) and refuses every query door that names it
+     * (`POST /analytics/query`, `POST /analytics/sql`) with `CUBE_NOT_FOUND`.
+     * It is visibility, not row security: an object's records stay governed by
+     * its permissions and row-level security on every door, whether or not a
+     * cube over it is hidden. Enforced by `@objectstack/service-analytics`
+     * (`cube-visibility.ts`). The default was `false` while nothing read the
+     * key; it moved to the mainstream default in the change that enforced it,
+     * because enforcing `false` as declared would have hidden every cube.
+     */
+    public: z.boolean().default(true).describe(
+      'Whether the analytics API exposes this cube. Default true (visible). false hides it from '
+      + 'GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it '
+      + '(CUBE_NOT_FOUND). Visibility only: the underlying object\'s permissions and row-level '
+      + 'security still govern its records on every door.'
+    ),
 
     // ADR-0010 — runtime protection envelope (internal — set by loader).
     // [#10194] See the docblock above for why this spread became load-bearing

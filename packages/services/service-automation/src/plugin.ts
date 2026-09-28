@@ -1781,7 +1781,7 @@ export class AutomationServicePlugin implements Plugin {
         );
     }
 
-    /** The action-less `status: 'error'` def a degraded instance registers (#3017). */
+    /** The action-less def a degraded instance registers (#3017). */
     private buildDegradedHuskDef(name: string, entry: DeclaredConnectorItem): Connector {
         return {
             name,
@@ -1789,9 +1789,12 @@ export class AutomationServicePlugin implements Plugin {
             description: entry.description,
             icon: entry.icon,
             type: (typeof entry.type === 'string' ? entry.type : 'api') as Connector['type'],
-            // 'error' is the ConnectorStatusSchema value for "has errors" — the
-            // husk is honest metadata, not a dispatchable connector.
-            status: 'error',
+            // What marks the husk as not dispatchable is the registry's computed
+            // `state: 'degraded'` (`registerDegradedConnector`), which
+            // `GET /connectors` publishes. It used to carry `status: 'error'` as
+            // well — the retired `ConnectorStatusSchema` value — which nothing
+            // ever read; the spec key is a tombstone now (ADR-0049), so the
+            // husk no longer writes it.
             enabled: true,
             authentication: { type: 'none' },
             // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049): it

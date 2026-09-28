@@ -85,7 +85,7 @@ const CUBE: Cube = {
       (n) => [n, { name: n, label: n, type: 'string', sql: n }],
     ),
   ),
-  public: false,
+  public: true,
 } as unknown as Cube;
 
 interface WireBearingError extends Error {

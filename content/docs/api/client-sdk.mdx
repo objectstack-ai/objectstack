@@ -319,7 +319,7 @@ const result = await client.analytics.query({
 });
 console.log(result.rows.length, result.fields[0].name); // AnalyticsResult, unwrapped
 
-// Get cube metadata — all cubes, or one with meta('account')
+// Get cube metadata — all cubes (those declared public: false are omitted), or one with meta('account')
 const meta = await client.analytics.meta('account');
 console.log(meta[0].name, meta[0].measures.length);     // the bare cube list
 

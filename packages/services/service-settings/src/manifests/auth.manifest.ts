@@ -89,7 +89,7 @@ const manifest = {
       label: 'Audience',
       required: false,
       description:
-        'Who may become a user of this environment\'s apps. Postures other than invitation-only force email verification on. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+        'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
     },
     {
       type: 'select',
@@ -103,7 +103,7 @@ const manifest = {
         { value: 'open', label: 'Open — anyone may self-register' },
       ],
       description:
-        'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Any posture other than invite_only forces email verification on and requires the self-registration permission set below.',
+        'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Both email_domain and open require the self-registration permission set below. email_domain always forces email verification on. open forces it on unless the deployment turns it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false saved in this console is refused under open.',
     },
     {
       type: 'textarea',

@@ -1370,7 +1370,7 @@ Edges connect nodes and define the execution path:
 A node has exactly two ways to split its path, and mixing them is what makes a
 guard stop guarding (#4414).
 
-**Branch on the edges** (BPMN exclusive gateway — the default choice):
+**Branch on the edges** (BPMN gateway — the default choice):
 
 ```typescript
 { id: 'check', type: 'decision', label: 'Already converted?' },   // no config
@@ -1387,6 +1387,61 @@ in parallel with `abort` — so an already-converted lead sees the abort screen
 *and* walks into the wizard behind it. Writing the negation of every sibling
 condition by hand is the only other correct spelling; `isDefault` is the one
 that stays correct when a third branch is added.
+
+**The gateway is exclusive.** When more than one out-edge carries a
+`condition`, the engine evaluates them **in the order the `edges` array
+declares them** and takes the **first** one whose condition holds — the BPMN
+exclusive gateway, Salesforce Flow's Decision element, n8n's Switch default.
+The siblings after it are not evaluated, and each records a `skipped` step in
+the run log, so a run says which branch won and which were passed over. When
+none holds, the `isDefault` edge runs. Two conditions that both hold for one
+record therefore run **one** branch, the earlier one; put the branch you want
+to win first.
+
+To take **every** out-edge whose condition holds — the BPMN inclusive gateway,
+n8n's "send to all matching outputs" — declare it on the node:
+
+```typescript
+{ id: 'route', type: 'decision', label: 'Route', config: { mode: 'inclusive' } },
+edges: [
+  { id: 'e_vip',  source: 'route', target: 'notify_account_manager', condition: 'lead.tier == "vip"' },
+  { id: 'e_big',  source: 'route', target: 'notify_finance',         condition: 'lead.amount > 100000' },
+]
+```
+
+A VIP lead over the threshold takes both, one after another (never in
+parallel). `mode` has two members, `'exclusive'` (what an omitted key means)
+and `'inclusive'`; anything else, and a `mode` written beside a `config.conditions`
+list (which is first-match on its own), is refused when the flow registers and
+by `os validate` (`flow-decision-mode-invalid`), with the same sentence at both
+doors. `os validate` also reports `flow-decision-inclusive-overlap` on an
+inclusive decision with two or more conditioned out-edges, because that is the
+shape in which more than one branch can run for one record.
+
+<Callout type="info">
+**Upgrading a flow written before protocol 18.** An edge-branched decision used
+to take every out-edge whose condition held. The ADR-0087 conversion
+`flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto every
+decision with two or more conditioned out-edges and no `mode` when the chain is
+replayed, so the migrated flow runs exactly as before; delete the key where the
+two conditions partition (`== 'a'` beside `!= 'a'`, `>` beside `<=`), which is
+the common case and the honest declaration. Nothing rewrites a flow at load: an
+author who writes two branches today gets the exclusive gateway the contract
+describes. Run `os migrate meta --from 17` to list the mechanical edits for
+existing sources; apply them by hand.
+</Callout>
+
+<Callout type="warn">
+**A flow stored from the Studio takes the new meaning (breaking).** A decision
+saved in `sys_metadata` before protocol 18 — no `config.conditions`, no `mode`,
+two or more out-edges with a `condition` — runs **first-match** after the
+upgrade, and nothing rewrites the stored row: nothing about a row says it was
+saved before the change. `os migrate meta --stored` lists every such node (flow,
+node id, label and path) on a preview and an `--apply` run alike and writes
+nothing for it, so you can review them before and after upgrading. Where a node
+meant every branch, declare `config: { mode: 'inclusive' }` on it; declaring
+`mode` either way takes it off the list.
+</Callout>
 
 **Branch on the node** (Salesforce-style decision outcomes): the node declares
 `config.conditions[]` and traversal restricts itself to the out-edge whose
@@ -1410,11 +1465,14 @@ fallback used to be silent, and a decision declaring `'Yes — already converted
 against an out-edge labelled `'Yes'` is how #4414 shipped. `os validate` reports
 the shape as `flow-branch-label-unmatched` at build time, along with
 `flow-decision-unconditional-branch` (a guarded decision with an unconditional
-sibling), `flow-default-edge-with-condition` and `flow-multiple-default-edges`.
+sibling), `flow-default-edge-with-condition`, `flow-multiple-default-edges`,
+`flow-decision-mode-invalid` and `flow-decision-inclusive-overlap`.
 
 <Callout type="warn">
 A decision node that declares **no** `conditions` reports no branch at all — it
-is a plain gateway and its out-edges do the routing.
+is a plain gateway and its out-edges do the routing: the first out-edge whose
+condition holds, in declaration order, unless the node declares
+`config: { mode: 'inclusive' }`.
 
 Declaring **both** — `config.conditions` *and* per-edge `condition`s — is
 redundant but not wrong: the node picks a branch, and then that branch's edge

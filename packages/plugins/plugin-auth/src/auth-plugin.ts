@@ -18,7 +18,7 @@ import {
 // same question. [#14157] The dev-admin seed no longer GATES on it (a
 // directory row is not a login); it still reads it to find the seed account
 // among existing users when re-arming the credential hint.
-import { isHumanUserRow } from './audience-posture.js';
+import { isHumanUserRow, OPEN_POSTURE_VERIFICATION_OFF_WARNING } from './audience-posture.js';
 // [#14157] The dev-admin seed's own precondition — "does a login exist?".
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import {
@@ -733,6 +733,17 @@ export class AuthPlugin implements Plugin {
       if (this.authManager) {
         await this.ensureAuthSettingsBound(ctx);
 
+        // [#20389] The `open` posture's verification opt-out is LOUD: once per
+        // boot, after the settings namespace (which carries the
+        // OS_AUTH_REQUIRE_EMAIL_VERIFICATION env override) has been applied,
+        // read from the same advertisement the login UI reads.
+        if (
+          this.authManager.getAudience().posture === 'open' &&
+          this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification === false
+        ) {
+          ctx.logger.warn(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
+        }
+
         let emailSvc: IEmailService | undefined;
         try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
         if (emailSvc) {
@@ -746,11 +757,16 @@ export class AuthPlugin implements Plugin {
           // misconfiguration loudly at boot instead of one failure per signup.
           const requiresEmail = !!this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification;
           if (requiresEmail) {
+            // [#20389] The second remedy is only real where the posture lets the
+            // deployment turn verification off: `email_domain` refuses it.
+            const disableRemedy = this.authManager.getAudience().posture === 'email_domain'
+              ? "; verification cannot be turned off under the 'email_domain' audience posture."
+              : ' or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).';
             ctx.logger.error(
               'Auth: email verification is REQUIRED but NO email service is registered — '
               + 'verification & password-reset emails will FAIL and new users will be locked '
-              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*) '
-              + 'or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).',
+              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*)'
+              + disableRemedy,
             );
           } else {
             ctx.logger.info('Auth: no email service registered — transactional mail disabled');
@@ -1681,7 +1697,15 @@ export class AuthPlugin implements Plugin {
         }
 
         if (Object.keys(patch).length > 0) {
-          this.authManager.applyConfigPatch(patch);
+          this.authManager.applyConfigPatch(patch, {
+            // [#20389] An `OS_AUTH_REQUIRE_EMAIL_VERIFICATION` env override is
+            // the DEPLOYMENT's declaration (the settings service reports it as
+            // source `env`, locked); anything else explicit was stored through
+            // the console. Under posture `open` only the former may turn
+            // verification off — `assertAudienceConfig` owns that verdict.
+            requireEmailVerificationFrom:
+              sources.require_email_verification === 'env' ? 'deployment' : 'console',
+          });
         }
 
         // [#11768] Audience posture (#11739) — the console switch for
@@ -1691,8 +1715,9 @@ export class AuthPlugin implements Plugin {
         // and validates the MERGED result), applied AFTER the main patch so
         // that validation judges the audience against the `emailAndPassword`
         // state this same pass just applied — an explicit
-        // `require_email_verification: false` beside a self-registration
-        // posture is a contradiction `assertAudienceConfig` refuses.
+        // `require_email_verification: false` beside `email_domain`, or beside
+        // `open` when only the console stored it (#20389), is a contradiction
+        // `assertAudienceConfig` refuses.
         //
         // #5152's rules, exactly as `membership_policy` above:
         //   - EXPLICIT-only. The manifest default (`invite_only`) is a UI

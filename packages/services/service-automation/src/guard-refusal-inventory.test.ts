@@ -62,7 +62,7 @@ function flowWithHandler(name: string, node: Record<string, unknown>) {
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
             { id: 'op', label: 'Op', ...node },
-            { id: 'handler', type: 'script' as any, label: 'Handler' },
+            { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
             { id: 'end', type: 'end' as const, label: 'End' },
         ],
         edges: [
@@ -78,8 +78,15 @@ function flowWithHandler(name: string, node: Record<string, unknown>) {
  * Every guard that must survive a declared fault edge. `node` is the operative
  * node; `expect` is a fragment of the refusal the run must fail with, so a guard
  * that starts failing for a DIFFERENT reason does not pass vacuously.
+ *
+ * `strip` (#20316): a key the node's executor contract requires is refused
+ * ABSENT at the build doors now — `registerFlow` parses first — so a flow
+ * missing it cannot register. The executor's own refusal is still the one this
+ * inventory classifies, so those rows register the node WHOLE and remove the
+ * key from the stored flow before the run: the shape an executor meets when a
+ * config reaches it past the doors.
  */
-const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string }> = [
+const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string; strip?: string }> = [
     // Since #4277 a missing REQUIRED key is refused by the executor's contract
     // parse (parse-config.ts) before the hand-written guard runs, so those
     // entries pin the parse refusal's fragment. The classification is the
@@ -88,25 +95,29 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
     {
         name: 'get_record without objectName',
         why: 'a required config key — no run can supply it',
-        node: { type: 'get_record', config: { filter: { id: 'x' } } },
+        node: { type: 'get_record', config: { objectName: 'deal', filter: { id: 'x' } } },
+        strip: 'objectName',
         expect: 'does not satisfy the get_record contract',
     },
     {
         name: 'create_record without objectName',
         why: 'a required config key',
-        node: { type: 'create_record', config: { fields: { a: 1 } } },
+        node: { type: 'create_record', config: { objectName: 'deal', fields: { a: 1 } } },
+        strip: 'objectName',
         expect: 'does not satisfy the create_record contract',
     },
     {
         name: 'update_record without objectName',
         why: 'a required config key',
-        node: { type: 'update_record', config: { fields: { a: 1 } } },
+        node: { type: 'update_record', config: { objectName: 'deal', fields: { a: 1 } } },
+        strip: 'objectName',
         expect: 'does not satisfy the update_record contract',
     },
     {
         name: 'delete_record without objectName',
         why: 'a required config key',
-        node: { type: 'delete_record', config: { filter: { id: 'x' } } },
+        node: { type: 'delete_record', config: { objectName: 'deal', filter: { id: 'x' } } },
+        strip: 'objectName',
         expect: 'does not satisfy the delete_record contract',
     },
     {
@@ -133,13 +144,15 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
     {
         name: 'http without url',
         why: 'a required config key',
-        node: { type: 'http', config: { method: 'GET' } },
+        node: { type: 'http', config: { url: 'https://example.invalid/x', method: 'GET' } },
+        strip: 'url',
         expect: 'does not satisfy the http contract',
     },
     {
         name: 'subflow without flowName',
         why: 'a required config key',
-        node: { type: 'subflow', config: {} },
+        node: { type: 'subflow', config: { flowName: 'child_flow' } },
+        strip: 'flowName',
         // #4343 moved this from a hand-written `refuseNode` to the contract
         // parse, like the CRUD entries above. Same classification, same node —
         // only the message is now derived from `SubflowConfigSchema`.
@@ -148,7 +161,8 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
     {
         name: 'map without flowName',
         why: 'a required config key — the per-item subflow',
-        node: { type: 'map', config: { collection: [] } },
+        node: { type: 'map', config: { collection: [], flowName: 'child_flow' } },
+        strip: 'flowName',
         expect: 'flowName',
     },
     {
@@ -194,7 +208,7 @@ describe('#3863 — the guard inventory stays un-routable', () => {
 
     it.each(GUARDS.map((g, i) => ({ ...g, i })))(
         '$name stays fatal with a fault edge ($why)',
-        async ({ node, expect: fragment, i }) => {
+        async ({ node, expect: fragment, i, strip }) => {
         let handlerRan = false;
         engine.registerNodeExecutor({
             type: 'script',
@@ -204,7 +218,8 @@ describe('#3863 — the guard inventory stays un-routable', () => {
             },
         });
         const flowName = `guard_case_${i}`;
-        engine.registerFlow(flowName, flowWithHandler(flowName, node) as any);
+        const stored = engine.registerFlow(flowName, flowWithHandler(flowName, node) as any);
+        if (strip) delete (stored.nodes.find((n) => n.id === 'op')!.config as Record<string, unknown>)[strip];
 
         const result = await engine.execute(flowName, { record: { id: 'r1', owner: 'usr_7' } } as any);
 
@@ -237,7 +252,7 @@ describe('#3863 — runtime failures stay routable', () => {
                 return { success: true };
             },
         });
-        engine.registerFlow('runtime_ok', flowWithHandler('runtime_ok', { type: 'script' }) as any);
+        engine.registerFlow('runtime_ok', flowWithHandler('runtime_ok', { type: 'script', config: { function: 'noop' } }) as any);
 
         const result = await engine.execute('runtime_ok');
         expect(result.success).toBe(true);
@@ -254,7 +269,7 @@ describe('#3863 — runtime failures stay routable', () => {
                 return { success: true };
             },
         });
-        engine.registerFlow('throw_ok', flowWithHandler('throw_ok', { type: 'script' }) as any);
+        engine.registerFlow('throw_ok', flowWithHandler('throw_ok', { type: 'script', config: { function: 'noop' } }) as any);
 
         const result = await engine.execute('throw_ok');
         expect(result.success).toBe(true);

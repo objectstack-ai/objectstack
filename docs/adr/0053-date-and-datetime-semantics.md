@@ -3,7 +3,7 @@
 **Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
-**Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
+**Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@object-ui/core` (`FormulaFunctions`, the client-evaluated `TODAY()`; addendum D-G1), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
 **Surfaced by**: the formula/flow guardrail series (#1928) and the templates time-relative bug family (#1874). Browser testing of `example-crm` and `templates` found that a `Field.date` compared for equality against a time function (`end_date == daysFromNow(60)`, `expires_on: { $in: [daysFromNow(30)] }`) **silently matches nothing** — and that the value is stored as a full timestamp, not a calendar day.
 
 ---
@@ -124,6 +124,18 @@ day), `$in` of dates works, and the day-window range pattern keeps working. The
    23:00 UTC-8 on the 15th, `today()` must be the 15th, not UTC's 16th.) For a
    genuine sub-day time offset, authors use `now() + duration("Nh")` — the
    documented escape hatch.
+
+   > **Addendum D-G1 (2026-09-28) — a client-evaluated `today()` names the
+   > compute-tz reference day** (objectui#10903, maintainer ruling A). A formula
+   > evaluated in the client — objectui's expression evaluator, `@object-ui/core`
+   > `FormulaFunctions`, where the function is spelled `TODAY()` — resolves
+   > `today()` to the same reference day the server resolves for that user on the
+   > compute-tz axis (items 5–6), and to the UTC day while no reference timezone
+   > reaches the client. One "today" per execution context: a preview and the
+   > saved answer agree. Not taken: the viewer's local day, and the UTC day as
+   > the permanent rule. Threading the reference timezone to the client is a
+   > follow-up once Phase 2 exposes it.
+
 7. **`datetime` rendering** uses the reference timezone at the presentation
    boundary (console, templates, reports). Storage stays UTC.
 

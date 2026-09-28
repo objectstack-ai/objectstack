@@ -1,5 +1,6 @@
 ---
-title: Auth Config
+title: Auth Config schema — System Protocol reference
+navTitle: Auth Config
 description: "Auth Config schemas of the ObjectStack System Protocol: AdvancedAuthConfig and 10 more — each property with its type, default and a TypeScript example."
 ---
 
@@ -51,7 +52,7 @@ Advanced / low-level Better-Auth options
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). Any posture other than invite_only forces email verification on. |
+| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). email_domain forces email verification on; open forces it on unless the deployment explicitly sets emailAndPassword.requireEmailVerification to false. |
 | **allowedEmailDomains** | `string[]` | optional | Email domains admitted to self-register under posture email_domain (exact, case-insensitive match; subdomains need their own entries). Required non-empty for email_domain; refused under other postures. |
 | **selfRegistrationPermissionSet** | `string` | optional | sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; refused for invite_only. admin_full_access is refused. |
 
@@ -168,7 +169,7 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). Any posture other than invite_only forces email verification on. |
+| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). email_domain forces email verification on; open forces it on unless the deployment explicitly sets emailAndPassword.requireEmailVerification to false. |
 | **allowedEmailDomains** | `string[]` | optional | Email domains admitted to self-register under posture email_domain (exact, case-insensitive match; subdomains need their own entries). Required non-empty for email_domain; refused under other postures. |
 | **selfRegistrationPermissionSet** | `string` | optional | sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; refused for invite_only. admin_full_access is refused. |
 

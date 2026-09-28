@@ -213,7 +213,12 @@ describe('http (canonical node)', () => {
         it('fails the step when url is missing', async () => {
             const engine = new AutomationEngine(createTestLogger());
             registerHttpNodes(engine, createCtx());
-            engine.registerFlow('http_flow', httpFlow('http', { method: 'GET' }));
+            // #20316 — `url` is the key the http contract requires, so a node
+            // without it is refused at registration now…
+            expect(() => engine.registerFlow('http_flow', httpFlow('http', { method: 'GET' }))).toThrow(/leaves out `url`/);
+            // …and the executor still refuses one that reaches it past the doors.
+            const stored = engine.registerFlow('http_flow', httpFlow('http', { method: 'GET', url: 'https://example.invalid/x' }));
+            delete (stored.nodes.find((n) => n.id === 'http')!.config as Record<string, unknown>).url;
             const result = await engine.execute('http_flow');
             expect(result.success).toBe(false);
             expect(result.error).toContain('url');

@@ -895,10 +895,15 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // ratchet further down still reads zero. The population is DERIVED from the
     // form, so the arrival needed no edit here; these counts are the measured
     // facts that moved with it.
-    expect(PANEL_LEAVES.length).toBe(55);
+    // 61 since #20349: that card gave `advanced` the two ADR-0066 access rows —
+    // `access` (a composite over one declared `default` select) and
+    // `requiredPermissions` — a label and a help text each, three rows and six
+    // leaves, all eighteen translated leaves authored by the same card. `advanced`
+    // reads 46 → 52; `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(61);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(46);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(52);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
@@ -908,8 +913,11 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 96 since #19331 gave `basics` its `nameField` row — the ADR-0079
     // record-title pointer the schema declared and no control offered — whose
     // label and help text are authored in all three locales by that same card,
-    // so the `openEchoes` reading below is unchanged at zero.
-    expect(OPEN_LEAVES.length).toBe(96);
+    // so the `openEchoes` reading below is unchanged at zero. 100 since #20349
+    // gave `basics` the object's two own field-name lists, `highlightFields` and
+    // `searchableFields`, beside `nameField` — four leaves, their twelve
+    // translated leaves authored by that card, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(100);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

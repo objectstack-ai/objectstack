@@ -19,20 +19,21 @@
  * INTO a `connectors:` entry. A connector's nested `webhooks[]` therefore stays
  * inside the connector document, never becomes a `webhook` metadata item, is
  * never in `declared`, and is never materialized here — no row, no warning, no
- * skip count. The shapes are not even the same: a connector's entries are
+ * skip count. The shapes were not even the same: a connector's entries were
  * `WebhookConfigSchema` (`WebhookSchema` plus `events` / `signatureAlgorithm`),
  * not the `WebhookSchema` this seeder parses.
  *
- * That gap is the DECLARED direction, not an oversight to route around. The
- * spec says so twice: `@objectstack/spec/automation/webhook` — "(Connector
- * `webhooks` remain NOT-yet-enforced — see #3197.)" — and the nested schema
- * itself (`WebhookConfigSchema`, `integration/connector.zod.ts`) — "declared
- * but ignored at registration ... parse and are stored, but no runtime
- * dispatches, emits, or filters on them". Widening this seeder to read
- * connectors would enforce a surface the spec declares unenforced; that is
- * #3197's card, not this one. The absence is pinned as behaviour by
- * `bootstrap-declared-webhooks.connector-nested.test.ts`, so this paragraph
- * cannot quietly go stale the way the sentence above it did.
+ * That gap is now CLOSED BY RETIREMENT, not an oversight to route around: the
+ * spec retired `connector.webhooks` and the `WebhookConfig` shape under ADR-0049
+ * enforce-or-remove (`integration/connector.zod.ts`, "REMOVED: `health`,
+ * `status` and the nested `webhooks`"), so the authoring doors refuse a nested
+ * array with a prescription pointing at the top-level collection, and the D2
+ * conversion `connector-resilience-keys-removed` strips it from stored rows.
+ * Widening this seeder to read connectors would resurrect a retired surface.
+ * The absence is still pinned as behaviour by
+ * `bootstrap-declared-webhooks.connector-nested.test.ts`, which drives the
+ * registry below the authoring parse, so this paragraph cannot quietly go
+ * stale the way the sentence above it did.
  *
  * ## The disconnect this closes
  * The spec authoring surface (`WebhookSchema` — `defineStack({ webhooks })`,

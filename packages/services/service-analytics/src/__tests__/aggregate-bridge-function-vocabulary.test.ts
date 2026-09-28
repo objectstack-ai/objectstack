@@ -84,7 +84,7 @@ const cubeWithMeasureType = (type: string): Cube => ({
   sql: 'opportunity',
   measures: { revenue: { name: 'revenue', label: 'Revenue', type, sql: 'amount' } as Cube['measures'][string] },
   dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'region' } },
-  public: false,
+  public: true,
 });
 
 async function analyticsVia(engine: unknown, cube: Cube): Promise<AnalyticsService> {

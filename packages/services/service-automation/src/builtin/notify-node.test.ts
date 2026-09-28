@@ -228,7 +228,13 @@ describe('notify (baseline node)', () => {
         });
 
         it('fails the step when title is missing', async () => {
-            engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'] }));
+            // #20316 — with no `template`, `title` is a key the notify contract
+            // requires, so the node is refused at registration now, in the
+            // contract's own words…
+            expect(() => engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'] }))).toThrow(/A notify node needs one content source/);
+            // …and the executor still refuses one that reaches it past the doors.
+            const stored = engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Hi' }));
+            delete (stored.nodes.find((n) => n.id === 'notify')!.config as Record<string, unknown>).title;
             const result = await engine.execute('notify_flow');
             expect(result.success).toBe(false);
             expect(result.error).toContain('title');
@@ -278,7 +284,11 @@ describe('notify (baseline node)', () => {
         });
 
         it('fails the step when no recipient is given', async () => {
-            engine.registerFlow('notify_flow', notifyFlow({ title: 'Hi' }));
+            // #20316 — refused at registration now (`recipients` is required)…
+            expect(() => engine.registerFlow('notify_flow', notifyFlow({ title: 'Hi' }))).toThrow(/leaves out `recipients`/);
+            // …and the executor still refuses one that reaches it past the doors.
+            const stored = engine.registerFlow('notify_flow', notifyFlow({ title: 'Hi', recipients: ['user_1'] }));
+            delete (stored.nodes.find((n) => n.id === 'notify')!.config as Record<string, unknown>).recipients;
             const result = await engine.execute('notify_flow');
             expect(result.success).toBe(false);
             expect(result.error).toContain('recipient');
