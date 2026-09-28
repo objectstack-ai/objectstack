@@ -703,7 +703,9 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
     it(`${locale}: no decided leaf is still recorded as an extractor fill`, () => {
       // Lit — the table really loaded, so "no entry" cannot pass by the import
       // having come back empty.
-      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length, `${locale} provenance table is empty`).toBeGreaterThan(0);
       const stillFilled = DECISIONS.filter((d) => table[provenanceKey(d)] !== undefined).map(idOf);
       expect(stillFilled, 'these leaves are still byte copies of their source revision').toEqual([]);
     });
@@ -754,7 +756,9 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
       // of my twelve is still a fill", but "no metadata type's own display pair
       // is still a fill, anywhere in this table". Lit by the table being large,
       // so a zero cannot come from an empty import.
-      expect(Object.keys(table).length).toBeGreaterThan(100);
+      // Non-empty, not a debt size: since #20462 zh-CN's objects slice holds only
+      // its declared English-by-design leaves, so the table is small by design.
+      expect(Object.keys(table).length).toBeGreaterThan(0);
       const typeLevel = Object.keys(table).filter((k) => /^metadataForms\.[^.]+\.(label|description)$/.test(k));
       expect(typeLevel, 'a metadata type display pair is still an extractor fill').toEqual([]);
     });

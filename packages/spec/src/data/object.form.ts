@@ -465,6 +465,38 @@ export const objectForm = defineForm({
         // `lifecycle.*.onlyWhen` rows — ⛔ not a reconciliation, and not this
         // row's price of admission.
         { field: 'validations', widget: 'json', helpText: 'Object-level validation rules — an array of rule objects, e.g. [{ "type": "script", "name": "amount_positive", "condition": "amount > 0", "message": "Amount must be positive" }]. State-machine transition tables are declared here too (ADR-0020)' },
+        // #19332 (flight G2b of ruling record 5861442317) — the object's
+        // declarative timeline milestones (ADR-0052 §5b.2), beside `validations`:
+        // a milestone fires on a field reaching a value, the same transition a
+        // `state_machine` rule above governs. A repeater with declared sub-rows,
+        // the `fieldGroups` repeater's face, over the four keys the entry schema
+        // has, all plain text, as plugin-audit reads them
+        // (`audit-writers.ts` `matchMilestone` / `renderMilestoneSummary`).
+        //
+        // `field` pins `widget: 'text'`, and that is a measurement, not a
+        // preference: with no `widget`, objectui's name convention turns a
+        // string sub-row named `field` into the `field-ref` picker, whose catalog
+        // an object draft never fills (it names no `object` / `objectName` /
+        // `data.object` / `interfaceConfig.source`), so the picker would offer
+        // only "None" and a new milestone could not name its field. An explicit
+        // `widget` skips the name convention; `text` is a passthrough hint, so
+        // the face is the plain text input.
+        //
+        // No authoring door judges `field` or a `{token}` of `summary`: not the
+        // parse, not the publish door, not `os validate`
+        // (`validate-object-field-refs` leaves `activityMilestones[].field` out
+        // by name). The help text claims what the runtime does with a miss.
+        {
+          field: 'activityMilestones',
+          type: 'repeater',
+          helpText: 'Timeline entries fired by a field reaching a value (ADR-0052 §5b.2): when an update moves the watched field into the value, the audit plugin writes the milestone\'s summary to the record\'s activity timeline instead of the field-change entry. The first milestone that matches wins.',
+          fields: [
+            { field: 'field', label: 'Field', widget: 'text', required: true, helpText: 'Name of the field to watch on this object (e.g. status). Nothing checks it when you save or publish: a name that is not a field of this object never fires.' },
+            { field: 'value', label: 'Value', type: 'text', required: true, helpText: 'The stored value the field must change into, compared exactly as text — for a select field the option value, not its label (e.g. done). A milestone on a number or boolean field never fires.' },
+            { field: 'summary', label: 'Summary', type: 'text', required: true, helpText: 'Timeline text (e.g. "Deal won: {name}"). A {field_name} token takes the record\'s value after the update, and the token of a lookup, master-detail or user field shows the referenced record\'s title; a token that names no field renders empty.' },
+            { field: 'type', label: 'Type', type: 'text', helpText: 'Activity type of the timeline entry: a built-in kind such as completed, or your own word, stored as written. Unset: updated.' },
+          ],
+        },
         { field: 'datasource', type: 'text', helpText: 'Target datasource ID (default: "default")' },
         // #19332 (flight G2a of ruling record 5861442317) — the object's declared
         // indexes, beside `datasource`: storage. A repeater with declared
@@ -472,12 +504,14 @@ export const objectForm = defineForm({
         // (`name`, `fields`, `unique`); `type` and `partial` are tombstones and
         // need no row.
         //
-        // `fields` is a free-text list, the `highlightFields` row's face. No
-        // authoring door judges its names: not the schema parse, not the publish
-        // door, not `os validate` (`validate-object-field-refs` leaves it to the
-        // storage layer by design). The SQL driver's `syncDeclaredIndexes` skips
-        // an index naming a column the table does not have, logging a warning,
-        // so the help text claims that and no refusal.
+        // `fields` is a free-text list, the `highlightFields` row's face. The
+        // schema parse, so a draft save, does not judge its names. Publishing and
+        // `os validate` refuse one that is not a field of this object
+        // (`object-field-ref-unknown`, `error`, since #20432). The SQL driver's
+        // `syncDeclaredIndexes` skips an index naming a column the table does
+        // not have, logging a warning, which is what still befalls a real field
+        // that is not a stored column (a formula). The help text claims exactly
+        // those three.
         //
         // `unique` is a select over `global` / `organization` ONLY, as the
         // ruling says. The node is `boolean | 'global' | 'organization'`: a
@@ -494,7 +528,7 @@ export const objectForm = defineForm({
           helpText: 'Database indexes on this object\'s table. The SQL driver creates each one the table lacks when it syncs the table; a sync never drops an index.',
           fields: [
             { field: 'name', label: 'Name', type: 'text', helpText: 'Physical index name. Unset: generated from the table and the columns (e.g. idx_task_status).' },
-            { field: 'fields', label: 'Fields', widget: 'string-tags', required: true, helpText: 'Column names of this object, in key order (e.g. status, owner). Nothing checks them when you save or publish: a name that is not a stored column makes the SQL driver skip the whole index, with a warning in the server log.' },
+            { field: 'fields', label: 'Fields', widget: 'string-tags', required: true, helpText: 'Column names of this object, in key order (e.g. status, owner). Saving does not check them; publishing and os validate refuse a name that is not a field of this object. A field that is not a stored column (a formula, say) makes the SQL driver skip the whole index, with a warning in the server log.' },
             { field: 'unique', label: 'Unique', type: 'select', helpText: 'Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope.', options: [
               { label: 'Global — one holder across the installation, over exactly these columns', value: 'global' },
               { label: 'Organization — one holder per organization (the driver prepends the organization column)', value: 'organization' },
@@ -549,6 +583,52 @@ export const objectForm = defineForm({
         // renders a list input. On a create the first branch (the list)
         // renders; the map arm is written in source or reached once stored.
         { field: 'requiredPermissions', widget: 'json', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold to reach this object, checked in addition to CRUD grants (ADR-0066 D3). A list gates every operation; a {read, create, update, delete} map gates only the operations it lists. Absent or empty: no capability gate.' },
+        // #19332 (flight G2b of ruling record 5861442317) — the share-LINK policy,
+        // after the three principal-access rows above: `sharingModel` shares with
+        // named principals, this block with whoever holds a link. A composite
+        // with declared sub-rows, the `access` / `lifecycle` face, over all six
+        // keys of the strict block, each read by plugin-sharing
+        // (`share-link-service.ts` `getPolicy`, `createLink`, `resolveToken`):
+        //
+        //   - `enabled` a switch, the `enable` toggles' face.
+        //   - `allowedAudiences` / `allowedPermissions` are arrays of an enum
+        //     whose members are all spellable option values, so they take the
+        //     `multiselect` widget objectui derives for an array of enum (the
+        //     derived `appearance.allowedVisualizations` of the view and page
+        //     forms), declared here so each choice carries a label. It writes
+        //     nothing when every choice is cleared, so the form cannot store the
+        //     empty list the service reads as "any audience".
+        //   - `maxExpiryDays` a number, `min` the schema's positive integer.
+        //   - `redactFields` a free-text list, the `highlightFields` face and for
+        //     the same reason (`field-multi` has no catalog on an object draft).
+        //     It pins its widget on purpose: a string list named `*Fields` is
+        //     otherwise turned into that very picker by objectui's name
+        //     convention. A misspelt entry is refused at publish
+        //     (`object-field-ref-unknown`, `error`), and by `os validate`.
+        //   - `eligibility` a plain CEL string (not an ADR-0089 envelope), the
+        //     `type: 'code'` / `language: 'expression'` predicate rows' face.
+        {
+          field: 'publicSharing',
+          type: 'composite',
+          helpText: 'Share-link policy: whether records of this object can be published through a link that anyone holding it opens, and on what terms. Separate from sharingModel, which shares with named users and teams. Unset or off: no link can be created, and none opens.',
+          fields: [
+            { field: 'enabled', label: 'Enabled', type: 'boolean', helpText: 'Allow share links for this object\'s records. Checked on every redemption: switching it off stops every existing link from opening, and switching it back on serves them again. Off (the default): nothing else here applies.' },
+            { field: 'allowedAudiences', label: 'Allowed Audiences', widget: 'multiselect', helpText: 'Audiences a new link may name; any other is refused. Unset: link only. Every audience still needs the link itself: signed in also needs a signed-in user, and email also needs the recipient\'s address on the link\'s list.', options: [
+              { label: 'Public', value: 'public' },
+              { label: 'Link only — anyone with the link', value: 'link_only' },
+              { label: 'Signed in — signed-in users with the link', value: 'signed_in' },
+              { label: 'Email — listed recipients with the link', value: 'email' },
+            ] },
+            { field: 'allowedPermissions', label: 'Allowed Permissions', widget: 'multiselect', helpText: 'Permission levels a new link may grant; any other is refused. Unset: view only.', options: [
+              { label: 'View', value: 'view' },
+              { label: 'Comment', value: 'comment' },
+              { label: 'Edit', value: 'edit' },
+            ] },
+            { field: 'maxExpiryDays', label: 'Max Expiry Days', type: 'number', min: 1, helpText: 'Latest expiry a new link may request, in days from now; a later one is refused. Unset: 365. It does not force an expiry: a link created without one never expires.' },
+            { field: 'redactFields', label: 'Redact Fields', widget: 'string-tags', helpText: 'Field names of this object removed from every record a link serves, whatever the audience; the owner\'s own access is unaffected. A name that is not a field of this object is refused at publish.' },
+            { field: 'eligibility', label: 'Eligibility', type: 'code', language: 'expression', helpText: 'CEL predicate over the record (e.g. record.status == \'published\'): a link is created only while it is TRUE, and an existing link stops opening once its record no longer qualifies. A predicate that does not compile, or faults, refuses the link.' },
+          ],
+        },
         // No inline `options` here, and that is a CONSTRAINT rather than a
         // preference: `FormSelectOptionSchema.value` is a system identifier
         // (`^[a-z][a-z0-9_.]*$`), so the four hyphenated members of this enum —
@@ -557,6 +637,37 @@ export const objectForm = defineForm({
         // Schema, which carries every member verbatim, and the meanings ride the
         // help text instead of a list the form face would refuse.
         { field: 'managedBy', helpText: 'Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object.' },
+        // #19332 (flight G2b of ruling record 5861442317) — the per-entry override
+        // of the matrix `managedBy` above resolves (`resolveCrudAffordances`),
+        // so it sits directly under it. A composite with declared sub-rows over
+        // all five keys of the strict block (its alias and guidance words —
+        // `new`, `export`, the VIEW block's `sort`, … — are refusals, not keys).
+        //
+        // `create` / `import` / `edit` / `delete` are each a UNION — a boolean,
+        // or a strict `{ enabled, visibleWhen, disabledWhen }` object — so the
+        // ruling's union rule applies: `json`, ⛔ never a face that can only
+        // write one arm. `json` is not a registered widget, so objectui resolves
+        // the face from the stored value's union branch: a stored boolean or a
+        // new entry (the first arm) renders a switch, and a stored object
+        // renders its three keys, whose edits merge into it. The object arm is
+        // therefore written in source and edited here once stored. `exportCsv` is
+        // a plain boolean, the `enable` toggles' face.
+        //
+        // A switch reads `false` for an unset entry, which is not what the
+        // resolved default says for most buckets, so the composite's help text
+        // states the defaults the switch cannot show.
+        {
+          field: 'userActions',
+          type: 'composite',
+          helpText: 'Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object\'s records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission.',
+          fields: [
+            { field: 'create', label: 'Create', widget: 'json', helpText: 'The New button: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the button on the record in scope, evaluated once per toolbar (the host record on a related list).' },
+            { field: 'import', label: 'Import', widget: 'json', helpText: 'The CSV import entry: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the entry on the record in scope, evaluated once per toolbar.' },
+            { field: 'edit', label: 'Edit', widget: 'json', helpText: 'Editing existing records, inline and in the form: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
+            { field: 'delete', label: 'Delete', widget: 'json', helpText: 'Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
+            { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The CSV export entry. Unset: shown, since every managedBy bucket offers export.' },
+          ],
+        },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [
           { label: 'Modal — edit form as a dialog over the current view', value: 'modal' },
           { label: 'Page — navigate to a dedicated full-page edit route', value: 'page' },

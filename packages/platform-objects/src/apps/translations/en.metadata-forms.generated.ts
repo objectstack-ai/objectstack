@@ -293,6 +293,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Validations",
         helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
       },
+      activityMilestones: {
+        label: "Activity Milestones",
+        helpText: "Timeline entries fired by a field reaching a value (ADR-0052 §5b.2): when an update moves the watched field into the value, the audit plugin writes the milestone's summary to the record's activity timeline instead of the field-change entry. The first milestone that matches wins."
+      },
+      "activityMilestones.field": {
+        label: "Field",
+        helpText: "Name of the field to watch on this object (e.g. status). Nothing checks it when you save or publish: a name that is not a field of this object never fires."
+      },
+      "activityMilestones.value": {
+        label: "Value",
+        helpText: "The stored value the field must change into, compared exactly as text — for a select field the option value, not its label (e.g. done). A milestone on a number or boolean field never fires."
+      },
+      "activityMilestones.summary": {
+        label: "Summary",
+        helpText: "Timeline text (e.g. \"Deal won: {name}\"). A {field_name} token takes the record's value after the update, and the token of a lookup, master-detail or user field shows the referenced record's title; a token that names no field renders empty."
+      },
+      "activityMilestones.type": {
+        label: "Type",
+        helpText: "Activity type of the timeline entry: a built-in kind such as completed, or your own word, stored as written. Unset: updated."
+      },
       datasource: {
         label: "Datasource",
         helpText: "Target datasource ID (default: \"default\")"
@@ -307,7 +327,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.fields": {
         label: "Fields",
-        helpText: "Column names of this object, in key order (e.g. status, owner). Nothing checks them when you save or publish: a name that is not a stored column makes the SQL driver skip the whole index, with a warning in the server log."
+        helpText: "Column names of this object, in key order (e.g. status, owner). Saving does not check them; publishing and os validate refuse a name that is not a field of this object. A field that is not a stored column (a formula, say) makes the SQL driver skip the whole index, with a warning in the server log."
       },
       "indexes.unique": {
         label: "Unique",
@@ -333,9 +353,61 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Required Permissions",
         helpText: "Capabilities (permission-set systemPermissions) a caller must hold to reach this object, checked in addition to CRUD grants (ADR-0066 D3). A list gates every operation; a {read, create, update, delete} map gates only the operations it lists. Absent or empty: no capability gate."
       },
+      publicSharing: {
+        label: "Public Sharing",
+        helpText: "Share-link policy: whether records of this object can be published through a link that anyone holding it opens, and on what terms. Separate from sharingModel, which shares with named users and teams. Unset or off: no link can be created, and none opens."
+      },
+      "publicSharing.enabled": {
+        label: "Enabled",
+        helpText: "Allow share links for this object's records. Checked on every redemption: switching it off stops every existing link from opening, and switching it back on serves them again. Off (the default): nothing else here applies."
+      },
+      "publicSharing.allowedAudiences": {
+        label: "Allowed Audiences",
+        helpText: "Audiences a new link may name; any other is refused. Unset: link only. Every audience still needs the link itself: signed in also needs a signed-in user, and email also needs the recipient's address on the link's list."
+      },
+      "publicSharing.allowedPermissions": {
+        label: "Allowed Permissions",
+        helpText: "Permission levels a new link may grant; any other is refused. Unset: view only."
+      },
+      "publicSharing.maxExpiryDays": {
+        label: "Max Expiry Days",
+        helpText: "Latest expiry a new link may request, in days from now; a later one is refused. Unset: 365. It does not force an expiry: a link created without one never expires."
+      },
+      "publicSharing.redactFields": {
+        label: "Redact Fields",
+        helpText: "Field names of this object removed from every record a link serves, whatever the audience; the owner's own access is unaffected. A name that is not a field of this object is refused at publish."
+      },
+      "publicSharing.eligibility": {
+        label: "Eligibility",
+        helpText: "CEL predicate over the record (e.g. record.status == 'published'): a link is created only while it is TRUE, and an existing link stops opening once its record no longer qualifies. A predicate that does not compile, or faults, refuses the link."
+      },
       managedBy: {
         label: "Managed By",
         helpText: "Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object."
+      },
+      userActions: {
+        label: "User Actions",
+        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission."
+      },
+      "userActions.create": {
+        label: "Create",
+        helpText: "The New button: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the button on the record in scope, evaluated once per toolbar (the host record on a related list)."
+      },
+      "userActions.import": {
+        label: "Import",
+        helpText: "The CSV import entry: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the entry on the record in scope, evaluated once per toolbar."
+      },
+      "userActions.edit": {
+        label: "Edit",
+        helpText: "Editing existing records, inline and in the form: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record."
+      },
+      "userActions.delete": {
+        label: "Delete",
+        helpText: "Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record."
+      },
+      "userActions.exportCsv": {
+        label: "Export CSV",
+        helpText: "The CSV export entry. Unset: shown, since every managedBy bucket offers export."
       },
       editMode: {
         label: "Edit Mode",
@@ -621,6 +693,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       inlineTitle: {
         label: "Inline Title",
         helpText: "Title for the inline master-detail grid on the parent record."
+      },
+      inlineColumns: {
+        label: "Inline Columns",
+        helpText: "Columns of the inline grid on the parent's form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
+      },
+      "inlineColumns.name": {
+        label: "Name",
+        helpText: "Field of this (the child) object that the column shows and edits (e.g. quantity). Nothing checks it when you save or publish: a name that is not a field of this object renders a plain text column."
+      },
+      "inlineColumns.label": {
+        label: "Label",
+        helpText: "Column header. Unset: the field's own label."
+      },
+      "inlineColumns.width": {
+        label: "Width",
+        helpText: "Fixed column width in pixels. Unset: sized by the cell type, with text columns flexing and number, date and select columns staying narrow."
+      },
+      "inlineColumns.defaultHidden": {
+        label: "Default Hidden",
+        helpText: "Start the column in the grid's column chooser instead of on screen; the user can show it. A column whose field is required is always shown."
       },
       inlineAmountField: {
         label: "Inline Amount Field",
