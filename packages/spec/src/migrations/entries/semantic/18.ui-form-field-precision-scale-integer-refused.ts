@@ -26,8 +26,9 @@ export const entry: SemanticMigration = {
     + 'parse time (ADR-0078 declared=enforced). Same no-type-gate rationale as the length '
     + 'pair entry (`ui-form-field-length-malformed-refused`): the row usually omits '
     + '`type`, so only value shape is checkable on this surface. '
-    + '⚠️ `CurrencyConfigSchema.precision` and the gantt `scale` enum are different '
-    + 'surfaces and are unchanged.',
+    + '⚠️ The gantt `scale` enum is a different surface and is unchanged. '
+    + '`CurrencyConfigSchema.precision` was also a different surface — retired in this '
+    + 'same protocol major by `currency-config-precision-removed`, not enforced here.',
   acceptanceCriteria:
     'Every form-view field row declaring `precision` or `scale` carries a non-negative '
     + 'integer. Well-formed rows (`0`, `2`, any non-negative integer) parse '
