@@ -93,6 +93,48 @@ describe('temporalStorageForm — date: an epoch-ms number is the UTC calendar d
   }
 });
 
+// [#20240] A `Date` or a number whose UTC year is 0..999 spelled that year
+// unpadded — `999-06-15` — while the ISO-string and bare-day arms spelled the
+// same day `0999-06-15`. As text `999-…` sorts above every padded day
+// (`'9' > '0'`), so over REST the number for 0999-06-15 counted `$gt` 0 /
+// `$lt` 7 on driver-memory and SQLite where its ISO string counted 6 / 0. The
+// year is now four digits. A year below 0 or above 9999 has no `YYYY-MM-DD`
+// form: it keeps the spelling it had (no ordered form is invented), and the
+// temporal-comparand door refuses it as a comparand.
+describe('temporalStorageForm — date: the year of a Date or number is four digits', () => {
+  const at = (iso: string) => Date.parse(iso);
+  const cases: ReadonlyArray<readonly [string, number]> = [
+    ['0999-06-15', -30627504000000],
+    ['0099-03-04', at('0099-03-04T12:00:00.000Z')],
+    ['0009-03-04', at('0009-03-04T00:00:00.000Z')],
+    ['0001-01-01', at('0001-01-01T00:00:00.000Z')],
+    ['0000-06-15', at('0000-06-15T00:00:00.000Z')],
+    ['0000-01-01', at('0000-01-01T00:00:00.000Z')],
+    ['1000-01-01', at('1000-01-01T00:00:00.000Z')], //   already four digits — unchanged
+    ['9999-12-31', at('9999-12-31T23:59:59.999Z')], //   the last millisecond of year 9999
+  ];
+  for (const [day, ms] of cases) {
+    it(`${day}: the number, its Date and its ISO string spell one day`, () => {
+      expect(temporalStorageForm(ms, 'date')).toBe(day);
+      expect(temporalStorageForm(new Date(ms), 'date')).toBe(day);
+      expect(temporalStorageForm(new Date(ms).toISOString(), 'date')).toBe(day);
+    });
+  }
+
+  it('the spellings sort as the days they name', () => {
+    const spelled = cases.map(([, ms]) => temporalStorageForm(ms, 'date') as string);
+    const chronological = [...cases].sort((a, b) => a[1] - b[1]).map(([day]) => day);
+    expect([...spelled].sort()).toEqual(chronological);
+  });
+
+  it('a year outside 0..9999 keeps its spelling — no ordered form is invented', () => {
+    expect(temporalStorageForm(253402300800000, 'date')).toBe('10000-01-01');
+    expect(temporalStorageForm(new Date(253402300800000), 'date')).toBe('10000-01-01');
+    expect(temporalStorageForm(-62198755200000, 'date')).toBe('-1-01-01');
+    expect(temporalStorageForm(at('-000001-12-31T23:59:59.999Z'), 'date')).toBe('-1-12-31');
+  });
+});
+
 describe('temporalStorageForm — time: the UTC wall clock, .fff only when non-zero', () => {
   const cases: ReadonlyArray<readonly [string, unknown, unknown]> = [
     ['a short wall clock', '09:00', '09:00:00'],

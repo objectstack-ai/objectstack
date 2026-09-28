@@ -24,6 +24,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } 
 // frozen in the TEST_DEBT ledger, which only ever shrinks. A new file must not
 // add the 68th.
 import { RestServer } from './rest-server.js';
+import { filterAppForUser, resolveNavServability } from './meta-item-read-gate.js';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
 // asserts against instead of inheriting the suite's quiet one. 'info' is the
@@ -76,9 +77,9 @@ const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
 const areaIds = (a: any, i: number): string[] => (a?.areas?.[i]?.navigation ?? []).map((e: any) => e.id);
 
 /** Resolve the gate the way the `/meta` routes do. */
-async function gateOf(rest: any, items?: unknown[]) {
+async function gateOf(rest: any, items?: unknown[]): Promise<any> {
     const p = createMockProtocol(items);
-    return rest.resolveNavServability(p, undefined);
+    return resolveNavServability({ ...rest.metaListSource(p, undefined), navPruneLogged: rest.navPruneLogged });
 }
 
 describe('[#7912] nav servability — the prune', () => {
@@ -100,7 +101,7 @@ describe('[#7912] nav servability — the prune', () => {
     it('drops an entry whose object is `apiEnabled: false` (404 OBJECT_API_DISABLED)', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        expect(ids(rest.filterAppForUser(app(), new Set<string>(), undefined, gate))).not.toContain('nav_jwks');
+        expect(ids(filterAppForUser(app(), new Set<string>(), undefined, gate))).not.toContain('nav_jwks');
     });
 
     it('drops an entry whose `apiMethods` whitelist omits `list` (405), a SEPARATE condition', async () => {
@@ -108,13 +109,13 @@ describe('[#7912] nav servability — the prune', () => {
         // and still cannot answer the list its nav entry navigates to.
         const rest = make();
         const gate = await gateOf(rest);
-        expect(ids(rest.filterAppForUser(app(), new Set<string>(), undefined, gate))).not.toContain('nav_verification');
+        expect(ids(filterAppForUser(app(), new Set<string>(), undefined, gate))).not.toContain('nav_verification');
     });
 
     it('⭐ CONTROL: `nav_api_keys` → `sys_api_key` SURVIVES — the prune must not over-reach', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        const out = ids(rest.filterAppForUser(app(), new Set<string>(), undefined, gate));
+        const out = ids(filterAppForUser(app(), new Set<string>(), undefined, gate));
         expect(out).toContain('nav_api_keys');
         // The card's own control, stated as the whole surviving set so an
         // over-pruning derivation cannot pass by keeping one entry alive.
@@ -124,13 +125,13 @@ describe('[#7912] nav servability — the prune', () => {
     it('an object that declares no `enable` block is served (default-open)', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        expect(ids(rest.filterAppForUser(app(), new Set<string>(), undefined, gate))).toContain('nav_inbox');
+        expect(ids(filterAppForUser(app(), new Set<string>(), undefined, gate))).toContain('nav_inbox');
     });
 
     it('an `enable` block silent about the API is served (unrestricted)', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        expect(ids(rest.filterAppForUser(app(), new Set<string>(), undefined, gate))).toContain('nav_leads');
+        expect(ids(filterAppForUser(app(), new Set<string>(), undefined, gate))).toContain('nav_leads');
     });
 });
 
@@ -152,7 +153,7 @@ describe('[#7912] nav servability — what it deliberately does NOT judge', () =
                 { id: 'nav_gated_ghost', type: 'object', objectName: 'also_absent', requiresObject: 'also_absent' },
             ],
         };
-        expect(ids(rest.filterAppForUser(app, new Set<string>(), undefined, gate)))
+        expect(ids(filterAppForUser(app, new Set<string>(), undefined, gate)))
             .toEqual(['nav_ghost', 'nav_gated_ghost']);
     });
 
@@ -167,14 +168,13 @@ describe('[#7912] nav servability — what it deliberately does NOT judge', () =
                 { id: 'nav_url', type: 'url', url: 'https://example.com' },
             ],
         };
-        expect(ids(rest.filterAppForUser(app, new Set<string>(), undefined, gate)))
+        expect(ids(filterAppForUser(app, new Set<string>(), undefined, gate)))
             .toEqual(['nav_component', 'nav_page', 'nav_url']);
     });
 
     it('fail-open: with no gate resolved, nothing is pruned (prior behaviour)', async () => {
-        const rest = make();
-        const app = { name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] };
-        expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual(['nav_jwks']);
+        const app ={ name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] };
+        expect(ids(filterAppForUser(app, new Set<string>()))).toEqual(['nav_jwks']);
     });
 
     it('fail-open: unreadable/empty object metadata resolves NO gate at all', async () => {
@@ -209,7 +209,7 @@ describe('[#7912] nav servability — reaches every tree the other gates reach',
                 ],
             }],
         };
-        const out = rest.filterAppForUser(app, new Set<string>(), undefined, gate);
+        const out = filterAppForUser(app, new Set<string>(), undefined, gate);
         expect(out.navigation[0].children.map((c: any) => c.id)).toEqual(['nav_api_keys']);
         expect(areaIds(out, 0)).toEqual(['nav_api_keys_area']);
     });
@@ -224,7 +224,7 @@ describe('[#7912] nav servability — reaches every tree the other gates reach',
                 children: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }],
             }],
         };
-        expect(ids(rest.filterAppForUser(app, new Set<string>(), undefined, gate))).toEqual([]);
+        expect(ids(filterAppForUser(app, new Set<string>(), undefined, gate))).toEqual([]);
     });
 
     it('does not mutate the app it filters', async () => {
@@ -238,7 +238,7 @@ describe('[#7912] nav servability — reaches every tree the other gates reach',
             ],
         };
         const before = JSON.stringify(app);
-        rest.filterAppForUser(app, new Set<string>(), undefined, gate);
+        filterAppForUser(app, new Set<string>(), undefined, gate);
         expect(JSON.stringify(app)).toBe(before);
     });
 });
@@ -254,7 +254,7 @@ describe('[#7912] the prune is never silent — the serving-side diagnostic', ()
     it('names the app, the entry AND the condition that pruned it (apiEnabled)', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        rest.filterAppForUser(
+        filterAppForUser(
             { name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] },
             new Set<string>(), undefined, gate,
         );
@@ -270,7 +270,7 @@ describe('[#7912] the prune is never silent — the serving-side diagnostic', ()
     it('names the OTHER condition distinctly (apiMethods without `list`)', async () => {
         const rest = make();
         const gate = await gateOf(rest);
-        rest.filterAppForUser(
+        filterAppForUser(
             { name: 'setup', navigation: [{ id: 'nav_verification', type: 'object', objectName: 'sys_verification' }] },
             new Set<string>(), undefined, gate,
         );
@@ -287,7 +287,7 @@ describe('[#7912] the prune is never silent — the serving-side diagnostic', ()
         const rest = make();
         const gate = await gateOf(rest);
         const app = { name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] };
-        for (let i = 0; i < 5; i++) rest.filterAppForUser(app, new Set<string>(), undefined, gate);
+        for (let i = 0; i < 5; i++) filterAppForUser(app, new Set<string>(), undefined, gate);
         expect(lines(warn).filter((l) => l.includes('nav_jwks'))).toHaveLength(1);
     });
 });
@@ -329,7 +329,7 @@ describe('[#7912] the served Account app is unaffected — the QA-sweep sibling'
                 { id: 'nav_account_oauth_apps', type: 'object', objectName: 'sys_oauth_application', requiresObject: 'sys_oauth_application' },
             ],
         };
-        expect(ids(rest.filterAppForUser(app, new Set<string>(), undefined, gate))).toEqual([
+        expect(ids(filterAppForUser(app, new Set<string>(), undefined, gate))).toEqual([
             'nav_account_notifications',
             'nav_account_orgs',
             'nav_account_linked',

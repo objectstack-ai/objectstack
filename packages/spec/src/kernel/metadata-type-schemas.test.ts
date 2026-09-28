@@ -260,8 +260,8 @@ const UNDECLARED_ENVELOPE_UNREGISTERED = new Set<string>([]);
  * `sharing_rule` is `.strict()`, so its undeclared envelope surfaced as a hard
  * 422 that #6245 hit; `connector` is a plain `z.object`, so it silently stripped
  * all seven keys and needed a separate card and a hand-written probe roughly a
- * day later (#6362 / PR #6900); `webhook` happened to be fine from #4001 batch
- * 11, but nothing verified that either — #6362 had to measure it by hand to find
+ * day later (commit b5404f496, PR #6900); `webhook` happened to be fine from #4001 batch
+ * 11, but nothing verified that either — commit b5404f496 had to measure it by hand to find
  * out, which is what a gate is for.
  *
  * ## The fence — this enrolls them in a TEST ITERATION, nothing else
@@ -359,15 +359,15 @@ describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS
 });
 
 /**
- * [#10194] The map's own closing invariant, pinned instead of trusted.
+ * [commit 2306a765c] The map's own closing invariant, pinned instead of trusted.
  *
  * `UNREGISTERED_KIND_SCHEMAS` closes with: "Each entry binds the SAME schema
  * its stack collection is validated against in `stack.zod.ts`, so no body can
  * be legal in a stack and illegal through `/meta` or the reverse." That
- * sentence was prose until #10194 found its converse failure mode — two stack
+ * sentence was prose until commit 2306a765c found its converse failure mode — two stack
  * collections (`themes`, `analyticsCubes`) with strict schemas and NO map
  * entry, so the divergence the sentence forbids simply lived outside the map.
- * (#10485 later retired the `themes` carrier and `ThemeSchema` whole, and the
+ * (Commit 35ad101bc later retired the `themes` carrier and `ThemeSchema` whole, and the
  * `theme` binding left the map with them — the row below went too.)
  *
  * Two halves, both load-bearing:
@@ -388,7 +388,7 @@ const STACK_COLLECTION_OF: Record<string, string> = {
   webhook: 'webhooks',
   connector: 'connectors',
   sharing_rule: 'sharingRules',
-  // theme: 'themes' — retired at #10485 (ADR-0049).
+  // theme: 'themes' — retired by commit 35ad101bc (ADR-0049).
   analytics_cube: 'analyticsCubes',
 };
 

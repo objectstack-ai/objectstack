@@ -218,7 +218,7 @@ describe('Automation Service Contract', () => {
     expect(flowEnabled).toBe(true);
   });
 
-  // [#11504] The #10025 ruling's contract half: a definition-level
+  // [commit f90e82024] The #10025 ruling's contract half: a definition-level
   // input-schema refusal is a NEVER-DISPATCHED exit with its own
   // `AutomationResult.code` member. The compile of the literal below IS the
   // assertion — the #9384 reverse verification run forward: before the union

@@ -188,7 +188,14 @@ export type TransformType = z.input<typeof TransformType>;
  *    here and tombstoned on the other two. Same name, opposite dispositions.
  * 2. `source` / `target` accept `string | string[]` here — one target field may
  *    be composed from several columns (`split` / `join`). The other two take a
- *    single `string`.
+ *    single `string`. A target may also name a declared PART of a compound
+ *    field, `field.part` (`mailing_address.street`, #20149): the import path
+ *    assembles every part one row maps into that field's one value. Which
+ *    fields are compound, and which parts they declare, is read from each
+ *    field's value schema when `indexImportMappingTargets` indexes the object
+ *    (its module-private `importTargetPartsOf`, `import-mapping-target.ts`);
+ *    `judgeImportMappingTarget`, the one verdict every door asks, then judges
+ *    a `field.part` target against that set.
  * 3. This schema is a {@link strictObject} (#4001): an unknown key THROWS with
  *    an alias/typo prescription. The other two are plain `z.object` and strip
  *    silently. Opposite failure modes under one name is exactly how a snippet
@@ -207,8 +214,11 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
   /** Source Column */
   source: z.union([z.string(), z.array(z.string())]).describe('Source column header(s)'),
 
-  /** Target Field */
-  target: z.union([z.string(), z.array(z.string())]).describe('Target object field(s)'),
+  /** Target Field — a field name, or `field.part` for a declared part of a compound field (#20149). */
+  target: z.union([z.string(), z.array(z.string())]).describe(
+    'Target object field(s); a declared part of a compound field is written field.part '
+    + '(e.g. mailing_address.street), and the parts one row maps are assembled into that field\'s value',
+  ),
 
   /** Transformation */
   transform: TransformType.default('none'),

@@ -949,3 +949,124 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
         expect(lines[0]).toContain('allowRestore');
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #20158 — the RLS read-scope judge at the PERMISSION write door.
+//
+// `validateRlsPredicateEnforceability` crossed to this door for `permission`
+// writes, and it judges every read-scope `using` with the engine's judge-only
+// admission (`IObjectQLEngine.judgeFilter`), which this door takes from its
+// HOST: `assertRuntimeAuthoringRules` probes `typeof engine.judgeFilter` and
+// hands the bound method through the pure gate. The stub host below stands in
+// for the engine's STORAGE only; the judge it carries records what it is asked.
+// The engine's real verdicts over the fifteen classes, at both doors, are
+// pinned in `packages/cli/test/rls-policy-authoring-admission.test.ts`, which
+// holds a real engine (this package may not load one: the engine depends on it).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runtime authoring gate on PERMISSION writes — the engine judge (#20158)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    const permissionRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'permission');
+
+    /** A permission set with one read-scope policy on the stub's `leave_request`. */
+    const policySet = (using: string) => ({
+        name: 'sales_team',
+        label: 'Sales Team',
+        objects: { leave_request: { allowRead: true, readScope: 'own' } },
+        rowLevelSecurity: [{ name: 'own_rows', object: 'leave_request', operation: 'select', using }],
+    });
+
+    const REFUSAL = {
+        ok: false as const,
+        code: 'FILTER_TOKEN_UNRESOLVED',
+        status: 400,
+        message: 'Filter placeholder "{current_user_id}" cannot be resolved: the request has no authenticated user.',
+    };
+
+    function hostWithJudge(verdict: { ok: true } | typeof REFUSAL) {
+        const { engine, rows } = makeStubEngine();
+        const calls: Array<{ self: unknown; object: string; where: unknown; options: unknown }> = [];
+        engine.judgeFilter = function judgeFilter(this: unknown, object: string, where: unknown, options: unknown) {
+            calls.push({ self: this, object, where, options });
+            return verdict;
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { engine, rows, calls, protocol };
+    }
+
+    it('probes the host engine for `judgeFilter` and hands it through, BOUND to that engine', async () => {
+        const { engine, rows, calls, protocol } = hostWithJudge({ ok: true });
+
+        const result = await protocol.saveMetaItem({
+            type: 'permission', name: 'sales_team', item: policySet('owner == current_user.id'),
+        });
+
+        expect(result.success).toBe(true);
+        expect(permissionRows(rows)).toHaveLength(1);
+        // Asked about the lowered read scope, on the policy's object, as a read.
+        expect(calls.map(({ object, where, options }) => ({ object, where, options }))).toEqual([
+            { object: 'leave_request', where: { owner: '__objectstack_lint_probe__' }, options: { operation: 'find' } },
+        ]);
+        // `judgeFilter` reads its engine's registry through `this`.
+        expect(calls[0]!.self).toBe(engine);
+    });
+
+    it('a judge refusal refuses the publish in the gate\'s own 422 envelope, the engine\'s sentence verbatim', async () => {
+        const { rows, protocol } = hostWithJudge(REFUSAL);
+
+        const err = await protocol.saveMetaItem({
+            type: 'permission', name: 'sales_team', item: policySet("owner == '{current_user_id}'"),
+        }).then(() => null, (e: unknown) => e);
+
+        expect({ code: (err as any)?.code, status: (err as any)?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = (err as { issues: Array<{ rule: string; path: string; message: string }> }).issues;
+        expect(issues.map((i) => ({ rule: i.rule, path: i.path }))).toEqual([
+            { rule: 'rls-predicate-unenforceable', path: 'permissions.sales_team.rowLevelSecurity[0].using' },
+        ]);
+        expect(issues[0]!.message).toContain(`(${REFUSAL.code} / ${REFUSAL.status}): ${REFUSAL.message}`);
+        expect(permissionRows(rows), 'a refused publish writes nothing').toHaveLength(0);
+    });
+
+    it('a host engine WITHOUT the member keeps its answer on a judge-only class, and the rule still runs here', async () => {
+        // The optional member's ruling (#19995 C): a host without it keeps its
+        // existing behaviour for what only the engine can judge…
+        const { engine, rows } = makeStubEngine();
+        expect(typeof engine.judgeFilter).toBe('undefined');
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        const kept = await protocol.saveMetaItem({
+            type: 'permission', name: 'sales_team', item: policySet("owner == '{current_user_id}'"),
+        });
+        expect(kept.success).toBe(true);
+        expect(permissionRows(rows)).toHaveLength(1);
+
+        // …while the rule itself now runs at this door: a predicate that does
+        // not parse as CEL was ACCEPTED here before this crossing.
+        const err = await protocol.saveMetaItem({
+            type: 'permission', name: 'audit_team',
+            item: { ...policySet("owner = 'x' AND owner = 'y'"), name: 'audit_team' },
+        }).then(() => null, (e: unknown) => e);
+        expect({ code: (err as any)?.code, status: (err as any)?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err as { issues: Array<{ rule: string }> }).issues.map((i) => i.rule)).toEqual([
+            'rls-predicate-unparseable',
+        ]);
+    });
+
+    it('a DRAFT save is not judged (D1 unchanged)', async () => {
+        const { calls, protocol } = hostWithJudge(REFUSAL);
+        const result = await protocol.saveMetaItem({
+            type: 'permission', name: 'sales_team', item: policySet("owner == '{current_user_id}'"), mode: 'draft',
+        });
+        expect(result.success).toBe(true);
+        expect(calls).toEqual([]);
+    });
+});

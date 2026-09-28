@@ -14,7 +14,7 @@ import {
   CreateManyDataResponseSchema,
   UpdateManyDataRequestSchema,
   DeleteManyDataRequestSchema,
-  // View-management schemas removed with the retired ViewProtocol (#6239, v17)
+  // View-management schemas removed with the retired ViewProtocol (commit f549a0d4a, v17)
   // Permissions
   CheckPermissionRequestSchema,
   CheckPermissionResponseSchema,
@@ -283,9 +283,9 @@ describe('ObjectStack Protocol', () => {
   });
 
   /**
-   * [#6361] `GET /api/v1/notifications` declares no pagination — on either half.
+   * [commit 90bbf2510] `GET /api/v1/notifications` declares no pagination — on either half.
    *
-   * Maintainer ruling 2026-08-07 (Option A), ruled jointly with #6363: one
+   * Maintainer ruling 2026-08-07 (Option A), ruled jointly with the `unreadCount` fix (commit 17d095413): one
    * capability's two halves are never half-deleted. `cursor` was declared on the
    * request AND the response and honoured on neither, and `limit` declared a
    * `.default(20)` no request path has ever applied (the server windows at 50).
@@ -341,7 +341,7 @@ describe('ObjectStack Protocol', () => {
     const parsedEmpty = ListNotificationsRequestSchema.parse({});
     expect(Object.prototype.hasOwnProperty.call(parsedEmpty, 'limit')).toBe(false);
     expect(ListNotificationsRequestSchema.parse({ limit: 7 }).limit).toBe(7);
-    // The response half keeps exactly #6363's landed business, and gains nothing.
+    // The response half keeps exactly what commit 17d095413 landed (`unreadCount`), and gains nothing.
     expect(ListNotificationsResponseSchema.safeParse({ notifications: [], unreadCount: 0 }).success).toBe(true);
   });
 
@@ -1653,7 +1653,7 @@ describe('meta-read request schemas declare organizationId (#9726 — declared =
 });
 
 describe('meta-read request schemas declare the draft-visibility switches (#9741 — declared = enforced)', () => {
-  // Maintainer ruling 2026-08-18 (#9741): declare `previewDrafts` / `state`
+  // Maintainer ruling 2026-08-18 (commit 2a29caa53): declare `previewDrafts` / `state`
   // exactly where the implementation enforces them, and record `environmentId`
   // as transport-level — OUT of the request shape by decision. The
   // implementation's inline parameter types are the measure:
@@ -1737,7 +1737,7 @@ describe('meta-read request schemas declare the draft-visibility switches (#9741
 });
 
 describe('environmentId stays OUT of the meta-read request shape — by decision, not omission (#9741)', () => {
-  // Maintainer ruling 2026-08-18 (#9741): `environmentId` is the
+  // Maintainer ruling 2026-08-18 (commit 2a29caa53): `environmentId` is the
   // TRANSPORT-level multi-kernel routing key. The REST layer resolves the
   // target kernel from it BEFORE the protocol call, the implementation's
   // parameter types never read it off the request, and these schemas record
@@ -1865,7 +1865,7 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
   it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read block above: if someone declares
     // the member, the parse stops stripping it and this test names the ruling
-    // they are overturning (2026-08-18 on #9741: `environmentId` is the
+    // they are overturning (2026-08-18, commit 2a29caa53: `environmentId` is the
     // multi-kernel ROUTING key; `packages/rest` layers it on top via
     // `TransportScopedMetaRequest`).
     const result = PublishMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
@@ -1890,7 +1890,7 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
 
 describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
   // Type-level pins (compiled by the spec test typecheck, the
-  // translation-typegen.test.ts pattern — same as the #9740 block above).
+  // translation-typegen.test.ts pattern — same as the getMetaItemLayered block above, commit 11b779e0f).
   // Before this declaration the cast at the REST call site carried
   // MEMBER-EXISTENCE weight (deleting it answered TS2339, not TS2353), so a
   // request literal there was typed by nothing. These pins are what turns
@@ -1916,7 +1916,7 @@ describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
     // declaration any key sailed through the `(p as any)` cast.
     const good: PublishMetaItemRequest = { type: 'view', name: 'account_list', packageId: 'pkg_crm' };
     expect(good.type).toBe('view');
-    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member.
+    // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member.
     const withEnv: PublishMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
@@ -1929,8 +1929,8 @@ import { AuditMetaItemRequestSchema, AuditMetaItemResponseSchema } from './proto
 import type { AuditMetaItemRequest, AuditMetaItemResponse } from './protocol.zod';
 
 describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (#11678)', () => {
-  // The audit door was a step BEHIND the half-declared publish door #11006
-  // adjudicated: NEITHER side was declared, and the REST call site reached the
+  // The audit door was a step BEHIND the half-declared publish door (closed by
+  // commit cccbe51bf): NEITHER side was declared, and the REST call site reached the
   // verb through `(p as any)` twice (guard + call). The measure is the
   // implementation's parameter type in `@objectstack/metadata-protocol` —
   // `{ type, name, organizationId?: string | null, limit?: number }` — and the
@@ -2046,7 +2046,7 @@ describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678
 
 describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
   // Type-level pins (compiled by the spec test typecheck, the
-  // translation-typegen.test.ts pattern — same as the #9740 and #11006 blocks
+  // translation-typegen.test.ts pattern — same as the getMetaItemLayered (commit 11b779e0f) and publishMetaItem (commit cccbe51bf) blocks
   // above). Before this declaration the casts at the REST call site carried
   // MEMBER-EXISTENCE weight (TS2339, not TS2353), so the request literal
   // there was typed by nothing. These pins are what turns red if the member
@@ -2067,7 +2067,7 @@ describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
   it('refuses an undeclared key at the member call shape', () => {
     const good: AuditMetaItemRequest = { type: 'view', name: 'account_list', organizationId: null };
     expect(good.type).toBe('view');
-    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member (and #8747 removed it from this door's wire payload entirely).
+    // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member (and #8747 removed it from this door's wire payload entirely).
     const withEnv: AuditMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
@@ -2244,7 +2244,7 @@ describe('MetadataProtocol declares historyMetaItem (#12005)', () => {
   it('refuses an undeclared key at the member call shape', () => {
     const good: HistoryMetaItemRequest = { type: 'view', name: 'account_list', sinceSeq: 3, limit: 50 };
     expect(good.type).toBe('view');
-    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member (the REST door's spread of it rides the TransportScopedMetaRequest wrapper, never this shape).
+    // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member (the REST door's spread of it rides the TransportScopedMetaRequest wrapper, never this shape).
     const withEnv: HistoryMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
@@ -2322,7 +2322,7 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
     // the reset door DOES spread `environmentId` into its outgoing payload,
     // and that member rides `packages/rest`'s `TransportScopedMetaRequest`
     // envelope — never this schema. If someone declares it, this test names
-    // the ruling they are overturning (2026-08-18 on #9741).
+    // the ruling they are overturning (2026-08-18, commit 2a29caa53).
     const result = DeleteMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -2358,7 +2358,7 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
       dropStorage: true,
     };
     expect(good.type).toBe('view');
-    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
+    // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: DeleteMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
@@ -2485,7 +2485,7 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
     // outgoing payload, and that member rides `packages/rest`'s
     // `TransportScopedMetaRequest` envelope — never this schema. If someone
     // declares it, this test names the ruling they are overturning
-    // (2026-08-18 on #9741).
+    // (2026-08-18, commit 2a29caa53).
     const result = SaveMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -2540,7 +2540,7 @@ describe('MetadataProtocol.saveMetaItem types against the caught-up request sche
       writeFace: 'meta-dispatch',
     };
     expect(good.type).toBe('view');
-    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
+    // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: SaveMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
     // @ts-expect-error `source` is implementation-internal provenance — no producer on this contract sends it, and the REST layer never reads it off the wire.

@@ -43,7 +43,10 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
-import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
+import {
+  assertHavingTemporalComparandsInterpretable,
+  assertTemporalComparandsInterpretable,
+} from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
@@ -213,7 +216,7 @@ import {
 // `resolveMetadataItemName` below for why this registrar lost its fourth copy.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -11751,7 +11754,11 @@ export class ObjectQL implements IObjectQLEngine {
     // those arms, and the families it does not carry).
     // `update()` deliberately does not default (#2706: a PATCH's explicit
     // `null` means "clear it"), so neither does an `update`-mode preview.
-    const rawRows = Array.isArray(data) ? data : [data];
+    // [#20308] The write doors read a blank on a non-string-typed column as
+    // `null` before anything else; the preview does the same at the same point,
+    // or a blank on a required field with a `defaultValue` would preview
+    // `required` while the write takes the default.
+    const rawRows = normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]);
     const nowSnapshot = new Date();
     // [#20082] The preview's ONE permission resolution, shared by its CEL
     // defaults and its option gates below, exactly as the write shares one. A
@@ -11916,6 +11923,14 @@ export class ObjectQL implements IObjectQLEngine {
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
     this.enforceTransactionOrigin(object, driver, 'insert');
+
+    // [#20308] A blank on a non-string-typed column is `null` from here on —
+    // before the middleware, the caller snapshot, the defaults, the hooks and
+    // validation read the payload, so all of them see one image (a blank then
+    // takes a `defaultValue` exactly as `null` does). See
+    // `normalizeBlankTypedValues` for the scope; it never mutates the caller's
+    // rows.
+    data = normalizeBlankTypedValues(this._registry.getObject(object), data);
 
     const opCtx: OperationContext = {
       object,
@@ -12954,6 +12969,13 @@ export class ObjectQL implements IObjectQLEngine {
      // so an unresolved `{current_user_id}` would be bound as the primary key
      // itself. Resolve first, then extract.
      options = this.withResolvedWhere(options);
+
+     // [#20308] The insert door's rule, same place: a blank on a
+     // non-string-typed column is `null` before the middleware, the
+     // caller-value snapshot (`suppliedValues`), the hooks, the read-only
+     // strips and validation read the payload — so a `readonlyWhen` lock judges
+     // the value it snapshotted. See `normalizeBlankTypedValues`.
+     data = normalizeBlankTypedValues(this._registry.getObject(object), data);
 
      // 1. Extract ID from data or where if it's a single update by ID.
      //    Only a SCALAR `where.id` means "update one row by primary key". An
@@ -16389,6 +16411,19 @@ export class ObjectQL implements IObjectQLEngine {
               aggregatedRowColumns(query.groupBy, query.aggregations),
               havingColumnClasses,
           );
+          // [#20263] …and last, the TEMPORAL-comparand door `where` (#8690) and
+          // the per-aggregation `filter` (#20148) take: the same walk and the
+          // same `@objectstack/core` predicate, with each column's kind read
+          // from the class #20127 derived above (`min` / `max` of a temporal
+          // field keeps its kind, a `day` bucket is a date, `count` / `sum` /
+          // `avg` are not temporal). A comparand the column's storage rule
+          // cannot read (`'not-a-date'`, a `date` year outside 0..9999) was
+          // compared as written and kept no group or every group, on both
+          // `applyHaving` doors, while its `where` twin answered 400. After
+          // every other `having` door, so a clause one of them refuses keeps
+          // that refusal's words; on the caller's own clause, before the
+          // bigint narrowing, which is what `where`'s object form judges.
+          assertHavingTemporalComparandsInterpretable(object, query.having, havingColumnClasses, query);
           if (having !== query.having) query = { ...query, having };
       }
       const driver = this.getDriver(object);

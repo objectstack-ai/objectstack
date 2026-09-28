@@ -15,6 +15,7 @@
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
+ *   node scripts/pm/dispatch-gates.mjs --tier --repo <sister> <path> ...  # a GOVERNED sister repo's tier verdict, from the path globs ALONE
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
  * A path NAMED on argv that is not in this tree has two readings — a surface of
@@ -463,7 +464,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 // The human-merge line threshold is declared ONCE, in the landing gate; this
 // tool prints the same reading at dispatch time and never carries a second copy.
-import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
+import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD, SELF_REPO_ID, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
 // The test-file predicate the clause-② suspect table EXCEPTS by, read from the
 // gate whose whole question is which files under a package's `src/` are
 // published source and which are its tests — never respelled here (#19936). See
@@ -3255,8 +3256,16 @@ function populationMarkerPattern(key) {
  *
  * The `--` is SPACE-delimited on both sides here (never `[ \t]*`), because a
  * path may legitimately contain one and a bare separator would split it.
+ *
+ * ⚠️ `local-env` shares this grammar with a list of ENVIRONMENT NAMES in the
+ * path position (#20278). The grammar is LIST-then-reason and never reads what
+ * the list holds; each key's own reader does (`declaredLocalEnv` refuses a
+ * token that is not an env name). The roster keeps its name for the reason
+ * `REASON_TAIL_MARKER_KEYS` states: a rename would move what a reader greps for
+ * without moving a behaviour, and a third builder would be the copy of this
+ * pattern the refusal below forbids.
  */
-const PATH_LIST_MARKER_KEYS = Object.freeze(['inherited-population', 'self-test-reads']);
+const PATH_LIST_MARKER_KEYS = Object.freeze(['inherited-population', 'self-test-reads', 'local-env']);
 
 function pathListMarkerPattern(key) {
   if (!PATH_LIST_MARKER_KEYS.includes(key)) {
@@ -3305,7 +3314,7 @@ const MARKER_REASON_GRAMMARS = Object.freeze(Object.fromEntries([
  * ⚠️ Still spelled `readPopulationMarker` for the reason
  * `REASON_TAIL_MARKER_KEYS` states: the exported half of this machinery is
  * named `population*` and a reader greps for it. `MARKER_REASON_GRAMMARS` is
- * the authority on which keys it reads — today all six, population or not.
+ * the authority on which keys it reads — today all seven, population or not.
  *
  * Returns `{ form, kind, line, reason, cut, match }`, or null when this source
  * carries no usable declaration of that key — no match, or a match whose reason
@@ -4637,6 +4646,18 @@ export function ciOnlyMeasurement(entry, rootScripts = {}) {
  *             LIVE: `check-governed-queue-guard.mjs`, whose step also passes
  *             `GITHUB_TOKEN: ${{ … }}` — #14004's own specimen.
  *
+ * and one limb that is per NAME rather than per family (#20278):
+ *
+ *   localEnv  the script's own `local-env` declaration names values its BARE
+ *             invocation does not need (`declaredLocalEnv`, graded by
+ *             `localEnvRefusal`, scoped by `localEnvAdmitted`). Only the
+ *             declared names leave the list, so a name the script did not
+ *             declare still keeps the family out. LIVE:
+ *             `check-issue-citations.mjs`, whose `lint.yml` step passes
+ *             `GITHUB_TOKEN` and `OS_GATE_MERGE_GROUP_BASE_SHA` and whose own
+ *             declaration says the pull-request run needs neither — while its
+ *             `--census` sibling, which declares nothing, keeps `GITHUB_TOKEN`.
+ *
  * ⚠️ What this does NOT claim, and it is `payloadEnvDependence`'s caveat
  * unchanged: that the gate READS the variable. It reads what the WORKFLOW
  * passes, not what the program consumes, so the family stays NAMED with its
@@ -4649,7 +4670,8 @@ export function workflowEnvValues(entry) {
   if (entry.selfTest) return [];
   if (!entry.direct) return [];
   if (entry.ciOnly) return [];
-  return [...names];
+  const admitted = localEnvAdmitted(entry);
+  return names.filter((name) => !admitted.includes(name));
 }
 
 /**
@@ -4875,6 +4897,132 @@ export function declaredSelfTestReads(scriptSource, readTargets, file = null) {
     );
   }
   return { population, reason };
+}
+
+/**
+ * A GATE SCRIPT's own declaration that its BARE invocation answers CI's
+ * question here WITHOUT some of the values its workflow step passes through
+ * `env:` — a whole-line comment anywhere in the script's source (#20278):
+ *
+ *   // dispatch-gates: local-env <NAME> [<NAME> ...] -- <reason>
+ *   #  dispatch-gates: local-env <NAME> [<NAME> ...] -- <reason>   (shell gates)
+ *
+ * ## The defect this exists for
+ *
+ * `workflowEnvValues` (#15761) marks a family NOT RUNNABLE LOCALLY when its
+ * step hands it a `${{ … }}` value through `env:`, and it reads what the
+ * WORKFLOW passes, never what the program needs. For the step that runs
+ * `node scripts/check-issue-citations.mjs` — the diff-scoped verdict
+ * `Lint & Repo Gates` blocks on — the two answers differ: the step passes
+ * `GITHUB_TOKEN` and `OS_GATE_MERGE_GROUP_BASE_SHA`, and the script needs
+ * neither to answer the pull-request run's question (the base renders EMPTY on
+ * `pull_request`; the token is used when present). So `--commands` offered only
+ * the family's `--self-test`, named the verdict NOT MEASURED, and a dev whose
+ * sweep reconciled clean took the red on CI instead — measured on #20268's CI
+ * run, whose citation the bare command, run here, refuses with the same exit 2.
+ *
+ * ## Why a declaration read from the SCRIPT, not a rule about the variables
+ *
+ * Measured before this landed: dropping the job token and the merge-group base
+ * from the classification GENERICALLY also admits the same script's `--census`
+ * (a report-only enumeration of the whole board that always exits 0) and
+ * `check-required-contexts.mjs --verify-required-set` (exit 2 here, through
+ * the proxy route) — one right answer bought with two wrong ones. Whether a
+ * value is needed is a fact about the PROGRAM and about the MODE, so the
+ * program states it, for the reason `declaredArgvDefaults` reads the usage
+ * block rather than a table here: a script that stops declaring returns its
+ * family to NOT MEASURED on the next run, with no edit in this file.
+ *
+ * ## What it does NOT do
+ *
+ *   guess             only a name the declaration spells is admitted; nothing
+ *                     is inferred from how the script reads the variable.
+ *   admit a name the workflow does not pass
+ *                     every declared name must be one EVERY step running the
+ *                     bare invocation passes as a workflow value through `env:`
+ *                     (`entry.envVariables`, the intersection). A name no step
+ *                     passes, one only some steps pass, a literal-valued one and
+ *                     one the command spells as argv are all REFUSED by
+ *                     `localEnvRefusal`, so a declaration the workflow outgrew
+ *                     reds every run of this tool instead of vouching quietly.
+ *   admit an argv no workflow runs
+ *                     the declaration is scoped to the script's BARE invocation
+ *                     — the key that is the script path alone — and a script
+ *                     that declares one while no workflow runs that invocation
+ *                     is REFUSED the same way.
+ *   touch any other invocation of the same script
+ *                     `--census`, `--self-test` and every other argv keep the
+ *                     classification they had (`localEnvAdmitted` answers []
+ *                     for them). An argv-scoped spelling is not built: no
+ *                     family has pulled one.
+ *   repair an argv value
+ *                     a value the command spells is the argv carrier's, and
+ *                     `declaredArgvDefaults` is its only repair.
+ *
+ * The reason is REQUIRED, separated from the name list by a SPACE-delimited
+ * `--` exactly as the two path-list markers spell it, and graded WHOLE by the
+ * shared reading (#18422): a cut reason throws, naming the file and the line.
+ *
+ * Returns `{ names, reason, line }`, or null when the script declares nothing.
+ */
+export function declaredLocalEnv(scriptSource, file = null) {
+  const read = readPopulationMarker(String(scriptSource), 'local-env');
+  if (!read) return null;
+  refuseCutMarkerReason(read, 'local-env', file);
+  const names = read.match[2].trim().split(/[ \t]+/).filter(Boolean);
+  // The name shape `stepEnvExpressionVariables` reads off a step's `env:` keys,
+  // so a declared token can only ever be one that reader could have produced.
+  const malformed = names.filter((name) => !/^[A-Za-z_][\w.-]*$/.test(name));
+  if (malformed.length > 0) {
+    throw new Error(
+      `dispatch-gates: ${file ?? 'the declaring script'}:${read.line} declares local-env with `
+        + `${malformed.length} token(s) that are not environment variable names: ${malformed.join(', ')} — `
+        + 'the list names `env:` keys of the step that runs this script bare, and nothing else.',
+    );
+  }
+  return { names, reason: read.reason, line: read.line };
+}
+
+/**
+ * Why a `local-env` declaration is REFUSED against the tree's workflows, or
+ * null when it holds (#20278) — the two refusals `declaredLocalEnv`'s docblock
+ * lists, in one pure reading so the discovery and the self-test cannot
+ * disagree about what a stale declaration is.
+ *
+ * `bareEntry` is the discovery entry keyed on the declaring script's path
+ * ALONE — its bare invocation — or null when no workflow runs one. Every entry
+ * that reads the declaring file grades the declaration against that same
+ * entry, so the census, the self-test alias and the bare run all get one
+ * answer, and a declaration whose bare run is gone is refused even when only
+ * some OTHER invocation of the script is still wired.
+ */
+export function localEnvRefusal(declaration, bareEntry, file = null) {
+  if (!declaration) return null;
+  const script = file ?? 'the declaring script';
+  const where = `${script}:${declaration.line}`;
+  if (!bareEntry || !bareEntry.direct || bareEntry.selfTest || bareEntry.check !== bareEntry.script) {
+    return `${where} declares local-env ${declaration.names.join(' ')} for its BARE invocation, and no workflow `
+      + `runs \`node ${script}\` with no argv. The declaration admits nothing there is to run, and left standing it `
+      + 'reads as a promise about a run CI never makes. Delete it, or wire the bare invocation it describes.';
+  }
+  const passed = bareEntry.envVariables ?? [];
+  const unpassed = declaration.names.filter((name) => !passed.includes(name));
+  if (unpassed.length === 0) return null;
+  return `${where} declares local-env ${unpassed.join(', ')}, which the step(s) running \`node ${script}\` do not `
+    + `all pass as a workflow value through \`env:\` (every such step passes: ${passed.join(', ') || 'nothing'}). `
+    + 'A name no step passes is stale; one only SOME steps pass is not a property of the invocation; a literal '
+    + 'value is not a workflow value; and a name the command spells is argv, whose only repair is a usage-block '
+    + 'default. Correct the declaration to the names the step really passes — never widen this reading to admit it.';
+}
+
+/**
+ * The step-`env:` names the classification DROPS for this one invocation, off
+ * its script's `local-env` declaration (#20278) — and [] for every key except
+ * that script's BARE one, which is the whole of the scope rule.
+ */
+export function localEnvAdmitted(entry) {
+  if (!entry?.direct || !entry.script || entry.check !== entry.script || entry.selfTest) return [];
+  return [...(entry.localEnv?.names ?? [])];
 }
 
 /**
@@ -12287,6 +12435,16 @@ export function residueLines(
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 
 /**
+ * The constant's NAME — the one token a GitHub artefact (a claim's `model:`
+ * value, a record's `Served-tier:` line) may carry for the ceiling, because
+ * AGENTS.md lets no model identifier land in a comment. Declared beside the
+ * constant it names so the two cannot drift apart: `record-recognisers.mjs`
+ * re-exports it for the `Served-tier:` reading, and `readContainerModelLine`
+ * below compares a claim's declared tier against it.
+ */
+export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
+
+/**
  * The globs that MANDATE a model tier for any card whose file surface touches
  * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
  * and it is here for the same reason: it is enumerable, so a guard can hold it.
@@ -12719,6 +12877,172 @@ export function changedLineLines(size) {
 }
 
 // ---------------------------------------------------------------------------
+// The claim's `Container & model:` line — read against the ladder this file
+// derives, so the tier a seat DECLARES is compared to something
+// ---------------------------------------------------------------------------
+
+/**
+ * The spellings a claim may use for the CEILING tier, derived — never listed:
+ * the constant's NAME (what a GitHub artefact may carry), its VALUE (which a
+ * claim must not carry, and which a reader must still recognise as the ceiling
+ * rather than wave through as an unknown word), and the ladder's family word —
+ * that last one only while the ceiling is a tier of its own: the day it retires
+ * onto the default (see TIER_CEILING) the default's word names no ceiling.
+ */
+export function ceilingTierSpellings() {
+  const words = [CONTRACT_REVIEW_TIER_NAME, CONTRACT_REVIEW_TIER];
+  if (TIER_CEILING !== TIER_DEFAULT && TIER_CEILING !== TIER_FLOOR) words.push(TIER_CEILING);
+  return words;
+}
+
+/**
+ * The `Container & model:` key line of a claim, at the START of a line — the
+ * decoration the record readers tolerate (a leading blockquote, a bullet, bold
+ * or backticks round the key) tolerated here for the same reason.
+ */
+export const CONTAINER_MODEL_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Container & model`?(?:\*\*)?[ \t]*:(.*)$/m;
+
+/**
+ * What a claim's `Container & model:` line declares about the tier, and what
+ * it cites for it.
+ *
+ * ## Why this reader exists (the measured incident)
+ *
+ * The claim template asks for `model: <tier, quoting this run's --tier
+ * output>`, and until this reader nothing compared the line to anything. A
+ * sister-repo seat — for whom `--tier` refused to answer at all — hand-wrote
+ * the ceiling tier into every claim of a whole shift after a quota wall, and
+ * every dev and every reviewer on that lane ran at the scarcest tier on cards
+ * with no mandatory-clause hit. The seat's own error is its own; this reader
+ * is why nothing caught it.
+ *
+ * ## What is read, and what is deliberately not
+ *
+ * The declared tier is the FIRST token after `model:` (decoration stripped),
+ * exactly as `Served-tier:` is read: prose in front is the value and compares
+ * unequal, and the ladder line a seat pastes further along (`floor … · default
+ * … · ceiling …`) names every tier without declaring any. A ceiling token owes
+ * a citation ON THE SAME LINE: the word `MANDATORY` — which `--tier` prints,
+ * and prints only for a mandated surface — or a `reason:` naming the per-card
+ * ruling. The default and floor tiers owe nothing here: their exits are
+ * recorded on the line by the skill's rule, and a reader that demanded them
+ * would refuse every ordinary claim over a formatting preference.
+ *
+ * ⛔ Absence is nobody's refusal: a claim that carries no `Container & model:`
+ * line, or one whose `model:` slot reads no token, declares no ceiling — the
+ * older claims never carried the line, and this reader judges a ceiling, not
+ * an omission.
+ *
+ * @returns {{ present: false } | { present: true, line: string, tier: string|null, ceiling: boolean,
+ *            mandateCited: boolean, reasonCited: boolean }}
+ */
+export function readContainerModelLine(body) {
+  const m = CONTAINER_MODEL_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  const value = String(m[1] ?? '');
+  const model = /\bmodel[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z0-9][A-Za-z0-9_.-]*)?/i.exec(value);
+  const tier = model?.[1] ?? null;
+  const ceiling = tier !== null && ceilingTierSpellings().some((word) => word.toLowerCase() === tier.toLowerCase());
+  return {
+    present: true,
+    line: m[0].trim(),
+    tier,
+    ceiling,
+    mandateCited: /\bMANDATORY\b/.test(value),
+    reasonCited: /\breason[ \t]*:/i.test(value),
+  };
+}
+
+/**
+ * The refusal a ceiling-tier claim earns when it derives its tier from nothing
+ * — `null` when the line reads, or when there is no ceiling to judge. The row
+ * shape is `post-stamped.mjs`'s keyed-line row (`key`, `why`), so that tool
+ * files it beside the `Seat:`, `Thread-read:` and `Clause-②:` refusals it
+ * already imports; the `why` names the ceiling by the constant's NAME and
+ * quotes no model identifier back.
+ */
+export function containerModelRefusal(body) {
+  const read = readContainerModelLine(body);
+  if (!read.present || !read.ceiling || read.mandateCited || read.reasonCited) return null;
+  return {
+    key: 'Container & model',
+    line: read.line,
+    why:
+      `the \`model:\` value names the ceiling tier (${CONTRACT_REVIEW_TIER_NAME}) and the line cites neither the MANDATORY hit` +
+      ' `--tier` printed for the card\'s paths nor a `reason:` naming the per-card ruling — a ceiling nobody derived is the' +
+      ' hand-written default that ran a whole shift at the scarcest tier.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// A GOVERNED sister repo's tier verdict — from the path globs alone
+// ---------------------------------------------------------------------------
+
+/**
+ * The governed register's entry for a sister slug — `null` for this repo's
+ * own slug, an unknown slug, or a value that is no slug at all. Read from the
+ * register `check-governed-merges.mjs` declares, never from a list here.
+ */
+export function governedSisterRepo(slug, { repos = GOVERNED_REPOS, selfId = SELF_REPO_ID } = {}) {
+  const wanted = String(slug ?? '').trim().toLowerCase();
+  return repos.find((r) => r.id !== selfId && String(r.slug).toLowerCase() === wanted) ?? null;
+}
+
+/**
+ * `--tier --repo <sister> <path> ...` — the tier verdict for a governed sister
+ * repo, from MANDATORY_TIER_GLOBS and SUSPECT_TIER_GLOBS ALONE.
+ *
+ * ## Why the tier half needs no tree
+ *
+ * The cross-repo guard refuses a sister slug because the GATE FAMILIES are a
+ * property of the repo's own workflows and check scripts, which this checkout
+ * does not hold. The tier verdict is not: `deriveTier` is a pure predicate over
+ * the paths and the two glob tables, reads no workflow and no check script, and
+ * the refusal it inherited was the gate half's. Measured cost of inheriting it:
+ * every sister-repo claim hand-wrote its `model:` line, and one shift wrote the
+ * ceiling into all of them (see `readContainerModelLine`). So this mode answers
+ * the tier question for a slug the governed register knows, and says on stderr
+ * exactly what it derived from and what it did not read.
+ *
+ * ⛔ Explicit paths only. No diff of another repo is readable from here, so a
+ * sister run with no paths refuses rather than deriving THIS tree's change set
+ * and printing it under that repo's name. ⛔ The gate half is untouched: every
+ * other mode keeps the wrong-repo refusal, which now points at this one.
+ *
+ * @returns `null` when `asserted` is not a governed sister slug — this repo, an
+ *          unknown repo, a malformed value — so the ordinary assertion path
+ *          answers those exactly as before; otherwise `{ ok, stderr, stdout }`.
+ */
+export function sisterRepoTierRun({ asserted, paths = [], identity = null, repos = GOVERNED_REPOS, selfId = SELF_REPO_ID }) {
+  const sister = governedSisterRepo(asserted, { repos, selfId });
+  if (sister === null) return null;
+  const at = identity?.head ? ` at commit ${identity.head}` : '';
+  const stderr = [
+    `dispatch-gates: tier verdict for '${sister.slug}' derived from the path globs ALONE — MANDATORY_TIER_GLOBS and` +
+      ` SUSPECT_TIER_GLOBS as this checkout${at} declares them, over the ${paths.length} path(s) named on argv.`,
+    `  That repo's tree was NOT read: the tier question is a path predicate and needs none. The gate FAMILIES are a property` +
+      ` of '${sister.slug}' and still derive only from a checkout OF it (its own package manifest and workflow files).`,
+  ];
+  if (paths.length === 0) {
+    stderr.push(
+      `dispatch-gates: REFUSING — a sister-repo tier verdict takes explicit paths: no diff of '${sister.slug}' is readable` +
+        " from this checkout, so there is nothing to derive them from. Name the card's file surface.",
+    );
+    return { ok: false, sister, stderr, stdout: [] };
+  }
+  return {
+    ok: true,
+    sister,
+    stderr,
+    stdout: [
+      ...tierLines(deriveTier(paths)),
+      `Changed lines — NOT MEASURED: no diff of '${sister.slug}' is readable from this checkout. The human-merge threshold` +
+        ` (${HUMAN_MERGE_LINE_THRESHOLD}, additions + deletions, generated files INCLUDED) is read off that repo's PR at landing.`,
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Live derivation
 // ---------------------------------------------------------------------------
 
@@ -13100,6 +13424,15 @@ function discoverFamiliesPass(tree) {
       // does with an argument it was not given, exactly like the declarations
       // around it.
       if (entry.direct && f === entry.script) entry.argvDefaults = declaredArgvDefaults(source);
+      // ONE read, and one more answer off it (#20278): the step-`env:` values
+      // this script DECLARES its bare invocation does not need. Collected from
+      // EVERY family that reads the file — the bare run, the census, the
+      // self-test alias — so each of them grades the declaration below against
+      // the one bare entry, and a declaration whose bare run is gone is refused
+      // even while another invocation of the script is still wired. It is SPENT
+      // on the bare key alone (`localEnvAdmitted`).
+      const localEnv = declaredLocalEnv(source, f);
+      if (localEnv) (entry.localEnvDeclarations ??= []).push({ file: f, ...localEnv });
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
       // SELF-TEST; a module the script imports carries the population of the
@@ -13275,6 +13608,17 @@ function discoverFamiliesPass(tree) {
     // `--commands` are all the argv one, unchanged. The env names are spelled
     // `env NAME` so the two carriers stay legible in a single list — an argv
     // variable always carries its `$`.
+    // GRADED before it is spent (#20278): a declaration naming a value the step
+    // does not pass, or scoped to a bare run no workflow makes, throws here, and
+    // the CLI answers `derivation failed` — a stale declaration reds every run
+    // rather than quietly listing a command. See `localEnvRefusal`.
+    for (const declaration of entry.localEnvDeclarations ?? []) {
+      const refusal = localEnvRefusal(declaration, byCheck.get(declaration.file) ?? null, declaration.file);
+      if (refusal) throw new Error(`dispatch-gates: ${refusal}`);
+    }
+    entry.localEnv = entry.direct && entry.script
+      ? (entry.localEnvDeclarations ?? []).find((d) => d.file === entry.script) ?? null
+      : null;
     entry.envValues = workflowEnvValues(entry);
     const workflowValues = [
       ...(entry.argvVariables ?? []),
@@ -14924,6 +15268,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     // block, the `--commands` accounting and `--json` cannot disagree about
     // whether a family was repaired or merely rendered.
     argvDefaulted: entry.argvDefaulted ?? [],
+    // And again (#20278): the step-`env:` names this row runs WITHOUT because
+    // its script declares them unneeded, so no rendering can list the command
+    // runnable without also being able to say why a CI-env step became one.
+    localEnv: localEnvAdmitted(entry),
     // The script path, so a rendering can ask whether a family's `--self-test`
     // sibling is in the runnable list beside it — the substitute this card is
     // about, which has to be labelled where it is offered.
@@ -15100,6 +15448,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         workflows: [...row.workflows],
         via: [...row.via],
         argvDefaulted: [...(row.argvDefaulted ?? [])],
+        localEnv: [...(row.localEnv ?? [])],
       };
       pastedByCommand.set(row.command, merged);
       pastedRows.push(merged);
@@ -15114,10 +15463,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         already.argvDefaulted.push(filled);
       }
     }
+    for (const name of row.localEnv ?? []) if (!already.localEnv.includes(name)) already.localEnv.push(name);
   }
   if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
-    for (const { command, workflows: wfs, via: hits, argvDefaulted } of pastedRows) {
+    for (const { command, workflows: wfs, via: hits, argvDefaulted, localEnv } of pastedRows) {
       // The note rides the SAME line, deliberately: the published harvest ends
       // this block at the first empty line and reads each row with one regexp,
       // so a second line under a row would be harvested as another command. It
@@ -15127,7 +15477,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         ? `   · ${[...new Set(argvDefaulted.map((d) => `${d.flag} ${d.value}`))].join(', ')} is this script's own documented`
           + ` default; CI pins it to ${[...new Set(argvDefaulted.map((d) => d.variable))].join(', ')}`
         : '';
-      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}${filled}`);
+      // Same line, same reason as the note above (#20278).
+      const unneeded = (localEnv ?? []).length
+        ? `   · runs here without ${localEnv.join(', ')}: its script declares local-env for this bare invocation,`
+          + " and CI passes them through the step's env:"
+        : '';
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}${filled}${unneeded}`);
     }
     // The blank line FIRST, and it is not cosmetic: the published harvest ends
     // the block at the first empty line, so a footer butted against the rows
@@ -16072,6 +16427,12 @@ export function repoAssertionVerdict({ asserted, identity }) {
         `  Gate families are derived from the workflows and check scripts of the tree this process runs in, so an answer from here is about '${here}' whatever paths you pass.`,
         `  Repo-relative paths cannot tell the two apart: the same manifest and lockfile names exist in both, which is why a run like this used to return a confident wrong answer instead of this message.`,
         `  Derive '${wanted}' from a checkout OF '${wanted}' — this script exists only in '${here}', so a sister repo's list is hand-derived from its own package manifest and its own workflow files.`,
+        // The TIER half is the one question a sister slug CAN be answered from
+        // here (`sisterRepoTierRun`), so the refusal says so instead of sending
+        // a claim-time caller away to hand-write the line.
+        ...(governedSisterRepo(wanted) === null
+          ? []
+          : [`  The TIER half alone needs no tree: \`--tier ${REPO_FLAG} ${wanted} <path> ...\` answers a governed sister repo from the path globs, and says so.`]),
         `  Tree: ${identity.root}`,
       ],
     };
@@ -17599,6 +17960,137 @@ function selfTest() {
   t('a `check:*` family is invocable by name and its KEY drops the argv, so one step\'s env is not a property of it', workflowEnvValues(envEntry({ direct: false })).length === 0);
   t('a family already named CI-MEASURED ONLY is not named a second time as value-bearing', workflowEnvValues(envEntry({ ciOnly: { env: 'GITHUB_EVENT_PATH' } })).length === 0);
   t('CONTROL: no env carrier at all classifies nothing', workflowEnvValues(envEntry({ envVariables: [] })).length === 0);
+
+  // ── The script's own `local-env` declaration (#20278) ─────────────────────
+  //
+  // Judged on the specimen's own step text: `lint.yml`'s diff-scoped citation
+  // step passes two workflow values through `env:`, and the script declares its
+  // BARE run needs neither. Pinned by DIRECTION — which command reaches the
+  // runnable union and which stays NOT MEASURED — never by a count.
+  const localEnvWf = [
+    'jobs:',
+    '  lint:',
+    '    steps:',
+    '      - name: Issue citations this change adds resolve on the board',
+    '        env:',
+    '          GITHUB_TOKEN: ${{ github.token }}',
+    '          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}',
+    '        run: pnpm check:issue-citations && node scripts/check-issue-citations.mjs',
+    '      - name: the census, report-only',
+    '        env:',
+    '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}',
+    '        run: node scripts/check-issue-citations.mjs --census',
+  ].join('\n');
+  const localEnvSource = [
+    "export const SURFACES = ['packages/**'];",
+    '',
+    '// dispatch-gates: local-env GITHUB_TOKEN OS_GATE_MERGE_GROUP_BASE_SHA -- the bare diff run reads a public board and falls back to the merge base',
+    '',
+    'export function run() {}',
+  ].join('\n');
+  const localEnvDecl = declaredLocalEnv(localEnvSource, 'scripts/check-issue-citations.mjs');
+  t(
+    '⭐ a `local-env` declaration reads back its NAMES, its whole reason and its line',
+    localEnvDecl?.names.join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA'
+      && localEnvDecl?.reason === 'the bare diff run reads a public board and falls back to the merge base'
+      && localEnvDecl?.line === 3,
+  );
+  t('CONTROL: a script that declares nothing reads back null', declaredLocalEnv("export const X = 'local-env';\n") === null);
+  t(
+    'a `local-env` reason cut by the comment line under it is REFUSED, by file and line — the shared wholeness reading reaches this key by construction',
+    (() => {
+      try {
+        declaredLocalEnv('// dispatch-gates: local-env GITHUB_TOKEN -- the diff run\n// needs no token\n', 'scripts/x.mjs');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('scripts/x.mjs:2 continues it with');
+      }
+    })(),
+  );
+  t(
+    'a token in the name list that is not an environment variable name is REFUSED, never read as one',
+    (() => {
+      try {
+        declaredLocalEnv('// dispatch-gates: local-env GITHUB_TOKEN --census -- x\n', 'scripts/x.mjs');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('scripts/x.mjs:1') && String(error.message).includes('--census');
+      }
+    })(),
+  );
+  const localEnvInvs = extractCheckInvocations(localEnvWf, 'lint.yml');
+  const localEnvBareInv = localEnvInvs.find((i) => i.check === 'scripts/check-issue-citations.mjs');
+  const localEnvCensusInv = localEnvInvs.find((i) => i.check === 'scripts/check-issue-citations.mjs --census');
+  t(
+    'CONTROL: the step text yields the bare run and the census as two direct keys, each carrying its OWN step env',
+    (localEnvBareInv?.envVariables ?? []).join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA'
+      && (localEnvCensusInv?.envVariables ?? []).join(',') === 'GITHUB_TOKEN'
+      && localEnvBareInv?.direct === true && localEnvCensusInv?.direct === true,
+  );
+  const localEnvRow = (inv, declaration) => {
+    const entry = { ...inv, ciOnly: null, localEnv: declaration };
+    const values = workflowEnvValues(entry);
+    return {
+      check: entry.check,
+      command: runnableInvocation(entry),
+      ciOnly: null,
+      notRunnable: values.length > 0 ? { variables: values.map((n) => `env ${n}`), envVariables: values } : null,
+    };
+  };
+  const localEnvRows = [localEnvRow(localEnvBareInv ?? {}, localEnvDecl), localEnvRow(localEnvCensusInv ?? {}, localEnvDecl)];
+  const localEnvCommands = commandsFor({ matchedRows: localEnvRows });
+  const localEnvUnrunnable = notRunnableCommandSet(localEnvRows);
+  t(
+    '⭐ the lint.yml step text, with the script\'s declaration, puts the BARE command in --commands and NOT in the not-runnable set',
+    localEnvCommands.includes('node scripts/check-issue-citations.mjs')
+      && !localEnvUnrunnable.has('node scripts/check-issue-citations.mjs'),
+  );
+  t(
+    '⭐ …while the census invocation of the SAME script stays not-runnable, on the token its own step passes',
+    !localEnvCommands.includes('node scripts/check-issue-citations.mjs --census')
+      && localEnvUnrunnable.has('node scripts/check-issue-citations.mjs --census')
+      && (localEnvRows[1].notRunnable?.variables ?? []).join(',') === 'env GITHUB_TOKEN',
+  );
+  const localEnvUndeclared = [localEnvRow(localEnvBareInv ?? {}, null), localEnvRow(localEnvCensusInv ?? {}, null)];
+  t(
+    'CONTROL: with no declaration the bare run is not-runnable on both names — the reading this card repairs, unchanged for every script that declares nothing',
+    notRunnableCommandSet(localEnvUndeclared).has('node scripts/check-issue-citations.mjs')
+      && (localEnvUndeclared[0].notRunnable?.variables ?? []).join(',') === 'env GITHUB_TOKEN,env OS_GATE_MERGE_GROUP_BASE_SHA',
+  );
+  t(
+    'the limb is per NAME: a declaration naming only the token leaves the undeclared base keeping the family out',
+    (() => {
+      const tokenOnly = { names: ['GITHUB_TOKEN'], reason: 'x', line: 1 };
+      return (localEnvRow(localEnvBareInv ?? {}, tokenOnly).notRunnable?.variables ?? []).join(',') === 'env OS_GATE_MERGE_GROUP_BASE_SHA';
+    })(),
+  );
+  t(
+    'the scope is the BARE key alone: a `--census` or `--self-test` key of the declaring script, and any `check:*` key, admit nothing',
+    localEnvAdmitted({ ...localEnvCensusInv, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ check: 'scripts/check-issue-citations.mjs --self-test', script: 'scripts/check-issue-citations.mjs', direct: true, selfTest: true, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ check: 'check:issue-citations', direct: false, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ ...localEnvBareInv, localEnv: localEnvDecl }).join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA',
+  );
+  const localEnvBareEntry = { ...(localEnvBareInv ?? {}) };
+  t(
+    'CONTROL: a declaration naming exactly what the bare run\'s step passes is NOT refused',
+    localEnvRefusal(localEnvDecl, localEnvBareEntry, 'scripts/check-issue-citations.mjs') === null,
+  );
+  t(
+    '⭐ a STALE name — one the step does not pass — is REFUSED, naming the file, the line and the name',
+    (localEnvRefusal({ names: ['GITHUB_TOKEN', 'PR_BODY'], reason: 'x', line: 3 }, localEnvBareEntry, 'scripts/check-issue-citations.mjs') ?? '')
+      .includes('scripts/check-issue-citations.mjs:3 declares local-env PR_BODY,'),
+  );
+  t(
+    'a name only SOME steps pass is refused too — the bare key carries the intersection, and a value one step omits is not a property of the invocation',
+    (localEnvRefusal(localEnvDecl, { ...localEnvBareEntry, envVariables: ['GITHUB_TOKEN'] }, 'scripts/check-issue-citations.mjs') ?? '')
+      .includes('declares local-env OS_GATE_MERGE_GROUP_BASE_SHA,'),
+  );
+  t(
+    '⭐ a declaration whose BARE run no workflow makes is REFUSED — an argv no workflow runs admits nothing and must not read as a promise',
+    (localEnvRefusal(localEnvDecl, null, 'scripts/check-issue-citations.mjs') ?? '').includes('no workflow runs `node scripts/check-issue-citations.mjs` with no argv')
+      && localEnvRefusal(localEnvDecl, { ...localEnvCensusInv }, 'scripts/check-issue-citations.mjs') !== null,
+  );
 
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
@@ -22185,9 +22677,9 @@ function selfTest() {
     Object.keys(MARKER_REASON_GRAMMARS).join(' '),
   );
   t(
-    'and it names all SIX live marker keys, not the three the repair was filed on',
+    'and it names all SEVEN live marker keys, not the three the repair was filed on (`local-env` joined the path-list grammar with #20278)',
     Object.keys(MARKER_REASON_GRAMMARS).sort().join(' ')
-      === 'inherited-population no-check-families no-path-population self-test-reads whole-tree-population wide-population',
+      === 'inherited-population local-env no-check-families no-path-population self-test-reads whole-tree-population wide-population',
     Object.keys(MARKER_REASON_GRAMMARS).sort().join(' '),
   );
   t(
@@ -22924,14 +23416,16 @@ function selfTest() {
     // number in the file.
     const body = maskSelfTests(readFileSync(nodePath.join(ROOT, f), 'utf8'));
     censusCorpus.set(f, body);
-    for (const key of ['inherited-population', 'self-test-reads']) {
+    // The path-list ROSTER, not a hand list (#20278): a key added to that
+    // grammar arrives censused, which is how `local-env` reached this row.
+    for (const key of PATH_LIST_MARKER_KEYS) {
       const read = readPopulationMarker(body, key);
       if (read) censusRead(f, key, read);
     }
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the seven declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the eight declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -22944,16 +23438,19 @@ function selfTest() {
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
+      // Eighth row, added with the declaration it names (#20278): the checker's
+      // bare diff-scoped run declares the two step-`env:` values it does not need.
+      'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:713 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:714 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 7,
+    censusCut.length === 0 && liveMarkerCensus.length === 8,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
@@ -22994,7 +23491,7 @@ function selfTest() {
     .flatMap(([f, text]) => unparsedPopulationMarkers(text, f))
     .filter((u) => !POPULATION_MARKER_KEYS.includes(u.key));
   t(
-    `no live file carries a DROPPED declaration on the three keys outside the population roster `
+    `no live file carries a DROPPED declaration on the four keys outside the population roster `
       + `(${censusWorkflows.length} workflow(s) + ${censusScripts.length} script(s) swept; found `
       + `${censusLookalikes.map((u) => `${u.file}:${u.line} ${u.key}`).join(' · ') || 'none'})`,
     censusLookalikes.length === 0,
@@ -25498,6 +25995,48 @@ function selfTest() {
     ambiguityRefused = true;
   }
   t('two globs mandating DIFFERENT tiers for one surface are REFUSED, not guessed between', ambiguityRefused);
+
+  // ── The claim's `Container & model:` line, read against the ladder ───────
+  //
+  // The measured incident: a sister-repo seat hand-wrote the ceiling tier into
+  // every claim of a whole shift after a quota wall, and nothing compared the
+  // line to anything. `post-stamped.mjs` imports the reader below to refuse
+  // that claim before the write: a ceiling cites the MANDATORY hit `--tier`
+  // printed, or a per-card `reason:`, on the SAME line — or it is refused.
+  const CM = (rest) => `Claim: PM loop round 1\nSession: \`session_x\`\nContainer & model: \`M\`, \`mode:subagent\`, ${rest}`;
+  const ceilingIsItsOwnTier = TIER_CEILING !== TIER_DEFAULT && TIER_CEILING !== TIER_FLOOR;
+  t('the constant NAME and its VALUE are ceiling spellings; the ladder word joins them only while the ceiling is a tier of its own', ceilingTierSpellings().includes(CONTRACT_REVIEW_TIER_NAME) && ceilingTierSpellings().includes(CONTRACT_REVIEW_TIER) && ceilingTierSpellings().includes(TIER_CEILING) === ceilingIsItsOwnTier);
+  t('⭐ a ceiling claim quoting the MANDATORY line reads as the ceiling, with its mandate cited, and earns no refusal', (() => { const r = readContainerModelLine(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`--tier\` at \`abc1234\`: MANDATORY — SKILL.md ⇢ '.claude/skills/pm-dispatch/SKILL.md')`)); return r.present && r.ceiling && r.mandateCited && containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (--tier: MANDATORY)`)) === null; })());
+  t('⭐ a ceiling claim carrying a per-card `reason:` reads too', containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (reason: the maintainer ruled it on the card)`)) === null);
+  t('⛔ THE INCIDENT SHAPE — the ceiling by its ladder word, with nothing behind it — is REFUSED', !ceilingIsItsOwnTier || containerModelRefusal(CM(`model: ${TIER_CEILING} (the ceiling)`))?.key === 'Container & model');
+  t('⛔ the ceiling by its constant NAME with nothing behind it is refused the same way', containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\``))?.key === 'Container & model');
+  t('⛔ and by its VALUE — a claim must not carry the id at all, and the reader still recognises it as the ceiling', containerModelRefusal(CM(`model: ${CONTRACT_REVIEW_TIER}`))?.key === 'Container & model');
+  t('the refusal names the ceiling by the constant\'s NAME and quotes no model identifier back', (() => { const r = containerModelRefusal(CM(`model: ${CONTRACT_REVIEW_TIER}`)); return r.why.includes(CONTRACT_REVIEW_TIER_NAME) && !r.why.includes(CONTRACT_REVIEW_TIER) && r.why.includes('MANDATORY') && r.why.includes('reason:'); })());
+  t('the default and floor tiers cite nothing and pass — the reader judges the ceiling only', containerModelRefusal(CM(`\`model: ${TIER_DEFAULT}\` (no path-derived mandate)`)) === null && containerModelRefusal(CM(`model: ${TIER_FLOOR}`)) === null);
+  t('the declared tier is the FIRST token after `model:` — the pasted ladder naming the ceiling further along declares nothing', containerModelRefusal(CM(`model: ${TIER_DEFAULT} — --tier: no path-derived mandate (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING})`)) === null && readContainerModelLine(CM(`model: ${TIER_DEFAULT} — ceiling ${TIER_CEILING}`)).tier === TIER_DEFAULT);
+  t('the tier compares case-insensitively, as the ladder is quoted by hand', !ceilingIsItsOwnTier || readContainerModelLine(CM(`model: ${TIER_CEILING.toUpperCase()}`)).ceiling === true);
+  t('the key is read at the START of a line, decoration tolerated — and off the line start it is prose, not a declaration', readContainerModelLine('Claim: x\n- **Container & model:** `M`, `mode:cloud`, `model: opus`').tier === 'opus' && readContainerModelLine(`Claim: x\nas said, Container & model: model: ${TIER_CEILING} earlier`).present === false);
+  t('⛔ ABSENCE is nobody\'s refusal: no `Container & model:` line, or a `model:` slot reading no token, declares no ceiling', readContainerModelLine('Claim: x\nSeat: domain:skills#1').present === false && containerModelRefusal('Claim: x') === null && readContainerModelLine(CM('model:')).tier === null && containerModelRefusal(CM('model:')) === null);
+  t('⛔ NOT a claim reader\'s business what a claim is — the reader reads any body; scoping to `Claim:` comments is post-stamped\'s', readContainerModelLine(`Round report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``).ceiling === true);
+
+  // ── A governed sister repo's tier verdict, from the path globs alone ─────
+  //
+  // The gate half's cross-repo refusal was inherited by the tier half, which
+  // reads no tree; measured cost: every sister-repo claim hand-wrote its
+  // `model:` line. `sisterRepoTierRun` answers a slug the governed register
+  // knows, from the two glob tables, and says so.
+  const SISTER = GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID);
+  t('CONTROL: the governed register names a sister repo, so the cases below are not vacuous', SISTER !== undefined && String(SISTER.slug).includes('/') && governedSisterRepo(SISTER.slug)?.id === SISTER.id);
+  const sisterHit = sisterRepoTierRun({ asserted: SISTER.slug, paths: ['skills/x/SKILL.md'], identity: { head: 'abc1234' } });
+  t('⭐ a governed sister slug with paths ANSWERS from the globs — MANDATORY for its published catalog, and the provenance names the globs and the commit', sisterHit?.ok === true && sisterHit.stdout.join('\n').includes('MANDATORY') && sisterHit.stdout.join('\n').includes("'skills/**'") && sisterHit.stderr.join('\n').includes('path globs ALONE') && sisterHit.stderr.join('\n').includes('abc1234'));
+  t('…the stderr says the sister tree was NOT read and that its gate families still need a checkout OF it', sisterHit.stderr.join('\n').includes('NOT read') && sisterHit.stderr.join('\n').includes('checkout OF'));
+  t('…and the changed-lines line is NOT MEASURED, naming the sister — no diff of another repo is readable here', sisterHit.stdout.join('\n').includes('Changed lines — NOT MEASURED') && sisterHit.stdout.join('\n').includes(SISTER.slug));
+  t('an ordinary sister path answers the no-mandate floor line this repo prints, glob count included', sisterRepoTierRun({ asserted: SISTER.slug, paths: ['src/components/button.tsx'] }).stdout.join('\n').includes(`no path-derived mandate: the surface hits none of the ${MANDATORY_TIER_GLOBS.length} declared glob`));
+  t('the slug compares case-insensitively, as repo slugs do', sisterRepoTierRun({ asserted: SISTER.slug.toUpperCase(), paths: ['src/x.ts'] })?.ok === true);
+  t('⛔ a governed sister with NO paths is refused — nothing here can read that repo\'s diff', (() => { const r = sisterRepoTierRun({ asserted: SISTER.slug, paths: [] }); return r !== null && r.ok === false && r.stdout.length === 0 && r.stderr.join('\n').includes('explicit paths'); })());
+  t('⛔ this repo\'s own slug is not a sister — null, so the ordinary assertion path answers it', sisterRepoTierRun({ asserted: GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID).slug, paths: ['x'] }) === null && governedSisterRepo(GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID).slug) === null);
+  t('⛔ an unknown slug or a checkout path is not a sister either — the wrong-repo refusal keeps its exit and its text', sisterRepoTierRun({ asserted: 'not-an-owner/not-a-repo', paths: ['x'] }) === null && sisterRepoTierRun({ asserted: '../a-sister-checkout', paths: ['x'] }) === null && sisterRepoTierRun({ asserted: null, paths: ['x'] }) === null);
+  t('the register is INJECTED, never restated: a register naming no sister answers null for every slug', sisterRepoTierRun({ asserted: SISTER.slug, paths: ['x'], repos: [{ id: 'self', slug: SISTER.slug }], selfId: 'self' }) === null);
   // Live guards. A glob naming a path this tree does not have is dead data that
   // mandates nothing while reading as protection — the incident class itself.
   t('the mandatory table is not empty (the guard below is not vacuous)', MANDATORY_TIER_GLOBS.length > 0);
@@ -26160,6 +26699,9 @@ function selfTest() {
   const retargetAttempt = repoAssertionVerdict({ asserted: '../a-sister-checkout', identity: hereIdentity });
   t('a value shaped like a checkout PATH is refused, so the retarget misreading fails loudly', !retargetAttempt.ok && retargetAttempt.lines.join('\n').includes('does not point the derivation at another checkout'));
   t('and so is a three-segment value', !repoAssertionVerdict({ asserted: 'a/b/c', identity: hereIdentity }).ok);
+  const sisterMismatch = repoAssertionVerdict({ asserted: GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID).slug, identity: hereIdentity });
+  t('a governed SISTER\'s refusal points at the tier route — the one question a sister slug can be answered from here', !sisterMismatch.ok && sisterMismatch.lines.join('\n').includes(`--tier ${REPO_FLAG}`) && sisterMismatch.lines.join('\n').includes('hand-derived'));
+  t('…and an UNKNOWN repo\'s refusal does not — it is not a sister the register knows', !mismatchText.includes('TIER half'));
 
   const bannerHit = bannerLines({ identity: hereIdentity, paths: [] });
   t('the banner names the repo and the commit the answer came from', bannerHit[0].includes('an-owner/a-repo') && bannerHit[0].includes('abc1234'));
@@ -26552,6 +27094,24 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
+  // ── A governed sister repo's tier verdict on the real CLI ────────────────
+  //
+  // Measured on the CLI and not on `sisterRepoTierRun` alone, because what
+  // was wrong was the process: `--tier` over a sister slug exited 2 with the
+  // gate half's refusal, and every sister-repo claim hand-wrote its line.
+  const SISTER_SLUG = GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID).slug;
+  const sisterCatalog = runCli(['--tier', 'skills/objectui/SKILL.md', REPO_FLAG, SISTER_SLUG]);
+  t('⭐ `--tier <path> --repo <sister>` ANSWERS at exit 0 — the tier half no longer inherits the gate half\'s refusal', sisterCatalog.status === 0 && (sisterCatalog.stdout ?? '').includes('MANDATORY') && (sisterCatalog.stdout ?? '').includes("'skills/**'"), `status ${sisterCatalog.status}: ${(sisterCatalog.stderr ?? '').split('\n')[0]}`);
+  t('…its stderr says the answer is the globs\' ALONE, and that the gate families still need a checkout OF that repo', (sisterCatalog.stderr ?? '').includes('path globs ALONE') && (sisterCatalog.stderr ?? '').includes('checkout OF'));
+  t('…and it prints NO gate-list banner: no gate list was derived, so none is claimed', !(sisterCatalog.stderr ?? '').includes('gate list derived from the tree of'));
+  t('…and stdout stays paste-clean — the provenance is on stderr, as every other provenance is', !(sisterCatalog.stdout ?? '').includes('dispatch-gates:'));
+  const sisterPlain = runCli(['--tier', 'src/components/button.tsx', REPO_FLAG, SISTER_SLUG]);
+  t('an ordinary sister-repo path answers the no-mandate floor line and the NOT MEASURED changed-lines line', sisterPlain.status === 0 && (sisterPlain.stdout ?? '').includes('no path-derived mandate') && (sisterPlain.stdout ?? '').includes('Changed lines — NOT MEASURED'));
+  const sisterNoPaths = runCli(['--tier', REPO_FLAG, SISTER_SLUG]);
+  t('⛔ a sister slug with no paths refuses at exit 2 with nothing on stdout — there is no diff of that repo to derive them from', sisterNoPaths.status === 2 && (sisterNoPaths.stdout ?? '').trim() === '' && (sisterNoPaths.stderr ?? '').includes('explicit paths'));
+  const sisterCommands = runCli(['--commands', 'skills/objectui/SKILL.md', REPO_FLAG, SISTER_SLUG]);
+  t('⛔ the GATE half still refuses a sister repo with the wrong-repo text, now pointing at the tier route — only the tier question was freed from the tree', sisterCommands.status === 2 && (sisterCommands.stdout ?? '').trim() === '' && (sisterCommands.stderr ?? '').includes('REFUSING — asked for') && (sisterCommands.stderr ?? '').includes(`--tier ${REPO_FLAG}`));
 
   // ── The three shapes an absent path can arrive in, end to end ─────────────
   //
@@ -28891,6 +29451,51 @@ function selfTest() {
   }
 
 
+  // ── The DECLARED half of that bucket, on the LIVE tree (#20278) ──────────
+  //
+  // The fixture cases beside `workflowEnvValues`' limbs judge the reader; these
+  // judge the tree, in-process off the discovery this self-test already holds
+  // (no extra CLI spawn). The card's specimen path is the one whose CI run went
+  // red: a change to `rls.zod.ts` owes the diff-scoped citation verdict.
+  {
+    const citations = 'scripts/check-issue-citations.mjs';
+    const specimenPath = 'packages/spec/src/security/rls.zod.ts';
+    const bare = liveDiscovery.byCheck.get(citations);
+    const census = liveDiscovery.byCheck.get(`${citations} --census`);
+    const liveDeclaration = declaredLocalEnv(readFileSync(nodePath.join(ROOT, citations), 'utf8'), citations);
+    const liveRow = (entry) => ({
+      check: entry?.check ?? null,
+      command: entry ? runnableInvocation(entry) : null,
+      ciOnly: entry?.ciOnly ?? null,
+      notRunnable: entry?.notRunnable ?? null,
+    });
+    t(
+      'CONTROL: the live checker declares local-env, and a workflow still runs its bare invocation and its census, so the cases below judge live rows',
+      Boolean(liveDeclaration) && Boolean(bare) && Boolean(census)
+        && liveDeclaration.names.every((name) => (bare.envVariables ?? []).includes(name)),
+    );
+    t(
+      `⭐ the bare diff-scoped run is placed for ${specimenPath} and reaches the runnable union`,
+      Boolean(bare) && placeFamily(bare, [specimenPath]).verdict === 'matched'
+        && commandsFor({ matchedRows: [liveRow(bare)] }).includes(`node ${citations}`),
+    );
+    t(
+      '⭐ …and it is NOT in the NOT MEASURED set any more — no workflow value is left on it',
+      Boolean(bare) && bare.notRunnable === null && !notRunnableCommandSet([liveRow(bare)]).has(`node ${citations}`),
+    );
+    t(
+      '⭐ the census of the same script is placed for the same path and STAYS NOT MEASURED, on the token its step passes',
+      Boolean(census) && placeFamily(census, [specimenPath]).verdict === 'matched'
+        && notRunnableCommandSet([liveRow(census)]).has(`node ${citations} --census`)
+        && (census.notRunnable?.variables ?? []).includes('env GITHUB_TOKEN'),
+    );
+    t(
+      'the names the live bare run is admitted without are exactly the ones its script declares — nothing inferred',
+      Boolean(bare) && Boolean(liveDeclaration)
+        && localEnvAdmitted(bare).join(',') === liveDeclaration.names.join(','),
+    );
+  }
+
   // The non-vacuity half of #15539, read at the tail because that is where
   // every call site passing a reading has already run. The card named six; the
   // assertion is a FLOOR rather than an equality, so adding a seventh is not a
@@ -29132,6 +29737,20 @@ if (invokedDirectly) {
           ? 'ran'
           : 'human';
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    // A GOVERNED sister repo's tier verdict, answered BEFORE the banner: the
+    // banner names the tree that produced a gate list, and this run derives
+    // none — its provenance is the two glob tables, and the run prints that
+    // itself. `null` for every other assertion (this repo, an unknown one, a
+    // malformed one), which the assertion verdict below answers as before.
+    const sisterTier = process.argv.includes('--tier') && argv.assertion !== null
+      ? sisterRepoTierRun({ asserted: argv.assertion, paths: declaredPaths, identity })
+      : null;
+    if (sisterTier !== null) {
+      for (const line of sisterTier.stderr) console.error(line);
+      if (!sisterTier.ok) process.exit(2);
+      for (const line of sisterTier.stdout) console.log(line);
+      process.exit(0);
+    }
     for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
       // An assertion the tree contradicts is the measured failure, caught. It

@@ -591,7 +591,12 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `page :: source`, `action :: openIn`, `action :: newTabUrl` and
     // `action :: undoable`. The other twenty-six rows that card landed carry no
     // predicate at all, so they do not enter this census.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(72);
+    // It is 73 today, an ADDITION of ONE: #20161 gated `report :: chart` on
+    // `data.type != 'joined'` — a joined report draws no chart and its schema
+    // refuses one, so the form offers the control only where it draws. The same
+    // card REMOVED the joined-block `chart` repeater column, which carried no
+    // predicate, so it leaves this census untouched.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(73);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -680,7 +685,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // deliberately outside this rule (see the anchor note above), and
     // `action :: newTabUrl` compares against the bare `true`, which is not a
     // quoted literal and is not rewritten.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(52);
+    // It is 53 today: #20161's `report :: chart` gate is `data.type != 'joined'`,
+    // a `!=` against a single-quoted literal.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(53);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

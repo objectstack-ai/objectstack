@@ -193,19 +193,10 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       runtimeFilter: { stage: {} },
       message: /carries a field constraint with zero operators/,
     },
-    {
-      // [#20010] RE-WORDED, same verdict: still a real normalizer refusal,
-      // still 400 INVALID_FILTER through this seam. PR #20032 hands every field
-      // entry of an object-form `where` to the shared comparand-shape face
-      // (`assertListComparandShapes`) before any node is built, and the face's
-      // own rule answers first — a list operator takes a list, `$between` a
-      // two-element [min, max] (#5869, moved to the face by #9228). So the
-      // message is the face's, the same bytes the FilterArray spelling gets;
-      // the analytics "needs a two-element" sentence is no longer reached.
-      name: 'a $between with one bound',
-      runtimeFilter: { amount: { $between: [10] } },
-      message: /Operator "\$between" on field "amount" requires a \[min, max\] value array/,
-    },
+    // [#20116] `a $between with one bound` sat here. It no longer reaches the
+    // normalizer: `FilterConditionSchema` now refuses every slot the shared
+    // comparand-shape face refuses, so this route's schema door answers it
+    // first. It moved, with its #20010 note, to the #17551 block below.
     {
       name: 'an unsupported top-level operator',
       runtimeFilter: { $nor: [{ stage: 'won' }] },
@@ -227,7 +218,12 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
 /**
  * [#17551] Three spellings that used to reach the normalizer now stop one layer
  * earlier — at the route's schema door — and the block above no longer claims
- * them.
+ * them. [#20116] A fourth joined them: the one-bound `$between`, once
+ * `FilterConditionSchema` began refusing on save every comparand slot the
+ * shared comparand-shape face refuses on query. [#20116, stage 2] Then the
+ * comparand-TYPE face's JSON-representable cells — a plain object where one
+ * value belongs, as the comparand or as a list member — once that schema asked
+ * the type face too.
  *
  * ⚠️ This is a CODE change on a live wire surface, so it is recorded with the
  * measurement that justifies it rather than as a test edit. Since #17551 the
@@ -242,14 +238,19 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
  * | `{ $or: [{…}, 'nope'] }`           | refused at the schema | refused at the schema |
  * | `{ $not: 5 }`                      | refused at the schema | refused at the schema |
  * | `{ stage: {} }`                    | passes the schema     | passes the schema     |
- * | `{ amount: { $between: [10] } }`   | passes the schema     | passes the schema     |
+ * | `{ amount: { $between: [10] } }`   | refused at the schema (#20116) | refused at the schema (#20116) |
+ * | `{ stage: { $eq: { a: 1 } } }`     | refused at the schema (#20116 stage 2) | refused at the schema (#20116 stage 2) |
+ * | `{ stage: { $in: ['won', { a: 1 }] } }` | refused at the schema (#20116 stage 2) | refused at the schema (#20116 stage 2) |
  * | `{ $nor: [{…}] }`                  | passes the schema     | passes the schema     |
  * | `{ $or: [] }`                      | passes the schema     | passes the schema     |
  *
  * ⇒ the two routes now answer this field IDENTICALLY, which is the whole reason
  * the door exists ("one family, two postures" was the defect). The three rows
- * that changed changed because the dataset route used to be the LOOSER of the
- * two, not because anything narrowed past `FilterCondition`.
+ * that changed under #17551 changed because the dataset route used to be the
+ * LOOSER of the two, not because anything narrowed past `FilterCondition`. The
+ * `$between` row changed under #20116 on BOTH routes at once, because
+ * `FilterCondition` itself narrowed: the schema now refuses what the face
+ * refused on every query, in the face's sentence less its location.
  *
  * ⛔ Nothing here weakens #5352's subject: the seam it exists for — a real
  * `AnalyticsService`, a real `normalizeAnalyticsFilterTree` refusal, and this
@@ -257,10 +258,40 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
  * driven by every case left in the block above, `$sortOf` included.
  */
 describe('[#17551] the structurally-malformed filter spellings are refused at the door', () => {
-  const AT_THE_DOOR: Array<{ name: string; runtimeFilter: unknown }> = [
+  const AT_THE_DOOR: Array<{ name: string; runtimeFilter: unknown; member?: string; sentence?: RegExp }> = [
     { name: 'an $or that is not an array', runtimeFilter: { $or: 'won' } },
     { name: 'an $or branch that is not a filter object', runtimeFilter: { $or: [{ stage: 'won' }, 'nope'] } },
     { name: 'a $not of a non-object', runtimeFilter: { $not: 5 } },
+    {
+      // [#20010] The face's sentence has named this shape since PR #20032 handed
+      // every field entry of an object-form `where` to the shared comparand-
+      // shape face (`assertListComparandShapes`) — a list operator takes a
+      // list, `$between` a two-element [min, max] (#5869, moved to the face by
+      // #9228) — and it still does. [#20116] What moved is WHERE: the schema
+      // door now asks that face on save and prints its sentence less the
+      // `at where…` location, so the refusal is located on the member instead.
+      name: 'a $between with one bound',
+      runtimeFilter: { amount: { $between: [10] } },
+      member: 'selection.runtimeFilter.amount.$between',
+      sentence: /^Operator "\$between" on field "amount" requires a \[min, max\] value array\. Received array \(\[10\]\)\. A range needs exactly two bounds/,
+    },
+    {
+      // [#20116, stage 2] Before, this crossed the schema and the normalizer
+      // refused it `INVALID_FILTER` / 400 in the comparand-TYPE face's words
+      // (`at where.stage.$eq`). The schema door now asks that face on save and
+      // prints the same sentence less its location, located on the member.
+      name: 'a plain object where a single value belongs',
+      runtimeFilter: { stage: { $eq: { a: 1 } } },
+      member: 'selection.runtimeFilter.stage.$eq',
+      sentence: /^Filter comparand is a plain object \(\{"a":1\}\), which no driver can compare\. A comparison value must be a string, number, bigint, boolean, null or Date\./,
+    },
+    {
+      // [#20116, stage 2] The same face, on a list member: located on the member.
+      name: 'a plain object as an $in member',
+      runtimeFilter: { stage: { $in: ['won', { a: 1 }] } },
+      member: 'selection.runtimeFilter.stage.$in.1',
+      sentence: /^Filter comparand is a plain object \(\{"a":1\}\), which no driver can compare\./,
+    },
   ];
 
   for (const c of AT_THE_DOOR) {
@@ -274,8 +305,17 @@ describe('[#17551] the structurally-malformed filter spellings are refused at th
       expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
       expect(res.body.code).toBe('VALIDATION_FAILED');
       // …and it says WHICH member, which the deeper refusal never did.
-      const fields: Array<{ field: string }> = res.body.details.fields;
+      const fields: Array<{ field: string; message: string }> = res.body.details.fields;
       expect(fields.map((f) => f.field).some((f) => f.startsWith('selection.runtimeFilter'))).toBe(true);
+      if (c.member) {
+        // [#20116] Exactly one entry, at the slot, carrying the face's sentence.
+        const atMember = fields.filter((f) => f.field === c.member);
+        expect(atMember, JSON.stringify(fields)).toHaveLength(1);
+        expect(atMember[0]!.message).toMatch(c.sentence!);
+        expect(atMember[0]!.message).not.toContain(' at where.');
+        // The normalizer never ran: the refusal is the door's, not INVALID_FILTER.
+        expect(res.body.code).not.toBe('INVALID_FILTER');
+      }
     });
   }
 
@@ -288,12 +328,24 @@ describe('[#17551] the structurally-malformed filter spellings are refused at th
         where: c.runtimeFilter,
       });
       expect(parsed.success, `${c.name} must be refused by the sibling schema too`).toBe(false);
+      if (c.member) {
+        // [#20116] …at the same slot, in the same sentence, one level up: the
+        // sibling body carries the filter as `where`, not `selection.runtimeFilter`.
+        const issues: Array<{ path: PropertyKey[]; message: string }> = parsed.error.issues;
+        const slot = c.member.replace(/^selection\.runtimeFilter\./, 'where.');
+        const atSlot = issues.filter((i) => i.path.join('.') === slot);
+        expect(atSlot, JSON.stringify(issues.map((i) => i.path))).toHaveLength(1);
+        expect(atSlot[0]!.message).toMatch(c.sentence!);
+      }
     }
   });
 
-  it('CONTROL — the four spellings the schema PASSES still cross the seam', async () => {
+  it('CONTROL — the three spellings the schema PASSES still cross the seam', async () => {
+    // [#20116] `{ amount: { $between: [10] } }` left this list: the schema
+    // refuses it now, on both routes (the AT_THE_DOOR row above, and the
+    // sibling-schema control, which iterates that table).
     const { AnalyticsQueryRequestSchema } = await import('@objectstack/spec/api');
-    const passes = [{ stage: {} }, { amount: { $between: [10] } }, { $nor: [{ stage: 'won' }] }, { $or: [] }];
+    const passes = [{ stage: {} }, { $nor: [{ stage: 'won' }] }, { $or: [] }];
     for (const where of passes) {
       const parsed = (AnalyticsQueryRequestSchema as any).safeParse({
         cube: 'opportunity', measures: ['revenue'], where,

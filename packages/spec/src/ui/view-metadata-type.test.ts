@@ -23,9 +23,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   VIEW_METADATA_BRANCHES,
+  VIEW_METADATA_MEMBERS,
   diagnoseViewMetadata,
   type ViewMetadata,
   type ViewMetadataBranch,
+  type ViewMetadataParsed,
 } from './view.zod';
 
 // ── One body per member, each typed through the published name ────────────────────────────────
@@ -66,6 +68,16 @@ const undeclaredKey: ViewMetadata = { type: 'grid', columns: ['name'], object: '
 const scalar: ViewMetadata = 42;
 void [fromUnknown, undeclaredKey, scalar];
 
+// ── [#19920] `ViewMetadataParsed`: the members' OUTPUT union, refused the same way ─────────────
+
+// @ts-expect-error -- `unknown` is not a parsed view body; it was assignable while ViewMetadataParsed was `unknown`.
+const parsedFromUnknown: ViewMetadataParsed = someValue;
+// @ts-expect-error -- `notAViewKey` is declared by no member's output (TS2353).
+const parsedUndeclaredKey: ViewMetadataParsed = { type: 'grid', columns: ['name'], object: 'crm_lead', viewKind: 'list', notAViewKey: 1 };
+// @ts-expect-error -- a parsed view body is an object.
+const parsedScalar: ViewMetadataParsed = 42;
+void [parsedFromUnknown, parsedUndeclaredKey, parsedScalar];
+
 describe('[#19871] ViewMetadata is a view body, not unknown', () => {
   it('has a typed body for every member of the union', () => {
     expect(Object.keys(BODY_OF_EACH_MEMBER).sort()).toEqual([...VIEW_METADATA_BRANCHES].sort());
@@ -76,6 +88,20 @@ describe('[#19871] ViewMetadata is a view body, not unknown', () => {
       const diagnosis = diagnoseViewMetadata(BODY_OF_EACH_MEMBER[branch]);
       expect(diagnosis.success).toBe(true);
       expect(diagnosis.branch).toBe(branch);
+    });
+  }
+});
+
+describe('[#19920] ViewMetadataParsed is a parsed view body, not unknown', () => {
+  for (const branch of VIEW_METADATA_BRANCHES) {
+    it(`the ${branch} member's parse output and diagnoseViewMetadata's data are both ViewMetadataParsed`, () => {
+      const memberOutput: ViewMetadataParsed = VIEW_METADATA_MEMBERS[branch].parse(BODY_OF_EACH_MEMBER[branch]);
+      const diagnosis = diagnoseViewMetadata(BODY_OF_EACH_MEMBER[branch]);
+      if (!diagnosis.success) throw new Error(`the ${branch} body must parse`);
+      const data: ViewMetadataParsed = diagnosis.data;
+      // The assertion in diagnoseViewMetadata changes no value: its data is the union's output,
+      // which is the accepting member's own output.
+      expect(data).toEqual(memberOutput);
     });
   }
 });

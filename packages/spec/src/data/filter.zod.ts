@@ -10,6 +10,10 @@ import {
   arrayEqualityComparandMessage,
   arrayInequalityComparandMessage,
 } from './filter-comparand-refusal-text';
+// [#20116] The save door's verdict on one comparand slot — the query faces'
+// refusals, the comparand-shape face deciding — shared with the analytics
+// carriers' nested-relation walk (`../ui/dataset.zod.ts`).
+import { reportQueryFaceRefusals } from './filter-save-door-refusals';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
 // [#19514] The text-comparand door this package publishes for the
@@ -312,8 +316,9 @@ const equalityComparandSchema = () =>
  *
  * ⚠️ Scope: this is the OPERATOR slot. `FilterConditionSchema` (every stored
  * filter carrier) does not parse a field's operator map through
- * `FieldOperatorsSchema`; its own walk, `checkFilterConditionComparands`, does
- * not judge `$ne`, and the ruling names this slot, not that walk.
+ * `FieldOperatorsSchema`. [#20116] Its own walk, `checkFilterConditionComparands`,
+ * refuses the same shape by asking the comparand-shape face, and prints this
+ * sentence with the field named.
  *
  * ⚠️ `z.toJSONSchema()` has no arm for a custom check, so the published JSON
  * Schema still reads `{}` here. The site is declared in
@@ -1698,10 +1703,76 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * [#20116] Is this object DATA rather than filter structure, as the
+ * comparand-type face classifies it? Structure is a PLAIN object only,
+ * prototype `Object.prototype` or `null` (the face's `isFilterNode`, the
+ * convention `driver-sql` shares since #5134, and the analytics door's
+ * nested-relation test). A `Map` or a class instance answers
+ * `typeof x === 'object'` while being data: `{ stage: new Map() }` is a
+ * comparand the type face refuses, never an empty nested relation.
+ */
+function isDataObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto !== Object.prototype && proto !== null;
+}
+
+/**
  * Walk one condition node and report every comparand this authoring door
  * refuses — the bare date-range PRESET names in an ordering position (#8793),
  * the `$icontains` comparands the platform's own conformance table declares
- * refused (#19514), and an ARRAY in the EQUALITY slot (#19889).
+ * refused (#19514), an ARRAY in the EQUALITY slot (#19889), and, since #20116,
+ * every comparand slot the query faces refuse.
+ *
+ * ## Every slot the query faces refuse is refused on save (#20116)
+ *
+ * The comparand-shape face (`assertListComparandShapes`) refuses, on every
+ * query, more than the equality slot: an array under `$ne` (ruling A on
+ * #19886), a `null` ordering comparand (2026-09-01), a non-list `$in` / `$nin`
+ * and a `$between` that is not a pair (#5869), a `null` list member or
+ * `$between` endpoint (2026-08-31), and a blank or `{ $field }` `$between`
+ * endpoint (#19071, #7596). Every query face refuses a non-boolean `$null` /
+ * `$exists` flag (#5347 / #5369). Measured on `origin/main` `af32cf9a` before
+ * this arm: `DatasetSchema`'s filter and measure filter, a dashboard widget
+ * `filter` and a report `runtimeFilter` each saved every one of them clean,
+ * while the face refused each shape with `INVALID_FILTER` / 400 — so a stored
+ * filter published and then failed every query built on it.
+ *
+ * - **The judge is the face itself**, asked about one slot at a time by
+ *   `reportQueryFaceRefusals` (`./filter-save-door-refusals.ts`, the one
+ *   function the analytics carriers' nested-relation walk calls too), so this
+ *   door refuses exactly what the query door refuses and nothing else — `null`
+ *   in the equality and `$ne`
+ *   slots (the null predicate), a `{ $field }` reference as a whole comparand,
+ *   `$in: []` / `$nin: []` and a whitespace endpoint all keep passing, because
+ *   the face passes them. The flags, which that face does not judge, use the
+ *   one predicate every flag face uses: `typeof comparand !== 'boolean'`.
+ * - **The comparand-TYPE face too** (`normalizeFilterComparandTypes`, the
+ *   #7872 accepted set), asked by the same function after the shape face: a
+ *   plain object where a literal belongs (`{ $eq: { a: 1 } }`), a `Map`, a
+ *   class instance, a function, a Symbol, `undefined` or a bigint beyond ±2^53
+ *   — as the comparand or as a list member — is refused on save, as every
+ *   query face refuses it. Measured on `origin/main` `17bd3187` before this
+ *   arm: every save door accepted `{ stage: { $eq: { a: 1 } } }`,
+ *   `{ stage: { $in: [{ a: 1 }] } }` and a `Map` comparand, while the type face
+ *   and the analytics door refused each with `INVALID_FILTER` / 400. A `Date`,
+ *   a `{ $field }` reference, a `{placeholder}` string resolved at request time
+ *   and a bigint within ±2^53 keep passing, because the face passes them. So
+ *   that a `Map` or a class instance reaches the face at all, a field value is
+ *   a comparand unless it is a PLAIN object ({@link isDataObject}, the face's
+ *   own structure test).
+ * - **The words** are chosen in that module: the face's own sentence where
+ *   the two doors already share a builder, the enforced
+ *   operator slot's sentence where `FieldOperatorsSchema` already prints one for
+ *   the same comparand, and the face's sentence less its location where neither
+ *   door had one. None carries the face's ` at <path>`; the issue's `path` does.
+ * - **The reach** is the face's, the equality arm's below: this node's own
+ *   field entries and its `$and` / `$or` / `$not` members, and NOT a field spec
+ *   with no `$` key. The drivers' flag checks stop at the same place. The
+ *   analytics `where` door does descend a nested relation (it flattens one to a
+ *   dotted member), so those positions belong to the analytics carriers' own
+ *   walk (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`), which
+ *   asks the same function — never to this shared walk, which every other
+ *   carrier reads.
  *
  * ## The equality-slot arm answers the FACE, in the face's words (#19889)
  *
@@ -1728,12 +1799,11 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *   door accepts, which is the split this arm exists to close.
  * - **Not dropped.** The refusal fails the parse; nothing is stripped from the
  *   document. A dropped filter would show MORE rows than the author asked for.
- * - ⛔ `$ne` is not judged by this walk (the ruling names equality), and the
- *   list operators keep their lists, `$in: []` / `$nin: []` included. [#19886]
- *   Ruling A refuses an array under `$ne` at the face and at the OPERATOR slot
- *   `FieldOperatorsSchema.$ne` (`inequalityComparandSchema`); it names neither
- *   this walk nor `FilterConditionSchema`, so a stored carrier still saves a
- *   `$ne` list and the face refuses it at query time.
+ * - The list operators keep their lists, `$in: []` / `$nin: []` included.
+ *   [#20116] `$ne` carrying a list is refused on save too, since #20116, by the
+ *   face-parity arm above in `arrayInequalityComparandMessage`'s words: the
+ *   same reach as this arm and the sentence the face and
+ *   `FieldOperatorsSchema.$ne` print (route A, the `$ne` member of #20116).
  *
  * Descends non-`$` keys only (operator specs and nested relations): the
  * `$and` / `$or` / `$not` members are re-parsed by {@link FilterConditionSchema}
@@ -1785,22 +1855,17 @@ function checkFilterConditionComparands(
 
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('$')) continue; // $and/$or/$not re-parse; other $ keys stay unjudged
-    // [#19889] The EQUALITY slot, implicit form `{ field: [...] }` — the empty
-    // list included. Judged on this node's OWN field entries only (`depth` 0),
+    // [#19889, #20116] An IMPLICIT comparand — a scalar, a `Date`, an array
+    // (the equality slot's `{ field: [...] }`, the empty list included), or a
+    // `Map` / class instance, which the type face calls data — asked of the
+    // query faces. Judged on this node's OWN field entries only (`depth` 0),
     // the face's exact reach: its walk never descends a field spec that has no
-    // `$` key, so an array inside a nested-relation condition is not refused
-    // there and is not refused here. See the docblock's third arm.
-    if (Array.isArray(value)) {
-      if (depth === 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [...path, key],
-          message: arrayEqualityComparandMessage(value, { field: key }),
-        });
-      }
+    // `$` key, so nothing inside a nested-relation condition is refused there,
+    // and nothing is refused here. See the docblock.
+    if (!isPlainFilterNode(value) || isDataObject(value)) {
+      if (depth === 0) reportQueryFaceRefusals(ctx, [...path, key], key, undefined, value, FieldOperatorsSchema);
       continue;
     }
-    if (!isPlainFilterNode(value)) continue; // a scalar implicit-equality comparand — not judged
     const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
@@ -1809,17 +1874,16 @@ function checkFilterConditionComparands(
       continue;
     }
     for (const [op, comparand] of Object.entries(value)) {
-      // [#19889] The EQUALITY slot, explicit form `{ field: { $eq: [...] } }`,
-      // on the same reach as the implicit form above. `null`, every scalar and a
-      // `{ $field }` reference are not arrays and pass.
-      if (op === '$eq') {
-        if (depth === 0 && Array.isArray(comparand)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...path, key, op],
-            message: arrayEqualityComparandMessage(comparand, { op: '$eq', field: key }),
-          });
-        }
+      // [#20116] Every operator slot asked of the query faces, on the same
+      // reach as the implicit form above: the comparand-shape face's verdict
+      // (the equality and `$ne` slots, the ordering `null` carve-out, the list
+      // operators' shape, null-member and endpoint rules), the comparand-type
+      // face's (a plain object, `Map`, class instance, `undefined` … where a
+      // literal belongs), and the boolean flags'. An operator none of them
+      // judges passes through untouched. A slot they refuse raises that one
+      // issue, and this walk's own arms below stay silent on it: one defect,
+      // one issue at one path.
+      if (depth === 0 && reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema, value)) {
         continue;
       }
       if (op === FILTER_TEXT_COMPARAND_OPERATOR && isRefusedTextComparand(comparand)) {
@@ -1972,7 +2036,7 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
       $or: z.array(FilterConditionSchema).optional(),
       $not: FilterConditionSchema.optional(),
     })
-  // Three comparand refusals ride one walk — see its docblock for why. [#8793]
+  // The comparand refusals ride one walk — see its docblock for why. [#8793]
   // Bare date-range preset names are refused from ordering comparands (the
   // § 3.35 block above carries the ruling, the measured defect and the
   // ordering-only boundary); [#19514] `$icontains` comparands are refused on
@@ -1980,9 +2044,10 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
   // stops admitting the document its own conformance table says will 400;
   // [#19889] an ARRAY in the equality slot, implicit or `$eq`, is refused in
   // the comparand-shape face's own words, so a stored filter the query door
-  // refuses is refused on save. The refinement judges this node's own field
-  // entries; `$and` / `$or` / `$not` members re-enter the schema and are
-  // judged by their own pass with nested issue paths.
+  // refuses is refused on save; [#20116] and so is every other slot the query
+  // faces refuse, the face itself deciding. The refinement judges this node's
+  // own field entries; `$and` / `$or` / `$not` members re-enter the schema and
+  // are judged by their own pass with nested issue paths.
   ).superRefine((node, ctx) => checkFilterConditionComparands(node, ctx))
 );
 

@@ -40,6 +40,9 @@
  *    `@objectstack/objectql`'s `undeclaredWriteFieldErrors`), because the SQL
  *    driver creates the three on every table it builds.
  *
+ * …or a declared part of one of those declared fields, when the field is
+ * compound (the section below).
+ *
  * Row 3 is what keeps this verdict from refusing a target the write accepts.
  * It is a superset rule, never a narrowing one: an import refused here is one
  * the commit would have refused row by row.
@@ -53,14 +56,37 @@
  * so a refusal there would be a verdict made from an absence. The engine's
  * write door takes the same position on the same input.
  *
- * ## Extension point for compound-field parts
+ * ## A declared part of a compound field (#20149)
  *
- * The maintainer's ruling on #20149 lets a target name a declared PART of a
- * compound field (`mailing_address.street`). That capability extends THIS
- * verdict by one arm in {@link judgeImportMappingTarget}, at the marked
- * place, returning a new `kind: 'part'` member of
- * {@link ImportMappingTargetVerdict}; ⛔ it never becomes a second predicate.
- * Until it lands, a dotted target names no field and is refused.
+ * The maintainer's ruling on #20149 (A) lets a target name a declared PART of
+ * a compound field: `mailing_address.street`. The importer assembles the parts
+ * one row maps into ONE value under the field's own key. That is one arm of
+ * {@link judgeImportMappingTarget}, answering `kind: 'part'`; ⛔ it is never a
+ * second predicate.
+ *
+ * A field is compound here when its stored VALUE schema (`valueSchemaFor`,
+ * `field-value.zod.ts`) is a CLOSED object whose every declared part is an
+ * OPTIONAL STRING, and its part names are exactly that object's keys: read from
+ * the schema, never listed by hand. Today that selects `address` (street,
+ * city, state, postalCode, country, countryCode, formatted); the test file
+ * pins the census over every field type. `location` is the one other
+ * closed-object value, and it is deliberately NOT compound: its parts are
+ * numbers and `lat` / `lng` are
+ * required, so a value assembled from text cells would be the wrong type or
+ * incomplete, and the ADR-0104 warn-first write path would store it with a
+ * warning rather than refuse it. The two conditions are what make an assembled
+ * value valid by construction: every subset of text cells is one.
+ *
+ * Refused, each with the part list in hand for the refusal to name:
+ *
+ * - a part the value does not declare (`mailing_address.stret`);
+ * - a dotted path whose head is not a compound field. ⛔ It is never read as a
+ *   lookup traversal (`account.name`): resolving a reference from its display
+ *   text is the `lookup` transform's business, on the reference field itself;
+ * - a part of a field the SAME mapping also writes whole (`mailing_address`
+ *   and `mailing_address.street`): one row carries one value for the field, so
+ *   the two collide, and {@link unknownImportMappingTargets} reports the part
+ *   with `reason: 'collides'`.
  *
  * Tolerant of bare / un-parsed records (the same contract as
  * {@link resolveInjectedSystemColumns}), because the import door reads a stored
@@ -68,6 +94,7 @@
  */
 
 import { SystemFieldName } from '../system/constants/system-names';
+import { valueSchemaFor } from './field-value.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
 
 type AnyRec = Record<string, unknown>;
@@ -93,13 +120,50 @@ export const IMPORT_TARGET_ALWAYS_ADDRESSABLE_COLUMNS: readonly string[] = Objec
 
 /**
  * The names an object makes addressable as an import target, plus each
- * declared field's definition (the input the compound-part arm reads).
+ * declared field's definition and the parts of each compound field.
  */
 export interface ImportMappingTargetIndex {
   /** Every name a target may be: declared ∪ provisioned. */
   names: ReadonlySet<string>;
   /** The object's DECLARED field definitions, by name. */
   fields: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
+  /**
+   * [#20149] Each compound declared field, by name, mapped to the parts a
+   * target may name on it (`mailing_address` → `street`, `city`, …), in the
+   * order its value schema declares them. A field absent here takes no part
+   * target.
+   */
+  parts: ReadonlyMap<string, readonly string[]>;
+}
+
+/** The `def.type` of a zod node, or `undefined`. */
+function zodType(node: unknown): string | undefined {
+  const def = (node as { _zod?: { def?: { type?: unknown } } } | undefined)?._zod?.def;
+  return typeof def?.type === 'string' ? def.type : undefined;
+}
+
+/**
+ * [#20149] The parts an import target may name on ONE declared field, or
+ * `undefined` when the field is not compound: the keys of its stored value
+ * schema when that schema is a closed object (`catchall: never`) whose every
+ * part is an optional string. See the module note for why both conditions.
+ */
+function importTargetPartsOf(def: Readonly<Record<string, unknown>>): readonly string[] | undefined {
+  if (typeof def.type !== 'string') return undefined;
+  const schema = valueSchemaFor(def as { type: string; multiple?: boolean }, 'stored') as unknown as {
+    _zod?: { def?: { type?: unknown; catchall?: unknown; shape?: unknown } };
+  };
+  const objectDef = schema?._zod?.def;
+  if (!objectDef || objectDef.type !== 'object' || zodType(objectDef.catchall) !== 'never') return undefined;
+  const rawShape: unknown = objectDef.shape;
+  const shape = ((typeof rawShape === 'function' ? (rawShape as () => unknown)() : rawShape) ?? {}) as Record<string, unknown>;
+  const names = Object.keys(shape);
+  if (names.length === 0) return undefined;
+  for (const name of names) {
+    const member = shape[name] as { _zod?: { def?: { innerType?: unknown } } } | undefined;
+    if (zodType(member) !== 'optional' || zodType(member?._zod?.def?.innerType) !== 'string') return undefined;
+  }
+  return Object.freeze(names);
 }
 
 /**
@@ -132,15 +196,43 @@ export function indexImportMappingTargets(objectDef: unknown): ImportMappingTarg
   const names = new Set<string>(fields.keys());
   for (const name of resolveInjectedSystemColumns(objectDef).names) names.add(name);
   for (const name of IMPORT_TARGET_ALWAYS_ADDRESSABLE_COLUMNS) names.add(name);
-  return { names, fields };
+  const parts = new Map<string, readonly string[]>();
+  for (const [name, def] of fields) {
+    const compound = importTargetPartsOf(def);
+    if (compound) parts.set(name, compound);
+  }
+  return { names, fields, parts };
+}
+
+/**
+ * What the text before the first dot of a dotted target names, so a refusal
+ * can say why the path is not a target and which parts ARE.
+ */
+export interface ImportMappingTargetHead {
+  /** The text before the first dot (`mailing_address` in `mailing_address.stret`). */
+  name: string;
+  /** Whether that text names a field of the object, declared or provisioned. */
+  field: boolean;
+  /** The head's declared `type`, when it is a DECLARED field that carries one. */
+  type?: string;
+  /** The parts a target may name on the head, when it is a compound field. */
+  parts?: readonly string[];
 }
 
 /** The verdict on one target string. */
 export type ImportMappingTargetVerdict =
   /** The target names a field of the object, declared or platform-provisioned. */
   | { kind: 'field'; target: string }
-  /** The target names no field of the object; every row would be refused on write. */
-  | { kind: 'unknown'; target: string };
+  /**
+   * [#20149] The target names a declared part of a compound field
+   * (`field.part`): the importer writes it into that field's one value.
+   */
+  | { kind: 'part'; target: string; field: string; part: string }
+  /**
+   * The target names no field of the object and no declared part; every row
+   * would be refused on write. `head` is present when the target is dotted.
+   */
+  | { kind: 'unknown'; target: string; head?: ImportMappingTargetHead };
 
 /**
  * Judge one target string against an indexed object.
@@ -150,12 +242,28 @@ export function judgeImportMappingTarget(
   target: string,
 ): ImportMappingTargetVerdict {
   if (index.names.has(target)) return { kind: 'field', target };
-  // ── #20149 extends the verdict HERE, with one arm ──────────────────────
-  // A dotted `head.part` whose head is a declared field with a strict-object
-  // value schema, and whose tail is a key that schema declares, answers
-  // `{ kind: 'part', … }`. It reads the head's definition from
-  // `index.fields`. Until that ruling is implemented a dotted target names
-  // no field, and falls through to `unknown` below.
+  // [#20149] The compound-part arm. The head is judged against the DECLARED
+  // fields only (a provisioned column has no compound value), and the part
+  // against the closed set the head's value schema declares. A dotted path
+  // that fails either stays `unknown`, carrying what its head names.
+  const dot = target.indexOf('.');
+  if (dot > 0) {
+    const name = target.slice(0, dot);
+    const part = target.slice(dot + 1);
+    const parts = index.parts.get(name);
+    if (parts?.includes(part)) return { kind: 'part', target, field: name, part };
+    const type = index.fields.get(name)?.type;
+    return {
+      kind: 'unknown',
+      target,
+      head: {
+        name,
+        field: index.names.has(name),
+        ...(typeof type === 'string' ? { type } : {}),
+        ...(parts ? { parts } : {}),
+      },
+    };
+  }
   return { kind: 'unknown', target };
 }
 
@@ -176,7 +284,7 @@ export function importMappingEntryTargets(entry: unknown): Array<{ target: strin
   return out;
 }
 
-/** One target that names no field of the mapping's object. */
+/** One target a mapping cannot write on its object. */
 export interface UnknownImportMappingTarget {
   /** Index of the entry in `fieldMapping`. */
   entry: number;
@@ -184,12 +292,27 @@ export interface UnknownImportMappingTarget {
   path: string;
   /** The target string as written. */
   target: string;
+  /**
+   * Why it is refused:
+   * - `unknown` — it names no field of the object and no declared part of a
+   *   compound field;
+   * - `collides` — [#20149] it names a declared part of a compound field that
+   *   the same mapping also writes whole, and one row carries one value for
+   *   the field.
+   */
+  reason: 'unknown' | 'collides';
+  /** `unknown`, dotted target: what its head names (see {@link ImportMappingTargetHead}). */
+  head?: ImportMappingTargetHead;
+  /** `collides`: the position of the target that writes the whole field. */
+  wholeAt?: string;
 }
 
 /**
- * Every target in a mapping's `fieldMapping` that names no field of the
- * object, in entry order. Empty when all resolve, and ALSO empty when the
- * object carries no readable field map (no opinion, never a refusal).
+ * Every target in a mapping's `fieldMapping` that the mapping cannot write on
+ * the object, in entry order: one that names no field and no declared part
+ * (`unknown`), and a declared part of a field the same mapping also writes
+ * whole (`collides`). Empty when all resolve, and ALSO empty when the object
+ * carries no readable field map (no opinion, never a refusal).
  *
  * @param fieldMapping The mapping's `fieldMapping` array, as stored or authored.
  * @param objectDef The definition of the mapping's `targetObject`.
@@ -201,13 +324,28 @@ export function unknownImportMappingTargets(
   if (!Array.isArray(fieldMapping)) return [];
   const index = indexImportMappingTargets(objectDef);
   if (!index) return [];
-  const out: UnknownImportMappingTarget[] = [];
+  const judged: Array<{ entry: number; path: string; verdict: ImportMappingTargetVerdict }> = [];
+  // The first position that writes each field WHOLE, for the collision check.
+  const wholeAt = new Map<string, string>();
   fieldMapping.forEach((entry, i) => {
     for (const { target, path } of importMappingEntryTargets(entry)) {
-      if (judgeImportMappingTarget(index, target).kind === 'unknown') {
-        out.push({ entry: i, path: `fieldMapping[${i}].${path}`, target });
-      }
+      const verdict = judgeImportMappingTarget(index, target);
+      const located = `fieldMapping[${i}].${path}`;
+      if (verdict.kind === 'field' && !wholeAt.has(target)) wholeAt.set(target, located);
+      judged.push({ entry: i, path: located, verdict });
     }
   });
+  const out: UnknownImportMappingTarget[] = [];
+  for (const { entry, path, verdict } of judged) {
+    if (verdict.kind === 'unknown') {
+      out.push({
+        entry, path, target: verdict.target, reason: 'unknown',
+        ...(verdict.head ? { head: verdict.head } : {}),
+      });
+    } else if (verdict.kind === 'part') {
+      const whole = wholeAt.get(verdict.field);
+      if (whole !== undefined) out.push({ entry, path, target: verdict.target, reason: 'collides', wholeAt: whole });
+    }
+  }
   return out;
 }

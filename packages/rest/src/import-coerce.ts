@@ -178,7 +178,12 @@ function coerceError(
 
 // ── blank / null handling ──────────────────────────────────────────
 
-function isBlank(value: unknown, nullValues?: string[]): boolean {
+/**
+ * Whether a cell is blank: absent, empty or whitespace, or one of the
+ * request's `nullValues`. Exported for the named mapping's compound-part
+ * assembly (#20149), which drops a blank part by this same rule.
+ */
+export function isBlank(value: unknown, nullValues?: string[]): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') {
     const s = value.trim();

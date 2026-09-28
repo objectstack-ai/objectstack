@@ -1608,10 +1608,13 @@ const actionObject = () => strictObject({
    * surface and defaults `'self'`; the handler convention is a shipped surface
    * and keeps new-tab.
    *
-   * The console consumer is not wired yet — the SPA navigation branch,
-   * `executeAPI` navigation handling and `${result.*}` interpolation are the
-   * downstream objectui half (Blocked-by #9566/#9474; tracked in the liveness
-   * ledger at `planned` strength with the amend-on-landing instruction).
+   * The console consumer is objectui's `ActionRunner` (`handlePostExecution`
+   * → `readOnSuccessNavigation` → `navigateOnSuccess`), read at the
+   * `.objectui-sha` pin `f8a9d0fb`. After an `api` or `script` action
+   * succeeds, it interpolates `navigate` with the `${param.*}`, `${ctx.*}` and
+   * `${result.*}` scopes and hands the URL to the console's router. It opens
+   * a new tab only on `openIn: 'newTab'`. The liveness ledger's two
+   * `onSuccess` rows are `live` and cite this reader.
    *
    * **The doubled channel is refused where the schema can see it** (#11519,
    * maintainer ruling 2026-08-24): a `type: 'script'` action declaring BOTH
@@ -2158,7 +2161,22 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }),
 ));
 
-export type InlineAction = z.input<typeof InlineActionSchema>;
+/**
+ * An inline action as an author writes it: the INPUT type of the object {@link InlineActionSchema}
+ * hands its body to, read off the pipe's `out` member.
+ *
+ * [#19920] Deliberately NOT `z.input<typeof InlineActionSchema>`. That schema is a `z.preprocess`,
+ * whose input type is the preprocess function's parameter — `unknown` for
+ * {@link normalizeInlineAction} — so this name used to type-check any value at all. The pipe's
+ * `out` member is the `.pick()`ed object itself, so the type now carries the shape its fields
+ * declare. `inline-action-type.test.ts` pins both halves.
+ *
+ * A static type, not the door's verdict, in both directions: the door accepts bodies this type
+ * refuses (the legacy `type: 'navigation'` and `to` spellings, which the preprocess folds onto
+ * `url` / `target`, are canonical-only here on purpose), and refuses bodies it admits (the
+ * `target`-required refinement is not a type). `InlineActionSchema` remains the only judge.
+ */
+export type InlineAction = z.input<(typeof InlineActionSchema)['out']>;
 /** Post-parse shape of {@link InlineAction} — defaults applied, transforms run (ADR-0122). */
 export type InlineActionParsed = z.infer<typeof InlineActionSchema>;
 

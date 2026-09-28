@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#6037 / #4633 ruling D] The validate-only DataProtocol contract.
+// [commit 18189983d / #4633 ruling D] The validate-only DataProtocol contract.
 //
 // The ruling carried two clauses aimed squarely at this contract, and both are
 // pinned here because both are the kind that a later edit could quietly undo:

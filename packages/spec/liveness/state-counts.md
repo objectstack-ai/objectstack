@@ -30,7 +30,7 @@ for both corollaries.
 | `object` | 50 | 0 | 0 | 0 | 1 | 51 |
 | `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
-| `action` | 44 | 0 | 0 | 3 | 2 | 49 |
+| `action` | 46 | 0 | 0 | 3 | 0 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -45,14 +45,14 @@ for both corollaries.
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
 | `query` | 16 | 0 | 0 | 5 | 0 | 21 |
 | `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
-| `app` | 47 | 0 | 0 | 9 | 0 | 56 |
+| `app` | 49 | 0 | 0 | 9 | 1 | 59 |
 | `book` | 20 | 0 | 0 | 1 | 0 | 21 |
 | `doc` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `email_template` | 21 | 0 | 0 | 0 | 0 | 21 |
 | `job` | 15 | 0 | 0 | 1 | 0 | 16 |
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
 | `seed` | 13 | 0 | 0 | 0 | 0 | 13 |
-| `translation` | 22 | 0 | 0 | 0 | 2 | 24 |
+| `translation` | 23 | 0 | 0 | 0 | 1 | 24 |
 | `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -62,9 +62,9 @@ for both corollaries.
 | `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
-| `rest_api` | 12 | 0 | 0 | 14 | 0 | 26 |
+| `rest_api` | 12 | 0 | 0 | 12 | 0 | 24 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 44 | 1 | 74 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **931** | **5** | **1** | **168** | **11** | **1116** |
+| **total** | **936** | **5** | **1** | **166** | **9** | **1117** |

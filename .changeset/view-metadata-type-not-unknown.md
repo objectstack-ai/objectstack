@@ -30,7 +30,7 @@ judge.
 member shapes. Correct the body, or type a value that is still unvalidated as `unknown` and let
 `ViewMetadataSchema.safeParse` decide.
 
-`ViewMetadataParsed` is not changed by this release: it is still `unknown`.
+`ViewMetadataParsed` is not changed by this change. It is re-derived from the same members, as their output types, by its own entry (#19920).
 
 The `@objectstack/metadata` changelog entry for #19852 gives `ViewMetadata` being `unknown` as the
 reason a saved `view` file is written with no annotation; that reason is superseded here, and the

@@ -20,6 +20,7 @@ import {
   packageBodyAsStack,
   runPerPackageAuthoringRules,
 } from '../utils/artifact-packages.js';
+import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -670,10 +671,16 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // so `lowered` already carries the folded collections and re-folding it here
   // would be a second call that could only ever return by identity.
   const { lowered, loweredHookRefs } = lowerCallables(stack as Record<string, unknown>);
+  // [#20158] The engine's own filter admission over this stack's objects — the
+  // same judge `os build` / `os validate` hand the table (see
+  // `utils/authoring-filter-judge.ts`), for the union run and the per-package
+  // pass below.
+  const judgeFilter = stackFilterJudge(lowered as Record<string, unknown>);
   const unionFindings = runAuthoringRules('lint', {
     normalized: stack,
     parsed: lowered,
     sduiManifest: opts.sduiManifest,
+    judgeFilter,
     // [#16546] Same ref set `os build` computes from the same normalized
     // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`
     // report `hooks[i].handler` here byte-identically to `os build`.
@@ -743,6 +750,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     unionFindings,
     sduiManifest: opts.sduiManifest,
     loweredHookRefs,
+    judgeFilter,
   }).findings;
 
   // ⛔ ONE mapping for both halves. A second copy of this expression is how one

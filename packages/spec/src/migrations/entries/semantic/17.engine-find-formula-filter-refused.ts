@@ -12,13 +12,14 @@ export const entry: SemanticMigration = {
   replacement:
     'denormalise the value onto the object (a stored field, written when the source '
     + 'changes) and filter that — deliberately the same remedy, in the same words, the '
-    + 'SORT axis prescribes (#6924 / #6994 / #7095) and the SEARCH axis has prescribed '
-    + 'since #6674; `summary` and `autonumber` fields need NO action, because both get '
+    + 'SORT axis prescribes when it refuses a formula sort, at the ingress and at the '
+    + 'engine, and the SEARCH axis prescribes when it refuses a formula search field; '
+    + '`summary` and `autonumber` fields need NO action, because both get '
     + 'real maintained columns and filter correctly',
   reason:
     '`formula` is the one field type no driver materialises a column for, and FILTER was '
-    + 'the last of the three query axes still fail-open on it: SORT refuses it (#6994 at '
-    + 'the ingress, #7095 at the engine) and SEARCH refuses it by name (#6674), while a '
+    + 'the last of the three query axes still fail-open on it: SORT refuses it (at the '
+    + 'REST ingress and at the engine) and SEARCH refuses it by name, while a '
     + '`where` on a `formula` field cleared every gate precisely BECAUSE the object '
     + 'declares the field, reached a driver with no column behind it, and answered 200 '
     + 'with zero rows. Measured on a real `ObjectQL` with `is_open` a `formula` over the '
@@ -34,7 +35,7 @@ export const entry: SemanticMigration = {
     + 'simultaneously unfilterable. That is strictly worse than the sort axis it mirrors: '
     + 'a refused sort returns the same rows in a different order, a refused filter changes '
     + 'which rows exist.\n\n'
-    + 'Both doors now refuse it with `400 INVALID_FIELD` (#8296 / PR #8369), naming the '
+    + 'Both doors now refuse it with `400 INVALID_FIELD`, naming the '
     + 'offending key path and carrying the remedy sentence — the ingress gate '
     + '(`assertFilterFieldsExist`, `@objectstack/metadata-protocol`) for everything '
     + 'reaching `findData`, and `assertFilterIsMaterializable` '
@@ -62,10 +63,11 @@ export const entry: SemanticMigration = {
     + 'filters are author-written the same way. A report or flow authored to filter on a '
     + 'formula field used to run and quietly return the wrong row set; it now fails '
     + 'loudly, with the remedy in the message.\n\n'
-    + 'Registered on the inherited ruling of #7095 ("register it anyway"), re-affirmed for '
-    + 'this axis at triage on 2026-08-13 (#8370): the shape is identical to the sort axis '
-    + 'and the consequence here is larger. #8296, #8370, #7095, #6994, #6924, #6674, '
-    + 'ADR-0112.',
+    + 'Registered on the ruling inherited from the SORT axis — its engine refusal was '
+    + 'registered in this ledger although no stored row needs rewriting, because the '
+    + 'ledger is the one channel that carries its rewrite instructions to the author — '
+    + 're-affirmed for this axis at triage on 2026-08-13: the shape is identical to the '
+    + 'sort axis and the consequence here is larger. ADR-0112.',
   acceptanceCriteria:
     'No filter names a `formula` field on any surface — grep your saved report definitions '
     + "(`sys_saved_report.query.filter`), flow node `config.filter`, dashboard widget "

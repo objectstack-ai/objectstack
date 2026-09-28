@@ -38,7 +38,7 @@ import {
 // a D2 conversion — `RETIRED_DEFS_BY_MAJOR[18]` plus the D3 semantic entry
 // `advanced-plugin-lifecycle-config-retired` ARE the declaration.
 //
-// Form follows #8715 / #4988 / #5055: resolved symbol identity over every
+// Form follows commit 2c86fe3ea / #4988 / #5055: resolved symbol identity over every
 // public entry via the build-time `export-origins/` artifact.
 describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
   /** The 9 names the retired defs exported (3 schema consts + 6 types). */

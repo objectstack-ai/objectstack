@@ -15,11 +15,11 @@ export const entry: SemanticMigration = {
     + 'driver pass-through key — `{ upsert: true }` was accepted and silently dropped and the '
     + 'update stayed a plain update (ADR-0049 declared-but-unenforced). There is no behaviour to '
     + 'preserve and nothing stored to rewrite (it only ever appeared in a call-time option bag). '
-    + "Any future first-class upsert must reconcile with #7867's not-found gate — a by-id update "
-    + 'whose id names no row throws RECORD_NOT_FOUND rather than inserting — which is why the '
+    + "Any future first-class upsert must reconcile with the engine's not-found gate — a by-id "
+    + 'update whose id names no row throws RECORD_NOT_FOUND rather than inserting — which is why the '
     + 'flag is removed rather than implemented here.',
   acceptanceCriteria:
     'No caller passes `options.upsert` to `engine.update()`; a call that includes it is refused '
-    + 'loudly (the engine gate and both schemas quote the #8057 prescription) instead of '
+    + 'loudly (the engine gate and both schemas quote one removal prescription) instead of '
     + 'succeeding with the option silently ignored.',
 };

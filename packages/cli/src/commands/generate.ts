@@ -49,13 +49,33 @@ import {
 // #20197 — the namespace-prefix gate's own verdict, IMPORTED for the reason
 // the block above gives: `objectNameFor` asks it rather than restating it.
 import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
-import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
+// #20215 — the collection key a type's items live under in a stack, the same
+// derivation the stack schema's own plural keys follow. Imported, not a second
+// table: `os init` wires, and `os g` looks up, exactly this key.
+import { singularToPlural } from '@objectstack/spec/shared';
+import { printHeader, printSuccess, printError, printInfo, printStep, printWarning, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { readProjectNamespace } from '../utils/project-namespace.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
+import {
+  barrelExportsBinding,
+  barrelSpecifier,
+  measureStackReach,
+  wiringLines,
+  type StackReach,
+} from '../utils/scaffold-wiring.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
+
+/**
+ * The capability tokens a stack must declare for the `flow` scaffold to run
+ * (#20215): a record-change flow is fired by `triggers` and run by
+ * `automation`. The same pair `os serve`'s boot banner prescribes when flows
+ * are declared and the engine is off. See the `flow` generator for the
+ * measurement.
+ */
+const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
 
 /**
  * The scaffold templates, keyed by metadata type.
@@ -84,16 +104,39 @@ import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
  * `generate-object-namespace-prefix.test.ts` pins both the prefix and the
  * flag against the templates.
  *
- * Only object names are prefixed. The scaffold's own `name` on a view, an
- * action, a flow, a dashboard, an app or a skill is not judged against the
- * namespace by any gate `os validate` runs, so it stays the name the author
- * typed.
+ * Only object names are prefixed. The scaffold's own `name` on an action, a
+ * flow, a dashboard, an app or a skill is not judged against the namespace by
+ * any gate `os validate` runs, so it stays the name the author typed. A view
+ * container's own `name` IS an object name — the container is registered under
+ * the object it binds to — so it is prefixed with it (#20215).
+ *
+ * ## Every scaffold reaches the stack, or the command says it does not
+ *
+ * Each generator's items are collected under the `defineStack` key
+ * `singularToPlural(type)` names, which `os init` wires its barrel into and
+ * `os validate` counts. After writing, `runMetadataGeneration` loads the
+ * project's config and looks for `itemName` there (see
+ * `utils/scaffold-wiring.ts`, #20215).
  */
 const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
   /** Whether the scaffold writes an object machine name (see above). */
   namesObject: boolean;
+  /**
+   * The metadata `name` the scaffold writes, for the same arguments as
+   * `generate`. `runMetadataGeneration` looks for exactly this name in the
+   * loaded stack to say whether the file reached it (#20215), and
+   * `generate-scaffold-wiring.test.ts` holds it equal to what `generate`
+   * writes, so the two cannot drift.
+   */
+  itemName: (name: string, namespace?: string) => string;
+  /**
+   * Capability tokens a stack must declare in `requires` for this scaffold to
+   * RUN (#20215). `os init` declares the union of them, and `os g` names the
+   * missing ones. Absent: the scaffold needs none.
+   */
+  requires?: readonly string[];
   /**
    * @param name      the name the author passed, already past the charset gate
    * @param namespace the project's `manifest.namespace`; omitted for a project
@@ -136,6 +179,7 @@ const GENERATORS: Record<string, {
      * stay derived from the name the author typed.
      */
     namesObject: true,
+    itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
     generate: (name: string, namespace?: string) => `import { ObjectSchema } from '@objectstack/spec/data';
 
 /**
@@ -192,15 +236,28 @@ export default ${toCamelCase(name)};
      * views belong to. `objectName` is the spelling on the QUERY surface. It
      * names the object `os g object NAME` writes, prefix included, so the two
      * scaffolds compose.
+     *
+     * The container's own `name` is that SAME object name (#20215). A views
+     * container is registered under the object it binds to, and the runtime
+     * refuses one whose `name` disagrees with that key at boot
+     * (`ObjectQL.registerMetadataCollections`: "Register under one name: drop
+     * `name`, or set it to …"). `os validate` did not say so, and the scaffold
+     * was never loaded, so nobody met it until `os init` started wiring
+     * `src/views`: in a namespaced project the scaffold then stopped `os serve`
+     * from booting. Unprefixed and prefixed are the same string in a project
+     * with no namespace, so only a namespaced project sees the difference.
      */
     namesObject: true,
+    itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
     generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Views
  */
 const ${toCamelCase(name)}Views: UI.View = {
-  name: '${toSnakeCase(name)}',
+  // A views container is registered under the object it binds to, so its
+  // \`name\` is that object's name: the server refuses one that disagrees.
+  name: '${objectNameFor(name, namespace)}',
   label: '${toTitleCase(name)}',
   object: '${objectNameFor(name, namespace)}',
   list: {
@@ -241,6 +298,7 @@ export default ${toCamelCase(name)}Views;
      * a FLOW, whose name no gate prefixes, so it does not.
      */
     namesObject: true,
+    itemName: (name: string) => toSnakeCase(name),
     generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -287,12 +345,28 @@ export default ${toCamelCase(name)}Action;
      * The start node's `objectName` carries the namespace prefix: a trigger
      * bound to an object the stack does not define never fires, and
      * `validate-flow-trigger-readiness` reports it.
+     *
+     * It declares what it needs to run (#20215): {@link FLOW_SCAFFOLD_REQUIRES}.
+     * `defineStack` refuses a record-change flow in a stack whose `requires`
+     * lacks `triggers`, and a stack that has `triggers` but not `automation`
+     * loads it and never runs it — measured on `os serve`: "1 flow(s) declared
+     * but the automation engine is not enabled — they will never run", each
+     * trigger plugin "NOT installed". So both tokens are declared here, `os
+     * init` declares the union, `os g flow` names any the stack is missing, and
+     * the emitted file says so in its own header.
      */
     namesObject: true,
+    itemName: (name: string) => `${toSnakeCase(name)}_flow`,
+    requires: FLOW_SCAFFOLD_REQUIRES,
     generate: (name: string, namespace?: string) => `import * as Automation from '@objectstack/spec/automation';
 
 /**
  * ${toTitleCase(name)} Flow
+ *
+ * Starts when a record changes, so the stack that carries it must declare
+ * requires: [${FLOW_SCAFFOLD_REQUIRES.map((t) => `'${t}'`).join(', ')}]. The 'triggers' capability
+ * fires the flow and 'automation' runs it: without 'triggers' the config does
+ * not load, and without 'automation' the server loads the flow and never runs it.
  */
 const ${toCamelCase(name)}Flow: Automation.Flow = {
   name: '${toSnakeCase(name)}_flow',
@@ -334,6 +408,7 @@ export default ${toCamelCase(name)}Flow;
     description: 'Analytics dashboard',
     defaultDir: 'src/dashboards',
     namesObject: false,
+    itemName: (name: string) => `${toSnakeCase(name)}_dashboard`,
     generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -367,6 +442,7 @@ export default ${toCamelCase(name)}Dashboard;
      * `objectName` that names no declared object.
      */
     namesObject: true,
+    itemName: (name: string) => `${toSnakeCase(name)}_app`,
     generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -413,6 +489,7 @@ export default ${toCamelCase(name)}App;
      * harness default.
      */
     namesObject: false,
+    itemName: (name: string) => toSnakeCase(name),
     generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
 
 /**
@@ -473,20 +550,29 @@ export default ${toCamelCase(name)}Skill;
  * Exported for `generate-file-name-registry-parity.test.ts` (which reads
  * `type` / `defaultDir`) and `generate-scaffold-validates.test.ts` (which
  * reads `generate` to materialize each scaffold and put it through the schema
- * `os validate` parses it with). Derived on purpose: each pin's job is to hold
- * for the NEXT generator somebody adds, and a hand-kept list would leave that
- * one unmeasured while still reading green.
+ * `os validate` parses it with), and `init.ts`, whose templates wire every
+ * `defaultDir` barrel under its `stackKey` and declare the union of `requires`
+ * (#20215). Derived on purpose: each pin's job is to hold for the NEXT
+ * generator somebody adds, and a hand-kept list would leave that one
+ * unmeasured while still reading green.
  */
 export const GENERATOR_SCAFFOLD_TARGETS: readonly {
   type: string;
   defaultDir: string;
+  /** The `defineStack` key this type is collected under: `singularToPlural(type)`. */
+  stackKey: string;
   namesObject: boolean;
+  itemName: (name: string, namespace?: string) => string;
+  requires: readonly string[];
   generate: (name: string, namespace?: string) => string;
 }[] =
   Object.entries(GENERATORS).map(([type, gen]) => ({
     type,
     defaultDir: gen.defaultDir,
+    stackKey: singularToPlural(type),
     namesObject: gen.namesObject,
+    itemName: gen.itemName,
+    requires: gen.requires ?? [],
     generate: gen.generate,
   }));
 
@@ -504,6 +590,12 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
  * and the natural next move is to hunt for the right spelling of something
  * that no longer exists.
  *
+ * The ledger is read by {@link refuseRetiredGenerator}, which `Generate.run`
+ * calls before anything else — ahead of the sub-command routing and ahead of
+ * the `<name>` requirement. Both positions matter: `schema` was one of the
+ * routed sub-commands, and it never took a name, so a lookup placed after
+ * either one answered `os generate schema` with something other than this.
+ *
  * `agent` (ADR-0063 §2, which reversed ADR-0040 §3): the kernel ships exactly
  * two agents, `ask` and `build`, bound by surface and never picked from a
  * roster. Tenant / app-package agents were withdrawn, and the runtime catalog
@@ -514,6 +606,22 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
  * that silence one step earlier instead of ending it, which is why each entry
  * owes both halves — the decision that withdrew the surface, and the surface
  * to author instead.
+ *
+ * `schema` (maintainer ruling on #19098, comment 5856790152, letter C —
+ * retired, not repaired): `os generate schema` wrote a JSON Schema of the
+ * whole stack definition for an editor to check `objectstack.config.ts`
+ * against. It projected `ObjectStackDefinitionSchema` through a bare
+ * `z.toJSONSchema`, so every refinement the platform enforces beyond the
+ * shape (a non-blank string, a required one-of, a banned key) was missing
+ * from the file, and an editor reported as valid a config the platform then
+ * refused — a green at authoring time that the runtime contradicts. No
+ * config format this CLI loads is one an editor validates against a JSON
+ * Schema (`objectstack.config.ts` is typed through `defineStack`), and no
+ * reader of the file was found. The ruling generates no replacement file:
+ * the refusal points at `os validate`, which runs the real parse, and at the
+ * per-type schemas `@objectstack/spec` publishes, which carry the published
+ * projection. The ruling's id lives here and not in the refusal, because
+ * text an author is shown carries no tracker number.
  */
 const RETIRED_GENERATORS: Record<string, {
   /** Reason clause completing "`os g <type>` was retired — …". */
@@ -542,7 +650,53 @@ const RETIRED_GENERATORS: Record<string, {
       'Docs: https://objectstack.ai/docs/ai/agents',
     ],
   },
+  schema: {
+    reason: 'its JSON Schema passed configs the platform refuses (maintainer ruling).',
+    detail: [
+      'The file it wrote described only the shape of a stack. Every rule the',
+      'platform enforces beyond that shape — a non-blank string, a required',
+      'one-of, a banned key — was missing from it, so an editor showed a config',
+      'as valid and the platform then refused it. By maintainer ruling it is',
+      'retired, not repaired, and no replacement file is generated.',
+      '',
+      'Check a project against the rules that actually run:',
+      '',
+      '    os validate',
+      '',
+      'For JSON metadata, point your editor at the per-type schemas that',
+      '@objectstack/spec publishes. They state the rules a JSON Schema can',
+      'express, and name the ones it cannot under `x-dropped-refinements`:',
+      '',
+      '    node_modules/@objectstack/spec/json-schema/<category>/<Type>.json',
+      '',
+      '`objectstack.config.ts` needs neither: `defineStack` types it in your',
+      'editor. Delete the `os generate schema` call, and any editor setting',
+      'that maps `objectstack.schema.json` — nothing writes that file now.',
+      '',
+      'Docs: https://objectstack.ai/docs/deployment/cli',
+    ],
+  },
 };
+
+/**
+ * Print a retired generator's refusal and exit 1 — never returns.
+ *
+ * Called from `Generate.run` ahead of the sub-command routing and the
+ * `<name>` requirement (see {@link RETIRED_GENERATORS} for why both), so
+ * every spelling of a retired type reaches it: `os g agent support`,
+ * `os g agent`, `os generate schema -o <file>`.
+ */
+function refuseRetiredGenerator(type: string): never {
+  const retired = RETIRED_GENERATORS[type];
+  printHeader('Generate');
+  printError(`\`${CLI_ALIAS} g ${type}\` was retired — ${retired.reason}`);
+  console.log('');
+  for (const line of retired.detail) {
+    console.log(line ? chalk.dim(`  ${line}`) : '');
+  }
+  console.log('');
+  process.exit(1);
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -924,18 +1078,8 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
 async function runMetadataGeneration(type: string, name: string, flags: { dir?: string; dryRun?: boolean }): Promise<void> {
     printHeader('Generate');
 
-    // A withdrawn type answers for itself, ahead of the roster lookup — see
-    // RETIRED_GENERATORS for why "unknown type" is the wrong answer here.
-    const retired = RETIRED_GENERATORS[type];
-    if (retired) {
-      printError(`\`${CLI_ALIAS} g ${type}\` was retired — ${retired.reason}`);
-      console.log('');
-      for (const line of retired.detail) {
-        console.log(line ? chalk.dim(`  ${line}`) : '');
-      }
-      console.log('');
-      process.exit(1);
-    }
+    // A withdrawn type never reaches this function: `Generate.run` answers it
+    // first, through refuseRetiredGenerator.
 
     const generator = GENERATORS[type];
     if (!generator) {
@@ -1006,16 +1150,25 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       process.exit(1);
     }
 
-    // The project's `manifest.namespace`, read only for a generator that
-    // writes an object machine name (#20197) — see `objectNameFor`.
+    // The project's config, loaded once before anything is written.
+    //
+    // Its `manifest.namespace` is applied only by a generator that writes an
+    // object machine name (#20197) — see `objectNameFor` — and only such a
+    // generator refuses when the config does not load. Every generator reads
+    // it (#20215), because whether the config loaded BEFORE this command wrote
+    // anything is what the reach check below needs: a config that loaded then
+    // and does not load once the scaffold is in place was broken by this
+    // command, and the write is taken back out. A generator that names no
+    // object still generates into a project whose config does not load, as it
+    // always has.
     //
     // BELOW the charset gate, because the prefix is a derivation and the
     // #16726 position puts every derivation after that gate. ABOVE the render,
     // the parse check and the dry-run branch, so a preview shows the object
     // name that would land.
+    const project = await readProjectNamespace();
     let namespace: string | undefined;
     if (generator.namesObject) {
-      const project = await readProjectNamespace();
       if (project.kind === 'load-failed') {
         // ⛔ REFUSE rather than write the name as typed. An unreadable
         // manifest is not a manifest with no namespace: guessing "none" is
@@ -1294,42 +1447,190 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       process.exit(1);
     }
 
+    // Everything this run writes is recorded, so that a write the reach check
+    // below refuses can be taken back out byte-for-byte: the scaffold (new —
+    // its absence was just checked), the directory if this run created it, and
+    // the barrel as it was before (`null`: it did not exist).
+    const fullDir = path.dirname(filePath);
+    const indexPath = path.join(fullDir, 'index.ts');
+    let createdDir: string | undefined;
+    let barrelBefore: string | null = null;
+    let barrelWritten = false;
+    // The success lines are held until the reach verdict, so a refused write
+    // never prints a `Created` line for a file that is no longer there.
+    const written: string[] = [];
     try {
-      // Create directory
-      const fullDir = path.dirname(filePath);
-      if (!fs.existsSync(fullDir)) {
-        fs.mkdirSync(fullDir, { recursive: true });
-      }
+      // `mkdirSync` answers the first directory it created, or `undefined`
+      // when the whole path already existed.
+      createdDir = fs.mkdirSync(fullDir, { recursive: true }) ?? undefined;
 
       // Write file — the same `content` the parse check above accepted, ⛔ not
       // a re-render: a second call to `generator.generate` would make the
       // bytes that were checked and the bytes that land two different things.
       fs.writeFileSync(filePath, content);
-      printSuccess(`Created ${path.join(dir, fileName)}`);
+      written.push(`Created ${path.join(dir, fileName)}`);
 
-      // Check for barrel index
-      const indexPath = path.join(process.cwd(), dir, 'index.ts');
       if (fs.existsSync(indexPath)) {
-        const indexContent = fs.readFileSync(indexPath, 'utf-8');
-
-        if (!indexContent.includes(toCamelCase(name))) {
+        barrelBefore = fs.readFileSync(indexPath, 'utf-8');
+        // Asked of the compiler, never `includes` (#20215): see
+        // `barrelExportsBinding` for the names a substring test dropped.
+        if (!(await barrelExportsBinding(barrelBefore, barrelAlias))) {
           fs.appendFileSync(indexPath, exportLine + '\n');
-          printSuccess(`Updated ${dir}/index.ts with export`);
+          barrelWritten = true;
+          written.push(`Updated ${dir}/index.ts with export`);
         }
       } else {
-        // Create barrel index
         fs.writeFileSync(indexPath, exportLine + '\n');
-        printSuccess(`Created ${dir}/index.ts`);
+        barrelWritten = true;
+        written.push(`Created ${dir}/index.ts`);
       }
-
-      console.log('');
-      console.log(chalk.dim(`  Tip: Run \`objectstack validate\` to check your config`));
-      console.log('');
-
     } catch (error: any) {
+      for (const line of written) printSuccess(line);
       printError(error.message || String(error));
       process.exit(1);
     }
+
+    // ── Does it reach the stack? (#20215) ──────────────────────────────
+    //
+    // The one wrong answer is silence: a scaffold nothing imports passed
+    // `os validate` at a count of 0. So the project's config is loaded again,
+    // now with the scaffold in place, and asked whether its stack carries the
+    // item — the same loader and the same fold `os validate` counts with (see
+    // `utils/scaffold-wiring.ts` for why the loaded stack, not the config's
+    // text, is asked). ⛔ The config is never edited: it is the author's file.
+    const stackKey = singularToPlural(type);
+    const itemName = generator.itemName(name, namespace);
+    const requires = generator.requires ?? [];
+    const reach = await measureStackReach({ stackKey, itemName, requires });
+    const scaffoldLabel = path.join(dir, fileName);
+
+    if (reach.kind === 'load-failed' && project.kind === 'loaded') {
+      // The config loaded before this run wrote anything and does not load
+      // now, so this write is what broke it: the barrel it reaches carries
+      // the scaffold into a stack that refuses it. ⛔ REFUSE, and leave the
+      // project as it was — the same "nothing written" every refusal above
+      // this line holds.
+      fs.rmSync(filePath, { force: true });
+      if (barrelWritten) {
+        if (barrelBefore === null) fs.rmSync(indexPath, { force: true });
+        else fs.writeFileSync(indexPath, barrelBefore);
+      }
+      if (createdDir) fs.rmSync(createdDir, { recursive: true, force: true });
+
+      const configName = path.basename(reach.configPath);
+      printError(`Refusing to generate — with ${scaffoldLabel} in place, ${configName} no longer loads`);
+      console.log('');
+      for (const line of reach.message.split('\n')) {
+        console.log(chalk.dim(`  ${line}`));
+      }
+      console.log('');
+      console.log(chalk.dim(
+        `  ${configName} loaded before this command wrote anything, and it wires ${dir}/index.ts,`,
+      ));
+      console.log(chalk.dim(
+        `  so the ${type} became part of its stack, and the stack refuses it in the words above.`,
+      ));
+      if (requires.length > 0) {
+        console.log(chalk.dim(
+          `  A ${type} needs requires: [${requires.map((t) => `'${t}'`).join(', ')}] in ${configName} to load and to run.`,
+        ));
+      }
+      console.log(chalk.dim(
+        '  The scaffold and its barrel line were removed again, so nothing was written.',
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
+    for (const line of written) printSuccess(line);
+    reportStackReach(reach, { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir: fullDir });
+}
+
+/**
+ * Say whether a scaffold `os generate` just wrote is part of the project's
+ * stack (#20215). Every branch that is not "yes, and it can run" is a
+ * warning with the exact lines that fix it, because each of them is a file
+ * `os validate` will not count or will not see run.
+ */
+function reportStackReach(
+  reach: StackReach,
+  info: {
+    type: string;
+    dir: string;
+    scaffoldLabel: string;
+    stackKey: string;
+    itemName: string;
+    requires: readonly string[];
+    barrelDir: string;
+  },
+): void {
+  const { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir } = info;
+  const quoted = (tokens: readonly string[]) => tokens.map((t) => `'${t}'`).join(', ');
+  const printWiring = (
+    specifier: string,
+    missingRequires: readonly string[],
+    declaredRequires: readonly string[] | null,
+  ) => {
+    const { importLine, stackLines } = wiringLines({ specifier, stackKey, missingRequires, declaredRequires });
+    console.log(chalk.white(`      ${importLine}`));
+    console.log(chalk.dim('    and inside defineStack({ … }):'));
+    for (const line of stackLines) console.log(chalk.white(`      ${line}`));
+  };
+  console.log('');
+
+  if (reach.kind === 'loaded' && reach.reached) {
+    const configName = path.basename(reach.configPath);
+    printSuccess(`Reaches the stack: ${configName} carries it in \`${stackKey}\` as '${itemName}'`);
+    if (reach.missingRequires.length > 0) {
+      printWarning(`It will not run yet: ${configName} does not require ${quoted(reach.missingRequires)}`);
+      console.log(chalk.dim(
+        `    A ${type} needs requires: [${quoted(requires)}] to run. The stack carries it, and the`,
+      ));
+      console.log(chalk.dim(
+        `    server loads it and never runs it until ${configName} also declares ${quoted(reach.missingRequires)}:`,
+      ));
+      const all = [...(reach.declaredRequires ?? []), ...reach.missingRequires];
+      console.log(chalk.white(`      requires: [${quoted(all)}],`));
+    }
+    console.log('');
+    console.log(chalk.dim(`  Tip: Run \`objectstack validate\` to check your config`));
+    console.log('');
+    return;
+  }
+
+  if (reach.kind === 'loaded') {
+    const configName = path.basename(reach.configPath);
+    printWarning(`Not wired: ${scaffoldLabel} is not part of the stack ${configName} builds`);
+    console.log(chalk.dim(
+      `    ${configName} loads, and its \`${stackKey}\` has no '${itemName}'. Nothing loads this file,`,
+    ));
+    console.log(chalk.dim(
+      '    and `objectstack validate` neither counts it nor checks it.',
+    ));
+    console.log(chalk.dim(`    To wire every ${type} in ${dir}, add to ${configName}:`));
+    printWiring(barrelSpecifier(reach.configPath, barrelDir), reach.missingRequires, reach.declaredRequires);
+    console.log('');
+    return;
+  }
+
+  if (reach.kind === 'no-config') {
+    printWarning(`Not wired: there is no objectstack.config.{ts,js,mjs} here, so nothing loads ${scaffoldLabel}`);
+    console.log(chalk.dim(
+      `    Run \`${CLI_ALIAS} g\` where the project's config is, or wire ${dir}/index.ts into the config`,
+    ));
+    console.log(chalk.dim('    of the stack that should carry it, next to this directory:'));
+    printWiring(barrelSpecifier(path.join(process.cwd(), 'objectstack.config.ts'), barrelDir), requires, null);
+    console.log('');
+    return;
+  }
+
+  // The config did not load before this run either, so this run did not break
+  // it, and whether the scaffold reaches the stack is unknown.
+  printWarning(
+    `${path.basename(reach.configPath)} does not load, so whether ${scaffoldLabel} reaches its stack cannot be told`,
+  );
+  console.log(chalk.dim(`    \`${CLI_ALIAS} validate\` reports why it does not load.`));
+  console.log('');
 }
 
 async function runTypesGeneration(configPath: string | undefined, flags: { output: string; dryRun?: boolean }): Promise<void> {
@@ -3146,132 +3447,6 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
     }
 }
 
-// ─── JSON Schema Generator ──────────────────────────────────────────
-
-/**
- * Error messages for schema nodes that inherently have no JSON Schema form.
- *
- * ⛔ Deliberately the SAME single substring `packages/spec/scripts/build-schemas.ts`
- * matches on, and for the same reason: zod names the offending node kind in the
- * PREFIX (`Transforms …`, `Function types …`), so a list of kinds here would go
- * stale against zod while the suffix is what all of them share. Anything this
- * does NOT recognise is a real conversion failure, and every tier below
- * re-raises it instead of degrading past it.
- */
-const KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS = [
-  'cannot be represented in JSON Schema',
-];
-
-function isKnownUnsupportedJsonSchema(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS.some((p) => msg.includes(p));
-}
-
-async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }): Promise<void> {
-    printHeader('Generate Schema');
-
-    try {
-      const timer = createTimer();
-      printStep('Loading ObjectStackDefinitionSchema...');
-
-      const { z } = await import('zod');
-      const { ObjectStackDefinitionSchema } = await import('@objectstack/spec');
-
-      printStep('Converting to JSON Schema...');
-
-      // [#17873] The three-tier ladder `packages/spec/scripts/build-schemas.ts`
-      // already runs for every schema it publishes, with the third tier spelled
-      // as `packages/metadata-protocol/src/protocol.ts`'s `unrepresentable: 'any'`
-      // rather than spec's union-branch projection (a spec-private helper).
-      //
-      // Before this, the call below was the ONE `toJSONSchema` call site in the
-      // repository that neither fell back nor used that convention — and
-      // `ObjectStackDefinitionSchema` has no JSON form in EITHER direction, so
-      // the bare call threw for every repository and every flag combination and
-      // the `catch` at the bottom of this function exited 1. The command could
-      // never reach its own `fs.writeFileSync`.
-      //
-      //   tier 1  output, strict — what this command asked for, kept first.
-      //   tier 2  input, strict  — an IDE schema describes what an author WRITES,
-      //                            and the input side of a transform pipe is
-      //                            plain data (build-schemas.ts carries the
-      //                            full argument).
-      //   tier 3  input, `unrepresentable: 'any'` — the callable leaves
-      //                            (`onEnable`, hook/function `handler`s) have no
-      //                            JSON form in any direction; widening THOSE
-      //                            LEAVES to "accepts anything" is what buys the
-      //                            other 40 members a published schema.
-      let jsonSchema: Record<string, unknown>;
-      let io: 'output' | 'input' = 'output';
-      let widenedUnrepresentable = false;
-      try {
-        jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-          target: 'draft-2020-12',
-        }) as Record<string, unknown>;
-      } catch (outputError) {
-        if (!isKnownUnsupportedJsonSchema(outputError)) throw outputError;
-        io = 'input';
-        try {
-          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-            target: 'draft-2020-12',
-            io: 'input',
-          }) as Record<string, unknown>;
-        } catch (inputError) {
-          if (!isKnownUnsupportedJsonSchema(inputError)) throw inputError;
-          widenedUnrepresentable = true;
-          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-            target: 'draft-2020-12',
-            io: 'input',
-            unrepresentable: 'any',
-          }) as Record<string, unknown>;
-        }
-      }
-
-      // Absence must be loud: a degraded artifact says so at the moment it is
-      // produced, rather than leaving an IDE user to discover that some subtree
-      // accepts anything.
-      if (io === 'input') {
-        printInfo('Converted in the authoring (input) direction — the output direction contains a transform with no JSON form');
-      }
-      if (widenedUnrepresentable) {
-        printInfo('Nodes with no JSON form (live callables) are published as unconstrained — they accept any value in this schema');
-      }
-
-      // Add metadata
-      const schema = {
-        ...jsonSchema,
-        $id: 'https://schema.objectstack.io/objectstack.config.json',
-        title: 'ObjectStack Configuration',
-        description: 'JSON Schema for objectstack.config.ts — generated from ObjectStackDefinitionSchema',
-      };
-
-      const content = JSON.stringify(schema, null, 2) + '\n';
-
-      if (flags.dryRun) {
-        printInfo('Dry run — no files written');
-        console.log('');
-        console.log(content);
-        return;
-      }
-
-      const outPath = path.resolve(process.cwd(), flags.output);
-      const outDir = path.dirname(outPath);
-      if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
-      }
-      fs.writeFileSync(outPath, content);
-      printSuccess(`Generated JSON Schema at ${flags.output} (${timer.display()})`);
-      console.log('');
-      console.log(chalk.dim('  Usage: Reference in your IDE or editor for autocomplete'));
-      console.log(chalk.dim(`  Path:  ${outPath}`));
-      console.log('');
-
-    } catch (error: any) {
-      printError(error.message || String(error));
-      process.exit(1);
-    }
-}
-
 // ─── Main Generate Command ──────────────────────────────────────────
 
 export default class Generate extends Command {
@@ -3300,6 +3475,15 @@ export default class Generate extends Command {
   async run(): Promise<void> {
     const { args, flags } = await this.parse(Generate);
 
+    // A withdrawn type answers for itself before anything else is read: ahead
+    // of the sub-command routing below and ahead of the `<name>` requirement,
+    // since `os generate schema` was a routed sub-command that took no name.
+    // An own-key read, because the ledger is a plain object literal: an
+    // inherited name such as `constructor` is not a retired type.
+    if (Object.prototype.hasOwnProperty.call(RETIRED_GENERATORS, args.type)) {
+      refuseRetiredGenerator(args.type);
+    }
+
     // Route to sub-commands by type name
     switch (args.type) {
       case 'types':
@@ -3316,11 +3500,6 @@ export default class Generate extends Command {
         return runMigrationGeneration(args.name, {
           output: flags.output,
           format: flags.format ?? 'typescript',
-          dryRun: flags['dry-run'],
-        });
-      case 'schema':
-        return runSchemaGeneration({
-          output: flags.output ?? 'objectstack.schema.json',
           dryRun: flags['dry-run'],
         });
     }

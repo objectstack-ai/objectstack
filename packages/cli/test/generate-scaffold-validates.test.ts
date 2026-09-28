@@ -132,8 +132,11 @@ afterAll(() => {
   fs.rmSync(TMP_ROOT, { recursive: true, force: true });
 });
 
-/** A legal, minimal host stack. Only the collection under test is populated. */
-const hostStack = (collection: string, artifact: unknown) => ({
+/**
+ * A legal, minimal host stack: the collection under test, plus the objects a
+ * binding scaffold needs present (see {@link boundObjects}).
+ */
+const hostStack = (collection: string, artifact: unknown, objects: readonly unknown[] = []) => ({
   manifest: {
     id: 'com.example.scaffold',
     name: 'scaffold',
@@ -141,22 +144,52 @@ const hostStack = (collection: string, artifact: unknown) => ({
     type: 'app' as const,
     namespace: 'scaffold',
   },
+  ...(objects.length > 0 ? { objects: [...objects] } : {}),
   [collection]: [artifact],
 });
+
+/** Materialize one scaffold through the loader `os validate` uses (see the header). */
+async function loadScaffold(fileStem: string, source: string): Promise<unknown> {
+  const file = path.join(TMP_ROOT, `${fileStem}.scaffold.ts`);
+  fs.writeFileSync(file, source, 'utf8');
+  const { mod } = await bundleRequire({ filepath: file, external: BUNDLE_REQUIRE_EXTERNALS });
+  return (mod as { default?: unknown }).default ?? mod;
+}
+
+/**
+ * The object a BINDING scaffold names, as `os g object` writes it for the same
+ * name — the precondition the author's own project supplies.
+ *
+ * A generator flagged `namesObject` (other than `object` itself) writes a
+ * binding to `objectNameFor(STEM)`: a view container's `object`, an action's or
+ * a flow start node's `objectName`, an app nav entry's `objectName`. The
+ * templates are written to COMPOSE — `os g object NAME` then `os g view NAME`
+ * — so each binding names exactly the object the object scaffold declares.
+ * Validating a binding scaffold in a stack WITHOUT that object judged it against
+ * an empty object set, and once the author-time rules resolved a view
+ * container's `object` (`object-reference-unknown` at `views[0].object`), the
+ * harness's own omission read as the scaffold's defect. So the object is
+ * scaffolded here, through the same loader, and carried beside the artifact —
+ * ⛔ never special-cased in a rule, and ⛔ never the scaffold under test edited
+ * to fit the harness.
+ */
+async function boundObjects(type: string): Promise<unknown[]> {
+  const target = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === type);
+  if (!target?.namesObject || type === 'object') return [];
+  const objectTarget = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'object');
+  if (!objectTarget) throw new Error('the `object` generator must exist to seed a binding scaffold');
+  return [await loadScaffold('bound-object', objectTarget.generate(STEM))];
+}
 
 /**
  * Load a scaffold the way `os validate` loads authored TypeScript, then run
  * the two steps `Validate.run()` runs on it.
  */
 async function validateScaffold(type: string, source: string) {
-  const file = path.join(TMP_ROOT, `${type}.scaffold.ts`);
-  fs.writeFileSync(file, source, 'utf8');
-
-  const { mod } = await bundleRequire({ filepath: file, external: BUNDLE_REQUIRE_EXTERNALS });
-  const artifact = (mod as { default?: unknown }).default ?? mod;
+  const artifact = await loadScaffold(type, source);
 
   const normalized = normalizeStackInput(
-    hostStack(singularToPlural(type), artifact) as Record<string, unknown>,
+    hostStack(singularToPlural(type), artifact, await boundObjects(type)) as Record<string, unknown>,
   ) as Record<string, unknown>;
 
   const unknownKeys = [
@@ -201,6 +234,22 @@ describe('[#14087] every `os generate` scaffold passes `os validate`', () => {
 
   it("`flow` is not in the ledger — this card's own defect cannot be re-admitted", () => {
     expect(Object.keys(KNOWN_UNVALIDATED_SCAFFOLDS)).not.toContain('flow');
+  });
+
+  it('a binding scaffold is judged beside the object `os g object` writes for the same name', async () => {
+    // The precondition `boundObjects` supplies is only honest while the view's
+    // binding and the object's name are the SAME spelling. Pinned directly, so
+    // a template drifting one side of the pair turns this red rather than
+    // quietly handing the view scaffold an object it does not bind.
+    const [object] = (await boundObjects('view')) as { name?: unknown }[];
+    const view = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'view');
+    expect(view, 'the view generator must exist').toBeDefined();
+    const container = (await loadScaffold('view-binding', view!.generate(STEM))) as { object?: unknown };
+    expect(object?.name).toBe(STEM);
+    expect(container.object).toBe(object?.name);
+    // …and a non-binding generator is judged with no object carried at all.
+    expect(await boundObjects('dashboard')).toEqual([]);
+    expect(await boundObjects('object')).toEqual([]);
   });
 
   const clean = GENERATOR_SCAFFOLD_TARGETS.filter((t) => !(t.type in KNOWN_UNVALIDATED_SCAFFOLDS));

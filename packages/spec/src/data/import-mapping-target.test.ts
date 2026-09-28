@@ -9,6 +9,8 @@ import {
   judgeImportMappingTarget,
   unknownImportMappingTargets,
 } from './import-mapping-target';
+import { FieldType } from './field.zod';
+import { AddressSchema, LocationValueSchema } from './field-value.zod';
 import * as dataBarrel from './index';
 
 // ---------------------------------------------------------------------------
@@ -24,19 +26,24 @@ const contact = {
     full_name: { type: 'text' },
     email: { type: 'email' },
     mailing_address: { type: 'address' },
+    geo: { type: 'location' },
+    account: { type: 'lookup', reference: 'crm_account' },
   },
 };
+
+/** The seven parts `AddressSchema` declares, read from the schema itself. */
+const ADDRESS_PARTS = Object.keys(AddressSchema.shape);
 
 describe('indexImportMappingTargets', () => {
   it('addresses the declared fields plus the columns the platform provisions on this object', () => {
     const index = indexImportMappingTargets(contact);
     expect(index).not.toBeNull();
     expect([...index!.names].sort()).toEqual([
-      'created_at', 'created_by', 'email', 'full_name', 'id', 'mailing_address',
+      'account', 'created_at', 'created_by', 'email', 'full_name', 'geo', 'id', 'mailing_address',
       'organization_id', 'owner_id', 'owning_business_unit_id', 'updated_at', 'updated_by',
     ]);
     // Only the DECLARED definitions are carried: the compound-part arm reads a head's type here.
-    expect([...index!.fields.keys()].sort()).toEqual(['email', 'full_name', 'mailing_address']);
+    expect([...index!.fields.keys()].sort()).toEqual(['account', 'email', 'full_name', 'geo', 'mailing_address']);
   });
 
   it('reads the array form of `fields` the same way as the map form', () => {
@@ -89,10 +96,70 @@ describe('judgeImportMappingTarget', () => {
     expect(judgeImportMappingTarget(index, 'emial')).toEqual({ kind: 'unknown', target: 'emial' });
   });
 
-  it('answers `unknown` for a dotted path into a declared compound field (no part targets yet)', () => {
-    // The card's measured shape. A later ruling extends the verdict with a
-    // `part` arm; until then the dotted name is not a field of the object.
-    expect(judgeImportMappingTarget(index, 'mailing_address.street').kind).toBe('unknown');
+  // [#20149] The pin #20150 left here (`mailing_address.street` → unknown)
+  // flips: a declared part of a compound field is a target.
+  it('answers `part` for every part the address value schema declares', () => {
+    expect(ADDRESS_PARTS).toEqual(['street', 'city', 'state', 'postalCode', 'country', 'countryCode', 'formatted']);
+    for (const part of ADDRESS_PARTS) {
+      expect(judgeImportMappingTarget(index, `mailing_address.${part}`)).toEqual({
+        kind: 'part', target: `mailing_address.${part}`, field: 'mailing_address', part,
+      });
+    }
+  });
+
+  it('refuses a part the value does not declare, carrying the declared parts for the refusal to name', () => {
+    expect(judgeImportMappingTarget(index, 'mailing_address.stret')).toEqual({
+      kind: 'unknown',
+      target: 'mailing_address.stret',
+      head: { name: 'mailing_address', field: true, type: 'address', parts: ADDRESS_PARTS },
+    });
+    // The parts are the value schema's keys, spelled its way — not a synonym of one.
+    expect(judgeImportMappingTarget(index, 'mailing_address.postal_code').kind).toBe('unknown');
+    expect(judgeImportMappingTarget(index, 'mailing_address.').kind).toBe('unknown');
+    expect(judgeImportMappingTarget(index, 'mailing_address.street.line1').kind).toBe('unknown');
+  });
+
+  it('refuses a dotted path on a field that is not compound — a lookup is never traversed', () => {
+    expect(judgeImportMappingTarget(index, 'full_name.first')).toEqual({
+      kind: 'unknown', target: 'full_name.first', head: { name: 'full_name', field: true, type: 'text' },
+    });
+    expect(judgeImportMappingTarget(index, 'account.name')).toEqual({
+      kind: 'unknown', target: 'account.name', head: { name: 'account', field: true, type: 'lookup' },
+    });
+    // A provisioned column carries no compound value either.
+    expect(judgeImportMappingTarget(index, 'owner_id.name')).toEqual({
+      kind: 'unknown', target: 'owner_id.name', head: { name: 'owner_id', field: true },
+    });
+    // …and a head that names nothing at all.
+    expect(judgeImportMappingTarget(index, 'billing_address.street')).toEqual({
+      kind: 'unknown', target: 'billing_address.street', head: { name: 'billing_address', field: false },
+    });
+  });
+
+  it('refuses a `location` part: its declared parts are required numbers, which text cells cannot assemble', () => {
+    // The one other closed-object value schema. Measured: a value assembled
+    // from text cells fails it (a string `lat`), and so does one missing `lng`.
+    expect(Object.keys(LocationValueSchema.shape)).toEqual(['lat', 'lng', 'altitude', 'accuracy']);
+    expect(LocationValueSchema.safeParse({ lat: '37.7', lng: '-122.4' }).success).toBe(false);
+    expect(LocationValueSchema.safeParse({ lat: 37.7 }).success).toBe(false);
+    expect(judgeImportMappingTarget(index, 'geo.lat')).toEqual({
+      kind: 'unknown', target: 'geo.lat', head: { name: 'geo', field: true, type: 'location' },
+    });
+  });
+});
+
+describe('the compound-field census — which field types take a part target', () => {
+  it('is exactly the field types whose stored value is a closed object of optional strings: address', () => {
+    const fields: Record<string, { type: string }> = {};
+    for (const type of FieldType.options) fields[`f_${type}`] = { type };
+    const index = indexImportMappingTargets({ name: 'zoo', fields })!;
+    expect([...index.parts.keys()]).toEqual(['f_address']);
+    expect(index.parts.get('f_address')).toEqual(ADDRESS_PARTS);
+  });
+
+  it('reads the parts from the value schema, so an address field authored as `multiple` changes nothing', () => {
+    const index = indexImportMappingTargets({ name: 'o', fields: [{ name: 'home', type: 'address', multiple: true }] })!;
+    expect(index.parts.get('home')).toEqual(ADDRESS_PARTS);
   });
 });
 
@@ -117,7 +184,7 @@ describe('unknownImportMappingTargets', () => {
     const misses = unknownImportMappingTargets(
       [
         { source: 'Name', target: 'full_name' },
-        { source: 'Street', target: 'mailing_address.street' },
+        { source: 'Street', target: 'mailing_address.stret' },
         { source: 'Full', target: ['full_name', 'nick_name'], transform: 'split' },
         { source: 'Owner', target: 'owner_id', transform: 'lookup' },
         { source: 'x', target: 'zzz', transform: 'constant', params: { value: 1 } },
@@ -125,9 +192,12 @@ describe('unknownImportMappingTargets', () => {
       contact,
     );
     expect(misses).toEqual([
-      { entry: 1, path: 'fieldMapping[1].target', target: 'mailing_address.street' },
-      { entry: 2, path: 'fieldMapping[2].target[1]', target: 'nick_name' },
-      { entry: 4, path: 'fieldMapping[4].target', target: 'zzz' },
+      {
+        entry: 1, path: 'fieldMapping[1].target', target: 'mailing_address.stret', reason: 'unknown',
+        head: { name: 'mailing_address', field: true, type: 'address', parts: ADDRESS_PARTS },
+      },
+      { entry: 2, path: 'fieldMapping[2].target[1]', target: 'nick_name', reason: 'unknown' },
+      { entry: 4, path: 'fieldMapping[4].target', target: 'zzz', reason: 'unknown' },
     ]);
   });
 
@@ -136,6 +206,36 @@ describe('unknownImportMappingTargets', () => {
       [{ source: 'Name', target: 'full_name' }, { source: 'Created', target: 'created_at' }],
       contact,
     )).toEqual([]);
+  });
+
+  it('[#20149] is empty for a mapping that writes an address by its declared parts — every transform, split elements too', () => {
+    expect(unknownImportMappingTargets(
+      [
+        { source: 'Name', target: 'full_name' },
+        { source: 'Street', target: 'mailing_address.street' },
+        { source: 'City/State', target: ['mailing_address.city', 'mailing_address.state'], transform: 'split', params: { separator: '/' } },
+        { source: 'x', target: 'mailing_address.countryCode', transform: 'constant', params: { value: 'US' } },
+        { source: ['Line 1', 'Line 2'], target: 'mailing_address.formatted', transform: 'join' },
+      ],
+      contact,
+    )).toEqual([]);
+  });
+
+  it('[#20149] refuses a part of a field the same mapping also writes whole, naming where the whole value is written', () => {
+    const misses = unknownImportMappingTargets(
+      [
+        { source: 'Street', target: 'mailing_address.street' },
+        { source: 'Address JSON', target: 'mailing_address' },
+        { source: 'Both', target: ['mailing_address.city', 'full_name'], transform: 'split' },
+      ],
+      contact,
+    );
+    expect(misses).toEqual([
+      { entry: 0, path: 'fieldMapping[0].target', target: 'mailing_address.street', reason: 'collides', wholeAt: 'fieldMapping[1].target' },
+      { entry: 2, path: 'fieldMapping[2].target[0]', target: 'mailing_address.city', reason: 'collides', wholeAt: 'fieldMapping[1].target' },
+    ]);
+    // The whole-field target alone, or the parts alone, is fine.
+    expect(unknownImportMappingTargets([{ source: 'A', target: 'mailing_address' }], contact)).toEqual([]);
   });
 
   it('is empty — no opinion, never a refusal — when the object has no field map', () => {
