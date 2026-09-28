@@ -233,6 +233,7 @@ const diff = await client.meta.diffItem('object', 'account', { from: 2, to: 5 })
 // Introspection & governance
 const bad = await client.meta.getDiagnostics({ severity: 'error' });
 const refs = await client.meta.getReferences('object', 'account');
+// Authoring-only too, like diffItem: without studio.access, setup.access or manage_metadata → 403 FORBIDDEN
 const trail = await client.meta.getAudit('object', 'account', { limit: 20 });
 const tree = await client.meta.getBookTree('handbook');
 

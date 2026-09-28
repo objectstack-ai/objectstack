@@ -6,11 +6,17 @@
 // unscoped on both ends and returned every tenant's audit rows for a
 // `(type, name)`.
 //
-// This route has no capability gate in its handler — unlike its `PUT` twin,
-// which gates on `manage_metadata` — so the reachable cohort was any
+// This route had no capability gate in its handler then — unlike its `PUT`
+// twin, which gates on `manage_metadata` — so the reachable cohort was any
 // authenticated principal of any tenant, on the published `meta.getAudit` SDK
 // surface. That is why the assertions below are about the ARGUMENT rather than
 // the status code: a 200 was always the answer; what leaked was the payload.
+//
+// [#20441] It is an authoring door now (`refuseNonAuthoringCaller`), so every
+// caller below holds `manage_metadata` (`BUILDER`): the question here is which
+// organization an ADMITTED caller's read is scoped to. The gate does not do
+// that job — it admits a builder of one organization, never a reader of every
+// organization's trail — so the scope still carries the tenant separation.
 //
 // The organization comes from `resolveExecCtx`, which this file already calls
 // in 40+ handlers. Deliberately NOT a new `resolveActiveOrganizationId` — the
@@ -90,12 +96,15 @@ function boot(execCtx: any) {
     return { auditMetaItem, drive };
 }
 
+/** The authoring capability `/audit` asks for (#20441): these cases ask what an admitted caller's read is scoped to. */
+const BUILDER = { systemPermissions: ['manage_metadata'] };
+
 /** The request object the route handed to `auditMetaItem`. */
 const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
 describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organization', () => {
     it('threads the execution context tenant as `organizationId`', async () => {
-        const { auditMetaItem, drive } = boot({ userId: 'u1', tenantId: 'org_alpha' });
+        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1', tenantId: 'org_alpha' });
         await drive();
 
         expect(auditMetaItem).toHaveBeenCalledTimes(1);
@@ -106,7 +115,7 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organi
         // A principal with no active organization must read env-wide rows, not
         // become a skeleton key. `null` is the env-wide read downstream; an
         // ABSENT key would be the pre-fix unscoped call.
-        const { auditMetaItem, drive } = boot({ userId: 'u1' });
+        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1' });
         await drive();
 
         const request = requestFrom(auditMetaItem);
@@ -122,9 +131,11 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organi
         // with a 401 before the handler body runs, so the protocol is never
         // called at all.
         //
-        // That floor is the ONLY gate here — this route has no capability gate,
-        // unlike the `PUT` twin's `manage_metadata` check — which is precisely
-        // why the organization scope below has to do the tenant separation.
+        // That floor was the ONLY gate here when this was measured — the route
+        // had no capability gate then, unlike the `PUT` twin's
+        // `manage_metadata` check. [#20441] The authoring-door gate now sits in
+        // the handler, after this floor; neither does the tenant separation,
+        // which is why the organization scope has to.
         const { auditMetaItem, drive } = boot(undefined);
         const answer = await drive();
 
@@ -134,9 +145,9 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organi
 
     it('never omits the organization — the call shape that leaked is unreachable', async () => {
         for (const ctx of [
-            { userId: 'u1', tenantId: 'org_alpha' },
-            { userId: 'u1', tenantId: undefined },
-            { userId: 'u1' },
+            { ...BUILDER, userId: 'u1', tenantId: 'org_alpha' },
+            { ...BUILDER, userId: 'u1', tenantId: undefined },
+            { ...BUILDER, userId: 'u1' },
         ]) {
             const { auditMetaItem, drive } = boot(ctx);
             await drive();
@@ -152,14 +163,14 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organi
         // Swept with the fix: `auditMetaItem` neither declares nor reads it.
         // Environment scoping is unaffected — it comes from WHICH protocol
         // `resolveProtocol` hands back, not from this payload.
-        const { auditMetaItem, drive } = boot({ userId: 'u1', tenantId: 'org_alpha' });
+        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1', tenantId: 'org_alpha' });
         await drive();
 
         expect(requestFrom(auditMetaItem)).not.toHaveProperty('environmentId');
     });
 
     it('still forwards the (type, name) key and a well-formed limit', async () => {
-        const { auditMetaItem, drive } = boot({ userId: 'u1', tenantId: 'org_alpha' });
+        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1', tenantId: 'org_alpha' });
         await drive({ query: { limit: '5' } });
 
         const request = requestFrom(auditMetaItem);
