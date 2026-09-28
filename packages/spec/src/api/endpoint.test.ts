@@ -103,7 +103,7 @@ describe('ApiEndpointSchema', () => {
     expect(endpoint.name).toBe('get_customers');
   });
 
-  // [#10338] `target` is OPTIONAL in the vocabulary: for `object_operation` no
+  // [commit d2619fd0c] `target` is OPTIONAL in the vocabulary: for `object_operation` no
   // consumer reads it (the executor, the OpenAPI enrichment and the publish
   // gate all branch on `objectParams` alone), so the author is no longer
   // forced to write a dead string. The per-type requirement for `type: 'flow'`

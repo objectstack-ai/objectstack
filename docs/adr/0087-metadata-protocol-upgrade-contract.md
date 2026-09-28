@@ -173,7 +173,8 @@ The spec ships **declarative migration artifacts per major** — `migrations/N.j
 per-surface transforms with machine-readable pre/post conditions plus a prose
 `rationale` (the one place prose is load-bearing, and it is one field, not a
 document). Two sources feed each major's step: **semantic changes** authored for that
-major (the residue D2 cannot express losslessly), and **graduated conversions** (D2
+major (one entry per retirement family, even when a lossless D2 conversion also exists
+for it; D2 carries the mechanical data repair only), and **graduated conversions** (D2
 entries retired from the load path). Together the steps form a **permanent, ordered
 chain** — the database-migration model applied to metadata source files.
 
@@ -381,7 +382,8 @@ does both halves:
 - **The policy, stated:** until GA, a metadata-facing break MAY ship one-step
   without a load window. The exemption covers the *window* only — never the
   *chain*: every such break must land as a chain step (a `retiredFromLoadPath`
-  conversion when lossless, a semantic TODO when not) in the same release.
+  conversion when lossless, and one D3 semantic entry per retirement family in
+  every case; D2 carries the mechanical data repair only) in the same release.
   After GA the full D2 ladder applies: lossless breaks ship a live conversion
   entry or they do not ship.
 

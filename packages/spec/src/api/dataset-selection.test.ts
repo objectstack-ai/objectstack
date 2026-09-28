@@ -283,7 +283,7 @@ describe('#17551 §5 — a valid selection still passes, and the parse adds noth
   });
 
   it('every in-repo selection specimen still passes', () => {
-    // The same leniency sweep #17058 ran at the door, re-run against the WHOLE
+    // The same leniency sweep commit 94c930248 ran at the door, re-run against the WHOLE
     // schema: if any in-repo caller had been relying on the four undoored
     // members going unparsed, this is where it shows.
     const specimens: Array<Record<string, unknown>> = [
