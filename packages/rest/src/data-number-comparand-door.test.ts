@@ -196,7 +196,7 @@ for (const cell of CELLS) {
           const res = await query({ where });
           expect(res.status, `REST, ${name}: ${JSON.stringify(res.body)}`).toBe(400);
           expect(res.body.code, `REST, ${name}`).toBe('INVALID_FILTER');
-          expect(res.body.message, `REST, ${name}`).toContain("filter on 'amount'");
+          expect(res.body.error, `REST, ${name}`).toContain("filter on 'amount'");
           const err = await refusalOf(engine.find(OBJECT, { where }));
           expect({ code: err?.code, status: err?.status }, `engine.find, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
         }
@@ -209,7 +209,7 @@ for (const cell of CELLS) {
           const filter = await query(perAggregation({ amount: { [op]: 'abc' } } as FilterCondition) as Record<string, unknown>);
           expect(filter.status, `filter ${op}: ${JSON.stringify(filter.body)}`).toBe(400);
           expect(filter.body.code, `filter ${op}`).toBe('INVALID_FILTER');
-          expect(filter.body.message, `filter ${op}`).toContain(`aggregations[1].filter.amount.${op}`);
+          expect(filter.body.error, `filter ${op}`).toContain(`aggregations[1].filter.amount.${op}`);
           const engineFilter = await refusalOf(engine.aggregate(OBJECT, perAggregation({ amount: { [op]: 'abc' } } as FilterCondition)));
           expect({ code: engineFilter?.code, status: engineFilter?.status }, `engine filter ${op}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
           for (const path of ['native', 'rows'] as const) {
@@ -217,7 +217,7 @@ for (const cell of CELLS) {
               const having = await query(grouped(path, { [column]: { [op]: 'abc' } } as FilterCondition) as Record<string, unknown>);
               expect(having.status, `having ${path} ${column} ${op}: ${JSON.stringify(having.body)}`).toBe(400);
               expect(having.body.code, `having ${path} ${column} ${op}`).toBe('INVALID_FILTER');
-              expect(having.body.message, `having ${path} ${column} ${op}`).toContain(`having.${column}.${op}`);
+              expect(having.body.error, `having ${path} ${column} ${op}`).toContain(`having.${column}.${op}`);
             }
           }
         }
