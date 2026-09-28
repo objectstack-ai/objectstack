@@ -6569,11 +6569,15 @@ export class ObjectQL implements IObjectQLEngine {
               // the prose is this seam's own live in `viewContainerNameRefusal`
               // (`view-container-name-refusal.ts`).
               //
-              // [#20331] Moved there unchanged so that `os validate` runs the
-              // SAME judgment, in the same words, instead of passing a document
-              // this loop then refuses at boot. ⛔ Do not re-inline it here, and
-              // do not write a second copy of it anywhere else: one judge, two
-              // doors.
+              // [#20331] Moved there so that `os validate` runs the SAME
+              // judgment, in the same words, instead of passing a document this
+              // loop then refuses at boot. The message and the envelope moved
+              // unchanged. The `!itemName` skip just above is this loop's
+              // precondition for the check, so the function carries it too: it
+              // answers `undefined` for a falsy derived key, and a door calling
+              // it without this loop cannot refuse an entry this loop skips.
+              // ⛔ Do not re-inline it here, and do not write a second copy of
+              // it anywhere else: one judge, two doors.
               if (key === 'views') {
                   const refusal = viewContainerNameRefusal(item, sourceLabel, ownerId);
                   if (refusal) throw refusal;

@@ -836,9 +836,10 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
         `${unclassified.join(', ')}.\n` +
         `Every call site must land in exactly one ledger. If it is an artifact-level gate, wire it ` +
         `into BOTH commands and add it to SHARED_NON_REGISTRY_GATES; if it genuinely cannot run ` +
-        `read-only, add it to BUILD_ONLY_GATES with a reason; if it is not a gate at all, add it to ` +
-        `NOT_A_GATE under the reason that says so. Registering it in ` +
-        `packages/lint/src/authoring-rules.ts instead is better than all three — then all THREE ` +
+        `read-only, add it to BUILD_ONLY_GATES with a reason; if validate.ts runs it and compile.ts ` +
+        `deliberately does not, add it to VALIDATE_ONLY_GATES with the reason the build lacks it; if ` +
+        `it is not a gate at all, add it to NOT_A_GATE under the reason that says so. Registering it in ` +
+        `packages/lint/src/authoring-rules.ts instead is better than all four — then all THREE ` +
         `authoring commands get it and no roster row is needed.`,
     ).toEqual([]);
   });

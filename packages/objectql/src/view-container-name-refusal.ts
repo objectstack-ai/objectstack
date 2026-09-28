@@ -21,8 +21,12 @@
  * used to pass this document (exit 0) while `os serve` refused it at boot
  * (#20331). The fix is the SAME judgment at both doors, in the same words —
  * not a second rule that agrees with the first only until one of them is
- * edited. So the check moved here, byte for byte, and the boot loop throws
- * what this returns; the CLI reports it.
+ * edited. So the check moved here, and the boot loop throws what this
+ * returns; the CLI reports it. The message and the envelope moved byte for
+ * byte. The GATE moved whole, precondition included: the boot loop skips an
+ * entry whose derived key is falsy (it warns and registers nothing) BEFORE it
+ * reaches this check, and this function answers `undefined` for that entry
+ * too, so a door that calls it alone cannot refuse what boot skips.
  *
  * ## Why it derives the key itself instead of taking it
  *
@@ -43,6 +47,12 @@
  *     so is one whose `name` already equals the derived key, and one that
  *     declares no binding anywhere else, because the derivation then falls
  *     back to that same `name` and cannot disagree with itself.
+ * Ahead of both sits the boot loop's own precondition: a derived key that is
+ * falsy means boot skips the entry, so there is nothing to refuse. The key
+ * CAN be `''` while `name` is set — `deriveViewContainerObject`'s `??` chain
+ * keeps an empty string, so `list: { data: { object: '' } }` with no
+ * top-level `object` derives `''` — and without this line a second door
+ * would refuse a container boot only warns about.
  *
  * The runtime string carries NO tracker id: it is read by authors and
  * operators who cannot resolve one (`check:doc-authoring`). The envelope is
@@ -83,6 +93,10 @@ export function viewContainerNameRefusal(
   const name = (container as { name?: unknown }).name;
   if (typeof name !== 'string' || !name) return undefined;
   const itemName = deriveViewContainerObject(container);
+  // Boot's precondition, carried with the gate: `registerMetadataCollections`
+  // warns and skips an entry whose derived key is falsy before it reaches
+  // this check, so such an entry is never refused.
+  if (!itemName) return undefined;
   if (name === itemName) return undefined;
   const err = new Error(
     `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `

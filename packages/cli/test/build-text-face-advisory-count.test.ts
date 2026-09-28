@@ -187,11 +187,11 @@ const ordersObjects = [{
 }];
 const ordersViews = [
   {
-    name: 'bc_account_list', label: 'Account List', object: 'bc_account',
+    name: 'bc_account', label: 'Account List', object: 'bc_account',
     list: { label: 'Account List', columns: ['name', 'industry'] },
   },
   {
-    name: 'bc_order_list', label: 'Order List', object: 'bc_order',
+    name: 'bc_order', label: 'Order List', object: 'bc_order',
     list: { label: 'Order List', columns: ['name', 'account'] },
   },
 ];

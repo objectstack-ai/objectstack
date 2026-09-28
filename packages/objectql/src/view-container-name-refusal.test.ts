@@ -20,6 +20,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine';
+import { deriveViewContainerObject } from '@objectstack/metadata';
 import { viewContainerNameRefusal } from './view-container-name-refusal';
 
 const PKG = 'com.acme.crm';
@@ -116,5 +117,36 @@ describe('#20331 — viewContainerNameRefusal is the boot registrar\'s judgment'
         const blank = { ...divergent, name: '' };
         expect(viewContainerNameRefusal(blank, 'manifest', PKG)).toBeUndefined();
         expect(bootRefusal({ views: [blank] })).toBeUndefined();
+    });
+
+    it('CONTROL: a derived key that is falsy is boot\'s skip, not a refusal — boot registers nothing and throws nothing', () => {
+        // Boot's precondition, carried with the gate. `registerMetadataCollections`
+        // warns and skips an entry whose derived key is falsy BEFORE the name
+        // check runs. The key can be `''` while `name` is set: the derivation's
+        // `??` chain keeps an empty `list.data.object`. A judge that refused
+        // this entry would have a second door refuse what boot only warns about.
+        const unbound = {
+            name: 'lead_views',
+            list: {
+                label: 'All Leads',
+                type: 'grid',
+                data: { provider: 'object', object: '' },
+                columns: [{ field: 'name' }],
+            },
+        };
+        // Premise guard: the derived key really is falsy (and not `undefined`,
+        // which the name fallback would have replaced).
+        expect(deriveViewContainerObject(unbound)).toBe('');
+
+        const engine = new ObjectQL();
+        let thrown: unknown;
+        try {
+            engine.registerApp({ id: PKG, name: 'crm', views: [unbound] } as any);
+        } catch (e) {
+            thrown = e;
+        }
+        expect(thrown).toBeUndefined();
+        expect(engine.registry.listItems<any>('view') ?? []).toEqual([]);
+        expect(viewContainerNameRefusal(unbound, 'manifest', PKG)).toBeUndefined();
     });
 });
