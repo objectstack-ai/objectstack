@@ -1409,6 +1409,12 @@ export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
 export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
 export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
+/**
+ * Post-parse shape of {@link EngineAggregateOptions} — defaults applied (ADR-0122).
+ * The two shapes part at `search`: its structured `FullTextSearchSchema` form
+ * carries flag defaults, exactly as on {@link EngineQueryOptionsParsed}.
+ */
+export type EngineAggregateOptionsParsed = z.infer<typeof EngineAggregateOptionsSchema>;
 export type EngineCountOptions = z.input<typeof EngineCountOptionsSchema>;
 
 // --- Legacy: deprecated types (kept for backward compatibility) ---
