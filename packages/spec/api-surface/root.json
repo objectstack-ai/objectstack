@@ -215,6 +215,7 @@
     "formatUnknownAuthoringKey (function)",
     "formatZodError (function)",
     "formatZodIssue (function)",
+    "hasStackProvenance (function)",
     "isAggregatedViewContainer (function)",
     "isKnownPlatformCapability (function)",
     "isViewContainerShaped (function)",
