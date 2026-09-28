@@ -7322,8 +7322,9 @@ const step18: MigrationStep = {
         + 'without a refusal over it. No code of your own reads `currencyConfig.precision`; where it '
         + 'needed a width, it derives one from the field\'s currency. Every currency field renders '
         + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
-        + 'amount. Run `os migrate meta --from 17` to list the mechanical edits for existing sources, '
-        + 'and `os migrate meta --stored --apply` to rewrite stored rows so the per-row notice stops.',
+        + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
+        + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+        + 'apply them by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
