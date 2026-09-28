@@ -116,6 +116,11 @@ export { __resetPushdownLimitWarnings } from './cel-to-filter';
 // conditions ARE the red/green line.
 export { isSupportedRlsExpression, sqlPredicateToCel } from './rls-predicate';
 export { matchesFilterCondition } from './matches-filter';
+// #20355 — the write check's comparison-class rule: the spec's cross-field
+// classification, judged over a filter against the object's declared columns,
+// and the reader a caller uses to log the refused comparison server-side.
+export { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from './matches-filter';
+export type { CrossFieldClassRefusal, MatchesFilterOptions } from './matches-filter';
 // #13594 — the function-EXISTENCE verdict, isolated from the rest of what
 // cel-js's `check()` has an opinion about. Published for the same reason as
 // `firstUndeclaredReference` above and under the same discipline: the answer to

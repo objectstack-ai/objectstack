@@ -25,9 +25,9 @@ const card = (
   links: Array<[href: string, label: string]>,
 ) => `
     <flex direction="col" gap={2} style={{"background":"hsl(var(--card))","border":"1px solid hsl(var(--border))","borderRadius":"var(--radius)","padding":"24px"}}>
-      <div style={{"fontSize":"12px","fontWeight":"700","letterSpacing":"0.06em","textTransform":"uppercase","color":"hsl(var(--primary))"}}>${eyebrow}</div>
-      <div style={{"fontSize":"18px","fontWeight":"600","color":"hsl(var(--foreground))"}}>${title}</div>
-      <div style={{"fontSize":"14px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>${body}</div>
+      <box style={{"fontSize":"12px","fontWeight":"700","letterSpacing":"0.06em","textTransform":"uppercase","color":"hsl(var(--primary))"}}>${eyebrow}</box>
+      <box style={{"fontSize":"18px","fontWeight":"600","color":"hsl(var(--foreground))"}}>${title}</box>
+      <box style={{"fontSize":"14px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>${body}</box>
       <flex direction="col" gap={1} style={{"marginTop":"4px"}}>
 ${links
   .map(
@@ -48,12 +48,12 @@ export const CapabilityMapPage = definePage({
 <flex direction="col" gap={8} style={{"maxWidth":"1080px","margin":"0 auto","padding":"40px"}}>
 
   <flex direction="col" gap={2}>
-    <div style={{"fontSize":"12px","fontWeight":"600","letterSpacing":"0.12em","textTransform":"uppercase","color":"hsl(var(--primary))"}}>ObjectStack Showcase</div>
-    <div style={{"fontSize":"32px","fontWeight":"700","letterSpacing":"-0.02em","color":"hsl(var(--foreground))"}}>The capability map</div>
-    <div style={{"maxWidth":"720px","fontSize":"15px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>Every metadata capability the platform delivers, demonstrated once and indexed here — one card per protocol domain, mirroring the registry and the src/ layout. The coverage test keeps this map honest: a new capability fails CI until it is demonstrated or explicitly waived.</div>
+    <box style={{"fontSize":"12px","fontWeight":"600","letterSpacing":"0.12em","textTransform":"uppercase","color":"hsl(var(--primary))"}}>ObjectStack Showcase</box>
+    <box style={{"fontSize":"32px","fontWeight":"700","letterSpacing":"-0.02em","color":"hsl(var(--foreground))"}}>The capability map</box>
+    <box style={{"maxWidth":"720px","fontSize":"15px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>Every metadata capability the platform delivers, demonstrated once and indexed here — one card per protocol domain, mirroring the registry and the src/ layout. The coverage test keeps this map honest: a new capability fails CI until it is demonstrated or explicitly waived.</box>
   </flex>
 
-  <div style={{"display":"grid","gridTemplateColumns":"repeat(2, 1fr)","gap":"20px"}}>
+  <box style={{"display":"grid","gridTemplateColumns":"repeat(2, 1fr)","gap":"20px"}}>
 ${card('data', 'Objects, fields & rules', 'The Account → Project → Task backbone plus the Field Zoo specimen (every field type), relationships, enforced validation rules, hooks, seed data, an object-extension overlay, and the analytics cube.', [
   ['apps/com.example.showcase/showcase_field_zoo', 'Field Zoo'],
   ['apps/com.example.showcase/showcase_project', 'Projects (backbone)'],
@@ -83,8 +83,8 @@ ${card('security', 'Roles, permissions & sharing', 'A role hierarchy, permission
 ${card('ai · deferred', 'Agents, tools & skills', 'Deliberately not demonstrated here: agents are platform-owned (ADR-0063) and the open framework exposes AI via MCP only. The coverage manifest waives agent/tool/skill with a tracking issue instead of faking a demo.', [
   ['https://github.com/objectstack-ai/objectstack/issues/2610', 'Tracking issue #2610'],
 ])}
-  </div>
+  </box>
 
-  <div style={{"fontSize":"13px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>Provenance: src/coverage.ts — every metadata kind in the registry is either demonstrated (with proof files) or waived (with a reason and an issue). Run pnpm verify to hold the map to it.</div>
+  <box style={{"fontSize":"13px","lineHeight":"1.6","color":"hsl(var(--muted-foreground))"}}>Provenance: src/coverage.ts — every metadata kind in the registry is either demonstrated (with proof files) or waived (with a reason and an issue). Run pnpm verify to hold the map to it.</box>
 </flex>`,
 });
