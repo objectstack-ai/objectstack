@@ -20,19 +20,20 @@ onlyBuiltDependencies:
 
 # Patched dependencies. Written with `pnpm patch` / `pnpm patch-commit`, never
 # by hand. `patch-commit` writes this key into package.json's `pnpm` field;
-# move it here, the file that holds every other pnpm setting, then run
+# move it here, beside `overrides` and `onlyBuiltDependencies`, then run
 # `pnpm install`.
 #   - tsup@8.5.1: its bundled rollup-plugin-dts gave every DTS entry its own
 #     ts.Program. tsup always passes the tsconfig path, and on that path a
 #     config-cache hit keyed each later entry by its own directory. The patch
 #     keys every entry by the tsconfig's directory, so all entries share one
-#     program. The same code is in rollup-plugin-dts 6.5.1. Measured on
-#     @objectstack/spec's 18 entries: live heap 4997 → 1405 MB. The emitted
-#     declarations are the same types in every affected package.
-#     The key names the exact version. A tsup that resolves to anything else
-#     leaves the patch unused, and `pnpm install` then fails
-#     (ERR_PNPM_UNUSED_PATCH), so an upgrade cannot drop the patch silently.
-#     Re-derive the patch, or retire it, on every tsup bump.
+#     program. The same code is in rollup-plugin-dts 6.5.1. Twelve packages
+#     here have more than one DTS entry; @objectstack/spec had 18 programs
+#     and now has one, and its DTS pass went from 4997 MB to 882 MB of live
+#     heap. Every one of the twelve emits the same types as before.
+#     The key names the exact version. When the installed tsup is any other
+#     version, the patch goes unused and `pnpm install` fails
+#     (ERR_PNPM_UNUSED_PATCH), so a tsup upgrade cannot drop the patch
+#     silently. Re-derive the patch, or retire it, on every tsup bump.
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
 
