@@ -327,7 +327,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "Campos",
-        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Guardar no los comprueba; publicar y os validate rechazan un nombre que no sea un campo de este objeto. Un campo que no sea una columna almacenada (una fórmula, por ejemplo) hace que el driver SQL omita el índice entero, con una advertencia en el registro del servidor."
+        helpText: "Nombres de columna de este objeto, en el orden de la clave (p. ej., status, owner). Guardar no los comprueba; publicar y os validate rechazan un nombre que no sea un campo de este objeto. Un campo que no sea una columna almacenada (una fórmula, por ejemplo) hace que el driver SQL omita el índice entero, con un error en el registro del servidor."
       },
       "indexes.unique": {
         label: "Único",

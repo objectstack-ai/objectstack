@@ -327,7 +327,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "フィールド",
-        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時には検査されませんが、公開時と os validate では、このオブジェクトのフィールドではない名前が拒否されます。保存される列ではないフィールド（数式など）があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログに警告を出します。"
+        helpText: "このオブジェクトの列名を、キーの順に指定します（例：status、owner）。保存時には検査されませんが、公開時と os validate では、このオブジェクトのフィールドではない名前が拒否されます。保存される列ではないフィールド（数式など）があると、SQL ドライバーはそのインデックス全体をスキップし、サーバーログにエラーを出します。"
       },
       "indexes.unique": {
         label: "一意",

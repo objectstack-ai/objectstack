@@ -327,7 +327,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.fields": {
         label: "Fields",
-        helpText: "Column names of this object, in key order (e.g. status, owner). Saving does not check them; publishing and os validate refuse a name that is not a field of this object. A field that is not a stored column (a formula, say) makes the SQL driver skip the whole index, with a warning in the server log."
+        helpText: "Column names of this object, in key order (e.g. status, owner). Saving does not check them; publishing and os validate refuse a name that is not a field of this object. A field that is not a stored column (a formula, say) makes the SQL driver skip the whole index, with an error in the server log."
       },
       "indexes.unique": {
         label: "Unique",

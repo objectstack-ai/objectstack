@@ -1,5 +1,7 @@
 ---
 '@objectstack/driver-sql': minor
+'@objectstack/spec': patch
+'@objectstack/platform-objects': patch
 ---
 
 fix(driver-sql): a declared index that can never be built is logged at `error` and reported in drift
@@ -45,6 +47,10 @@ skipped. The artifact-pinned boot warns about it and still starts, because
 only `destructive` entries refuse a boot. A `switch` over `op.type` that treats unknown values
 as "not applied" needs no change. An exhaustive `switch` with a `never` check gets one more case
 to handle.
+
+**The object form's help text follows.** The `indexes` → Fields help in the Studio object form
+said the skip left "a warning in the server log". It now says an error, in English and in the
+zh-CN, ja-JP and es-ES translations. Nothing else in the text changes.
 
 **Upgrade note:** on a database that already carries such an index, `os migrate plan` now
 reports one entry per index, and so does the boot's drift warning. That entry clears only when
