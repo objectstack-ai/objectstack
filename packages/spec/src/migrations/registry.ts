@@ -9690,6 +9690,85 @@ const step18: MigrationStep = {
         + 'authoring schema door (SET_MEMBER_DESCRIPTION); they are outside THIS entry\'s transition '
         + 'and are worth sweeping in the same pass.',
     },
+    // The second half of the schema door's parity with the query faces. The first
+    // (filter-query-face-comparands-refused-at-save) asked the comparand-SHAPE face
+    // and the flag rule; this one asks the comparand-TYPE face too, and makes a
+    // dashboard widget filter and both report runtimeFilters analytics carriers, so
+    // the slots inside a nested relation that the analytics where door judges are
+    // judged on save there as on a dataset filter. The faces stay the judges; the
+    // save door only asks them.
+    {
+      id: 'filter-comparand-types-and-widget-nested-slots-refused-at-save',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.FilterCondition — a comparand the comparand-type face refuses, now refused when the '
+        + 'document is PARSED: a plain object where a single value belongs (an $eq, $ne, ordering, '
+        + 'text or flag comparand such as { a: 1 }, including a { $field } whose name is not a '
+        + 'string), a Map, a class instance, a function, a Symbol, undefined, or a bigint beyond '
+        + 'plus or minus 2^53, whether it is the comparand itself, an implicit-equality comparand '
+        + 'or an $in / $nin / $between list member. On every schema that carries a FilterCondition, '
+        + 'at the reach the save door already had (the field entries of a condition and of every '
+        + '$and / $or / $not member); and, on a dataset filter, a dataset measure filter and now a '
+        + 'dashboard widget filter, a report runtimeFilter and a joined report block runtimeFilter, '
+        + 'INSIDE a nested-relation condition as well, for these shapes and for every shape the '
+        + 'earlier entry names — so ui.DashboardWidget.filter, ui.Report.runtimeFilter and '
+        + 'ui.JoinedReportBlock.runtimeFilter gain the nested-relation reach of the two dataset '
+        + 'carriers',
+      replacement:
+        'a value of one of the six accepted comparand types — a string, number, bigint within plus '
+        + 'or minus 2^53, boolean, null or Date — or a { $field: "column" } reference where a column '
+        + 'is meant. A value set belongs in $in; an absent value is the null predicate ($eq null / '
+        + '$ne null) or an omitted key, never undefined; a bigint beyond 2^53 is compared as a '
+        + 'string or within range. Inside a nested relation on a widget filter or a report '
+        + 'runtimeFilter, write the same '
+        + 'spelling the top-level refusal prescribes. A Date, a { $field } reference, a {placeholder} '
+        + 'string resolved at request time (such as {current_user_id} or {today}) and a bigint '
+        + 'within 2^53 are untouched, and the save door keeps a bigint as written',
+      reason:
+        'The save door narrows to exactly what the query faces already refuse (#20116, stage 2 of '
+        + 'the collector). The comparand-type face (normalizeFilterComparandTypes, the #7872 '
+        + 'ruling\'s accepted set) refuses these values on every query: parseFilterAST, the engine '
+        + 'seam, the analytics where door and the read-scope compiler all run it. Measured on '
+        + 'origin/main 17bd3187 before the change: FilterConditionSchema, a dataset filter, a '
+        + 'dataset measure filter, a dashboard widget filter, a report runtimeFilter and a joined '
+        + 'report block runtimeFilter each parsed GREEN for { stage: { $eq: { a: 1 } } }, '
+        + '{ stage: { $in: [{ a: 1 }] } } and a Map comparand, top level and nested, while the type '
+        + 'face and the analytics where door refused each with INVALID_FILTER / 400. And a '
+        + 'dashboard widget filter, a report runtimeFilter and a joined report block runtimeFilter '
+        + 'parsed GREEN for { acct: { stage: { $in: ["won", null] } } } and for a list in a nested '
+        + 'equality slot, which the analytics where door refuses when they are charted, because '
+        + 'only the two dataset carriers had the nested-relation walk. '
+        + 'The save door now asks the type face itself, read-only, after the shape face, so it '
+        + 'refuses exactly what the face refuses and passes what it passes; one slot raises one '
+        + 'refusal, in the query doors\' order (shape, then type, then the flag rule), in the face\'s '
+        + 'own words less its location clause. At the top level of a filter and in its $and / $or / '
+        + '$not members, a second issue on a slot a face already refused (the schema door\'s own '
+        + '$icontains and date-preset arms) is no longer raised; inside a nested relation on an '
+        + 'analytics carrier those two arms still judge the slot beside the faces, so a nested '
+        + '$icontains with a refused comparand, or a nested one-bound $between of a preset name, can '
+        + 'carry two issues. Neither moves a verdict. The widget filter and both report runtimeFilters declare the same '
+        + 'analytics-carrier filter as the dataset carriers, so their nested-relation slots are '
+        + 'judged by the same walk: every stored filter the analytics where door charts now refuses '
+        + 'on save what that door refuses on chart. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'conversion: none of these values has a single honest meaning as a comparand, which is why '
+        + 'each was refused. The read path does not re-validate stored rows, so a stored document '
+        + 'keeps loading; re-saving it through the metadata protocol (422 INVALID_METADATA), '
+        + 'defineStack or os validate is refused at the filter\'s path. A JSON document can carry '
+        + 'only the plain-object cells; the others arrive only from TypeScript authoring. Such a '
+        + 'filter has failed every query since the type face\'s ruling, so the refusal is a repair '
+        + 'and not a loss. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every stored document that carries a filter: os validate '
+        + 'or defineStack, and a save through the metadata protocol, report each refused slot by '
+        + 'path, for example widgets.0.filter.acct.stage.$in.1 or filter.stage.$eq, with the type '
+        + 'face\'s sentence and the accepted set. A producer census before the change — a literal '
+        + 'scan with a lit control per shape over examples, the non-test packages of this repository, '
+        + 'the console repository at its pin and the cloud repository, plus a runtime walk of every '
+        + 'filter in the example stacks — found no authored filter carrying one of these values and '
+        + 'no widget filter or report runtimeFilter with a nested-relation condition holding a '
+        + 'list or an operator map.',
+    },
     // The RUNTIME door's half of the question the sibling entry
     // view-filter-rule-scalar-operator-array-refused answered at the view-rule
     // schema door: that entry refuses an array on a scalar view operator when the
@@ -13417,6 +13496,53 @@ const step18: MigrationStep = {
         + 'label and value can still tell what the icon was meant to say. Any tooling that generated '
         + 'highlight entries (a code generator, a template) no longer emits the key.',
     },
+    // #20295 (family `rest-api-retire`, rank 9 of the #18900 census; triage graded
+    // it RETIRE by the maintainer's criterion) — the D3 entry of the family (ruling
+    // B on #17152: one D3 entry per retirement family). Registered keys:
+    // `api/RestApiConfig:responseFormat` and `api/RestApiConfig:documentation.enabled`
+    // — four ledger keys, since `responseFormat` retires whole with its three
+    // members. No D2 conversion: a `RestServerConfig` is plugin TS configuration,
+    // never a stack collection member or a stored row (the
+    // `rest-server-config-dead-keys-retired` precedent on the four sibling
+    // sub-objects), so this entry is where the prescription reaches
+    // `os migrate meta`, the upgrade guide and `spec-changes.json`.
+    {
+      id: 'rest-api-config-dead-keys-retired',
+      surface: 'restServer.api.responseFormat / restServer.api.documentation.enabled',
+      replacement:
+        '(removed — delete each key; neither had an effect to preserve. Whether the server publishes its '
+        + 'OpenAPI document and the docs viewer is `api.enableOpenApi`, the switch the mount already reads. '
+        + 'Response shapes are fixed — each route answers in the response schema `@objectstack/spec/api` '
+        + 'declares for it — and are not a server-wide option, so there is no replacement for `responseFormat`.)',
+      reason:
+        'The `rest_api` liveness census found every member of these two keys `dead`: `normalizeConfig` '
+        + 'parsed them, applied their defaults and copied them into the REST server\'s config, and no site '
+        + 'ever read them back. So `responseFormat.envelope: false` unwrapped no response, '
+        + '`includeMetadata` and `includePagination` gated nothing, and `documentation.enabled: false` '
+        + 'turned no document off — the document\'s existence was, and is, decided by `api.enableOpenApi` at '
+        + 'the mount. Enforce-or-remove (ADR-0049) resolved both to REMOVE: mainstream data APIs keep a '
+        + 'fixed response envelope that no administrator toggles server-wide, a configurable envelope would '
+        + 'fork the declared response shapes the client SDK parses and the served /openapi.json describes, '
+        + 'and `documentation.enabled` duplicates a switch that is already enforced. `RestApiConfigSchema` '
+        + 'and its inline `documentation` '
+        + 'block are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone and its ledger row '
+        + 'stays `dead` with a REMOVED note. No stored or built artifact carries either key, so no emitted '
+        + 'default needs to be tolerated as residue: the config is a construction argument that is parsed and '
+        + 'consumed in the same process. The consumer still owes the judgment because a host that WROTE '
+        + '`envelope: false` or `documentation.enabled: false` believed its clients saw a different shape or '
+        + 'no document, and only that host knows which clients were built on the belief.',
+      acceptanceCriteria:
+        'No `RestServerConfig` value passed to the REST plugin carries `api.responseFormat` or '
+        + '`api.documentation.enabled` — a config that does now fails `RestServer` construction (and so '
+        + 'the REST plugin\'s `start`) with the retirement prescription, naming the key and '
+        + '`RestApiConfigSchema`, instead of being accepted and ignored; `tsc` refuses the key at the '
+        + 'authoring site (`never`). A host that meant "serve no OpenAPI document" sets `api.enableOpenApi: '
+        + 'false` and sees `GET /openapi.json` and `GET /docs` unmounted. Every client that parses REST '
+        + 'responses reads each route\'s declared response shape. Every LIVE key of the `api` block — '
+        + 'including `documentation`\'s other members — parses byte-identically to before, and the mounted '
+        + 'REST surface is unchanged: '
+        + 'neither key ever reached it.',
+    },
     {
       id: 'rest-api-endpoint-handler-status-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
@@ -17107,6 +17233,41 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // A nested key of an inline block, so it has no line of its own in
     // `authorable-surface/` (the `kernel/Manifest:contributes.routes` shape).
     'api/MetadataEndpointsConfig:endpoints.schema',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: 0 read
+    // sites outside `normalizeConfig` and the normalized-config type; re-measured on
+    // origin/main 4e0f72e8, objectui at its pin f8a9d0fb and cloud at 96eb092 — all
+    // clean against lit controls). Tombstoned with `retiredKey()` inside the live
+    // `documentation` block — a tombstone whose siblings keep parsing, because only
+    // this member retires here. No D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration, never a stack collection member or a `sys_metadata` row. D3
+    // semantic entry `rest-api-config-dead-keys-retired`. Registered under 18 for the
+    // launch-window reason its neighbours state.
+    //
+    // `documentation.enabled` was a second on/off switch for the OpenAPI document:
+    // `api.enableOpenApi` decides the mount, and this key was consulted nowhere.
+    // Nested key of an inline block — no `authorable-surface/` line of its own.
+    'api/RestApiConfig:documentation.enabled',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: every
+    // member of the block `dead`, 0 read sites outside `normalizeConfig` and the
+    // normalized-config type; re-measured on origin/main 4e0f72e8, objectui at its
+    // pin f8a9d0fb and cloud at 96eb092 — all clean against lit controls).
+    // `RestApiConfigSchema` is a non-strict `z.object()`, so the route is a
+    // `retiredKey()` tombstone (a bare deletion would strip the key silently), the
+    // ledger row stays `dead` with a REMOVED note, and there is no D2 conversion: a
+    // `RestServerConfig` is plugin TS configuration, never a stack collection member
+    // or a `sys_metadata` row — the `api/RestServerConfig:openApi31` precedent, and
+    // the `rest-server-config-dead-keys-retired` one on the four sibling
+    // sub-objects. D3 semantic entry `rest-api-config-dead-keys-retired`. Registered
+    // under 18 for the launch-window reason its neighbours state.
+    //
+    // `responseFormat` is retired WHOLE — `envelope`, `includeMetadata` and
+    // `includePagination` were its only members and none was ever read, so there is
+    // no live member left to hold the container open (the `crud.patterns`
+    // precedent). A response shape is a fixed contract — each route's declared
+    // response schema, which the client SDK parses — not a server-wide option.
+    'api/RestApiConfig:responseFormat',
     // #15677 (stack card 2/6 of #14478) — ruling B; the seconds half of the pair
     // documented on `api/RestApiEndpoint:timeout`. Renamed to `cacheTtlSeconds`;
     // the value is unchanged. Tombstoned with `retiredKey()`; disposition and

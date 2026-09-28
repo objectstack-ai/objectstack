@@ -223,7 +223,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * Get all items of a specific metadata type
  *
  * **`environmentId` is deliberately NOT a member here — or on any meta-read
- * request schema** (maintainer ruling 2026-08-18, #9741). It is the
+ * request schema** (maintainer ruling 2026-08-18, commit 2a29caa53). It is the
  * TRANSPORT-level multi-kernel routing key: the REST layer resolves the target
  * kernel from it *before* the protocol call, and the implementation's own
  * parameter types (`@objectstack/metadata-protocol`) never read it off the
@@ -582,8 +582,8 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  *
  * Declared member for member against the implementation's parameter type in
  * `@objectstack/metadata-protocol` and the REST save door's actual sends — a
- * declared-surface catch-up, not a new capability (#12004, the #11006
- * maintainer-ruled pattern, 2026-08-22 option B, carried one door over
+ * declared-surface catch-up, not a new capability (#12004, the maintainer-ruled
+ * pattern of commit cccbe51bf, 2026-08-22 option B, carried one door over
  * exactly as #11679/PR #12003 carried it to the reset twin). `saveMetaItem`
  * is a REQUIRED protocol member, so this was the sharpest instance of the
  * request-shape gap: the schema declared 3 of the ~11 members the door
@@ -593,7 +593,7 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  * Every member below already ships and is read and enforced by the
  * implementation.
  *
- * `name` carries the enforced item-name grammar (#12194 — lowercase
+ * `name` carries the enforced item-name grammar (commit 311433f6b — lowercase
  * snake_case segments, optionally dot-qualified; `shared/identifiers.zod.ts`
  * is the single source). The implementation refuses an off-grammar name at
  * the door with `400 INVALID_REQUEST`, so declared = enforced. The read and
@@ -604,7 +604,7 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  * deliberately NOT declared:
  *
  * - `environmentId` — the TRANSPORT-level multi-kernel routing key, OUT of
- *   protocol request shapes by the #9741 maintainer ruling (2026-08-18):
+ *   protocol request shapes by the maintainer ruling of 2026-08-18 (commit 2a29caa53):
  *   `resolveProtocol(environmentId)` has already selected the target kernel
  *   before this method is entered, and `packages/rest` layers that one
  *   member on top of the declared shape via its `TransportScopedMetaRequest`
@@ -787,7 +787,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
  * (with `?mode=draft`) stages a body, and this verb promotes the pending
  * DRAFT overlay to the live `active` row. Mirrors the implementation's
  * parameter type in `@objectstack/metadata-protocol` member for member — a
- * declared-surface catch-up, not a new capability (#11006, maintainer ruling
+ * declared-surface catch-up, not a new capability (commit cccbe51bf, maintainer ruling
  * 2026-08-22: option B, closing the half-declared door #7294 left — the
  * response side was declared there while the request and the interface member
  * were not). The verb and every member here already ship and are enforced.
@@ -796,7 +796,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
  * deliberately NOT declared:
  *
  * - `environmentId` — the TRANSPORT-level multi-kernel routing key, OUT of
- *   protocol request shapes by the #9741 maintainer ruling (2026-08-18):
+ *   protocol request shapes by the maintainer ruling of 2026-08-18 (commit 2a29caa53):
  *   `resolveProtocol(environmentId)` has already selected the target kernel
  *   before this method is entered, and `packages/rest` layers that one member
  *   on top of the declared shape via its `TransportScopedMetaRequest` wrapper,
@@ -1255,8 +1255,8 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
  *
  * Declared member for member against the implementation's parameter type in
  * `@objectstack/metadata-protocol` and the REST reset door's actual sends — a
- * declared-surface catch-up, not a new capability (#11679, the #11006
- * maintainer-ruled pattern): every member here already ships and is enforced.
+ * declared-surface catch-up, not a new capability (#11679, the maintainer-ruled
+ * pattern of commit cccbe51bf): every member here already ships and is enforced.
  * The member existed on `MetadataProtocol` all along; the request schema
  * declared 2 of the 8 members the reset door sends, so the door's call site
  * had to stay behind an `as any` cast (removing it surfaced `TS2353` on the
@@ -1264,7 +1264,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
  *
  * One wire member is deliberately NOT declared: `environmentId`, the
  * transport-level multi-kernel routing key, OUT of protocol request shapes by
- * the #9741 maintainer ruling (2026-08-18) — `resolveProtocol(environmentId)`
+ * the maintainer ruling of 2026-08-18 (commit 2a29caa53) — `resolveProtocol(environmentId)`
  * selects the target kernel before this method is entered, the implementation
  * never reads it off the request, and `packages/rest` layers it on via its
  * `TransportScopedMetaRequest` wrapper.
@@ -1401,12 +1401,12 @@ export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
  * allowed and denied) that Studio's 审计日志 / Audit log tab renders. Mirrors
  * the implementation's parameter type in `@objectstack/metadata-protocol`
  * member for member — a declared-surface catch-up, not a new capability
- * (the #11006 maintainer-ruled pattern, 2026-08-22 option B, carried one door
+ * (the maintainer-ruled pattern of commit cccbe51bf, 2026-08-22 option B, carried one door
  * over): the verb and every member here already ship and are enforced.
  *
  * `environmentId` is deliberately NOT declared — the transport-level
- * multi-kernel routing key is OUT of protocol request shapes by the #9741
- * maintainer ruling (2026-08-18): `resolveProtocol(environmentId)` selects the
+ * multi-kernel routing key is OUT of protocol request shapes by the
+ * maintainer ruling (2026-08-18, commit 2a29caa53): `resolveProtocol(environmentId)` selects the
  * target kernel before this method is entered, and the implementation never
  * reads it off the request (the REST audit door stopped sending it when #8747
  * scoped the read).
@@ -1500,14 +1500,14 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
  * the `sys_metadata_history` events (every overlay put/delete, ADR-0008 §2.4)
  * that Studio's History tab renders as a timeline. Mirrors the
  * implementation's parameter type in `@objectstack/metadata-protocol` member
- * for member — a declared-surface catch-up, not a new capability (the #11006
- * maintainer-ruled pattern, 2026-08-22 option B, carried one door over
+ * for member — a declared-surface catch-up, not a new capability (the maintainer-ruled
+ * pattern of commit cccbe51bf, 2026-08-22 option B, carried one door over
  * exactly as #11678 carried it to the audit twin): the verb and every member
  * here already ship and are enforced.
  *
  * `environmentId` is deliberately NOT declared — the transport-level
- * multi-kernel routing key is OUT of protocol request shapes by the #9741
- * maintainer ruling (2026-08-18): `resolveProtocol(environmentId)` selects
+ * multi-kernel routing key is OUT of protocol request shapes by the
+ * maintainer ruling (2026-08-18, commit 2a29caa53): `resolveProtocol(environmentId)` selects
  * the target kernel before this method is entered, and the implementation
  * never declares or reads it off the request. Unlike the audit twin (whose
  * door stopped sending it when #8747 scoped the read), the REST history door
@@ -2089,7 +2089,7 @@ export const ValidateDataIssueSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Validate Data Request (#6037 — #4633 ruling D)
+ * Validate Data Request (commit 18189983d — #4633 ruling D)
  *
  * Ask for the write path's verdict on candidate rows WITHOUT writing them.
  *
@@ -2499,7 +2499,7 @@ export {
 
 // `ListViews` / `GetView` / `CreateView` / `UpdateView` / `DeleteView` —
 // five methods and their ten Request/Response schemas — were REMOVED per
-// ADR-0049 enforce-or-remove (#6239, protocol 17, maintainer ruling
+// ADR-0049 enforce-or-remove (commit f549a0d4a, protocol 17, maintainer ruling
 // 2026-08-07). Route 3 of the retirement playbook: not one of the ten was a
 // KEY on an authorable shape, nothing parsed them, and no route could reach the
 // methods, so there is no tombstone to write and no source or `sys_metadata`
@@ -2722,8 +2722,8 @@ export const NotificationSchema = lazySchema(() => z.object({
 
 // `cursor` was declared on BOTH halves of `GET /api/v1/notifications` and
 // honoured on neither, and `limit` declared a default the server has never
-// applied. Both are removed per the maintainer ruling of 2026-08-07 (#6361,
-// Option A), ruled together with #6363 as one capability's two halves — a
+// applied. Both are removed per the maintainer ruling of 2026-08-07 (commit 90bbf2510,
+// Option A), ruled together with the `unreadCount` fix (commit 17d095413) as one capability's two halves — a
 // pagination capability is never half-deleted.
 //
 // ## What the route actually does
@@ -2759,7 +2759,7 @@ export const NotificationSchema = lazySchema(() => z.object({
 // service CLAMPS an out-of-range limit (`Math.min(Math.max(limit ?? 50, 1),
 // 200)`); it does not refuse one. A constraint here would declare a rejection
 // the wire does not perform — the same declared-not-enforced defect in the
-// opposite direction. ADR-0049, #6361.
+// opposite direction. ADR-0049, commit 90bbf2510.
 
 /**
  * One prescription, two rejection sites — the `cursor` key was declared on both
@@ -3500,7 +3500,7 @@ export interface DataProtocol {
   deleteData(request: DeleteDataRequest): Promise<DeleteDataResponse>;
 
   /**
-   * Validate-only (#6037 — #4633 ruling D): the write path's verdict on
+   * Validate-only (commit 18189983d — #4633 ruling D): the write path's verdict on
    * candidate rows, with nothing persisted.
    *
    * Declared optional because it is additive to a shipped contract, not
@@ -3539,7 +3539,7 @@ export interface MetadataProtocol {
    * a body, this makes it live). Declared optional like its `deleteMetaItem`
    * / `getMetaItemLayered` siblings: additive to a shipped contract, with the
    * implementation (`@objectstack/metadata-protocol`) predating the
-   * declaration. #11006 (maintainer ruling 2026-08-22, option B) promotes
+   * declaration. Commit cccbe51bf (maintainer ruling 2026-08-22, option B) promotes
    * what was an ADR-0076 D9 server-only extension into a declared optional
    * member, closing the half-declared door #7294 left: the response side was
    * declared there while the request and this member were not — so the
@@ -3573,7 +3573,7 @@ export interface MetadataProtocol {
    * `getMetaItemLayered` siblings: additive to a shipped contract, with the
    * implementation (`@objectstack/metadata-protocol`) predating the
    * declaration. Promotes what was an ADR-0076 D9 server-only extension into
-   * a declared optional member (the #11006 maintainer-ruled pattern,
+   * a declared optional member (the maintainer-ruled pattern of commit cccbe51bf,
    * 2026-08-22 option B, carried one door over) — before this, the REST audit
    * door reached the verb through a runtime cast and its request literal was
    * compiled against nothing. A host without the verb is CONFORMING: the REST
@@ -3590,7 +3590,7 @@ export interface MetadataProtocol {
    * `getMetaItemLayered` siblings: additive to a shipped contract, with the
    * implementation (`@objectstack/metadata-protocol`) predating the
    * declaration. Promotes what was an ADR-0076 D9 server-only extension into
-   * a declared optional member (the #11006 maintainer-ruled pattern,
+   * a declared optional member (the maintainer-ruled pattern of commit cccbe51bf,
    * 2026-08-22 option B, carried one door over exactly as #11678 carried it
    * to the audit twin) — before this, the REST history door reached the verb
    * through a runtime cast and its request literal was compiled against
@@ -3627,7 +3627,7 @@ export interface PackageProtocol {
 
 // `ViewProtocol` (`listViews` / `getView` / `createView` / `updateView` /
 // `deleteView`) was REMOVED at protocol 17 — see the "View Management
-// Operations — RETIRED" note above (#6239). No host implemented it and no route
+// Operations — RETIRED" note above (commit f549a0d4a). No host implemented it and no route
 // reached it; view read/write is `MetadataProtocol` (`getMetaItem` /
 // `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) plus `getUiView`.
 
