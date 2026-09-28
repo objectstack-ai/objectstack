@@ -23,7 +23,8 @@ import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
-import { flowNodeConfigRefusals, predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
+import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { EndConfigSchema } from './builtin-node-config.zod';
 import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from './approval.zod';
 export const FlowNodeAction = z.enum([

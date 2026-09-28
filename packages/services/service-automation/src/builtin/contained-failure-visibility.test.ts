@@ -144,7 +144,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                                     try: {
                                         nodes: [
                                             { id: 'flag', type: 'flag', label: 'Flag' },
-                                            { id: 'notify', type: 'notify', label: 'Notify' },
+                                            { id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } },
                                         ],
                                         edges: [{ id: 't1', source: 'flag', target: 'notify' }],
                                     },
@@ -256,7 +256,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'guard', type: 'try_catch', label: 'Guarded',
                     config: {
-                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify' }], edges: [] },
+                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } }], edges: [] },
                         catch: { nodes: [{ id: 'seen', type: 'capture', label: 'Seen' }], edges: [] },
                     },
                 },
@@ -287,7 +287,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'guard', type: 'try_catch', label: 'Guarded',
                     config: {
-                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify' }], edges: [] },
+                        try: { nodes: [{ id: 'notify', type: 'notify', label: 'Notify', config: { title: 'Notice', recipients: ['user_1'] } }], edges: [] },
                         catch: { nodes: [{ id: 'seen', type: 'capture', label: 'Seen' }], edges: [] },
                     },
                 },

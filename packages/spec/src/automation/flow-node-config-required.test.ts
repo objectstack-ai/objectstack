@@ -29,7 +29,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NotifyConfigSchema } from './io-node-config.zod';
 import { ScreenConfigSchema } from './builtin-node-config.zod';
-import { flowNodeConfigRefusals } from './flow-node-expression-paths';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { FlowSchema } from './flow.zod';
 
 type Node = Record<string, unknown>;

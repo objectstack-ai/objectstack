@@ -25,7 +25,6 @@ import {
   FLOW_SLOT_REFUSAL_CODES,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
-  flowNodeConfigRefusals,
   predicateSlotRefusal,
   structuralConditionRefusal,
   type FlowNodeConfigRefusal,
@@ -38,6 +37,7 @@ import {
   type StructuralConditionRefusalCode,
 } from './flow-node-expression-paths.js';
 import * as automation from './index.js';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
 import { NotifyConfigSchema } from './io-node-config.zod.js';
 
 /** What one refusal says, whichever producer said it. */

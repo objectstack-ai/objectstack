@@ -590,9 +590,17 @@ describe('conversion layer (ADR-0087 D2)', () => {
           `${key} must be rejected`,
         ).toThrow(/was removed in @objectstack\/spec 17/);
       }
-      // The flow-level parse is deliberately blind here — pinned so the note
-      // above stays true if `FlowNodeSchema.config` is ever tightened.
-      expect(() => FlowSchema.parse((scriptFlow({ actionType: 'email' }).flows as any[])[0])).not.toThrow();
+      // The flow-level parse is deliberately blind to the TOMBSTONES — pinned so
+      // the note above stays true if `FlowNodeSchema.config` is ever tightened.
+      // What it does see since #20316 is the one key the script contract
+      // requires, left out: a stripped node naming no callable is refused at
+      // the build doors now, not only at execute — and by that, never by a
+      // tombstone.
+      expect(() => FlowSchema.parse((scriptFlow({ function: 'score_lead', actionType: 'email' }).flows as any[])[0])).not.toThrow();
+      const stripped = FlowSchema.safeParse((scriptFlow({ actionType: 'email' }).flows as any[])[0]);
+      expect(stripped.success).toBe(false);
+      expect(stripped.error!.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.function']);
+      expect(stripped.error!.issues[0].message).not.toMatch(/was removed in @objectstack\/spec 17/);
     });
   });
 
