@@ -77,9 +77,15 @@ my-app/
 ├── README.md
 ├── AGENTS.md                    # conventions for coding agents
 └── src/
-    └── objects/
-        ├── index.ts
-        └── note.object.ts
+    ├── objects/
+    │   ├── index.ts
+    │   └── note.object.ts
+    ├── views/index.ts           # an empty barrel for each directory
+    ├── actions/index.ts         # `objectstack generate` writes into,
+    ├── flows/index.ts           # already wired into objectstack.config.ts
+    ├── dashboards/index.ts
+    ├── apps/index.ts
+    └── skills/index.ts
 ```
 
 Next steps inside the project:

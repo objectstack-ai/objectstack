@@ -91,22 +91,41 @@ my-app/
 ├── tsconfig.json
 ├── AGENTS.md                    # conventions for coding agents
 └── src/
-    └── objects/
-        ├── index.ts             # barrel — re-exports every object
-        └── note.object.ts       # a sample object
+    ├── objects/
+    │   ├── index.ts             # barrel — re-exports every object
+    │   └── note.object.ts       # a sample object
+    ├── views/index.ts           # an empty barrel for each directory
+    ├── actions/index.ts         # `os generate` writes into, already
+    ├── flows/index.ts           # wired into objectstack.config.ts
+    ├── dashboards/index.ts
+    ├── apps/index.ts
+    └── skills/index.ts
 ```
 
 Two files matter most:
 
 **`objectstack.config.ts`** wires everything together. There is no
-filename-suffix magic — metadata exists in the app only if it is imported here:
+filename-suffix magic — metadata exists in the app only if it is imported here.
+Every directory `os generate` writes into is already imported, so a generated
+view, action or flow adds a file and one export line to its directory's
+`index.ts` and is part of the stack with no edit to this file:
 
 ```typescript title="objectstack.config.ts"
 import { defineStack } from '@objectstack/spec';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
-import * as objects from './src/objects/index.js';
+import * as objects from './src/objects';
+import * as views from './src/views';
+import * as actions from './src/actions';
+import * as flows from './src/flows';
+import * as dashboards from './src/dashboards';
+import * as apps from './src/apps';
+import * as skills from './src/skills';
+
+// Object.values, typed by what the barrel exports, so an empty barrel still
+// type-checks.
+const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);
 
 export default defineStack({
   manifest: {
@@ -120,14 +139,22 @@ export default defineStack({
   },
   // `automation` runs flows and, per ADR-0097, materializes declarative
   // `connectors:` entries at boot. The three generic executors below register
-  // their `rest` / `openapi` / `mcp` provider factories with it.
-  requires: ['automation'],
+  // their `rest` / `openapi` / `mcp` provider factories with it. `triggers`
+  // fires a flow that starts on a record change, the kind `os generate flow`
+  // writes.
+  requires: ['automation', 'triggers'],
   plugins: [
     new ConnectorRestPlugin(),
     new ConnectorOpenApiPlugin(),
     new ConnectorMcpPlugin(),
   ],
-  objects: Object.values(objects),
+  objects: exportsOf(objects),
+  views: exportsOf(views),
+  actions: exportsOf(actions),
+  flows: exportsOf(flows),
+  dashboards: exportsOf(dashboards),
+  apps: exportsOf(apps),
+  skills: exportsOf(skills),
 });
 ```
 
