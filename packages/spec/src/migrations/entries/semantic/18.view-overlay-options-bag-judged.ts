@@ -28,7 +28,7 @@ export const entry: SemanticMigration = {
     + 'view\'s `options` into the list renderer, which merges `options.KIND` under the top-level block — so a '
     + 'key the strict block refuses by name (`timeline.metaFields`) was saved and rendered when spelled '
     + '`options.timeline.metaFields`. Measured on `origin/main` @ `8d1f7ab` through the real save. Ruled '
-    + 'direction A (maintainer 「其他同意」): judge each `options.KIND` with the kind\'s strict schema and '
+    + 'direction A (the maintainer\'s ruling of 2026-09-24): judge each `options.KIND` with the kind\'s strict schema and '
     + 'refuse an out-of-contract key by name, as the direct spelling is; refusing the bag whole was ruled '
     + 'out because the legacy `options.map` path is live and pinned. Judged key by key, because the '
     + 'renderer reads the bag as a per-key underlay of the top-level block: a bag that carries only the '

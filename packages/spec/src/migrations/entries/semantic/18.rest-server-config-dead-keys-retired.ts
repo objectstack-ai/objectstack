@@ -17,9 +17,10 @@ export const entry: SemanticMigration = {
     + 'Batch atomicity is the per-request `options.atomic` (ADR-0119 D4); upsert is an operation type of '
     + 'the generic `POST /data/:object/batch` endpoint, gated by `batch.enableBatchEndpoint`.)',
   reason:
-    'The #14369 liveness census enrolled the four `RestServerConfig` sub-objects and found 15 of their '
+    'The liveness census that enrolled the four `RestServerConfig` sub-objects found 15 of their '
     + '32 rows `dead`: parsed, defaulted and normalized into the REST server\'s config by `normalizeConfig` '
-    + '(#11984) and never read back. `crud.patterns` and `routes.overrides` described route customization '
+    + '(which parses them, rather than casting them, since an earlier fix) and never read back. '
+    + '`crud.patterns` and `routes.overrides` described route customization '
     + 'the server mounts from fixed pairs; `routes.includeObjects` / `excludeObjects` and `overrides.enabled` '
     + '/ `operations` duplicated the object\'s own enforced exposure keys; `nameTransform` and '
     + '`objectParamStyle` were enums validated and then ignored; `metadata.endpoints.schema` and '
@@ -32,8 +33,9 @@ export const entry: SemanticMigration = {
     + 'segment). All four schemas are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone '
     + 'and its ledger row stays `dead` with a REMOVED note; `api/CrudEndpointPattern`, the value def of '
     + '`crud.patterns`, leaves with it. No D2 conversion: a `RestServerConfig` is plugin TS configuration, '
-    + 'never a stack collection member or a `sys_metadata` row (the `openApi31` precedent, #4579). Cloud '
-    + 'sweep #14796 @9b6abe0f2fd5: zero hits, structural — cloud never authors a `RestServerConfig`. #14691.',
+    + 'never a stack collection member or a `sys_metadata` row (the `openApi31` precedent). A closed-set '
+    + 'sweep of the cloud repository at 9b6abe0f2fd5: zero hits, structural — cloud never authors a '
+    + '`RestServerConfig`.',
   acceptanceCriteria:
     'No `RestServerConfig` value passed to the REST plugin (or `plugin-hono-server` `restConfig`) carries '
     + 'any of the ten keys — a config that does now fails `new RestServer(...)` / `createRestApiPlugin().start()` '

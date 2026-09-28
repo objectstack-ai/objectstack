@@ -8,7 +8,8 @@ export const entry: SemanticMigration = {
   replacement: 'retryAfterSeconds — rename the key; the value (seconds) is unchanged',
   reason:
     'Maintainer ruling B of 2026-09-02 on duration-shaped keys: the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
-    + 'BREAKING ON THE WIRE, and ruled in deliberately: the ruling puts the ~16 runtime-emitted '
+    + 'BREAKING ON THE WIRE, and ruled in deliberately: its 2026-09-05 population ruling puts the '
+    + '~16 runtime-emitted '
     + 'measurements in scope because they are read by humans and agents even if nobody authors '
     + 'them, and names ApiError.retryAfter explicitly, with its own BREAKING note. The ambiguity '
     + 'here is sharper than the usual bare duration. A consumer meets TWO retry-after values on '
