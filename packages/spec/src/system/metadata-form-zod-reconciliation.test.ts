@@ -304,21 +304,21 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'view',
     path: ROOT_PATH,
     key: 'columnState',
-    why: "platform-written, never authored — `Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
+    why: "platform-written, never authored — `Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
   {
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
     key: 'isPinned',
-    why: "platform-written, never authored — `Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name",
+    why: "platform-written, never authored — `Console round-trip: the view is pinned in the object's view switcher. … Not authored.`; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
   {
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
     key: 'sortOrder',
-    why: "platform-written, never authored — `Studio round-trip: position within the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
+    why: "platform-written, never authored — `Console round-trip: the view's position among the object's saved views in the switcher … Not authored`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
   },
 
   // Deprecated or legacy alias — deliberately not offered to new authors, the

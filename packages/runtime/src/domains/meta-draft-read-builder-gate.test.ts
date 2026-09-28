@@ -289,8 +289,9 @@ describe('[#20338] census: every draft switch in domains/meta.ts is ledgered, an
     const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
 
     const LEDGER: ReadonlyArray<{ site: string; count: number; disposition: 'read' | 'listing' }> = [
-        // The item read's and the list's `?preview=draft` — the switch declared with its admission.
-        { site: "query?.preview === 'draft'", count: 2, disposition: 'read' },
+        // The item read's and the list's `?preview=draft` — the switch declared with its admission,
+        // [#20408] parsed case-insensitively as `RestServer` parses it.
+        { site: "query.preview.toLowerCase() === 'draft'", count: 2, disposition: 'read' },
         // [#20320] The item read's `?state=draft` — the pending draft row, declared with its admission.
         { site: "query.state.toLowerCase() === 'draft'", count: 1, disposition: 'read' },
         // `GET /meta/_drafts` — the probe and the call, behind the 403.

@@ -300,9 +300,12 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
     // so it parses to a list (`type: 'grid'`). It used to parse to
     // `type: 'simple'` — a FORM — because the form member was the one accepting
     // it, with every list key stripped unread.
-    ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
-    ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
-    ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
+    // [#20456] …and the pin / reorder keys it carries are the console's
+    // round-trip keys, declared on this member now, so the parse KEEPS them.
+    // They used to be `.strip()`ped from the output while the save stored them.
+    ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'grid', isPinned: true, ...BOUND_LIST }],
+    ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'grid', sortOrder: 3, ...BOUND_LIST }],
+    ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'grid', isPinned: true, sortOrder: 3, ...BOUND_LIST }],
   ];
 
   const REFUSED: Array<[string, unknown, string[]]> = [

@@ -42,12 +42,29 @@
  * branch pruned nothing. Its gate lives here too
  * ({@link createMetaListReadGate}), built from the same functions over the
  * same ports.
+ *
+ * [#20320 · #20408] …and so does every other step those reads take after the
+ * store read: the list chain ({@link createMetaListAnswer}), the item read's
+ * ({@link createMetaItemAnswer}), the book tree ({@link createMetaBookTreeAnswer}),
+ * the list's unknown-type refusal ({@link refuseUnknownMetaListType}), the
+ * object mask's cache posture ({@link projectMetaObjectSchema}) and the
+ * organization a caller's read is scoped to ({@link metaReadOrganizationId}).
+ * `meta-list-projection-parity.test.ts` and `meta-read-org-scope-parity.test.ts`
+ * in `@objectstack/runtime` drive both transports over the same fixtures and
+ * hold the answers equal.
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
-import { pluralToSingular } from '@objectstack/spec/shared';
+import { resolveObjectSortability } from '@objectstack/spec/api';
+import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
+import {
+    ObjectSchemaMaskEvaluationError,
+    applyObjectSchemaMask,
+    organizationIdForMetaRead,
+    type ObjectSchemaMaskPosture,
+} from '@objectstack/metadata-core';
 import { isEndpointMatchAuthority, selectServedEndpoints } from './served-endpoints.js';
 import { logError, logWarn } from './log.js';
 
@@ -118,6 +135,52 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
     serviceProbe(caller: MetaReadGateCaller | undefined): ((name: string) => Promise<boolean>) | null;
     /** Where the nav-servability prune log records what it has already said (one line per key). */
     readonly navPruneLogged: Set<string>;
+}
+
+// ── The caller's organization ─────────────────────────────────────────────────
+
+/**
+ * [#20408] The active organization a `/meta` request is scoped to: the
+ * `tenantId` the identity resolver VETTED onto the caller's execution context
+ * — ⛔ never the session's `activeOrganizationId` as stored.
+ *
+ * `resolveAuthzContext` (`@objectstack/core`) vets that claim: under a
+ * wall-enforcing tenancy posture, a claim naming an organization the caller no
+ * longer belongs to is DROPPED, and the request resolves with no active
+ * organization at all (the fail-closed state every other layer reads). The
+ * runtime dispatcher's `/meta` doors used to read the claim straight off the
+ * auth service, so a member removed from an organization kept its metadata
+ * partition there for the rest of the session: its org-scoped overlays were
+ * served to them by the item read, the list, `/published` and `?state=draft`,
+ * `GET /meta/_drafts` listed its pending drafts, and `PUT` wrote into it —
+ * while `RestServer`, which reads `ctx.tenantId`, answered the same caller the
+ * env-wide rows. One source, both transports.
+ *
+ * `undefined` for an anonymous caller, a caller with no active organization,
+ * and one whose claim was dropped — which are one fact to every consumer.
+ */
+export function metaCallerOrganizationId(caller: unknown): string | undefined {
+    const tenantId = caller && typeof caller === 'object' ? (caller as { tenantId?: unknown }).tenantId : undefined;
+    return typeof tenantId === 'string' ? tenantId : undefined;
+}
+
+/**
+ * [#9454 · #20408] The organization a `/meta` READ of `type` carries:
+ * `organizationIdForMetaRead` over the FOLDED segment (folded-type commit
+ * 26f3588fb, whose card no longer resolves: the raw plural would miss the
+ * registry's override flag) and the caller's vetted
+ * organization ({@link metaCallerOrganizationId}). An organization reaches the
+ * read only for a type the registry declares `allowOrgOverride`, so a
+ * non-overridable type never resurrects a pre-#6190 phantom org row.
+ *
+ * `RestServer`'s list and item reads and the runtime dispatcher's ask this, so
+ * the partition a caller reads cannot differ by transport.
+ */
+export function metaReadOrganizationId(type: unknown, caller: unknown): string | undefined {
+    return organizationIdForMetaRead(
+        canonicalMetaUrlType(typeof type === 'string' ? type : ''),
+        metaCallerOrganizationId(caller),
+    );
 }
 
 // ── The verdict ───────────────────────────────────────────────────────────────
@@ -1568,6 +1631,144 @@ export function isPublicAudienceRead(
     return folded === 'book' || folded === 'doc';
 }
 
+// ── The list route's unknown-type refusal ─────────────────────────────────────
+
+/**
+ * [#9488] Refuse a `GET /meta/:type` LIST whose `:type` segment names no
+ * metadata type — the read half of the verdict the WRITE door has enforced
+ * since #8421.
+ *
+ * ## The disagreement this closes
+ *
+ * `PUT /api/v1/meta/totally_invented_type/x` answers `400` /
+ * `INVALID_REQUEST` / *"'totally_invented_type' is not a metadata type"*
+ * (`refuseUnmintableMetaType` in `@objectstack/metadata-protocol`), while
+ * `GET /api/v1/meta/totally_invented_type` answered `200
+ * {"items":[]}` — so the two doors disagreed about which type names exist.
+ * A 200-with-an-empty-collection is indistinguishable from "this type
+ * exists and holds nothing", which is the same trap
+ * `GET /meta/app?id=<unknown>` was filed for: a typo'd or renamed type
+ * reads as an empty surface rather than as a mistake.
+ *
+ * ## Why the static verdict alone is NOT the rule here
+ *
+ * #8421 considered and REJECTED raising `unrecognisedMetaTypeRefusal` on
+ * the read entries, for a reason that is still true: the live type set
+ * legitimately holds keys the static contract does not. An ordinary
+ * `registerApp` puts `data`, `kind`, `package` and `policy` into
+ * `SchemaRegistry`, `GET /api/v1/meta/types` enumerates exactly that set,
+ * and a plugin's own type enters the live set as a side effect of
+ * registering items of it (`content/docs/plugins/adding-a-metadata-type.mdx`:
+ * *"A third-party package's type instead enters the live set as a side
+ * effect of registering items of that type"*). Refusing on the static
+ * verdict alone would answer `400` for types this same service advertises
+ * — trading one declared-≠-served gap for another, which is the objection
+ * verbatim.
+ *
+ * So the rule is the UNION of the two authorities the platform already
+ * has, and neither is restated here: the static spelling contract
+ * (`unrecognisedMetaTypeRefusal`, the predicate the write door consults)
+ * and the live listing (`getMetaTypes`, the one `GET /meta/types` serves).
+ * A name in neither is a name nothing can serve, which is exactly the
+ * population this card is about. ⛔ Do not hand-write a list of type names
+ * here — both halves are derived (Prime Directive #8).
+ *
+ * ## Order, cost, and the failure mode
+ *
+ * The static verdict runs FIRST and is silent for all 68 accepted
+ * spellings, so an ordinary list request pays nothing at all; the live
+ * probe is reached only by a request already headed for a refusal. That is
+ * the same shape the write door uses (static verdict, then
+ * `metaTypeNamespaceExists`), for the same reason.
+ *
+ * It fails OPEN. A host whose protocol carries no `getMetaTypes`, or whose
+ * listing cannot be read, keeps today's answer rather than earning a
+ * refusal — inventing "no such type" from an unreachable authority would
+ * be an existence claim stated while the authority was unreachable, the
+ * very thing `metaTypeNamespaceExists` refuses to do in the write door.
+ * The cost is that the defect survives an outage; the alternative is
+ * refusing a type that does exist.
+ *
+ * ## Scope — deliberately the LIST door only
+ *
+ * ⛔ Not the compound arity. `/meta/lead/views/all_leads` carries an OBJECT
+ * name in the `:type` segment, which no static contract can enumerate;
+ * that is exemption 1 of the write door and it is honoured here by simply
+ * not being this route. ⛔ Not the single-item doors: measured on this
+ * branch, `GET /meta/<invented>/x` already answers `404
+ * RESOURCE_NOT_FOUND` and the `/references`, `/layers`, `/history`,
+ * `/audit`, `/diff`, `/published` limbs already answer `501
+ * NOT_IMPLEMENTED` — all distinguishable from a served answer, so none of
+ * them carries this defect.
+ *
+ * ## Both transports
+ *
+ * [#20408] Moved here, unchanged, out of `RestServer`: the runtime
+ * dispatcher's `/meta` list branch asks it too, at the same point — before any
+ * listing work — so a dispatcher-only host refuses the segments `RestServer`
+ * refuses instead of answering `200 {"items":[]}`. A dispatcher host whose
+ * protocol has no `getMetaTypes` keeps its answer (fail-open, above).
+ *
+ * @returns nothing; THROWS the refusal, so each transport's own `catch`
+ *          shapes it (`RestServer`'s `handleRouteError`, the dispatcher's
+ *          `errorFromThrown`) and the wire body is byte-identical to the
+ *          write door's for the same condition. A hand-built body would
+ *          author a second dialect for one condition and would tick
+ *          `rest-server.ts`'s `check:route-envelope` dialect ratchets UP.
+ */
+export async function refuseUnknownMetaListType(p: unknown, urlType: unknown): Promise<void> {
+    if (typeof urlType !== 'string' || urlType.length === 0) return;
+    const unrecognised = unrecognisedMetaTypeRefusal(urlType);
+    if (!unrecognised) return;
+    if (await metaTypeIsLive(p, urlType)) return;
+    const err: any = new Error(
+        `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+        + `no such type and this deployment has registered no items under it, so an empty `
+        + `collection here would be indistinguishable from a type that exists and holds `
+        + `nothing. GET /api/v1/meta/types lists the types this deployment carries.`,
+    );
+    err.code = 'INVALID_REQUEST';
+    err.status = 400;
+    throw err;
+}
+
+/**
+ * [#9488] Does this deployment's LIVE type set carry this `/meta/:type`
+ * segment? The second half of {@link refuseUnknownMetaListType}'s union.
+ *
+ * Reads the same accessor `GET /meta/types` serves, and tolerates both
+ * shapes it is known to arrive in — the protocol's `{ types, entries }`
+ * and the bare `string[]` older hosts and stubs return. Both sides of the
+ * comparison are folded through `canonicalMetaUrlType`, the platform's own
+ * spelling fold, so a registry storing the plural and a URL carrying the
+ * singular still meet; nothing about spelling is re-derived here.
+ *
+ * `getMetaTypes` is called optionally on purpose: `RestServer`'s own
+ * `getMetaItems` call sites are too, because a host may occupy the protocol
+ * slot with an object that does not implement the whole surface.
+ *
+ * Returns `true` — "cannot disprove, so do not refuse" — for every
+ * unreadable outcome: no accessor, a rejected call, or a listing in a
+ * shape this cannot read. See the caller's doc for why that direction.
+ */
+async function metaTypeIsLive(p: unknown, urlType: string): Promise<boolean> {
+    let listing: unknown;
+    try {
+        listing = await (p as any)?.getMetaTypes?.();
+    } catch {
+        return true;
+    }
+    const types: unknown = Array.isArray(listing)
+        ? listing
+        : (listing && typeof listing === 'object' && Array.isArray((listing as any).types))
+            ? (listing as any).types
+            : null;
+    if (!Array.isArray(types)) return true;
+    const wanted = canonicalMetaUrlType(urlType);
+    return types.some((t: unknown) => typeof t === 'string'
+        && (t === urlType || canonicalMetaUrlType(t) === wanted));
+}
+
 // ── The list route's locale and translation ───────────────────────────────────
 
 /** The two request members a locale is read from — each transport hands in its own. */
@@ -1753,6 +1954,141 @@ export async function translateMetaList(
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
 
+/**
+ * [#20408] Translate ONE metadata document for the request's locale — the item
+ * twin of {@link translateMetaList}. `metaType` is the canonical singular (the
+ * caller folds its URL segment once — plural-spelling commit 2443bb4c4e, whose
+ * card no longer resolves: the translatable set is singular-only, so an
+ * unfolded plural would skip the whole localization).
+ *
+ * Takes the DOCUMENT, never the `getMetaItem` envelope (#5563): nav and field
+ * labels live on the document. A missing bundle is not a bail-out (the
+ * built-in fallbacks still apply); no locale is. The i18n service is resolved
+ * only for a translatable type, and the protocol only for an `object` (#8284,
+ * the packaged base).
+ *
+ * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
+ * delegates), so the runtime dispatcher's item read translates with the same
+ * function instead of serving the authored labels.
+ */
+export async function translateMetaDocument(
+    sources: MetaListTranslationSources,
+    metaType: string,
+    document: unknown,
+): Promise<unknown> {
+    if (!document || typeof document !== 'object') return document;
+    if (!(await isTranslatableMetaType(metaType))) return document;
+    const i18n = await sources.resolveI18nService();
+    const bundle = translationBundleOf(i18n);
+    const locale = sources.requestLocale(i18n);
+    if (!locale) return document;
+    const { translateMetadataDocument } = await import('@objectstack/spec/system');
+    const packagedBase = metaType === 'object'
+        ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
+        : undefined;
+    return translateMetadataDocument(metaType, document as any, bundle, {
+        ...metaTranslateOptions(i18n, locale),
+        packagedBase,
+    });
+}
+
+/**
+ * [#5563 · #10235 · #20408] The one place a single-item read rebuilds its
+ * response body around the document it serves: `envelope` supplies the
+ * identity and the ADR-0008 OCC carriers (`lock`, `provenance`, …), `document`
+ * is the (gated, locale-collapsed, masked) document that belongs under `item`,
+ * translated ({@link translateMetaDocument}).
+ *
+ * Beside an OBJECT schema it serves the per-column `sortability` projection
+ * (#10235), computed from the FINAL document — post ADR-0106 mask — so its
+ * domain is exactly the field set this caller is served, and never inside
+ * `item` (`FieldSchema` is strict; the key must stay un-authorable).
+ *
+ * Moved here, unchanged, from `RestServer.translateMetaEnvelope` (which now
+ * delegates), so the runtime dispatcher's item read answers the same body —
+ * it served neither the translation nor `sortability`.
+ */
+export async function translateMetaEnvelope(
+    sources: MetaListTranslationSources,
+    metaType: string,
+    envelope: Readonly<Record<string, unknown>> | undefined,
+    document: unknown,
+): Promise<Record<string, unknown>> {
+    const sortability = metaType === 'object'
+        && document && typeof document === 'object' && !Array.isArray(document)
+        ? { sortability: resolveObjectSortability(document) }
+        : {};
+    return {
+        ...envelope,
+        ...sortability,
+        item: await translateMetaDocument(sources, metaType, document),
+    };
+}
+
+// ── The object mask's answer ──────────────────────────────────────────────────
+
+/** [ADR-0106 D6 tier 2] The cache posture a schema served under an UNDETERMINED field visibility carries. */
+export const META_UNDETERMINED_CACHE_CONTROL = 'private, no-store';
+
+/**
+ * [#20408] Project ONE object schema through the caller's ADR-0106 posture —
+ * the decision every schema-serving `/meta` exit makes, on both transports:
+ *
+ *  - `project` — the readable fields only (D1). A projection that leaves NO
+ *    field is a fault (`ok: false`), never an empty-fields `200` (D6: "silently
+ *    wrong UI **and** cacheable poison");
+ *  - `undetermined` (D6 tier 2) — the schema UNMASKED, and so served
+ *    {@link META_UNDETERMINED_CACHE_CONTROL}: no shared cache may store or
+ *    revalidate a body no mask touched;
+ *  - `passthrough` — as given.
+ *
+ * The runtime dispatcher masked without the second half: an undetermined
+ * posture's schema went out with no `Cache-Control` at all, where `RestServer`
+ * answers `private, no-store` — the header the ADR (and the posture's own
+ * `warn` line) promises.
+ */
+export function projectMetaObjectSchema(
+    posture: ObjectSchemaMaskPosture,
+    document: unknown,
+): { ok: true; document: any; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false } {
+    const masked = applyObjectSchemaMask(document, posture);
+    if (masked.emptied) return { ok: false };
+    return posture.kind === 'undetermined'
+        ? { ok: true, document: masked.document, cacheControl: META_UNDETERMINED_CACHE_CONTROL }
+        : { ok: true, document: masked.document };
+}
+
+/**
+ * [ADR-0106 D5(2)] Project every object schema of a listed `object` page. One
+ * unevaluable object fails the whole list (`ok: false`, naming it) — serving the
+ * rest would leave a hole in the projection no client can see — whether its
+ * posture threw (D6 tier 3, {@link ObjectSchemaMaskEvaluationError}) or its
+ * projection emptied it; any other throw propagates. The page is served
+ * `private, no-store` when ANY object's posture was undetermined.
+ */
+async function maskMetaObjectList(
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+    items: readonly any[],
+): Promise<{ ok: true; items: any[]; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false; object: string }> {
+    const projected: any[] = [];
+    let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
+    for (const item of items) {
+        const objectName = String(item?.name ?? '');
+        let posture: ObjectSchemaMaskPosture;
+        try {
+            posture = await masker(objectName);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return { ok: false, object: objectName };
+            throw maskError;
+        }
+        const masked = projectMetaObjectSchema(posture, item);
+        if (!masked.ok) return { ok: false, object: objectName };
+        cacheControl ??= masked.cacheControl;
+        projected.push(masked.document);
+    }
+    return cacheControl ? { ok: true, items: projected, cacheControl } : { ok: true, items: projected };
+}
+
 // ── THE list answer ───────────────────────────────────────────────────────────
 
 /** Everything {@link createMetaListAnswer} reads, supplied by the transport. */
@@ -1783,15 +2119,19 @@ export interface MetaListAnswerSources extends MetaItemReadGateSources {
      */
     notifyMissingEndpointMatcher(surface: string): void;
     /**
-     * [ADR-0106 D5(2)] The transport's own object mask over a non-empty
-     * `object` list: every item projected for this caller, or the object whose
-     * projection could not be evaluated (D6 tier 3 — the transport answers
-     * that fault, ⛔ never the list with a hole in it). A mask fault of any
-     * other kind is thrown. The mask stays the transport's for the gate's
-     * reason: each threads it through its own `fetch → mask → send` exit, and
-     * `RestServer` sets its own cache header from the posture.
+     * [ADR-0106 D2 · #20408] This request's object-schema masker — the
+     * transport's own posture resolver (its caller, its security service, its
+     * enablement switch), resolved ONCE per page and asked per object name. It
+     * REJECTS with `ObjectSchemaMaskEvaluationError` on D6 tier 3. Asked only
+     * for a non-empty `object` list.
+     *
+     * What the chain does with each posture — the projection, the tier-3 and
+     * emptied faults, and the `private, no-store` an undetermined posture owes
+     * — is the chain's ({@link projectMetaObjectSchema}), so both transports
+     * answer it alike. It used to be a whole-mask port, and the dispatcher's
+     * took the projection without the cache header.
      */
-    maskObjects(items: any[]): Promise<{ ok: true; items: any[] } | { ok: false; object: string }>;
+    resolveObjectMasker(): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>>;
 }
 
 /** The request facts the list chain reads — no transport shape. */
@@ -1812,9 +2152,14 @@ export interface MetaListRequest {
  * What the chain answers: the list to send (the input's shape — a bare array
  * or the `{ type, items }` envelope), or the object whose mask could not be
  * evaluated, which the transport answers as its D6 tier-3 fault.
+ *
+ * [#20408] `cacheControl` — the `Cache-Control` the list must be served under,
+ * when it owes one: {@link META_UNDETERMINED_CACHE_CONTROL} when any listed
+ * object schema was served under an undetermined field visibility (ADR-0106
+ * D6 tier 2). Absent otherwise; the transport then sets none.
  */
 export type MetaListAnswer =
-    | { ok: true; data: unknown }
+    | { ok: true; data: unknown; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
     | { ok: false; object: string };
 
 /** The items of a list shape this chain serves, or `null` for anything else (left alone, never replaced). */
@@ -1865,7 +2210,9 @@ function withItems(raw: unknown, items: any[]): unknown {
  *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
  *     `translations` map is dropped whatever the locale).
  *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
- *  7. `object` — the transport's ADR-0106 mask ({@link MetaListAnswerSources.maskObjects}).
+ *  7. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema} over the
+ *     transport's {@link MetaListAnswerSources.resolveObjectMasker}), and the
+ *     `private, no-store` an undetermined posture owes (D6 tier 2).
  *  8. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -1958,17 +2305,228 @@ export function createMetaListAnswer(
             }
         }
 
-        // 7. [ADR-0106 D5(2)] The object mask — the transport's.
+        // 7. [ADR-0106 D5(2)] The object mask, over the transport's posture resolver.
+        let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
         if (metaType === 'object') {
             const list = metaItemsArray(visible);
             if (list.length > 0) {
-                const masked = await sources.maskObjects(list);
+                const masked = await maskMetaObjectList(await sources.resolveObjectMasker(), list);
                 if (!masked.ok) return masked;
                 visible = withItems(visible, masked.items);
+                cacheControl = masked.cacheControl;
             }
         }
 
         // 8. The translation step ({@link translateMetaList}, through the transport's entry).
-        return { ok: true, data: await sources.translateList(metaType, visible) };
+        const data = await sources.translateList(metaType, visible);
+        return cacheControl ? { ok: true, data, cacheControl } : { ok: true, data };
     };
+}
+
+// ── THE item answer ───────────────────────────────────────────────────────────
+
+/** Everything {@link createMetaItemAnswer} reads, supplied by the transport. */
+export interface MetaItemAnswerSources extends MetaItemReadGateSources {
+    /**
+     * This request's locale ({@link metaRequestLocale} over the transport's own
+     * request). The doc locale collapse asks it with no i18n service, so only
+     * the request's own preference counts there.
+     */
+    requestLocale(i18n?: unknown): string | undefined;
+    /**
+     * The body step: {@link translateMetaEnvelope} over this transport's I/O,
+     * handed the store's envelope and the served document. A port rather than a
+     * call so each transport keeps ONE entry into it
+     * (`RestServer.translateMetaEnvelope`).
+     */
+    translateEnvelope(envelope: Readonly<Record<string, unknown>>, document: unknown): Promise<unknown>;
+}
+
+/** The request facts the item chain reads — no transport shape. */
+export interface MetaItemRequest {
+    /** The SINGULAR type (the caller folds `/meta/books/:name` once, at its boundary). */
+    readonly metaType: string;
+    readonly name: string;
+    /**
+     * The door's gate policy: `{ arms: 'all', app: 'gate' }` for the rendered
+     * read (its `?preview=draft` included), {@link STORED_VERSION_DOOR_POLICY}
+     * for the ADMITTED `?state=draft` read — the transport's own declaration,
+     * made with its admission, ⛔ never re-read here.
+     */
+    readonly policy: MetaReadGatePolicy;
+    /**
+     * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
+     * resolved by the transport BEFORE the fetch (`fetch → mask → send`), the
+     * not-applicable passthrough for every type but `object`. A tier-3 fault is
+     * the transport's to answer before it gets here.
+     */
+    readonly maskPosture: ObjectSchemaMaskPosture;
+}
+
+/**
+ * What the item chain answers:
+ *
+ *  - `serve` — send `envelope`, under `cacheControl` when it owes one
+ *    ({@link META_UNDETERMINED_CACHE_CONTROL}, ADR-0106 D6 tier 2), and under
+ *    `Vary: Accept-Language` always (the body is translated per request);
+ *  - `refuse` — the gate's {@link MetaItemReadRefusal} (`absent` included:
+ *    nothing behind the name is the transport's own absence answer);
+ *  - `mask-fault` — the projection left the schema with no field (D6), which
+ *    the transport answers as its field-visibility fault for `object`.
+ */
+export type MetaItemAnswer =
+    | { kind: 'serve'; envelope: unknown; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
+    | { kind: 'refuse'; refusal: MetaItemReadRefusal }
+    | { kind: 'mask-fault'; object: string };
+
+/**
+ * [#20408] THE answer of one `/meta/:type/:name` read, after the store read —
+ * one chain, called by both transports that serve that read.
+ *
+ * ## Why one chain
+ *
+ * `RestServer`'s plain read ran every step below inline, and the runtime
+ * dispatcher's `/meta` item read — the only answer on a host that mounts just
+ * the `${prefix}/*` catch-all — ran the per-caller gate (#20193) and the mask,
+ * and nothing else. So the dispatcher served an item untranslated whatever
+ * `Accept-Language` asked for, a doc with its whole `translations` map and in
+ * no locale, an object schema with no `sortability`, no `Vary` header, and an
+ * undetermined posture's schema with no `Cache-Control`. Each transport now
+ * hands its store's envelope to THIS function: a step added here reaches both,
+ * and `meta-list-projection-parity.test.ts` in `@objectstack/runtime` drives
+ * every cell × query parameter × caller through both and holds the answers
+ * equal. ⛔ An item step is added HERE, never in a transport.
+ *
+ * ## The steps, in `RestServer`'s order (unchanged)
+ *
+ *  1. Absence — an envelope with no `item` is `absent` (#18066), judged BEFORE
+ *     the gate, so a name with nothing behind it can never be converted into
+ *     the `403` #8013 reserves for an app the caller may not open.
+ *  2. THE per-caller gate ({@link createMetaItemReadGate}) under the door's
+ *     policy.
+ *  3. `doc` — the ADR-0046 locale collapse (the request's own preference; the
+ *     `translations` map is dropped whatever the locale).
+ *  4. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema}) under the
+ *     posture resolved before the fetch.
+ *  5. The body ({@link translateMetaEnvelope}, through the transport's entry):
+ *     the translation, and `sortability` beside an object schema.
+ *
+ * The envelope is never mutated. A gate input that cannot be read REJECTS:
+ * the transport answers that fault, ⛔ never the document.
+ */
+export function createMetaItemAnswer(
+    sources: MetaItemAnswerSources,
+    request: MetaItemRequest,
+): (envelope: Readonly<Record<string, any>> | null | undefined) => Promise<MetaItemAnswer> {
+    const { metaType, name, policy, maskPosture } = request;
+    return async (envelope) => {
+        // 1. [#18066] Absence.
+        let visible: any = envelope?.item;
+        if (visible == null) return { kind: 'refuse', refusal: { reason: 'absent' } };
+
+        // 2. [#20156 · #20193] THE per-caller gate.
+        const verdict = await createMetaItemReadGate(sources, metaType, name, [visible], policy)(visible);
+        if (verdict.kind === 'refuse') return verdict;
+        visible = verdict.document;
+
+        // 3. ADR-0046 i18n: collapse the doc to the request locale.
+        if (metaType === 'doc' && visible) {
+            const { resolveDocLocale } = await import('@objectstack/spec/system');
+            visible = resolveDocLocale(visible as any, sources.requestLocale());
+        }
+
+        // 4. [ADR-0106 D1/D5(1)] The mask, under the posture resolved before the fetch.
+        const masked = projectMetaObjectSchema(maskPosture, visible);
+        if (!masked.ok) return { kind: 'mask-fault', object: name };
+        visible = masked.document;
+
+        // 5. The body — translation, and `sortability` beside an object schema.
+        const served = await sources.translateEnvelope(envelope ?? {}, visible);
+        return masked.cacheControl
+            ? { kind: 'serve', envelope: served, cacheControl: masked.cacheControl }
+            : { kind: 'serve', envelope: served };
+    };
+}
+
+// ── THE book tree ─────────────────────────────────────────────────────────────
+
+/** Everything {@link createMetaBookTreeAnswer} reads, supplied by the transport. */
+export interface MetaBookTreeSources extends MetaReadGateAudienceSources {
+    /**
+     * One list read of `type` for the tree, env-wide, scoped to `packageId` when
+     * the request names one (`?package=`, ADR-0048). A THROW propagates: an
+     * unreadable book list is never "no book", nor an unreadable doc list "no
+     * page".
+     */
+    listTreeInput(type: 'book' | 'doc', packageId: string | undefined): Promise<unknown>;
+    /** This request's locale, as {@link MetaItemAnswerSources.requestLocale} reads it. */
+    requestLocale(i18n?: unknown): string | undefined;
+}
+
+/**
+ * What the tree route answers: the tree to send, or the ADR-0046 §6.7 refusal —
+ * `401 UNAUTHENTICATED` to an anonymous caller, `403 PERMISSION_DENIED`
+ * otherwise — each transport writes on its own wire.
+ */
+export type MetaBookTreeAnswer =
+    | { ok: true; tree: ResolvedBook }
+    | { ok: false; refusal: Extract<MetaItemReadRefusal, { reason: 'docs-audience' }> };
+
+/**
+ * [ADR-0046 §6 · #20408] THE answer of `GET /meta/book/:name/tree` — a book
+ * spine resolved against the docs that exist NOW into a rendered tree
+ * (membership is DERIVED, never stored — §6.2.1), on both transports.
+ *
+ * ## Why here
+ *
+ * `RestServer` served the route; the runtime dispatcher had no such route at
+ * all, so a dispatcher-only host answered `404 ROUTE_NOT_FOUND` to a signed-in
+ * caller and `401` to an anonymous reader of a `public` book — the reader the
+ * route exists for. It is a ROUTE, not a projection, but everything it does is
+ * a read and a pure resolution, so the whole handler moved here, unchanged, and
+ * each transport supplies only its I/O.
+ *
+ * ## The steps (unchanged from `RestServer`'s handler)
+ *
+ *  1. Every book (`?package=` scopes the list), audience-shaped, and THE
+ *     {@link DocsAudience} over them — one resolution, the docs reads' own.
+ *  2. The book the name names: a declared book, else the implicit per-package
+ *     book (§6.4).
+ *  3. §6.7 — the book's OWN audience gates the whole tree: anonymous →
+ *     `public` only; `{ permissionSet }` → the caller must hold the named set
+ *     (fail closed when holdings cannot be resolved, ADR-0049).
+ *  4. Every doc (the same package scope), collapsed to the request's locale and
+ *     reduced to the header the tree renders.
+ *  5. The tree, its ENTRIES narrowed by each doc's effective audience, so a
+ *     reader never sees an entry that would refuse them on fetch.
+ */
+export async function createMetaBookTreeAnswer(
+    sources: MetaBookTreeSources,
+    request: { readonly name: string; readonly packageId?: string },
+): Promise<MetaBookTreeAnswer> {
+    const { resolveDocLocale } = await import('@objectstack/spec/system');
+    const locale = sources.requestLocale();
+    const books = metaItemsArray(await sources.listTreeInput('book', request.packageId));
+    const audience = await resolveDocsAudience(sources, audienceBooksOf(books));
+    const book = audience.bookNamed(request.name);
+    if (!audience.admitsBook(book)) {
+        return {
+            ok: false,
+            refusal: audience.caller.authenticated
+                ? { reason: 'docs-audience', status: 403, code: 'PERMISSION_DENIED', message: DOCS_HOLDER_MESSAGE }
+                : { reason: 'docs-audience', status: 401, code: 'UNAUTHENTICATED', message: DOCS_SIGN_IN_MESSAGE },
+        };
+    }
+    const docs = metaItemsArray(await sources.listTreeInput('doc', request.packageId))
+        .map((d: any) => (d && typeof d === 'object' ? resolveDocLocale(d, locale) : d))
+        .map((d: any) => ({
+            name: d.name,
+            label: d.label,
+            description: d.description,
+            order: d.order,
+            group: d.group,
+            tags: d.tags,
+            packageId: d._packageId,
+        }));
+    return { ok: true, tree: audience.readableTree(book, docs) };
 }

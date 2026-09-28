@@ -171,9 +171,9 @@ describe('[#20240] a four-digit year — the number, the Date and the ISO string
   }
 });
 
-describe('[#20240] a year outside 0..9999 — the number and the Date are refused as their ISO string is, before any read', () => {
+describe('[#20240] a year outside the four-digit years — the number and the Date are refused as their ISO string is, before any read', () => {
   for (const [day, ms] of [['10000-01-01', Y10000], ['-1-01-01', YNEG1]] as const) {
-    it(`${day}: INVALID_FILTER / 400 at where and at the per-aggregation filter, on both doors; the datetime control is read`, async () => {
+    it(`${day}: INVALID_FILTER / 400 at where and at the per-aggregation filter, on both doors — on a datetime too [#20264]; a 2026 instant is read`, async () => {
       const { engine, post, reads } = await boot();
       for (const op of ['$gt', '$lt', '$eq'] as const) {
         for (const [form, comparand] of [['number', ms], ['Date', new Date(ms)], ['ISO string', new Date(ms).toISOString()]] as const) {
@@ -200,11 +200,17 @@ describe('[#20240] a year outside 0..9999 — the number and the Date are refuse
       }
       expect(reads.n, 'no read of the object — the refusal precedes the driver').toBe(0);
 
-      // Control: the same numbers on a `datetime` field are instants its rule reads.
+      // [#20264] The same numbers on a `datetime` field are refused too — the
+      // supported years 0001..9999 hold for both kinds.
       for (const comparand of [ms, new Date(ms)]) {
-        await expect(engine.find(OBJECT, { where: { opened_at: { $gt: comparand } } })).resolves.toBeDefined();
+        const err = await refusalOf(engine.find(OBJECT, { where: { opened_at: { $gt: comparand } } }));
+        expect(err).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
       }
-      const control = await post({ where: { opened_at: { $gt: ms } } });
+      const refused = await post({ where: { opened_at: { $gt: ms } } });
+      expect(refused._status).toBe(400);
+      expect(reads.n).toBe(0);
+      // Control: a 2026 instant on the same field is read.
+      const control = await post({ where: { opened_at: { $gt: N } } });
       expect(control._status ?? 200, JSON.stringify(control._json)).toBe(200);
       expect(reads.n).toBeGreaterThan(0);
     });

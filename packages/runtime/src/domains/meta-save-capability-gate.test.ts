@@ -276,8 +276,11 @@ describe('#7019 — dispatcher PUT /meta/:type/:name: the capability gate', () =
 describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-A admission', () => {
     /**
      * The `boot()` double above, plus an auth service whose session carries an
-     * active organization — the value `deps.resolveActiveOrganizationId` reads,
-     * which the gate and the write threading now share.
+     * active organization — and [#20408] `caller()`, the execution context the
+     * identity resolver builds from that session: its VETTED active
+     * organization rides it as `tenantId` (no tenancy wall here, so the claim
+     * is kept). That is the value the gate and the write threading share — the
+     * one `RestServer`'s `PUT` door reads — never the session's claim as stored.
      */
     function bootOrg(activeOrganizationId?: string) {
         const saveMetaItem = vi.fn(async ({ type, name }: any) => ({ success: true, type, name }));
@@ -290,7 +293,9 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
                 getService: (n: string) => (n === 'protocol' ? protocol : n === 'auth' ? auth : null),
             },
         } as any;
-        return { dispatcher: new HttpDispatcher(kernel), saveMetaItem };
+        const caller = (identity: Record<string, unknown>) =>
+            ctx({ ...identity, ...(activeOrganizationId ? { tenantId: activeOrganizationId } : {}) });
+        return { dispatcher: new HttpDispatcher(kernel), saveMetaItem, caller };
     }
 
     const HOLDER = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] };
@@ -299,7 +304,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
         const stack = bootOrg('org_a');
 
         const res = await stack.dispatcher.handleMetadata(
-            '/view/org_grid', ctx(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
+            '/view/org_grid', stack.caller(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
         );
 
         expect(res.response?.status).toBe(200);
@@ -315,7 +320,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
         const stack = bootOrg('org_a');
 
         const res = await stack.dispatcher.handleMetadata(
-            '/email_templates/welcome', ctx(HOLDER), 'PUT', { name: 'welcome', subject: 'Hi' },
+            '/email_templates/welcome', stack.caller(HOLDER), 'PUT', { name: 'welcome', subject: 'Hi' },
         );
 
         expect(res.response?.status).toBe(200);
@@ -333,7 +338,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
         const stack = bootOrg('org_a');
 
         const res = await stack.dispatcher.handleMetadata(
-            path, ctx(HOLDER), 'PUT', { label: 'x' },
+            path, stack.caller(HOLDER), 'PUT', { label: 'x' },
         );
 
         expect(res.response?.status).toBe(403);
@@ -345,7 +350,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
         const stack = bootOrg(undefined);
 
         const res = await stack.dispatcher.handleMetadata(
-            '/view/org_grid', ctx(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
+            '/view/org_grid', stack.caller(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
         );
 
         expect(res.response?.status).toBe(403);
@@ -360,7 +365,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
         const stack = bootOrg('org_a');
 
         const res = await stack.dispatcher.handleMetadata(
-            '/view/org_grid', ctx(HOLDER), 'PUT',
+            '/view/org_grid', stack.caller(HOLDER), 'PUT',
             { name: 'org_grid', label: 'Org Grid', organization_id: 'org_b', organizationId: 'org_b' },
         );
 
@@ -375,7 +380,7 @@ describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-
 
         const res = await stack.dispatcher.handleMetadata(
             '/view/org_grid',
-            ctx({ userId: 'u_author', systemPermissions: ['manage_metadata'] }),
+            stack.caller({ userId: 'u_author', systemPermissions: ['manage_metadata'] }),
             'PUT',
             { name: 'org_grid', label: 'Org Grid' },
         );

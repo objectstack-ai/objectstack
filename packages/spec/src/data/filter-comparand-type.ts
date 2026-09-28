@@ -184,7 +184,7 @@ const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   '$like', '$ilike',
-  '$null', '$exists',
+  '$null', '$exists', '$empty',
 ]);
 
 const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([

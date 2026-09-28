@@ -158,9 +158,10 @@ describe('[#20336] the judged fields', () => {
 // ── Which positions ──────────────────────────────────────────────────────────
 
 describe('[#20336] the judged positions', () => {
-  it('partition FieldOperatorsSchema\'s keys with the text operators and the two flag operators', () => {
+  it('partition FieldOperatorsSchema\'s keys with the text operators and the three flag operators', () => {
     const judged = [...NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS, ...NUMBER_COMPARAND_DOOR_LIST_OPERATORS];
-    const partition = [...judged, ...TEXT_FILTER_OPERATORS, '$null', '$exists'];
+    // [#20311] `$empty` is a boolean flag like `$null` / `$exists`, not a value of the field.
+    const partition = [...judged, ...TEXT_FILTER_OPERATORS, '$null', '$exists', '$empty'];
     expect(new Set(partition).size, 'the four parts overlap').toBe(partition.length);
     expect(sorted(partition)).toEqual(sorted(Object.keys(FieldOperatorsSchema.shape)));
   });

@@ -73,7 +73,7 @@ describe('the accepted set (#7872 ruling)', () => {
     const judgedScalar = [
       '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
       '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
-      '$like', '$ilike', '$null', '$exists',
+      '$like', '$ilike', '$null', '$exists', '$empty',
     ];
     const judgedList = ['$in', '$nin', '$between'];
     expect([...judgedScalar, ...judgedList].sort()).toEqual(declared);
