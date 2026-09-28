@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 784 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1556,7 +1556,10 @@ export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.Pag
 export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
-export type Iso_ui_report__JoinedReportBlockSchema = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
+// `JoinedReportBlockSchema` left the family on #19920: its `z.ZodTypeAny`
+// annotation made input and infer the same `unknown`, and with the annotation
+// gone its `type` default makes them differ, so `JoinedReportBlockParsed` is
+// declared and the pin deleted.
 export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
 
 // ui/responsive.zod.ts
@@ -1571,6 +1574,10 @@ export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.
 // ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at #10485.
 
 // ui/view.zod.ts
+// `ViewItemSchema` and `ViewItemWireSchema` left the family on #19920: their
+// `config` was `z.ZodTypeAny` (input and infer the same `unknown`), and typed by
+// its arm it carries the list and form configs' defaults, so `ViewItemParsed` and
+// `ViewItemWireParsed` are declared and both pins deleted.
 // `KanbanConfigSchema` left this list as Iso829 when #17393 gave it a `limit`
 // with an APPLIED default, and returns as Iso_ui_view__KanbanConfigSchema now
 // that #19228 removed that member before it was published: the two shapes
@@ -1589,8 +1596,6 @@ export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHe
 export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
-export type Iso_ui_view__ViewItemSchema = Assert<Eq< z.input< typeof M167.ViewItemSchema >, z.infer< typeof M167.ViewItemSchema > >>;
-export type Iso_ui_view__ViewItemWireSchema = Assert<Eq< z.input< typeof M167.ViewItemWireSchema >, z.infer< typeof M167.ViewItemWireSchema > >>;
 export type Iso_ui_view__ViewKindSchema = Assert<Eq< z.input< typeof M167.ViewKindSchema >, z.infer< typeof M167.ViewKindSchema > >>;
 export type Iso_ui_view__ViewScopeSchema = Assert<Eq< z.input< typeof M167.ViewScopeSchema >, z.infer< typeof M167.ViewScopeSchema > >>;
 export type Iso_ui_view__VisualizationTypeSchema = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
@@ -1663,7 +1668,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 787 isomorphic pins', () => {
+  it('still declares all 784 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2311,7 +2316,16 @@ describe('ADR-0122 type-alias convention', () => {
     // this entry's arrow starts from its 787. The count below was re-derived
     // from the merged file, not added up. -1 removed.
     //
-    // 786 -> 787 is #20371's `ElementDefinitionListPropsSchema` — the
+    // 786 -> 783 is #19920's typing of three schemas whose static type had been
+    // erased, so that input and infer were the same `unknown` and the pins held
+    // vacuously: `JoinedReportBlockSchema` (its `z.ZodTypeAny` annotation
+    // removed) and `ViewItemSchema` / `ViewItemWireSchema` (their `config` typed
+    // by its arm). Typed, each carries defaults, so input !== infer:
+    // Iso_ui_report__JoinedReportBlockSchema, Iso_ui_view__ViewItemSchema and
+    // Iso_ui_view__ViewItemWireSchema leave, and `JoinedReportBlockParsed`,
+    // `ViewItemParsed` and `ViewItemWireParsed` are declared. -3 removed.
+    //
+    // 783 -> 784 is #20371's `ElementDefinitionListPropsSchema` — the
     // `element:definition-list` row of `ComponentPropsMap` (ui/component.zod.ts,
     // module slot M170), the (RISE) case once. Isomorphism MEASURED, not
     // assumed: a strict item of one `z.string()` and one `z.unknown()`, a
@@ -2322,7 +2336,9 @@ describe('ADR-0122 type-alias convention', () => {
     // `disabled`), whose bare-string arm transforms to the canonical envelope,
     // and `element:repeater` carries `ViewFilterRuleSchema` on `filter` — so
     // each declares an `XParsed` alias instead. +1 added.
-    expect(pins).toHaveLength(787);
+    // Authored off 786 and re-derived on the merge with #19920's 786 -> 783,
+    // so this entry's arrow starts from its 783.
+    expect(pins).toHaveLength(784);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

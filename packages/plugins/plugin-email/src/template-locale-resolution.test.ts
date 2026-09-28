@@ -300,7 +300,11 @@ function expected(locale: string) {
   };
 }
 
-/** Mirror of the template engine's escaper — the rendered output is escaped. */
+/**
+ * Mirror of the template engine's HTML escaper — applied to the `html` face
+ * only. The subject is a plain-text face and renders unescaped, so subject
+ * expectations below compare the formatter output as-is.
+ */
 const esc = (s: string) => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -316,7 +320,7 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
     await svc.sendTemplate({ template: 'receipt', to: 'a@x.test', timezone: 'UTC', data: FMT_DATA });
 
     const en = expected('en-US');
-    expect(transport.sent[0].subject).toBe(`[en-US] ${esc(en.when)}`);
+    expect(transport.sent[0].subject).toBe(`[en-US] ${en.when}`);
     expect(transport.sent[0].html).toContain(esc(en.amount));
   });
 
@@ -336,8 +340,8 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
     await svc.sendTemplate({ template: 'receipt', to: 'a@x.test', timezone: 'UTC', data: FMT_DATA });
 
     const zh = expected('zh-CN');
-    expect(transport.sent[0].subject).toBe(`[zh-CN] ${esc(zh.when)}`);
-    expect(transport.sent[0].subject).not.toContain(esc(expected('en-US').when));
+    expect(transport.sent[0].subject).toBe(`[zh-CN] ${zh.when}`);
+    expect(transport.sent[0].subject).not.toContain(expected('en-US').when);
   });
 
   // Pin (b): the row is the authority only when the caller named NOBODY.
@@ -349,7 +353,7 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
     });
 
     const de = expected('de-DE');
-    expect(transport.sent[0].subject).toBe(`[de-DE] ${esc(de.when)}`);
+    expect(transport.sent[0].subject).toBe(`[de-DE] ${de.when}`);
     expect(transport.sent[0].html).toContain(esc(de.amount));
   });
 
@@ -365,7 +369,7 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
     });
 
     const de = expected('de-DE');
-    expect(transport.sent[0].subject).toBe(`[en-US] ${esc(de.when)}`);
+    expect(transport.sent[0].subject).toBe(`[en-US] ${de.when}`);
     expect(transport.sent[0].html).toContain(esc(de.amount));
   });
 
@@ -379,7 +383,7 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
       template: 'receipt', to: 'a@x.test', locale: '  de-DE  ', timezone: 'UTC', data: FMT_DATA,
     });
 
-    expect(transport.sent[0].subject).toBe(`[de-DE] ${esc(expected('de-DE').when)}`);
+    expect(transport.sent[0].subject).toBe(`[de-DE] ${expected('de-DE').when}`);
   });
 });
 
