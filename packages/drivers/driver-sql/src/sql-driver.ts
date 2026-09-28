@@ -5440,6 +5440,79 @@ function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: nu
   return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
 }
 
+/** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
+interface BetterSqlite3Connection {
+  exec(sql: string): unknown;
+  pragma(source: string, options?: { simple: boolean }): unknown;
+}
+
+/**
+ * The better-sqlite3 arm of `SqlDriver.reclaimSpace`: return the whole freelist,
+ * and return the bytes it passes through the `-wal` sidecar too, without ever
+ * waiting on another connection. Every statement runs through the binding's
+ * `exec()` / `pragma()`, which step to completion. Synchronous by design:
+ * nothing else runs on the connection between the chunks, so the freelist
+ * only shrinks while the loop runs.
+ *
+ * Why chunks. In WAL mode one `PRAGMA incremental_vacuum` over a large
+ * freelist is one transaction whose dirty pages outgrow the page cache, so
+ * SQLite spills them into the WAL before the commit truncates them away.
+ * Measured at 25,754 free pages: the database file went to 16,384 bytes and
+ * the `-wal` sidecar to 94,430,432, held until the last connection closed. A
+ * chunk that stays inside the page cache writes only the pages its commit
+ * keeps. The chunk is a quarter of this connection's page cache — 1,000 pages
+ * at better-sqlite3's default `cache_size` (-16000 KiB) and 4 KiB pages.
+ * Readings with a reader pinning the WAL, so every frame written stays
+ * visible: 2,000-page chunks left 883 frames, 4,000 left 3,779, and one
+ * statement 22,920; with a 2 MB cache, 250-page chunks left 1,121 and
+ * 1,000-page chunks 15,491.
+ *
+ * Why these two checkpoints. A `PASSIVE` checkpoint after each chunk moves
+ * its frames into the database and lets the next chunk restart the WAL from
+ * its start; it never waits. What it cannot do is shrink the sidecar, which
+ * keeps its high-water size until something truncates it. So one
+ * `TRUNCATE` checkpoint closes the call, under a busy timeout of 0 for that
+ * one statement and the connection's own timeout put back afterwards: a
+ * `TRUNCATE` checkpoint waits for other connections' readers through the
+ * busy handler, and on this synchronous binding that wait blocks the whole
+ * process — measured at 5,333 ms against a reader in the same process, the
+ * connection's 5,000 ms timeout. When another connection is reading, the
+ * `PASSIVE` checkpoints move only the frames that reader no longer needs and
+ * the `TRUNCATE` one answers "busy" as a result row, not as an error: the
+ * pages are off the freelist, and their bytes leave the files at a later
+ * checkpoint (the next call, SQLite's own auto-checkpoint, or the last
+ * connection closing). Outside WAL mode both checkpoints are no-ops.
+ *
+ * The loop stops when the freelist is empty or a chunk frees nothing: a file
+ * whose `auto_vacuum` is still `NONE` never shrinks its freelist through
+ * this statement (one full `VACUUM` adopts INCREMENTAL, see `SqlDriver.connect`).
+ *
+ * Module-local, like {@link formatDuplicateGroups}: `SqlDriver`'s `.d.ts`
+ * carries its non-public members too, and this helper is no entry point.
+ */
+function reclaimBetterSqlite3(db: BetterSqlite3Connection): void {
+  const scalar = (pragma: string): number => Number(db.pragma(pragma, { simple: true }));
+  let free = scalar('freelist_count');
+  if (free === 0) return;
+  const cacheSize = scalar('cache_size');
+  const cachePages = cacheSize >= 0 ? cacheSize : Math.floor((-cacheSize * 1024) / scalar('page_size'));
+  const chunk = Math.max(1, Math.floor(cachePages / 4));
+  for (;;) {
+    db.exec(`PRAGMA incremental_vacuum(${chunk})`);
+    db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+    const left = scalar('freelist_count');
+    if (left === 0 || left >= free) break;
+    free = left;
+  }
+  const busyTimeout = scalar('busy_timeout');
+  db.pragma('busy_timeout = 0');
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } finally {
+    db.pragma(`busy_timeout = ${busyTimeout}`);
+  }
+}
+
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
@@ -10944,6 +11017,10 @@ export class SqlDriver implements IDataDriver {
    * `knex.raw` below). knex's node-sqlite3 client runs a raw statement with
    * `Database.all()`, which reads every row too (read from knex's source; that
    * binding is not installed in this repository).
+   *
+   * On better-sqlite3 the freed bytes also leave the `-wal` sidecar, which is
+   * what a file-backed database in WAL mode (the default, see
+   * {@link applySqliteJournalMode}) needs — see `reclaimBetterSqlite3`.
    */
   async reclaimSpace(_options?: DriverOptions): Promise<void> {
     if (!this.isSqlite) return;
@@ -10951,7 +11028,7 @@ export class SqlDriver implements IDataDriver {
     if (client.driverName === 'better-sqlite3') {
       const connection = await client.acquireConnection();
       try {
-        connection.exec('PRAGMA incremental_vacuum');
+        reclaimBetterSqlite3(connection);
       } finally {
         await client.releaseConnection(connection);
       }
