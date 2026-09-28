@@ -9,6 +9,9 @@ import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objec
 // its reason half, asked at {@link compileOperator}'s `$icontains` arm and at
 // the engine-bound merges through {@link assertReadScopeComparandsRunnable}.
 import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
+// [#20445] The `$empty` operator's one expansion, asked at {@link compileOperator}'s
+// `$empty` arm for the field's declared row of the ruled per-type table.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
 // is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
 // {@link assertReadScopePlaceholdersResolvable}, and [#20075] before the
@@ -21,6 +24,7 @@ import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objec
 import type { ReadScopeFilterJudge } from './strategies/types.js';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
+import { emptyOperatorPredicateSql } from './empty-operator-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
@@ -52,7 +56,8 @@ import {
  *
  * Supports the operators the RLS layer and common policies emit: implicit
  * equality, `$eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$between/$contains/$notContains/
- * $startsWith/$endsWith/$null/$exists`, and `$and/$or/$not` combinators.
+ * $startsWith/$endsWith/$null/$exists`, and `$and/$or/$not` combinators — plus
+ * `$icontains` (#6520) and the staged `$empty` (#20445, the last section).
  *
  * ## `''` means TRUE, and that is a value — not "nothing happened"
  *
@@ -584,6 +589,43 @@ import {
  * them. Such a host keeps today's behaviour for the four classes, and says so
  * once in its log: `AnalyticsService` when it was given no judge at all,
  * `AnalyticsServicePlugin` when its data engine lacks the member.
+ *
+ * ## `$empty` is answered by the field's DECLARED type (#20445, ruling A on #20399)
+ *
+ * The spec declares `$empty: boolean` with the ruled per-type 「is empty」 table
+ * as its meaning (#20311) and gives every compile surface one expansion to
+ * call, `expandEmptyOperator(fieldDef)`. This compiler's arm
+ * ({@link compileOperator} → {@link compileEmptyOperator}) asks the caller for
+ * the field's declaration ({@link ReadScopeCompileOptions.declaredValueShape}),
+ * expands it, and compiles the row with `empty-operator-sql.ts`:
+ *
+ *   - text-like: `(col IS NULL OR col = '')`;
+ *   - multi-value: `(col IS NULL OR <the dialect's empty-JSON-list test>)`;
+ *   - every other type: `col IS NULL`;
+ *   - `$empty: false` is the exact complement of each, and every one of them
+ *     is TOTAL, so a `$not` over it needs no NULL guard.
+ *
+ * Refused, in this module's envelope, when the caller cannot name the field's
+ * declaration, when a list-valued field meets the `'unknown'` dialect, and
+ * when the flag is not a boolean ({@link assertBooleanFlagComparands}, the
+ * gate the two null flags already had).
+ *
+ * The operator stays STAGED — absent from `FILTER_OPERATORS` until every face
+ * has its arm (the maintainer's amendment of ruling A: 「照 $like 先例分阶段」)
+ * — so no in-repo producer emits it in a read scope yet; the CEL lowering's
+ * `is_empty` still emits `$null`. An in-process `getReadScope` producer can.
+ *
+ * The ObjectQL execute face does not meet this compiler: it hands the scope to
+ * the engine, whose `$empty` arm is the engine lane's (`driver-sql` and its
+ * heirs, a sibling card of ruling A). Until that arm lands the engine's driver
+ * refuses the operator there (`INVALID_FILTER` / 400, the operator and field
+ * withheld from its message), so one scope is refused on that face and
+ * answered on the other two; nothing is dropped on any of them.
+ *
+ * What `$empty` did NOT change is the envelope of an operator this compiler
+ * has no arm for: still `READ_SCOPE_COMPILE_FAILED` / 500, withheld, per the
+ * #5367 section above. The note at {@link compileOperator}'s `default:` arm
+ * records why a 400 would be the wrong class here.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -679,6 +721,15 @@ export interface ReadScopeCompileOptions {
    * section.
    */
   context?: ExecutionContextLike;
+  /**
+   * [#20445] The DECLARED value shape of `field` (its type, and `multiple`),
+   * or `undefined` when the caller cannot name it. The `$empty` arm expands
+   * it through `expandEmptyOperator` (`@objectstack/spec/data`); a field it
+   * answers `undefined` for — and every field, when the option is absent —
+   * has its `$empty` refused, never guessed. Both of this compiler's
+   * consumers fill it from the context's `declaredValueShape` hook.
+   */
+  declaredValueShape?: (field: string) => ValueShapeFieldDef | undefined;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -1558,7 +1609,9 @@ function assertDefinedComparands(field: string, spec: unknown): void {
   if (spec === undefined) throw undefinedComparandError(field, root);
   if (!isFilterNode(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
-    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    // [#20445] `$empty` is the third declared-boolean flag, skipped for the
+    // reason the other two are and refused by the same boolean-domain gate.
+    if (!op.startsWith('$') || BOOLEAN_FLAG_OPERATORS.includes(op as BooleanFlagOperator)) continue;
     const opPath = `${root}.${op}`;
     if (opValue === undefined) throw undefinedComparandError(field, opPath);
     if (!Array.isArray(opValue)) continue;
@@ -1645,11 +1698,20 @@ function assertDefinedComparands(field: string, spec: unknown): void {
  * what makes "declared boolean" mean enforced boolean regardless of who writes
  * the scope. Graded on that measurement, not on the issue's opening wording.
  */
+/**
+ * [#20445] The flags `FieldOperatorsSchema` declares `z.boolean()`: the two
+ * null flags and the `$empty` operator. One list for the two gates that read
+ * it, {@link assertDefinedComparands} (which skips them) and
+ * {@link assertBooleanFlagComparands} (which refuses a non-boolean).
+ */
+const BOOLEAN_FLAG_OPERATORS = ['$null', '$exists', '$empty'] as const;
+type BooleanFlagOperator = (typeof BOOLEAN_FLAG_OPERATORS)[number];
+
 function nonBooleanFlagComparandError(op: string, field: string, path: string): Error {
   return readScopeCompileError(
     `[read-scope-sql] comparand for "${op}" at ${path} is not a boolean — refusing to build read scope ` +
-      `(fail-closed). @objectstack/spec FieldOperatorsSchema declares both $null and $exists as ` +
-      `z.boolean(), and this compiler used to read the comparand by TRUTHINESS instead — so a ` +
+      `(fail-closed). @objectstack/spec FieldOperatorsSchema declares $null, $exists and $empty as ` +
+      `z.boolean(), and this compiler once read the $null / $exists comparand by TRUTHINESS instead — so a ` +
       `non-boolean was silently sorted into one of the two declared answers rather than refused. The ` +
       `string "false" is TRUTHY, which is the case that matters: it landed on the side OPPOSITE the ` +
       `false it was written to mean, turning "rows with no ${field}" into "rows that have one" — a ` +
@@ -1689,10 +1751,18 @@ function nonBooleanFlagComparandError(op: string, field: string, path: string): 
  * refused. The classification is DISCARDED either way (the leaf still reaches
  * `compileField` and still throws), and the rewrite's own synthesised leaves
  * (`{ $null: false }`, `{ $null: true }`) are literal booleans by construction.
+ *
+ * [#20445] `$empty` is the third flag, and it joins the gate on the day its arm
+ * lands rather than after a flip is measured: the spec declares it
+ * `z.boolean()` exactly like the other two, and its arm reads `=== true`, so
+ * without this gate every non-boolean — the string `"true"` included — would
+ * compile to the `$empty: false` arm. The shared comparand faces judge a flag
+ * as a literal comparand and admit a string, a number, `null` or a list, so
+ * nothing else refuses it.
  */
 function assertBooleanFlagComparands(field: string, spec: unknown): void {
   if (!isFilterNode(spec)) return;
-  for (const op of ['$null', '$exists'] as const) {
+  for (const op of BOOLEAN_FLAG_OPERATORS) {
     if (!Object.prototype.hasOwnProperty.call(spec, op)) continue;
     if (typeof spec[op] === 'boolean') continue;
     throw nonBooleanFlagComparandError(op, field, `"${field}".${op}`);
@@ -1970,9 +2040,74 @@ function compileOperator(
     // {@link nullValueSatisfiesOperator} now mirrors (#5146 / #5298).
     case '$null': return val === true ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val === true ? `${col} IS NOT NULL` : `${col} IS NULL`;
+    // [#20445] `val` is a boolean here too — the same gate refused anything
+    // else — so `=== true` is the whole choice between the arm and its
+    // complement. See {@link compileEmptyOperator}.
+    case '$empty': return compileEmptyOperator(col, val === true, field, params, opts);
+    // ⚠️ [#20445] An operator outside this arm list stays a SERVER fault,
+    // `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld, and NOT the
+    // `where` door's `INVALID_FILTER` / 400. The scope was not written by the
+    // caller of this query: both callers of this compiler hand it
+    // `ctx.getReadScope(object)`, which the plugin answers from the security
+    // service's compiled sharing rules / permission sets or from the host's
+    // own `getReadScope` option. A 400 would tell that caller to repair a
+    // request that was never the problem and would relay the policy's
+    // operator and field to them — the two defects the #5367 ruling (the
+    // module header's "Every refusal here is a SERVER fault" section,
+    // re-affirmed as #7598 Q2 = A) closed.
     default:
       throw readScopeCompileError(`[read-scope-sql] unsupported operator "${op}" on "${field}" (fail-closed).`);
   }
+}
+
+/**
+ * [#20445] The `$empty` arm: the field's DECLARED row of the ruled per-type
+ * table, from the spec's one expansion, compiled by `empty-operator-sql.ts`.
+ *
+ * The declaration comes from the caller ({@link ReadScopeCompileOptions.declaredValueShape});
+ * this compiler calls `expandEmptyOperator` on it and keeps no table of its
+ * own. Two refusals, both in this module's one envelope and both before
+ * anything binds, so `params` stays aligned:
+ *
+ * - the caller cannot name the field's declaration. The row decides what the
+ *   SQL compares (`''` is a type error against a numeric column on Postgres,
+ *   and an empty list is only recognisable as JSON), so there is no reading to
+ *   fall back to;
+ * - the field is list-valued and the dialect is `'unknown'`, where no JSON
+ *   test parses on every engine.
+ */
+function compileEmptyOperator(
+  col: string,
+  empty: boolean,
+  field: string,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string {
+  const shape = opts.declaredValueShape?.(field);
+  if (!shape) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "$empty" on "${field}" needs the field's declared type, and this host could not ` +
+        `name it (no field metadata wired, or no such field on the object) — refusing to build read scope ` +
+        `(fail-closed). What counts as empty depends on the declaration: null or '' for a text-like ` +
+        `field, null or [] for a multi-value field, null only for every other type. The producer to fix ` +
+        `is whoever BUILT this read scope, or the host's field metadata — never the caller of this query.`,
+    );
+  }
+  const sql = emptyOperatorPredicateSql({
+    dialect: normalizeSqlDialect(opts.dialect),
+    column: col,
+    expansion: expandEmptyOperator(shape),
+    empty,
+    bind: (v) => bind(params, v),
+  });
+  if (sql === null) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "$empty" on "${field}" is a multi-value field, whose empty list is tested with a ` +
+        `JSON function that differs per SQL dialect, and the dialect of this datasource is not known — ` +
+        `refusing to build read scope (fail-closed) rather than guessing the construct.`,
+    );
+  }
+  return sql;
 }
 
 // ── [#5146] NULL-safe `$not` ─────────────────────────────────────────────────
@@ -2040,6 +2175,10 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // `$null: true` and `$exists: false` are the same question, so these two
     // arms are correctly each other's MIRROR, not each other's copy (#5369).
     case '$exists': return value === false;
+    // [#20445] Null is empty on every row of the ruled table, so a NULL column
+    // satisfies `$empty: true` and fails its complement — by identity, as the
+    // arm reads it, behind the same boolean gate.
+    case '$empty': return value === true;
     // Negative-polarity set / substring tests hold vacuously for an absent value.
     case '$nin': return true;
     // `$notContains` is the one operator where the two JS backends disagree for
@@ -2057,6 +2196,10 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
     case '$null':
     case '$exists':
+      return true;
+    // [#20445] Both polarities spell their NULL case out (`col IS NULL OR …` /
+    // `col IS NOT NULL AND …`, `empty-operator-sql.ts`), so the arm is TOTAL.
+    case '$empty':
       return true;
     // A null comparand makes these null PREDICATES too, not comparisons.
     case '$eq':
