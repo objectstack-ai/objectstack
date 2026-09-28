@@ -813,8 +813,9 @@ function nameCharsetRefusal(name: string): string | null {
  * only what it always should have: this generator's answer for a `type` string
  * that is not a `FieldType` at all, which the UNVALIDATED authoring mode
  * (`defineStack(x, { strict: false })`) can still deliver. A plain-object config
- * export is no longer an authoring door at all: `os validate` / `os build`
- * refuse a default export `defineStack` did not build (`STACK_PROVENANCE_MISSING`).
+ * export is no longer a legal authoring shape — `os validate` / `os build`
+ * refuse a default export `defineStack` did not build (`STACK_PROVENANCE_MISSING`)
+ * — though this command, which checks no provenance, still loads one.
  *
  * Values are MEASURED, not invented — each one is the shape the platform
  * actually implements, read from the spec's ADR-0104 D1 value classes

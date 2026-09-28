@@ -147,7 +147,9 @@ export default defineStack({
 /**
  * THE WIDENING LIMB (#16544 contract review) — the axis the hook legs above
  * cannot see. `ActionSchema.target` is `z.string()`, and `normalizeStackInput`
- * never touches function values, so a plain-object config with an inline
+ * never touches function values, so a config that skipped the strict producer
+ * (a plain object then; `defineStack(…, { strict: false })` since the
+ * one-authoring-shape ruling) with an inline
  * action `target` callable hit `invalid_type` at the parse: `os validate`
  * REFUSED it before #16544 (exit 1) while `os build`, which lowers before it
  * parses, always accepted it. The same `lowerCallables` pass now rewrites the
