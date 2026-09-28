@@ -107,7 +107,7 @@ export const SysOrganization = ObjectSchema.create({
     {
       name: 'delete_organization',
       label: 'Delete Organization',
-      icon: 'trash-2',
+      icon: 'trash',
       variant: 'danger',
       mode: 'delete',
       locations: ['list_item'],

@@ -21286,9 +21286,10 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Compute a shallow structural diff between two historical
      * versions of a metadata item. Either side may be omitted: when
-     * `toVersion` is undefined the current active body is used; when
-     * `fromVersion` is undefined the immediately previous history row
-     * is used. Returns `{ added, removed, changed }` keyed by JSON
+     * `toVersion` is undefined the current active body is used, labelled
+     * with that active row's own `version` (`null` when there is no active
+     * row); when `fromVersion` is undefined the immediately previous history
+     * row is used. Returns `{ added, removed, changed }` keyed by JSON
      * pointer-style paths for primitive leaves; nested objects/arrays
      * are reported as a single change record.
      *
@@ -21391,12 +21392,6 @@ export class ObjectStackProtocolImplementation implements
         // `catch` below is this function's only stated intent for that failure,
         // so removing the call makes every type take it. Pinned in
         // `protocol.diff-dead-history-read.test.ts`.
-        const repo = this.getOverlayRepo(orgId);
-        const fullRef = {
-            type: singularType,
-            name: request.name,
-            org: orgId ?? 'env',
-        } as { type: string; name: string; org: string };
         const histRows: Array<{ version: number; body: Record<string, unknown> | null }> = [];
         try {
             const engineAny = this.engine as any;
@@ -21467,9 +21462,40 @@ export class ObjectStackProtocolImplementation implements
             toVersion = request.toVersion;
             toBody = byVersion.get(request.toVersion) ?? null;
         } else {
-            const current = await repo.get(fullRef as any, { state: 'active' });
-            toBody = current ? (current.body as Record<string, unknown>) : null;
-            toVersion = histRows.length ? histRows[histRows.length - 1]!.version : null;
+            // [#20397] The default `to` side is the CURRENT ACTIVE ROW, and ONE
+            // read of that row supplies both of its facts: the body compared and
+            // the `version` it is labelled with. `SysMetadataRepository.put`
+            // stamps that column in the same transaction that appends the history
+            // row carrying the same body, so it names the version this body is.
+            //
+            // The label used to come from the NEWEST `sys_metadata_history` row
+            // instead, which is a draft save whenever a draft is pending (every
+            // draft save appends a row too). Body and label then named different
+            // rows: on the real REST stack an app answered `2 → 3` over its
+            // version-1 body, and a view answered "no changes" labelled `1 → 2`
+            // while version 2 differs.
+            //
+            // Read here, not through `SysMetadataRepository.get`: its
+            // `MetadataItem` projection carries the row's content hash but not
+            // its lineage `version`. Same predicate as that read (active state, no
+            // package scope), and VERBATIM like the history bodies it is compared
+            // against: no ADR-0087 conversion on either side.
+            //
+            // No active row (a draft-only item, a deleted one) ⇒ that side is
+            // absent and so is its label: `null`, as `DiffMetaItemResponseSchema`
+            // declares, never the number of a row whose body is not the one
+            // compared. ⛔ Do not recover a number by matching bodies or hashes
+            // against history: a publish and a revert both write rows whose
+            // bodies repeat earlier ones.
+            const current = (await this.engine.findOne('sys_metadata', {
+                where: { organization_id: orgId, type: singularType, name: request.name, state: 'active' },
+            })) as { metadata?: unknown; version?: unknown } | null;
+            toBody = current?.metadata == null
+                ? null
+                : (typeof current.metadata === 'string'
+                    ? JSON.parse(current.metadata)
+                    : current.metadata as Record<string, unknown>);
+            toVersion = current && typeof current.version === 'number' ? current.version : null;
         }
         if (request.fromVersion !== undefined) {
             fromVersion = request.fromVersion;

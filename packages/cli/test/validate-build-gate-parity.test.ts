@@ -123,6 +123,21 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // `kind:'html'` page to check. Not a registry rule: the manifest is a file
   // in the working directory, not part of the stack a rule is handed.
   'resolveJsxGateManifest',
+  // [#20331, #20393] The boot registrar's divergent view-container `name`
+  // refusal (`viewContainerNameRefusal`, @objectstack/objectql), judged at
+  // author time by the same function boot throws the answer of. Not a registry
+  // rule: the WALK decides which `views:` entries boot registers and under
+  // which package id — the top level under the manifest's id, or each
+  // `packages[i].manifest` body under its own — which is the artifact's
+  // package reading, not the one stack a rule is handed.
+  //
+  // ⭐ This row is the #20331 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "`os build` still emits an artifact carrying such a container, which the
+  // runtime refuses when it loads it", and it was right. `compile.ts` now makes
+  // the same call (#20393), so the row moved here, where both doors are held to
+  // it — deleted there rather than reworded, for the reason the
+  // `runPerPackageAuthoringRules` row above gives.
+  'findViewContainerNameRefusals',
   // [#20367 ruling B] One authoring shape: a default export no stack producer
   // built (`defineStack` / `composeStacks`) is refused right after load, before
   // any other judgement — the `STACK_*` cross-field refusals run inside the
@@ -167,14 +182,14 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * validate-only` below: a row whose gate `validate.ts` no longer calls is
  * stale, and a row whose gate `compile.ts` now calls too belongs in
  * SHARED_NON_REGISTRY_GATES instead.
+ *
+ * EMPTY is this ledger's steady state: every row is a gap the build carries.
+ * Its one row, `findViewContainerNameRefusals` (#20331), moved to
+ * SHARED_NON_REGISTRY_GATES when `compile.ts` gained the call (#20393). The
+ * ledger stays, empty, because it is the only honest place the closed roster
+ * has for the next validate-only gate.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
-  findViewContainerNameRefusals:
-    '[#20331] The boot registrar\'s divergent view-container `name` refusal ' +
-    '(`viewContainerNameRefusal`, @objectstack/objectql), judged at author time by the same function ' +
-    'boot throws the answer of. Wired into validate.ts only, by that card\'s scope: `os build` still ' +
-    'emits an artifact carrying such a container, which the runtime refuses when it loads it.',
-};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an

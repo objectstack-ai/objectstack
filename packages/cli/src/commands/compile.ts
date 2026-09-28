@@ -60,6 +60,9 @@ import {
   formatPermissionSetNameCollisions,
 } from '../utils/permission-set-name-collisions.js';
 import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
+// [#20393] The boot registrar's divergent view-container `name` refusal — the
+// walk `os validate` step 2c runs, over `@objectstack/objectql`'s one judge.
+import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -384,6 +387,48 @@ export default class Compile extends Command {
         )) {
           console.log(chalk.dim(line));
         }
+        this.exit(1);
+      }
+
+      // 3a. [#20393] The boot registrar's divergent view-container `name`
+      //     refusal — the SAME walk `os validate` runs at its step 2c, over the
+      //     same judge (`viewContainerNameRefusal`, `@objectstack/objectql`)
+      //     `ObjectQL.registerMetadataCollections` throws the answer of. This
+      //     door used to exit 0 on `{ name: 'order_line', object:
+      //     'my_app_order_line', list: {…} }` and WRITE an artifact carrying
+      //     it, which `os serve` then refused at boot — the command that ships
+      //     shipping the failure.
+      //
+      //     ⛔ One judge, not a second rule, and not a second walk: the call is
+      //     the one `validate.ts` makes, so the two doors cannot disagree about
+      //     which `views:` entries boot registers or under which package id,
+      //     and the message is the runtime's own, verbatim.
+      //
+      //     The input is `result.data`, the parsed stack this command
+      //     serializes: every `views:` entry the artifact carries — top level,
+      //     or each `packages[i].manifest` body — is the one judged here
+      //     (step 4 adds docs and `runtimeModule`, never a view). So the
+      //     verdict is the one boot reaches on the artifact.
+      //
+      //     Right after the parse, ahead of the rule table and of every
+      //     artifact write, mirroring `os validate`: this is the runtime's own
+      //     accept set, the same class as the schema. The `--json` face is the
+      //     schema exit's envelope just above (`errors`, as `os validate --json`
+      //     carries these rows); the text face is `os validate`'s. No step
+      //     line, as on `os validate`: a passing build prints what it printed.
+      const containerNameRefusals = findViewContainerNameRefusals(result.data as Record<string, unknown>);
+      if (containerNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: containerNameRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = containerNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} view container${n > 1 ? 's' : ''})`);
+        printBulletList(
+          containerNameRefusals.map((r) => r.message),
+          { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
         this.exit(1);
       }
 

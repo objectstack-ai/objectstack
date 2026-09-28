@@ -7268,6 +7268,66 @@ const step18: MigrationStep = {
         + 'fail tsc on upgrade; the fix is choosing a shipped driver, never '
         + 'widening a local mirror of the enum.',
     },
+    // The `connector_action` sibling of `wait-node-event-config-required`: a node
+    // whose one input is a SIBLING block (not `config`) owes that block, and the
+    // flow parse now refuses what the executor's own read refuses — the block
+    // absent, or an id in it empty.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'connector-action-config-required',
+      surface:
+        'The connectorConfig block of every type: \'connector_action\' flow node — the BLOCK, and its '
+        + 'connectorId and actionId once it is written. The block was optional on the node and both ids '
+        + 'were any string inside it, so a node with no block, or with connectorId or actionId empty or '
+        + 'only whitespace, parsed. That is the state of a node authored without its configuration, and '
+        + 'of a new connector node from the Studio flow designer, which seeds both ids empty. At any depth, '
+        + 'including an ADR-0031 region body. Reachable wherever a flow is authored or stored: '
+        + 'defineStack({ flows }) sources, defineFlow(), an exported stack passed to objectstack validate, '
+        + 'a flow saved from the Studio flow designer (a connector node added and saved before it is '
+        + 'configured), and a flow row already sitting in sys_metadata. Also reached: connectorId, actionId '
+        + 'or input written under the node\'s config instead of the block, where the load-time conversion '
+        + 'cannot complete the pair and leaves them there',
+      replacement:
+        'Declare what the node dispatches, on the node: `connectorConfig: { connectorId: \'slack\', '
+        + 'actionId: \'chat.postMessage\', input: { channel: \'C0WINS000\', text: \'Done\' } }` — '
+        + '`connectorId` the registered connector\'s `name`, `actionId` one of the action keys that '
+        + 'connector declares, `input` optional. Keys written under the node\'s `config` move into the '
+        + 'block. A node you cannot configure yet is deleted until you can: there is no placeholder '
+        + 'connector, and a block with empty ids names nothing to dispatch to',
+      reason:
+        'The block is the node\'s whole contract: the connector_action executor reads nothing else and '
+        + 'refuses the node when `connectorId` or `actionId` is empty. The build doors checked only the '
+        + 'block\'s shape once it was written, so `FlowSchema.parse`, `AutomationEngine.registerFlow` and '
+        + '`objectstack validate` all admitted a node with no block, or with an empty id, and every run '
+        + 'that reached the node then failed at the executor\'s guard — a guard refusal, never routed to a '
+        + '`fault` edge, and no rerun could succeed because the config is metadata. The flow parse now '
+        + 'refuses what that read refuses, in the walk that reaches every region body, so all three doors '
+        + 'answer alike. A whitespace-only id is refused with the empty one: a connector `name` is a '
+        + 'snake_case identifier, so whitespace names nothing a dispatch can reach. '
+        + '⚠️ No D2 conversion: the platform cannot know the connector or the action the author left out, '
+        + 'and no value it could write would dispatch anything. '
+        + '⚠️ Where such a node already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not armed, '
+        + 'while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.connectorConfig` for an absent block, at `nodes.N.connectorConfig.connectorId` or '
+        + '`nodes.N.connectorConfig.actionId` for an empty or whitespace-only id, or at the region path '
+        + '`nodes.N.config.body.nodes.M.connectorConfig…`, and `objectstack validate` prints the same path '
+        + 'under `flows.K.`. For each hit write the block, per the replacement. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm each '
+        + 'flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. A connector node carrying a complete block parses, '
+        + 'registers and dispatches as before, and `input` stays optional.',
+    },
     // ADR-0049 enforce-or-remove — the D3 entry of the
     // `connector-error-mapping-removed` family, which landed in commit 13c48c2a5:
     // eleven inert authorable keys, one of them spelled like the live
@@ -11611,13 +11671,14 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names '
+        + 'against, `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8512 tracked files (0 across the '
-        + '8303 at 62597c588 too), against lit '
+        + 'the string debounceDelay each occur 0 times across its 9283 tracked files (0 across the '
+        + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
-        + 'which re-count to 13125 and 5043 respectively at 62597c588 and to 13347 and 5123 at '
-        + 'this pin (git grep -o -F, the method that reproduces every earlier count).',
+        + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
+        + 'f8a9d0fb0 and to 13745 and 5466 at this pin (git grep -o -F, the method that reproduces '
+        + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
@@ -11821,10 +11882,11 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
+        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
-        + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
+        + '9283 tracked files, against lit controls timeout 1172, RuntimeConfig 263 and resourceLimits '
+        + '2 on the same corpus (0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
       acceptanceCriteria:
@@ -12057,10 +12119,11 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
+        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
-        + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
+        + 'across its 9283 tracked files, against lit controls `useState` 2435 and `timeout` 1172 on '
+        + 'the same corpus (all four 0 across 8512, against 2391 and 1096, at f8a9d0fb0, and 0 across '
+        + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
         + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
@@ -14283,6 +14346,77 @@ const step18: MigrationStep = {
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
     },
+    // The cross-field comparison-class family, both arms in one entry: #20347
+    // refuses the comparison where it is authored (the lint rules behind
+    // os validate, and the permission save door), and #20355 refuses it where the
+    // row-level write check evaluates it. One classification decides both —
+    // crossFieldComparisonVerdict in @objectstack/spec/data, lifted from
+    // driver-sql's #5222 read boundary, which driver-sql now reads too. Recorded as
+    // its own entry because the surface an author rewrites is a CEL predicate string.
+    {
+      id: 'rls-predicate-cross-class-field-comparison-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing a field with another field (==, !=, >, >=, <, <=) where the two '
+        + 'declared columns share no comparison class: text against a number, a date against a '
+        + 'datetime, a boolean against text, and any column against a file field (file, image, avatar, '
+        + 'video, audio) or a formula field. In a filter passed to matchesFilterCondition together with '
+        + 'the object\'s declared columns (options.fields), a { $field } comparison under $eq, $ne, $gt, '
+        + '$gte, $lt or $lte between two such columns, and between a column and a json or multiple '
+        + 'field',
+      replacement:
+        'a comparison between two columns of one comparison class: a number with a number (number, '
+        + 'currency, percent, rating, slider, progress, summary), text with text (the string types, '
+        + 'autonumber, a single select or radio, a single lookup or user, a master_detail or a tree), a '
+        + 'boolean with a boolean, a date with a date, a datetime with a datetime, a time of day with a '
+        + 'time of day. '
+        + 'A file field and a formula field cannot be compared with another column at all: compare the '
+        + 'field with a literal or test it for null. If the two columns do hold comparable values, one '
+        + 'of them is declared with the wrong type, so correct that declaration rather than the '
+        + 'predicate. Comparisons between two columns of one class lower and evaluate exactly as before',
+      reason:
+        'A column-to-column comparison has one meaning only within one comparison class: across '
+        + 'classes SQLite orders every TEXT above every INTEGER while the in-process evaluator coerces '
+        + '("open" > 5 is false). A formula field is virtual, with no stored column to reference. The '
+        + 'file family is refused by name, whatever the deployment stores: during the ADR-0104 '
+        + 'dual-encoding window one media column can hold a bare id and another the JSON-quoted form of '
+        + 'the same id, so no comparison against the family is provably one answer on every path. '
+        + 'driver-sql has refused such a comparison on the read since #5222, so a policy written '
+        + 'record.status != record.amount (text and a number), record.status != record.photo (text and '
+        + 'an image) or record.status != record.is_open (text and a formula field) got three answers, '
+        + 'measured through the real plugin-security on driver-sql, on SQLite and PostgreSQL: '
+        + 'os validate called it valid, every read it scoped answered INVALID_FILTER / 400 and every '
+        + 'by-id update or delete it scoped 403, and an insert or update its check judged, or its using '
+        + 'standing in as the check, was admitted and stored, because the write check compared the two '
+        + 'raw values. The classification is now exported once from @objectstack/spec/data '
+        + '(crossFieldComparisonVerdict) and read by every judge. The authoring arm (#20347): the '
+        + 'rls-predicate-unenforceable rule refuses the comparison in using and check, on every '
+        + 'operation, at os validate, build and lint and at the metadata save door for a permission '
+        + 'set, and the sharing-rule-unlowerable-condition rule refuses it in a sharing-rule condition '
+        + 'at os validate, build and lint. The write-check arm (#20355): the row-level write gate hands '
+        + 'matchesFilterCondition the object\'s declared columns, and a comparison the classification '
+        + 'does not define is refused INVALID_FILTER / 400 for every insert and update the check judges, '
+        + 'before any record is read, with nothing stored; the message withholds the columns and the '
+        + 'server log names the policy and both. A comparison against a json or multiple field is now '
+        + 'refused by its declared type on the write too, where #19886 judged it by the value each '
+        + 'record held. driver-memory, a test driver with no field-reference arm, still reads such a '
+        + 'comparison as a literal. Shipped producers were counted before the change: no shipped '
+        + 'row-level policy or sharing-rule condition compares two fields of different classes. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which comparison the author meant, and rewriting it on the author\'s behalf would change '
+        + 'which rows and writes the policy admits, which is the policy author\'s decision. '
+        + 'ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Run os validate over your stack: it names every row-level or sharing-rule predicate that '
+        + 'compares two fields of different comparison classes, with both declarations. Rewrite each as '
+        + 'the replacement says. A policy that never passed os validate (stored before the authoring '
+        + 'arm, or written by another path) is refused at request time instead: every read it scopes '
+        + 'answers 400 on the SQL drivers, and so does every insert or update its check judges, so '
+        + 're-check what each such policy is meant to admit rather than assuming the writes it admitted '
+        + 'before were right.',
+    },
     // Stage 2e of #19886: the mirror of stage 2d's ordering refusal, with the list on
     // the RECORD's side. The shape is legal, a field ordered against one bound; what
     // the write-check evaluator now refuses is the VALUE the record holds there, a
@@ -15358,11 +15492,12 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8512 tracked '
-        + 'files at that sha, against lit controls window 3581, timeout 1096, period 171, '
-        + 'interval 179 and metrics 326 on that same corpus and sha (0 across 8303, against 3526 / '
-        + '1086 / 170 / 179 / 324, at 62597c588), so no pin bump is owed. '
+        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9283 tracked '
+        + 'files at that sha, against lit controls window 3681, timeout 1172, period 183, '
+        + 'interval 176 and metrics 340 on that same corpus and sha (0 across 8512, against 3581 / '
+        + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
+        + '324, at 62597c588), so no pin bump is owed. '
         + 'ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
@@ -15573,13 +15708,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8512 files '
-        + 'tracked at that sha (the 488 Span and 53 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9283 files '
+        + 'tracked at that sha (the 485 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 13347 hits for the bare token objectstack, '
-        + 'and 5123 for the package specifier @objectstack/spec (at 62597c588: 0 across 8303, '
-        + 'Span 486, 13125 and 5043).',
+        + 'two lit controls on that same corpus and sha: 13745 hits for the bare token objectstack, '
+        + 'and 5466 for the package specifier @objectstack/spec (at f8a9d0fb0: 0 across 8512, '
+        + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
         + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
@@ -15682,9 +15817,10 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
-        + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
-        + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
+        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells it 0 '
+        + 'times across 9283 tracked files, against lit controls `TTL` 181 and `tenant` 1185 on the '
+        + 'same corpus (0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
         + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '
@@ -15999,10 +16135,11 @@ const step18: MigrationStep = {
     // The AUTHORING half of the turso driver's constructor refusals. The driver
     // refuses these configurations when it is built; this entry records that the
     // datasource contract now refuses them where they are written, together with
-    // the one combination the driver builds and then ignores. A structured TODO,
-    // not a D2 conversion: which way out an author wants — a remote database, an
-    // embedded replica on a local file, or a plain local file — is intent no
-    // artifact records.
+    // the one combination the driver used to build and then ignore (syncUrl under
+    // a forced remote mode), which the constructor refuses too since #20200. A
+    // structured TODO, not a D2 conversion: which way out an author wants — a
+    // remote database, an embedded replica on a local file, or a plain local
+    // file — is intent no artifact records.
     {
       id: 'turso-config-transport-mismatch-refused',
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -16029,16 +16166,20 @@ const step18: MigrationStep = {
         '#19977. Each key parsed on its own, so the contract accepted configurations the turso driver '
         + 'refuses when it is built (VALIDATION_ERROR / 400 from the constructor, since the #19893 '
         + 'and #19976 changes) — a datasource published clean and then failed at boot or at test '
-        + 'connection. One more it builds and then ignores: syncUrl under a forced remote mode, where '
-        + 'the remote client is created without it, no sync ever runs and the sync call fails as not '
-        + 'supported while the driver reports sync as enabled (measured on the built driver). '
-        + 'Authoring now refuses exactly the constructor\'s refused set — the same predicates, a '
-        + 'scheme matched in any letter case, the url read trimmed as both datasource loaders hand it '
-        + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
-        + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
-        + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
-        + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
-        + 'the first four shapes there already); what changes is that creating, testing or editing '
+        + 'connection. One more it built and then ignored until #20200: syncUrl under a forced remote '
+        + 'mode, where the remote client was created without it, no sync ever ran and the sync call '
+        + 'failed as not supported while the driver reported sync as enabled (measured on the built '
+        + 'driver). Authoring now refuses exactly the constructor\'s refused set — the same predicates, '
+        + 'a scheme matched in any letter case, the url read trimmed as both datasource loaders hand '
+        + 'it over — plus that key, refused at authoring first as the declared-but-not-enforced shape '
+        + 'ADR-0049 does not ship, and by the constructor too since #20200. Nothing the constructor '
+        + 'accepts is refused (at #19977 that key was the one exception; since #20200 there is none): '
+        + 'a forced remote mode keeps its url unjudged, as the constructor does. Stored datasource '
+        + 'rows are not re-parsed '
+        + 'when they load, so a stored row still reaches the constructor as written; the constructor '
+        + 'refuses the first four shapes there already and, since #20200, also refuses syncUrl under '
+        + 'a forced remote mode and sync with no syncUrl when the datasource boots. What changes here '
+        + 'is that creating, testing or editing '
         + 'its config through the datasource admin service, defineStack or os validate is refused at '
         + 'the key. Measured on this tree at the change: no example, template, published skill or '
         + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',

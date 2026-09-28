@@ -41,6 +41,14 @@
  *                   and the stored fraction carries the same quantity two
  *                   places further right (ruling batch #161 item 3 letter B,
  *                   2026-09-18).
+ *  - `precision`    more digits in total than the field's declared count →
+ *                   `max_precision` (#19992; rejection, never rounding), on
+ *                   `number` / `currency` / `percent` / `rating` / `slider`.
+ *                   The DECIMAL(p, s) reading: the value's digits counted at
+ *                   the decimal places the `scale` rule above applies (the
+ *                   value's own, when it applies none), so `precision: 5,
+ *                   scale: 2` refuses `1234.5`. A fraction-stored `percent` is
+ *                   always counted two places further right. No column change.
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
@@ -245,6 +253,11 @@ interface FieldDef {
   /** Max decimal places for number types — enforced by rejection (#7501). */
   scale?: number;
   /**
+   * Max TOTAL digits for number types — the `p` of a DECIMAL(p, s), enforced
+   * by rejection (#19992). See {@link digitCountAt} for what is counted.
+   */
+  precision?: number;
+  /**
    * Standard value domain the WRITTEN value must be a member of (#14168) —
    * the same closed vocabulary and the same membership predicate a settings
    * specifier's `valueDomain` uses, so a time zone accepted in Settings is the
@@ -303,6 +316,51 @@ function decimalPlacesOf(n: number): number {
   const fractionDigits = m[1] ? m[1].length : 0;
   const exponent = m[2] ? Number(m[2]) : 0;
   return Math.max(0, fractionDigits - exponent);
+}
+
+/**
+ * How many digits a finite number occupies when written with at least
+ * `minPlaces` decimal places — the count a declared `precision` bounds (#19992).
+ *
+ * The DECIMAL(p, s) reading, the one SQL and Salesforce ("Length" + "Decimal
+ * Places") share: `precision` counts every digit of the value, integer and
+ * fraction together, at the column's decimal places. So the count is the
+ * number of digits from the value's first non-zero digit down to its last
+ * decimal place, where "last decimal place" is `minPlaces` or the value's own
+ * last one, whichever is further right:
+ *
+ *  - `1234.5` at 2 places is `1234.50` → 6; `123.45` → 5; `5` → `5.00` → 3.
+ *    Hence `precision: 5, scale: 2` refuses `1234.5` and holds up to `999.99`.
+ *  - at 0 places the value's own digits count: `1e18` → 19, `100` → 3 (a
+ *    trailing zero of the INTEGER part is a digit), `0.05` → 1 (a leading zero
+ *    never is), `1.2345` → 5.
+ *  - zero occupies no digits, so it fits every declaration.
+ *
+ * Equivalently, a value `v` with at most `minPlaces` decimals needs more than
+ * `p` digits exactly when `|v| >= 10^(p - minPlaces)` — the DECIMAL(p, s)
+ * range — which is also what the count answers when `minPlaces` exceeds `p`
+ * (`precision: 1, scale: 2` holds `0.05` and refuses `0.1`), so no declaration
+ * the spec accepts is left without a meaning here.
+ *
+ * Measured from the canonical string form for the reasons {@link decimalPlacesOf}
+ * gives (no overflow, the count the client's own payload showed); exponent forms
+ * are normalized the same way (`1.23e+21` → 22 at 0 places, `1.5e-7` → 2).
+ * Callers guard `Number.isFinite` first.
+ */
+function digitCountAt(n: number, minPlaces: number): number {
+  const m = /^-?(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(n));
+  if (!m) return 0;
+  const fraction = m[2] ?? '';
+  // The value is int(mantissa) × 10^exponent.
+  let exponent = (m[3] ? Number(m[3]) : 0) - fraction.length;
+  const mantissa = (m[1] + fraction).replace(/^0+/, '');
+  if (mantissa === '') return 0; // zero
+  const significant = mantissa.replace(/0+$/, '');
+  exponent += mantissa.length - significant.length;
+  // Now `significant` has no leading or trailing zero, and the value's own
+  // decimal places are `max(0, -exponent)`.
+  const places = Math.max(minPlaces, -exponent, 0);
+  return significant.length + exponent + places;
 }
 
 /**
@@ -934,6 +992,12 @@ function validateOne(
     // write carries whatever decimals it carries, exactly as it always has on
     // a currency field that declared no `scale`. Enforcing a currency width on
     // writes (the first ruling's B′) was offered and NOT taken.
+    //
+    // `scaleAllowance` keeps the allowance this branch APPLIED (or `undefined`
+    // when it applies none), because the `precision` count below is taken at
+    // exactly those decimal places — one reading of the field's scale, never
+    // a second derivation of it.
+    let scaleAllowance: number | undefined;
     if (
       t !== 'currency' &&
       def.scale !== undefined &&
@@ -960,6 +1024,7 @@ function validateOne(
       const allowed = t === 'percent' && percentScaleOf(def) === 'fraction'
         ? def.scale + 2
         : def.scale;
+      scaleAllowance = allowed;
       const actual = decimalPlacesOf(n);
       if (actual > allowed) {
         // The envelope names the allowance that was APPLIED, not the raw
@@ -969,6 +1034,60 @@ function validateOne(
         // accepts 4 — a true refusal described by a false constraint, and the
         // `max_scale` message template renders both numbers verbatim.
         return fail('max_scale', { scale: allowed, actual });
+      }
+    }
+    // ── `precision` — enforced by REJECTION, never rounding (#19992) ──
+    // Triage on #19992 (ENFORCE, by the maintainer's #18900 ④ criterion
+    // 「主流平台有没有这个能力 —— 有 ⇒ 补消费端」): a total-digit bound is the
+    // mainstream DECIMAL(p, s) / Salesforce Length + Decimal Places, and the
+    // metadata designer writes it, so the declared count binds here — refused
+    // like `max_scale`, for the same reason: rounding is silently altering data.
+    // New writes only; a stored value above a count declared later rests.
+    //
+    // The count is `digitCountAt`: the value's digits from its first non-zero
+    // digit down to the decimal places the `scale` branch above applied — so
+    // `precision: 5, scale: 2` refuses `1234.5` (`1234.50`, 6 digits) and the
+    // integer part may carry `precision − scale` digits. With no allowance
+    // applied (no `scale` declared, or `currency`, whose `scale` is refused)
+    // the value's OWN decimal places count: a currency amount's written
+    // decimals are part of its total, while the decimals themselves stay
+    // unconstrained (ruling 乙, above) — only the total is bounded.
+    //
+    // ⛔ The one derived floor: a fraction-stored `percent` is counted at least
+    // two places right even with no `scale` declared — the same two-place
+    // shift the `scale + 2` allowance above encodes (ruling batch #161 item 3
+    // letter B). With it the count is that of the PERCENTAGE-POINT value as
+    // displayed and entered (`1000%` is stored `10`, counted `10.00`, 4 digits),
+    // so a percent's `precision` means one thing whether or not `scale` is
+    // declared. Read from `percentScaleOf`, never re-decided from `max`.
+    //
+    // Only a well-formed declaration is enforced, for the reason given for
+    // `scale` above; `FieldSchema` refuses a non-integer or negative count at
+    // parse (#8321). ⛔ No column follows: every numeric column stays the fixed
+    // NUMERIC_COLUMN_REPRESENTATION exact decimal, so this seam is the whole of
+    // the enforcement — sizing DDL from `precision` is a migration question
+    // this rule does not answer.
+    if (
+      def.precision !== undefined &&
+      Number.isInteger(def.precision) &&
+      def.precision >= 0
+    ) {
+      const minPlaces =
+        scaleAllowance ?? (t === 'percent' && percentScaleOf(def) === 'fraction' ? 2 : 0);
+      const actual = digitCountAt(n, minPlaces);
+      if (actual > def.precision) {
+        // The envelope names the decimal places the count was TAKEN at, as
+        // `max_scale` names its applied allowance. When the field's places
+        // padded the value (`1234.5` counted as `1234.50`) the sentence says
+        // so; otherwise the plain one — a user who typed 6 digits and reads
+        // "got 7" with no reason given has been handed a riddle.
+        const own = decimalPlacesOf(n);
+        const counted = Math.max(minPlaces, own);
+        return fail(
+          'max_precision',
+          { precision: def.precision, scale: counted, actual },
+          counted > own ? 'max_precision_scaled' : 'max_precision',
+        );
       }
     }
     return null;

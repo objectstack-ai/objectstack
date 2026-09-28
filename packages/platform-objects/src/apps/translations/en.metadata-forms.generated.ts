@@ -72,6 +72,34 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Searchable Fields",
         helpText: "Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish."
       },
+      fieldGroups: {
+        label: "Field Groups",
+        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field's own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
+      },
+      "fieldGroups.key": {
+        label: "Key",
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+      },
+      "fieldGroups.label": {
+        label: "Label",
+        helpText: "Header text of the group's section."
+      },
+      "fieldGroups.icon": {
+        label: "Icon",
+        helpText: "Lucide icon name shown beside the header on the record detail page (e.g. \"banknote\"). The entry form does not show it."
+      },
+      "fieldGroups.description": {
+        label: "Description",
+        helpText: "Text shown under the header, on the entry form and the record detail page."
+      },
+      "fieldGroups.collapse": {
+        label: "Collapse",
+        helpText: "Whether the section can be collapsed, on the entry form and the record detail page. Unset: none."
+      },
+      "fieldGroups.visibleWhen": {
+        label: "Visible When",
+        helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the entry form shows the whole group, header included, only while it is TRUE."
+      },
       fields: {
         label: "Fields",
         helpText: "Add the columns this object will store"
@@ -268,6 +296,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       datasource: {
         label: "Datasource",
         helpText: "Target datasource ID (default: \"default\")"
+      },
+      indexes: {
+        label: "Indexes",
+        helpText: "Database indexes on this object's table. The SQL driver creates each one the table lacks when it syncs the table; a sync never drops an index."
+      },
+      "indexes.name": {
+        label: "Name",
+        helpText: "Physical index name. Unset: generated from the table and the columns (e.g. idx_task_status)."
+      },
+      "indexes.fields": {
+        label: "Fields",
+        helpText: "Column names of this object, in key order (e.g. status, owner). Nothing checks them when you save or publish: a name that is not a stored column makes the SQL driver skip the whole index, with a warning in the server log."
+      },
+      "indexes.unique": {
+        label: "Unique",
+        helpText: "Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope."
       },
       ownership: {
         label: "Ownership",

@@ -2016,14 +2016,23 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (17 lines), `ObjectMapConfigSchema` `1574` -> `1589` (the whole 47-line
  * declaration) and `LIST_VIEW_LOCAL_OVERRIDES` `734` -> `741` (the whole
  * list, still without `map`); `ObjectMap.tsx` and the `ListView.tsx` anchors
- * did not move. Each anchor quotes the line it was read at,
+ * did not move. RE-READ again at pin `dd3f7e1be` on 2026-09-28: that bump
+ * redded five anchors, and none of them changed what it reads — `case 'map':`
+ * `1792` -> `2043`, whose arm gained one comment line (`viewOptions.map` is now
+ * described as the host `views` entry merged with the named view's canonical
+ * `map` block, objectui#7928) and still flattens through the same whitelist;
+ * `ObjectMapConfigSchema` `1589` -> `1835`, its ten-line declaration
+ * byte-identical (only docblocks around it were reworded);
+ * `LIST_VIEW_LOCAL_OVERRIDES` `741` -> `809`, still without `map`; and the two
+ * `getMapConfig` lines `404` -> `409` and `409` -> `414`, byte-identical. The
+ * `ListView.tsx` anchors did not move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1792` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2043` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:85` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2035,14 +2044,14 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:1589` first line
+ *   `packages/types/src/zod/objectql.zod.ts:1835` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:404` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:409` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:409` first line `return { ...config, style: config.style || style };`),
+ *   (`:414` first line `return { ...config, style: config.style || style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -2051,7 +2060,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:741`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:809`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -3242,13 +3251,21 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `form.tsx` changed on
-   * this hop only in its registration's input list, objectui#9910's
-   * `children` slot, and `spanLadderFor` at `:204-231` is byte-identical, so it
-   * still emits the ladder; `plugin-form`'s `autoLayout.ts` is byte-identical
-   * to `62597c588`, where `form.tsx` was byte-identical to `87af769e9`).
+   * (`.objectui-sha` = `dd3f7e1be`, re-read 2026-09-28: `form.tsx` changed on
+   * this hop — 66 insertions, 5 deletions: the named clear-on-hide notice,
+   * objectui#8070, a cascade clear that writes `null`, objectui#10291, and
+   * objectui `1dae95a41` re-citing objectui#9244 as `bd0995738` in two
+   * comments — none of it inside `spanLadderFor`, which is still `:204-231`
+   * byte-identical, and its one call site moved `:2787` -> `:2848` with the
+   * call byte-identical (only the comment over it was re-cited), so it still
+   * emits the ladder; `plugin-form`'s `autoLayout.ts` changed in one docblock
+   * line, the same re-citation, so `resolveColSpan` is still `:154` and
+   * `WIDE_FIELD_TYPES` still `:58-69`, both byte-identical to `f8a9d0fb0` and
+   * `62597c588`. At `f8a9d0fb0` (2026-09-24) `form.tsx`
+   * had changed only in its registration's input list, objectui#9910's
+   * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `dd3f7e1be356`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -5698,16 +5715,57 @@ const ViewContainerWireSchema = lazySchema(() =>
  * the loud answer this derivation wants: a kind block that grows a cross-key
  * check forces a decision about how that check reads on a partial underlay,
  * instead of silently losing it.
+ *
+ * [#19920] The return type is {@link ListViewKindBlocks}, derived by the same
+ * rule at the type level. It was `Record<string, z.ZodTypeAny>`, which typed
+ * the bag as a string-keyed record of `unknown` on the list overlay member, and
+ * so on `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and
+ * `AssembledViewArtifactParsed`: `options: { foo: 1, kanban: 42 }` type-checked
+ * while this member refuses it. The loop below is unchanged; the one assertion
+ * on its result states what the two derivations share, and
+ * `view-overlay-options-type.test.ts` pins the runtime key set to the type's.
  */
-function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
+function listViewKindBlocks(): ListViewKindBlocks {
   const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
   const blocks: Record<string, z.ZodTypeAny> = {};
   for (const kind of overlayTypeValues(ListViewShapeSchema)) {
     const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
     if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
   }
-  return blocks;
+  return blocks as ListViewKindBlocks;
 }
+
+/**
+ * [#19920] What {@link listViewKindBlocks} builds for ONE kind, as a function
+ * so its return type is zod's own answer for `.unwrap().partial().optional()`
+ * rather than a hand-written copy of it. Only its type is read
+ * ({@link ListViewKindBlocks}); the loop above keeps its own duck-typed calls.
+ */
+function partialListViewKindBlock<S extends z.ZodRawShape, C extends z.core.$ZodObjectConfig>(
+  block: z.ZodOptional<z.ZodObject<S, C>>,
+) {
+  return block.unwrap().partial().optional();
+}
+
+type ListViewShapeFields = (typeof ListViewShapeSchema)['shape'];
+
+/**
+ * [#19920] The kinds that name a block, by {@link listViewKindBlocks}' own rule:
+ * a value of the shape's `type` enum that is also a key of the shape (`grid`
+ * names none).
+ */
+type ListViewKindBlockName = Extract<z.output<ListViewShapeFields['type']>, keyof ListViewShapeFields>;
+
+/**
+ * [#19920] The static type of {@link listViewKindBlocks}: per kind, the kind's
+ * own block with every key optional. A block that stopped being an optional
+ * object would read `never` here, and the pin test's never-check goes red.
+ */
+type ListViewKindBlocks = {
+  [K in ListViewKindBlockName]: ListViewShapeFields[K] extends z.ZodOptional<z.ZodObject<infer S, infer C>>
+    ? ReturnType<typeof partialListViewKindBlock<S, C>>
+    : never;
+};
 
 /**
  * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.

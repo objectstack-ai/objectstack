@@ -201,25 +201,72 @@ describe('connector_action (baseline node)', () => {
         expect(received).toEqual({});
     });
 
-    it('fails the step when connectorConfig is missing required fields', async () => {
-        engine.registerFlow('bad_config', {
-            name: 'bad_config',
-            label: 'Bad Config',
-            type: 'autolaunched',
+    /**
+     * #20418 — `registerFlow`, the second of the three doors, refuses a node
+     * this executor cannot dispatch: it parses first (`FlowSchema`), and the
+     * flow parse judges the `connectorConfig` block the way this executor
+     * reads it. Before, each of these shapes REGISTERED and then failed every
+     * run at the guard below — the last test in this block is that ground.
+     */
+    function unconfiguredFlow(name: string, call: Record<string, unknown>) {
+        return {
+            name,
+            label: name,
+            type: 'autolaunched' as const,
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'call', type: 'connector_action', label: 'No Config' },
+                { id: 'call', type: 'connector_action', label: 'Call', ...call },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
                 { id: 'e1', source: 'start', target: 'call' },
                 { id: 'e2', source: 'call', target: 'end' },
             ],
-        });
+        };
+    }
 
-        const result = await engine.execute('bad_config');
+    /** The issues `registerFlow` threw, as `[code, path]`, or `undefined` when it registered. */
+    function refusalOf(flow: { name: string }): Array<[string, unknown[]]> | undefined {
+        try {
+            engine.registerFlow(flow.name, flow as never);
+            return undefined;
+        } catch (e) {
+            return ((e as { issues?: Array<{ code: string; path: unknown[] }> }).issues ?? [])
+                .map((i) => [i.code, i.path] as [string, unknown[]]);
+        }
+    }
+
+    it('registerFlow refuses a node with no connectorConfig block, naming the block', async () => {
+        expect(refusalOf(unconfiguredFlow('no_block', {}))).toEqual([['custom', ['nodes', 1, 'connectorConfig']]]);
+        expect(await engine.listFlows()).not.toContain('no_block');
+    });
+
+    it('registerFlow refuses the designer seed — both ids blank — naming each key', () => {
+        expect(refusalOf(unconfiguredFlow('blank_ids', { connectorConfig: { connectorId: '', actionId: '', input: {} } })))
+            .toEqual([
+                ['custom', ['nodes', 1, 'connectorConfig', 'connectorId']],
+                ['custom', ['nodes', 1, 'connectorConfig', 'actionId']],
+            ]);
+    });
+
+    it('CONTROL — the same node with its block registers', () => {
+        expect(refusalOf(unconfiguredFlow('configured', { connectorConfig: { connectorId: 'fake', actionId: 'echo' } })))
+            .toBeUndefined();
+    });
+
+    it('what the refused shape did at run time: the step failed at the guard, every run', async () => {
+        // It can no longer register, so the run registers the block whole and
+        // deletes it from the stored node — the shape this executor meets when
+        // a node reaches it past the doors.
+        const stored = engine.registerFlow(
+            'stripped',
+            unconfiguredFlow('stripped', { connectorConfig: { connectorId: 'fake', actionId: 'echo' } }) as never,
+        );
+        delete (stored.nodes[1] as { connectorConfig?: unknown }).connectorConfig;
+
+        const result = await engine.execute('stripped');
         expect(result.success).toBe(false);
-        expect(result.error).toContain('connectorId');
+        expect(result.error).toContain("connector_action 'call': connectorConfig.connectorId and .actionId are required");
     });
 });
 
