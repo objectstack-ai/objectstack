@@ -1,0 +1,138 @@
+{
+  "manifest": {
+    "id": "com.example.forward-probe",
+    "namespace": "fwd",
+    "defaultDatasource": "default",
+    "version": "1.0.0",
+    "type": "app",
+    "scope": "project",
+    "name": "forward_probe",
+    "engines": {
+      "protocol": "^17.4.0"
+    }
+  },
+  "objects": [
+    {
+      "name": "fwd_deal",
+      "label": "Deal",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Name",
+          "type": "text",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "stage": {
+          "label": "Stage",
+          "type": "text",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "amount": {
+          "label": "Amount",
+          "type": "number",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "sharingModel": "private"
+    }
+  ],
+  "pages": [
+    {
+      "name": "fwd_deal_desk",
+      "label": "Deal Desk",
+      "type": "app",
+      "template": "default",
+      "regions": [],
+      "isDefault": false,
+      "assignedProfiles": [
+        "sales_manager"
+      ],
+      "kind": "full"
+    }
+  ],
+  "dashboards": [
+    {
+      "name": "fwd_pipeline",
+      "label": "Pipeline",
+      "widgets": [
+        {
+          "id": "amount_by_stage",
+          "title": "Amount by stage",
+          "type": "bar",
+          "chartConfig": {
+            "type": "bar",
+            "xAxis": {
+              "field": "stage",
+              "showGridLines": true,
+              "logarithmic": false
+            },
+            "yAxis": [
+              {
+                "field": "amount",
+                "showGridLines": true,
+                "logarithmic": false
+              }
+            ],
+            "showLegend": true,
+            "showDataLabels": false
+          },
+          "dataset": "fwd_deal_metrics",
+          "dimensions": [
+            "stage"
+          ],
+          "values": [
+            "amount"
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          }
+        }
+      ]
+    }
+  ],
+  "datasets": [
+    {
+      "name": "fwd_deal_metrics",
+      "label": "Deal metrics",
+      "object": "fwd_deal",
+      "dimensions": [
+        {
+          "name": "stage",
+          "field": "stage"
+        }
+      ],
+      "measures": [
+        {
+          "name": "amount",
+          "aggregate": "sum",
+          "field": "amount"
+        }
+      ]
+    }
+  ]
+}

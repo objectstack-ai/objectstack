@@ -19,6 +19,7 @@ import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
  * no longer constrains authored flows — plugins extend the vocabulary.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
@@ -367,6 +368,12 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
  * executor for that type at all (`NO_EXECUTOR` plus a startup `warn`, measured
  * in the same characterization run), so unlike `wait` there is no silent
  * executor branch to retire behind this.
+ *
+ * ⚠️ The third sibling block, `connector_action`'s `connectorConfig`, is
+ * required at the FLOW level instead — {@link connectorActionConfigRefusals},
+ * walked by the `FlowSchema` superRefine — precisely because of the region
+ * caveat above: a refusal here leaves a region-nested node admitted by the
+ * flow parse. Read the reason there.
  */
 function requireTypeScopedConfig<T extends {
   id?: unknown;
@@ -405,6 +412,97 @@ function requireTypeScopedConfig<T extends {
     });
   }
   return node;
+}
+
+/** The two `connectorConfig` keys the `connector_action` executor dispatches by. */
+const CONNECTOR_DISPATCH_KEYS = ['connectorId', 'actionId'] as const;
+
+/**
+ * Every reason a `connector_action` node's `connectorConfig` cannot dispatch —
+ * judged by the `FlowSchema` superRefine for every node the
+ * `collectFlowGraphs` walk reaches (#20418). Each refusal carries its path
+ * relative to the node.
+ *
+ * ## The document this closes
+ *
+ * The block is the node's whole contract: the executor
+ * (`service-automation/builtin/connector-nodes.ts`) reads nothing else, and its
+ * first act is `if (!cfg?.connectorId || !cfg?.actionId)` → a guard refusal.
+ * The inner shape already required both keys as strings once the block was
+ * written, so what the build doors still admitted was exactly the rest of that
+ * read — measured on `FlowSchema.parse`, `AutomationEngine.registerFlow` and
+ * `objectstack validate`, each answering "valid" and each followed by a run that
+ * failed at the node every time:
+ *
+ *  - **the block absent** — `{ type: 'connector_action' }`, the shape of a node
+ *    authored without its configuration, or with the keys left under `config`
+ *    where the load-time conversion cannot complete the pair;
+ *  - **an id present and blank** — `connectorConfig: { connectorId: '',
+ *    actionId: '' }` is the Studio designer's seed for a freshly added node, so
+ *    a node added and saved before it is configured is this shape.
+ *
+ * ## Why blank is refused, not only absence
+ *
+ * The same rule the flow parse applies to a `decision` branch `label`
+ * (`flowNodeConfigRefusals`' decision arm): where an executor reads a value raw,
+ * the refusal states what that read needs, and a string that is blank after
+ * trimming (`NON_BLANK_STRING`, the spec's one notion of blank) is refused with
+ * the absent one. Refusing absence alone would leave the designer's seed —
+ * which fails every run identically — admitted. A whitespace-only id is refused
+ * too: the executor's `!value` lets it through, but a connector `name` is a
+ * snake_case identifier, so it names nothing any dispatch can reach.
+ *
+ * ## Why at the flow level and not beside `requireTypeScopedConfig`
+ *
+ * Measured: a node-level refusal (the `wait` / `boundary_event` block rule) does
+ * NOT reach a node nested in an ADR-0031 region body at this parse —
+ * `parseFlowNodeRegions` leaves the refused region raw and `FlowSchema.safeParse`
+ * of the flow answers `true` (the control: a block-less `boundary_event` in a
+ * `loop` body). Judged in the flow walk, a nested node is refused at all three
+ * doors, anchored where the author wrote it — the reach `flowNodeConfigRefusals`
+ * has. And `FlowNodeSchema` stays the structural contract a designer seed is
+ * held to on its own, while the flow the seed is saved into is refused.
+ *
+ * Only strings are judged: a block that is not an object, or an id that is not
+ * a string, is refused by the node's own shape first, so it is never reported
+ * twice.
+ */
+function connectorActionConfigRefusals(node: unknown): Array<{ path: PropertyKey[]; message: string }> {
+  if (node === null || typeof node !== 'object') return [];
+  const { type, connectorConfig } = node as { type?: unknown; connectorConfig?: unknown };
+  if (type !== 'connector_action') return [];
+  if (connectorConfig === undefined) {
+    return [{
+      path: ['connectorConfig'],
+      message:
+        'a `connector_action` node requires a `connectorConfig` block naming the connector and the action it '
+        + 'dispatches — the block is the only thing its executor reads, and a node without one used to register '
+        + 'and then fail every run that reached it. Declare it, e.g. `connectorConfig: { connectorId: \'slack\', '
+        + 'actionId: \'chat.postMessage\', input: { channel: \'C0WINS000\', text: \'Done\' } }` — `connectorId` is '
+        + 'the registered connector\'s `name`, `actionId` one of the action keys that connector declares, and '
+        + '`input` (optional) the action\'s mapped inputs. Keys written under the node\'s `config` are not read: '
+        + 'move `connectorId` / `actionId` / `input` from `config` into the block.',
+    }];
+  }
+  if (connectorConfig === null || typeof connectorConfig !== 'object' || Array.isArray(connectorConfig)) return [];
+  const block = connectorConfig as Record<string, unknown>;
+  const out: Array<{ path: PropertyKey[]; message: string }> = [];
+  for (const key of CONNECTOR_DISPATCH_KEYS) {
+    const value = block[key];
+    if (typeof value !== 'string' || NON_BLANK_STRING(value)) continue;
+    const write = key === 'connectorId'
+      ? 'the registered connector\'s `name` (e.g. `connectorId: \'slack\'`)'
+      : 'one of the action keys that connector declares (e.g. `actionId: \'chat.postMessage\'`)';
+    out.push({
+      path: ['connectorConfig', key],
+      message:
+        `\`connectorConfig.${key}\` holds a string that is blank after trimming, so this \`connector_action\` `
+        + 'node names nothing to dispatch to. Its executor refuses a node whose `connectorId` or `actionId` is '
+        + 'empty — and a whitespace-only one matches no connector — so a flow carrying it used to register and '
+        + `then fail every run that reached the node. Write ${write}, or delete the node until it is configured.`,
+    });
+  }
+  return out;
 }
 
 /**
@@ -853,8 +951,10 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *   nodes: [
  *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0} },
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
- *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200} },
- *     { id: "submit_for_approval", type: "connector_action", label: "Submit", position: {x: 100, y: 200} }
+ *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
+ *       config: { objectName: "order", filter: { id: "{record.id}" }, fields: { status: "approved" } } },
+ *     { id: "submit_for_approval", type: "connector_action", label: "Submit", position: {x: 100, y: 200},
+ *       connectorConfig: { connectorId: "approvals_desk", actionId: "submit", input: { orderId: "{record.id}" } } }
  *   ],
  *   edges: [
  *     { id: "e1", source: "start", target: "check_amount" },
@@ -1388,6 +1488,21 @@ export const FlowSchema = lazySchema(() => strictObject(
           path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(refusal.path)],
           message: refusal.message,
         });
+      }
+    });
+  }
+
+  // What a `connector_action` node's executor needs its SIBLING block to carry
+  // (#20418) — `connectorConfig` present, `connectorId` and `actionId` not
+  // blank — the rest of the read the executor refuses the node on. Beside the
+  // `config` judge above rather than in it (the block is not `config`), and in
+  // this walk rather than in the node transform so a node inside an ADR-0031
+  // region body is refused here too; the reason is measured under
+  // {@link connectorActionConfigRefusals}.
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      for (const refusal of connectorActionConfigRefusals(node)) {
+        ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, ...refusal.path], message: refusal.message });
       }
     });
   }

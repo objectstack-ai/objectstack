@@ -950,6 +950,19 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'no ledger row can be owed for it (ADR-0112 D6).',
     },
     {
+        code: 'max_precision',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'max_precision\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
         code: 'value_domain',
         file: 'packages/objectql/src/validation/record-validator.ts',
         shape: 'objlithelper',
