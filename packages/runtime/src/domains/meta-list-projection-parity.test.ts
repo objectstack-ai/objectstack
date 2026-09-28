@@ -1109,7 +1109,7 @@ describe('[#20507] the layered view: a name with nothing behind it answers what 
         }
     }
 
-    it('whoever asks, an absent name is the same 404; an unpublished app is still served to whoever may write it', async () => {
+    it('whoever asks, an absent name is the same 404; an unpublished app is still served to a builder', async () => {
         for (const [transport, boot] of Object.entries(TRANSPORTS)) {
             for (const [spelling, at] of Object.entries(SPELLINGS)) {
                 for (const who of ITEM_CALLERS) {
@@ -1117,8 +1117,9 @@ describe('[#20507] the layered view: a name with nothing behind it answers what 
                     expect({ status: absent.status, code: absent.code }, `${spelling} ${transport} ${who}`)
                         .toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
                 }
-                const authored = await boot('author').read(...at('launchpad'));
-                expect(authored.status, `${spelling} ${transport} author launchpad`).toBe(200);
+                // ADR-0045 §3: the builder (`studio.access`) still receives the unpublished app.
+                const built = await boot('builder').read(...at('launchpad'));
+                expect(built.status, `${spelling} ${transport} builder launchpad`).toBe(200);
             }
         }
     });
