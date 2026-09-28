@@ -58,7 +58,6 @@
   ],
   "containers": [
     "action/ai",
-    "action/aria",
     "action/params",
     "action/resultDialog",
     "agent/guardrails",

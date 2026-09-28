@@ -5430,6 +5430,20 @@ const step18: MigrationStep = {
     + 'still carries it replays clean. It is retired from the load path, so authors are refused '
     + 'at parse rather than rewritten. Its D3 record is the semantic entry '
     + '`permission-rls-tags-retired`. '
+    + 'Finally, it removes `aria` from the action (ADR-0049 enforce-or-remove), the fourth '
+    + 'member of the `aria` family after `dashboard.aria`, `dashboard.widgets[].aria` and the '
+    + 'chart config\'s, and retired for the same measured reason: an ARIA block an author can '
+    + 'declare and nothing lowers to the DOM. The liveness ledger had graded it `live` on an '
+    + 'uncited "partial" note with no reader behind it; at the pinned renderer, none of the '
+    + 'surfaces that render an action — button, icon, menu, group and bar, the row and bulk '
+    + 'action menus, the record quick-actions toolbar — reads it. Remove rather than enforce, '
+    + 'because every one of them already takes the accessible name from the action\'s required '
+    + '`label` (visible text, or `aria-label` on an icon-only action), and the node that places '
+    + 'the actions carries the node-level `aria` block — a per-action block would be a second '
+    + 'spelling of both. The D2 conversion `action-aria-removed` STRIPS the key from stack '
+    + 'actions and object-nested actions as a pure lossless delete, retired from the load path '
+    + 'so authors are refused at parse; its D3 record is the semantic entry '
+    + '`action-aria-retired`. '
     + 'It also retires the connector resilience family (ADR-0049 enforce-or-remove, one batch): '
     + '`connector.health` — the `healthCheck` probe (eight keys) and the `circuitBreaker` (six) — '
     + '`connector.status` and the connector-nested `webhooks`, sixteen authorable keys with no '
@@ -5493,12 +5507,42 @@ const step18: MigrationStep = {
     'form-layout-inline-grid-to-vertical',
     'currency-config-precision-removed',
     'permission-rls-tags-removed',
+    'action-aria-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated semantic:18>
+    // #20323 — ADR-0049 enforce-or-remove (triage record 5860351140) — the D3 entry
+    // of the `action-aria-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). Its OWN family, not a member of
+    // `chart-config-aria-retired`: a different schema, a different measurement and
+    // a different replacement channel (the action's `label`, not a chart
+    // `description`). Registered key: `ui/Action:aria`, over two authored sites.
+    // The strip changes nothing a screen reader hears; the name the author wrote
+    // was never announced, and moving it is the author's edit.
+    {
+      id: 'action-aria-retired',
+      surface: 'action.aria / object.actions[].aria — the ARIA block on an action',
+      replacement: "The action's required `label`, which every action renderer uses as the accessible "
+        + 'name (the visible button or menu-item text, and the `aria-label` of an icon-only action). '
+        + 'To name the region that places the actions, the `aria` block of the placing node — '
+        + '`page.components[].aria` or the list view `aria`.',
+      reason: 'The D2 conversion `action-aria-removed` deletes `aria` from every stack action and every '
+        + 'object-nested action, and the delete is lossless: no surface that renders an action ever '
+        + 'read the block, so the ARIA attributes it declared never reached the DOM. The residue is '
+        + 'accessibility work the author did that no user benefited from. An author who wrote '
+        + '`aria.ariaLabel` believed screen-reader users heard that name; they heard the `label`. The '
+        + 'strip deletes the text along with the key, and only the author can say whether it should '
+        + 'become the `label` — which sighted users read too — or whether it described the toolbar '
+        + 'or list the action sits in, and belongs in that node\'s `aria` block instead.',
+      acceptanceCriteria: 'No action, top-level or nested under an object, carries `aria`; the parse '
+        + 'refuses it. Every action that had carried an `aria.ariaLabel` has a `label` conveying what '
+        + 'that name was meant to announce, or the author has moved the text to the placing '
+        + "component's or list view's `aria` block, or confirmed the existing label already says it. "
+        + 'With a screen reader, focusing an icon-only action announces its label.',
+    },
     {
       id: 'action-bulk-dispatch-contract-undeclared',
       surface: '`action.execution` — the bulk dispatch contract an action’s body is written for',
@@ -20115,6 +20159,28 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `training-deadline-keys-retired`.
     'system/TrainingPlan:reminderDaysBefore',
+    // #20323 — ADR-0049 enforce-or-remove (triage record 5860351140, following the
+    // `ChartConfig.aria` retirement `2bf6ef18d`). The liveness ledger graded this
+    // key `live` on an uncited "PARTIAL — honored by a few objectui renderers"
+    // note, and no reader stood behind it: measured at the `.objectui-sha` pin
+    // `f8a9d0fb05`, none of the surfaces that render an action (`action:button`,
+    // `action:icon`, `action:menu`, `action:group`, `action:bar`, the grid's row
+    // and bulk action menus, `record:quick_actions`, the declared-actions bar)
+    // reads an action's `aria`. Every one of them derives the accessible name from
+    // the action's REQUIRED `label` — visible text, or `aria-label` on the
+    // icon-only renderer and the overflow trigger — and the node that PLACES the
+    // actions carries the node-level `ariaLabel` / `ariaDescribedBy` / `role`
+    // (`page.components[].aria`, the list view `aria`). A per-action block was a
+    // second spelling of both.
+    //
+    // `retiredKey()` on a `strictObject`, for the prescription (the
+    // `aria-carrier-tombstones.test.ts` family). Sources are rewritten by the D2
+    // conversion `action-aria-removed`; the D3 record is `action-aria-retired`.
+    //
+    // Registered under 18, not 17: the tombstone ships on the 17.x line
+    // (launch-window convention — accept-set narrowings ride minor releases) and
+    // the prescription lives at the major boundary where `migrate meta` users look.
+    'ui/Action:aria',
     // #17751 — ADR-0049 enforce-or-remove (maintainer decision batch #118 item 2,
     // 2026-09-12: recommendation C, judge the protocol wrong for this one key).
     // The third and last member of the `aria` family retired on the same measured
