@@ -25,6 +25,6 @@ What does not change:
 
 The one-line fix: write the canonical id. Every alias maps to exactly one, and `VIEW_FILTER_OPERATOR_ALIASES` is that map; the rewritten rule selects the same rows, because the schema already folded the alias to that id.
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 <!-- adr-0087: registered view-filter-rule-operator-input-canonical -->
