@@ -2905,11 +2905,12 @@ export class RemoteTransport {
       //
       // The first two are the silent empty set: SQLite's backwards-compatible
       // rule degrades a double-quoted name that resolves to no column into a
-      // STRING LITERAL, so the statement compiles, runs and matches nothing —
-      // and where a build disables that rule (`SQLITE_DQS=0`) `find()`'s own
-      // `no such column` backstop swallows the error into `[]` anyway. Two
-      // roads, one answer, and neither is distinguishable from "no rows
-      // matched".
+      // STRING LITERAL, so the statement compiles, runs and matches nothing,
+      // which is not distinguishable from "no rows matched". Where a build
+      // disables that rule (`SQLITE_DQS=0`), the statement fails with
+      // `no such column` instead, and `find()`'s backstop now refuses it, as
+      // the local face does (`INVALID_FILTER` / 400, see #20424). It used to
+      // swallow that error into `[]` too: a second road to the same answer.
       //
       // The third is the expensive direction, and it needs no dialect quirk at
       // all: a `{}` disjunct absorbs its `$or` to TRUE, the compiled clauses are
