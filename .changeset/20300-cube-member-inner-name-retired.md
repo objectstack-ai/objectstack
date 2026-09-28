@@ -36,7 +36,7 @@ Clause-②: yes
 
 ## Reach, measured
 
-- This repository, non-test: the showcase cube (`examples/app-showcase`, 8 members), the published `objectstack-ui` skill's `defineCube` example (6), the `service-analytics` README (3), and the three internal cube mints above — every one wrote the inner `name` EQUAL to its key, and all are corrected here. Test fixtures: about 290 member literals across 72 test files in seven packages, all EQUAL to their key except 21 in `driver-memory`, which disagreed (camelCase key, snake_case inner name) and were already queried by key.
+- This repository, non-test: the showcase cube (`examples/app-showcase`, 8 members), the published `objectstack-ui` skill's `defineCube` example (6), the `service-analytics` README (3), and the three internal cube mints above — every one wrote the inner `name` EQUAL to its key, and all are corrected here. Test fixtures: about 300 member literals and map-built members across 84 test and fixture files in eight packages, all EQUAL to their key except 21 in `driver-memory`, which disagreed (camelCase key, snake_case inner name) and were already queried by key.
 - Out-of-repo authors: NOT MEASURED.
 
 ## What an operator with a STORED cube sees
