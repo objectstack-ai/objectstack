@@ -104,6 +104,14 @@ export type {
   NavGroupContribution,
 } from './nav-contribution-diagnostics.js';
 
+// [#20331] The divergent view-container `name` refusal the boot registrar
+// throws. Exported because `os validate` is the SECOND door that has to answer
+// "will boot refuse this `views:` container?" — at author time, before the
+// server refuses it — and it must answer with the same judgment in the same
+// words. A consumer calls this; it does not re-derive the check.
+export { viewContainerNameRefusal } from './view-container-name-refusal.js';
+export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
+
 // Search-normalization companion column (#2486 — pinyin recall). Shared by
 // the registry's compile-time provisioning seam, the engine's `$search`
 // expansion, and plugin-pinyin-search's populate hooks.

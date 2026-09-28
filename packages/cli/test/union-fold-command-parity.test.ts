@@ -203,13 +203,17 @@ const perPackageOnlyStack = (): Record<string, unknown> => {
       account: { name: 'account', type: 'lookup', label: 'Account', reference: 'ob_account' },
     },
   }];
+  // [#20331] Each container's `name` IS the object it binds to: the boot
+  // registrar refuses a container whose own `name` disagrees with that key,
+  // and `os validate` now refuses it too, so a `*_list` name here would make
+  // this a stack the server cannot load.
   const ordersViews = [
     {
-      name: 'ob_account_list', label: 'Account List', object: 'ob_account',
+      name: 'ob_account', label: 'Account List', object: 'ob_account',
       list: { label: 'Account List', columns: ['name', 'industry'] },
     },
     {
-      name: 'ob_order_list', label: 'Order List', object: 'ob_order',
+      name: 'ob_order', label: 'Order List', object: 'ob_order',
       list: { label: 'Order List', columns: ['name', 'account'] },
     },
   ];
