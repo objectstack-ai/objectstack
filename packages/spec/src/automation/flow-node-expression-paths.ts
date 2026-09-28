@@ -1224,7 +1224,7 @@ function decisionShapeRefusals(config: unknown, out: FlowNodeConfigRefusal[]): v
       params: { index, found },
       message:
         'A decision branch routes by its `label`: the first branch whose `expression` holds is taken, and the run '
-        + `continues down the out-edge carrying that label. \`${path}.label\` holds ${phrase}, which names no `
+        + `continues down the out-edge carrying that label. \`${path}.label\` holds ${phrase}, and that names no `
         + 'out-edge — so when this branch matches, the node reports no branch it can route, and traversal '
         + 'considers EVERY out-edge instead, as if the decision declared no branches: an unconditional labelled '
         + 'out-edge and the default out-edge both run. Write the label of the out-edge this branch should take '
