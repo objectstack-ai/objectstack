@@ -64,6 +64,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Is System",
         helpText: "System object (protected from deletion; defaults sharing to public)"
       },
+      highlightFields: {
+        label: "Highlight Fields",
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+      },
+      searchableFields: {
+        label: "Searchable Fields",
+        helpText: "Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish."
+      },
       fields: {
         label: "Fields",
         helpText: "Add the columns this object will store"
@@ -268,6 +276,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       sharingModel: {
         label: "Sharing Model",
         helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
+      },
+      access: {
+        label: "Access",
+        helpText: "Wildcard-grant posture (ADR-0066 D2). Absent resolves to public. It decides whether a permission set's '*' object grant covers this object; record visibility between users is sharingModel."
+      },
+      "access.default": {
+        label: "Default",
+        helpText: "public: covered by '*' wildcard grants. private: needs an explicit per-object grant, and is exempt from wildcard row-level security."
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold to reach this object, checked in addition to CRUD grants (ADR-0066 D3). A list gates every operation; a {read, create, update, delete} map gates only the operations it lists. Absent or empty: no capability gate."
       },
       managedBy: {
         label: "Managed By",
@@ -2047,6 +2067,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       systemPermissions: {
         label: "System Permissions",
         helpText: "List of system capability keys"
+      },
+      adminScope: {
+        label: "Admin Scope",
+        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments, manageBindings and authorEnvironmentSets default to false; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
       },
       objects: {
         label: "Objects",

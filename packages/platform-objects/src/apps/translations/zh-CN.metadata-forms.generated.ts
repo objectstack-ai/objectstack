@@ -64,6 +64,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
       },
+      highlightFields: {
+        label: "重点字段",
+        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
+      },
+      searchableFields: {
+        label: "可搜索字段",
+        helpText: "$search 查询匹配的字段名（ADR-0061）：记录选择器、列表快速搜索和全局搜索的默认范围，视图可以再收窄。未设置时，搜索使用名称/标题字段加上短文本字段。每一项都必须是本对象已存储的字段——未知的名称或虚拟的 formula 字段会在发布时被拒绝。"
+      },
       fields: {
         label: "字段",
         helpText: "添加该对象将存储的列"
@@ -268,6 +276,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sharingModel: {
         label: "共享模型",
         helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
+      },
+      access: {
+        label: "访问策略",
+        helpText: "通配授权策略（ADR-0066 D2）。不声明时按 public 处理。它决定权限集的 '*' 对象授权是否覆盖本对象；用户之间的记录可见性由 sharingModel 决定。"
+      },
+      "access.default": {
+        label: "默认暴露级别",
+        helpText: "public：被 '*' 通配授权覆盖。private：需要显式的逐对象授权，并且不受通配行级安全策略约束。"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用方访问本对象必须持有的能力（权限集的 systemPermissions），在增删改查授权之外额外检查（ADR-0066 D3）。列表限制所有操作；{read, create, update, delete} 映射只限制其中列出的操作。不声明或为空：不设能力门槛。"
       },
       managedBy: {
         label: "生命周期归属",
@@ -2047,6 +2067,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "系统权限",
         helpText: "系统能力键列表"
+      },
+      adminScope: {
+        label: "委派管理范围",
+        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments、manageBindings 和 authorEnvironmentSets 默认为 false；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
       },
       objects: {
         label: "对象权限",

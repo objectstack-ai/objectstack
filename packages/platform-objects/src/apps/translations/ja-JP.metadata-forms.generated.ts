@@ -64,6 +64,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
       },
+      highlightFields: {
+        label: "ハイライト項目",
+        helpText: "このオブジェクトの項目名を重要な順に並べます。1 つしか表示できない場所では先頭の項目が使われます（ADR-0085）。既定の一覧列、カード、子レコードのプレビュー、詳細画面のハイライト帯を決めます。このオブジェクトの項目でない名前は公開時に拒否されます。"
+      },
+      searchableFields: {
+        label: "検索対象項目",
+        helpText: "$search クエリが照合する項目名（ADR-0061）。レコードピッカー、一覧のクイック検索、グローバル検索の既定値で、ビューで絞り込めます。未設定の場合は名前／タイトル項目と短いテキスト項目で検索します。各項目はこのオブジェクトの保存済みの項目を指す必要があり、不明な名前や仮想の formula 項目は公開時に拒否されます。"
+      },
       fields: {
         label: "フィールド",
         helpText: "このオブジェクトが保存する列を追加"
@@ -268,6 +276,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sharingModel: {
         label: "共有モデル",
         helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
+      },
+      access: {
+        label: "アクセス設定",
+        helpText: "ワイルドカード付与の方針（ADR-0066 D2）。省略時は public として解決されます。権限セットの '*' オブジェクト付与がこのオブジェクトに及ぶかどうかを決めます。ユーザー間のレコード可視性は sharingModel が決めます。"
+      },
+      "access.default": {
+        label: "既定の公開範囲",
+        helpText: "public: '*' ワイルドカード付与の対象になります。private: オブジェクトごとの明示的な付与が必要で、ワイルドカードの行レベルセキュリティの対象外になります。"
+      },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このオブジェクトにアクセスするために呼び出し元が保持すべき機能（権限セットの systemPermissions）。CRUD 付与に加えてチェックされます（ADR-0066 D3）。リストはすべての操作を制限し、{read, create, update, delete} マップは列挙した操作だけを制限します。省略または空の場合、機能による制限はありません。"
       },
       managedBy: {
         label: "ライフサイクル区分",
@@ -2047,6 +2067,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "システム権限",
         helpText: "システム機能キーのリスト"
+      },
+      adminScope: {
+        label: "委任管理スコープ",
+        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true、manageAssignments・manageBindings・authorEnvironmentSets の既定値は false です。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
       },
       objects: {
         label: "オブジェクト権限",

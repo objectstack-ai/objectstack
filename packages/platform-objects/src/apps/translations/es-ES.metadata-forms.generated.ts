@@ -64,6 +64,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
       },
+      highlightFields: {
+        label: "Campos destacados",
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+      },
+      searchableFields: {
+        label: "Campos buscables",
+        helpText: "Nombres de campo con los que coincide la consulta $search (ADR-0061): el valor predeterminado del selector de registros, la búsqueda rápida de listas y la búsqueda global; una vista puede acotarlo. Sin definir, la búsqueda usa el campo de nombre/título más los campos de texto corto. Cada entrada debe nombrar un campo almacenado de este objeto: un nombre desconocido o un campo formula virtual se rechaza al publicar."
+      },
       fields: {
         label: "Campos",
         helpText: "Añade las columnas que almacenará este objeto"
@@ -268,6 +276,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sharingModel: {
         label: "Modelo de uso compartido",
         helpText: "Visibilidad predeterminada de la organización (OWD) para usuarios internos. Un objeto personalizado que lo omita se resuelve como private en tiempo de ejecución (ADR-0090 D1)."
+      },
+      access: {
+        label: "Acceso",
+        helpText: "Postura ante las concesiones comodín (ADR-0066 D2). Si se omite, se resuelve como public. Decide si la concesión de objeto '*' de un conjunto de permisos cubre este objeto; la visibilidad de registros entre usuarios la decide sharingModel."
+      },
+      "access.default": {
+        label: "Exposición predeterminada",
+        helpText: "public: cubierto por las concesiones comodín '*'. private: necesita una concesión explícita por objeto y queda exento de la seguridad a nivel de fila comodín."
+      },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener para acceder a este objeto, comprobadas además de las concesiones CRUD (ADR-0066 D3). Una lista restringe todas las operaciones; un mapa {read, create, update, delete} restringe solo las operaciones que enumera. Ausente o vacío: sin restricción por capacidad."
       },
       managedBy: {
         label: "Gestionado por",
@@ -2047,6 +2067,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       systemPermissions: {
         label: "Permisos del sistema",
         helpText: "Lista de claves de capacidades del sistema"
+      },
+      adminScope: {
+        label: "Ámbito de administración delegada",
+        helpText: "Administración delegada (ADR-0090 D12): permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments, manageBindings y authorEnvironmentSets valen false por defecto; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
       },
       objects: {
         label: "Permisos de objeto",
