@@ -1463,7 +1463,7 @@ const step17: MigrationStep = {
         + 'and ship it through `publishPackage`',
       reason:
         'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
-        + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
+        + 'honoured it. Measured on a real showcase boot: `PUT /api/v1/meta/api/'
         + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
         + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
         + 'line, because the endpoint was never in the index to be excluded from. The serving '
@@ -1477,19 +1477,22 @@ const step17: MigrationStep = {
         + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
         + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
         + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
-        + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
+        + 'them at runtime; showcase uses the artifact route, and its declared endpoints serve '
+        + 'live). '
         + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
         + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
         + 'authorable one, and the artifact route it points authors toward is untouched — a '
         + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
         + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
         + 'Studio callers rather than a stack conversion — the same disposition '
-        + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
-        + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
+        + '`BatchOptions.validateOnly` takes. Consequently `gateApiDraftsForPublish` '
+        + 'is retired with it: it gated a promotion into a state the matcher can '
         + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
-        + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
-        + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
-        + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
+        + 'Re-entry is recorded in the ruling: if the Studio metadata-coverage work promotes `apis` '
+        + 'to a registered type WITH A REAL CONSUMPTION PATH, the flag flips back then — '
+        + 'implementation first, '
+        + 'declaration second. The same refusal closes the direct-active write too, which had been a '
+        + 'third path past the endpoint namespace and duplicate-path gates. ADR-0049 / ADR-0121.',
       acceptanceCriteria:
         'No caller creates or updates an `api` item through the runtime metadata API. '
         + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
@@ -1498,8 +1501,8 @@ const step17: MigrationStep = {
         + 'as well as direct-active, because the gate runs before the draft/publish branch and '
         + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
         + 'point of the change: a stack declaring `apis:` still compiles, still passes '
-        + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
-        + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
+        + '`validateApiEndpointDeclarations` at publish (`publishPackage`) and at load '
+        + '(`buildEndpointIndex`), and its endpoints still SERVE — that route was '
         + 'always the only one that served. An operator who genuinely needs the runtime door '
         + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
         + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '
@@ -2894,8 +2897,10 @@ const step17: MigrationStep = {
         + 'and `false` is authoring intent rather than a veto, because permission sets are '
         + 'additive capability containers (ADR-0090). The super-user bits no longer confer it: '
         + '`viewAllRecords` / `modifyAllRecords` are "may see all data", not "may take a bulk '
-        + 'copy". Registered by the #6350 stock reconciliation; #3544 / #3710 predate the #6148 '
-        + 'completeness gate. ADR-0087, #3544 / #3710 (backfilled #6350).',
+        + 'copy". Registered (backfilled) by the stock reconciliation that compared the breaking '
+        + 'changesets already on the v17 release train against this ledger: the export axis, and its '
+        + 'extension to the CSV attachments scheduled reports mail out, both predate the gate that makes '
+        + 'a breaking changeset state its ADR-0087 disposition. ADR-0087.',
       acceptanceCriteria:
         'Every environment-authored permission set has been READ and decided, not just parsed: '
         + 'each object entry whose holders should keep exporting carries `allowExport: true`, and '
@@ -2925,7 +2930,9 @@ const step17: MigrationStep = {
         + 'passed in, so the map carried a second copy of facts the caller already held. '
         + "They existed for exactly one consumer — the import dry run's hand-copied "
         + 'pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`, '
-        + 'framework#3956) — and #4633 ruling D retired that mirror (PR #6532): the dry run '
+        + 'added when the dry run was found skipping the field-level validation the real write ran) '
+        + '— and the maintainer\'s 2026-08-06 ruling D (a validate-only protocol operation, so the '
+        + 'dry run\'s prediction is the engine\'s verdict by construction) retired that mirror: the dry run '
         + "now asks `DataProtocol.validateData` for the engine's verdict, which reads the "
         + "object's own schema. That left all eight computed on every import and read by "
         + 'NOTHING, which is the declared-and-unread shape ADR-0049 exists for; a constraint '
@@ -2936,8 +2943,8 @@ const step17: MigrationStep = {
         + "verify, plugin-auth, plugin-dev) and the `objectui` sibling; plugin-auth's "
         + 'identity import forwards `prepared.metaMap` into `runImport` but reads only the '
         + 'presentation keys through `coerceRow`. '
-        + 'Why this needs a ledger entry despite that sweep: it is the `findStream` (#4484) / '
-        + '`IStorageService.list` (#5540) / `actor-user-roles-to-positions` (#6011) '
+        + 'Why this needs a ledger entry despite that sweep: it is the `findStream` / '
+        + '`IStorageService.list` / `actor-user-roles-to-positions` '
         + 'disposition — a published TS surface with NO spec schema, so there is no '
         + '`retiredKey()` tombstone and no parse rejection that could carry a prescription, '
         + 'and the ledger is the only channel that reaches an upgrader. It is if anything '
@@ -2951,7 +2958,8 @@ const step17: MigrationStep = {
         + 'remain fully authorable on a field definition and fully enforced by the engine, '
         + 'which is where they always lived. The only place these eight are ever spelled is '
         + "inside a consumer's own TypeScript, so no `objectstack migrate meta` transform can "
-        + 'reach them. ADR-0049 / ADR-0087, #6536 (the sweep PR #6532 deliberately deferred).',
+        + 'reach them. ADR-0049 / ADR-0087; this is the removal the dry-run change deliberately '
+        + 'deferred to a sweep of its own.',
       acceptanceCriteria:
         'No code of yours reads any of the eight off a `buildFieldMetaMap` / '
         + '`prepareImportRequest` result. Grep your sources for `.required` / `.hasDefault` / '
@@ -3044,7 +3052,7 @@ const step17: MigrationStep = {
       reason:
         'The `field` registry entry declared `allowRuntimeCreate: true` and the platform never '
         + 'built a read path for it. Measured end-to-end through the real HttpDispatcher -> '
-        + 'ObjectStackProtocolImplementation -> SysMetadataRepository (#7893): '
+        + 'ObjectStackProtocolImplementation -> SysMetadataRepository: '
         + "`PUT /api/v1/meta/field/showcase_task.zz_probe` answered 200 with "
         + '{"success":true,"state":"active","message":"Saved field …"}, the row persisted, and '
         + '`GET /api/v1/meta/object/showcase_task` then listed fields = [title, status] with '
@@ -3061,7 +3069,8 @@ const step17: MigrationStep = {
         + '(a composition step that does not exist, ~20 `gate.fields` call sites, physical '
         + 'schema/migrations, and cold boot via `loadMetaFromDb`); if ever wanted it is a '
         + 'separate card — implementation first, declaration second. '
-        + '⚠️ This is NOT the #5488 (`api`) rationale reused: that ruling rested on "zero '
+        + '⚠️ This is NOT the `api` withdrawal\'s rationale reused (`api-runtime-create-withdrawn`): '
+        + 'that ruling rested on "zero '
         + 'business pull", and "add a field" is the opposite — a core Studio/CRM operation. The '
         + 'justification here is that the operation REMAINS AVAILABLE on the route that actually '
         + 'composes: `object` keeps `allowRuntimeCreate: true`, so what is withdrawn is a second, '
@@ -3071,22 +3080,22 @@ const step17: MigrationStep = {
         + 'authorable one, and no authored source changes — an `**/*.object.ts` file valid before '
         + 'this change is valid after it, byte for byte. What changed is a runtime HTTP verdict, '
         + 'so it is one semantic TODO for operators and Studio callers rather than a stack '
-        + 'conversion — the same disposition `api` (#5488) and `BatchOptions.validateOnly` '
-        + '(#4052) take. ADR-0049 / ADR-0087, #7893 (split from #7743).',
+        + 'conversion — the same disposition `api` and `BatchOptions.validateOnly` take. '
+        + 'ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'No caller creates a standalone `field` item through the runtime metadata API. '
         + '`PUT /api/v1/meta/field/{object}.{name}` answers 403 with `code: "NOT_CREATABLE"` and '
         + 'a body naming both flags (`allowRuntimeCreate=false, allowOrgOverride=false`) and the '
         + 'prescription `PUT /api/v1/meta/object/:object with the new field in `fields``. The '
         + 'plural spelling `PUT /api/v1/meta/fields/{object}.{name}` folds onto the singular '
-        + '(#7894) and earns the same refusal — verify it, because it was a separate door until '
+        + 'and earns the same refusal — verify it, because it was a separate door until '
         + '2026-08-12. ⚠️ Verify the OBJECT route is UNAFFECTED, which is the whole point of the '
         + 'change: `PUT /api/v1/meta/object/{name}` with a new entry in `fields` still answers '
         + '200, and `GET /api/v1/meta/object/{name}` READS THE NEW FIELD BACK (assert on '
         + '`body.data.item.fields`, not `body.item`, which is undefined and makes an empty read '
         + 'look like a pass). Assert a DECLARED field is present in the same response, so a dead '
         + 'read cannot be what makes the check pass. '
-        + '⚠️ #7743\'s overlay refusal is untouched and must stay: overwriting a field a code '
+        + '⚠️ The field overlay refusal is untouched and must stay: overwriting a field a code '
         + 'package ships is still 403 `NOT_OVERRIDABLE`, a different gate for a different '
         + 'question — making field OVERRIDES legal was never part of this decision. '
         + 'DISPOSITION OF EXISTING ROWS: `field` rows already written through the retired channel '
@@ -3094,7 +3103,7 @@ const step17: MigrationStep = {
         + 'no read path ever composed them into an object, so nothing that used to work stops '
         + 'working and no data is silently reinterpreted. They remain self-readable by name and '
         + 'still report `_diagnostics.valid: true`, which asserts only that the isolated document '
-        + 'is well-formed (see #8169 — the envelope has no "in effect" axis). They may be deleted '
+        + 'is well-formed (the envelope has no "in effect" axis). They may be deleted '
         + 'at leisure: `deleteMetaItem` is deliberately NOT gated by this refusal, so repair stays '
         + 'possible. An operator who needs the write door back on one deployment sets '
         + '`OS_METADATA_WRITABLE=field`; note this unlocks the WRITE only — the field still will '
@@ -3212,16 +3221,18 @@ const step17: MigrationStep = {
         + 'different untyped object that does carry `roles`, tracked apart and unaffected). '
         + 'Both branches were therefore dead on '
         + 'every real engine path — an authorization decision in shape only, and a second admin '
-        + 'dialect competing with the one ADR-0090 D3 / ADR-0095 D3 sanction. #4839 (PR #5049) '
-        + 'removed the readers; this removes the declaration, per ADR-0049 enforce-or-remove. '
+        + 'dialect competing with the one ADR-0090 D3 / ADR-0095 D3 sanction. An earlier fix removed '
+        + 'both readers, returning the record lock and the delegation guard to the one permission '
+        + 'vocabulary; this removes the declaration, per ADR-0049 enforce-or-remove. '
         + 'This is a RUNTIME context, not stored metadata: the engine builds a HookContext per '
         + 'operation and nothing persists one, so no `sys_metadata` row, example or template '
         + 'can carry the key and there is no source for the D2 chain to rewrite — the '
-        + '`openApi31` (#4579) / `activationEvents` (#4657) shape, one semantic TODO rather '
+        + '`openApi31` / `activationEvents` shape, one semantic TODO rather '
         + 'than a stack conversion. The key IS tombstoned (`HookContextSchema` is deliberately '
-        + 'not `.strict()` — a plain delete would strip it silently, #3733 / ADR-0104), so a '
+        + 'not `.strict()` — a plain delete would strip it silently, as a removed field key was '
+        + 'measured to be, ADR-0104), so a '
         + 'consumer that parses a context it was handed still meets the prescription. '
-        + 'ADR-0049, #5050.',
+        + 'ADR-0049.',
       acceptanceCriteria:
         'No hook reads `ctx.session.roles`; caller gating uses `ctx.session.userId` / '
         + '`ctx.session.isSystem`, and privilege comes from the security service '
@@ -3241,14 +3252,16 @@ const step17: MigrationStep = {
         + "a global hook, `object: '*'` or no `object` key at all; for a cancelled scope, widen "
         + '`object` or drop the overlapping names from `excludeObjects`',
       reason:
-        '#4281 ruled that an empty hook target is not "no target" and closed the shape at the '
+        'An earlier breaking fix established that an empty hook target is not "no target" and '
+        + 'closed the shape at the '
         + "two METADATA doors — `HookSchema.object`'s refine and `hook-binder.ts`'s "
         + '`normalizeObjects`. `engine.registerHook`, the CODE door, goes through neither, so '
         + 'all three spellings still registered, each producing a defect the author did not '
         + "write: `''` is FALSY, so the allow face was skipped entirely and the entry became a "
-        + "GLOBAL hook (#4281's headline failure mode — blank intent taking the broadest "
+        + "GLOBAL hook (that fix's headline failure mode — blank intent taking the broadest "
         + "possible blast radius); `[]` and `['']` are truthy but admit no object name, so the "
-        + 'entry could never fire. #5928 then added the `excludeObjects` face, which brought a '
+        + 'entry could never fire. The later `excludeObjects` face (a hook global except for the '
+        + 'objects it names) then brought a '
         + 'fourth shape reached by arithmetic rather than by one bad name: an `object` list '
         + 'every member of which is also excluded admits nothing, so that entry can never fire '
         + 'either. All four are ADR-0078 silently-inert declarations, and all four are now '
@@ -3260,7 +3273,7 @@ const step17: MigrationStep = {
         + "the MATCHING read be changed instead: teaching the matcher that `''` is an "
         + 'unmatchable name would silently convert a hook firing on every object into one '
         + 'firing on none — the same class of defect pointing the other way, which is why '
-        + '#5928 declined to do it in passing.\n\n'
+        + 'the `excludeObjects` change declined to do it in passing.\n\n'
         + 'This is a RUNTIME registration API, not stored metadata, so — like '
         + '`hook-context-session-roles-retired` at this step — there is no `sys_metadata` row '
         + 'for the D2 chain to rewrite and the ledger entry is the notification channel. One '
@@ -3270,8 +3283,7 @@ const step17: MigrationStep = {
         + 'a blank `objectName` used to bind a trigger to EVERY object in the tenant. It now '
         + "fails to bind instead, loudly — the automation engine's per-flow bind guard warns "
         + 'and the `kernel:bootstrapped` binding audit re-reports it — which is the correct '
-        + 'end state, but it is an observable change for that flow. #6573, #4281, #4001, '
-        + '#5928, ADR-0078.',
+        + 'end state, but it is an observable change for that flow. ADR-0078.',
       acceptanceCriteria:
         'No `registerHook` call site passes an empty `object` target, and none passes an '
         + '`excludeObjects` list covering every name in its `object` list. Every `record-change` '
@@ -6126,7 +6138,8 @@ const step18: MigrationStep = {
         + 'the request schemas of both read doors, the install / uninstall / upgrade / rollback shapes, '
         + '`PackageApiErrorCode` — stays on `@objectstack/spec/api`.',
       reason:
-        'Maintainer ruling on #18576 (batch #145 item 1, letter B, 「同意,其他也同意」): split the API entry '
+        'Maintainer ruling of 2026-09-17, option B (narrow the entry, rather than add a bundle-weight '
+        + 'rule to the browser-reachability ledger or accept the weight as it stood): split the API entry '
         + 'so its browser-facing half no longer carries the assembled-package declarations. Those five embed '
         + 'the ASSEMBLED package body, which reaches the whole metadata vocabulary and, behind it, the '
         + 'datasource declaration and the driver-config validators; declared inside `@objectstack/spec/api`, '
@@ -6177,7 +6190,7 @@ const step18: MigrationStep = {
       surface: 'EnhancedApiError.retryAfter (api/errors.zod.ts) — the ADR-0112 error envelope on the wire',
       replacement: 'retryAfterSeconds — rename the key; the value (seconds) is unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B of 2026-09-02 on duration-shaped keys: the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
         + 'BREAKING ON THE WIRE, and ruled in deliberately: the ruling puts the ~16 runtime-emitted '
         + 'measurements in scope because they are read by humans and agents even if nobody authors '
         + 'them, and names ApiError.retryAfter explicitly, with its own BREAKING note. The ambiguity '
@@ -6191,7 +6204,7 @@ const step18: MigrationStep = {
         + 'green grep for `retry-after` in transport code as leftover work. A SEMANTIC entry rather '
         + 'than a D2 conversion because an error envelope is emitted, never stored: it is not a stack '
         + 'collection member and never a sys_metadata row, so the conversion chain has no seam that '
-        + 'would see one. #15677, #14478, ADR-0087, ADR-0112.',
+        + 'would see one. ADR-0087, ADR-0112.',
       acceptanceCriteria:
         'No producer emits `retryAfter` on an ApiError envelope and no consumer reads it; the old '
         + 'spelling is a retiredKey() tombstone that fails tsc at the construction site and fails the '
@@ -6211,7 +6224,7 @@ const step18: MigrationStep = {
       replacement: 'cacheTtlSeconds (seconds) and timeoutMs (milliseconds) — rename each key; both '
         + 'values are unchanged',
       reason:
-        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        'Maintainer ruling B of 2026-09-02 on duration-shaped keys: the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
         + 'Two keys on two shapes, in one entry because they share a disposition and an audience: '
         + 'both are api-layer runtime configuration a host or plugin builds in code, and neither is '
         + 'part of a published metadata document. DataLoaderConfig.cacheTtl named seconds only in its '
@@ -6225,7 +6238,7 @@ const step18: MigrationStep = {
         + 'chain has no seam that would run on them (the kernel/Manifest:loading precedent). Worth '
         + 'knowing while grepping: packages/runtime declares its OWN local RouteDefinition interface '
         + 'for the ai:routes hook payload — a different type with no duration key at all, untouched by '
-        + 'this rename. #15677, #14478, ADR-0087.',
+        + 'this rename. ADR-0087.',
       acceptanceCriteria:
         'Every DataLoaderConfigSchema.parse(…) and RouteDefinitionSchema.parse(…) site spells '
         + '`cacheTtlSeconds` / `timeoutMs`; authoring either old spelling fails to compile (input type '
@@ -8059,9 +8072,10 @@ const step18: MigrationStep = {
         + 'the shared comparand-shape face, which refuses it with INVALID_FILTER / 400. So such a '
         + 'dataset saved clean and every chart built on it failed, for a different person, later. '
         + 'The shared FilterConditionSchema does not descend a field spec with no $ key, because the '
-        + 'engine reads one as a deep-equality comparand; ruling A on #19889 (record 5805248669) put '
-        + 'it there and it stays there. Triage on #20080 (record 5825670610) routed the fix to the two '
-        + 'analytics carriers instead: they refine their filter with the analytics door\'s own walk '
+        + 'engine reads one as a deep-equality comparand; ruling A of 2026-09-24, which made the schema '
+        + 'door refuse what the compile face refuses, drew the line there and it stays there. Triage on '
+        + '2026-09-25 routed the fix to the two analytics carriers instead, rather than stop the '
+        + 'analytics door descending, which would change what a nested list means: they refine their filter with the analytics door\'s own walk '
         + '($and / $or arrays and $not descended, other $ keys skipped, a plain object with no $ key '
         + 'descended as a nested relation at any depth) and refuse, inside a nested relation only, '
         + 'exactly what that door refuses there, in the face\'s words from the one builder both doors '
@@ -8096,22 +8110,22 @@ const step18: MigrationStep = {
         + 'whose aggregate that declared `FieldType` cannot carry: `avg` and `sum` over any of '
         + 'the three. ⚠️ This entry is ONE OF TWO on this leg, and its scope sentence is kept '
         + 'as written: it covered the temporal class and nothing else when it was registered. '
-        + 'The non-temporal `sum` / `avg` rows followed under #16099, which registered NO '
+        + 'The non-temporal `sum` / `avg` rows followed in a later change, which registered NO '
         + 'entry of its own — it declared `not-required (already-registered '
         + 'dataset-measure-aggregate-field-type-refused)` against THIS id — so its widening '
         + 'rides this entry\'s prescription rather than a separate one. The `min` / `max` rows '
         + 'over every class the table refuses are the second entry, '
-        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560). ⇒ Read BOTH when '
+        + '`dataset-measure-selecting-aggregate-field-type-refused`. ⇒ Read BOTH when '
         + 'migrating; there is no third',
       replacement: 'an aggregate the field\'s type accepts, per '
-        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353): '
+        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`): '
         + '`min` / `max` for a temporal field — both return a real instant of the field\'s own '
         + 'type — or `count` / `count_distinct`, which read no arithmetic off the value. '
         + 'A DURATION is not recoverable from an aggregate over instants: store it as a '
         + 'number (a computed "days open" field) and aggregate that. A `derived` measure whose `of` '
         + 'names a refused measure is fixed by fixing that measure, not the `derived` one',
       reason:
-        '#16737 / #16099. Nothing between the author and the driver correlated a measure\'s '
+        'Nothing between the author and the driver correlated a measure\'s '
         + 'aggregate with its field type, so `avg` over a `Field.datetime` compiled to '
         + '`AVG(col)` and reached the backend — where the ANSWER was decided by the dialect '
         + 'rather than by the data. Measured on both halves: SQLite coerces the column\'s '
@@ -8129,8 +8143,8 @@ const step18: MigrationStep = {
         + 'such averages rendered `-0.85` on a tile labelled "average cycle time delta" — '
         + 'indistinguishable from a correct answer, which is the shape Prime Directive #12 '
         + 'exists to remove. Which pairs are accepted is therefore a contract, declared once '
-        + 'in `@objectstack/spec` under the director ruling of decision batch #59 '
-        + '(2026-09-06, "both legs, table in spec") and executed by the consumer legs; the '
+        + 'in `@objectstack/spec` under the director\'s ruling of 2026-09-06 ("both legs, table '
+        + 'in spec") and executed by the consumer legs; the '
         + 'compile-time leg (`dataset-compiler`, `service-analytics`) refuses the pair with '
         + '`DATASET_INVALID` / 400 before any query is built, using the declared type the '
         + 'host already supplies through `AnalyticsServiceConfig.sourceFieldMeta`. '
@@ -8142,9 +8156,9 @@ const step18: MigrationStep = {
         + '— and none pairs it with `avg` or `sum`. ⚠️ The criterion as WRITTEN reaches no '
         + 'further: a measure over a field of any other class was not judged by the leg this '
         + 'entry was registered for. It is covered all the same — by this entry\'s own '
-        + 'prescription, widened by #16099 (which registered `not-required` against this id '
-        + 'rather than an entry of its own) to `sum` / `avg` over every field class; and by '
-        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560) for `min` / '
+        + 'prescription, widened by a later change (which registered `not-required` against this '
+        + 'id rather than an entry of its own) to `sum` / `avg` over every field class; and by '
+        + '`dataset-measure-selecting-aggregate-field-type-refused` for `min` / '
         + '`max`. ⛔ There is no third entry to look for. At protocol major 18 as a whole, '
         + 'every refused pair in `AGGREGATE_FIELD_TYPE_COMPATIBILITY` is refused at the '
         + 'compile door. '
@@ -8170,7 +8184,7 @@ const step18: MigrationStep = {
         + 'types (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) '
         + 'and `formula` — 37 field types × 2 aggregates = 74 pairs',
       replacement: 'an aggregate the field\'s type accepts, per '
-        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353), or a '
+        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`), or a '
         + 'different way of asking the question. ⚠️ There is no lossless rewrite, which is why '
         + 'this is a semantic TODO and not a D2 conversion: nothing can compute "the smallest '
         + 'text value" in a way every backend agrees on, so no transform can preserve the '
@@ -8186,13 +8200,13 @@ const step18: MigrationStep = {
         + 'A `derived` measure whose `of` names a refused measure is fixed by fixing that '
         + 'measure, not the `derived` one',
       reason:
-        '#17560, director ruling, decision batch #127 (2026-09-13). The table refused these '
-        + '74 pairs from the day it was declared and NOTHING executed the refusal: the compile '
+        'Director ruling B of 2026-09-13: the compile door enforces the table for every aggregate. '
+        + 'The table refused these 74 pairs from the day it was declared and NOTHING executed the refusal: the compile '
         + 'leg (`dataset-compiler`, `service-analytics`) carried an explicit scope condition — '
         + '`if (!DERIVING_AGGREGATES.has(aggregate)) return;` — so `min` / `max` were never '
         + 'judged whatever the field type, and `service-analytics`\' `measureResultType` went '
         + 'further and typed `min` / `max` over the string classes as a supported `\'string\'` '
-        + 'result (#15768) and over a `formula` field from its declared `returnType` (#16236). '
+        + 'result and over a `formula` field from its declared `returnType`. '
         + 'Four declarations, three answers, one pair — the worst shape of declared≠enforced, '
         + 'because nobody could tell which sentence was the contract. ⭐ The divergence is '
         + 'real and it is the ORDER rather than the arithmetic: string order is '
@@ -8200,15 +8214,15 @@ const step18: MigrationStep = {
         + 'metadata document, and `min(jsonb)` does not exist on PostgreSQL at all — the same '
         + 'shape Prime Directive #12 exists to remove. The ruling settled all three '
         + 'sub-questions together rather than per field class, because one shared fixture drove '
-        + 'members of both halves: the string classes stay REFUSED as decision batch #59 ruled '
-        + '(2026-09-06, 「`min`/`max` numeric plus `date`/`datetime`; everything else '
+        + 'members of both halves: the string classes stay REFUSED as the director\'s 2026-09-06 '
+        + 'ruling put them (「`min`/`max` numeric plus `date`/`datetime`; everything else '
         + 'refused」) and the table is NOT amended; the non-string classes are refused AND '
         + 'enforced; and `formula` is refused on the table\'s own storage ground — it is '
         + 'VIRTUAL in SQL storage, no column is emitted, so no aggregate can be lowered to it '
         + 'whatever `returnType` says. ⚠️ The "ruled C — the table is to be AMENDED to accept '
-        + 'the string rows" note the tree carried in two test files, citing #17513, had no '
-        + 'ruling behind it: that card is closed as a duplicate with zero rulings on it, and '
-        + 'the one recorded ruling on this table says the opposite. Business pull was measured '
+        + 'the string rows" note the tree carried in two test files had no ruling behind it: the '
+        + 'card it cited is closed as a duplicate with zero rulings on it, and '
+        + 'the earlier recorded ruling on this table says the opposite. Business pull was measured '
         + 'and is zero — the shipped `min` / `max` cases were in-tree fixtures pinning a result '
         + 'TYPE, not customer datasets reading one. ⚠️ Confidence gap, recorded rather than '
         + 'hidden: customer datasets in the `cloud` repository were not readable when this was '
@@ -9434,29 +9448,30 @@ const step18: MigrationStep = {
         + '(ImportJob…, ListImportJobs…, ImportJobApiContracts) is served and is NOT part of this '
         + 'retirement',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling A on #17158 (decision batch #122 item 3, '
-        + '「同意」 2026-09-12: retire the family, IExportService and ScheduleExportInput; ScheduleState '
-        + 'retired with it unless a live consumer is measured), landing route A (decision batch #221 '
-        + 'item 2, 「同意」 2026-09-24: objectui retires its side first, in objectui#10247, then this '
-        + 'retirement), and a scope note (「同意」 2026-09-25) that absorbs #19543 door ② — the '
-        + 'declared limit / cursor of the export-job list — into it. The family declared an '
+        'ADR-0049 enforce-or-remove; maintainer ruling A of 2026-09-12 (retire the family, '
+        + 'IExportService and ScheduleExportInput; ScheduleState retired with it unless a live '
+        + 'consumer is measured), the landing route the maintainer ruled on 2026-09-24 (route A: '
+        + 'objectui retires its own side of the unimplemented async-export path first, then this '
+        + 'retirement), and a scope note the maintainer agreed on 2026-09-25 that folds in the '
+        + 'declared limit / cursor of the export-job list — one of three sibling list doors found '
+        + 'declaring them and never reading them. The family declared an '
         + 'asynchronous export API, create / progress / download / list / schedule / cancel under '
         + '/api/v1/data/export and a POST on /api/v1/data/:object/export, that NOTHING served: '
         + '@objectstack/rest mounts no /api/v1/data/export route and only the GET on '
         + '/api/v1/data/:object/export, IExportService recorded no evidenced provider binding, and '
         + 'the reader census over objectstack outside packages/spec, over objectui at the pinned '
-        + 'sha (which carries objectui#10247) and over cloud main returned zero code files naming '
-        + 'any of the forty-three exported names, each beside a lit control. An AI reading the '
-        + 'contract found a complete, well-typed export-job API and wrote calls that answer 404 — '
-        + 'and after #16320 deleted its cron positions, ScheduledExport / ScheduleExportRequest '
-        + 'kept a REQUIRED schedule block that could hold no schedule, so an author who filled in '
+        + 'sha (which carries objectui\'s own retirement) and over cloud main returned zero code '
+        + 'files naming any of the forty-three exported names, each beside a lit control. An AI '
+        + 'reading the contract found a complete, well-typed export-job API and wrote calls that '
+        + 'answer 404 — and once the retirement of the cron-typed positions nothing read had '
+        + 'deleted theirs, ScheduledExport / ScheduleExportRequest kept a REQUIRED schedule block that could hold no schedule, so an author who filled in '
         + 'its timezone believed they had scheduled something. ScheduleState described the '
         + 'runtime state of a scheduled flow that no scheduler wrote or read. Why D3 semantic and '
         + 'not a D2 conversion: the chain walks a normalized STACK and applyConversionsToStoredItem '
         + 'maps a metadata type onto one of its collections; none of these shapes is either — they '
         + 'are HTTP bodies, a route map, a service interface and an unpersisted runtime record — so '
         + 'a conversion would be a transform with no seam that ever runs, and with no carrier key '
-        + 'there is no shape on which a tombstone could sit. The #16320 cron-position deletions '
+        + 'there is no shape on which a tombstone could sit. Those earlier cron-position deletions '
         + 'on three of these defs registered nothing and stay unregistered; the defs themselves are '
         + 'now the RETIRED_DEFS_BY_MAJOR[18] entries.',
       acceptanceCriteria:
@@ -9488,9 +9503,9 @@ const step18: MigrationStep = {
         + 'on a currency field that declared no `scale`. ⛔ Nothing replaces the key: do not re-declare '
         + 'its value under any other key.',
       reason:
-        'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retires `scale` from the '
-        + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
-        + 'decimal places are the currency\'s, not a setting) words the remedy. On a currency field the '
+        'The maintainer\'s ruling of 2026-09-23 (option B) retires `scale` from the `currency` field '
+        + 'type, and the ruling of 2026-09-24 (option 乙 — a currency\'s decimal places are the '
+        + 'currency\'s, not a setting) words the remedy. On a currency field the '
         + 'key was three-faced: the metadata-admin field designer offered it as stored metadata, the '
         + 'amount\'s cell never read it (fraction digits come from the currency\'s ISO 4217 minor '
         + 'unit), and the record validator\'s `max_scale` branch still refused writes carrying more '
@@ -9593,8 +9608,9 @@ const step18: MigrationStep = {
         + '`json`, `secret`, …)',
       replacement: 'a positive-integer `maxLength` (>= 1) on a bounded-string field type — `text`, '
         + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
-        + 'plus `signature`/`qrcode` since #11875 (the set is `BOUNDED_STRING_FIELD_TYPES`; the '
-        + '#11566 narrowing itself landed on the ten-member set of its day) '
+        + 'plus `signature`/`qrcode`, which joined once the write seam enforced a declared bound on '
+        + 'them (the set is `BOUNDED_STRING_FIELD_TYPES`; the narrowing itself landed on the '
+        + 'ten-member set of its day) '
         + '— or no declaration at all. Deleting the key is mechanical and behaviour-preserving '
         + 'for a MISPLACED declaration: the write-time validator only ever applied `max_length` '
         + 'inside its bounded-string branch, so the key was inert by construction on every other '
@@ -9602,18 +9618,21 @@ const step18: MigrationStep = {
         + 'validator\'s raw `>` comparison did consume it (`maxLength: 0` accepted only the '
         + 'empty string, a negative value refused every write, `maxLength: 12.5` behaved as '
         + '"at most 12"), and the SQL schema-drift planner consumed `maxLength: 0` as '
-        + '`varchar(0)` DDL until #11431 taught it to defend itself — so only the author knows '
+        + '`varchar(0)` DDL until it was taught to stop reading a malformed bound as authoritative '
+        + '— so only the author knows '
         + 'the bound they MEANT: re-declare it as a positive integer, or delete it deliberately '
         + 'accepting the unbounding',
       reason:
-        '#11566 (maintainer ruling 2026-08-24; enforcement shipped on the 17.x line in PR '
-        + '#11989 — accept-set narrowings ride minors, and this entry tells `migrate meta` users '
-        + 'at the major boundary; registration was deferred to #11950 because the registry file '
+        'Maintainer ruling of 2026-08-24, tightening both halves — the value\'s shape and the '
+        + 'types the key applies to (enforcement shipped on the 17.x line — accept-set narrowings '
+        + 'ride minors, and this entry tells `migrate meta` users at the major boundary; '
+        + 'registration was deferred to a follow-up because the registry file '
         + 'was serialized behind an in-flight change when the enforcement landed). Shape: a '
         + 'character length is a positive integer, so the key tightened from `z.number()` to '
         + '`z.number().int().min(1)` — `maxLength: 0` measurably sent schema-drift planning '
-        + '`varchar(0)` DDL no server accepts, at severity error/destructive, before #11431 '
-        + 'taught that consumer to defend itself (the #8321 `precision`/`scale` house pattern). '
+        + '`varchar(0)` DDL no server accepts, at severity error/destructive, before that consumer '
+        + 'was taught to stop reading a malformed bound as authoritative (the house pattern the '
+        + '`precision`/`scale` integer refusal set). '
         + 'Applicability: the key sat on the BASE field schema — authorable on `boolean` / '
         + '`lookup` / `autonumber`, types where nothing bounded is stored — while the write-time '
         + 'validator (objectql `record-validator.ts`) only ever enforced it on its ten '
@@ -9645,7 +9664,7 @@ const step18: MigrationStep = {
       replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
         + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
         + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
-        + '`signature`/`qrcode` joined in #11875) '
+        + '`signature`/`qrcode` joined once the write seam enforced a declared bound on them) '
         + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
         + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
         + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '
@@ -9656,8 +9675,10 @@ const step18: MigrationStep = {
         + '"at least 3"), so only the author knows the integer they MEANT — re-declare it '
         + 'deliberately if the constraint was wanted',
       reason:
-        '#11949 (maintainer ruling 2026-08-25): `minLength` carried the exact defect pair #11566 '
-        + 'closed for `maxLength`, and converges on the same template. Shape: the key was '
+        'Maintainer ruling of 2026-08-25 (option B, the lower bound at 1): '
+        + '`minLength` carried the exact defect pair the 2026-08-24 ruling closed for `maxLength` '
+        + '(`field-max-length-malformed-or-misplaced-refused`), and converges on the same template. '
+        + 'Shape: the key was '
         + '`z.number()`, so `minLength: -5` and `minLength: 2.5` parsed cleanly while describing '
         + 'no character length; it is now `z.number().int().min(1)`. The lower bound is 1 by '
         + 'ruling: `minLength: 0` is refused loudly — a vacuous always-true declaration is '
@@ -9694,14 +9715,15 @@ const step18: MigrationStep = {
         + '`isMultiValueField` are unchanged, so every field that was ALREADY multi-valued by that '
         + 'predicate keeps its declaration, its storage and its read path verbatim.',
       reason:
-        '#17469 (maintainer ruling 2026-09-13, decision batch #128 item 5, option 1′ — the #11437 '
-        + 'radio rule generalised): two definitions of "multi-valued" disagreed. `FieldSchema` '
+        'Maintainer ruling of 2026-09-13, option 1′ (the earlier rule refusing an authored `radio` '
+        + 'with `multiple: true`, generalised): two definitions of "multi-valued" disagreed. `FieldSchema` '
         + 'accepted `multiple: true` on ANY type; driver-sql\'s `isJsonField` read it raw '
         + '(`|| !!field.multiple`) and built a JSON ARRAY column; `isMultiValueField` — the spec '
         + 'predicate consumers shape queries from — answered "not multi-value" for the same field. '
         + 'A related list therefore composed `=` against a JSON array column and the driver answered '
-        + 'the user a 400 (objectui#8886 pinned the divergence on the consumer side; objectui#8937 '
-        + 'recorded it as owed and not filed). There is NO lossless conversion: the column was '
+        + 'the user a 400 (the console\'s related list pinned the divergence on the consumer side '
+        + 'when it began shaping that filter from the spec predicate, and its follow-up recorded the '
+        + 'driver half as owed and not filed). There is NO lossless conversion: the column was '
         + 'physically built as a JSON array, so the stored value is an array while the replacement '
         + 'type may want one scalar, several ids, or several option codes — which of those the author '
         + 'meant is a business judgment the chain cannot make. Hence a structured TODO rather than an '
@@ -9761,7 +9783,8 @@ const step18: MigrationStep = {
         + 'A read through `previous` or `parent` has no hydrated seam at all, a validation rule included: '
         + 'read a column the bound record declares instead',
       reason:
-        'Card #20078, triage remedy A (5825661201). The field level is never hydrated: '
+        'Triage routed this on 2026-09-25 to remedy A: refuse the traversal at authoring, with a '
+        + 'prescription. The field level is never hydrated: '
         + '`rule-validator.ts` evaluates `requiredWhen` / `readonlyWhen` / an option\'s `visibleWhen` '
         + 'against the record alone, so a reference there holds the related record\'s bare id and every '
         + 'read through it faults, on every row. Measured on the engine before this change: a traversing '
@@ -9770,8 +9793,8 @@ const step18: MigrationStep = {
         + 'gated through a reference was admitted whatever the related record said (option visibility is '
         + 'fail-open) — while `objectstack validate` passed a stack carrying all three, exit 0. ADR-0137 D2 '
         + 'made the runtime fail closed; the defect was that authoring did not say so first (NORTH-STAR '
-        + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served (#18682) '
-        + 'and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
+        + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served, one hop '
+        + 'deep, and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
         + 'moving a field predicate into a validation rule turns a condition into a FAILURE condition, '
         + 'moves an option from hidden to offered-then-refused, and the right `events` scope depends on '
         + 'what the author meant — none of it mechanical. Hydrating the field level instead is a '
@@ -9823,14 +9846,14 @@ const step18: MigrationStep = {
         + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
       replacement: 'a non-negative integer digit count, or no declaration at all. The mechanical '
         + 'conversion (`field-malformed-scale-precision-removed`) deletes a malformed value — '
-        + 'behaviour-preserving, because #7501\'s enforcement deliberately skipped malformed '
+        + 'behaviour-preserving, because the write-time `scale` enforcement deliberately skipped malformed '
         + 'declarations, so they enforced nothing — but only the author knows the count they '
         + 'MEANT (`scale: 2.5` was probably `2` or `3`): re-declare it deliberately if the '
         + 'constraint was wanted',
       reason:
         'Both keys are digit COUNTS ("Total digits" / "Decimal places"), and `z.number()` admitted '
-        + 'values with no defined meaning as a count. That looseness became load-bearing when #7501 '
-        + 'made `scale` enforced at write time: the runtime branch deliberately guards on '
+        + 'values with no defined meaning as a count. That looseness became load-bearing when `scale` '
+        + 'was made enforced at write time (an over-scale write refused, never rounded): the runtime branch deliberately guards on '
         + '`Number.isInteger(def.scale) && def.scale >= 0` — inventing floor/round semantics in a '
         + 'consumer would be PD #12 guessing — so a typo\'d declaration (`scale: 2.5`) silently got '
         + 'no enforcement at all: exactly the declared-but-inert shape that hides AI-authored '
@@ -11110,8 +11133,9 @@ const step18: MigrationStep = {
         + 'seams apart: one is a rename, the other is a different API.\n\n'
         + 'The refusal is scoped to those six names, not to everything outside the dispatched set. '
         + '`triggerHooks` is public, so a plugin dispatching its own event under a name outside the '
-        + "engine's vocabulary (`'myPlugin:flush'`) is a legitimate reading — that is why #3195 made "
-        + 'this branch a warn — and it still warns and still registers. The population is DERIVED '
+        + "engine's vocabulary (`'myPlugin:flush'`) is a legitimate reading — that is why the change "
+        + 'that collapsed the hook taxonomy to the eight dispatched events made this branch a warn — '
+        + 'and it still warns and still registers. The population is DERIVED '
         + 'from the operation union rather than typed out, so a new engine verb widens it without an '
         + 'edit; a hand-written list of refused names would be this same defect one layer up.\n\n'
         + 'This is a RUNTIME registration API, not stored metadata, so — like '
@@ -11120,7 +11144,7 @@ const step18: MigrationStep = {
         + 'channel. The metadata door was never open on this axis: `HookSchema.events` is '
         + '`z.array(HookEvent)`, and `HookEvent` enumerates exactly the eight dispatched names, so no '
         + 'authored or stored hook could ever carry one of the six. The exposure was entirely on the '
-        + 'code door. #17713, #3195, ADR-0078.',
+        + 'code door. ADR-0078.',
       acceptanceCriteria:
         'No `registerHook` call site passes `beforeFindOne`, `afterFindOne`, `beforeCount`, '
         + '`afterCount`, `beforeAggregate` or `afterAggregate`. Every read filter that was written '
@@ -12450,8 +12474,9 @@ const step18: MigrationStep = {
         + 'model (clone with a new machine name + ledger disable — never a field-level patch '
         + 'overlay)',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-29 on #12057 (「同意」 — retirement '
-        + 'adopted, re-scope rejected), executed widened by #13135 per the fork report on #12057: '
+        'ADR-0049 enforce-or-remove; the maintainer\'s ruling of 2026-08-29 adopted retirement and '
+        + 'rejected a re-scope, and it was executed widened to the full coupling set the fork report '
+        + 'on that ruling measured: '
         + 'the module declared a three-layer platform/user patch-overlay protocol with field-level '
         + 'change tracking and a 3-way-merge story, published reference docs described it as the '
         + 'customization architecture — and nothing reachable implemented it. The one '
@@ -12459,7 +12484,8 @@ const step18: MigrationStep = {
         + 'only by its own unit tests; no merge engine ever existed; no code read a '
         + '`CustomizationPolicy`. ADR-0126 §6 wall 4 supersedes the protocol as a matter of record '
         + '("nothing may build against it") — the per-field overlay layer it described is '
-        + 'precisely what the #11513 ruling recorded as deliberately not chartered. Why D3 '
+        + 'precisely what the 2026-08-24 lock-and-clone ruling (lock the packaged base, customize a '
+        + 'clone) left deliberately unchartered. Why D3 '
         + 'semantic and not a D2 conversion: the defs leave with no carrier key in any stack '
         + 'collection, and the three tombstoned keys live on plugin/manager configs, which are not '
         + 'stack collection members (`PLURAL_TO_SINGULAR` has no `plugins` entry) — a '
@@ -12504,11 +12530,13 @@ const step18: MigrationStep = {
         + 'judgment, so it is delegated rather than automated. The change itself is the ADR-0049 '
         + 'declared-vs-enforced defect in the direction the liveness ledger structurally cannot look: all '
         + 'three keys were genuinely live, and what had drifted was each one\'s RADIUS against its own '
-        + '`describe()` — `items` gated a migration write door while naming a listing read (#15542), and '
+        + '`describe()` — `items` gated a migration write door while naming a listing read, and '
         + '`item` gated four reads while its own `PUT` / `DELETE` and the history family answered to '
-        + '`api.enableMetadata` alone (#15854). Ruled together by the maintainer as one principle. Measured '
-        + 'population at the time of the move: ZERO — no shipped boot path constructs a `RestServerConfig` '
-        + '(#15543), so only programmatic embedders can have authored these keys at all.',
+        + '`api.enableMetadata` alone. The maintainer ruled the two together on 2026-09-06 as one '
+        + 'principle: every `endpoints.*` switch gates exactly the face its name states, and the '
+        + 'whole-store family gets a key of its own. Measured '
+        + 'population at the time of the move: ZERO — no shipped boot path constructs a `RestServerConfig`, '
+        + 'so only programmatic embedders can have authored these keys at all.',
       acceptanceCriteria:
         'For each `RestServerConfig` the consumer constructs, `new RestServer(...).registerRoutes()` followed '
         + 'by `getRoutes()` yields the route table the consumer intends — specifically: with '
@@ -12558,10 +12586,10 @@ const step18: MigrationStep = {
       surface: 'MetadataManagerConfig `cache.ttl` / `cache.databaseLoader.ttl` (kernel/metadata-loader.zod.ts)',
       replacement: '`cache.databaseLoader.ttlMs` (milliseconds, default 60000) — rename the nested key; the '
         + 'value is unchanged. The outer `cache.ttl` has NO replacement: its respelling `ttlSeconds` '
-        + 'was retired before it shipped (#15624, see `metadata-manager-config-inert-cache-keys-retired`) '
+        + 'was retired before it shipped (see `metadata-manager-config-inert-cache-keys-retired`) '
         + '— delete the key; nothing ever read it',
       reason:
-        'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
+        'Maintainer ruling B of 2026-09-02 on duration-shaped keys (no grandfathered baseline): the unit of a '
         + 'duration-shaped `z.number()` key lives in the key NAME or in a unit-carrying value, never '
         + 'only in the description. This block was the founding specimen: two keys spelled `ttl` '
         + 'fourteen lines apart, the outer one in SECONDS (3600) and the nested DatabaseLoader one in '
@@ -12575,7 +12603,7 @@ const step18: MigrationStep = {
         + '`metadata-plugin-additional-types-retired` precedent). The one in-repo reader, '
         + '`DatabaseLoader` (`packages/metadata`), reads `cache.databaseLoader.ttlMs` at the same '
         + 'magnitude it read `ttl`; the outer `cache.ttl` had no runtime reader (measured on '
-        + 'ca46f8f12, filed as #15624 and retired there under ADR-0049 before this rename shipped — '
+        + 'ca46f8f12, and retired on its own under ADR-0049 before this rename shipped — '
         + 'so this entry\'s outer half is a deletion, not a rename, and the `ttlSeconds` spelling '
         + 'never reached a published release).',
       acceptanceCriteria:
@@ -12595,11 +12623,11 @@ const step18: MigrationStep = {
         + '(default true) is the switch, `ttlMs` (milliseconds, default 60000) the TTL and `maxSize` '
         + '(an entry count, default 500) the cap',
       reason:
-        'ADR-0049 enforce-or-remove (#15624, PM ruling on the card, conditioned on the measurement '
-        + 'it carries and re-taken on the merged ref): the outer `cache` block of '
+        'ADR-0049 enforce-or-remove (the owning seat\'s ruling, conditioned on the measurement '
+        + 'below and re-taken on the merged ref): the outer `cache` block of '
         + '`MetadataManagerConfig` advertised three knobs — `enabled` (default true), `ttlSeconds` '
-        + '(default 3600; `ttl` until #14478) and `maxSize` ("bytes") — that no runtime read. The '
-        + 'only consumer of the block is `MetadataManager` (`packages/metadata`), which hands '
+        + '(default 3600; `ttl` until the duration-unit rename) and `maxSize` ("bytes") — that no '
+        + 'runtime read. The only consumer of the block is `MetadataManager` (`packages/metadata`), which hands '
         + '`cache.databaseLoader` and nothing else to `new DatabaseLoader({ cache })`; a '
         + 'repo-wide reader census over `packages/**` (tests and changelogs excluded) found no '
         + 'runtime reader of any outer key, while the same grep shape found the nested '
@@ -12608,8 +12636,8 @@ const step18: MigrationStep = {
         + 'cache that behaved exactly as before, and the published reference page documented '
         + 'all three as if they configured something. All three are retiredKey tombstones (the '
         + 'nested object is not strict; a bare deletion would strip them in silence — the same '
-        + 'no-op one layer down). The #14478 `ttl` → `ttlSeconds` rename, registered under this '
-        + 'same major and never shipped, is folded into the removal: `cache.ttl`\'s tombstone now '
+        + 'no-op one layer down). The duration-unit ruling\'s `ttl` → `ttlSeconds` rename, '
+        + 'registered under this same major and never shipped, is folded into the removal: `cache.ttl`\'s tombstone now '
         + 'prescribes deletion rather than a rename to a key that is itself retired, so a 17.x '
         + 'author sees one hop. Why a semantic entry and not a D2 conversion: `MetadataManagerConfig` '
         + 'is the runtime MetadataManager\'s constructor config, not a stack collection member and '
@@ -12639,7 +12667,8 @@ const step18: MigrationStep = {
         + '`registerMetadataTypeSchema(type, schema)` from the plugin\'s `init(ctx)` so '
         + '`GET /api/v1/meta` serves a real JSON Schema for it',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-14 on #8586. The key was '
+        'ADR-0049 enforce-or-remove; maintainer ruling of 2026-08-14: remove the key, jointly with '
+        + 'refusing unknown types at the `/meta` boundary by the static registry. The key was '
         + 'declared, authorable, on the published authorable surface, and documented on four '
         + 'docs pages as THE way a plugin registers a custom metadata type — and read by '
         + 'NOTHING. The only production writer of the manager\'s type registry is '
@@ -12649,9 +12678,9 @@ const step18: MigrationStep = {
         + '`MetadataManager`: declared count == live count (27 == 27), '
         + '`getRegisteredTypes()` sorted equals the built-in registry sorted. So an author '
         + 'who followed the published instructions wrote the key, got no error, and nothing '
-        + 'happened — the same silence trap as #4212\'s `onInstall` (a documented hook with '
-        + 'no invocation site), one level down, in exactly the AI-authoring path (ADR-0033). '
-        + 'Joint consequence recorded with #8421: with this plugin-declared channel removed, '
+        + 'happened — the same silence trap as the plugin lifecycle\'s `onInstall` (a documented '
+        + 'hook with no invocation site), one level down, in exactly the AI-authoring path (ADR-0033). '
+        + 'The joint consequence: with this plugin-declared channel removed, '
         + 'the static registry is the total universe of legal metadata kinds, which makes '
         + 'refuse-by-static-registry at the /meta boundary safe by construction. '
         + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
