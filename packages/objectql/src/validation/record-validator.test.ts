@@ -950,10 +950,19 @@ describe('validateRecord — number `scale` is enforced by rejection (#7501)', (
     expect(err).toMatchObject({ field: 'work_hours', code: 'max_scale' });
   });
 
-  it('string-carried numbers (a CSV cell) are judged after coercion, same as min/max', () => {
-    const [err] = fieldsOf({ work_hours: '11.5' });
+  it('a string-carried number is refused, never coerced (#20309): scale judges the number a producer sends', () => {
+    // A CSV cell reaches the engine as a NUMBER: the import route converts it
+    // (`parseNumberCell`) before the row is written. A string that gets here
+    // was sent as a string, and the arm judges what the driver would store.
+    expect(fieldsOf({ work_hours: '11.5' })).toEqual([
+      expect.objectContaining({ field: 'work_hours', code: 'invalid_number' }),
+    ]);
+    expect(fieldsOf({ work_hours: '11' })).toEqual([
+      expect.objectContaining({ field: 'work_hours', code: 'invalid_number' }),
+    ]);
+    const [err] = fieldsOf({ work_hours: 11.5 });
     expect(err).toMatchObject({ code: 'max_scale', constraint: { scale: 0, actual: 1 } });
-    expect(() => validateRecord(schema, { work_hours: '11' }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { work_hours: 11 }, 'insert')).not.toThrow();
   });
 
   it('exponent forms are normalized, not read as zero decimals', () => {
@@ -1251,10 +1260,12 @@ describe('validateRecord — a fraction-stored percent derives `scale + 2` (#193
     expect(fieldsOf(s, { rate: 0.123456789 })).toBeNull();
   });
 
-  it('string-carried and exponent forms travel with the derivation', () => {
-    // A CSV cell reaches the branch as a string and is judged after coercion;
+  it('the derivation judges the number a producer sends; exponent forms travel with it', () => {
+    // A CSV cell arrives as the number the import route parsed (#20309: a
+    // string that reaches the arm is `invalid_number`, never coerced);
     // `1e-6` is six places, one past a scale: 2 fraction field's four.
-    expect(fieldsOf(fraction, { rate: '0.1234' })).toBeNull();
+    expect(fieldsOf(fraction, { rate: 0.1234 })).toBeNull();
+    expect(fieldsOf(fraction, { rate: '0.1234' })?.[0]).toMatchObject({ code: 'invalid_number' });
     expect(fieldsOf(fraction, { rate: 1e-6 })?.[0]).toMatchObject({
       code: 'max_scale',
       constraint: { scale: 4, actual: 6 },
@@ -1313,8 +1324,9 @@ describe('validateRecord — `currency` is outside the max_scale enforced set (#
     const legacy = { fields: { amount: { type: 'currency', label: 'Amount', scale: 2 } } };
     expect(fieldsOf(legacy, { amount: 1.23456 })).toBeNull();
     expect(fieldsOf(legacy, { amount: 1.23456 }, 'update')).toBeNull();
-    // A string-carried amount (a CSV cell) takes the same path after coercion.
-    expect(fieldsOf(legacy, { amount: '1.23456' })).toBeNull();
+    // A string-carried amount is refused, never coerced (#20309): a CSV cell
+    // reaches the engine as the number the import route parsed.
+    expect(fieldsOf(legacy, { amount: '1.23456' })?.[0]).toMatchObject({ field: 'amount', code: 'invalid_number' });
   });
 
   it('keeps the rest of the numeric branch on currency — min, max and the finite-number check', () => {
