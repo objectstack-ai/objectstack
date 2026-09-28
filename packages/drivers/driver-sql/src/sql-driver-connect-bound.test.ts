@@ -75,6 +75,9 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
         // `connection.timezone`, which defaults to the HOST's local zone. Pinned
         // to UTC so the recorded instant cannot depend on which machine wrote it.
         timezone: 'Z',
+        // #20280 — a `DATE` comes back as its `YYYY-MM-DD` wire text, which
+        // mysql2's `Date.UTC` rebuild read a century late below year 100.
+        dateStrings: ['DATE'],
       });
     });
 
