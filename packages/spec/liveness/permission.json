@@ -224,9 +224,9 @@
         },
         "tags": {
           "status": "dead",
-          "evidenceScope": "cross-repo",
-          "verifiedAt": "2026-08-10",
-          "note": "CORRECTED 2026-07-30 (was live with no evidence): no reader in either repo — governance/compliance reporting never consumes policy tags. RE-TESTED AND UPHELD 2026-08-10 (#7427) under the previews ruling (#7131), same measurement as this block's `label`: at objectui @e9ab52f9 the permission preview reads `rowLevelSecurity` as an array and renders its LENGTH (PermissionPreview.tsx:111, :164), never a policy's fields, so no tag value reaches a human there. Benign organizational metadata — not authorWarn'd."
+          "verifiedAt": "2026-09-27",
+          "evidence": "packages/spec/src/security/rls.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
+          "note": "REMOVED 2026-09-27 (#20321, ADR-0049 enforce-or-remove — graded RETIRE by the maintainer's criterion for declared-but-unenforced families: no mainstream platform tags a row-level policy; Salesforce sharing rules, Dataverse security roles and PostgreSQL RLS policies carry no tag attribute, and compliance reporting there keys on the rule itself). Tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources and stored permission rows by the protocol-18 conversion `permission-rls-tags-removed`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). The dead verdict it replaces was measured twice (CORRECTED 2026-07-30; RE-TESTED 2026-08-10, #7427) and re-measured before removal on 2026-09-27: no reader in this repo, in objectui at the .objectui-sha pin f8a9d0fb or at main 972c1685 (the permission preview renders the policy COUNT; the RLS facet neither seeds nor reads the key), or in cloud main 96eb092f, each with a lit control. To say whom a policy applies to, use `positions`; to say why it exists, use `description`."
         }
       }
     }

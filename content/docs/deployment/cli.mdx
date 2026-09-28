@@ -1431,15 +1431,14 @@ After writing, `os g` loads the config again and says which of these holds:
   scaffolded in earlier releases do. The file is written, the config is left
   as it was, and the command prints the import and the `defineStack` key that
   wire the directory.
-- **Cannot run**: the stack carries a flow, and its `requires` lacks
-  `automation`. The config loads and the server never runs the flow. The
-  command prints the whole `requires` list to use.
 - **Refused**: the config loaded before the command wrote anything and no
   longer loads with the new file in place, because the stack refuses it. Two
   examples are an action or app bound to an object nobody declared, and a flow
-  in a stack without `triggers`. The command removes what it wrote, so the
-  project is as it was, and exits 1 with the stack's own reason. Generate the
-  object first (`os g object customer`), then what binds to it.
+  in a stack whose `requires` lacks `triggers` or `automation` (`defineStack`
+  refuses a record-change flow without both). The command removes what it
+  wrote, so the project is as it was, and exits 1 with the stack's own reason.
+  Generate the object first (`os g object customer`), then what binds to it,
+  and declare `requires: ['automation', 'triggers']` before `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
 command only loads it.
