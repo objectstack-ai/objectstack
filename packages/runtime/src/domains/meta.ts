@@ -149,6 +149,23 @@ async function resolveProtocol(
 }
 
 /**
+ * [#20338] May this caller read PENDING metadata (a `sys_metadata` row in
+ * `state: 'draft'`)? The one question this domain's three draft doors ask —
+ * `_drafts`, and the item and list reads' `?preview=draft` — delegated, never
+ * restated, to the predicate `_drafts` has always asked
+ * (`isObjectSchemaMaskExempt`: a system caller, `studio.access`, `setup.access`
+ * or `manage_metadata`). `RestServer` asks the same predicate through its own
+ * `mayReadPendingDrafts`, whose docblock carries the rule: a caller this does
+ * not admit is answered the read as if the switch were absent (the published
+ * version, or the door's own absence); only `_drafts`, which has no published
+ * answer, refuses. `meta-draft-read-builder-gate.test.ts` beside this file
+ * ledgers every draft switch here and holds this to a bare delegation.
+ */
+function mayReadPendingDrafts(caller: unknown): boolean {
+    return isObjectSchemaMaskExempt(caller);
+}
+
+/**
  * [#8848] The methods `/metadata/:type/:name` actually serves — the single
  * source for both the `Allow` header and the refusal message, so the two
  * cannot drift apart.
@@ -1064,8 +1081,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
                     // ADR-0033 draft-overlay preview: `?preview=draft` makes the
                     // detail read prefer a pending draft (falling back to active).
-                    // Admin gating is layered on top in a follow-up (step 2).
-                    const previewDrafts = query?.preview === 'draft';
+                    // [#20338] Admitted per caller ({@link mayReadPendingDrafts}),
+                    // in this declaration: a caller who may not read drafts
+                    // reads the published item — this read without the switch.
+                    const previewDrafts = query?.preview === 'draft'
+                        && mayReadPendingDrafts(_context.executionContext);
                     const data = await protocol.getMetaItem({ type: singularType, name, packageId, organizationId, previewDrafts });
                     // [#18401] The SAME hit test the `object` branch above runs,
                     // asked here for the same reason. `getMetaItem` answers a
@@ -1144,9 +1164,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // (same posture as `_migrate-stored` below). The runtime transport
         // derives the ADR-0112 code from the 403 status (`PERMISSION_DENIED`),
         // matching `_migrate-stored`'s next-door precedent rather than the REST
-        // twin's `FORBIDDEN`.
+        // twin's `FORBIDDEN`. [#20338] Asked through {@link mayReadPendingDrafts},
+        // the one question this domain's draft doors share.
         const ec: any = _context.executionContext;
-        if (!isObjectSchemaMaskExempt(ec)) {
+        if (!mayReadPendingDrafts(ec)) {
             return {
                 handled: true,
                 response: deps.error(
@@ -1267,7 +1288,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // ADR-0033 draft-overlay preview: `?preview=draft` overlays
                 // pending drafts on the active list so an (admin) reviewer can
                 // render the console off drafts before publishing.
-                const previewDrafts = query?.preview === 'draft';
+                // [#20338] Admitted per caller ({@link mayReadPendingDrafts}),
+                // in this declaration: anyone else reads the published list.
+                const previewDrafts = query?.preview === 'draft'
+                    && mayReadPendingDrafts(_context.executionContext);
                 const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;

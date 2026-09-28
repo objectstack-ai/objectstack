@@ -4035,6 +4035,33 @@ function refineFormFieldFeaturesRoot(
   });
 }
 
+// Form-view `layout` retired-value prescriptions (#20221, ADR-0049
+// enforce-or-remove). Declared with `//` on purpose — the
+// `LIST_VIEW_EXPORT_PDF_RETIRED` placement note above applies here too. An
+// enum-VALUE narrowing: the enum's own error map carries the prescription,
+// keyed on `issue.input`, so only a value which used to be legal gets the "was
+// removed" message. The twin of `OBJECT_FORM_LAYOUT_RETIRED`
+// (component.zod.ts), which carries the renderer measurement at the
+// `.objectui-sha` pin: every form presentation folds 'grid' and 'inline' to
+// 'vertical', and multi-column is `columns`, honoured under every arm. The
+// ADR-0087 conversion `form-layout-inline-grid-to-vertical` rewrites both to
+// 'vertical' in every form payload a view carries (`form`, `formViews.*`, a
+// form view item's `config`, a flattened form overlay).
+const FORM_VIEW_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
+  ['grid', "'grid' was removed from the form view `layout` enum in @objectstack/spec 17.5.0 "
+    + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
+    + "form presentation folds it to 'vertical'. Write 'vertical', or omit `layout` ('vertical' "
+    + 'is the renderer default); for a multi-column form set `columns` (e.g. `columns: 2`), which '
+    + 'the renderer honours under either layout. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+  ['inline', "'inline' was removed from the form view `layout` enum in @objectstack/spec 17.5.0 "
+    + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
+    + "form presentation folds it to 'vertical', and a row of inline inputs is a toolbar / "
+    + "filter-row pattern, not a record-form layout. Write 'vertical', or omit `layout` "
+    + "('vertical' is the renderer default). "
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+]);
+
 /**
  * Form View Schema
  * Defines the layout for creating or editing a single record.
@@ -4080,9 +4107,18 @@ export const FormViewSchema = lazySchema(() => strictObject({
 
   // --- Presentation options (per `type` variant). These mirror what the
   // ObjectForm component accepts so the protocol declares them; all optional. ---
-  /** Field layout within the form body. */
-  layout: z.enum(['vertical', 'horizontal', 'inline', 'grid']).optional().describe('Field layout direction'),
-  /** Number of columns for the form body (grid/multi-column layouts). */
+  /**
+   * Field layout within the form body — `vertical` (the renderer default) or
+   * `horizontal`. `inline` and `grid` were retired (#20221, ADR-0049): no
+   * renderer ever gave either a behaviour of its own, and multi-column is
+   * `columns` below, not a layout value. See `FORM_VIEW_LAYOUT_RETIRED`.
+   */
+  layout: z.enum(['vertical', 'horizontal'], {
+    error: (issue) =>
+      typeof issue.input === 'string' ? FORM_VIEW_LAYOUT_RETIRED.get(issue.input) : undefined,
+  }).optional()
+    .describe("Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns`"),
+  /** Number of columns for the form body (multi-column forms), honoured under either `layout`. */
   columns: z.number().int().min(1).optional().describe('Number of columns for the form body'),
   /** Optional form title / description (for embedded or standalone forms). */
   title: z.string().optional().describe('Form title'),

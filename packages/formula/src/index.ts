@@ -15,6 +15,7 @@ export { celEngine, DEFAULT_LIMITS } from './cel-engine';
 // (approval `expression` approvers): lint and the runtime pre-check share this
 // one helper so what they accept can never drift.
 export { collectCelRootIdentifiers } from './cel-engine';
+export type { CelRootIdentifiersResult } from './cel-engine';
 // #6128 — the strict-environment "does this identifier resolve?" oracle, the
 // same one `validateExpression` gives its `record`-scoped bare-ref verdict from.
 // Published for the same reason as `collectCelRootIdentifiers` above: a lint
@@ -131,5 +132,19 @@ export type { UnknownFunctionCall } from './unknown-function';
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
+// The closed set of refusal codes `validateExpression` and
+// `collectCelRootIdentifiers` carry beside their English message, with the
+// typed params each message interpolates — so a localized author surface keys
+// its own catalogue rows to a code instead of translating our sentence.
+export { EXPRESSION_REFUSAL_CODES } from './expression-refusal';
+export type {
+  CelFieldRole,
+  CelRootsRefusalCode,
+  ExprValidationCode,
+  ExpressionRefusal,
+  ExpressionRefusalCode,
+  ExpressionRefusalParams,
+  ExpressionSourceKind,
+} from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
 export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions } from './types';

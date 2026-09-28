@@ -68,11 +68,11 @@ export const TestScenarioSchema = lazySchema(() => z.object({
   steps: z.array(TestStepSchema).describe('Main test sequence to execute'),
   teardown: z.array(TestStepSchema).optional().describe('Steps to cleanup after test execution'),
   
-  // Environment requirements
+  // Environment requirements — declared, not yet checked by any reader.
   requires: z.object({
-    params: z.array(z.string()).optional().describe('Required environment variables or parameters'),
-    plugins: z.array(z.string()).optional().describe('Required plugins that must be loaded')
-  }).optional().describe('Environment requirements for this scenario')
+    params: z.array(z.string()).optional().describe('Environment variables or parameters the scenario needs. Declared only: nothing checks them before the scenario runs'),
+    plugins: z.array(z.string()).optional().describe('Plugins the scenario needs loaded on the target. Declared only: nothing checks them before the scenario runs')
+  }).optional().describe('Environment requirements for this scenario. NOT CHECKED by `os test` or the core TestRunner: the scenario runs whether or not they hold, and an unmet requirement surfaces only as the failure it causes')
 }).describe('A complete test scenario with setup, execution steps, and teardown'));
 
 export const TestSuiteSchema = lazySchema(() => z.object({
