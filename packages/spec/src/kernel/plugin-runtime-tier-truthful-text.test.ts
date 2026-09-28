@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { ManifestSchema, PluginRuntimeSchema } from './manifest.zod';
 import { entry as loadingRetiredEntry } from '../migrations/entries/semantic/17.plugin-manifest-loading-retired';
 
-// ─── [#11330] `manifest.runtime` text states publish-gate-only enforcement ────
+// ─── [commit a9ee98992] `manifest.runtime` text states publish-gate-only enforcement ──
 //
 // Maintainer ruling 2026-08-30 (verbatim「同意」), option B: say it truthfully
 // NOW; enforcing the tier at load is a v18 direction, deliberately NOT built
@@ -43,7 +43,7 @@ const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
 const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
 /**
- * [#17147] The permissions half of the same sentence, under the same rule: the
+ * [commit aaacf1d5c] The permissions half of the same sentence, under the same rule: the
  * granted set is REGISTERED at load and queried by nothing. Probes the two
  * load-bearing words rather than a whole clause, so a rewording that keeps the
  * fact keeps the pin.
@@ -110,7 +110,7 @@ describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
   it('[#17147] states the PERMISSIONS half truthfully too — the handoff landed', () => {
     // The coordination pin this replaces read
     // `expect(message).toContain('the permission declarations, which are enforced')`
-    // and existed to go RED the day #11333 corrected the other half of the
+    // and existed to go RED the day commit aaacf1d5c corrected the other half of the
     // sentence. It did its job: maintainer ruling 2026-09-12 took option B on
     // the permissions half as well — say it truthfully now — so the retracted
     // claim is gone and the truthful split is asserted in its place.
@@ -122,7 +122,7 @@ describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
     //     (#13457) and queried by nothing, so they refuse no operation.
     // The measurement behind the second lives in `@objectstack/core`:
     // `granted-permissions-not-enforced.pin.test.ts` goes red when a production
-    // `SecurePluginContext` construction site appears (#17147, the ADR-0025
+    // `SecurePluginContext` construction site appears (measured in commit aaacf1d5c, the ADR-0025
     // materialize seam), which is the signal that this text is stale again.
     const result = ManifestSchema.safeParse({ ...baseManifest, loading: { strategy: 'lazy' } });
     expect(result.success).toBe(false);

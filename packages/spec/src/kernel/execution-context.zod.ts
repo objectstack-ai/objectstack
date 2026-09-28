@@ -172,7 +172,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    *
    * Declared here (#7280) because it was previously written onto the envelope
    * behind an `as any` and was therefore invisible to the closed entry field set
-   * (#6216) — the one gate whose job is to stop a context field reaching one
+   * (commit f586f1a89) — the one gate whose job is to stop a context field reaching one
    * transport and missing another.
    */
   authGate: z.object({
@@ -230,8 +230,8 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * system) and answers "which non-user acted" with an ADDED attribution
    * field — this one — never with a second actor vocabulary.
    *
-   * A one-key object rather than a bare string so the API-key door (#18335,
-   * blocked on this carrier) can name its own identifier as a sibling key if
+   * A one-key object rather than a bare string so the API-key door (then
+   * blocked on this carrier; ADR-0090 D10's note since rules the key a credential) can name its own identifier as a sibling key if
    * it is ruled an agent, without re-shaping a field that already shipped.
    */
   performedBy: z.object({

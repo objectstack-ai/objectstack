@@ -1666,9 +1666,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "blocks.type": {
         label: "ブロックタイプ"
       },
-      "blocks.chart": {
-        label: "チャート"
-      },
       "blocks.dataset": {
         label: "データセット"
       },

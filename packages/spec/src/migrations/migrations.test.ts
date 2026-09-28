@@ -1,5 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from '../conversions/registry.js';
@@ -22,6 +26,41 @@ import {
 } from './spec-changes.js';
 
 const CONVERSION_IDS = new Set(ALL_CONVERSIONS.map((c) => c.id));
+
+/**
+ * Ruling B (ADR-0087 D3; the contract is `SemanticMigration` in `./types.ts`):
+ * every retirement family carries ONE D3 entry, even when a lossless D2
+ * conversion also repairs its data — D2 carries the mechanical repair only.
+ * Protocol 17 shipped before the rule and was not back-filled, so the pin
+ * below binds from protocol 18 on.
+ */
+const D3_PER_FAMILY_FROM_MAJOR = 18;
+
+const SEMANTIC_ENTRIES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'entries/semantic');
+
+/**
+ * The full text — leading comment AND literal — of every `semantic/` entry
+ * file registered under `major`, keyed by filename. The files, not the parsed
+ * objects: an entry may name its family's conversion in the comment the
+ * generator carries into `registry.ts` rather than in a field, and
+ * `check:migration-registry` already proves the files and the generated
+ * region are the same set.
+ */
+function semanticEntrySources(major: number): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const name of readdirSync(SEMANTIC_ENTRIES_DIR).sort()) {
+    if (name.startsWith(`${major}.`) && name.endsWith('.ts')) {
+      out.set(name, readFileSync(resolve(SEMANTIC_ENTRIES_DIR, name), 'utf8'));
+    }
+  }
+  return out;
+}
+
+/** The entry files of `major` that name conversion `id` as a whole id, not as a prefix of a longer one. */
+function entriesNaming(sources: Map<string, string>, id: string): string[] {
+  const whole = new RegExp(`(?<![a-z0-9-])${id.replaceAll('-', '\\-')}(?![a-z0-9-])`);
+  return [...sources].filter(([, text]) => whole.test(text)).map(([name]) => name);
+}
 
 describe('migration chain (ADR-0087 D3)', () => {
   describe('registry integrity', () => {
@@ -50,6 +89,57 @@ describe('migration chain (ADR-0087 D3)', () => {
           expect(s.reason.length).toBeGreaterThan(0);
         }
       }
+    });
+
+    // The census pin for ruling B (#20201). A graduated conversion is one
+    // retirement family's data repair, so from `D3_PER_FAMILY_FROM_MAJOR` on,
+    // a step whose D3 list names none of a conversion is a family shipped with
+    // its repair and without its judgment — the exact shape the pre-ruling
+    // "lossless, so no semantic residue" reasoning produced. What this CANNOT
+    // see, stated so a green run is not over-read: (1) whether the entry that
+    // names a conversion is that family's OWN — a passing mention satisfies it,
+    // so ownership was judged by reading, in the census; (2) a family retired
+    // with no conversion at all — no machine-readable link joins a retired key
+    // or def to its D3 entry, so those were paired by reading too.
+    it('from protocol 18 on, every graduated D2 conversion is named by a D3 entry of its own step (ruling B)', () => {
+      const checked = MIGRATION_MAJORS.filter((m) => m >= D3_PER_FAMILY_FROM_MAJOR);
+      // Anti-vacuity: the major this rule was first measured on is in range.
+      expect(checked).toContain(D3_PER_FAMILY_FROM_MAJOR);
+      const unnamed: string[] = [];
+      let pairs = 0;
+      for (const m of checked) {
+        const sources = semanticEntrySources(m);
+        for (const id of MIGRATIONS_BY_MAJOR[m]!.conversionIds) {
+          if (entriesNaming(sources, id).length === 0) unnamed.push(`protocol ${m}: ${id}`);
+          else pairs++;
+        }
+      }
+      expect(
+        unnamed,
+        `graduated D2 conversion(s) named by no D3 entry of their own step: ${unnamed.join(', ')}. `
+          + 'Remedy: add a D3 `semantic` entry of that step — a file under `entries/semantic/` '
+          + 'prefixed with its protocol major, then `gen:migration-registry` — whose text names the '
+          + 'conversion id as a whole word and says what judgment the consumer still owes after D2 '
+          + 'repaired the data (one D3 entry per retirement family, even when D2 is lossless).',
+      ).toEqual([]);
+      expect(pairs).toBeGreaterThan(0);
+    });
+
+    it('the census pin sees a family that has its entry, and not a prefix of a longer id', () => {
+      // Control for the pin above: a pair that predates the census, so the
+      // matcher is proven to find a family's entry by reading the files at all.
+      const sources18 = semanticEntrySources(18);
+      expect(entriesNaming(sources18, 'cube-join-sql-and-relationship-removed')).toContain(
+        '18.cube-join-sql-and-relationship-retired.ts',
+      );
+      // Whole-id match: `record-chatter-position-vocabulary` is a prefix of its
+      // D3 entry's own id, so only the entry's real citation of the conversion
+      // may count, never its id line.
+      expect(entriesNaming(sources18, 'record-chatter-position-vocabulary')).toContain(
+        '18.record-chatter-position-vocabulary-converged.ts',
+      );
+      const idLineOnly = new Map([['x.ts', "id: 'record-chatter-position-vocabulary-converged'"]]);
+      expect(entriesNaming(idLineOnly, 'record-chatter-position-vocabulary')).toEqual([]);
     });
 
     it('the support floor is at or below the earliest step', () => {
@@ -157,7 +247,9 @@ describe('migration chain (ADR-0087 D3)', () => {
 
     it('finds the entry, and it still explains the #4610 orphaning (anti-vacuity)', () => {
       expect(entry()).toBeDefined();
-      expect(entry()!.reason).toMatch(/#4610/);
+      // The orphaning is stated in words, not by tracker number: the reason is
+      // printed to the author by `os migrate meta`.
+      expect(entry()!.reason).toMatch(/dual-source cleanup removed the `\.\/ui` copies/);
       expect(entry()!.reason).toMatch(/NotificationConfigSchema/);
     });
 
@@ -171,7 +263,7 @@ describe('migration chain (ADR-0087 D3)', () => {
     it('names the correction and keeps the removal itself standing', () => {
       const r = entry()!.reason;
       expect(r).toMatch(/falsified/);
-      expect(r).toMatch(/#5781/);
+      expect(r).toMatch(/objectui, which re-exported both names/);
       // ⛔ A correction to the evidence is not an un-retirement.
       expect(r).toMatch(/removal itself stands/);
     });

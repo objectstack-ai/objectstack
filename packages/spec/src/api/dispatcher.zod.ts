@@ -16,7 +16,7 @@ import { CoreServiceName, ServiceCriticalitySchema } from '../system/core-servic
  * 4. Serves prefixes registered by the kernel services above. Plugins that need
  *    a code handler mount it imperatively on the `http.server` service (resolve
  *    it from the plugin context on `kernel:ready`) — the manifest's
- *    `contributes.routes` key was removed in @objectstack/spec 17 (#10726):
+ *    `contributes.routes` key was removed in @objectstack/spec 17 (commit bc56e1881):
  *    nothing ever read it, and authoring it is now a tsc error and a parse
  *    error carrying that prescription.
  * 

@@ -304,8 +304,9 @@ defineDataset({
 // A monetary measure may declare `currency` (ISO 4217) for a locale-correct
 // symbol: `{ name: 'revenue', aggregate: 'sum', field: 'amount', currency: 'USD' }`.
 // It resolves measure `currency` → the aggregated field's
-// `currencyConfig.defaultCurrency` → the tenant `localization.currency` default
-// (ADR-0053). Omit it for non-money measures (count, avg-of-hours).
+// `currencyConfig.defaultCurrency` (only under `currencyMode: 'fixed'`) → the
+// tenant `localization.currency` (`CurrencyConfigSchema`'s `currencyMode`
+// describe). Omit it for non-money measures (count, avg-of-hours).
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
@@ -405,7 +406,6 @@ export const PipelineCoverageReport = defineReport({
   // already chronological by default — declare `order` only to change that, or
   // to sort by a measure / a non-date dimension.
   order: [{ by: 'amount_sum', direction: 'desc' }],
-  // drilldown defaults true — click a cell to open the underlying records; set false to disable.
   chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum' },
 });
 ```

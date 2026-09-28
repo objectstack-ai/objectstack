@@ -6372,7 +6372,9 @@ export class SqlDriver implements IDataDriver {
       // A function-valued `connection` (knex's per-acquire provider) is left
       // alone: the host is building each connection itself and owns its timeouts.
     }
-    return SqlDriver.withPostgresCalendarDayAsText(SqlDriver.withUtcSession(bounded));
+    return SqlDriver.withPostgresCalendarDayAsText(
+      SqlDriver.withMysqlCalendarDayAsText(SqlDriver.withUtcSession(bounded)),
+    );
   }
 
   /**
@@ -6426,6 +6428,74 @@ export class SqlDriver implements IDataDriver {
       },
     };
     return out;
+  }
+
+  /**
+   * The mysql2 column types handed back as the server's own text rather than
+   * as a JS `Date` — see {@link withMysqlCalendarDayAsText}. `DATE` only:
+   * `DATETIME` and `TIMESTAMP` are instants, and ADR-0053 D-F2 keeps the
+   * client parser's `Date` for them.
+   */
+  private static readonly MYSQL_TEXT_TEMPORAL_TYPES: readonly string[] = ['DATE'];
+
+  /**
+   * Keep a MySQL `DATE` a calendar-day STRING, never a JS `Date` (#20280).
+   *
+   * The MySQL counterpart of {@link withPostgresCalendarDayAsText}: the wire
+   * form of a `DATE` IS `YYYY-MM-DD`, so the driver asks mysql2 for that text
+   * (`dateStrings: ['DATE']`) and presents it through {@link toDateOnly} —
+   * `@objectstack/core`'s `temporalStorageForm`, the rule the write and
+   * `where` paths already apply. A `date` column then reaches the read doors
+   * as TEXT on every dialect.
+   *
+   * ## The measurement
+   *
+   * mysql2 3.23's `Packet#parseDate` rebuilds a `DATE` from its three numbers:
+   * `new Date(Date.UTC(y, m - 1, d))` under the `timezone: 'Z'` pin of
+   * {@link withUtcSession}, `new Date(y, m - 1, d)` under the default
+   * `'local'`. Both constructors read a year from 0 to 99 as 1900 + year.
+   * Measured on MySQL 8.0.46 (server `time_zone='+08:00'`) through `find()`:
+   *
+   * | stored (`CAST(d AS CHAR)`) | mysql2 materialised | presented before | presented now |
+   * |---|---|---|---|
+   * | `0009-03-04` | `1909-03-04T00:00:00.000Z` | `1909-03-04` | `0009-03-04` |
+   * | `0099-03-04` | `1999-03-04T00:00:00.000Z` | `1999-03-04` | `0099-03-04` |
+   * | `0999-06-15` | `0999-06-15T00:00:00.000Z` | `0999-06-15` | `0999-06-15` |
+   * | `2026-03-04` | `2026-03-04T00:00:00.000Z` | `2026-03-04` | `2026-03-04` |
+   *
+   * The write was right and the read was wrong: `where d $eq '0009-03-04'`
+   * found the row and presented `1909-03-04`. A year from 1000 to 9999 presents
+   * exactly what it did. A zero day (`0000-00-00`, storable only with
+   * `NO_ZERO_DATE` off) presents as that text, where mysql2 invented
+   * `1899-11-30`.
+   *
+   * ## Why `DATE` and not `DATETIME`
+   *
+   * `dateStrings` also takes `'DATETIME'`, and a `DATETIME` in years 0..99 is
+   * misread too: `parseDateTime` hands `'0009-03-04 10:00:00.000Z'` to V8's
+   * non-ISO `Date` parser, which answers 2004-09-03. But a `DATETIME` is an
+   * instant, and ADR-0053 D-F2 keeps the client parser's `Date` for an instant,
+   * folded to text only at the driver's own read doors — text at the client
+   * parser is the option that ADR did not take. That half is not decided here.
+   *
+   * The other measured remedy, a `'+00:00'` zone, takes mysql2's padded
+   * string-constructor arm for a `DATE` but keeps the `Date`, and moves the
+   * zone every bound `Date` and every `DATETIME` is rendered in. The text is
+   * the narrower change, and it is how PostgreSQL already reads a day.
+   *
+   * A host that set `dateStrings` itself is left alone, as
+   * {@link withUtcSession} leaves an explicit `timezone`; so is a
+   * function-valued `connection`, which the host builds per acquire.
+   */
+  private static withMysqlCalendarDayAsText(knexConfig: Record<string, any>): Record<string, any> {
+    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
+
+    const conn = knexConfig.connection;
+    if (!conn || typeof conn !== 'object' || (conn as any).dateStrings !== undefined) return knexConfig;
+    return {
+      ...knexConfig,
+      connection: { ...(conn as object), dateStrings: [...SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES] },
+    };
   }
 
   /**
@@ -6507,7 +6577,9 @@ export class SqlDriver implements IDataDriver {
    * paths. Fixing it at the parser leaves exactly one clock in play, because
    * the driver then never produces a `Date` for a `date` column at all — which
    * is already how SQLite behaves (TEXT round-trip) and, via
-   * {@link withUtcSession}'s `timezone: 'Z'`, how mysql2 behaves.
+   * {@link withMysqlCalendarDayAsText}, how mysql2 behaves. (Before that,
+   * {@link withUtcSession}'s `timezone: 'Z'` kept mysql2's `Date` on the one
+   * UTC clock, but read a year below 100 a century late.)
    *
    * `pool.afterCreate` is the hook rather than a `pg.types.setTypeParser`
    * call because `setTypeParser` mutates the pg-types registry **process
@@ -14658,7 +14730,8 @@ export class SqlDriver implements IDataDriver {
    * `new Date('2026-08-24')` comparand becomes `2026-08-23` west of UTC — the
    * identical one-day error, moved onto the write and filter paths). The read
    * path was fixed at its source instead — see
-   * {@link withPostgresCalendarDayAsText} — so on every dialect a `date`
+   * {@link withPostgresCalendarDayAsText} and, for MySQL,
+   * {@link withMysqlCalendarDayAsText} — so on every dialect a `date`
    * column now arrives here as TEXT and no driver-materialised `Date` reaches
    * this helper at all. ⛔ Do not "repair" a residual date skew by switching
    * the rule's UTC getters to their local twins; that reintroduces #11389 in the

@@ -11,9 +11,9 @@ import type { ExecutionContext } from '../kernel/execution-context.zod';
 
 /**
  * `getObject` — typed on the contract, not re-declared by consumers
- * (#12248, fork 3 of the 2026-08-25 maintainer ruling on #11833).
+ * (commit 8425c17cc, fork 3 of the 2026-08-25 maintainer ruling on #11833).
  *
- * Reverse-verified against the pre-#12248 contract (measured 2026-08-26 on
+ * Reverse-verified against the contract before commit 8425c17cc (measured 2026-08-26 on
  * this branch's base): with both members declared `unknown`, the consumer
  * reads below (`?.fields`, `?.external`) are compile errors on the contract
  * value — which is exactly why `service-analytics`, `service-storage` and the
@@ -54,7 +54,7 @@ describe('getObject return contract (#12248, #11833 fork 3)', () => {
     // The two reads every measured re-declaration existed to perform:
     // `service-analytics` (field metadata for dimension labels + the ADR-0015
     // `external` marker) and `service-storage` (file-class field scan). On the
-    // pre-#12248 `unknown` return, each line below is a compile error.
+    // pre-8425c17cc `unknown` return, each line below is a compile error.
     const readFields = (engine: IObjectQLEngine, objectName: string) =>
       engine.getObject(objectName)?.fields;
     const readExternal = (view: EngineSchemaRegistryView, objectName: string) =>
@@ -95,7 +95,7 @@ describe('getObject return contract (#12248, #11833 fork 3)', () => {
 
 /**
  * `getSchema` — typed on the contract, one member over from `getObject`
- * (#12481; the #11833 ruling's fork 3 as executed by #12248, applied by
+ * (#12481; the #11833 ruling's fork 3 as executed by commit 8425c17cc, applied by
  * inheritance: `ObjectQL.getObject` is literally `return this.getSchema(name)`,
  * so the mother ruling's reason transfers whole).
  *

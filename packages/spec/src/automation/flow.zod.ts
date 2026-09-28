@@ -1305,18 +1305,30 @@ export const FlowSchema = lazySchema(() => strictObject(
   // `decision` branch carrying it was never taken, and the two sides agreeing
   // was ruled no defence.
   //
+  // #19961 carries the same refusal to the ABSENT value of a REQUIRED slot —
+  // a `decision` branch with no `expression` key, or `expression: null`. The
+  // resolver emits it only where the ledger entry is `required` (an absent
+  // `visibleWhen` is still "not authored"), and `predicateSlotRefusal` answers
+  // it under the same lead sentence, with the prescription the blank carries
+  // minus the run it kept: an absent branch predicate never evaluated, the
+  // executor refused it at run time, so there was no run to keep. Triage's
+  // direction on that card named all three doors, this one included.
+  //
   // Scoped on purpose, three ways:
-  //  - STRINGS only. A non-string there (the `{ dialect, source }` envelope
-  //    above all) is refused at the other two doors by the same function
-  //    (#15572) and was never ruled at this one; refusing it here would narrow
-  //    the flow parse's accept set past the ruling.
+  //  - STRINGS, plus the absent / `null` value of a `required` slot. Any other
+  //    non-string there (the `{ dialect, source }` envelope above all) is
+  //    refused at the other two doors by the same function (#15572) and was
+  //    never ruled at this one; refusing it here would narrow the flow parse's
+  //    accept set past the ruling.
   //  - The ledger's `predicate` role only. A `flow-template` slot's blank is
   //    untouched (no validator implements that dialect), and so is the
   //    structural `config.condition`, which the ledger does not list — its
   //    blank is refused at `registerFlow` and `objectstack validate` (#17322,
   //    #17495), and a node's open `config` still carries no parse door for it.
   //  - A VALUE rule, never a key-set closure: the node `config` stays the open
-  //    record the header of this module describes.
+  //    record the header of this module describes. The absent value of a
+  //    `required` slot is the one "missing key" it reads, and only on an
+  //    element that exists — no other key is required, none is refused.
   //
   // Walked with `collectFlowGraphs`, like the two refusals above, so a
   // `decision` inside an ADR-0031 region body is refused here too, anchored at
@@ -1326,7 +1338,8 @@ export const FlowSchema = lazySchema(() => strictObject(
       const type: unknown = (node as { type?: unknown } | null)?.type;
       if (typeof type !== 'string') return;
       for (const found of resolveFlowNodeExpressions(type, (node as { config?: unknown }).config)) {
-        if (found.entry.role !== 'predicate' || typeof found.value !== 'string') continue;
+        if (found.entry.role !== 'predicate') continue;
+        if (typeof found.value !== 'string' && !(found.entry.required && found.value == null)) continue;
         const refusal = predicateSlotRefusal(found.value);
         if (!refusal) continue;
         ctx.addIssue({

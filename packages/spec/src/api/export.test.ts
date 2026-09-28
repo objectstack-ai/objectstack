@@ -244,7 +244,7 @@ describe('ExportImportTemplateSchema', () => {
 });
 
 // ==========================================
-// Import Request — runAutomations declared default (#6704)
+// Import Request — runAutomations declared default (commit c3f491626)
 // ==========================================
 
 /**
@@ -257,9 +257,9 @@ describe('ExportImportTemplateSchema', () => {
  * `POST /data/:object/import` decides on — lives in
  * `packages/rest/src/import-run-automations-agreement.test.ts`, because only
  * that package can reach both the schema and `prepareImportRequest`. Neither
- * half alone is the fact #6704 is about: the fact is the AGREEMENT.
+ * half alone is the fact commit c3f491626 pins: the fact is the AGREEMENT.
  *
- * Before #6704 the two disagreed on exactly one input — the omitted key — and
+ * Before commit c3f491626 the two disagreed on exactly one input — the omitted key — and
  * that is the case a reader should look at first.
  */
 describe('ImportRequestSchema — runAutomations declared default (#6704)', () => {
@@ -302,7 +302,7 @@ describe('ImportRequestSchema — runAutomations declared default (#6704)', () =
 });
 
 /**
- * `mappingName` declared on the contract (#10330).
+ * `mappingName` declared on the contract (commit b9e9227e3).
  *
  * The wire accepted it long before the schema declared it: both import routes
  * read `body.mappingName` off the raw body in `prepareImportRequest`

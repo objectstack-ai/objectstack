@@ -35,7 +35,9 @@
  * - `packages` absent  → treat `manifest` (singular) as a **single-element list**.
  *
  * A `packages` that is present but is not an array takes neither branch. It is
- * refused here as `INVALID_ARTIFACT_PACKAGES`. The rule is stated once,
+ * refused here as `INVALID_ARTIFACT_PACKAGES`. `null` is one of those values:
+ * the key is declared `.optional()`, which admits `undefined` and not `null`,
+ * so ABSENT means `undefined` and nothing else. The rule is stated once,
  * beside `AssembledPackageBodySchema` (`@objectstack/spec`, `stack.zod.ts`).
  *
  * The second branch is not a convenience: it is the term ADR-0130's whole
@@ -194,7 +196,7 @@ interface ArtifactPackageNode extends OrderablePlugin {
  * @returns The manifest bodies to register, in the order to register them.
  * @throws An ADR-0112 envelope (`code` + `status: 422`):
  *   `INVALID_ARTIFACT_PACKAGES` for a `packages` that is present but is not an
- *   array, `INVALID_ARTIFACT_PACKAGE_ENTRY` for a malformed entry, and
+ *   array (`null` included), `INVALID_ARTIFACT_PACKAGE_ENTRY` for a malformed entry, and
  *   `DUPLICATE_ARTIFACT_PACKAGE` for a duplicate package id. Also
  *   `resolvePluginOrder`'s own error for a cycle.
  */
@@ -205,7 +207,12 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
   // the caller's own object IS that package's manifest body. Returned by
   // reference, unvalidated and unrewritten — this is the path every artifact
   // built to date takes, and D7 pins that it did not move.
-  if (declared === undefined || declared === null) return [artifact];
+  //
+  // ⛔ `undefined` ONLY. `null` is present, not absent: the schema's
+  // `.optional()` refuses it, so reading it as absent here would answer for an
+  // artifact the declaration calls malformed (#19926). It falls to the refusal
+  // below with every other non-array value.
+  if (declared === undefined) return [artifact];
 
   // Present but not an array: malformed, never absent. The rule is stated
   // once, beside `AssembledPackageBodySchema`.
@@ -214,7 +221,9 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
       'INVALID_ARTIFACT_PACKAGES',
       'A release artifact\'s `packages` must be an array of package entries '
       + '(ADR-0130 D4, `ArtifactPackageEntrySchema`), but this artifact carries '
-      + `\`packages\` of type ${typeof declared}. Omit the key entirely for a `
+      // `typeof null` is `'object'`, which would name a `{}` the author never
+      // wrote; `null` is named as itself.
+      + `\`packages\` of type ${declared === null ? 'null' : typeof declared}. Omit the key entirely for a `
       + 'single-package artifact — `manifest` is retained, not replaced.',
     );
   }

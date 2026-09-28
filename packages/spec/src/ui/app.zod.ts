@@ -382,7 +382,9 @@ const BaseNavItemSchema = z.object({
  * dropping the user on a list view first would be wrong UX.
  *
  * `recordId` supports a small set of template variables resolved at render
- * time by the shell (see Console's `AppSidebar` / `AppContent`):
+ * time by the shell (see objectui's `NavigationRenderer`, whose `resolveHref`
+ * substitutes them from the session ids the mounted `UnifiedSidebar` and the
+ * console's `AppContent` supply):
  *   - `{current_user_id}` — the signed-in user's id
  *   - `{current_org_id}`  — the active organization id
  * These mirror the variables already understood by the view-layer
@@ -932,7 +934,7 @@ export const AppBrandingSchema = lazySchema(() => strictObject(
  * `app.areas[].order`, retired in 17.0.0 (#4667, ADR-0049).
  *
  * The sibling that works is what made this one read alive: nav-item `order` IS
- * sorted (`NavigationRenderer.tsx:1154`). Area-level order is not — `AppSidebar`
+ * sorted (`NavigationRenderer.tsx:1154`). Area-level order is not — `UnifiedSidebar`
  * and `AppSchemaRenderer` both iterate the `areas` array as authored — so
  * declaration order has always been display order, and an author who set
  * `order` to rearrange areas saw nothing move.

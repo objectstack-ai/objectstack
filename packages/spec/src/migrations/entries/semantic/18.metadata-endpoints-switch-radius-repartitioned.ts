@@ -8,8 +8,9 @@
 // What an embedder is owed is a PRESCRIPTION, because the mounted route table their
 // existing config produces has moved in both directions, and the compiler cannot
 // tell them: every key is optional and boolean, so the old spelling still compiles
-// and still parses. That is exactly the residue D2 cannot express, which is why this
-// is a semantic entry rather than a conversion.
+// and still parses. That residue is also why this family has no D2 conversion at
+// all; its D3 entry is owed either way, because every retirement family carries
+// one whether or not a conversion also repairs its data.
 import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {

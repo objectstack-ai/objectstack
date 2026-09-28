@@ -164,6 +164,7 @@ export type {
   StoredMigrationOutcome,
   StoredMigrationReport,
   StoredMigrationRow,
+  StoredMigrationTodo,
 } from './stored-migration.js';
 
 export {

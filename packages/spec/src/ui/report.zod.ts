@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { FilterConditionSchema } from '../data/filter.zod';
+import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
@@ -144,6 +144,44 @@ export function reportSelectionOrder(
 }
 
 /**
+ * The prescription a `joined` report's `chart` carries, at both of its
+ * coordinates (#20161, ADR-0049 enforce-or-remove). Measured at this repo's
+ * `.objectui-sha` pin `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`:
+ * `DatasetReportRenderer`'s joined branch draws each block as a
+ * `DatasetMatrixTable` / `DatasetReportTable` and returns before the one
+ * `report.chart` read below it, and no renderer reads a block's `chart` at all
+ * — so a chart on a joined report, container or block, parsed and plotted
+ * nothing, while `validate-chart-bindings` checked its axes as if it would.
+ *
+ * - On a BLOCK the key is removed from the closed shape; `strictObject`'s
+ *   `guidance` slot answers it with the prescription below.
+ * - On the CONTAINER the key stays declared — it is the live embedded chart of
+ *   every non-joined report — and the joined arm of `ReportSchema`'s
+ *   refinement refuses it, beside the selection keys it already refuses.
+ *
+ * The ADR-0087 conversion `report-joined-chart-removed` strips both from old
+ * sources and stored rows; it is retired from the load path, so a live author
+ * is refused here rather than rewritten.
+ *
+ * ⚠️ The version sentence names the npm release this ships in, never the
+ * protocol major the migration entries are numbered at (ADR-0087, the level
+ * half of its 2026-09-13 amendment).
+ */
+const JOINED_BLOCK_CHART_RETIRED =
+  '`report.blocks[].chart` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) '
+  + '— no renderer ever drew it: a joined report draws each block as a table and never reads a '
+  + 'block `chart`, so the chart parsed and nothing was plotted. Delete the key. A chart is drawn '
+  + 'from a non-joined report\'s own top-level `chart`: to plot one of these slices, give it a '
+  + 'report of its own with that `chart`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const JOINED_CONTAINER_CHART_REFUSED =
+  'a `joined` report draws no chart — it draws each block as a table and never reads `chart`, '
+  + 'on the container or on a block. Delete `chart`; to plot one of these slices, give it a '
+  + 'non-joined report of its own with that `chart`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Joined Report Block Schema
  *
  * Represents a single sub-report inside a `type: 'joined'` report. Each block
@@ -153,15 +191,18 @@ export function reportSelectionOrder(
  * domain — e.g. "new customers / churned / silent" in a customer-churn
  * report, or "new / qualified / closed" in a lead-funnel report.
  *
- * Blocks may declare their own filter (combined with the container filter
- * via `$and` at render time) and their own grouping / aggregation.
+ * Blocks may declare their own `runtimeFilter` (ANDed with the container's
+ * `runtimeFilter` at query time) and their own `rows` / `columns` / `values`
+ * selection and `order`.
  *
  * Notes for implementers:
  * - `type` defaults to `tabular` — leave a block's type implicit if the
  *   sub-report is just a list. Set explicitly to `summary` or `matrix` for
  *   aggregated blocks.
- * - The schema is intentionally permissive about the column shape: blocks
- *   are not allowed to be themselves `joined` (no recursion).
+ * - Blocks are not allowed to be themselves `joined` (no recursion).
+ * - A block is drawn as a table and has no `chart` key: #20161 removed it,
+ *   because nothing ever drew it. Writing it is refused with the upgrade
+ *   prescription (the `guidance` entry below).
  */
 export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObject({
   surface: 'this joined report block',
@@ -210,6 +251,10 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
       '`drilldown` is a container-level key on the report, not per block — move it to the top-level report. A joined report drills through from the container.',
     protection:
       '`protection` is the ADR-0010 package-author lock policy, declared once on the REPORT — a block is not separately lockable. Move it to the top-level report.',
+    // #20161 — a retired key, not a wrong-layer pointer: removed from this
+    // closed shape, so the prescription is what an author who keeps writing it
+    // is answered with (build-schemas check (c) proof 4 reads it from here).
+    chart: JOINED_BLOCK_CHART_RETIRED,
   },
 }, {
   /** Stable id for the block (used as react key, telemetry, deeplinks). */
@@ -220,8 +265,8 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
   description: I18nLabelSchema.optional().meta({ title: 'Description' }),
   /** Block report type — `joined` is intentionally excluded (no recursion). */
   type: z.enum(['tabular', 'summary', 'matrix']).default('tabular').meta({ title: 'Block Type' }),
-  /** Optional inline chart configuration. */
-  chart: ReportChartSchema.optional().meta({ title: 'Chart' }),
+  // `chart` was declared here until #20161 and nothing ever drew it; it is
+  // answered by the `guidance` entry above (ADR-0087 `report-joined-chart-removed`).
 
   /**
    * ADR-0021 — the dataset this block binds to (single-form). The block selects
@@ -235,8 +280,14 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
   columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)').meta({ title: 'Columns' }),
   /** Measure names (from the dataset) to display. Dataset-bound only. */
   values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)').meta({ title: 'Values' }),
-  /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
+  /**
+   * Render-time scope filter, ANDed at query time. Dataset-bound only.
+   * [#20116] Charted through the analytics `where` door, so it is an analytics
+   * carrier: a comparand that door refuses INSIDE a nested relation is refused
+   * on save too — see {@link analyticsCarrierFilter}
+   * (`./analytics-carrier-filter.ts`).
+   */
+  runtimeFilter: analyticsCarrierFilter().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
   /** Result ordering for this block, most significant key first (framework#3916). */
   order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first').meta({ title: 'Order' }),
 }).superRefine(checkReportOrder));
@@ -246,8 +297,10 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
  * onto `blocks[]`: every one of them SELECTS data, and a joined container
  * selects nothing itself — each block binds its own `dataset` and picks its own
  * `rows` / `columns` / `values`. `order` is refused beside them, by its own
- * message, for the same reason. Not exported: the refinement below is the only
- * reader, and `report.test.ts` pins the list by parse.
+ * message, for the same reason, and so is `chart` (#20161) — with no pointer
+ * onto `blocks[]`, because a block draws no chart either. Not exported: the
+ * refinement below is the only reader, and `report.test.ts` pins the list by
+ * parse.
  */
 const JOINED_CONTAINER_SELECTION_KEYS = ['dataset', 'rows', 'columns', 'values'] as const;
 
@@ -362,8 +415,12 @@ export const ReportSchema = lazySchema(() => strictObject({
    * `joined` report is refused — see `blocks[].values`.
    */
   values: z.array(z.string()).optional().describe('Measure names to show'),
-  /** Render-time scope filter, ANDed at query time. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter'),
+  /**
+   * Render-time scope filter, ANDed at query time. [#20116] An analytics
+   * carrier, like a block's — see {@link analyticsCarrierFilter}
+   * (`./analytics-carrier-filter.ts`).
+   */
+  runtimeFilter: analyticsCarrierFilter().describe('Render-time scope filter'),
   /**
    * Result ordering — most significant key first (framework#3916).
    *
@@ -396,17 +453,26 @@ export const ReportSchema = lazySchema(() => strictObject({
    */
   drilldown: z.boolean().default(true).describe('Click-through to underlying records'),
 
-  /** Visualization */
-  chart: ReportChartSchema.optional().describe('Embedded chart configuration'),
+  /**
+   * Visualization — an embedded chart plotted from the bound dataset
+   * (`xAxis` names a dimension, `yAxis` a measure) above the report's table.
+   *
+   * Refused on a `joined` report (#20161): a joined report draws each block
+   * as a table and never reads `chart`, and a block has no `chart` key — so a
+   * chart there parsed and plotted nothing.
+   */
+  chart: ReportChartSchema.optional().describe('Embedded chart configuration (refused on a joined report, which draws tables only)'),
 
   /**
    * Joined report blocks — only meaningful when `type: 'joined'`.
    *
    * A joined report renders multiple independent sub-reports stacked
-   * vertically in the same view. Each block declares its own object,
-   * columns, groupings and filter. The container-level `filter` is ANDed
-   * into every block at query time so a top-level scope (e.g. "this
-   * quarter") flows down without per-block duplication.
+   * vertically in the same view, each drawn as a table. Each block binds its
+   * own `dataset` and selects its own `rows` / `columns` / `values`, with its
+   * own `runtimeFilter` and `order`. The container-level `runtimeFilter` is
+   * ANDed into every block at query time so a top-level scope (e.g. "this
+   * quarter") flows down without per-block duplication. Neither the container
+   * nor a block carries a `chart`.
    *
    * Renderers must ignore `blocks` when `type !== 'joined'`.
    */
@@ -464,6 +530,13 @@ export const ReportSchema = lazySchema(() => strictObject({
         message: 'a `joined` report orders per block — move `order` onto `blocks[]`.',
         path: ['order'],
       });
+    }
+    // #20161 — the one container key refused WITHOUT a pointer onto `blocks[]`:
+    // the joined branch never reads `chart`, and a block has no `chart` key to
+    // move it to. Any present value is refused (it is an object, so there is no
+    // "empty" reading the selection threshold above could apply to).
+    if (r.chart !== undefined) {
+      ctx.addIssue({ code: 'custom', message: JOINED_CONTAINER_CHART_REFUSED, path: ['chart'] });
     }
   } else {
     checkReportOrder(r, ctx);

@@ -9,11 +9,12 @@ export const entry: SemanticMigration = {
     + '`formula` field — the direct engine path, not the REST ingress',
   replacement:
     'denormalise the value onto the object (a stored field, written when the source '
-    + 'changes) and sort by that — the same remedy the REST ingress has prescribed since '
-    + '#6924 / #6994; a `summary` field is unaffected and still sorts, because it gets a '
-    + 'real maintained column',
+    + 'changes) and sort by that — the same remedy the REST ingress prescribes when it '
+    + 'refuses a dotted or formula sort; a `summary` field is unaffected and still sorts, '
+    + 'because it gets a real maintained column',
   reason:
-    '#4226 / #4256 / #6994 closed the SORT axis at the REST ingress '
+    'The SORT axis is closed at the REST ingress for an unknown field, a dotted path and '
+    + 'a `formula` field alike '
     + '(`assertSortFieldsExist`, `400 INVALID_SORT`), which covers everything reaching '
     + '`findData`: the list route, `POST /data/:object/query`, the export route and the '
     + 'RPC dispatcher. A caller reaching `engine.find()` / `engine.findOne()` DIRECTLY '
@@ -23,12 +24,13 @@ export const entry: SemanticMigration = {
     + 'be ordered by. No column exists to order by (a formula is computed on read, so no '
     + 'driver materialises one), so the ORDER BY reached the driver, found nothing, and '
     + 'the unknown-column backstop returned the rows unordered.\n\n'
-    + 'Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot apply is a 4xx with '
-    + 'guidance prose at the public boundary, never a silent drop — the same direction as '
-    + 'the analytics dataset refusal envelope and the #6924 sort-hint prescription. The '
+    + 'Ruled by the maintainer on 2026-08-10: an ORDER BY the engine cannot apply is a 4xx '
+    + 'with guidance prose at the public boundary, never a silent drop — the same direction '
+    + "as the analytics dataset refusal envelope and the ingress sort hint's stored-field "
+    + 'prescription. The '
     + "engine's documented internal-caller tolerance (`assertProjectionFieldsExist`'s "
     + 'docblock) was to survive only behind a pinned internal path, and only if a MEASURED '
-    + 'internal call site relied on it. The #7095 sweep of every in-tree `orderBy` reaching '
+    + 'internal call site relied on it. The sweep of every in-tree `orderBy` reaching '
     + 'the engine directly — hooks, flows, reports, queue/job adapters, sharing, metadata '
     + 'loaders, expand sub-reads — found NONE: every hardcoded internal sort names a real '
     + 'stored column (`created_at`, `updated_at`, `version`, `priority`, `scheduled_for`, '
@@ -53,7 +55,7 @@ export const entry: SemanticMigration = {
     + 'swallows every expand failure and retains the raw foreign keys — so that path moves '
     + 'from silent to OBSERVABLE (a warning naming the field and the fix) rather than '
     + 'refusing. Reversing that backstop is a separate decision on all expand failure '
-    + 'modes. #7095, #6994, #6924, #4226, #4256, #3821, ADR-0112.',
+    + 'modes. ADR-0112.',
   acceptanceCriteria:
     'No `engine.find` / `engine.findOne` call site sorts by a `formula` field, and no saved '
     + "report's `query.orderBy` names one — grep your report definitions for an `orderBy` "

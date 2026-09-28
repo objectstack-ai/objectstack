@@ -288,7 +288,7 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
    * ADR-0015 §6.2: tables / draft / import / refresh-catalog / validate) are
    * mounted.
    *
-   * Declared by #6633 (route B toward #6306): the SDK's
+   * Declared by #6633 (route B toward the single API base that commit fec784863 gave the direct-mount routes): the SDK's
    * `datasources.external.*` methods hard-coded `/api/v1/datasources` with no
    * discovery mechanism at all, so any deployment on a non-default base
    * (`apiPath`, or a programmatic `basePath`/`version`) had the whole family
@@ -419,16 +419,16 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
  * stays HERE, in the one open-source module that reads it:
  * `NODE_ENV_TO_DISCOVERY_ENVIRONMENT` is typed
  * `Record<EnvironmentType, DiscoveryEnvironment>`, which is what makes the fold
- * provably total over the taxonomy rather than total by inspection (#6287).
+ * provably total over the taxonomy rather than total by inspection (commit 84c86fb45).
  *
  * Its relation to the 3-member `DiscoveryEnvironmentSchema` below is a strict
  * subset: `resolveDiscoveryEnvironment` folds `test` → `development` and
- * `staging` / `preview` / `trial` → `sandbox` (#4828, #6287), and the subset is
+ * `staging` / `preview` / `trial` → `sandbox` (#4828, commit 84c86fb45), and the subset is
  * pinned in `discovery-environment-subset.pin.test.ts` (#5676).
  *
  * ⚠️ Adding a member here is a decision about the fold table too: a new bucket
  * does not compile until it says which of the three coarse postures it
- * advertises — on purpose, because before #6287 `preview` and `trial` reached
+ * advertises — on purpose, because before commit 84c86fb45 `preview` and `trial` reached
  * `development` through a `??` fallback instead of a decision (#5673).
  */
 export const EnvironmentTypeSchema = lazySchema(() => z
@@ -508,8 +508,8 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * | `development`, `dev`    | `development`  | exact / short spelling |
  * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
  * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
- * | `preview`               | `sandbox`      | a PROVISIONED environment (own database, hostname, plan tier, per-environment RBAC), not a developer's machine — same class as `staging` (#6287) |
- * | `trial`                 | `sandbox`      | a provisioned environment holding an evaluating customer's real business data; developer-class would understate it (#6287) |
+ * | `preview`               | `sandbox`      | a PROVISIONED environment (own database, hostname, plan tier, per-environment RBAC), not a developer's machine — same class as `staging` (commit 84c86fb45) |
+ * | `trial`                 | `sandbox`      | a provisioned environment holding an evaluating customer's real business data; developer-class would understate it (commit 84c86fb45) |
  * | unset / blank           | `production`   | the host declined to say; every other reader of that absence already says `production`, and of the two ways to be wrong, calling a real production deployment `development` is the dangerous one (#5673, #5936) |
  * | anything else           | `development`  | an unrecognised spelling is a GUESS, and this function never claims `production` on a guess (#4828) |
  *
@@ -521,9 +521,9 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * `production`: `environment` is machine-readable, and a client may skip
  * production warnings or loosen a destructive action's confirmation on it.
  *
- * ## `preview` and `trial` are a THIRD case — declared, not absent, not a guess (#6287)
+ * ## `preview` and `trial` are a THIRD case — declared, not absent, not a guess (commit 84c86fb45)
  *
- * Until #6287 those two reached `development` through the `??` fallback rather
+ * Until commit 84c86fb45 those two reached `development` through the `??` fallback rather
  * than through a decision, so this table declared five of the seven
  * `EnvironmentTypeSchema` members and let the other two fall off the end. That
  * is the same shape the two rows above exist to separate: the fallback answers
@@ -571,7 +571,7 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * "anything else" the two producers would have drifted again on exactly that
  * input — the drift this consolidation exists to end.
  *
- * ## The taxonomy half of this table is EXHAUSTIVE, and tsc keeps it so (#6287)
+ * ## The taxonomy half of this table is EXHAUSTIVE, and tsc keeps it so (commit 84c86fb45)
  *
  * The seven `EnvironmentTypeSchema` rows are grouped behind a
  * `satisfies Record<EnvironmentType, DiscoveryEnvironment>`: adding a bucket to
@@ -584,14 +584,14 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * one cannot see this defect: the fallback and three of the seven rows all
  * produce `'development'`, so calling `resolveDiscoveryEnvironment` returns an
  * indistinguishable answer whether a row exists or the `??` invented it. A
- * runtime exhaustiveness test would have passed on the exact state #6287
- * reported. `tsc` compares the KEY SET, which is the actual claim. The negative
+ * runtime exhaustiveness test would have passed on the exact state commit 84c86fb45
+ * repaired. `tsc` compares the KEY SET, which is the actual claim. The negative
  * control for it lives in `discovery.test.ts`.
  */
 const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
   // The seven declared `EnvironmentTypeSchema` buckets. The `satisfies` is the
   // gate described above: every member must appear, and nothing that is not a
-  // member may (#6287).
+  // member may (commit 84c86fb45).
   ...({
     production: 'production',
     sandbox: 'sandbox',
@@ -630,7 +630,7 @@ const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnviro
 export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
   const spelling = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (spelling === '') return 'production';
-  // [#6287] The fallback's ONE remaining job: a spelling that is not a declared
+  // [commit 84c86fb45] The fallback's ONE remaining job: a spelling that is not a declared
   // `EnvironmentType` member and not an operator shorthand — `qa`, `uat`, a
   // typo. It no longer silently answers for members of our own taxonomy; the
   // table above is total over them and `tsc` keeps it that way, so a future
@@ -667,7 +667,7 @@ export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvir
   // under this package's `tsconfig.json`: a bogus `dev: 'nope'` reports TS2322
   // as a literal and is silent under `Object.assign`.
   //
-  // ⚠️ It is NOT the #6287 `satisfies Record<EnvironmentType,
+  // ⚠️ It is NOT commit 84c86fb45's `satisfies Record<EnvironmentType,
   // DiscoveryEnvironment>` gate above that would be lost. `satisfies` applies
   // to the literal, not to the assignment, so under that spelling a missing
   // bucket still reports TS1360. Losing the value check silently is reason

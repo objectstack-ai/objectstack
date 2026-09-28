@@ -1666,9 +1666,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "blocks.type": {
         label: "分块类型"
       },
-      "blocks.chart": {
-        label: "图表"
-      },
       "blocks.dataset": {
         label: "数据集"
       },

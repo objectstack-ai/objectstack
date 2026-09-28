@@ -635,7 +635,9 @@ describe('import route — a mapping target that names no field (#20150)', () =>
     ({ route, engine } = await boot());
     engine.registry.registerObject(NOTE as any);
     await engine.syncSchemas();
-    // The card's shape: a dotted path into a structured value is not a field.
+    // A dotted path whose head names no field of the object is no target
+    // (`task` declares no `mailing_address`; #20149 made a declared PART of a
+    // compound field a target, pinned in the describe block below).
     register('task_bad_target', 'task', [
       { source: 'ID', target: 'id' },
       { source: 'Task Title', target: 'title' },
@@ -724,6 +726,148 @@ describe('import route — a mapping target that names no field (#20150)', () =>
     expect(noteDry._json).toMatchObject({ total: 1, ok: 1, errors: 0 });
     const noteCommit = await importNote({ csv: noteCsv, mappingName: 'note_owner_target' });
     expect(noteCommit._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#20149] A target may name a declared part of a compound field
+// (`mailing_address.street`); the import door assembles the parts one row
+// maps into ONE value under the field's key, before the engine sees the row.
+//
+// Before: the card measured `ok 44` on the dry run and `ok 0, errors 50` on
+// the commit for the customer's five address columns, every row
+// `INVALID_FIELD: Unknown field 'mailing_address.street'`; #20150 then refused
+// the mapping outright at both. Now the parts assemble, the dry run and the
+// commit report the same rows, and the record reads back as one address.
+// ---------------------------------------------------------------------------
+describe('import route — a declared part of a compound field (#20149)', () => {
+  let route: any;
+  let engine: any;
+
+  const CONTACT = {
+    name: 'contact', label: 'Contact', systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      full_name: { name: 'full_name', type: 'text' as const, label: 'Name' },
+      mailing_address: { name: 'mailing_address', type: 'address' as const, label: 'Mailing address' },
+    },
+  };
+
+  const register = (name: string, fieldMapping: unknown[]) =>
+    engine.registry.registerItem('mapping', { name, targetObject: 'contact', sourceFormat: 'csv', fieldMapping } as any, 'name');
+
+  beforeEach(async () => {
+    ({ route, engine } = await boot());
+    engine.registry.registerObject(CONTACT as any);
+    await engine.syncSchemas();
+    // The customer template's five columns, unchanged (hotcrm#1836).
+    register('contact_address_feed', [
+      { source: 'ID', target: 'id' },
+      { source: 'Name', target: 'full_name' },
+      { source: 'Street', target: 'mailing_address.street' },
+      { source: 'City', target: 'mailing_address.city' },
+      { source: 'State', target: 'mailing_address.state' },
+      { source: 'Zip', target: 'mailing_address.postalCode' },
+      { source: 'Country', target: 'mailing_address.country' },
+    ]);
+    register('contact_bad_part', [
+      { source: 'ID', target: 'id' },
+      { source: 'Street', target: 'mailing_address.stret' },
+    ]);
+    register('contact_flat_dotted', [
+      { source: 'ID', target: 'id' },
+      { source: 'Name', target: 'full_name.first' },
+    ]);
+    register('contact_whole_and_part', [
+      { source: 'ID', target: 'id' },
+      { source: 'Street', target: 'mailing_address' },
+      { source: 'Street', target: 'mailing_address.street' },
+    ]);
+    // The control: no dotted target at all.
+    register('contact_flat', [
+      { source: 'ID', target: 'id' },
+      { source: 'Name', target: 'full_name' },
+    ]);
+  });
+
+  const csv = [
+    'ID,Name,Street,City,State,Zip,Country',
+    'c1,Ada,1 Main St,Springfield,IL,62701,USA',
+    'c2,Bea,2 Side St,Shelbyville,,,',
+    'c3,Cy,,,,,',
+  ].join('\n');
+  const importContact = (body: any) => {
+    const res = makeRes();
+    return route.handler({ params: { object: 'contact' }, body: { format: 'csv', csv, ...body } } as any, res).then(() => res);
+  };
+  const PARTS = 'street, city, state, postalCode, country, countryCode, formatted';
+
+  it('assembles the parts into one value — the dry run and the commit report the same rows', async () => {
+    const dry = await importContact({ mappingName: 'contact_address_feed', dryRun: true });
+    expect(dry._status ?? 200).toBe(200);
+    expect(dry._json).toMatchObject({ dryRun: true, total: 3, ok: 3, errors: 0, created: 3 });
+    expect(await engine.find('contact', { where: {} })).toHaveLength(0);
+
+    const commit = await importContact({ mappingName: 'contact_address_feed' });
+    expect(commit._status ?? 200).toBe(200);
+    expect(commit._json).toMatchObject({ dryRun: false, total: 3, ok: 3, errors: 0, created: 3 });
+    // Row for row, the preview promised exactly what the commit did.
+    const shape = (r: any) => ({ row: r.row, ok: r.ok, action: r.action, code: r.code, warnings: r.warnings });
+    expect(dry._json.results.map(shape)).toEqual(commit._json.results.map(shape));
+
+    // One address value per record, read back whole; no dotted key was stored.
+    expect((await engine.findOne('contact', { where: { id: 'c1' } })).mailing_address).toEqual({
+      street: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'USA',
+    });
+    // A partial row carries only its non-blank parts (the schema declares all seven optional).
+    expect((await engine.findOne('contact', { where: { id: 'c2' } })).mailing_address).toEqual({
+      street: '2 Side St', city: 'Shelbyville',
+    });
+    // Every part blank: the field is left unset, as a blank flat cell is.
+    expect((await engine.findOne('contact', { where: { id: 'c3' } })).mailing_address ?? null).toBeNull();
+  });
+
+  it('refuses an unknown part and a dotted path on a field with no parts — dry run and commit alike, parts named', async () => {
+    for (const [mappingName, located] of [
+      ['contact_bad_part', `fieldMapping[1].target "mailing_address.stret" (the address field "mailing_address" declares the parts ${PARTS})`],
+      ['contact_flat_dotted', 'fieldMapping[1].target "full_name.first" (the text field "full_name" has no parts)'],
+    ] as const) {
+      const dry = await importContact({ mappingName, dryRun: true });
+      const commit = await importContact({ mappingName });
+      for (const res of [dry, commit]) {
+        expect(res._status).toBe(400);
+        expect(res._json.code).toBe('INVALID_FIELD');
+        expect(res._json.error).toContain(located);
+        expect(res._json.error).toContain(`or at a declared part of a compound field as field.part (mailing_address: ${PARTS})`);
+        expect(res._json.results).toBeUndefined();
+      }
+      expect(dry._json).toEqual(commit._json);
+    }
+    expect(await engine.find('contact', { where: {} })).toHaveLength(0);
+  });
+
+  it('refuses a mapping that writes the field whole AND by part — they would collide on one value', async () => {
+    const dry = await importContact({ mappingName: 'contact_whole_and_part', dryRun: true });
+    const commit = await importContact({ mappingName: 'contact_whole_and_part' });
+    for (const res of [dry, commit]) {
+      expect(res._status).toBe(400);
+      expect(res._json.code).toBe('INVALID_FIELD');
+      expect(res._json.error).toContain(
+        '(fieldMapping[2].target "mailing_address.street", with the whole field at fieldMapping[1].target)',
+      );
+      // …and, like every refusal, it lists the legal parts.
+      expect(res._json.error).toContain(`or at a declared part of a compound field as field.part (mailing_address: ${PARTS})`);
+    }
+    expect(dry._json).toEqual(commit._json);
+    expect(await engine.find('contact', { where: {} })).toHaveLength(0);
+  });
+
+  it('control: a mapping with no dotted target — the dry run and the commit agree on ok', async () => {
+    const dry = await importContact({ mappingName: 'contact_flat', dryRun: true });
+    expect(dry._json).toMatchObject({ total: 3, ok: 3, errors: 0, created: 3 });
+    const commit = await importContact({ mappingName: 'contact_flat' });
+    expect(commit._json).toMatchObject({ total: 3, ok: 3, errors: 0, created: 3 });
+    expect((await engine.find('contact', { where: {} })).map((r: any) => r.full_name).sort()).toEqual(['Ada', 'Bea', 'Cy']);
   });
 });
 

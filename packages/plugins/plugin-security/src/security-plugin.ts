@@ -27,6 +27,7 @@ import {
   INVITATION_PLACEMENT_SERVICE,
   createInvitationPlacementService,
 } from './invitation-placement.js';
+import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -843,9 +844,10 @@ function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any
  * compiles, out of the policies that apply to this principal, object and write
  * operation (`insert` / `update`, `all` included).
  *
- * The published contract is `RowLevelSecurityPolicySchema.check`: "defaults to
- * USING clause if not specified". That is also PostgreSQL's rule: a policy
- * without `WITH CHECK` holds new rows to its `USING`. Before this selector the
+ * The published contract is `RowLevelSecurityPolicySchema.check`, which states
+ * the per-operation composition below; read it there rather than from a quote
+ * here. Its starting point is PostgreSQL's rule: a policy without `WITH CHECK`
+ * holds new rows to its `USING`. Before this selector the
  * runtime compiled only policies that declared `check`, so a USING-only policy
  * never gated an INSERT or an UPDATE's new row. An author writing
  * `record.status != 'closed'` could store a closed row they could then not see.
@@ -3769,6 +3771,19 @@ export class SecurityPlugin implements Plugin {
     });
 
     ctx.logger.info('Security middleware registered on ObjectQL engine');
+
+    // [ADR-0057 D4 / ADR-0112] A `sys_user_position` write whose `position`
+    // names no `sys_position` catalog row is refused (`400 VALIDATION_FAILED`,
+    // `reference_not_found` at `position`) instead of answering 201 over an
+    // assignment that resolves to nothing. Registered AFTER the security
+    // middleware, so it runs INSIDE it: the delegated-admin gate and the CRUD
+    // check have both passed before the catalog is consulted, and a caller who
+    // may not write the table is refused on authority, never on the value.
+    // Scope, predicate and stand-downs: `position-catalog-refusal.ts`.
+    ql.registerMiddleware(
+      createPositionCatalogRefusal({ ql, logger: ctx.logger }),
+      { object: POSITION_ASSIGNMENT_OBJECT },
+    );
 
     // [ADR-0094] Data-door write-through: every non-system CRUD write on
     // `sys_permission_set` is redirected into the metadata store (the ONE

@@ -1429,7 +1429,7 @@
     "api/RestApiConfig:enableUi",
     "api/RestApiConfig:projectResolution",
     "api/RestApiConfig:requireAuth [RETIRED]",
-    "api/RestApiConfig:responseFormat",
+    "api/RestApiConfig:responseFormat [RETIRED]",
     "api/RestApiConfig:version",
     "api/RestApiEndpoint:cacheTtl [RETIRED]",
     "api/RestApiEndpoint:cacheTtlSeconds",

@@ -369,3 +369,62 @@ describe('[#19620] a `translation` item carrying `settings` is refused at the me
         expect([...rows.values()].map((r) => r.type)).toEqual(['translation']);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. #20161 — the `report` door refuses a `joined` report's `chart`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A joined report draws each block as a table and nothing ever drew its chart,
+// on the container or on a block. `chart` left the closed block shape and the
+// joined arm of `ReportSchema`'s refinement refuses it on the container, so a
+// report carrying either is refused at THIS gate — the door the Studio report
+// form saves through, which offered a block `chart` input until that change —
+// with the ADR-0112 envelope (`code` + `status`) and the refusal located at the
+// key. Rides this file's pinned engine double, as section 4 does.
+
+async function saveReport(protocol: any, item: Record<string, unknown>): Promise<any> {
+    try {
+        return await protocol.saveMetaItem({
+            type: 'report',
+            name: 'task_overview',
+            item,
+            writeFace: 'meta-envelope',
+        });
+    } catch (e: any) {
+        return e;
+    }
+}
+
+describe('[#20161] a `joined` report\'s `chart` is refused at the metadata door', () => {
+    // No `dataset` on the block: this door also runs the author-time lints, and
+    // `chart-dataset-unknown` refuses a dataset this stub engine cannot resolve —
+    // a second refusal the CONTROL below would otherwise be reading instead.
+    const block = { name: 'open_block', type: 'summary', rows: ['status'], values: ['task_count'] };
+    const joined = { name: 'task_overview', label: 'Task Overview', type: 'joined', blocks: [block] };
+    const chart = { type: 'bar', xAxis: 'status', yAxis: 'task_count' };
+
+    it.each([
+        // The door flattens an issue's path to the dotted spelling it serves.
+        ['the container', { ...joined, chart }, 'custom', 'chart', 'a `joined` report draws no chart'],
+        ['a block', { ...joined, blocks: [{ ...block, chart }] }, 'unrecognized_keys', 'blocks.0', '`report.blocks[].chart` was removed'],
+    ] as const)('`chart` on %s — 422 INVALID_METADATA, located at the key, nothing stored', async (_where, item, code, path, prescription) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveReport(protocol, item);
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([[code, path]]);
+        expect(issues[0]!.message).toContain(prescription);
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same joined report without a `chart` is stored (the refusal is the key, not the report)', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveReport(protocol, joined);
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => r.type)).toEqual(['report']);
+    });
+});

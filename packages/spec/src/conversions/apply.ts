@@ -16,9 +16,11 @@ import { ALL_CONVERSIONS } from './registry.js';
 import {
   CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
+  CONVERSION_TODO_CODE,
   type ConversionConflictNotice,
   type ConversionContext,
   type ConversionNotice,
+  type ConversionTodoNotice,
 } from './types.js';
 
 export interface ApplyConversionsOptions {
@@ -64,6 +66,19 @@ export interface ApplyConversionsOptions {
    * Populated by the runtime load seam; absent on the build/validate seam.
    */
   onConflict?: (notice: ConversionConflictNotice) => void;
+  /**
+   * Sink for each structured **TODO** — a site a conversion recognised as a
+   * pre-protocol shape and left as stored, because no lossless rewrite exists
+   * for it (ADR-0087 D3's model: convert where lossless, a structured TODO
+   * otherwise). The site is left unchanged whether or not a sink is supplied;
+   * the sink only makes it visible.
+   *
+   * Read today by the stored-metadata migration pass (`os migrate meta
+   * --stored`, through `applyConversionsToStoredItem`), which lists each TODO
+   * under its row. The authoring funnel and the other data-at-rest seams do not
+   * pass one.
+   */
+  onTodo?: (todo: ConversionTodoNotice) => void;
   /**
    * Node types that are live in this environment. Supplied by the runtime load
    * seam so open-namespace renames can detect a collision with a live owner
@@ -112,7 +127,7 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice, onConflict, reservedNodeTypes, includeRetired = false, excludeConversionIds } = options;
+  const { onNotice, onConflict, onTodo, reservedNodeTypes, includeRetired = false, excludeConversionIds } = options;
   const excluded = excludeConversionIds && excludeConversionIds.length > 0
     ? new Set(excludeConversionIds)
     : null;
@@ -142,6 +157,20 @@ export function applyConversions(
               token: detail.token,
               path: detail.path,
               message: `[protocol] ${detail.reason} (ADR-0087 conversion '${conversion.id}').`,
+            })
+        : undefined,
+      reportTodo: onTodo
+        ? (detail) =>
+            onTodo({
+              code: CONVERSION_TODO_CODE,
+              conversionId: conversion.id,
+              surface: conversion.surface,
+              from: detail.from,
+              path: detail.path,
+              reason: detail.reason,
+              message:
+                `[protocol] left ${conversion.surface} at ${detail.path} as stored — ADR-0087 ` +
+                `conversion '${conversion.id}' has no lossless rewrite for it: ${detail.reason}`,
             })
         : undefined,
     };

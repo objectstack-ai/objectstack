@@ -27,14 +27,17 @@
  * enforced too: `name`, the `namespace` grammar, the closed value sets, the
  * retired-key tombstones and the nested blocks it closes. §8 pins that.
  *
- * ## What is deliberately NOT refused — the declaration decides
+ * ## The wrapped TOP LEVEL — refused too, because the declaration closed it
  *
- * An unknown key at the TOP LEVEL of the wrapped form. The wrapped branch is a
- * plain `z.object` (strip mode) and its docblock forbids closing it here, so
- * `{ manifest, bogus }` parses green with `bogus` dropped. ⛔ No case below
- * pins that as intended behaviour in either direction: §5 asserts the door
- * AGREES WITH THE DECLARATION on it, which stays green whichever way the
- * declaration is later decided.
+ * An unknown key at the TOP LEVEL of the wrapped form was the one position
+ * this door still admitted when the whole-body parse landed: the wrapped
+ * branch was strip mode, so `{ manifest, enabledOnInstall: false }` — a
+ * misspelled `enableOnInstall` — parsed green with the key dropped and
+ * installed the package ENABLED. Decision batch #227 item 3, letter A (ruling
+ * record `5856869656`) closed that branch in `@objectstack/spec`, and the door
+ * followed with no edit of its own, because it asks the declaration. §5 pins
+ * the refusal at this door: the status, the named key, and that nothing was
+ * installed.
  *
  * ## Envelope
  *
@@ -170,6 +173,8 @@ describe('§0 the declaration is what the door is held to', () => {
             { ...m, enableOnInstall: false },
             { ...m, overwrite: true },
             { ...m, settings: { a: 1 } },
+            { manifest: m, enabledOnInstall: false },
+            { manifest: m, _source: 'studio' },
         ];
         for (const body of refused) {
             expect(PackageInstallBodySchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
@@ -315,23 +320,58 @@ describe('§4 row 4 — install options on the BARE form are refused, naming the
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// §5 — the door follows the declaration, including where it strips
+// §5 — the wrapped TOP LEVEL: refused, because the declaration closed it
 // ═══════════════════════════════════════════════════════════════════════
 
-describe('§5 the door answers what the declaration answers', () => {
-    it('an unknown TOP-LEVEL key on the wrapped form: door and declaration agree, whichever way that is', async () => {
-        // ⛔ Deliberately a PARITY assertion, not a status pin. The wrapped
-        // branch strips today, so both accept; if the declaration is ever
-        // closed, both must refuse — and the door follows with no edit,
-        // because it asks the declaration.
+describe('§5 an unknown TOP-LEVEL key on the wrapped form is refused by name, and nothing installs', () => {
+    // A STATUS pin, ⛔ not the parity assertion this section used to hold
+    // («door and declaration agree, whichever way that is»): parity stays green
+    // when the declaration is re-opened, because both would then accept, so it
+    // could not tell a closed branch from a strip-mode one. The ruling decided
+    // the direction (decision batch #227 item 3, letter A), so the direction is
+    // what is pinned. Each refusal case reads the declaration's verdict on the
+    // same body too, AFTER the door's answer, so a regression reddens the door
+    // assertion first and the trailing read names whether the declaration moved.
+
+    it('a MISSPELLED option — `enabledOnInstall: false` — is refused naming the key, ⛔ never installed ENABLED', async () => {
         const { registry, install } = door();
-        const m = manifest('toplevel.unknown');
-        const body = { manifest: m, bogus: 1 };
-        const declared = PackageInstallBodySchema.safeParse(body).success;
+        const m = manifest('toplevel.misspelled');
+        const body = { manifest: m, enabledOnInstall: false };
         const r = await install(body);
 
-        expect(r.response?.status).toBe(declared ? 201 : 400);
-        expect(registry.getPackage(m.id) !== undefined).toBe(declared);
+        expectRefused(r);
+        // The inversion this ruling is about: before it, this id was installed
+        // and ENABLED with the caller's `false` dropped. Refused, it is neither.
+        expect(registry.getPackage(m.id)).toBeUndefined();
+        expect(persistedDisabled().has(m.id)).toBe(false);
+        // Named subjects, ⛔ not prose: the key the caller wrote, and the
+        // declared option the refusal offers in its place.
+        expect(messageOf(r)).toContain('`enabledOnInstall`');
+        expect(messageOf(r)).toContain('`enableOnInstall`');
+        // Read LAST, so the door's own answer is what a regression turns red first.
+        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+    });
+
+    it('a PRIVATE key — `_source` — is refused naming the key, and nothing installs', async () => {
+        const { registry, install } = door();
+        const m = manifest('toplevel.private');
+        const body = { manifest: m, _source: 'studio' };
+        const r = await install(body);
+
+        expectRefused(r);
+        expect(registry.getPackage(m.id)).toBeUndefined();
+        expect(messageOf(r)).toContain('`_source`');
+        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+    });
+
+    it('control — the same body with the option spelled as declared installs, DISABLED as asked', async () => {
+        const { registry, install } = door();
+        const m = manifest('toplevel.control');
+        const r = await install({ manifest: m, enableOnInstall: false });
+
+        expect(r.response?.status).toBe(201);
+        expect(registry.getPackage(m.id)?.enabled).toBe(false);
+        expect(persistedDisabled().has(m.id)).toBe(true);
     });
 });
 

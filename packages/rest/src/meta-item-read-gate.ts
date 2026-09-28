@@ -34,8 +34,14 @@
  *
  * `RestServer` keeps its private helper names (`filterAppForUser`,
  * `resolveDocsAudience`, `resolveNavServability`, …) as one-line delegates to
- * the functions below, so its other docs and app reads — the lists, the book
- * tree — ask this same implementation.
+ * the functions below, so its other docs and app reads — the book tree, the
+ * alternate doors — ask this same implementation.
+ *
+ * [#20237] The LIST read had the same two transports and the same split:
+ * `RestServer`'s `GET /meta/:type` pruned inline, and the dispatcher's list
+ * branch pruned nothing. Its gate lives here too
+ * ({@link createMetaListReadGate}), built from the same functions over the
+ * same ports.
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
@@ -52,6 +58,17 @@ import { logWarn } from './log.js';
 export interface MetaReadGateCaller {
     userId?: unknown;
     systemPermissions?: unknown;
+    /**
+     * [#20156] May this caller WRITE the item being read? The transport's own
+     * answer, asked exactly as its save door asks it (REST: the admission of
+     * `PUT /meta/:type/:name`, `metaWriteCapabilityVerdict` for `save`) — a
+     * CALLER property, in ADR-0106 D4's shape, never a route property.
+     *
+     * Read only where the door's policy honours the author exemption
+     * ({@link MetaReadGatePolicy.app} `author-exempt`); a transport supplies it
+     * only there. Absent reads as `false`: no exemption.
+     */
+    mayWriteItem?: boolean;
     [key: string]: unknown;
 }
 
@@ -139,13 +156,14 @@ export interface MetaReadGatePolicy {
      * `all` — every gate the plain read runs, the ones that answer per
      * DEPLOYMENT included (ADR-0057 D10 `requiresService` on an app, its nav
      * entries and a dashboard's widgets; #7912 object servability). The
-     * doors that serve the document a client RENDERS: the plain read and
-     * `/published`.
+     * doors that serve the document a client RENDERS: the plain read (its
+     * `?preview=draft` included) and `/published`.
      *
      * `per-caller` — only the gates whose verdict depends on who asks. The
      * doors that serve STORED versions — the layered view, `/diff`,
-     * `/history`, `/audit`. A per-deployment gate withholds nothing from the
-     * caller, and applied to a stored version it reports the store wrongly (a
+     * `/history`, `/audit`, and [#20290] the plain read's `?state=draft`
+     * branch (the pending draft row). A per-deployment gate withholds nothing
+     * from the caller, and applied to a stored version it reports the store wrongly (a
      * widget whose service is merely off here reads as never authored — and
      * Studio's designer, which loads the layered view and saves what it
      * loaded, would delete it).
@@ -155,27 +173,37 @@ export interface MetaReadGatePolicy {
      * The `app` arm (the unpublished gate, `requiredPermissions`, the
      * docs-audience entry arm).
      *
-     * `gate` — the plain read's app answer: its refusal, or the pruned app.
+     * `gate` — the plain read's app answer: its refusal, or the pruned app,
+     * for EVERY caller, authors included: read-to-display is per user.
      *
-     * `pending-decision` — an app the plain read refuses WHOLE (an app-level
-     * `requiredPermissions` the caller lacks → `403`; an unpublished app to a
-     * non-builder → the absence answer, ADR-0045 §3) is refused exactly as the
-     * plain read refuses it. An app it would serve only in PART (entries
-     * withheld) is served as STORED, unpruned, exactly as before this gate.
-     * ⚠️ That second half is a DECLARED EXEMPTION, not a verdict: what the
-     * layered view (`/layers`, `?layers=`) and `/diff` owe a caller who may see
-     * part of an app is a new permission boundary, and the maintainer's to
-     * decide (decision anchor #20156). Both ways of pulling those cells to the
-     * plain read's answer draw one: pruning a stored version the designer
-     * saves back deletes the withheld entries, and refusing it locks out an
-     * author — a platform admin included, whose capability list carries no
-     * wildcard and meets no admin exemption in
-     * {@link filterAppForUserWithReason} — who lacks one entry's permission.
-     * The census in `meta-alternate-door-read-gates.test.ts` pins exactly those
-     * partial cells to the pre-gate answer under that anchor, so they stay loud
-     * until ruled, and holds every whole-refusal cell to the plain read's.
+     * `author-exempt` — [#20156] ruling 5856774816 (letter B, confirmed
+     * 5856866273), ADR-0106 D4's shape carried from object schemas to apps:
+     * read-to-edit is whole for whoever may edit. A caller the door hands in
+     * with {@link MetaReadGateCaller.mayWriteItem} `true` — one the item's
+     * save door admits — is served the STORED app, unpruned; every other
+     * caller is served exactly `gate`'s answer, pruned. An app the plain read
+     * refuses WHOLE (an app-level `requiredPermissions` the caller lacks →
+     * `403`; an unpublished app to a non-builder → the absence answer,
+     * ADR-0045 §3) is refused either way, author or not.
+     *
+     * Why the save door's answer, and not "platform administrator" (ruling
+     * item 1): Studio's designer loads a stored version and saves back what
+     * it loaded, so whoever may save an app must see all of it — pruned, the
+     * save would delete the withheld entries silently. That makes "whoever
+     * may write it sees it whole" true by construction, the same invariant
+     * ADR-0106 D4 holds for object schemas.
+     *
+     * The exemption is a CALLER property: this member says only whether a
+     * door honours it, and ⛔ no route test stands here. The doors that
+     * serve STORED versions for authoring (the layered view, `/diff`, and
+     * [#20290] the plain read's `?state=draft` branch — Studio's designers
+     * merge the draft over the layered view and save it back) honour it; the
+     * doors that serve the document a client renders (the plain read,
+     * `/published`) and the event doors (`/history`, `/audit`) do not.
+     * The census in `meta-alternate-door-read-gates.test.ts` pins both halves
+     * on every door, and that the exemption reaches no other cell.
      */
-    app: 'gate' | 'pending-decision';
+    app: 'gate' | 'author-exempt';
 }
 
 // ── The gates' types ──────────────────────────────────────────────────────────
@@ -1143,9 +1171,7 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
  * through `?layers=true`, and an app's `requiredPermissions` entries reached
  * every member. The by-name app route's own rule — it "must not serve a nav
  * entry the list route prunes, or reading the single-app JSON defeats the
- * filter" — held for one door out of seven (the layered view and `/diff`
- * still serve an app the caller may see only in PART as stored, pending a
- * decision: `MetaReadGatePolicy.app`). Each door asks THIS function, so a
+ * filter" — held for one door out of seven. Each door asks THIS function, so a
  * gate added here reaches all of them, and the census in
  * `meta-alternate-door-read-gates.test.ts` — its door list read off the
  * route table — fails a door that does not ask.
@@ -1164,10 +1190,11 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
  *    `service` → the absence answer (ADR-0045 §3: an unpublished app is
  *    externally unobservable). [#7912] The servability gate and [#19790] the
  *    docs-audience entry arm ride along.
- *    ⚠️ Under `app: 'pending-decision'` — the layered view and `/diff` —
- *    an app the plain read refuses WHOLE is refused the same way, and one
- *    it would serve only in PART is served as stored, unpruned: see
- *    `MetaReadGatePolicy.app` for the decision it waits on.
+ *    [ruling 5856774816] Under `app: 'author-exempt'` — the layered view,
+ *    `/diff` and [#20290] the plain read's `?state=draft` — a caller who
+ *    may write the app is served it as stored, unpruned, and every other
+ *    caller the pruned app; an app the plain read
+ *    refuses WHOLE is refused either way. See `MetaReadGatePolicy.app`.
  *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser}. A
  *    per-DEPLOYMENT gate (which optional services are registered), never
  *    per-caller, so `arms: 'per-caller'` skips it.
@@ -1219,6 +1246,8 @@ export function createMetaItemReadGate(
             serviceGate?: (n: string) => boolean;
             servabilityGate?: NavServabilityGate;
             docAudienceGate?: NavDocAudienceGate;
+            /** [ruling 5856774816] Serve the stored app unpruned — see `MetaReadGatePolicy.app`. */
+            authorExempt: boolean;
         };
         let inputs: Promise<AppGateInputs | null> | undefined;
         const resolveInputs = (): Promise<AppGateInputs | null> => (inputs ??= (async () => {
@@ -1238,15 +1267,20 @@ export function createMetaItemReadGate(
                 // #4722 lesson, one gate over).
                 servabilityGate = await resolveNavServability(sources) ?? undefined;
             }
+            // [#20156] Ruling 5856774816: on a door that honours the author
+            // exemption, a caller who may write the app reads it whole. The
+            // door answers `mayWriteItem` from its own save door's admission,
+            // so this is the caller's property, never the route's.
+            const authorExempt = policy.app === 'author-exempt' && ctx.mayWriteItem === true;
             // [#19790] And the same docs-audience gate, for the same reason:
             // a `doc` entry the list route prunes must not come back here.
-            // Not resolved under `pending-decision`: it only prunes ENTRIES,
-            // and that arm serves the stored app unpruned (see below), so
-            // its reads would decide nothing.
-            const docAudienceGate = policy.app === 'gate'
-                ? await resolveNavDocAudience(sources, documents)
-                : undefined;
-            return { sysPerms, serviceGate, servabilityGate, docAudienceGate };
+            // Not resolved for an exempt author: it only prunes ENTRIES, and
+            // an exempt author is served the stored app unpruned (see below),
+            // so its reads would decide nothing.
+            const docAudienceGate = authorExempt
+                ? undefined
+                : await resolveNavDocAudience(sources, documents);
+            return { sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
         })());
         return async (document) => {
             if (document == null) return serve(document);
@@ -1276,12 +1310,12 @@ export function createMetaItemReadGate(
                 // construction (ADR-0045 §3).
                 return refuse({ reason: 'absent' });
             }
-            // ⚠️ A DECLARED EXEMPTION, pending the maintainer's decision
-            // (anchor #20156) — see `MetaReadGatePolicy.app`. An app the
-            // plain read refuses WHOLE was refused above, exactly as the
-            // plain read refuses it; one it would serve only in PART is
-            // served as STORED, unpruned, exactly as before this gate.
-            return serve(policy.app === 'pending-decision' ? document : gated.app);
+            // [#20156] Ruling 5856774816 — see `MetaReadGatePolicy.app`. An
+            // app the plain read refuses WHOLE was refused above, author or
+            // not. Otherwise an exempt author reads the STORED app (whoever
+            // may save it must see all of it, or the save deletes what was
+            // withheld), and every other caller the plain read's pruned app.
+            return serve(gateInputs.authorExempt ? document : gated.app);
         };
     }
 
@@ -1335,4 +1369,125 @@ export function createMetaItemReadGate(
     }
 
     return async (document) => serve(document);
+}
+
+// ── THE list gate ─────────────────────────────────────────────────────────────
+
+/**
+ * [#20237] THE per-caller gate of one `/meta/:type` LIST answer — the list
+ * twin of {@link createMetaItemReadGate}, called by both transports that serve
+ * that read.
+ *
+ * ## Why one spelling
+ *
+ * `RestServer`'s `GET /meta/:type` ran these filters inline, and the runtime
+ * dispatcher's `/meta` list branch — the only answer on a host that mounts
+ * just the `${prefix}/*` catch-all — ran none of them. So a member `RestServer`
+ * prunes listed a `{ permissionSet }`-gated doc there WITH its body
+ * (`?include=content`), a set-gated book, an app whose `requiredPermissions`
+ * they lack, and an ungated app with its gated nav entries — the item gate's
+ * defect, one door over: the by-name reads refused what the list served.
+ * Each transport now hands its list to THIS function, so a list gate added
+ * here reaches both, and `meta-list-read-gate-parity.test.ts` in
+ * `@objectstack/runtime` drives the same fixtures through both and holds the
+ * answers equal.
+ *
+ * ## The gates, per type (unchanged from `RestServer`'s list route)
+ *
+ *  - `app` — for an authenticated caller, {@link filterAppForUser} over every
+ *    app, all of them judged with ONE set of per-request inputs: the ADR-0057
+ *    D10 service probe, [#7912] the nav-servability gate and [#19790] the
+ *    docs-audience entry arm. An app withheld for ANY reason is left out — on
+ *    a list, unpublished, `requiredPermissions` and an absent service all
+ *    mean "not in your list" (the by-name read is where they differ, #8013).
+ *    An anonymous caller's list is returned untouched, as it always was: the
+ *    anonymous-deny floor answers it before this gate, on both transports.
+ *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser} over every
+ *    dashboard, when the deployment can be probed (fail OPEN otherwise). A
+ *    per-DEPLOYMENT gate, not a per-caller one; it rides here because the
+ *    list answers what the by-name read answers.
+ *  - `book` — ADR-0046 §6.7, each book's OWN audience, resolved over the
+ *    listed books ({@link DocsAudience.admitsBook}).
+ *  - `doc` — ADR-0046 §6.7, each doc's EFFECTIVE audience: the env's books
+ *    ({@link fetchAudienceBooks} — a book-read fault THROWS, [#20129], so the
+ *    list is not served rather than filtered against no books), with the
+ *    listed docs as the corpus. The fast path (no set-gated book anywhere)
+ *    serves an authenticated caller every doc.
+ *
+ * Every other type is returned as given. One audience resolution, the docs
+ * reads' own ({@link resolveDocsAudience}) — ⛔ no second resolver.
+ *
+ * NOT here, for the item gate's reasons: the ADR-0106 object mask, which each
+ * transport threads through its own `fetch → mask → send` exit; and the list
+ * route's PROJECTIONS, which withhold nothing from anyone — `?id=`,
+ * `?object=`, the doc locale collapse and content slim, translation.
+ *
+ * ## Shape
+ *
+ * `metaType` is the SINGULAR type (the caller folds `/meta/docs` once, at its
+ * boundary). The judge takes the list's ITEMS — each transport unwraps and
+ * rewraps its own list envelope — and answers the SAME array when nothing
+ * applies (an ungated type, an empty book or doc list, an anonymous caller's
+ * app list, a deployment that cannot be probed), a new one otherwise; the
+ * input is never mutated. A gate input that cannot be read REJECTS the judge:
+ * the transport answers that fault, ⛔ never the unfiltered list.
+ */
+export function createMetaListReadGate(
+    sources: MetaItemReadGateSources,
+    metaType: string,
+): (items: any[]) => Promise<any[]> {
+    if (metaType === 'app') {
+        return async (items) => {
+            const ctx = await sources.resolveCaller();
+            if (!ctx?.userId) return items;
+            const sysPerms = new Set<string>(
+                Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
+            );
+            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
+            const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+            // [#7912] Resolved ONCE for the whole list — object metadata is a
+            // per-request fact, not a per-app one.
+            const servabilityGate = await resolveNavServability(sources) ?? undefined;
+            // [#19790] Likewise once for the whole list: books, holdings and
+            // the doc corpus are per-request facts about this caller.
+            const docAudienceGate = await resolveNavDocAudience(sources, items);
+            return items
+                .map((it: any) => filterAppForUser(it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
+                .filter((it: any) => it != null);
+        };
+    }
+
+    if (metaType === 'dashboard') {
+        return async (items) => {
+            const ctx = await sources.resolveCaller();
+            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
+            if (!registered) return items;
+            const serviceGate = (n: string) => registered.has(n);
+            return items.map((it: any) => filterDashboardForUser(it, serviceGate));
+        };
+    }
+
+    if (metaType === 'book') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const audience = await resolveDocsAudience(sources, items);
+            return items.filter((b: any) => b && typeof b === 'object' && audience.admitsBook(b));
+        };
+    }
+
+    if (metaType === 'doc') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const books = await fetchAudienceBooks(sources);
+            const audience = await resolveDocsAudience(sources, books);
+            // Fast path: with no gated book anywhere, every effective audience
+            // admits an authenticated caller.
+            if (audience.allReadable) return items;
+            // The corpus is the listed docs themselves.
+            const canRead = audience.docReader(docCorpusOf(items));
+            return items.filter((d: any) => !!d && typeof d === 'object' && canRead(d.name));
+        };
+    }
+
+    return async (items) => items;
 }

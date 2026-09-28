@@ -105,8 +105,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
-import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
+import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
+import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [#11350] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -174,6 +174,7 @@ import type {
     StoredMigrationNotice,
     StoredMigrationReport,
     StoredMigrationRow,
+    StoredMigrationTodo,
 } from './stored-migration.js';
 
 /**
@@ -4762,22 +4763,32 @@ export class ObjectStackProtocolImplementation implements
      * instead would be weaker — the pass is copy-on-write, so an untouched
      * branch is shared and a re-serialized identical body can still differ in
      * key order.
+     *
+     * [#17321] The TODOs ride along for the same caller. A conversion that
+     * recognises a pre-protocol shape it cannot rewrite losslessly leaves the
+     * site as stored and emits NO notice for it, so "no notices" alone means
+     * "nothing to persist", never "on protocol": {@link migrateStoredMetadata}
+     * reads `todos` to tell the two apart. They change nothing in `item`.
      */
     private convertStoredItemDetailed(
         type: string,
         data: unknown,
         onNotice?: (notice: ConversionNotice) => void,
-    ): { item: unknown; notices: ConversionNotice[] } {
+    ): { item: unknown; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (singular === 'flow') return { item: data, notices: [] };
+        if (singular === 'flow') return { item: data, notices: [], todos: [] };
         const notices: ConversionNotice[] = [];
+        const todos: ConversionTodoNotice[] = [];
         const item = applyConversionsToStoredItem(singular, data, {
             onNotice: (n) => {
                 notices.push(n);
                 onNotice?.(n);
             },
+            onTodo: (t) => {
+                todos.push(t);
+            },
         });
-        return { item, notices };
+        return { item, notices, todos };
     }
 
     /**
@@ -5115,6 +5126,24 @@ export class ObjectStackProtocolImplementation implements
         // an argument, the same shape `orgWallEnforced` uses below.
         const packageScope = this.resolveWritePackageScope(evt.packageId);
 
+        // [#20158] The live engine's judge-only filter admission — the third
+        // host fact of the #6285 kind, probed here and passed in so the gate
+        // stays pure. OPTIONAL on `IObjectQLEngine` by ruling (#19995 C): a host
+        // whose engine lacks it (a metadata-only store, a test double) passes
+        // nothing and the rules skip the engine's judgement. Bound, because
+        // `judgeFilter` reads the engine's own registry through `this`.
+        //
+        // ⚠️ It reads the LIVE registry, not the snapshot the rules resolve
+        // names against. An object that exists only in this write's pending
+        // batch or in an organization overlay row is one the engine does not
+        // know, and the engine's answer for that is its own: the field-map
+        // doors answer nothing and the schema-free doors still judge. The
+        // runtime read-scope withhold (#5367) stays the backstop there.
+        const engineJudge: IObjectQLEngine['judgeFilter'] =
+            typeof this.engine.judgeFilter === 'function'
+                ? (objectName, where, options) => this.engine.judgeFilter(objectName, where, options)
+                : undefined;
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -5130,6 +5159,7 @@ export class ObjectStackProtocolImplementation implements
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
+            ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
@@ -16714,6 +16744,16 @@ export class ObjectStackProtocolImplementation implements
      *   is simply outside its reach. Re-author the item under the canonical
      *   type (`PUT /meta/<canonical>/<name>`) and drop the non-canonical
      *   row.
+     * - **Sites the chain leaves as stored for want of a lossless rewrite**
+     *   (#17321, ADR-0087 D3's structured TODO). A conversion that recognises
+     *   a pre-protocol shape it cannot rewrite without changing what it means
+     *   — a page filter carrying `$or`, which a flat rule list cannot spell —
+     *   leaves the site byte-identical and reports a TODO instead of a notice.
+     *   Every such site is listed under its row (`rows[].todos`) with the
+     *   block and the reason, whatever the row's outcome; a row whose ONLY
+     *   finding is TODOs has nothing to persist and is reported `skipped`,
+     *   never `canonical`. Like the skip classes above, TODOs do not flip
+     *   {@link storedMigrationClean}: no run of this pass could clear them.
      */
     async migrateStoredMetadata(request: {
         /** Write. Omitted / false = preview: reports what it would do, writes nothing. */
@@ -16811,6 +16851,7 @@ export class ObjectStackProtocolImplementation implements
                 packageId,
                 state,
                 notices: [] as StoredMigrationNotice[],
+                todos: [] as StoredMigrationTodo[],
             };
             // An already-canonical row is counted, never itemised: on a healthy
             // deployment that is every row, and a report listing all of them
@@ -16941,12 +16982,43 @@ export class ObjectStackProtocolImplementation implements
             // still changing the body. Both passes are copy-on-write, so
             // identity is the precise test there: `storable === body` exactly
             // when nothing was rewritten at all.
-            const { item, notices } = flowResult
-                ? { item: flowResult.storable, notices: flowResult.notices }
+            const { item, notices, todos } = flowResult
+                ? { item: flowResult.storable, notices: flowResult.notices, todos: [] as ConversionTodoNotice[] }
                 : this.convertStoredItemDetailed(singular, body);
             const changed = flowResult ? item !== body : notices.length > 0;
+            // [#17321] A site the chain left as stored — no lossless rewrite
+            // exists for it (ADR-0087 D3: a structured TODO, never silence) —
+            // rides on the row whatever its outcome, and is what keeps a row
+            // with nothing to persist from being counted `canonical` below.
+            const flattenedTodos: StoredMigrationTodo[] = todos.map((t) => ({
+                conversionId: t.conversionId,
+                surface: t.surface,
+                from: t.from,
+                path: t.path,
+                reason: t.reason,
+                message: t.message,
+            }));
             if (!changed) {
-                record({ ...base, outcome: 'canonical' });
+                if (flattenedTodos.length === 0) {
+                    record({ ...base, outcome: 'canonical' });
+                    continue;
+                }
+                // Nothing to persist, and not on protocol either: every site the
+                // chain recognised here is one it has no lossless rewrite for.
+                // `skipped` — outside what a body-canonicalization pass can do,
+                // BY RULING rather than by capability (the conversion must not
+                // flatten a combinator) — so, like every skip class, it is
+                // printed with each site and does not flip
+                // `storedMigrationClean`: no run of this pass could ever clear it.
+                record({
+                    ...base,
+                    todos: flattenedTodos,
+                    outcome: 'skipped',
+                    reason: `the conversion chain rewrites nothing here: it left ${flattenedTodos.length} `
+                        + 'site(s) of this row as stored, because no lossless rewrite exists for them — '
+                        + 'each TODO below names the site and why. The row keeps loading unchanged; '
+                        + 'rewrite each site by hand.',
+                });
                 continue;
             }
             const flattened: StoredMigrationNotice[] = notices.map((n) => ({
@@ -16959,7 +17031,7 @@ export class ObjectStackProtocolImplementation implements
             }));
 
             if (!apply) {
-                record({ ...base, notices: flattened, outcome: 'pending' });
+                record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'pending' });
                 continue;
             }
 
@@ -16976,7 +17048,7 @@ export class ObjectStackProtocolImplementation implements
                     actor: request.actor ?? 'migrate-stored',
                     ...(organizationId ? { organizationId } : {}),
                 });
-                record({ ...base, notices: flattened, outcome: 'rewritten' });
+                record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' });
             } catch (e: any) {
                 // [#8333 · P13] `rows[].reason` is REPORT DATA — it rides on the
                 // migration report, not on a thrown message — so no HTTP
@@ -16999,6 +17071,7 @@ export class ObjectStackProtocolImplementation implements
                 record({
                     ...base,
                     notices: flattened,
+                    todos: flattenedTodos,
                     outcome: 'failed',
                     reason: clientFacingFailureText(
                         e,

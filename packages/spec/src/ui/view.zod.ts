@@ -4770,6 +4770,17 @@ export const ViewKindSchema = z
  * and no effect, and a view marked as one user's was shown to everyone: the
  * `owner` half is a visibility claim, the security shape ADR-0049 is about.
  *
+ * [#20230] The SAME two constants tombstone the flattened overlay's own
+ * `owner` / `hidden` ({@link flattenedViewOverlayFields}) — one family, one
+ * text, triage direction 「follow #20085's disposition for the same key
+ * pair」. The overlay door (a lean personalization PUT with no `config`)
+ * declared both names separately, accepted and stored them, and nothing read
+ * either. Writer census before removal: none in this framework or its
+ * examples, in objectui at its pin and at `main` (the toolbar writes only
+ * `rowHeight` / `sort` / `hiddenFields` / `columnState` / `inlineEdit`, the
+ * switcher only `label` / `isPinned` / `isDefault` / `sortOrder`), or in the
+ * HotCRM app; cloud was not reachable from that census.
+ *
  * Declared ABOVE {@link viewItemBaseShape} on purpose: under
  * `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module init in file
  * order, and a `const` below its first eager reader is a TDZ error (the
@@ -4833,11 +4844,12 @@ function viewItemBaseShape() {
      * {@link viewItemArmShape} exists for: `tsc` types the key `never` on
      * `defineViewItem`'s input, and every parse raises the prescription.
      *
-     * ⚠️ The flattened-overlay members declare their OWN `owner` / `hidden`
+     * The flattened-overlay members declare their OWN `owner` / `hidden`
      * (`flattenedViewOverlayFields()`) — a different door, a lean
-     * personalization PUT with no `config`, and deliberately untouched here.
-     * The D2 conversion `view-item-owner-hidden-removed` is scoped to the
-     * record spelling for the same reason.
+     * personalization PUT with no `config`. [#20230] They are tombstoned
+     * there too, with these same two texts. The D2 conversion
+     * `view-item-owner-hidden-removed` stays scoped to the record spelling;
+     * `view-overlay-owner-hidden-removed` strips the overlay spelling.
      */
     owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
     hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
@@ -5281,8 +5293,18 @@ function flattenedViewOverlayFields(kind: 'list' | 'form') {
     isDefault: z.boolean().optional(),
     order: z.number().int().optional(),
     scope: ViewScopeSchema.optional(),
-    owner: z.string().optional(),
-    hidden: z.boolean().optional(),
+    // [#20230] RETIRED — ADR-0049 enforce-or-remove, the view item's pair
+    // (#20085) on this door. Declared here, accepted by the write door, stored
+    // verbatim, and read by nothing: both switcher read paths filter on
+    // `viewKind` + `object` and sort on `order`, so `hidden: true` hid no
+    // view and `owner` scoped none. Tombstoned, never deleted: both members
+    // `.strip()`, so a bare deletion would drop the key in silence (ADR-0104)
+    // — the no-effect save this retirement ends. The texts are the view
+    // item's own ({@link VIEW_ITEM_OWNER_RETIRED} /
+    // {@link VIEW_ITEM_HIDDEN_RETIRED}); stored overlay rows are stripped by
+    // the D2 conversion `view-overlay-owner-hidden-removed`.
+    owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
+    hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     protection: ProtectionSchema.optional(),
     ...MetadataProtectionFields,
     // Structural guards — a flattened overlay is neither a record nor a container.
@@ -5402,13 +5424,16 @@ function speaksViewVocabulary(body: unknown): boolean {
  * it rejects bodies that are **not a view at all** (`{ nope: 1 }`, `{}`,
  * `{ id: 'x' }`, and identity with no content) while making no judgement about
  * whether the view is *complete* — which is what keeps it compatible with every
- * lean shape the platform round-trips. A pin PUT (`{ isPinned: true }`), a hide
- * PUT (`{ hidden: true }`), a reorder (`{ sortOrder: 3 }`) and a column-sort PUT
- * all carry declared non-identity keys and are unaffected *by this precondition*
- * ([#7741] the UNION may still refuse the baseline-less ones — an overlay with
- * no shadowed entry to inherit `object`/`viewKind` from now fails the members'
- * binding requirement, which is the ruled behaviour, and the refusal is the
- * members' located guidance rather than this precondition's).
+ * lean shape the platform round-trips. A pin PUT (`{ isPinned: true }`), a
+ * reorder (`{ sortOrder: 3 }`) and a column-sort PUT all carry declared
+ * non-identity keys and are unaffected *by this precondition* ([#7741] the
+ * UNION may still refuse the baseline-less ones — an overlay with no shadowed
+ * entry to inherit `object`/`viewKind` from now fails the members' binding
+ * requirement, which is the ruled behaviour, and the refusal is the members'
+ * located guidance rather than this precondition's). [#20230] A hide body
+ * (`{ hidden: true }`) is no longer a platform write: `hidden` is a retired
+ * key, still in the vocabulary as a tombstone, so it passes this precondition
+ * and the members refuse it with the retirement prescription.
  *
  * "Complete" is deliberately NOT the bar, and the distinction is the whole
  * reason this is safe: `{ isPinned: true }` is not a renderable view either, but
@@ -6206,7 +6231,16 @@ export function diagnoseViewMetadata(body: unknown): ViewMetadataDiagnosis {
     );
     // The union accepted, so some member did; `selectViewMetadataBranch` is the
     // fallback only for the impossible case, never the primary answer.
-    return { success: true, branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem', data: parsed.data };
+    //
+    // [#19920] `parsed.data` is typed `unknown` only because the union's members
+    // are cast to `z.ZodTypeAny` where `ViewMetadataSchema` builds it; at runtime
+    // it IS one member's output, which is what `ViewMetadataParsed` names. The
+    // assertion restores the type that cast erased and changes no value.
+    return {
+      success: true,
+      branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem',
+      data: parsed.data as ViewMetadataParsed,
+    };
   }
 
   // (2) The identity precondition short-circuited the pipe with `z.NEVER`, so
@@ -6654,8 +6688,20 @@ export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
  * optional. `ViewMetadataSchema` remains the only judge.
  */
 export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
-/** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
-export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
+/**
+ * Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122): the union
+ * of the OUTPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
+ * {@link VIEW_METADATA_MEMBERS} exactly as {@link ViewMetadata} reads their input types.
+ *
+ * [#19920] Deliberately NOT `z.infer<typeof ViewMetadataSchema>`, for the reason
+ * {@link ViewMetadata} gives: the union's members are cast to `z.ZodTypeAny` where the union is
+ * built, so the schema's own output type is `unknown` and this name used to type-check any value.
+ * A successful parse returns the output of the one member that accepted the stripped body (the
+ * union's `.check()` transforms nothing), so every parse result is a value of this type.
+ * `view-metadata-type.test.ts` pins that `unknown` is refused here and that a parsed body of each
+ * member type-checks.
+ */
+export type ViewMetadataParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;
 export type ViewKind = z.input<typeof ViewKindSchema>;
 export type ListView = z.input<typeof ListViewSchema>;
