@@ -5,7 +5,7 @@
 
 **BREAKING** — the inner `name` on an analytics cube's measures and dimensions (`MetricSchema.name`, `DimensionSchema.name`) is now refused at parse: nothing ever read it. The record key a member is declared under IS its name — the analytics API publishes it as `<cube>.<key>` and a query names it that way. Delete the inner `name`; to rename a member, rename its key.
 
-Clause-②: yes
+Clause-②: no (narrowing)
 
 `measures` and `dimensions` are records, and the key was always the member's identity: `GET /api/v1/analytics/meta` publishes every member as `${cube.name}.${key}` (in `@objectstack/service-analytics` and in `@objectstack/driver-memory`), and both SQL strategies and the in-memory driver resolve a member by indexing the bag with that key. Measured before removal, with a lit control: zero reads of a member's inner `name` in non-test source, against four reads of the neighbouring `measure.label` / `dimension.label` in the same two `getMeta` projections. So the inner `name` was a REQUIRED second copy of the identity that nothing read — and one that disagreed with its key was silently ignored (this repository's own in-memory driver fixtures authored `totalAmount: { name: 'total_amount', … }` and queried `orders.totalAmount`).
 
