@@ -32,7 +32,7 @@
  * refused with the collision code at the declaring stack's own index.
  */
 import { describe, it, expect } from 'vitest';
-import { composeStacks } from './stack.zod';
+import { composeStacks, defineStack } from './stack.zod';
 
 type Envelope = Error & {
   code?: string;
@@ -69,8 +69,17 @@ const withTop = (actions: unknown) => ({ manifest: mf('com.example.b'), objects:
 /** Stack B, hand-built, whose object `b_item` carries the given `actions`. */
 const withOwn = (actions: unknown) => ({ manifest: mf('com.example.b'), objects: [obj('b_item', { actions })] });
 
+/**
+ * A BUILT stack whose keys were rewritten after `defineStack` returned — the
+ * shape nothing parsed. Since #20367 ruling B a hand-built literal is refused
+ * at `composeStacks`' step 0 (no provenance mark), but the mark survives an
+ * in-place mutation of a built stack, so this is the route by which a malformed
+ * collection still reaches step 6.
+ */
+const built = (stack: unknown) => Object.assign(defineStack({} as never, { strict: false }), stack as object);
+
 const compose = (stacks: unknown[], options?: Record<string, unknown>) =>
-  composeStacks(stacks as never, options as never);
+  composeStacks(stacks.map(built) as never, options as never);
 
 function expectSchemaEnvelope(refused: Envelope | null, paths: PropertyKey[][], expected: 'array' | 'object'): void {
   expect(refused).toBeInstanceOf(Error);
