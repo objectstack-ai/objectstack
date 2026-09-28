@@ -87,6 +87,7 @@ import {
 } from '@objectstack/formula';
 import {
   collectFlowGraphs,
+  flowNodeConfigRefusals,
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
   resolveFlowNodeValueSlots,
@@ -1620,6 +1621,22 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // `loop.collection`). The ledger records them regardless, so the
         // reconciliation ratchet still sees the marker.
         const nodeType = typeof node.type === 'string' ? node.type : '';
+        // [#20316] What the node's executor needs its `config` to carry — a key
+        // its contract requires, left out, and a `decision` branch list it
+        // cannot read. The spec's one judge, the same call `FlowSchema.parse`
+        // makes (and `registerFlow` meets through that parse), so a stack
+        // handed to `validateStackExpressions` without a parse in front of it
+        // is held to the same bar. `error`: the flow would register and then
+        // refuse — or, for a branch with no label, misroute — every run.
+        const configRefusals = flowNodeConfigRefusals(nodeType, node.config);
+        for (const refusal of configRefusals) {
+          issues.push({
+            where: `${at} · node '${node.id}' (${nodeType}) config.${refusal.path}`,
+            message: refusal.message,
+            source: refusal.source,
+            severity: 'error',
+          });
+        }
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
           // [#15137] `value` slots are checkable too, by their own rule — see
@@ -1727,7 +1744,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
                   + 'sources; apply them by hand.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
-          } else if (!fn) {
+          } else if (!fn && !configRefusals.some((r) => r.path === 'function')) {
+            // [#20316] An ABSENT `function` is the contract judge's finding
+            // above (one finding, not two); this arm keeps the shape that judge
+            // leaves alone — a `function` that is present and blank.
             issues.push({
               where: `${at} · node '${node.id}' (script) callable`,
               message:

@@ -75,6 +75,21 @@
 // The repo's one notion of "blank" (`source.trim()`), shared with the evaluated
 // slots — never a second hand-written one here.
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
+import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
+// The executor contracts (#20316). Read only inside
+// `getBuiltinNodeConfigContracts`, never at module load: two of these modules
+// import this one, so the bindings are live references resolved on first use.
+import { LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema } from './control-flow.zod';
+import {
+  CreateRecordConfigSchema,
+  DeleteRecordConfigSchema,
+  GetRecordConfigSchema,
+  MapConfigSchema,
+  ScreenConfigSchema,
+  UpdateRecordConfigSchema,
+} from './builtin-node-config.zod';
+import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod';
+import { ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
 
 /**
  * The dialect a declared expression slot takes — and therefore what, if
@@ -168,8 +183,10 @@ export interface FlowNodeExpressionPath {
    * `service-automation`), in both directions over the `predicate` role, so
    * this flag cannot claim a requirement the contract does not make, nor miss
    * one it does. Never set on another role: the channels require
-   * `loop.collection` / `map.collection` too, but no door refuses their
-   * absence — their executors parse their own config.
+   * `loop.collection` / `map.collection` too, and since #20316 all three doors
+   * refuse their absence — but through {@link flowNodeConfigRefusals}, which
+   * judges every key an executor contract requires, not through this flag,
+   * which only decides what the expression walk emits.
    */
   readonly required?: true;
 }
@@ -353,7 +370,10 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *    emitted (as `undefined` or `null`, whichever was there) for the consumer
  *    to refuse through {@link predicateSlotRefusal}, the same way as a blank.
  *    Only the element's OWN slot is judged: an element that is not an object
- *    carries no slot, and the walk does not reach it. A **non-string**
+ *    carries no slot, and the walk does not reach it — an ARRAY element
+ *    included, since #20316 (the walk used to read an array element as an
+ *    object missing its slot); {@link flowNodeConfigRefusals} refuses such an
+ *    element as what it is. A **non-string**
  *    is emitted too (#15572), for the consumer to refuse through
  *    {@link predicateSlotRefusal}: it used to be skipped as "a type violation
  *    for the schema pass to report", and for a schemaless node type there is no
@@ -483,9 +503,26 @@ export type StructuralConditionValueKind =
   | 'function';
 
 /**
- * Refusal code → the params its message interpolates, for this file's two
- * refusal producers, {@link predicateSlotRefusal} and
- * {@link structuralConditionRefusal}. The keys ARE the closed set.
+ * What a value sitting where a node's `config` wants another shape was, as a
+ * token — for {@link flowNodeConfigRefusals}. `null` is spelled out on the
+ * codes that can meet it; the message renders the token as a phrase (`a
+ * string`, `an array`, `an object`).
+ */
+export type NodeConfigValueKind =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'bigint'
+  | 'symbol'
+  | 'function'
+  | 'array'
+  | 'object';
+
+/**
+ * Refusal code → the params its message interpolates, for this file's three
+ * refusal producers, {@link predicateSlotRefusal},
+ * {@link structuralConditionRefusal} and {@link flowNodeConfigRefusals}. The
+ * keys ARE the closed set.
  *
  * A consumer that renders its own words — a localized designer — keys its
  * catalogue row to the `code` and fills it from the `params`; the English
@@ -503,6 +540,23 @@ export interface FlowSlotRefusalParams {
   'predicate-slot-not-text': { readonly found: PredicateSlotValueKind };
   /** A structural condition holding neither text nor an envelope carrying a string `source`. */
   'structural-condition-shape': { readonly found: StructuralConditionValueKind };
+  /** A `decision` node's `conditions` present, not `null`, and not an array. */
+  'decision-conditions-not-array': { readonly found: Exclude<NodeConfigValueKind, 'array'> };
+  /** An element of a `decision` node's `conditions` that is not an object (`null` and arrays included). */
+  'decision-branch-not-object': { readonly index: number; readonly found: Exclude<NodeConfigValueKind, 'object'> | 'null' };
+  /** A `decision` branch whose `label` is absent, `null`, blank after trimming, or not a string. */
+  'decision-branch-label-missing': {
+    readonly index: number;
+    readonly found: 'absent' | 'null' | 'blank' | Exclude<NodeConfigValueKind, 'string'>;
+  };
+  /** A key the node's executor contract requires, absent from the node's `config`. */
+  'node-config-key-missing': { readonly nodeType: string; readonly key: string };
+  /**
+   * A key the node's executor contract requires IN THIS CONFIGURATION — by a
+   * rule of the contract's own, whose message is the refusal's — absent from
+   * the node's `config`.
+   */
+  'node-config-key-required-by-rule': { readonly nodeType: string; readonly key: string };
 }
 
 /** Every refusal code this file's producers emit. */
@@ -513,6 +567,14 @@ export type PredicateSlotRefusalCode = 'predicate-slot-missing' | 'predicate-slo
 
 /** The codes {@link structuralConditionRefusal} emits. */
 export type StructuralConditionRefusalCode = 'structural-condition-shape';
+
+/** The codes {@link flowNodeConfigRefusals} emits. */
+export type FlowNodeConfigRefusalCode =
+  | 'decision-conditions-not-array'
+  | 'decision-branch-not-object'
+  | 'decision-branch-label-missing'
+  | 'node-config-key-missing'
+  | 'node-config-key-required-by-rule';
 
 /** One refusal's `code` and `params`, correlated: narrowing on `code` narrows `params`. */
 type FlowSlotRefusalOf<Codes extends FlowSlotRefusalCode> = { message: string; source: string } & {
@@ -534,6 +596,15 @@ export type PredicateSlotRefusal = FlowSlotRefusalOf<PredicateSlotRefusalCode>;
 export type StructuralConditionRefusal = FlowSlotRefusalOf<StructuralConditionRefusalCode>;
 
 /**
+ * One reason a node's `config` is refused on SHAPE or PRESENCE: the English
+ * `message`, the `source` to attribute it to (always `''` — none of these
+ * holds CEL text), the `code` with its `params`, and the `path` inside
+ * `config` it is anchored at, in the ledger's spelling (`conditions[0].label`,
+ * `fields[1].options[0].value`, `collection`).
+ */
+export type FlowNodeConfigRefusal = FlowSlotRefusalOf<FlowNodeConfigRefusalCode> & { readonly path: string };
+
+/**
  * Keyed by code so the compiler holds {@link FLOW_SLOT_REFUSAL_CODES} equal to
  * {@link FlowSlotRefusalParams}.
  */
@@ -542,6 +613,11 @@ const FLOW_SLOT_REFUSAL_CODE_TABLE = {
   'predicate-slot-blank': true,
   'predicate-slot-not-text': true,
   'structural-condition-shape': true,
+  'decision-conditions-not-array': true,
+  'decision-branch-not-object': true,
+  'decision-branch-label-missing': true,
+  'node-config-key-missing': true,
+  'node-config-key-required-by-rule': true,
 } as const satisfies Record<FlowSlotRefusalCode, true>;
 
 /**
@@ -866,6 +942,300 @@ export function structuralConditionRefusal(
   };
 }
 
+// ─── Node config the executor requires (#20316) ─────────────────────
+
+/**
+ * The executor contract a builtin node's `config` is parsed against at run
+ * time — the SAME Zod schema its executor hands `parseNodeConfig`
+ * (`service-automation/builtin/parse-config.ts`) — and, where the executor
+ * parses only on one path, the condition it parses on.
+ *
+ * Structural, like `parseNodeConfig`'s own view of a contract: this module
+ * reads `safeParse` and nothing else.
+ */
+export interface BuiltinNodeConfigContract {
+  readonly schema: {
+    safeParse(value: unknown): {
+      success: boolean;
+      error?: { issues: ReadonlyArray<{ code: string; path: ReadonlyArray<PropertyKey>; message: string }> };
+    };
+  };
+  /**
+   * The executor parses the config only when this holds. Absent: always. The
+   * one member is `loop`, whose legacy flat-graph form (no `body`) predates
+   * the ADR-0031 construct its contract describes and is deliberately not
+   * parsed (`loop-node.ts`), so `collection` is required only once a `body`
+   * is there.
+   */
+  readonly parsedWhen?: (config: Readonly<Record<string, unknown>>) => boolean;
+}
+
+let cachedBuiltinNodeConfigContracts: ReadonlyMap<string, BuiltinNodeConfigContract> | undefined;
+
+/**
+ * Every builtin node type whose executor parses its `config` against a
+ * contract at run time, keyed by `node.type` (#20316).
+ *
+ * The declared half of a pair: `service-automation`'s ratchet
+ * (`node-config-contract-ledger.test.ts`) reads each executor's
+ * `parseNodeConfig(…)` call out of its source and holds this map equal to it
+ * in both directions — the type, the schema, and `loop`'s parse condition —
+ * so a new contract-parsing executor cannot go unjudged here, and an entry
+ * cannot outlive the parse it mirrors.
+ *
+ * Built on first use, never at module load: these schemas' modules import
+ * this one, and a map literal at top level would read them mid-cycle.
+ *
+ * NOT here, on purpose: `decision` (its executor parses nothing — its branch
+ * shape is judged by {@link flowNodeConfigRefusals}'s own arm), `assignment`
+ * (three read-compatible shapes, no single contract), and `wait` /
+ * `connector_action`, whose inputs are FlowNode SIBLING blocks
+ * (`waitEventConfig` / `connectorConfig`), not `config`.
+ */
+export function getBuiltinNodeConfigContracts(): ReadonlyMap<string, BuiltinNodeConfigContract> {
+  if (cachedBuiltinNodeConfigContracts === undefined) {
+    cachedBuiltinNodeConfigContracts = new Map<string, BuiltinNodeConfigContract>([
+      ['get_record', { schema: GetRecordConfigSchema }],
+      ['create_record', { schema: CreateRecordConfigSchema }],
+      ['update_record', { schema: UpdateRecordConfigSchema }],
+      ['delete_record', { schema: DeleteRecordConfigSchema }],
+      ['notify', { schema: NotifyConfigSchema }],
+      ['http', { schema: HttpConfigSchema }],
+      ['screen', { schema: ScreenConfigSchema }],
+      ['script', { schema: ScriptConfigSchema }],
+      ['subflow', { schema: SubflowConfigSchema }],
+      ['map', { schema: MapConfigSchema }],
+      ['loop', { schema: LoopConfigSchema, parsedWhen: (config) => config.body != null }],
+      ['parallel', { schema: ParallelConfigSchema }],
+      ['try_catch', { schema: TryCatchConfigSchema }],
+    ]);
+  }
+  return cachedBuiltinNodeConfigContracts;
+}
+
+/** A plain object (not an array, not `null`). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The kind of a value that is not the shape a node-config position wants. */
+function nodeConfigValueKind(value: unknown): NodeConfigValueKind {
+  if (Array.isArray(value)) return 'array';
+  return typeof value as NodeConfigValueKind;
+}
+
+/** `a string`, `an array`, `an object` — the phrase a kind token renders as. */
+function kindPhrase(kind: NodeConfigValueKind | 'null'): string {
+  if (kind === 'null') return '`null`';
+  return kind === 'array' || kind === 'object' ? `an ${kind}` : `a ${kind}`;
+}
+
+/** A Zod issue path → the ledger spelling (`['fields', 0, 'name']` → `fields[0].name`). */
+function ledgerPathOf(path: ReadonlyArray<PropertyKey>): string {
+  let out = '';
+  for (const segment of path) {
+    if (typeof segment === 'number') out += `[${segment}]`;
+    else out += out ? `.${String(segment)}` : String(segment);
+  }
+  return out;
+}
+
+/**
+ * Is the key an issue names ABSENT from the authored config — its parent
+ * reached, and the key itself not there (or `undefined`)? The one question
+ * the contract arm asks: a present value of the wrong type is a different
+ * finding, and not this judge's.
+ */
+function absentAt(config: Readonly<Record<string, unknown>>, path: ReadonlyArray<PropertyKey>): boolean {
+  let parent: unknown = config;
+  for (const segment of path.slice(0, -1)) {
+    if (parent === null || typeof parent !== 'object') return false;
+    parent = (parent as Record<PropertyKey, unknown>)[segment as PropertyKey];
+  }
+  if (parent === null || typeof parent !== 'object') return false;
+  const last = path[path.length - 1] as PropertyKey;
+  return (parent as Record<PropertyKey, unknown>)[last] === undefined;
+}
+
+/**
+ * Does an issue path descend INTO an ADR-0031 region (`body.nodes…`,
+ * `branches[0]…`, `try.edges…`)? Those are the region's own nodes and edges,
+ * judged where the walks reach them as a graph — never re-reported against
+ * the container that holds them. The slot itself absent (`try`, `branches`)
+ * is the container's, and is judged here.
+ */
+function insideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+  if (path.length < 2) return false;
+  return (FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === path[0]);
+}
+
+/** The refusal for a key a node's executor contract requires. */
+function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
+  return (
+    `This \`${nodeType}\` node's config leaves out \`${key}\`, which the ${nodeType} contract requires. Its executor `
+    + 'parses the config against that contract before it does anything else and refuses the node without it — so '
+    + 'the flow registers, and then every run that reaches this node fails there; the config is metadata, and '
+    + `re-running changes nothing. Write \`${key}\` on the node's \`config\`.`
+  );
+}
+
+/**
+ * Every reason a node's `config` is refused on SHAPE or PRESENCE — the ONE
+ * judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses
+ * first) and `objectstack validate` share (#20316), in this module beside
+ * {@link predicateSlotRefusal} because it closes the same gap: a node's
+ * `config` is an open `z.record`, so what its executor requires was checked
+ * by nobody until the run.
+ *
+ * Two arms.
+ *
+ * ## The executor contract — a key it requires, absent
+ *
+ * For a type in {@link getBuiltinNodeConfigContracts}, the config is parsed
+ * against the executor's own contract, on the executor's own condition
+ * (`config ?? {}`, as `parseNodeConfig` reads it; `loop` only with a `body`),
+ * and a failure is kept ONLY where the key it names is absent from what was
+ * authored. That keeps the judge to one question — "would the run refuse this
+ * node for a key it leaves out?" — and leaves every other contract finding
+ * (a present value of the wrong type, an undeclared key) where it lives
+ * today. Issues inside an ADR-0031 region are the region's own and skipped.
+ *
+ *  - A key the contract simply requires → `node-config-key-missing`, whose
+ *    message names the key and the node type.
+ *  - A key a RULE of the contract requires in this configuration (a `notify`
+ *    with no `template` needs `title`; a `lookup` screen field needs its
+ *    `reference`) → `node-config-key-required-by-rule`, whose message is the
+ *    contract's own.
+ *
+ * A key only the conversion layer spells canonically (`object` →
+ * `objectName`, `flow` → `flowName`, …) is judged AFTER the conversion at
+ * `registerFlow` and `objectstack validate`, which convert first; a direct
+ * `FlowSchema.parse` of a pre-conversion spelling meets the refusal, exactly
+ * as it meets every other tombstone.
+ *
+ * ## The decision branch shape
+ *
+ * `decision` is parsed by nothing at run time — its executor reads
+ * `conditions[]` raw — so its arm states what that read needs:
+ *
+ *  - `conditions` present and not `null` is an array
+ *    (`decision-conditions-not-array`) — the executor iterates it;
+ *  - every element is an object (`decision-branch-not-object`) — the
+ *    executor reads `label` and `expression` off it;
+ *  - every branch's `label` is a non-blank string
+ *    (`decision-branch-label-missing`) — the label is the branch: the matched
+ *    branch reports it and traversal keeps only the out-edge carrying it, so
+ *    a branch without one selects nothing and EVERY out-edge is considered.
+ *
+ * The branch's `expression` is not judged here: it is a ledger `predicate`
+ * slot, refused absent / blank / non-text by {@link predicateSlotRefusal}.
+ *
+ * Every refusal carries `source: ''`: none of these values is CEL text.
+ */
+export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowNodeConfigRefusal[] {
+  const out: FlowNodeConfigRefusal[] = [];
+  if (nodeType === 'decision') {
+    decisionShapeRefusals(config, out);
+    return out;
+  }
+  const contract = getBuiltinNodeConfigContracts().get(nodeType);
+  if (!contract) return out;
+  const authored = config ?? {};
+  if (!isRecord(authored)) return out;
+  if (contract.parsedWhen && !contract.parsedWhen(authored)) return out;
+  const result = contract.schema.safeParse(authored);
+  if (result.success) return out;
+  const seen = new Set<string>();
+  for (const issue of result.error?.issues ?? []) {
+    if (issue.path.length === 0) continue;
+    if (insideRegion(nodeType, issue.path)) continue;
+    if (!absentAt(authored, issue.path)) continue;
+    const key = ledgerPathOf(issue.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(
+      issue.code === 'custom'
+        ? { code: 'node-config-key-required-by-rule', params: { nodeType, key }, message: issue.message, source: '', path: key }
+        : {
+          code: 'node-config-key-missing',
+          params: { nodeType, key },
+          message: nodeConfigKeyMissingMessage(nodeType, key),
+          source: '',
+          path: key,
+        },
+    );
+  }
+  return out;
+}
+
+/** The `decision` arm of {@link flowNodeConfigRefusals}. */
+function decisionShapeRefusals(config: unknown, out: FlowNodeConfigRefusal[]): void {
+  if (!isRecord(config)) return;
+  const conditions = config.conditions;
+  // Absent or `null` declares no branch: the executor reads `?? []` and the
+  // node routes by its out-edges, which is legal.
+  if (conditions == null) return;
+  if (!Array.isArray(conditions)) {
+    const found = nodeConfigValueKind(conditions) as Exclude<NodeConfigValueKind, 'array'>;
+    out.push({
+      code: 'decision-conditions-not-array',
+      params: { found },
+      message:
+        `A decision's \`conditions\` is its ordered branch list — an array of \`{ label, expression }\` — and this `
+        + `one is ${kindPhrase(found)}. The decision executor iterates it, so a run that reaches the node fails `
+        + 'there (a string is iterated character by character, each character a branch with no `expression`). '
+        + 'Write the branches as an array, or delete `conditions` and route by the out-edges\' own `condition`s.',
+      source: '',
+      path: 'conditions',
+    });
+    return;
+  }
+  conditions.forEach((branch: unknown, index: number) => {
+    const path = `conditions[${index}]`;
+    if (!isRecord(branch)) {
+      const found = branch === null ? 'null' : (nodeConfigValueKind(branch) as Exclude<NodeConfigValueKind, 'object'>);
+      out.push({
+        code: 'decision-branch-not-object',
+        params: { index, found },
+        message:
+          `A decision branch is an object — \`{ label, expression }\` — and \`${path}\` is ${kindPhrase(found)}. `
+          + 'The decision executor reads `label` and `expression` off every branch it reaches, so this one has '
+          + 'neither and a run that reaches it fails at the node. Write it as `{ label: \'approved\', expression: '
+          + '\'record.amount > 1000\' }` — the label of the out-edge it routes to, and a bare CEL predicate; a '
+          + 'predicate written as a bare string belongs under `expression`.',
+        source: '',
+        path,
+      });
+      return;
+    }
+    const label = branch.label;
+    if (typeof label === 'string' && NON_BLANK_STRING(label)) return;
+    const found: FlowSlotRefusalParams['decision-branch-label-missing']['found'] =
+      label === undefined ? 'absent'
+        : label === null ? 'null'
+          : typeof label === 'string' ? 'blank'
+            : (nodeConfigValueKind(label) as Exclude<NodeConfigValueKind, 'string'>);
+    const phrase =
+      found === 'absent' ? 'nothing — the key is absent'
+        : found === 'blank' ? 'a string that is blank after trimming'
+          : kindPhrase(found);
+    out.push({
+      code: 'decision-branch-label-missing',
+      params: { index, found },
+      message:
+        'A decision branch routes by its `label`: the first branch whose `expression` holds is taken, and the run '
+        + `continues down the out-edge carrying that label. \`${path}.label\` holds ${phrase}, which names no `
+        + 'out-edge — so when this branch matches, the node reports no branch it can route, and traversal '
+        + 'considers EVERY out-edge instead, as if the decision declared no branches: an unconditional labelled '
+        + 'out-edge and the default out-edge both run. Write the label of the out-edge this branch should take '
+        + '(`label: \'approved\'` for the out-edge labelled `approved`). To branch on the out-edges instead, '
+        + 'delete `conditions` and put each predicate on its edge\'s `condition`.',
+      source: '',
+      path: `${path}.label`,
+    });
+  });
+}
+
 /**
  * Descend `segments` through `node`, expanding a `key[]` segment over every
  * element of that array and a `*` segment over every own key of that object,
@@ -880,6 +1250,12 @@ function walk(
   if (node == null || typeof node !== 'object') return;
   const [head, ...rest] = segments;
   if (head === undefined) return;
+  // A named key is read off an OBJECT (#20316). An array element where the
+  // path expects an object carries no slot at all — it is a malformed element,
+  // refused as such by `flowNodeConfigRefusals` (`decision-branch-not-object`)
+  // — so it must not be read as an object whose required slot is absent and
+  // refused a second time, for the wrong reason.
+  if (Array.isArray(node) && head !== '*' && !head.endsWith('[]')) return;
 
   if (head === '*') {
     // Every own key of a plain object (#14149). An array here is not "a map
