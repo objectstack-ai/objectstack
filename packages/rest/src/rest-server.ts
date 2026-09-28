@@ -7605,8 +7605,7 @@ export class RestServer {
                     //
                     // `auditCtx` is this door's one caller resolution; the org
                     // scope below reads the same value.
-                    const auditCtx = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    const auditCtx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     if (refuseNonAuthoringCaller(auditCtx, res, 'Reading a metadata item\'s audit trail')) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof p.auditMetaItem !== 'function') {
@@ -7719,8 +7718,7 @@ export class RestServer {
                     // read on the two lines that need it.
                     //
                     // `auditCtx` is the caller resolved at the head of this door
-                    // (#20441), not a second resolution — `resolveExecCtx` is
-                    // memoised per request (WeakMap keyed by `req`) anyway.
+                    // (#20441), not a second resolution.
                     //
                     // The `(p as any)` casts this door carried came off when
                     // `MetadataProtocol` declared `auditMetaItem` (the #11006
