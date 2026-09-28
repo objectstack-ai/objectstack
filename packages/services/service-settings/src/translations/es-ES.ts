@@ -91,7 +91,7 @@ export const esES: PlatformTranslationData = {
         },
         audience: {
           title: 'Audiencia',
-          description: 'Quién puede convertirse en usuario de las aplicaciones de este entorno. Las posturas distintas de «solo por invitación» fuerzan la verificación de correo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
+          description: 'Quién puede convertirse en usuario de las aplicaciones de este entorno. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive; un valor guardado en esta consola no puede hacerlo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
         },
         password_policy: {
           title: 'Política de contraseñas',
@@ -133,7 +133,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'Audiencia de autorregistro',
-          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. Cualquier postura distinta de «solo por invitación» fuerza la verificación de correo y requiere el conjunto de permisos de autorregistro inferior.',
+          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. «Dominios de correo» y «Abierto» requieren el conjunto de permisos de autorregistro inferior. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, o emailAndPassword.requireEmailVerification: false en la configuración del stack); un false guardado en esta consola se rechaza bajo «Abierto».',
           options: {
             invite_only: 'Solo por invitación — sin autorregistro (predeterminado)',
             email_domain: 'Solo dominios de correo permitidos',
