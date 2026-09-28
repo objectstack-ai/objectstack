@@ -264,7 +264,8 @@
         },
         "layout": {
           "status": "live",
-          "note": "objectui: ObjectForm.tsx:826, ModalForm.tsx:468, DrawerForm.tsx:384 (vertical/horizontal)."
+          "verifiedAt": "2026-09-27",
+          "note": "objectui @ f8a9d0fb0: plugin-form ObjectForm.tsx:1408 (simple arm) and :463/:499 (drawer/modal hand-off), DrawerForm.tsx:575, ModalForm.tsx:597 — each reads vertical/horizontal only. The enum was narrowed to those two arms 2026-09-27 (#20221, ADR-0049 enforce-or-remove): every arm folded 'inline' and 'grid' to vertical, so both were a declared value the renderer threw away; multi-column is the sibling `columns` key. The key itself stays live."
         },
         "columns": {
           "status": "live",

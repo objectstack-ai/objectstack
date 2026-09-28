@@ -1135,12 +1135,13 @@ type NormalizedRestServerConfig = {
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
         // [#14366] The PARSED shape, not the authored one: this block is
-        // built from `RestApiConfigSchema`'s output, so a `documentation` or
-        // `responseFormat` the caller wrote arrives with its OWN declared
-        // inner defaults applied (`documentation.enabled`, `.title`;
-        // `responseFormat.envelope`, `.includeMetadata`, `.includePagination`).
+        // built from `RestApiConfigSchema`'s output, so a `documentation` the
+        // caller wrote arrives with its OWN declared inner defaults applied
+        // (`.title`). [#20295] `documentation.enabled` and the whole
+        // `responseFormat` block are `retiredKey()` tombstones now — the parse
+        // REFUSES them at construction, so neither is carried here and
+        // neither is re-defaulted.
         documentation: RestApiConfigParsed['documentation'];
-        responseFormat: RestApiConfigParsed['responseFormat'];
     };
     crud: {
         operations: {
@@ -3481,8 +3482,10 @@ export class RestServer {
 
     /**
      * [#20156] The policy of the doors that serve STORED versions for authoring
-     * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
-     * the two cannot come to disagree about the `app` row.
+     * — the layered view (`/layers`, `?layers=`), `/diff` and [#20290] the
+     * plain read's `?state=draft` branch (the pending draft row, which Studio's
+     * designers merge over the layered view and save back). One constant, so
+     * they cannot come to disagree about the `app` row.
      *
      * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
      * 5856866273): a caller who may write the app ({@link metaSaveVerdict},
@@ -4187,6 +4190,18 @@ export class RestServer {
      *    observes it today — but it is a real change to this structure's
      *    contents and belongs in the record rather than in a reader's surprise.
      *
+     *    [#20295] Two of those keys then left under ADR-0049
+     *    enforce-or-remove: `responseFormat` (the whole block) and
+     *    `documentation.enabled` are `retiredKey()` tombstones, so this parse
+     *    REFUSES them at construction with their prescription — the
+     *    `crud.patterns` posture, NOT `requireAuth`'s `.omit()` below, because
+     *    no boot path or shipped config writes either (measured in this repo,
+     *    in objectui at its pin and in cloud) and nothing chose
+     *    warn-and-ignore for them. The key diff stays empty with the
+     *    tombstones counted on the schema side only: `normalizeConfig` reads
+     *    13 keys, the schema declares those 13 plus the `responseFormat`
+     *    tombstone, which parses to nothing and is not threaded.
+     *
      *  - the retired `api.requireAuth` key is STILL `.omit()`ed rather than enforced.
      *    #3963 retired it with a deliberate warn-and-ignore posture
      *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
@@ -4287,10 +4302,13 @@ export class RestServer {
 
         return {
             // Keys listed rather than spread: `NormalizedRestServerConfig`
-            // declares `documentation` / `responseFormat` as REQUIRED (possibly
-            // `undefined`) while the schema declares them `.optional()`, so a
-            // spread would not satisfy this type — and listing them is also
-            // what makes the empty key diff readable at the seam it protects.
+            // declares `documentation` as REQUIRED (possibly `undefined`)
+            // while the schema declares it `.optional()`, so a spread would
+            // not satisfy this type — and listing them is also what makes the
+            // empty key diff readable at the seam it protects. [#20295] The
+            // retired `responseFormat` tombstone is deliberately NOT listed:
+            // the parse above refuses it, so there is nothing to forward and
+            // no default to re-apply.
             api: {
                 version: api.version,
                 basePath: api.basePath,
@@ -4305,7 +4323,6 @@ export class RestServer {
                 enableProjectScoping: api.enableProjectScoping,
                 projectResolution: api.projectResolution,
                 documentation: api.documentation,
-                responseFormat: api.responseFormat,
             },
             crud: {
                 // Per key, not per object: since ADR-0122 `crud.operations` is the
@@ -6936,13 +6953,31 @@ export class RestServer {
                             // exemption (ruling 5856774816, see
                             // `MetaReadGatePolicy.app`).
                             //
+                            // [#20290] Save its `?state=draft` branch, which serves
+                            // a STORED version — the pending draft row, never the
+                            // rendered world (that is `?preview=draft`, which keeps
+                            // the policy above) — and so reads under the
+                            // stored-version doors' policy
+                            // ({@link STORED_VERSION_DOOR_POLICY}). Studio's
+                            // designers merge this answer over the layered view
+                            // and save the result back, so a draft pruned for an
+                            // author deleted what it withheld: whoever may save
+                            // the app reads its draft whole, every other caller
+                            // pruned per caller (ruling 5856774816's rule, the
+                            // carrier triage decided in 5859504238). And no
+                            // per-DEPLOYMENT gate: a nav entry or a widget whose
+                            // service is merely off here is part of the stored
+                            // draft, for every caller, as on `/layers`.
+                            //
                             // [plural-spelling commit 83a3b1f2e] (the original
                             // card no longer resolves) Judged on the NORMALIZED
                             // `metaType`, like every gate here: `/meta/books/:name`
                             // is the canonical plural spelling (Prime Directive #3).
+                            const readPolicy: MetaReadGatePolicy = stateParam === 'draft'
+                                ? RestServer.STORED_VERSION_DOOR_POLICY
+                                : { arms: 'all', app: 'gate' };
                             const verdict = await this.metaItemReadGate(
-                                environmentId, req, p, metaType, req.params.name, [visible],
-                                { arms: 'all', app: 'gate' },
+                                environmentId, req, p, metaType, req.params.name, [visible], readPolicy,
                             )(visible);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);

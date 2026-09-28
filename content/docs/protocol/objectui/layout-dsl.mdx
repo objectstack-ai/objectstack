@@ -78,7 +78,20 @@ Top-level layout structures that define macro organization.
 
 A page is identified by `name` + `label`, and its content lives in `regions`,
 each holding typed `components`. There is no `context:` key — the binding is
-`object` plus `type` (`record` here).
+`object` plus `type` (`record` here). `page:header`'s `actions` are the **ids**
+of actions declared on that object — there is no built-in id registry, so
+`edit` / `delete` / `share` resolve nowhere (the host draws its own Edit /
+Delete chrome). Declare the action, placed at `record_header`, then name it:
+
+{/* os:check-yaml action */}
+```yaml
+name: send_statement
+label: Send Statement
+objectName: account
+type: flow
+target: account_statement
+locations: [record_header]
+```
 
 {/* os:check-yaml page */}
 ```yaml
@@ -93,7 +106,7 @@ regions:
       - type: page:header
         properties:
           title: Customer Details
-          actions: [edit, delete, share]
+          actions: [send_statement]
   - name: main
     components:
       - type: record:details
@@ -531,8 +544,8 @@ The tab *is* the section, so a section's keys are the whole surface: `name`,
 `visibleWhen` — plus `pane`, which split forms alone accept. There is **no**
 per-tab `lazy`, `source`, `badge` or `badgeVariant` key, and no
 `layout: { mode: tabbed, ... }` wrapper: `FormViewSchema.layout` is a string
-enum (`vertical` / `horizontal` / `inline` / `grid`) and the form schema
-declares no `tabs` key at all. `FormViewSchema` and `FormSectionSchema`
+enum (`vertical` / `horizontal` — multi-column is the separate `columns` key,
+not a layout value) and the form schema declares no `tabs` key at all. `FormViewSchema` and `FormSectionSchema`
 (`packages/spec/src/ui/view.zod.ts`) are `.strict()`, so authoring any of them
 is a **parse failure** — a loud rejection, not a silent no-op.
 
@@ -994,7 +1007,7 @@ regions:
       - type: page:header
         properties:
           title: Customer
-          actions: [edit, delete, share]
+          # `actions:` takes ids declared on `customer` — see Standard Template
 
   - name: main
     components:

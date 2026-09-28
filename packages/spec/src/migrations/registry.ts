@@ -5386,6 +5386,17 @@ const step18: MigrationStep = {
     + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
     + 'meant. Its D3 record is the semantic entry '
     + '`view-overlay-owner-hidden-retired`. '
+    + 'It also narrows form `layout` to `vertical` | `horizontal` on both surfaces that '
+    + 'declared the four-arm enum — the `object-form` page component and the form view '
+    + '(#20221, ADR-0049 enforce-or-remove). No renderer ever gave `inline` or `grid` a '
+    + 'behaviour of its own: every form presentation folded both to `vertical`, multi-column '
+    + 'is `columns` (honoured under either layout), and `inline` is a toolbar / filter-row '
+    + 'pattern rather than a record-form layout — redundant vocabulary under the #18900 family '
+    + 'criterion, retired with no alias window. Both enums refuse the two values with a '
+    + 'per-value prescription naming `columns`; the D2 conversion '
+    + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
+    + '`columns` untouched) on `object-form` page components, on every form payload a view '
+    + 'carries, and on the assembled-manifest `viewItems` channel '
     + 'It also retires the list view\'s own `tabs` (ADR-0049 enforce-or-remove). The '
     + 'key parsed and was stored at every list-view door and drew nothing: the one component '
     + 'that reads a `ViewTab[]` has no production mount, and the tab strip above an object\'s '
@@ -5435,6 +5446,7 @@ const step18: MigrationStep = {
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
+    'form-layout-inline-grid-to-vertical',
     'view-list-tabs-removed',
   ],
   semantic: [
@@ -13499,6 +13511,53 @@ const step18: MigrationStep = {
         + 'label and value can still tell what the icon was meant to say. Any tooling that generated '
         + 'highlight entries (a code generator, a template) no longer emits the key.',
     },
+    // #20295 (family `rest-api-retire`, rank 9 of the #18900 census; triage graded
+    // it RETIRE by the maintainer's criterion) — the D3 entry of the family (ruling
+    // B on #17152: one D3 entry per retirement family). Registered keys:
+    // `api/RestApiConfig:responseFormat` and `api/RestApiConfig:documentation.enabled`
+    // — four ledger keys, since `responseFormat` retires whole with its three
+    // members. No D2 conversion: a `RestServerConfig` is plugin TS configuration,
+    // never a stack collection member or a stored row (the
+    // `rest-server-config-dead-keys-retired` precedent on the four sibling
+    // sub-objects), so this entry is where the prescription reaches
+    // `os migrate meta`, the upgrade guide and `spec-changes.json`.
+    {
+      id: 'rest-api-config-dead-keys-retired',
+      surface: 'restServer.api.responseFormat / restServer.api.documentation.enabled',
+      replacement:
+        '(removed — delete each key; neither had an effect to preserve. Whether the server publishes its '
+        + 'OpenAPI document and the docs viewer is `api.enableOpenApi`, the switch the mount already reads. '
+        + 'Response shapes are fixed — each route answers in the response schema `@objectstack/spec/api` '
+        + 'declares for it — and are not a server-wide option, so there is no replacement for `responseFormat`.)',
+      reason:
+        'The `rest_api` liveness census found every member of these two keys `dead`: `normalizeConfig` '
+        + 'parsed them, applied their defaults and copied them into the REST server\'s config, and no site '
+        + 'ever read them back. So `responseFormat.envelope: false` unwrapped no response, '
+        + '`includeMetadata` and `includePagination` gated nothing, and `documentation.enabled: false` '
+        + 'turned no document off — the document\'s existence was, and is, decided by `api.enableOpenApi` at '
+        + 'the mount. Enforce-or-remove (ADR-0049) resolved both to REMOVE: mainstream data APIs keep a '
+        + 'fixed response envelope that no administrator toggles server-wide, a configurable envelope would '
+        + 'fork the declared response shapes the client SDK parses and the served /openapi.json describes, '
+        + 'and `documentation.enabled` duplicates a switch that is already enforced. `RestApiConfigSchema` '
+        + 'and its inline `documentation` '
+        + 'block are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone and its ledger row '
+        + 'stays `dead` with a REMOVED note. No stored or built artifact carries either key, so no emitted '
+        + 'default needs to be tolerated as residue: the config is a construction argument that is parsed and '
+        + 'consumed in the same process. The consumer still owes the judgment because a host that WROTE '
+        + '`envelope: false` or `documentation.enabled: false` believed its clients saw a different shape or '
+        + 'no document, and only that host knows which clients were built on the belief.',
+      acceptanceCriteria:
+        'No `RestServerConfig` value passed to the REST plugin carries `api.responseFormat` or '
+        + '`api.documentation.enabled` — a config that does now fails `RestServer` construction (and so '
+        + 'the REST plugin\'s `start`) with the retirement prescription, naming the key and '
+        + '`RestApiConfigSchema`, instead of being accepted and ignored; `tsc` refuses the key at the '
+        + 'authoring site (`never`). A host that meant "serve no OpenAPI document" sets `api.enableOpenApi: '
+        + 'false` and sees `GET /openapi.json` and `GET /docs` unmounted. Every client that parses REST '
+        + 'responses reads each route\'s declared response shape. Every LIVE key of the `api` block — '
+        + 'including `documentation`\'s other members — parses byte-identically to before, and the mounted '
+        + 'REST surface is unchanged: '
+        + 'neither key ever reached it.',
+    },
     {
       id: 'rest-api-endpoint-handler-status-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
@@ -15653,6 +15712,49 @@ const step18: MigrationStep = {
         + 'next authoring-path save with a prescriptive per-key issue; the author deletes the '
         + 'key or re-declares the integer they meant.',
     },
+    // The family's one D3 entry (the per-family house rule: a retirement family
+    // gets a semantic entry even when its D2 conversion is lossless). The D2 half
+    // is `form-layout-inline-grid-to-vertical`; this entry carries the one
+    // judgement the chain cannot make — whether a form that said `grid` wanted
+    // more than one column and never declared how many.
+    {
+      id: 'ui-form-layout-inline-grid-retired',
+      surface:
+        'form `layout` — the `object-form` page component (`ObjectFormPropsSchema.layout`) and the '
+        + 'form view (`FormViewSchema.layout`: `view.form`, `view.formViews.*`, a form view item\'s '
+        + '`config`, a flattened form overlay): the `inline` and `grid` arms (REMOVED)',
+      replacement:
+        "`layout: 'vertical' | 'horizontal'`, or no `layout` at all ('vertical' is the renderer "
+        + 'default). A multi-column form is `columns` (e.g. `columns: 2`), which the renderer honours '
+        + "under either layout — it was never a layout value. 'grid' → 'vertical' and 'inline' → "
+        + "'vertical', with any `columns` beside them kept as authored.",
+      reason:
+        'Both surfaces declared `vertical | horizontal | inline | grid`, and no renderer ever gave '
+        + '`inline` or `grid` a behaviour of its own. Measured at the objectui pin `f8a9d0fb0`: the '
+        + 'simple `object-form` arm folds both to `vertical` under a comment saying exactly that, the '
+        + 'drawer and modal arms pass only `vertical` / `horizontal` through, and the tabbed, split '
+        + 'and wizard sub-forms hard-code `vertical` — so both values parsed green at the spec door '
+        + 'and rendered as the default. The spec admitted them from two declarations (the designer '
+        + 'palette and the registry inputs), never from a read. The maintainer\'s ADR-0049 family '
+        + 'criterion asks whether mainstream platforms have the capability — if they do, build the '
+        + 'consumer once, correctly; if they do not, retire the key — and not whether anything in this '
+        + 'repository reads it. Multi-column, the capability `grid` names, is one they have, and this '
+        + 'spec already carries it under another key, `columns`; `inline` is a toolbar / filter-row '
+        + 'pattern, not a record-form layout. So the two arms are redundant vocabulary rather than a '
+        + 'missing consumer, and are retired with no alias window. The mechanical '
+        + 'rewrite is the ADR-0087 D2 conversion `form-layout-inline-grid-to-vertical` (retired from '
+        + 'the load path — both enums refuse the two values at parse with a per-value prescription; '
+        + 'stored rows and assembled artifacts replay clean). It is behaviour-preserving: the '
+        + 'rewritten form renders exactly as before. What it cannot decide is whether an author who '
+        + 'wrote `grid` without `columns` wanted a multi-column form they never got — that form '
+        + 'always rendered single-column, and only the author knows whether that was the intent.',
+      acceptanceCriteria:
+        "No authored `object-form` component or form view carries `layout: 'inline' | 'grid'`; "
+        + '`objectstack validate` passes. For every form that was rewritten from `grid`, decide '
+        + 'whether it should be multi-column: if so, author `columns` with the count you meant (the '
+        + 'rewrite never invents one); if not, the rewritten `vertical` — or deleting `layout` — is '
+        + 'already what the form rendered.',
+    },
     {
       id: 'ui-form-view-predicate-features-root-refused',
       surface: 'form-view predicates naming the `features.*` scope root — section-level '
@@ -17189,6 +17291,41 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // A nested key of an inline block, so it has no line of its own in
     // `authorable-surface/` (the `kernel/Manifest:contributes.routes` shape).
     'api/MetadataEndpointsConfig:endpoints.schema',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: 0 read
+    // sites outside `normalizeConfig` and the normalized-config type; re-measured on
+    // origin/main 4e0f72e8, objectui at its pin f8a9d0fb and cloud at 96eb092 — all
+    // clean against lit controls). Tombstoned with `retiredKey()` inside the live
+    // `documentation` block — a tombstone whose siblings keep parsing, because only
+    // this member retires here. No D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration, never a stack collection member or a `sys_metadata` row. D3
+    // semantic entry `rest-api-config-dead-keys-retired`. Registered under 18 for the
+    // launch-window reason its neighbours state.
+    //
+    // `documentation.enabled` was a second on/off switch for the OpenAPI document:
+    // `api.enableOpenApi` decides the mount, and this key was consulted nowhere.
+    // Nested key of an inline block — no `authorable-surface/` line of its own.
+    'api/RestApiConfig:documentation.enabled',
+    // #20295 — ADR-0049 enforce-or-remove on the `api` sub-object of
+    // `RestServerConfig`, executing the `rest_api` liveness census (#14640: every
+    // member of the block `dead`, 0 read sites outside `normalizeConfig` and the
+    // normalized-config type; re-measured on origin/main 4e0f72e8, objectui at its
+    // pin f8a9d0fb and cloud at 96eb092 — all clean against lit controls).
+    // `RestApiConfigSchema` is a non-strict `z.object()`, so the route is a
+    // `retiredKey()` tombstone (a bare deletion would strip the key silently), the
+    // ledger row stays `dead` with a REMOVED note, and there is no D2 conversion: a
+    // `RestServerConfig` is plugin TS configuration, never a stack collection member
+    // or a `sys_metadata` row — the `api/RestServerConfig:openApi31` precedent, and
+    // the `rest-server-config-dead-keys-retired` one on the four sibling
+    // sub-objects. D3 semantic entry `rest-api-config-dead-keys-retired`. Registered
+    // under 18 for the launch-window reason its neighbours state.
+    //
+    // `responseFormat` is retired WHOLE — `envelope`, `includeMetadata` and
+    // `includePagination` were its only members and none was ever read, so there is
+    // no live member left to hold the container open (the `crud.patterns`
+    // precedent). A response shape is a fixed contract — each route's declared
+    // response schema, which the client SDK parses — not a server-wide option.
+    'api/RestApiConfig:responseFormat',
     // #15677 (stack card 2/6 of #14478) — ruling B; the seconds half of the pair
     // documented on `api/RestApiEndpoint:timeout`. Renamed to `cacheTtlSeconds`;
     // the value is unchanged. Tombstoned with `retiredKey()`; disposition and
