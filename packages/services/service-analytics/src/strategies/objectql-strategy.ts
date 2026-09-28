@@ -24,6 +24,7 @@ import {
   compileScopedFilterToSql,
 } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
+import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
@@ -565,10 +566,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#20075] …and the request context `execute()` forwards to the engine,
       // so the echo prints the value the engine resolves a scope placeholder
       // to, and refuses one it cannot resolve, as `execute()` does.
+      // [#20445] …and the same declared value shape, so the echoed scope
+      // prints the `$empty` arm the executed native statement runs.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
         context: ctx.context,
+        declaredValueShape: declaredValueShapeResolver(ctx, tableName),
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
@@ -1265,6 +1269,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
     if (operator === 'notSet') return `${col} IS NULL`;
+    // [#20445] `$empty`'s leaf, rendered by the SAME function
+    // `NativeSQLStrategy.buildFilterClause` compiles it with, on the same
+    // target and hook, so the three SQL compilers of this package print one
+    // predicate for it. A caller that hands no target or no context cannot be
+    // asked for the declaration and gets the refusal, not a guess.
+    //
+    // ⚠️ `execute()` hands `{ $empty }` to the ENGINE (`convertFilter`), whose
+    // arm is the engine lane's. Until `driver-sql` carries it, the engine
+    // refuses the operator (`INVALID_FILTER` / 400) while this echo prints the
+    // declared arm — the row set that arm is ruled to return, on a query that
+    // is refused rather than answered differently. No face drops it.
+    if (operator === 'empty' || operator === 'notEmpty') {
+      return whereEmptyLeafSql({
+        ctx,
+        target,
+        column: col,
+        empty: operator === 'empty',
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
+    }
 
     if (!values || values.length === 0) return null;
 
@@ -1824,6 +1848,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private convertFilter(operator: string, values?: unknown[]): unknown {
     if (operator === 'set') return { $ne: null };
     if (operator === 'notSet') return null;
+    // [#20445] `$empty` goes to the engine as the canonical operator the
+    // author wrote — never as a local expansion into `$null` / `$eq: ''`
+    // fragments, which could not spell the multi-value row at all (an empty
+    // list is refused as an equality comparand, ruling 乙 on #19757). The
+    // engine resolves the field's declared row against its own metadata.
+    if (operator === 'empty') return { $empty: true };
+    if (operator === 'notEmpty') return { $empty: false };
     if (!values || values.length === 0) return undefined;
 
     const v0 = values[0];

@@ -8,7 +8,9 @@ import {
   TestStepSchema,
   TestScenarioSchema,
   TestSuiteSchema,
+  type TestScenario,
 } from './testing.zod';
+import { CORE_SERVICE_PROVIDER } from '../system/core-services.zod';
 
 describe('TestContextSchema', () => {
   it('should accept a valid context record', () => {
@@ -158,7 +160,7 @@ describe('TestScenarioSchema', () => {
       teardown: [{ name: 'cleanup', action: { type: 'delete_record', target: 'account' } }],
       requires: {
         params: ['API_KEY'],
-        plugins: ['crm'],
+        services: ['data', 'auth'],
       },
     };
     expect(() => TestScenarioSchema.parse(scenario)).not.toThrow();
@@ -198,5 +200,95 @@ describe('TestSuiteSchema', () => {
 
   it('should reject suite without scenarios', () => {
     expect(() => TestSuiteSchema.parse({ name: 'Suite' })).toThrow();
+  });
+});
+
+/**
+ * `requires` is ENFORCED (ADR-0049; the `qa-runner` family's `requires` key,
+ * ruled B): core's TestRunner judges it before a scenario's first step, and an
+ * unmet entry makes the scenario SKIPPED with its reason. The runner half is
+ * pinned in `packages/core/src/qa/runner.test.ts`; this half pins the contract
+ * an author writes against — `services` is the target's own vocabulary, closed
+ * at parse, and `plugins` is a tombstone that carries its prescription.
+ *
+ * On the assertion set: a schema refusal raises a `ZodError` whose issues carry
+ * `code` and `path` but no ADR-0112 `status` — that envelope belongs to the API
+ * error surface. So these pins assert refusal, the issue `code`, the `path`
+ * naming the key, and the prescription.
+ */
+describe('TestScenarioSchema.requires', () => {
+  const scenario = (requires: unknown) => ({
+    id: 'sc-req',
+    name: 'Requires',
+    steps: [{ name: 'step1', action: { type: 'api_call', target: '/api/v1/health' } }],
+    requires,
+  });
+
+  it('accepts `params` and `services` — the two judged keys — and keeps them', () => {
+    const r = TestScenarioSchema.safeParse(scenario({ params: ['OS_QA_TOKEN'], services: ['ai', 'analytics'] }));
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.requires).toEqual({ params: ['OS_QA_TOKEN'], services: ['ai', 'analytics'] });
+  });
+
+  it('closes `services` over the discovery service keys: a misspelling is refused at parse, located', () => {
+    const r = TestScenarioSchema.safeParse(scenario({ services: ['analytic'] }));
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const issue = r.error.issues.find((i) => i.path.join('.') === 'requires.services.0');
+    expect(issue, 'the refusal must locate `requires.services.0`').toBeDefined();
+    expect(issue!.code).toBe('invalid_value');
+  });
+
+  // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
+  // the key-first house convention is asserted on the issue message itself.
+  const PLUGINS_PRESCRIPTION =
+    /`scenarios\[\]\.requires\.plugins` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*nothing ever checked it.*Delete the key and name the service the scenario needs in `requires\.services`.*Plugin → service: .*@objectstack\/plugin-auth → auth/s;
+
+  for (const plugins of [['crm'], ['@objectstack/plugin-auth'], []]) {
+    it(`refuses \`requires.plugins: ${JSON.stringify(plugins)}\` at its path, with the prescription`, () => {
+      const r = TestScenarioSchema.safeParse(scenario({ plugins }));
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const issue = r.error.issues.find((i) => i.path.join('.') === 'requires.plugins');
+      expect(issue, 'the refusal must locate `requires.plugins`').toBeDefined();
+      expect(issue!.code).toBe('invalid_type');
+      expect(issue!.message).toMatch(PLUGINS_PRESCRIPTION);
+      expect(issue!.message.startsWith('`scenarios[].requires.plugins` was removed')).toBe(true);
+    });
+  }
+
+  it('the suite door refuses it THROUGH `scenarios`, located at the scenario', () => {
+    const r = TestSuiteSchema.safeParse({ name: 'Suite', scenarios: [scenario({ plugins: ['crm'] })] });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const issue = r.error.issues.find((i) => i.path.join('.') === 'scenarios.0.requires.plugins');
+    expect(issue, 'the refusal must locate `scenarios.0.requires.plugins`').toBeDefined();
+    expect(issue!.message).toMatch(PLUGINS_PRESCRIPTION);
+  });
+
+  it('fails tsc at the authoring site: the input type is `never`', () => {
+    const authored: TestScenario = {
+      id: 'sc-typed',
+      name: 'Typed',
+      steps: [],
+      // @ts-expect-error — `plugins` is a retiredKey() tombstone: its input type is `never`.
+      requires: { plugins: ['crm'] },
+    };
+    // The parse channel agrees with the type channel on the same literal.
+    expect(() => TestScenarioSchema.parse(authored)).toThrow(PLUGINS_PRESCRIPTION);
+  });
+
+  it('the prescription maps every provider package discovery names to its service', () => {
+    const r = TestScenarioSchema.safeParse(scenario({ plugins: ['x'] }));
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const message = r.error.issues.find((i) => i.path.join('.') === 'requires.plugins')!.message;
+    for (const [slot, pkg] of Object.entries(CORE_SERVICE_PROVIDER)) {
+      if (pkg === null || slot === 'file-storage') continue;
+      expect(message, `${pkg} → ${slot} must be in the mapping`).toMatch(new RegExp(`${pkg.replace(/[/.]/g, '\\$&')} → [a-z/ -]*\\b${slot}\\b`));
+    }
+    // The deprecated alias is not taught to a converting author.
+    expect(message).not.toContain('file-storage');
   });
 });

@@ -11,7 +11,7 @@ export const entry: SemanticMigration = {
     '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
     + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
     + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
-    + '`z.unknown()`, #15449). A record-form filter '
+    + '`z.unknown()`, a gap measured on its own). A record-form filter '
     + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
     + "an operator object `{ amount: { $gt: 100 } }` becomes "
     + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
@@ -19,16 +19,18 @@ export const entry: SemanticMigration = {
     + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
     + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
   reason:
-    'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
-    + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
+    'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
+    + 'every `filter` door takes the `ViewFilterRule` array rather than keeping record-shaped '
+    + "exceptions). `ComponentPropsMap['element:record_picker'].filter` "
     + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
-    + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+    + '(`FilterConditionSchema`) after `element:number` converged: the three '
     + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
     + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
-    + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+    + 'declare `z.unknown()`, so the filter a list view stores and renders was refused '
     + 'by the picker beside them, and a lone holdout is the state where the next author copies '
     + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
-    + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
+    + 'Option-A ordering ruling: measure the consumer\'s read path before the contract moves): '
+    + 'at the objectui pin `00d3f09c` the renderer hands '
     + '`filter` to `query.$filter` and calls `adapter.find()` '
     + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
     + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
@@ -50,5 +52,5 @@ export const entry: SemanticMigration = {
     + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
     + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
     + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
-    + 'objectui#7663, filed from #14406 with a Blocked-by line.',
+    + 'a console-side change filed in the objectui repository, blocked on that release.',
 };

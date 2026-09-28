@@ -663,7 +663,7 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
  *
  * 1. **`z.discriminatedUnion` cannot read this discriminator — it does not
- *    construct.** `operator` is `z.preprocess(normalizeFilterOperator, z.enum(…))`
+ *    construct.** `operator` is a `z.preprocess` over `normalizeFilterOperator`
  *    — the alias fold that lets a stored `notIn` / `nin` / `gt` parse. Zod 4
  *    extracts a discriminator's literal values from the option's own def, and a
  *    preprocess wrapper hides them: building the union throws
@@ -858,6 +858,38 @@ function checkViewFilterRuleTextComparand(
 }
 
 /**
+ * [#20450] The preprocess half of `ViewFilterRule.operator`. Its PARAMETER type
+ * is the rule's typed input.
+ *
+ * Zod types a `z.preprocess`'s INPUT from its function's parameter, so the
+ * parameter here is what `ViewFilterRule` (a `z.input`) and every carrier of it
+ * (`ListView.filter`, a tab filter, `Page.filterBy`, the component filter doors)
+ * publish for `operator`. It is the canonical {@link ViewFilterOperator}, because
+ * the alias table's own contract is that new producers emit canonical ids.
+ * Before this, the parameter was `normalizeFilterOperator`'s `unknown`, so
+ * `{ field: 'status', operator: 42 }` compiled as a rule on every carrier and was
+ * refused only at parse time.
+ *
+ * The RUNTIME is unchanged. The body hands whatever arrived to the exported
+ * {@link normalizeFilterOperator}, so a stored `sys_metadata` row or a plain-JS
+ * producer that carries an alias still parses and folds, and a non-string still
+ * reaches the enum and is refused there. The parameter type is therefore
+ * deliberately narrower than what this function receives: ⛔ never narrow its
+ * body on it.
+ *
+ * ⛔ Not an annotation on `normalizeFilterOperator` itself. That export exists
+ * so producers and renderers can fold UNTYPED stored metadata, and its callers
+ * pass raw strings and `unknown` by design: `@objectstack/lint`'s
+ * preset-comparand check and `@objectstack/rest`'s rule lowering pass a stored
+ * rule's `operator`, and the conversion registry folds an AST operator and the
+ * literal `'eq'`. Narrowing that parameter breaks them, or pushes a cast into
+ * each, to change a type only this schema publishes.
+ */
+function foldAuthoredViewFilterOperator(op: ViewFilterOperator): string {
+  return normalizeFilterOperator(op);
+}
+
+/**
  * View Filter Rule Schema
  * Standardized filter condition used in list views, tabs, and page-level filters.
  * Uses a declarative array-of-objects format: [{ field, operator, value }].
@@ -916,11 +948,14 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
   /** Field name to filter on */
   field: z.string().describe('Field name to filter on'),
   /**
-   * Filter operator (canonical vocabulary). Legacy shorthand/camelCase
-   * spellings (`eq`, `gt`, `isNull`, …) are accepted and normalized to
-   * canonical on parse.
+   * Filter operator (canonical vocabulary). The TYPED input is the canonical
+   * {@link ViewFilterOperator}: a typed author writing an alias or a
+   * non-string is refused at compile time. At RUNTIME the legacy
+   * shorthand/camelCase spellings (`eq`, `gt`, `isNull`, …) that stored
+   * metadata and plain-JS producers carry are still accepted and normalized
+   * to canonical on parse — see {@link foldAuthoredViewFilterOperator}.
    */
-  operator: z.preprocess(normalizeFilterOperator, z.enum(VIEW_FILTER_OPERATORS))
+  operator: z.preprocess(foldAuthoredViewFilterOperator, z.enum(VIEW_FILTER_OPERATORS))
     .describe('Filter operator'),
   /**
    * Filter value (optional for unary operators like is_empty, is_null).
@@ -1917,7 +1952,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   summaryExtent: z.enum(['children', 'self']).optional().describe("How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history)"),
   defaultCollapsedDepth: z.number().int().min(0).optional().describe('Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded'),
   dependencyTypes: z.boolean().optional().describe('Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start'),
-  timeZone: z.string().optional().describe("Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning"),
+  timeZone: z.string().optional().describe("Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; a datetime value is still written as the real instant, and a date value as the calendar day it was dropped on in this zone's calendar (YYYY-MM-DD). An invalid name falls back to the browser zone with a console warning"),
   exportFileName: z.string().optional().describe("Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended"),
   interactions: strictObject({
     surface: 'this gantt interactions block',

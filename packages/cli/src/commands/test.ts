@@ -329,6 +329,18 @@ export function tagSelectionLine(selected: number, deselected: number, tags: rea
   return `--tags ${tags.join(',')} selected ${selected} of ${selected + deselected} scenarios; ${deselected} deselected (not run, not counted as passed).`;
 }
 
+/**
+ * The run's closing tally. A SKIPPED scenario — one whose `requires` did not
+ * hold, so no step ran — is its own count: never passed, never failed. When
+ * nothing was skipped the line reads exactly as it did before skips existed.
+ */
+export function summaryLine(passed: number, failed: number, skipped: number): string {
+  const skippedClause = skipped > 0 ? ` ${skipped} skipped (not run, not counted as passed).` : '';
+  if (failed > 0) return `FAILED: ${failed} scenarios failed. ${passed} passed.${skippedClause}`;
+  if (skipped > 0) return `SUCCESS: ${passed} scenarios passed.${skippedClause}`;
+  return `SUCCESS: All ${passed} scenarios passed.`;
+}
+
 export default class Test extends Command {
   /**
    * The empty-match posture is stated in the help text on purpose (#7848).
@@ -353,7 +365,13 @@ export default class Test extends Command {
     'case-sensitive). Untagged scenarios are left out whenever --tags is given. Left-out ' +
     'scenarios are counted as deselected — never run and never counted as passed. A ' +
     'selection that matches no scenario exits 0 like an empty pattern, and 1 under ' +
-    '--fail-on-empty.';
+    '--fail-on-empty.\n' +
+    'A scenario whose "requires" does not hold — an environment variable in "params" ' +
+    'unset or empty in this process, or a service in "services" the target\'s discovery ' +
+    'document does not declare enabled and available — is SKIPPED: no step runs, the ' +
+    'reason is printed, and it is counted as skipped, never as passed. Skips alone do ' +
+    'not fail the run, but a run in which every selected scenario was skipped is not a ' +
+    'pass either: it exits 0, and 1 under --fail-on-empty.';
 
   static override args = {
     files: Args.string({ description: 'Glob pattern for test files (e.g. "qa/*.test.json")', required: false, default: 'qa/*.test.json' }),
@@ -364,7 +382,7 @@ export default class Test extends Command {
     token: Flags.string({ description: 'Authentication token' }),
     'fail-on-empty': Flags.boolean({
       description:
-        'Exit non-zero when the pattern matches no test suite, or --tags matches no scenario (default: both exit 0)',
+        'Exit non-zero when the pattern matches no test suite, --tags matches no scenario, or every selected scenario was skipped on an unmet "requires" (default: all three exit 0)',
       default: false,
     }),
     // A custom flag so a malformed list is refused while the invocation is
@@ -387,7 +405,9 @@ export default class Test extends Command {
     
     // 1. Setup Runner
     const adapter = new CoreQA.HttpTestAdapter(flags.url, flags.token);
-    const runner = new CoreQA.TestRunner(adapter);
+    // `requires.params` is judged against THIS process's environment — the one
+    // running the suite — which is what the spec declares.
+    const runner = new CoreQA.TestRunner(adapter, { env: process.env });
 
     // 2. Find test files using glob-style pattern matching
     const testFiles: string[] = resolveGlob(filesPattern);
@@ -411,6 +431,7 @@ export default class Test extends Command {
     const tags = flags.tags;
     let totalPassed = 0;
     let totalFailed = 0;
+    let totalSkipped = 0;
     let totalSelected = 0;
     let totalDeselected = 0;
     const matchedTags = new Set<string>();
@@ -444,6 +465,15 @@ export default class Test extends Command {
             const results = await runner.runSuite(suite);
 
             for (const result of results) {
+                if (result.status === 'skipped') {
+                    // Not run, so not a pass and not a failure: its own line,
+                    // its own count, and the reason in full — the unmet entry
+                    // and, for a service, what the target does serve.
+                    console.log(`  ⏭️  Scenario: ${scenarioLabel(result)} (skipped)`);
+                    console.log(chalk.yellow(`     Skipped: ${result.skipped?.reason ?? 'a requirement was not met.'}`));
+                    totalSkipped++;
+                    continue;
+                }
                 const icon = result.passed ? '✅' : '❌';
                 console.log(`  ${icon} Scenario: ${scenarioLabel(result)} (${result.duration}ms)`);
                 if (!result.passed) {
@@ -482,7 +512,7 @@ export default class Test extends Command {
         }
     }
     if (totalFailed > 0) {
-        console.log(chalk.red(`FAILED: ${totalFailed} scenarios failed. ${totalPassed} passed.`));
+        console.log(chalk.red(summaryLine(totalPassed, totalFailed, totalSkipped)));
         process.exit(1);
     } else if (tags && totalSelected === 0) {
         // The --tags twin of the empty pattern above, and the same posture: a
@@ -496,8 +526,19 @@ export default class Test extends Command {
         }
         console.log(chalk.dim(`Exiting 0 — a selection that matches nothing is not a failure. Pass --fail-on-empty to make it one.`));
         process.exit(0);
+    } else if (totalSkipped > 0 && totalPassed === 0) {
+        // Every selected scenario was skipped, so the run proved nothing: not
+        // a SUCCESS, and — the same posture as an empty pattern and an empty
+        // --tags selection — a failure only under --fail-on-empty.
+        console.warn(chalk.yellow(`No scenario ran: all ${totalSkipped} selected scenarios were skipped on unmet requirements.`));
+        if (flags['fail-on-empty']) {
+            console.error(chalk.red(`--fail-on-empty: a run in which every scenario was skipped is a failed run.`));
+            process.exit(1);
+        }
+        console.log(chalk.dim(`Exiting 0 — skipped scenarios are not failures. Pass --fail-on-empty to make a run that ran nothing one.`));
+        process.exit(0);
     } else {
-        console.log(chalk.green(`SUCCESS: All ${totalPassed} scenarios passed.`));
+        console.log(chalk.green(summaryLine(totalPassed, totalFailed, totalSkipped)));
         process.exit(0);
     }
   }
