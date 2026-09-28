@@ -151,6 +151,11 @@ const ROWS: Row[] = [
   { name: 'sync beside an empty syncUrl (unset)', config: { url: FILE, syncUrl: '', sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync' },
 ];
 
+/** The rows the constructor refuses on a sync key: its message is a copy of the spec's (#20200). */
+const SYNC_KEY_REFUSALS = ROWS.filter(
+  (r) => r.ctor === 'refuse' && (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync'),
+);
+
 /**
  * The driver config a datasource loader builds from an authored one — the
  * reading `buildTursoDriverConfig` / `resolveTursoUrl` in
@@ -204,6 +209,7 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     expect(ROWS.filter((r) => r.refusedOn === 'timeoutMs').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'syncUrl').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'sync').length).toBeGreaterThanOrEqual(5);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(8);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
@@ -215,15 +221,6 @@ describe('turso config: the constructor, the spec contract and this mirror agree
       expect(constructorVerdict(row.config).verdict).toBe(row.ctor);
     });
 
-    it.runIf(row.ctor === 'refuse' && (row.refusedOn === 'syncUrl' || row.refusedOn === 'sync'))(
-      "the constructor's message is the spec contract's, byte for byte (#20200)",
-      () => {
-        const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
-        expect(spec.refusedOn).toBe(row.refusedOn);
-        expect(spec.message).toBeTypeOf('string');
-        expect(constructorVerdict(row.config).message).toBe(spec.message);
-      },
-    );
 
     it(row.refusedOn ? `the spec contract refuses it on \`${row.refusedOn}\`` : 'the spec contract accepts it', () => {
       // Authoring refuses what construction refuses, and nothing it accepts
@@ -241,6 +238,18 @@ describe('turso config: the constructor, the spec contract and this mirror agree
       const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
       const mirror = schemaVerdict(MirrorTursoConfigSchema, row.config);
       expect(mirror).toEqual(spec);
+    });
+  });
+
+  // [#20200] The two sync refusals are copies of the spec contract's texts in
+  // `../turso-driver.ts` (the spec keeps them module-local); this is the pin
+  // that holds each copy equal to the schema's issue, byte for byte.
+  describe.each(SYNC_KEY_REFUSALS)('$name', (row) => {
+    it("the constructor's message is the spec contract's, byte for byte (#20200)", () => {
+      const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
+      expect(spec.refusedOn).toBe(row.refusedOn);
+      expect(spec.message).toBeTypeOf('string');
+      expect(constructorVerdict(row.config).message).toBe(spec.message);
     });
   });
 });
