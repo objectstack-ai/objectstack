@@ -46,7 +46,11 @@ Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
 
 1. **Zod First** — All schema definitions start with Zod. Types are derived via `z.infer<>`.
 2. `defineStack()` is the single configuration entry point in `objectstack.config.ts`.
-3. Use `Object.values()` barrel pattern for metadata arrays.
+3. Metadata reaches the stack through barrels: each `src/*/index.ts` exports what its
+   directory holds, and `objectstack.config.ts` already hands every barrel to
+   `defineStack()` through `exportsOf()` — a typed `Object.values()` that still
+   type-checks while a barrel is empty, so keep it. Export a new file from its barrel
+   rather than adding a key for it.
 4. Import from `@objectstack/spec` — never use relative paths into the spec package.
 5. **Predicates are CEL** — `visible`, `disabled`, `requiredWhen`, validation rules,
    flow conditions and sharing rules reference record fields as `record.<field>`,
