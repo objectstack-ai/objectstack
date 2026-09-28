@@ -16,6 +16,8 @@ Three places in the published types were wider than the doors that judge the sam
 
 **If your code stops compiling.** A value you annotated with one of these names, or passed to `defineReport` / `defineViewItem`, is not the shape the door accepts: correct it, or type a value that is still unvalidated as `unknown` and let the schema's `safeParse` decide. A ViewItem's `config` must match its `viewKind`: a `ListView` config under `viewKind: 'list'`, a `FormView` config under `viewKind: 'form'`.
 
+The declared types of `JoinedReportBlockSchema`, `ViewItemSchema` and `ViewItemWireSchema` narrow with them, so `z.input` / `z.infer` of each is typed where it was `unknown` (or carried an `unknown` `config`). Typed, each schema's input and output now differ by its defaults, so three ADR-0122 parsed-state aliases are added beside the bare names: `JoinedReportBlockParsed`, `ViewItemParsed` and `ViewItemWireParsed`. Nothing is removed or renamed.
+
 One default is applied by the parse and is absent from `ViewMetadataParsed` / `AssembledViewArtifactParsed`, and their TSDoc now says so: the flattened list overlay member re-applies `type: 'grid'` in an `.overwrite()`, so every body it parses carries `type`, while its output type leaves `type` optional.
 
 The types are the members' declared shapes, not the schemas' verdicts: refinements are not types, so each schema remains the only judge.
