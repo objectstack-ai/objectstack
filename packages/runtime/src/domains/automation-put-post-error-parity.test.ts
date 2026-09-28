@@ -45,7 +45,9 @@ import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /** Config keys the fake's `notify` descriptor declares (the #4277 legal set). */
-const NOTIFY_DECLARED_CONFIG_KEYS = ['message', 'recipients', 'channel'];
+// `title` joined the set when the flow parse began refusing a notify node with
+// neither `title` nor `template` (#20316) — the real notify descriptor declares it.
+const NOTIFY_DECLARED_CONFIG_KEYS = ['title', 'message', 'recipients', 'channel'];
 
 /**
  * The #4277 refusal, reproduced from `service-automation/src/engine.ts`

@@ -2292,7 +2292,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       const badRegion = () => ({
         nodes: [
           { id: 'gate', type: 'decision', config: { condition: '{record.rating} >= 4' } },
-          { id: 'act', type: 'update_record' },
+          { id: 'act', type: 'update_record', config: { objectName: 'crm_lead' } },
         ],
         edges: [{ id: 'b1', source: 'gate', target: 'act', condition: '{record.status} == "open"' }],
       });
@@ -2342,7 +2342,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             body: {
               nodes: [
                 { id: 'gate', type: 'decision', config: { condition: 'record.rating >= 4' } },
-                { id: 'act', type: 'update_record' },
+                { id: 'act', type: 'update_record', config: { objectName: 'crm_lead' } },
               ],
               edges: [{ id: 'b1', source: 'gate', target: 'act', condition: 'record.status == "open"' }],
             },
@@ -3011,6 +3011,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // are `success` / `error`, SafeParseResult's own, so that excuse covers
       // both locals for one reason and masks no metadata read either.
       'blankRefusal',
+      // [#20316] The spec's node-config judge, one refusal at a time. Its keys
+      // are that helper's own `{ code, params, message, source, path }` —
+      // never metadata keys — and it is named to stay clear of the `message` /
+      // `source` receivers for the reason the two entries above record.
+      'configRefusal',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact

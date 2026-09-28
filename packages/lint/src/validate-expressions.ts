@@ -1634,12 +1634,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
           // check reads what such a source spells — the `functionName` alias,
           // the retired dispatch keys — and names each, where the judge would
           // only see `function` absent.
-          .filter((r) => !(nodeType === 'script' && r.path === 'function'));
-        for (const refusal of configRefusals) {
+          .filter((configRefusal) => !(nodeType === 'script' && configRefusal.path === 'function'));
+        for (const configRefusal of configRefusals) {
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) config.${refusal.path}`,
-            message: refusal.message,
-            source: refusal.source,
+            where: `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`,
+            message: configRefusal.message,
+            source: configRefusal.source,
             severity: 'error',
           });
         }
