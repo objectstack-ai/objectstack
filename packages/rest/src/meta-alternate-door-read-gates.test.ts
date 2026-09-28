@@ -44,6 +44,11 @@
  *    The exemption is a CALLER property, honoured by these four doors and by
  *    no other: the rendered plain read (`?preview=draft` included) and
  *    `/published` still prune for an author.
+ *
+ *    [#20338] The draft door serves the draft only to a caller who may read
+ *    drafts at all — the authoring capability `GET /meta/_drafts` asks
+ *    (`readsDrafts` below). Anyone else is never handed one: `?state=draft`
+ *    answers them what the plain read answers them, byte for byte.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
@@ -164,6 +169,12 @@ interface Caller {
      * call a caller an author the save door refuses, or the reverse.
      */
     savesApps: boolean;
+    /**
+     * [#20338] Does `GET /meta/_drafts` admit this caller? DECLARED here and
+     * checked against that door below: every draft door asks the predicate it
+     * asks, so a caller it refuses is never served a draft by `?state=draft`.
+     */
+    readsDrafts: boolean;
 }
 const CALLERS: Record<'reader' | 'non-reader' | 'author' | 'anonymous', Caller> = {
     reader: {
@@ -171,12 +182,14 @@ const CALLERS: Record<'reader' | 'non-reader' | 'author' | 'anonymous', Caller> 
         holdings: ['crm_admin'],
         readableFields: ['amount', 'secret_margin'],
         savesApps: false,
+        readsDrafts: true,
     },
     'non-reader': {
         ctx: { userId: 'u_member', systemPermissions: [] },
         holdings: [],
         readableFields: ['amount'],
         savesApps: false,
+        readsDrafts: false,
     },
     // An author the plain read serves only PART of `crm`: they may write
     // metadata, but hold neither `finance.access` nor `crm_admin`. And no
@@ -187,8 +200,9 @@ const CALLERS: Record<'reader' | 'non-reader' | 'author' | 'anonymous', Caller> 
         holdings: [],
         readableFields: ['amount'],
         savesApps: true,
+        readsDrafts: true,
     },
-    anonymous: { holdings: [], readableFields: [], savesApps: false },
+    anonymous: { holdings: [], readableFields: [], savesApps: false, readsDrafts: false },
 };
 type CallerName = keyof typeof CALLERS;
 
@@ -269,6 +283,8 @@ function setup(who: CallerName | Caller) {
         }),
         // The save door's protocol call — reached only past its admission.
         saveMetaItem: vi.fn(async ({ type, name }: any) => ({ success: true, type: singular(type), name })),
+        // [#20338] `GET /meta/_drafts` — reached only past its admission.
+        listDrafts: vi.fn(async () => ({ items: [] })),
         findReferencesToMeta: vi.fn(async () => ({ references: [] })),
         findData: vi.fn().mockResolvedValue([]),
     };
@@ -308,6 +324,15 @@ async function save(rest: any, type: string, name: string, item: any) {
     if (!route) throw new Error(`PUT ${path} is not registered`);
     const res = makeRes();
     await route.handler({ method: 'PUT', path: `${META}/${type}/${name}`, params: { type, name }, query: {}, body: item, headers: {} }, res);
+    return res;
+}
+
+/** [#20338] `GET /meta/_drafts` — the door whose admission IS `readsDrafts`. */
+async function listDrafts(rest: any) {
+    const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}/_drafts`);
+    if (!route) throw new Error(`GET ${META}/_drafts is not registered`);
+    const res = makeRes();
+    await route.handler({ method: 'GET', path: `${META}/_drafts`, params: {}, query: {}, body: {}, headers: {} }, res);
     return res;
 }
 
@@ -581,6 +606,24 @@ describe(`[#20156 · #20290] ruling ${AUTHOR_EXEMPTION.ruling} — the author ex
             }
         }
     });
+
+    it('[#20338] `readsDrafts` is exactly who `GET /meta/_drafts` admits — the predicate every draft door asks', async () => {
+        for (const callerName of Object.keys(CALLERS) as CallerName[]) {
+            const { rest, protocol } = setup(callerName);
+            const res = await listDrafts(rest);
+            if (CALLERS[callerName].readsDrafts) {
+                expect(res.statusCode, callerName).toBe(200);
+                expect(protocol.listDrafts, callerName).toHaveBeenCalledTimes(1);
+            } else {
+                expect(envelope(res), callerName).toEqual(
+                    CALLERS[callerName].ctx
+                        ? { status: 403, code: 'FORBIDDEN' }
+                        : { status: 401, code: 'UNAUTHENTICATED' },
+                );
+                expect(protocol.listDrafts, callerName).not.toHaveBeenCalled();
+            }
+        }
+    });
 });
 
 describe(`[#20156] every alternate door answers what the plain read answers, or refuses — save the author exemption of ruling ${AUTHOR_EXEMPTION.ruling}`, () => {
@@ -601,11 +644,22 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                         const res = await drive(rest, door.suffix, subject.type, subject.name, door.query);
                         const stored = find(subject.type, subject.name);
                         if (door.serves === 'draft' && CALLERS[callerName].ctx) {
+                            const asked = protocol.getMetaItem.mock.calls.map(([r]: any[]) => r?.state);
+                            if (!CALLERS[callerName].readsDrafts) {
+                                // [#20338] A caller who may not read drafts is
+                                // never handed one: the protocol is not asked for
+                                // the draft row, and the door answers what the
+                                // plain read answers them, byte for byte.
+                                expect(asked).not.toContain('draft');
+                                expect(envelope(res)).toEqual(envelope(plain));
+                                expect(res.body).toEqual(plain.body);
+                                return;
+                            }
                             // [#20290] The cell measured the draft branch: the
                             // protocol was asked for the draft row. (An anonymous
                             // caller is refused by the `/meta` auth gate before
                             // any read, on every door alike.)
-                            expect(protocol.getMetaItem.mock.calls.map(([r]: any[]) => r?.state)).toContain('draft');
+                            expect(asked).toContain('draft');
                         }
 
                         if (exempt) {
@@ -759,6 +813,9 @@ describe('[#20156] edges', () => {
             holdings: [],
             readableFields: ['amount'],
             savesApps: false,
+            // [#20338] No authoring capability either, so `?state=draft`
+            // serves them the published app — pruned, as below.
+            readsDrafts: false,
         };
         const { rest, protocol } = setup(presenter);
 

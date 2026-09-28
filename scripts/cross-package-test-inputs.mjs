@@ -624,7 +624,31 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // that file DEFINES the `FieldType` enum the pin asserts totality over --
       // a member added there is exactly the change that must re-run this suite.
       'packages/spec/src/data/field.zod.ts',
+      // The blank starter's config and its `src/` tree, the third pair of the
+      // two-scaffolder shape above (#20333). The starter cannot import the
+      // wiring `os init` renders (the dependency edge runs the other way), so
+      // its config and barrels are a static COPY of that render, and
+      // test/create-objectstack-wiring-parity.test.ts holds the copy to it:
+      // every expected line is read off `TEMPLATES.app` and the two exported
+      // rosters. test/create-objectstack-stack-reach.test.ts drives the
+      // on-ramp's `bin/` into a project and counts what `os validate` loads,
+      // the starter's own object included. A template-only diff therefore
+      // changes what both measure, and without these globs
+      // `@objectstack/cli#test` would hash the same and replay a cached green
+      // over the drift the parity pin exists to catch. `src/**` rather than
+      // the barrels by name: the pin reaches them through a join over the
+      // roster, which is why the glob carries a witness below.
+      'packages/create-objectstack/src/templates/blank/objectstack.config.ts',
+      'packages/create-objectstack/src/templates/blank/src/**',
     ],
+    heldBy: {
+      // The parity pin joins each barrel path from `SCAFFOLD_WIRED_BARRELS`, a
+      // roster the scan cannot fold, so no rostered path lands in this glob;
+      // the witness keeps it attributed to the read that needs it.
+      'packages/create-objectstack/src/templates/blank/src/**': [
+        'packages/cli/test/create-objectstack-wiring-parity.test.ts',
+      ],
+    },
   },
   '@objectstack/client': {
     // The first entry this gate DERIVED from import specifiers rather than from

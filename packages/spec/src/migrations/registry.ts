@@ -5385,7 +5385,26 @@ const step18: MigrationStep = {
     + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
     + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
     + 'meant. Its D3 record is the semantic entry '
-    + '`view-overlay-owner-hidden-retired`.',
+    + '`view-overlay-owner-hidden-retired`. '
+    + 'It also narrows form `layout` to `vertical` | `horizontal` on both surfaces that '
+    + 'declared the four-arm enum — the `object-form` page component and the form view '
+    + '(#20221, ADR-0049 enforce-or-remove). No renderer ever gave `inline` or `grid` a '
+    + 'behaviour of its own: every form presentation folded both to `vertical`, multi-column '
+    + 'is `columns` (honoured under either layout), and `inline` is a toolbar / filter-row '
+    + 'pattern rather than a record-form layout — redundant vocabulary under the #18900 family '
+    + 'criterion, retired with no alias window. Both enums refuse the two values with a '
+    + 'per-value prescription naming `columns`; the D2 conversion '
+    + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
+    + '`columns` untouched) on `object-form` page components, on every form payload a view '
+    + 'carries, and on the assembled-manifest `viewItems` channel. '
+    + 'It also removes `currencyConfig.precision` (#19992, ADR-0049 enforce-or-remove): '
+    + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
+    + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+    + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
+    + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
+    + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
+    + 'built artifacts carry it without anyone having written it. Retired from the load path; '
+    + 'an authored key is refused with the prescription.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5425,6 +5444,8 @@ const step18: MigrationStep = {
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
+    'form-layout-inline-grid-to-vertical',
+    'currency-config-precision-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -7274,6 +7295,48 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+    },
+    // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」) — the D3 entry of the `currency-config-precision-removed` family
+    // (ruling B on #17152: one D3 entry per retirement family, even when D2 is
+    // lossless). Registered key: `data/CurrencyConfig:precision`; the never-accepted
+    // `decimals` / `scale` spellings are answered by the same prescription and have
+    // no stored form to convert. The delete changes no rendered amount; what it
+    // leaves is a width belief, and code outside the platform that may have read the
+    // served key.
+    {
+      id: 'currency-config-precision-retired',
+      surface: 'object.fields.*.currencyConfig.precision — the decimal-places key of a currency '
+        + 'field\'s configuration, and its never-accepted `decimals` / `scale` spellings',
+      replacement: '(removed — nothing replaces it.) A currency amount\'s decimal places are its '
+        + 'currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD), derived from the '
+        + 'currency itself and declared nowhere. Delete the key. Do not move the number to the '
+        + 'field-level `precision`: that key is the amount\'s total digit count, not its decimal '
+        + 'places, and it is unchanged.',
+      reason: 'The D2 conversion `currency-config-precision-removed` deletes the key from every '
+        + 'field\'s `currencyConfig` on objects and object extensions — in author sources, in stored '
+        + 'object rows and in built artifacts, which can carry a `2` the old schema wrote into parse '
+        + 'output without anyone authoring it — and the delete is lossless: no renderer or runtime '
+        + 'ever read the key. Every display face derives the width from the currency. Two judgments '
+        + 'remain, and neither is a rewrite. First, a width that never applied: the old contradiction '
+        + 'check judged an authored value only on a `fixed` field whose code has a known ISO 4217 '
+        + 'minor unit, so on a `dynamic` field, and on a `fixed` field whose code has none (a crypto '
+        + 'or custom code), an author could declare a width other than the one the field displays — '
+        + 'and read amounts as if it applied. Whether the displayed width is acceptable for that '
+        + 'field is the author\'s call. Second, code the chain cannot reach: a plugin, integration or '
+        + 'export of your own that read `currencyConfig.precision` from served object metadata now '
+        + 'finds no key, and must derive the width from the field\'s currency the way the platform\'s '
+        + 'renderers always did.',
+      acceptanceCriteria: 'No field\'s `currencyConfig` carries `precision`, `decimals` or `scale` — '
+        + 'in sources, in stored object rows or in built artifacts; the parse refuses each by name '
+        + 'with the prescription, and a stored row or artifact written before the upgrade loads '
+        + 'without a refusal over it. No code of your own reads `currencyConfig.precision`; where it '
+        + 'needed a width, it derives one from the field\'s currency. Every currency field renders '
+        + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
+        + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
+        + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+        + 'apply them by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -15656,6 +15719,49 @@ const step18: MigrationStep = {
         + 'next authoring-path save with a prescriptive per-key issue; the author deletes the '
         + 'key or re-declares the integer they meant.',
     },
+    // The family's one D3 entry (the per-family house rule: a retirement family
+    // gets a semantic entry even when its D2 conversion is lossless). The D2 half
+    // is `form-layout-inline-grid-to-vertical`; this entry carries the one
+    // judgement the chain cannot make — whether a form that said `grid` wanted
+    // more than one column and never declared how many.
+    {
+      id: 'ui-form-layout-inline-grid-retired',
+      surface:
+        'form `layout` — the `object-form` page component (`ObjectFormPropsSchema.layout`) and the '
+        + 'form view (`FormViewSchema.layout`: `view.form`, `view.formViews.*`, a form view item\'s '
+        + '`config`, a flattened form overlay): the `inline` and `grid` arms (REMOVED)',
+      replacement:
+        "`layout: 'vertical' | 'horizontal'`, or no `layout` at all ('vertical' is the renderer "
+        + 'default). A multi-column form is `columns` (e.g. `columns: 2`), which the renderer honours '
+        + "under either layout — it was never a layout value. 'grid' → 'vertical' and 'inline' → "
+        + "'vertical', with any `columns` beside them kept as authored.",
+      reason:
+        'Both surfaces declared `vertical | horizontal | inline | grid`, and no renderer ever gave '
+        + '`inline` or `grid` a behaviour of its own. Measured at the objectui pin `f8a9d0fb0`: the '
+        + 'simple `object-form` arm folds both to `vertical` under a comment saying exactly that, the '
+        + 'drawer and modal arms pass only `vertical` / `horizontal` through, and the tabbed, split '
+        + 'and wizard sub-forms hard-code `vertical` — so both values parsed green at the spec door '
+        + 'and rendered as the default. The spec admitted them from two declarations (the designer '
+        + 'palette and the registry inputs), never from a read. The maintainer\'s ADR-0049 family '
+        + 'criterion asks whether mainstream platforms have the capability — if they do, build the '
+        + 'consumer once, correctly; if they do not, retire the key — and not whether anything in this '
+        + 'repository reads it. Multi-column, the capability `grid` names, is one they have, and this '
+        + 'spec already carries it under another key, `columns`; `inline` is a toolbar / filter-row '
+        + 'pattern, not a record-form layout. So the two arms are redundant vocabulary rather than a '
+        + 'missing consumer, and are retired with no alias window. The mechanical '
+        + 'rewrite is the ADR-0087 D2 conversion `form-layout-inline-grid-to-vertical` (retired from '
+        + 'the load path — both enums refuse the two values at parse with a per-value prescription; '
+        + 'stored rows and assembled artifacts replay clean). It is behaviour-preserving: the '
+        + 'rewritten form renders exactly as before. What it cannot decide is whether an author who '
+        + 'wrote `grid` without `columns` wanted a multi-column form they never got — that form '
+        + 'always rendered single-column, and only the author knows whether that was the intent.',
+      acceptanceCriteria:
+        "No authored `object-form` component or form view carries `layout: 'inline' | 'grid'`; "
+        + '`objectstack validate` passes. For every form that was rewritten from `grid`, decide '
+        + 'whether it should be multi-column: if so, author `columns` with the count you meant (the '
+        + 'rewrite never invents one); if not, the rewritten `vertical` — or deleting `layout` — is '
+        + 'already what the form rendered.',
+    },
     {
       id: 'ui-form-view-predicate-features-root-refused',
       surface: 'form-view predicates naming the `features.*` scope root — section-level '
@@ -17530,6 +17636,28 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carries the judgement the strip cannot: an author who wrote a non-FK
     // condition wanted a join this runtime does not perform.
     'data/CubeJoin:sql',
+    // #19992 — ADR-0049 enforce-or-remove (triage direction REMOVE under ruling 乙
+    // on #19910: 「a currency's decimal places are the currency's, not a
+    // setting」). `currencyConfig.precision` was declared and validated against
+    // ISO 4217 (#7918) but read by NOTHING — measured with a positive control
+    // (`currencyConfig.currencyMode` IS read) over objectstack, objectui at the
+    // `.objectui-sha` pin and at `main`, and cloud `main`. objectui's
+    // `CurrencyField` derives decimal places from the currency's ISO 4217 minor
+    // unit and never read the key; its own contradiction check was its only
+    // reader. The `decimals` / `scale` aliases that pointed authors at it went
+    // with it (they now answer with the same prescription).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. `CurrencyConfigSchema` is
+    // `strictObject`, so the route is strict deletion + a `guidance` entry carrying
+    // the prescription (no retiredKey tombstone — the key is out of the walked
+    // shape entirely). Sources and stored rows are rewritten by the D2 conversion
+    // `currency-config-precision-removed`, which strips the key from every field's
+    // `currencyConfig` on objects and object extensions — including the `2` the
+    // old `.overwrite()` baked into parse output.
+    'data/CurrencyConfig:precision',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in

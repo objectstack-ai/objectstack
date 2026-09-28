@@ -38,8 +38,10 @@ the whole time — the `curl` above returns it, and an MCP client can read and
 write it. What it has no route into is the Console's navigation.
 
 **An object appears in Console navigation only when an app lists it.** Add an
-`*.app.ts` under `src/apps/` (plus the views it points at), and the Console
-renders it after the next `pnpm dev` rebuild. The `objectstack-ui` skill covers
+`*.app.ts` under `src/apps/` (plus the views it points at), export each one from
+its directory's `index.ts`, and the Console renders it after the next `pnpm dev`
+rebuild. `objectstack generate app NAME` and `objectstack generate view NAME`
+write the file and its export line together. The `objectstack-ui` skill covers
 the shape; describing the app you want to your coding agent is the intended
 path.
 
@@ -63,8 +65,15 @@ for OAuth, API keys, and which objects/actions become tools.
 
 ## Layout
 
-- `objectstack.config.ts` — environment manifest (objects, API, plugins)
+- `objectstack.config.ts` — environment manifest (objects, API, plugins), and
+  the wiring for every directory below
 - `src/objects/` — object definitions (one file per object)
+- `src/views/`, `src/actions/`, `src/flows/`, `src/dashboards/`, `src/apps/`,
+  `src/skills/` — empty to start. Each directory's `index.ts` exports what it
+  holds and `objectstack.config.ts` hands those exports to the stack, so
+  `objectstack generate flow NAME` (or `view`, `action`, …) adds a file and one
+  export line, and the item is loaded, and counted by `pnpm validate`, with no
+  edit to the config
 
 ## Connectors (default providers)
 

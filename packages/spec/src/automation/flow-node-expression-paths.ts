@@ -452,6 +452,114 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
   + 'envelope, any other non-string, or a string that is blank after trimming is not authorable there.';
 
 /**
+ * What a non-text value in a predicate slot was, as a token. The message
+ * renders it as a phrase (`an expression envelope (…)`, `an array`, `a number`).
+ */
+export type PredicateSlotValueKind =
+  | 'envelope'
+  | 'array'
+  | 'object'
+  | 'number'
+  | 'boolean'
+  | 'bigint'
+  | 'symbol'
+  | 'function';
+
+/**
+ * What a value in a structural condition slot was, when it is neither text nor
+ * an envelope carrying a string `source`, as a token. The message renders it as
+ * a phrase: `ast-without-source` is an object carrying an `ast` but no string
+ * `source`, `object-without-source` any other object carrying no string
+ * `source`, and the rest read `an array`, `a number`, and so on.
+ */
+export type StructuralConditionValueKind =
+  | 'array'
+  | 'ast-without-source'
+  | 'object-without-source'
+  | 'number'
+  | 'boolean'
+  | 'bigint'
+  | 'symbol'
+  | 'function';
+
+/**
+ * Refusal code → the params its message interpolates, for this file's two
+ * refusal producers, {@link predicateSlotRefusal} and
+ * {@link structuralConditionRefusal}. The keys ARE the closed set.
+ *
+ * A consumer that renders its own words — a localized designer — keys its
+ * catalogue row to the `code` and fills it from the `params`; the English
+ * `message` beside them is unchanged. Codes are kebab-case and never change
+ * once published: a new refusal is a new code, a reworded message keeps its
+ * code. ⛔ Not an ADR-0112 error code — an authoring diagnostic returned as a
+ * value, never a failing request's `error.code`.
+ */
+export interface FlowSlotRefusalParams {
+  /** No value where a predicate slot is required: the key is absent, or holds `null`. */
+  'predicate-slot-missing': { readonly found: 'absent' | 'null' };
+  /** A predicate slot holding a string that is blank after trimming. */
+  'predicate-slot-blank': Readonly<Record<string, never>>;
+  /** A predicate slot holding a value that is not text — an expression envelope, or any other non-string. */
+  'predicate-slot-not-text': { readonly found: PredicateSlotValueKind };
+  /** A structural condition holding neither text nor an envelope carrying a string `source`. */
+  'structural-condition-shape': { readonly found: StructuralConditionValueKind };
+}
+
+/** Every refusal code this file's producers emit. */
+export type FlowSlotRefusalCode = keyof FlowSlotRefusalParams;
+
+/** The codes {@link predicateSlotRefusal} emits. */
+export type PredicateSlotRefusalCode = 'predicate-slot-missing' | 'predicate-slot-blank' | 'predicate-slot-not-text';
+
+/** The codes {@link structuralConditionRefusal} emits. */
+export type StructuralConditionRefusalCode = 'structural-condition-shape';
+
+/** One refusal's `code` and `params`, correlated: narrowing on `code` narrows `params`. */
+type FlowSlotRefusalOf<Codes extends FlowSlotRefusalCode> = { message: string; source: string } & {
+  [Code in Codes]: { readonly code: Code; readonly params: FlowSlotRefusalParams[Code] };
+}[Codes];
+
+/**
+ * Why a predicate slot's value is not authorable: the English `message`, the
+ * `source` to attribute it to, and the same refusal as a `code` with its
+ * `params` — narrowing on `code` narrows `params`.
+ */
+export type PredicateSlotRefusal = FlowSlotRefusalOf<PredicateSlotRefusalCode>;
+
+/**
+ * Why a structural condition's value is not authorable: the English `message`,
+ * the `source` to attribute it to, and the same refusal as a `code` with its
+ * `params`.
+ */
+export type StructuralConditionRefusal = FlowSlotRefusalOf<StructuralConditionRefusalCode>;
+
+/**
+ * Keyed by code so the compiler holds {@link FLOW_SLOT_REFUSAL_CODES} equal to
+ * {@link FlowSlotRefusalParams}.
+ */
+const FLOW_SLOT_REFUSAL_CODE_TABLE = {
+  'predicate-slot-missing': true,
+  'predicate-slot-blank': true,
+  'predicate-slot-not-text': true,
+  'structural-condition-shape': true,
+} as const satisfies Record<FlowSlotRefusalCode, true>;
+
+/**
+ * The closed set of this file's refusal codes, as a value — for a consumer
+ * that must prove it has a catalogue row for every code.
+ */
+export const FLOW_SLOT_REFUSAL_CODES: readonly FlowSlotRefusalCode[] = Object.freeze(
+  Object.keys(FLOW_SLOT_REFUSAL_CODE_TABLE) as FlowSlotRefusalCode[],
+);
+
+/** A non-string, non-nullish slot value's kind. */
+function predicateSlotValueKind(value: object | number | boolean | bigint | symbol): PredicateSlotValueKind {
+  if (isExpressionEnvelopeShaped(value)) return 'envelope';
+  if (Array.isArray(value)) return 'array';
+  return typeof value as PredicateSlotValueKind;
+}
+
+/**
  * Why a value sitting in a `predicate`-role slot is not authorable at all —
  * the SINGLE notion every door applies, derived once (#15572, #17493).
  *
@@ -516,9 +624,11 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
  *   the value is a non-blank string and therefore this function's business is
  *   done.
  */
-export function predicateSlotRefusal(value: unknown): { message: string; source: string } | undefined {
+export function predicateSlotRefusal(value: unknown): PredicateSlotRefusal | undefined {
   if (value === undefined || value === null) {
     return {
+      code: 'predicate-slot-missing',
+      params: { found: value === null ? 'null' : 'absent' },
       message:
         `${PREDICATE_SLOT_STRING_REFUSAL} Found ${value === null ? '`null`' : 'nothing — the key is absent'} `
         + 'where the slot is required: a decision branch is `{ label, expression }` and its `expression` is not '
@@ -534,6 +644,8 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
   if (typeof value === 'string') {
     if (NON_BLANK_STRING(value)) return undefined;
     return {
+      code: 'predicate-slot-blank',
+      params: {},
       message:
         `${PREDICATE_SLOT_STRING_REFUSAL} Found a string that is blank after trimming, which states no rule. `
         + 'Write the predicate the branch or field was meant to test (e.g. `record.rating >= 4`), or keep what '
@@ -543,20 +655,22 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
       source: value,
     };
   }
-  const envelope = isExpressionEnvelopeShaped(value);
-  const found = envelope
+  // `value` is neither nullish (the first arm) nor a string (the second), so
+  // its kind is one of the non-text tokens; the phrase is rendered from it.
+  const kind = predicateSlotValueKind(value as object | number | boolean | bigint | symbol);
+  const found = kind === 'envelope'
     ? 'an expression envelope (an object naming a `dialect`)'
-    : Array.isArray(value)
+    : kind === 'array'
       ? 'an array'
-      : value === null
-        ? '`null`'
-        : typeof value === 'object'
-          ? 'an object'
-          : `a ${typeof value}`;
+      : kind === 'object'
+        ? 'an object'
+        : `a ${kind}`;
   // The envelope's own `source`, when it has one, so the finding still points
   // at the text the author wrote rather than at an empty string.
   const rawSource = (value as { source?: unknown } | null | undefined)?.source;
   return {
+    code: 'predicate-slot-not-text',
+    params: { found: kind },
     message:
       `${PREDICATE_SLOT_STRING_REFUSAL} Found ${found}. Write the predicate as bare CEL text `
       + '(e.g. `record.rating >= 4`); the `{ dialect, source }` envelope is the `value`-role spelling '
@@ -712,26 +826,37 @@ export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
  */
 export function structuralConditionRefusal(
   value: unknown,
-): { message: string; source: string } | undefined {
+): StructuralConditionRefusal | undefined {
   if (value == null) return undefined;
   if (typeof value === 'string') return undefined;
   if (typeof value === 'object' && !Array.isArray(value)) {
     const rec = value as { source?: unknown };
     if (typeof rec.source === 'string') return undefined;
   }
-  const found = Array.isArray(value)
-    ? 'an array'
+  // The kind is decided first and the phrase rendered from it, so the code's
+  // params and the message cannot name two different things.
+  const kind: StructuralConditionValueKind = Array.isArray(value)
+    ? 'array'
     : typeof value === 'object'
       ? (value as { ast?: unknown }).ast !== undefined
-        ? 'an object carrying an `ast` but no string `source` — the engine evaluates `source`, never `ast`'
-        : 'an object carrying no string `source`'
-      : `a ${typeof value}`;
+        ? 'ast-without-source'
+        : 'object-without-source'
+      : (typeof value as StructuralConditionValueKind);
+  const found = kind === 'array'
+    ? 'an array'
+    : kind === 'ast-without-source'
+      ? 'an object carrying an `ast` but no string `source` — the engine evaluates `source`, never `ast`'
+      : kind === 'object-without-source'
+        ? 'an object carrying no string `source`'
+        : `a ${kind}`;
   // The envelope's own `source`, when it has one, so the finding still points at
   // the text the author wrote rather than at an empty string. A non-string
   // `source` (the `{ source: 1 }` case) is exactly what is being refused, so it
   // cannot be the attribution.
   const rawSource = (value as { source?: unknown }).source;
   return {
+    code: 'structural-condition-shape',
+    params: { found: kind },
     message:
       `${STRUCTURAL_CONDITION_SHAPE_REFUSAL} Found ${found}. Write the condition as bare CEL text `
       + '(e.g. `record.rating >= 4`), or as an expression envelope (`{ dialect: \'cel\', source: \'…\' }`). '

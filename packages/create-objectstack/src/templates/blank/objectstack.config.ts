@@ -2,8 +2,24 @@ import { defineStack } from '@objectstack/spec';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
-import * as objects from './src/objects/index.js';
+import * as objects from './src/objects';
+import * as views from './src/views';
+import * as actions from './src/actions';
+import * as flows from './src/flows';
+import * as dashboards from './src/dashboards';
+import * as apps from './src/apps';
+import * as skills from './src/skills';
 
+// Every value a barrel exports, as the list a stack key takes: typed by what
+// the barrel exports, and an empty list while it exports nothing yet.
+const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);
+
+// This file is a MODULE, and the whole module is the stack: the default
+// export below is the base, and every NAMED export is merged onto it as a
+// top-level stack key under its own name. A helper exported from here is
+// therefore read as a stack key and the build refuses it — keep helpers in a
+// sibling module and import them. Only names the stack schema declares
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.example.blank',
@@ -27,7 +43,12 @@ export default defineStack({
   // connector executors below register their provider factories with it —
   // without `automation` loaded they have nowhere to register and boot fails,
   // so keep this capability whenever `plugins:` lists a connector.
-  requires: ['automation'],
+  //
+  // `triggers` fires a flow that starts on a record change, the kind
+  // `objectstack generate flow NAME` writes: without it this config stops
+  // loading once it holds such a flow. It can go if this project will never
+  // hold one.
+  requires: ['automation', 'triggers'],
 
   // Generic connector executors, default-present so you can add a `connectors:`
   // entry naming `provider: 'rest' | 'openapi' | 'mcp'` and have it materialize
@@ -43,5 +64,17 @@ export default defineStack({
     new ConnectorMcpPlugin(),
   ],
 
-  objects: Object.values(objects),
+  // Every directory `objectstack generate` writes into is wired here: its
+  // index.ts exports what the directory holds, and each list below hands
+  // those exports to the stack. `objectstack generate view NAME` adds a file
+  // and one export line, and the view is part of this stack with no edit to
+  // this file. A directory that is not wired here is never loaded, and
+  // `objectstack validate` neither counts nor checks what it holds.
+  objects: exportsOf(objects),
+  views: exportsOf(views),
+  actions: exportsOf(actions),
+  flows: exportsOf(flows),
+  dashboards: exportsOf(dashboards),
+  apps: exportsOf(apps),
+  skills: exportsOf(skills),
 });

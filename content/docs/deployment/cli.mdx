@@ -33,9 +33,14 @@ This scaffolds a working project with `objectstack.config.ts`, a sample object, 
 
 ```bash
 os generate object customer    # Add a Customer object
-os generate action approve     # Add an action
-os generate flow onboarding    # Add an automation flow
+os generate flow customer      # Add an automation flow on it
+os generate action customer    # Add an action on it that runs the flow
 ```
+
+Each command writes a file and its export line, and the starter's config already
+wires every directory they write into, so all three are part of the stack. The
+flow and the action bind to the object named like them, which is why the object
+comes first: an action bound to an object the stack does not declare is refused.
 
 ### Launch the dev server
 
@@ -739,8 +744,8 @@ the view and the action listed under
 renamed out of that page's `support_desk_` namespace into `my_app_`. That page's `support`
 app is **not** added, and a zero count is never printed, which is why the `UI:` row reads
 `1 Views  1 Actions` with no `Apps`. The walkthrough's `os generate` commands are **not**
-part of the fixture — run those as well and the summary gains `my_app_customer` and a
-`Logic:` row. Timings are machine identity, and the rule count and artifact size track the
+part of the fixture — run those as well and the summary gains `my_app_customer`, a second
+action and a `Logic:` row. Timings are machine identity, and the rule count and artifact size track the
 CLI version; everything else is fixture identity and reproduces.
 </Callout>
 
@@ -1410,7 +1415,8 @@ else a scaffold names (an action's, flow's or app's own `name`) is prefixed.
 
 **Every scaffold reaches the stack, or the command says it does not.** The
 `objectstack.config.ts` that `os init` writes for the `app` and `plugin`
-templates wires every directory in the table below: it imports each
+templates, and the one the `npm create objectstack` starter ships, wires every
+directory in the table below: it imports each
 `src/<dir>/index.ts` barrel and hands its exports to `defineStack` under the key
 in the **Collected as** column, so a file `os g` writes there is part of the
 stack with no edit to the config. It also declares
@@ -1421,8 +1427,8 @@ After writing, `os g` loads the config again and says which of these holds:
   checks it.
 - **Not wired**: the config loads and its stack does not carry the item, or
   there is no config. This is what happens with a config that imports
-  `./src/objects` alone, as `os init` projects from earlier releases and the
-  `npm create objectstack` starter do. The file is written, the config is left
+  `./src/objects` alone, as projects that `os init` and `npm create objectstack`
+  scaffolded in earlier releases do. The file is written, the config is left
   as it was, and the command prints the import and the `defineStack` key that
   wire the directory.
 - **Cannot run**: the stack carries a flow, and its `requires` lacks
@@ -1651,6 +1657,7 @@ os test --url http://localhost:4000    # Custom server URL
 os test --token my-api-key            # With authentication
 os test 'qa/**/*.test.json'           # Recursive — quote it, or the shell expands it first
 os test --fail-on-empty               # Matching no suite is a failure, not a pass
+os test --tags smoke,critical         # Only scenarios tagged smoke OR critical
 ```
 
 The pattern accepts `*` (one path segment) and `**` (any number of segments);
@@ -1677,6 +1684,30 @@ switch and reported ✅, so a `contains` against a missing path was a test that
 silently deleted itself. Assert absence with `is_null`; compare a scalar with
 `equals`.
 
+The report prints the **names the suite author wrote**. Each suite is headed by
+its `name` and the file it was loaded from —
+`📄 Running suite: Accounts smoke (accounts.test.json)` — and each scenario line
+leads with the scenario's `name` and carries its `id` in brackets:
+`✅ Scenario: An account can be created [acct-create] (12ms)`, or the id alone when
+the two are equal. A failed scenario also prints its `description` under its line,
+before the error, so a red run says what the scenario was checking. A file that is
+refused at load time is headed by its file name alone, because no suite name was
+ever parsed from it.
+
+**`--tags` selects scenarios by their `tags`.** Pass a comma-separated list: a
+scenario runs when it carries **at least one** of the listed tags (any-of), so
+`--tags smoke,critical` runs everything tagged `smoke` or `critical`. Matching is
+exact and case-sensitive — a tag is a name, not a pattern — and while the flag is
+given an untagged scenario is never selected. The scenarios the selection leaves
+out are **deselected**: not run, counted on the summary
+(`--tags smoke selected 1 of 4 scenarios; 3 deselected (not run, not counted as passed).`),
+and never counted as passed. A listed tag that no loaded scenario carries is named
+on the summary, since a typo narrows the run without failing it, and an empty entry
+(`--tags smoke,`) is refused before anything runs. Without the flag every scenario
+runs. A scenario's `requires` block is **not checked**: a scenario that names a
+plugin the target does not load still runs, and the unmet requirement surfaces
+only as whatever failure it causes, if any — the scenario can still pass.
+
 **A pattern that matches no suite is not a failure by default.** The run prints
 `Found 0 test suites.` — the same machine-readable line a full run prints, so a
 caller can tell "every suite passed" from "there were no suites" — and exits
@@ -1685,6 +1716,10 @@ build. That is a posture, not an oversight, and it has the cost you would expect
 a CI step whose glob stops matching (a renamed directory, a moved suite) reports
 success forever. Pass **`--fail-on-empty`** to opt into the strict reading, where
 an empty match exits 1 (#7848).
+A `--tags` selection that matches no scenario takes the same posture: it prints
+`No scenario matched --tags nightly.` and exits **0**, and **`--fail-on-empty`**
+makes it exit 1 — a renamed tag in a CI step is the same trap as a renamed
+directory.
 
 The **record-shaped** action types — `create_record`, `read_record`,
 `update_record`, `delete_record`, `query_records` — **ask the server where the
