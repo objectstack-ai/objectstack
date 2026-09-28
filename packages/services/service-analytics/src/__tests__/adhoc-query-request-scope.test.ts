@@ -281,8 +281,9 @@ describe.each(STRATEGY_PATHS)('[#20381] the ad-hoc doors leave the shared regist
     // Nothing was published: the name still resolves to nothing shared.
     expect(h.svc.cubeRegistry.get(OTHER)).toBeUndefined();
 
+    // The same caller asks again: the same driver call, the same answer.
     const secondFrom = h.calls.length;
-    const second = await h.svc.query(q, CALLER_B);
+    const second = await h.svc.query(q, CALLER_A);
     expect(second).toEqual(first);
     expect(h.calls.slice(secondFrom)).toEqual(firstDriven);
     // Each request was handed a cube inferred for it — two equal mints, not

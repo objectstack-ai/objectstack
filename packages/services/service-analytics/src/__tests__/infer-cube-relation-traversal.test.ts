@@ -178,7 +178,7 @@ async function run(query: unknown, opts: { native?: boolean; fields?: string[] }
   }
   // The cube this request's strategies were handed — none when a gate refused
   // the query before any strategy was asked.
-  const cube = cubes.at(-1);
+  const cube = cubes[cubes.length - 1];
   return {
     rows,
     error,
