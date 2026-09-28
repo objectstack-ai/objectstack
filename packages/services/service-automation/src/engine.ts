@@ -2126,11 +2126,12 @@ export const IN_PROCESS_DISPATCH_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
 
 /**
  * ADR-0087 conversions the flow rehydration seam refuses to replay, by id —
- * the DEFAULT-FLIP class, on the artifact door's precedent
- * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`). The
- * registry stays the single authority on what converts; this is only this
- * seam saying which entries its own evidence cannot carry, and each id owes
- * its reason beside it.
+ * the DEFAULT-FLIP class, the same per-door refusal the artifact-ingestion
+ * door makes (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in
+ * `packages/metadata-core/src/artifact-forward-conversion.ts`, which lists this
+ * seam's one id beside its own precedent). The registry stays the single
+ * authority on what converts; this is only this seam saying which entries its
+ * own evidence cannot carry, and each id owes its reason beside it.
  *
  * - `flow-decision-mode-inclusive-explicit` (#15429) writes `mode: 'inclusive'`
  *   onto an edge-branched `decision` with two or more conditioned out-edges,
@@ -2145,7 +2146,9 @@ export const IN_PROCESS_DISPATCH_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
  *   new exclusive decision into an inclusive one at registration and persist
  *   that at save, and the ruled default would be unobservable. The entry
  *   replays where the age IS asserted: `os migrate meta --from 17`, by the
- *   operator, over authored sources — never at a load seam.
+ *   operator, over authored sources — never at a load seam. The artifact
+ *   door refuses it for the same reason (its declared `^17.0.0` floor is a
+ *   dependency range, not an age), in the module named above.
  */
 const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
     'flow-decision-mode-inclusive-explicit',

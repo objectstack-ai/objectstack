@@ -11389,10 +11389,12 @@ const reportJoinedChartRemoved: MetadataConversion = {
  * data-at-rest seam that opens the retired window has to refuse this id by
  * name, on the artifact door's precedent for `app-hidden-to-unpublished`
  * (#17885, `DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`):
- * the automation engine's flow rehydration seam does (`registerFlow` serves
- * code-shipped flows, REST bodies and Studio saves alike, none of them dated),
- * and the artifact-ingestion door must (a scaffolded `^17.0.0` floor is a
- * dependency range, not an age). ⛔ Not replayed over stored `sys_metadata`
+ * the automation engine's flow rehydration seam does
+ * (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in `service-automation/src/engine.ts`:
+ * `registerFlow` serves code-shipped flows, REST bodies and Studio saves alike,
+ * none of them dated), and the artifact-ingestion door does
+ * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `metadata-core/src/artifact-forward-conversion.ts`:
+ * a scaffolded `^17.0.0` floor is a dependency range, not an age). ⛔ Not replayed over stored `sys_metadata`
  * flows by `os migrate meta --stored` either — that pass canonicalizes through
  * the same engine seam, and an operator-asserted rewrite of stored rows is a
  * separate plumbing, named by the D3 entry as the judgment still owed.
