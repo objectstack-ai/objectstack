@@ -374,7 +374,12 @@ them, left out as the single-app read leaves them out, on every layer, in the
 draft, and on both sides of a diff. These doors apply no per-deployment gate:
 an entry whose `requiresService` names a service this deployment lacks is part
 of the stored version, for every caller. The exemption lifts no whole refusal:
-an app an author may not open is refused on these doors too.
+an app an author may not open is refused on these doors too. Reading a
+*pending* draft at all — `?state=draft`, and the `?preview=draft` preview —
+needs an authoring capability (`studio.access`, `setup.access` or
+`manage_metadata`: the check `GET /api/v1/meta/_drafts` makes). A caller
+without one is answered as if the parameter were absent: the published app,
+or `404` for an app that has never been published.
 
 `visible` did **not** move server-side with them, and that asymmetry is
 deliberate: CEL is evaluated in the browser because server-side evaluation needs
