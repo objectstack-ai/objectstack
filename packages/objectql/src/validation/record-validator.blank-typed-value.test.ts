@@ -152,12 +152,14 @@ describe('the numeric type door is NUMERIC_VALUE_TYPES minus COMPUTED_VALUE_TYPE
     expect(refusal(type, 'abc')).toBeNull();
   });
 
-  it('progress takes the type check only, and summary none — no bound or scale is newly enforced', () => {
-    // The boundary the branch states: a declared `max` / `scale` on these two
-    // was never enforced, and this change does not start (a separate decision).
-    for (const type of ['progress', 'summary']) {
-      const fields = { [`f_${type}`]: { name: `f_${type}`, type, max: 100, scale: 0 } } as any;
-      expect(() => validateRecord({ fields }, { [`f_${type}`]: 150.5 }, 'insert'), type).not.toThrow();
-    }
+  it('summary takes no check at all, and progress no `scale` — a declared `max` / `scale` on summary is not read', () => {
+    // The boundary the branch states for `summary`: its shape is the producer's,
+    // so a declared `max` / `scale` is never enforced on it.
+    const summary = { f_summary: { name: 'f_summary', type: 'summary', max: 100, scale: 0 } } as any;
+    expect(() => validateRecord({ fields: summary }, { f_summary: 150.5 }, 'insert')).not.toThrow();
+    // `progress` took the type check here, and its declared `min` / `max` since
+    // #20386 (record-validator.progress-bounds.test.ts) — but still no `scale`.
+    const progress = { f_progress: { name: 'f_progress', type: 'progress', max: 100, scale: 0 } } as any;
+    expect(() => validateRecord({ fields: progress }, { f_progress: 50.5 }, 'insert')).not.toThrow();
   });
 });

@@ -256,11 +256,18 @@ function comparandShapeRefusalAtSave(
 }
 
 /**
- * The two flags `FieldOperatorsSchema` declares `z.boolean()`. A non-boolean one
+ * The flags `FieldOperatorsSchema` declares `z.boolean()`. A non-boolean one
  * is refused on every query face under the #5347 / #5369 rulings, in every
  * position, because the backends read one in opposite directions.
+ *
+ * [#20311] `$empty` is a flag by the same declaration (ruling A on #20399,
+ * record 5865693155: "`$empty: boolean`"). It is staged — no query face has an
+ * arm for it yet, and each refuses it whole — so this door holds it to its
+ * declared type from the day it is declared, the rule each face's arm then
+ * inherits, rather than letting a `"true"` string be saved into a stored
+ * filter that no later arm will read the way its author meant.
  */
-const BOOLEAN_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists']);
+const BOOLEAN_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists', '$empty']);
 
 /** What arrived where a flag's boolean belongs — the analytics door's `describeFlagComparand`. */
 function describeFlagComparand(value: unknown): string {
@@ -280,8 +287,22 @@ function describeFlagComparand(value: unknown): string {
  * prescription are the analytics door's, less the location and the history of
  * what that door used to do. The field is named because this door can see it;
  * the issue's own `path` carries the location.
+ *
+ * [#20311] `$empty` keeps the first sentence and the prescription's form; its
+ * reason cannot be the opposite-directions history (no backend reads it yet),
+ * so it names the rule it shares with the two null flags instead.
  */
 function nonBooleanFlagComparandMessage(op: string, field: string, value: unknown): string {
+  if (op === '$empty') {
+    return (
+      `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `
+      + `Received ${describeFlagComparand(value)}. @objectstack/spec FieldOperatorsSchema declares `
+      + `${op} as a boolean, and a non-boolean is refused rather than coerced, the rule $null and `
+      + `$exists follow on every query face. Write the boolean itself: "${op}": true matches rows `
+      + `whose "${field}" is empty, "${op}": false rows whose "${field}" is not empty. The filter `
+      + 'was NOT applied.'
+    );
+  }
   const [whenTrue, whenFalse] = op === '$null' ? ['has no value', 'has a value'] : ['has a value', 'has no value'];
   return (
     `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `

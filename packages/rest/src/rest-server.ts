@@ -1701,6 +1701,39 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
+ * [#20378 · #20441] THE AUTHORING-DOOR REFUSAL — ruling 5865708652 (letter B),
+ * carried to `/audit` by triage's grade 5871509797. Sends it and answers `true`
+ * when {@link mayReadPendingDrafts} does not admit `caller`; answers `false`,
+ * sending nothing, when it does. The `refuseRepeatedQueryParams` convention:
+ * `if (refuseNonAuthoringCaller(ctx, res, …)) return;`.
+ *
+ * The item-scoped doors that read an AUTHORING LOG ask it first, before the
+ * protocol is resolved, before the query is parsed and before any item or
+ * event is read: `/history` and `/diff` read `sys_metadata_history`, and
+ * `/audit` reads `sys_metadata_audit`. Both logs record a DRAFT save exactly
+ * as they record an active one, so they have no published-only answer to fall
+ * back to, and a caller who may not read pending drafts is refused as
+ * `GET /meta/_drafts` refuses them: 403 `FORBIDDEN`, the same nested
+ * envelope. The answer is the same for an item that exists, one that does
+ * not and a draft-only one, so the door is no existence oracle.
+ *
+ * `reading` names THE DOOR and never drafts: a refusal worded about drafts
+ * would read as "this item has one". This is ONE function so the three doors
+ * cannot drift apart in their predicate, status, code or envelope; only the
+ * door's own name differs between them.
+ */
+function refuseNonAuthoringCaller(caller: unknown, res: any, reading: string): boolean {
+    if (mayReadPendingDrafts(caller)) return false;
+    res.status(403).json({
+        error: {
+            code: 'FORBIDDEN',
+            message: `${reading} requires an authoring capability (studio.access, setup.access or manage_metadata).`,
+        },
+    });
+    return true;
+}
+
+/**
  * [#20156] What the per-caller read gate of `GET /meta/:type/:name` answers for
  * ONE document — see {@link RestServer.metaItemReadGate}, the one place it is
  * decided.
@@ -7375,18 +7408,12 @@ export class RestServer {
                     // the active row and keep the pruned plain-read answer.
                     //
                     // `historyCtx` is this door's one caller resolution; the org
-                    // partition below reads the same value.
+                    // partition below reads the same value. The refusal is
+                    // {@link refuseNonAuthoringCaller}, shared with `/diff` and
+                    // `/audit` (#20441) so the three cannot drift apart.
                     const historyCtx = await this.resolveExecCtx(environmentId, req)
                         .catch(rethrowAuthzStoreUnavailable);
-                    if (!mayReadPendingDrafts(historyCtx)) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Reading a metadata item\'s version history requires an authoring capability (studio.access, setup.access or manage_metadata).',
-                            },
-                        });
-                        return;
-                    }
+                    if (refuseNonAuthoringCaller(historyCtx, res, 'Reading a metadata item\'s version history')) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     // The cast came off when `MetadataProtocol` declared
                     // `historyMetaItem` (#12005 — the #11006 pattern, exactly
@@ -7543,13 +7570,43 @@ export class RestServer {
         // reset attempts, both allowed and denied) so Studio's "审计
         // 日志 / Audit log" tab can show who tried what and whether
         // a lock blocked it. Empty array on environments where the
-        // table is not yet provisioned.
+        // table is not yet provisioned. An AUTHORING door (#20441): a
+        // caller without an authoring capability is refused 403.
         registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/audit`,
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#20441] AN AUTHORING DOOR — ruling 5865708652 (letter B),
+                    // carried to this door by triage's grade 5871509797.
+                    // `saveMetaItem` appends a success row to
+                    // `sys_metadata_audit` for EVERY save, a draft save
+                    // included, and `auditMetaItem` serves its `note: 'draft'`,
+                    // its actor and its time. So this trail, served to a caller
+                    // who may not read pending drafts, disclosed that an item
+                    // had unpublished authoring work, who saved it and when —
+                    // and for an item with nothing published, that it exists at
+                    // all, where the plain read answers `404` (ADR-0045 §3).
+                    // ADR-0106 D4: 「draft/preview reads are admin-gated
+                    // upstream」.
+                    //
+                    // The trail has no published-only answer to fall back to:
+                    // withholding only the draft-save rows would hand a member
+                    // a pruned log that reads as a true, complete one, the
+                    // shape the ruling measured wrong. So the caller is asked
+                    // {@link mayReadPendingDrafts} FIRST and refused by
+                    // {@link refuseNonAuthoringCaller} — the refusal `/history`
+                    // and `/diff` give, and `GET /meta/_drafts`'s shape — before
+                    // the protocol is resolved (no 501-vs-200 probe), before the
+                    // query is parsed, and before any item or event is read.
+                    // Whoever it admits reads exactly what they read before,
+                    // the per-caller refusal and the org scope below included.
+                    //
+                    // `auditCtx` is this door's one caller resolution; the org
+                    // scope below reads the same value.
+                    const auditCtx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+                    if (refuseNonAuthoringCaller(auditCtx, res, 'Reading a metadata item\'s audit trail')) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof p.auditMetaItem !== 'function') {
                         // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
@@ -7628,10 +7685,14 @@ export class RestServer {
                     }
                     // [#8747] SCOPE THE READ. Without an organization this
                     // route returned every tenant's audit rows for a
-                    // `(type, name)` — measured, not inferred — and it carries
-                    // no capability gate (unlike its `PUT` twin, which gates on
-                    // `manage_metadata`), so the cohort was any authenticated
-                    // principal of any tenant, on the published SDK surface.
+                    // `(type, name)` — measured, not inferred — and it carried
+                    // no capability gate then (unlike its `PUT` twin, which
+                    // gates on `manage_metadata`), so the cohort was any
+                    // authenticated principal of any tenant, on the published
+                    // SDK surface. [#20441] It carries the authoring-door gate
+                    // now, and the scope still matters: that gate admits a
+                    // builder of ONE organization, never a reader of another's
+                    // trail, so the tenant separation stays this scope's job.
                     //
                     // The organization comes from `resolveExecCtx`, which this
                     // file already calls in 40+ handlers including the `PUT`
@@ -7655,7 +7716,10 @@ export class RestServer {
                     // hands back — the same reasoning the `/published` route
                     // states below — not from the request payload. It is still
                     // read on the two lines that need it.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+                    //
+                    // `auditCtx` is the caller resolved at the head of this door
+                    // (#20441), not a second resolution.
+                    //
                     // The `(p as any)` casts this door carried came off when
                     // `MetadataProtocol` declared `auditMetaItem` (the #11006
                     // pattern, same as the publish door below): the literal is
@@ -7670,7 +7734,7 @@ export class RestServer {
                     const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId: ctx?.tenantId ?? null,
+                        organizationId: auditCtx?.tenantId ?? null,
                         // Already finite or absent — the declared parse above
                         // refuses anything else.
                         ...(limit !== undefined ? { limit } : {}),
@@ -8042,18 +8106,12 @@ export class RestServer {
                     // read the active row and keep the pruned plain-read answer.
                     //
                     // `diffCtx` is this door's one caller resolution; the org
-                    // partition below reads the same value.
+                    // partition below reads the same value. The refusal is
+                    // {@link refuseNonAuthoringCaller}, shared with `/history`
+                    // and `/audit` (#20441) so the three cannot drift apart.
                     const diffCtx = await this.resolveExecCtx(environmentId, req)
                         .catch(rethrowAuthzStoreUnavailable);
-                    if (!mayReadPendingDrafts(diffCtx)) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Comparing a metadata item\'s stored versions requires an authoring capability (studio.access, setup.access or manage_metadata).',
-                            },
-                        });
-                        return;
-                    }
+                    if (refuseNonAuthoringCaller(diffCtx, res, 'Comparing a metadata item\'s stored versions')) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).diffMetaItem) {
                         res.status(501).json({

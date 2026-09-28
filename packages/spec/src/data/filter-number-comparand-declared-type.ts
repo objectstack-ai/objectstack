@@ -118,7 +118,7 @@
  * The implicit-equality comparand, `$eq` / `$ne` / `$gt` / `$gte` / `$lt` /
  * `$lte` ({@link NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS}), and every MEMBER of
  * `$in` / `$nin` / `$between` ({@link NUMBER_COMPARAND_DOOR_LIST_OPERATORS}).
- * Not judged: `$null` / `$exists` (a boolean flag, not a value of the field),
+ * Not judged: `$null` / `$exists` / `$empty` (a boolean flag, not a value of the field),
  * the text operators (their comparand is a substring or pattern, and over a
  * numeric field they are refused one door earlier by the text door, #15661),
  * a `{ $field }` reference (not a literal), and a DOTTED key (a dotted path
@@ -739,8 +739,8 @@ const JUDGED_SLOTS: readonly Slot[] = [
  *    refused string, a narrowed numeric string, and a number (passes).
  * 3. **The grammar** — every {@link NUMERIC_STRING_GRAMMAR_CASES} row at `$eq`
  *    on `f_number`.
- * 4. **The unjudged positions** — `$null`, `$exists` and a `{ $field }`
- *    reference on `f_number` pass.
+ * 4. **The unjudged positions** — `$null`, `$exists`, `$empty` and a
+ *    `{ $field }` reference on `f_number` pass.
  */
 export const NUMBER_COMPARAND_DOOR_CASES: readonly NumberComparandDoorCase[] = [
   ...NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.map((field) =>
@@ -756,6 +756,8 @@ export const NUMBER_COMPARAND_DOOR_CASES: readonly NumberComparandDoorCase[] = [
     'A null test takes a boolean flag, not a value of the field.'),
   caseFor('unjudged', fixtureField('f_number'), { kind: 'scalar', op: '$exists' }, false,
     'An existence test takes a boolean flag, not a value of the field.'),
+  caseFor('unjudged', fixtureField('f_number'), { kind: 'scalar', op: '$empty' }, true,
+    'An emptiness test takes a boolean flag, not a value of the field.'),
   caseFor('unjudged', fixtureField('f_number'), { kind: 'scalar', op: '$gt' }, { $field: 'f_currency' },
     'A field reference is not a literal.'),
 ];
