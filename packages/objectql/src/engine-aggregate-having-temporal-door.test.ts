@@ -331,9 +331,6 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['the first instant of year 1 on min(datetime) — inside the range', { first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
     ['a wall clock on max(time)', { last_slot: { $gte: '12:00' } }, ['c2', 'c3', 'c4']],
     ['the number for 10000-01-01 on max(time) — not judged on time', { last_slot: { $gt: Y10000 } }, []],
-    ['a string on sum — not temporal', { total: { $gt: 'not-a-date' } }, []],
-    ['a string on count — not temporal', { n: { $gt: 'not-a-date' } }, []],
-    ['a string on avg — not temporal', { mean: { $gt: 'not-a-date' } }, []],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],
@@ -352,6 +349,22 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
       expect(await keptGroups(having)).toEqual(kept);
     });
   }
+
+  // [#20351] A string on a NUMERIC column is not this door's either, and it is
+  // no longer compared as written: the number-comparand door, which runs after
+  // this one, refuses it in its own words, before any read. (It kept no group,
+  // with a 200, before that door existed.)
+  it('a string on sum, count or avg is not this door\'s: the number-comparand door refuses it, before any read', async () => {
+    for (const column of ['total', 'n', 'mean']) {
+      for (const path of ['native', 'rows'] as const) {
+        const { engine, reads } = await makeEngine(path, ROWS);
+        const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { [column]: { $gt: 'not-a-date' } })));
+        expect({ code: err?.code, status: err?.status }, `${column} ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err?.message, `${column} ${path}`).toContain(`compares a declared number field against "not-a-date" at having.${column}.$gt`);
+        expect(reads, `${column} ${path}`).toEqual({ aggregate: 0, find: 0 });
+      }
+    }
+  });
 
   // [#20334] An unknown one is stepped around by this door too, and is then
   // refused one layer down by the token resolver, in its own code, as on

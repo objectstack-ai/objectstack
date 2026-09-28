@@ -242,8 +242,11 @@ describe('[#20334] having — a placeholder the resolver cannot resolve is refus
   const REFUSED: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>, string]> = [
     ["the card's row: an unknown token on max(date), which kept no group",
       () => ({ last_placed: { $gte: '{not_a_token}' } }), { placed_on: { $gte: '{not_a_token}' } }, 'FILTER_TOKEN_UNKNOWN'],
-    ['an unknown token on count, a column no temporal door judges',
-      () => ({ n: { $gte: '{not_a_token}' } }), { amount: { $gte: '{not_a_token}' } }, 'FILTER_TOKEN_UNKNOWN'],
+    // [#20351] On a text column: a NUMERIC column (`n`, a count) is now the
+    // number-comparand door's, which refuses a placeholder unresolved — no
+    // filter token resolves to a number.
+    ['an unknown token on a text groupBy column, which neither the temporal nor the number door judges',
+      () => ({ customer_id: { $gte: '{not_a_token}' } }), { customer_id: { $gte: '{not_a_token}' } }, 'FILTER_TOKEN_UNKNOWN'],
     ['a near-miss spelling ({TODAY})',
       () => ({ last_placed: { $gte: '{TODAY}' } }), { placed_on: { $gte: '{TODAY}' } }, 'FILTER_TOKEN_UNKNOWN'],
     ['an unknown token under $and, beside an arm that holds',

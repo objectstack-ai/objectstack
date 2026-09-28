@@ -15,7 +15,7 @@ export type {
   AnalyticsDriverCapabilities,
 } from '@objectstack/spec/contracts';
 
-import type { FilterCondition } from '@objectstack/spec/data';
+import type { FilterCondition, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
 
 /**
@@ -88,6 +88,22 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * hook keeps the behaviour it had — "cannot answer, do not block".
    */
   declaredFieldType?(objectName: string, field: string): string | undefined;
+  /**
+   * [#20445] The DECLARED value shape of `field` on `objectName` — its type
+   * and, for a multi-capable type, `multiple` — or `undefined` when the host
+   * cannot answer (no data engine wired, an object or field it does not know).
+   *
+   * The question the `$empty` operator turns on: what counts as empty is the
+   * field's row of the ruled per-type table, which `expandEmptyOperator`
+   * (`@objectstack/spec/data`) reads off exactly this shape, and the type
+   * alone cannot answer it (a `lookup` is null-only, a `lookup` with
+   * `multiple: true` is list-valued). Answered from the same
+   * `AnalyticsServiceConfig.sourceFieldMeta` hook `declaredFieldType` reads.
+   * Unlike that hook's text-operator rule, a compiler that gets no answer
+   * REFUSES the operator rather than keeping an older behaviour: there is no
+   * declaration-free SQL for it (`empty-operator-sql.ts` says why).
+   */
+  declaredValueShape?(objectName: string, field: string): ValueShapeFieldDef | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `objectName` —
    * `'sqlite'` / `'postgres'` / `'mysql'`, or `undefined` when the host cannot

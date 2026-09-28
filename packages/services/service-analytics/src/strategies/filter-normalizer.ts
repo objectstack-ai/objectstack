@@ -415,6 +415,32 @@
  * node is built, in this door's envelope and with the message kept. `true` and
  * `false` lower exactly as before.
  *
+ * # `$empty` lowers to a leaf its consumers answer by the DECLARED type (#20445)
+ *
+ * The spec declares `$empty: boolean` with the ruled per-type 「is empty」 table
+ * as its meaning (#20311) — text-like: null or `''`; multi-value: null or `[]`;
+ * every other type: null only; `false` the complement — and ruling A on
+ * #20399 gives each compile surface an arm through the one expansion,
+ * `expandEmptyOperator(fieldDef)`. This door used to pass it through
+ * {@link lowerAnalyticsWhere} and then refuse it in {@link fieldLeaves} as an
+ * unsupported operator (`INVALID_FILTER` / 400).
+ *
+ * It now lowers to a valueless `empty` / `notEmpty` leaf, and each consumer of
+ * the tree answers the leaf where the field's declaration is known:
+ * `NativeSQLStrategy.buildFilterClause` and the `ObjectQLStrategy` echo expand
+ * the host's declared value shape through the spec and compile the row with
+ * `empty-operator-sql.ts` (refusing, in this door's envelope, when the host
+ * cannot name the field's declaration or a list-valued field meets the
+ * `'unknown'` dialect); `ObjectQLStrategy.convertFilter` hands `{ $empty }`
+ * to the engine, whose arm is the engine lane's. A non-boolean flag is
+ * refused by {@link assertBooleanNullFlags} with the two null flags. The leaf
+ * is TOTAL on every consumer, so the `$not` rewrite adds no guard to it.
+ *
+ * The operator stays STAGED (absent from `FILTER_OPERATORS`, 「照 $like 先例分阶段」):
+ * the view operators `is_empty` / `is_not_empty` still lower to `$null`, and
+ * the draft preview does not evaluate `$empty` — it refuses it with its other
+ * unevaluated operators (`preview-evaluator.ts`).
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -944,7 +970,9 @@ function assertDefinedComparands(field: string, spec: unknown): void {
   if (spec === undefined) throw undefinedComparandError(field, root);
   if (!isFilterObject(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
-    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    // [#20445] `$empty` is the third declared-boolean flag: skipped for the
+    // reason the null flags are, and refused by the same boolean-domain gate.
+    if (!op.startsWith('$') || NULL_FLAG_OPERATORS.has(op)) continue;
     const opPath = `${root}.${op}`;
     if (opValue === undefined) throw undefinedComparandError(field, opPath);
     if (!Array.isArray(opValue)) continue;
@@ -1158,6 +1186,24 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           continue;
         }
 
+        // [#20445] `$empty` lowers to its own two leaves, `empty` / `notEmpty`,
+        // valueless like `notSet` / `set` — NOT to them, and not to any tree
+        // of the existing leaves: what counts as empty is the field's
+        // DECLARED row of the ruled per-type table (null or `''`, null or
+        // `[]`, null only), this function sees no declaration, and the
+        // multi-value row cannot be spelled in the lowered vocabulary at all
+        // (an empty list is refused as an equality comparand — ruling 乙 on
+        // #19757). Each consumer of the tree resolves the row where it knows
+        // the field: the two SQL compilers through the host's declared value
+        // shape and the spec's `expandEmptyOperator`, the engine path by
+        // handing the operator to the engine. The flag is a boolean here —
+        // `assertBooleanNullFlags` refused anything else — so `=== true` is
+        // the whole choice.
+        if (opKey === '$empty') {
+          leaf(wrapper[opKey] === true ? 'empty' : 'notEmpty', []);
+          continue;
+        }
+
         // [#5332] A `null` COMPARAND is a null PREDICATE, not a value
         // comparison: `$eq: null` is `IS NULL` (`notSet`) and `$ne: null` is
         // `IS NOT NULL` (`set`) — the same two leaves the `raw === null` branch
@@ -1212,7 +1258,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           // driver-memory made the same call for the same reason in #3948.
           throw invalidFilterError(
             `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
-            `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, ` +
+            `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, $empty, ` +
             `and the $and/$or/$not combinators. ` +
             `Dropping it would silently widen the query to rows the filter excludes.`,
           );
@@ -1437,6 +1483,9 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     case '$ne': return value !== null;
     case '$null': return value === true;
     case '$exists': return value === false;
+    // [#20445] Null is empty on every row of the ruled table, so a NULL column
+    // satisfies `$empty: true` and fails its complement.
+    case '$empty': return value === true;
     // Negative-polarity set / substring tests hold vacuously for an absent value.
     case '$nin': return true;
     // `$notContains` is the one operator where the two JS backends disagree for
@@ -1490,6 +1539,12 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     // construction, on every strategy that compiles this tree.
     case '$null':
     case '$exists':
+      return true;
+    // [#20445] `empty` / `notEmpty` spell their NULL case out on both SQL
+    // compilers (`col IS NULL OR …` / `col IS NOT NULL AND …`), and the engine
+    // answers the operator by its own arm, so the leaf is TOTAL: a guard would
+    // only restate what the predicate already says.
+    case '$empty':
       return true;
     // [#5332] A `null` comparand makes these null PREDICATES too — `notSet` /
     // `set`, not comparisons — so they are total by construction and take NO
@@ -1939,8 +1994,24 @@ function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
 
 // ── [#20040] The null flags' boolean DOMAIN, on every spelling that carries one ──
 
-/** The two flags `FieldOperatorsSchema` declares `z.boolean()`. */
-const NULL_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists']);
+/**
+ * The flags `FieldOperatorsSchema` declares `z.boolean()`, each with what its
+ * `true` / `false` asks for (the refusal's prescription): the two null flags
+ * and [#20445] the `$empty` operator, which joins the gate with its arm. One
+ * table, so a flag cannot be gated without a prescription or described
+ * without being gated.
+ */
+const FLAG_MEANINGS = {
+  $null: ['has no value', 'has a value'],
+  $exists: ['has a value', 'has no value'],
+  $empty: ['is empty by its declared type', 'is not empty'],
+} as const satisfies Record<string, readonly [string, string]>;
+type BooleanFlagOperator = keyof typeof FLAG_MEANINGS;
+const NULL_FLAG_OPERATORS: ReadonlySet<string> = new Set(Object.keys(FLAG_MEANINGS));
+
+function isBooleanFlagOperator(op: string): op is BooleanFlagOperator {
+  return NULL_FLAG_OPERATORS.has(op);
+}
 
 /** What arrived where a flag's boolean belongs, for the refusal below. */
 function describeFlagComparand(value: unknown): string {
@@ -1993,15 +2064,15 @@ function describeFlagComparand(value: unknown): string {
  * condition reads one way wherever it is refused; the rest names what THIS
  * door used to do. The message carries no tracker number (a runtime string).
  */
-function nonBooleanFlagError(op: string, field: string, path: string, value: unknown): Error {
-  const [whenTrue, whenFalse] = op === '$null' ? ['has no value', 'has a value'] : ['has a value', 'has no value'];
+function nonBooleanFlagError(op: BooleanFlagOperator, field: string, path: string, value: unknown): Error {
+  const [whenTrue, whenFalse] = FLAG_MEANINGS[op];
   return invalidFilterError(
     `[analytics] Operator "${op}" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFlagComparand(value)} at ${path}. @objectstack/spec FieldOperatorsSchema ` +
       `declares ${op} as a boolean, and a non-boolean is refused rather than coerced because the ` +
       `backends read one in OPPOSITE directions — one as IS NULL, another as IS NOT NULL. This ` +
-      `analytics filter used to read every non-boolean as IS NOT NULL, so the string "true" and the ` +
-      `string "false" asked for the same rows. Write the boolean itself: "${op}": true matches rows ` +
+      `analytics filter used to read every non-boolean $null / $exists as IS NOT NULL, so the string ` +
+      `"true" and the string "false" asked for the same rows. Write the boolean itself: "${op}": true matches rows ` +
       `whose "${field}" ${whenTrue}, "${op}": false rows whose "${field}" ${whenFalse}. The filter was ` +
       `NOT applied.`,
   );
@@ -2054,7 +2125,7 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
   forEachWhereFieldEntry(node, path, (key, spec, at) => {
     if (!isFilterObject(spec)) return;
     for (const [op, value] of Object.entries(spec)) {
-      if (!NULL_FLAG_OPERATORS.has(op) || typeof value === 'boolean') continue;
+      if (!isBooleanFlagOperator(op) || typeof value === 'boolean') continue;
       throw nonBooleanFlagError(op, key, `${at}.${key}.${op}`, value);
     }
   });

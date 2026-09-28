@@ -39,6 +39,14 @@
  * translation step asks). A new projection that reads a new parameter or keys
  * on a new type reddens the derivation block until it is a cell, and the cell
  * reddens until the dispatcher answers it.
+ *
+ * [#20478] The layered view joined the census on both of its spellings: the
+ * item read's deprecated `?layers=` flag is an item probe like every other
+ * parameter, and `GET /meta/:type/:name/layers` has its own route census. The
+ * dispatcher answered the flag with the plain read's `{ type, name, item }` and
+ * the route with a located `404 ROUTE_NOT_FOUND`; both transports now hand it to
+ * `createMetaLayeredAnswer`, and the item census no longer excludes any
+ * parameter `RestServer`'s item read reads.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -160,6 +168,23 @@ const STORE: Record<string, any[]> = {
     flow: [{ name: 'on_lead', label: 'On lead', type: 'autolaunched' }],
 };
 
+/**
+ * [#20478] Env-wide overlay rows (a `sys_metadata` `state: 'active'` row over a
+ * packaged baseline), the `overlay` layer of the layered view: `crm` relabelled
+ * with one more gated entry, and `invoice` relabelled.
+ */
+const OVERLAYS: Record<string, any[]> = {
+    app: [{
+        ...CRM_APP,
+        label: 'CRM (overlay)',
+        navigation: [
+            ...CRM_APP.navigation,
+            { id: 'nav_finance_reports', type: 'page', label: 'Reports', pageName: 'reports', requiredPermissions: ['finance.access'] },
+        ],
+    }],
+    object: [{ ...INVOICE_OBJECT, label: 'Invoice (overlay)' }],
+};
+
 /** Pending drafts (ADR-0033): relabelled, plus an entry that exists only in the draft. */
 const DRAFTS: Record<string, any[]> = {
     app: [
@@ -238,8 +263,8 @@ const LIST_CALLERS = ['holder', 'non-holder', 'builder', 'anonymous'] as const s
 // ── The services both transports read ─────────────────────────────────────────
 
 /** The protocol's read rules: `?package=` scopes, `previewDrafts` overlays, `state: 'draft'` reads the pending row or throws `NO_DRAFT`. */
-function protocolDouble() {
-    return {
+function protocolDouble(opts: { withoutLayered?: boolean } = {}) {
+    const double = {
         getMetaTypes: vi.fn(async () => ({ types: Object.keys(STORE) })),
         getMetaItems: vi.fn(async ({ type, packageId, previewDrafts }: any) => {
             const t = singular(type);
@@ -261,7 +286,28 @@ function protocolDouble() {
             const item = previewDrafts && draft ? { ...clone(draft), _draft: true } : (active ? clone(active) : undefined);
             return { type: t, name, item };
         }),
+        /**
+         * [#20478] The layered read, in the shape `metadata-protocol` answers it:
+         * `code` the packaged baseline (scoped by `?package=`, ADR-0048),
+         * `overlay` the active overlay row, `effective` the overlay over the code
+         * layer — every layer `null` with nothing behind the name.
+         */
+        getMetaItemLayered: vi.fn(async ({ type, name, packageId }: any) => {
+            const t = singular(type);
+            const code = (STORE[t] ?? []).find((i) => i.name === name && (!packageId || i._packageId === packageId));
+            const overlay = (OVERLAYS[t] ?? []).find((i) => i.name === name);
+            const effective = overlay ?? code;
+            return {
+                type: t, name,
+                code: code ? clone(code) : null,
+                overlay: overlay ? clone(overlay) : null,
+                overlayScope: overlay ? 'env' : null,
+                effective: effective ? clone(effective) : null,
+                lock: 'none', editable: true, deletable: true, resettable: overlay !== undefined,
+            };
+        }),
     };
+    return opts.withoutLayered ? { ...double, getMetaItemLayered: undefined } : double;
 }
 
 const securityFor = (caller: Caller) => ({
@@ -283,17 +329,25 @@ const endpointMatcher = {
 
 // ── The two transports ────────────────────────────────────────────────────────
 
-interface Answer { status: number; code?: string; body: any; items?: any[]; item?: any; vary?: string; cacheControl?: string }
+interface Answer {
+    status: number; code?: string; body: any; items?: any[]; item?: any; vary?: string; cacheControl?: string;
+    /** [#20478] The deprecated `?layers=` flag's RFC 9745 / RFC 8288 pair. */
+    deprecation?: string; link?: string;
+}
 
 const itemsOf = (data: any): any[] | undefined =>
     Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : undefined;
 
-interface Boot { withI18n?: boolean }
+interface Boot {
+    withI18n?: boolean;
+    /** [#20478] A protocol with no layered read (`getMetaItemLayered` absent). */
+    withoutLayered?: boolean;
+}
 
 /** The dispatcher, exactly as `createHonoApp` builds it: `new HttpDispatcher(kernel)`. */
 function bootDispatcher(callerName: CallerName, opts: Boot = {}) {
     const caller: Caller = CALLERS[callerName];
-    const protocol = protocolDouble();
+    const protocol = protocolDouble(opts);
     const services: Record<string, unknown> = {
         protocol,
         security: securityFor(caller),
@@ -306,13 +360,20 @@ function bootDispatcher(callerName: CallerName, opts: Boot = {}) {
     // The seam `dispatch()` resolves identity through (as the sibling dispatch-level pins do).
     (dispatcher as any).timedResolveExecutionContext = async () => clone(caller.ctx);
     const read = async (path: string, query: Record<string, string> = {}, headers: Record<string, string> = {}): Promise<Answer> => {
-        const res = await dispatcher.dispatch('GET', path, undefined, query, { request: { headers } } as any);
+        // [#20478] The request carries its own URL, as `createHonoApp` hands
+        // `dispatch()` the raw Fetch `Request` (`c.req.raw`) — the only
+        // statement of where this host serves the item, which the `?layers=`
+        // flag names its successor under.
+        const request = { headers, url: `http://localhost/api/v1${path}` };
+        const res = await dispatcher.dispatch('GET', path, undefined, query, { request } as any);
         const status = res.response?.status ?? 0;
         const body = res.response?.body;
         const vary = (res.response as any)?.headers?.Vary;
         const cacheControl = (res.response as any)?.headers?.['Cache-Control'];
+        const deprecation = (res.response as any)?.headers?.Deprecation;
+        const link = (res.response as any)?.headers?.Link;
         return {
-            status, code: body?.error?.code, body, vary, cacheControl,
+            status, code: body?.error?.code, body, vary, cacheControl, deprecation, link,
             items: status === 200 ? itemsOf(body?.data) : undefined,
             item: status === 200 ? body?.data?.item : undefined,
         };
@@ -340,7 +401,7 @@ function makeRes() {
 /** `RestServer` over the same services and the same caller — the reference answer. */
 function bootRest(callerName: CallerName, opts: Boot = {}) {
     const caller: Caller = CALLERS[callerName];
-    const protocol = protocolDouble();
+    const protocol = protocolDouble(opts);
     const rest: any = new RestServer(createMockServer() as any, protocol as any, {} as any);
     if (caller.ctx.userId) {
         const ctx = caller.ctx;
@@ -362,8 +423,11 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
         await routeOf(routePath).handler({ method: 'GET', path: `${META}${path}`, params, query, body: {}, headers }, res);
         const status = res.statusCode;
         return {
-            status, code: res.body?.code ?? res.body?.error?.code, body: res.body, vary: res.headers.Vary,
+            // [#20478] A refusal's code: a served layered body carries its own
+            // `code` — the packaged layer — which is not one.
+            status, code: status === 200 ? undefined : res.body?.code ?? res.body?.error?.code, body: res.body, vary: res.headers.Vary,
             cacheControl: res.headers['Cache-Control'],
+            deprecation: res.headers.Deprecation, link: res.headers.Link,
             items: status === 200 ? itemsOf(res.body) : undefined,
             item: status === 200 ? res.body?.item : undefined,
         };
@@ -373,7 +437,11 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
         if (type === 'book' && rest_.length === 1 && rest_[0] === 'tree') {
             return drive(`${META}/book/:name/tree`, path.replace(/^\/meta/, ''), { name }, query, headers);
         }
-        if (rest_.length > 0) throw new Error(`bootRest.read drives list, item and book-tree reads only: ${path}`);
+        // [#20478] The layered view's own route.
+        if (rest_.length === 1 && rest_[0] === 'layers') {
+            return drive(`${META}/:type/:name/layers`, path.replace(/^\/meta/, ''), { type, name }, query, headers);
+        }
+        if (rest_.length > 0) throw new Error(`bootRest.read drives list, item, layers and book-tree reads only: ${path}`);
         return name === undefined
             ? drive(`${META}/:type`, path.replace(/^\/meta/, ''), { type }, query, headers)
             : drive(`${META}/:type/:name`, path.replace(/^\/meta/, ''), { type, name }, query, headers);
@@ -694,18 +762,6 @@ describe('[#20320] the ?state=draft row: the dispatcher\'s item read answers wha
 // `RestServer` answers `private, no-store`. Each is now a census cell, and each
 // census is derived from `RestServer`'s handler like the list's above.
 
-/**
- * The query parameters `RestServer`'s item handler reads that the dispatcher
- * deliberately does not answer — each one a ROUTE this transport does not
- * serve, named here so the derivation below still fails on any OTHER new one.
- */
-const ITEM_PARAMS_NOT_SERVED_HERE: Readonly<Record<string, string>> = {
-    // The deprecated spelling of `GET /meta/:type/:name/layers` — the layered
-    // view, a route the dispatcher does not serve (ADR-0076 item 9: the
-    // catch-all is the fallback fabric, not a second `RestServer`).
-    layers: 'the deprecated `?layers=` spelling of the /layers route, which the dispatcher does not serve',
-};
-
 const ITEM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
     { label: '(none)', query: {} },
     { label: '?state=draft', param: 'state', query: { state: 'draft' } },
@@ -715,6 +771,10 @@ const ITEM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
     { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
+    // [#20478] The layered view's deprecated spelling — any non-empty value —
+    // and the empty value, which is the plain read on both transports.
+    { label: '?layers=true', param: 'layers', query: { layers: 'true' } },
+    { label: '?layers=', param: 'layers', query: { layers: '' } },
 ];
 const ITEM_PARAM_AXIS = new Set(ITEM_PROBES.map((p) => p.param).filter((p): p is string => !!p));
 
@@ -746,7 +806,19 @@ const TREE_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<
 const TREE_PARAM_AXIS = new Set(TREE_PROBES.map((p) => p.param).filter((p): p is string => !!p));
 const TREE_CALLERS = ['holder', 'non-holder', 'builder', 'anonymous'] as const satisfies readonly CallerName[];
 
-/** The item and tree answers compared whole: the envelope (or tree) served, and the two headers either transport sets. */
+/**
+ * [#20478] `GET /meta/:type/:name/layers` — the layered view's own route: one
+ * probe per parameter it reads, and the locale a control (the view is not
+ * translated, so `Accept-Language` must move nothing on either transport).
+ */
+const LAYERS_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
+    { label: '(none)', query: {} },
+    { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
+];
+const LAYERS_PARAM_AXIS = new Set(LAYERS_PROBES.map((p) => p.param).filter((p): p is string => !!p));
+
+/** The item and tree answers compared whole: the envelope (or tree) served, and the headers either transport sets. */
 const served = (a: Answer, transport: 'dispatcher' | 'rest'): unknown =>
     (a.status === 200 ? (transport === 'dispatcher' ? a.body?.data : a.body) : undefined);
 const sameAnswer = (dispatcher: Answer, rest: Answer): boolean =>
@@ -754,11 +826,15 @@ const sameAnswer = (dispatcher: Answer, rest: Answer): boolean =>
     && dispatcher.code === rest.code
     && JSON.stringify(served(dispatcher, 'dispatcher')) === JSON.stringify(served(rest, 'rest'))
     && (rest.status !== 200 || dispatcher.vary === rest.vary)
-    && dispatcher.cacheControl === rest.cacheControl;
+    && dispatcher.cacheControl === rest.cacheControl
+    // [#20478] On EVERY answer of the deprecated flag, refusals included.
+    && dispatcher.deprecation === rest.deprecation
+    && dispatcher.link === rest.link;
+const headersOf = (a: Answer) => ({ vary: a.vary, cacheControl: a.cacheControl, deprecation: a.deprecation, link: a.link });
 const mismatchOf = (who: string, dispatcher: Answer, rest: Answer) => ({
     who,
-    dispatcher: { status: dispatcher.status, code: dispatcher.code, vary: dispatcher.vary, cacheControl: dispatcher.cacheControl, body: JSON.stringify(served(dispatcher, 'dispatcher'))?.slice(0, 400) },
-    rest: { status: rest.status, code: rest.code, vary: rest.vary, cacheControl: rest.cacheControl, body: JSON.stringify(served(rest, 'rest'))?.slice(0, 400) },
+    dispatcher: { status: dispatcher.status, code: dispatcher.code, ...headersOf(dispatcher), body: JSON.stringify(served(dispatcher, 'dispatcher'))?.slice(0, 400) },
+    rest: { status: rest.status, code: rest.code, ...headersOf(rest), body: JSON.stringify(served(rest, 'rest'))?.slice(0, 400) },
 });
 
 /**
@@ -767,10 +843,17 @@ const mismatchOf = (who: string, dispatcher: Answer, rest: Answer) => ({
  * starts reading is a derived cell too. A name absent from the module derives
  * nothing (the handler's own reads still do).
  */
-const SHARED_ITEM_FUNCTIONS = ['createMetaItemAnswer', 'createMetaItemReadGate', 'metaRequestLocale', 'translateMetaDocument', 'translateMetaEnvelope'];
+const SHARED_ITEM_FUNCTIONS = [
+    'createMetaItemAnswer', 'createMetaItemReadGate', 'metaRequestLocale', 'translateMetaDocument', 'translateMetaEnvelope',
+    // [#20478] The `?layers=` flag's parse, and the layered answer it serves.
+    'wantsMetaItemLayers', 'createMetaLayeredAnswer',
+];
 const SHARED_TREE_FUNCTIONS = ['createMetaBookTreeAnswer', 'resolveDocsAudience', 'metaRequestLocale'];
+const SHARED_LAYERS_FUNCTIONS = ['createMetaLayeredAnswer', 'createMetaItemReadGate'];
+/** [#20478] `RestServer`'s own helper both layered spellings call — read as part of each handler. */
+const LAYERED_METHODS = ['serveMetaItemLayered'];
 
-function deriveRouteReads(routePath: string, sharedFunctions: readonly string[]): Derived {
+function deriveRouteReads(routePath: string, sharedFunctions: readonly string[], methods: readonly string[] = []): Derived {
     const derived: Derived = { params: new Set(), types: new Set(), found: false };
     const rest = parse(REST_SERVER_SOURCE);
     const visit = (n: ts.Node): void => {
@@ -783,6 +866,9 @@ function deriveRouteReads(routePath: string, sharedFunctions: readonly string[])
                 readsUnder(rest, handler, derived);
             }
         }
+        // [#20478] A private helper the handler delegates to reads its own
+        // parameters a frame down (`serveMetaItemLayered` reads `?package=`).
+        if (ts.isMethodDeclaration(n) && ts.isIdentifier(n.name) && methods.includes(n.name.text)) readsUnder(rest, n, derived);
         ts.forEachChild(n, visit);
     };
     visit(rest);
@@ -794,19 +880,26 @@ function deriveRouteReads(routePath: string, sharedFunctions: readonly string[])
 }
 
 describe('[#20408] the item and book-tree census axes cover every read of RestServer\'s handlers and the shared steps', () => {
-    const item = deriveRouteReads('`${metaPath}/:type/:name`', SHARED_ITEM_FUNCTIONS);
+    const item = deriveRouteReads('`${metaPath}/:type/:name`', SHARED_ITEM_FUNCTIONS, LAYERED_METHODS);
     const tree = deriveRouteReads('`${metaPath}/book/:name/tree`', SHARED_TREE_FUNCTIONS);
+    const layers = deriveRouteReads('`${metaPath}/:type/:name/layers`', SHARED_LAYERS_FUNCTIONS, LAYERED_METHODS);
 
-    it('both handlers are found where the census looks for them', () => {
+    it('every handler is found where the census looks for it', () => {
         expect(item.found, `GET \${metaPath}/:type/:name in ${REST_SERVER_SOURCE}`).toBe(true);
         expect(tree.found, `GET \${metaPath}/book/:name/tree in ${REST_SERVER_SOURCE}`).toBe(true);
+        expect(layers.found, `GET \${metaPath}/:type/:name/layers in ${REST_SERVER_SOURCE}`).toBe(true);
     });
 
-    it('every query parameter the item read reads is a census cell, or a route this transport does not serve, by name', () => {
-        const missing = [...item.params].filter((p) => !ITEM_PARAM_AXIS.has(p) && !(p in ITEM_PARAMS_NOT_SERVED_HERE)).sort();
+    it('every query parameter the item read reads is a census cell — [#20478] `?layers=` included, with no exclusion left', () => {
+        const missing = [...item.params].filter((p) => !ITEM_PARAM_AXIS.has(p)).sort();
         expect(missing, 'an item read of a parameter this census never sends: add a probe that moves its answer').toEqual([]);
-        // The exclusions stay honest: each is still read by the handler.
-        expect(Object.keys(ITEM_PARAMS_NOT_SERVED_HERE).filter((p) => !item.params.has(p))).toEqual([]);
+        // The flag is read, so its probe is not a dead cell.
+        expect(item.params.has('layers')).toBe(true);
+    });
+
+    it('[#20478] every query parameter the layered route reads is a census cell', () => {
+        expect([...layers.params].filter((p) => !LAYERS_PARAM_AXIS.has(p)).sort()).toEqual([]);
+        expect(layers.params.has('package')).toBe(true);
     });
 
     it('every type the item read keys on, and every translatable type, is a census cell', () => {
@@ -856,6 +949,115 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
     });
 });
 
+// ── [#20478] The layered view, on both of its spellings ──────────────────────
+//
+// Measured on this file's fixtures before the fix: every `?layers=true` item
+// cell was red (the dispatcher answered the plain read's `{ type, name, item }`,
+// with no `Deprecation` and, for the author, the app PRUNED where ruling
+// 5856774816 serves it whole), and every `/layers` cell answered a located
+// `404 ROUTE_NOT_FOUND`. The item census above carries the flag as a probe;
+// the route has its own census here.
+
+describe('[#20478] GET /meta/:type/:name/layers: the dispatcher serves the route RestServer serves — every cell × query parameter × caller', () => {
+    for (const path of ITEM_CELLS) {
+        for (const probe of LAYERS_PROBES) {
+            it(`GET ${path}/layers ${probe.label}`, async () => {
+                const mismatches: unknown[] = [];
+                for (const who of ITEM_CALLERS) {
+                    const dispatcher = await bootDispatcher(who).read(`${path}/layers`, probe.query, probe.headers);
+                    const rest = await bootRest(who).read(`${path}/layers`, probe.query, probe.headers);
+                    if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
+                }
+                expect(mismatches).toEqual([]);
+            });
+        }
+    }
+});
+
+describe('[#20478] the layered view: the reference moves — each spelling and probe changes RestServer\'s answer', () => {
+    const nav = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
+    const layerNav = (a: Answer) => ({ code: nav(a.body?.code), overlay: nav(a.body?.overlay), effective: nav(a.body?.effective) });
+    const WHOLE = ['nav_leads', 'nav_finance_ledger', 'nav_admin_runbook', 'nav_org_directory'];
+    const PRUNED = ['nav_leads', 'nav_org_directory'];
+
+    it('?layers=true answers the three layers, not the plain read, under Deprecation and a Link to the successor', async () => {
+        const { read } = bootRest('author');
+        const flagged = await read('/meta/app/crm', { layers: 'true' });
+        expect(Object.keys(flagged.body ?? {})).toEqual(expect.arrayContaining(['code', 'overlay', 'effective']));
+        expect(flagged.body?.item).toBeUndefined();
+        expect(flagged.body?.effective?.label).toBe('CRM (overlay)');
+        expect({ deprecation: flagged.deprecation, link: flagged.link })
+            .toEqual({ deprecation: 'true', link: '</api/v1/meta/app/crm/layers>; rel="successor-version"' });
+        const plain = await read('/meta/app/crm', { layers: '' });
+        expect(plain.body?.item?.label).toBe('CRM');
+        expect(plain.deprecation).toBeUndefined();
+    });
+
+    it('the route answers the flag\'s body, with no Deprecation', async () => {
+        const { read } = bootRest('author');
+        const route = await read('/meta/app/crm/layers');
+        const flagged = await read('/meta/app/crm', { layers: 'true' });
+        expect(route.body).toEqual(flagged.body);
+        expect({ deprecation: route.deprecation, link: route.link }).toEqual({ deprecation: undefined, link: undefined });
+    });
+
+    it('ruling 5856774816: every layer whole for the author, pruned per caller for everyone else — the plain read prunes the author too', async () => {
+        const author = await bootRest('author').read('/meta/app/crm/layers');
+        expect(layerNav(author)).toEqual({ code: WHOLE, overlay: [...WHOLE, 'nav_finance_reports'], effective: [...WHOLE, 'nav_finance_reports'] });
+        const member = await bootRest('non-holder').read('/meta/app/crm/layers');
+        expect(layerNav(member)).toEqual({ code: PRUNED, overlay: PRUNED, effective: PRUNED });
+        // Per caller only: the service-bound entry and widget stay on a stored version.
+        expect(nav((await bootRest('author').read('/meta/app/crm')).item)).toEqual(['nav_leads']);
+        const ops = await bootRest('holder').read('/meta/dashboard/ops/layers');
+        expect((ops.body?.effective?.widgets ?? []).map((w: any) => w.id)).toEqual(['w_open_cases', 'w_org_kpi']);
+        expect(((await bootRest('holder').read('/meta/dashboard/ops')).item?.widgets ?? []).map((w: any) => w.id)).toEqual(['w_open_cases']);
+    });
+
+    it('a refusal is the plain read\'s, and the flag still carries its Deprecation on it', async () => {
+        const payroll = await bootRest('non-holder').read('/meta/app/payroll', { layers: 'true' });
+        expect({ status: payroll.status, code: payroll.code, deprecation: payroll.deprecation })
+            .toEqual({ status: 403, code: 'PERMISSION_DENIED', deprecation: 'true' });
+        const launchpad = await bootRest('non-holder').read('/meta/app/launchpad/layers');
+        expect({ status: launchpad.status, code: launchpad.code }).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+    });
+
+    it('?package= scopes the code layer, and the object mask projects every layer', async () => {
+        const scoped = await bootRest('non-holder').read('/meta/app/payroll/layers', { package: 'crm' });
+        expect({ status: scoped.status, code: scoped.body?.code, effective: scoped.body?.effective }).toEqual({ status: 200, code: null, effective: null });
+        const invoice = await bootRest('non-holder').read('/meta/object/invoice/layers');
+        for (const layer of ['code', 'overlay', 'effective']) expect(Object.keys(invoice.body?.[layer]?.fields ?? {}), layer).toEqual(['amount']);
+    });
+});
+
+describe('[#20478] the layered view: the controls', () => {
+    it('an anonymous ?layers=true on a public book reaches its §6.7 gate on both transports; a gated one is refused; /layers keeps the deny', async () => {
+        for (const [path, query, status] of [
+            ['/meta/book/public_guide', { layers: 'true' }, 200],
+            ['/meta/doc/public_faq', { layers: 'true' }, 200],
+            ['/meta/doc/crm_admin_runbook', { layers: 'true' }, 401],
+            ['/meta/book/public_guide/layers', {}, 401],
+        ] as const) {
+            const { read, protocol } = bootDispatcher('anonymous');
+            const dispatcher = await read(path, query);
+            const rest = await bootRest('anonymous').read(path, query);
+            expect({ status: rest.status }, path).toEqual({ status });
+            expect(sameAnswer(dispatcher, rest) ? [] : [mismatchOf('anonymous', dispatcher, rest)], path).toEqual([]);
+            expect(text(dispatcher), path).not.toContain(DOC_SECRET);
+            if (path.endsWith('/layers')) expect(protocol.getMetaItemLayered, path).not.toHaveBeenCalled();
+        }
+    });
+
+    it('a protocol with no layered read: /layers is 501 NOT_IMPLEMENTED and ?layers=true the plain read, on both transports', async () => {
+        for (const [path, query] of [['/meta/app/crm/layers', {}], ['/meta/app/crm', { layers: 'true' }]] as const) {
+            const dispatcher = await bootDispatcher('author', { withoutLayered: true }).read(path, query);
+            const rest = await bootRest('author', { withoutLayered: true }).read(path, query);
+            expect(sameAnswer(dispatcher, rest) ? [] : [mismatchOf('author', dispatcher, rest)], path).toEqual([]);
+            if (path.endsWith('/layers')) expect({ status: rest.status, code: rest.code }).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+            else expect({ status: rest.status, label: rest.item?.label, deprecation: rest.deprecation }).toEqual({ status: 200, label: 'CRM', deprecation: undefined });
+        }
+    });
+});
+
 describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route RestServer serves — every book × query parameter × caller', () => {
     for (const book of TREE_CELLS) {
         for (const probe of TREE_PROBES) {
@@ -884,7 +1086,11 @@ describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route Re
 });
 
 describe('[#20408] an undetermined field visibility (ADR-0106 D6 tier 2) serves the object schema `private, no-store` on both transports', () => {
-    const OBJECT_PATHS = ['/meta/object', '/meta/objects', '/meta/object/invoice', '/meta/objects/invoice'];
+    const OBJECT_PATHS = [
+        '/meta/object', '/meta/objects', '/meta/object/invoice', '/meta/objects/invoice',
+        // [#20478] The layered view's own route.
+        '/meta/object/invoice/layers', '/meta/objects/invoice/layers',
+    ];
 
     it('the reference: RestServer serves the unmasked schema under `private, no-store`, and a determined caller\'s answer carries no such header', async () => {
         for (const path of OBJECT_PATHS) {
@@ -895,7 +1101,7 @@ describe('[#20408] an undetermined field visibility (ADR-0106 D6 tier 2) serves 
     });
 
     for (const path of OBJECT_PATHS) {
-        const probes = path.split('/').length === 3 ? PARAM_PROBES : ITEM_PROBES;
+        const probes = path.split('/').length === 3 ? PARAM_PROBES : path.endsWith('/layers') ? LAYERS_PROBES : ITEM_PROBES;
         for (const probe of probes) {
             it(`GET ${path} ${probe.label} × undetermined`, async () => {
                 const dispatcher = await bootDispatcher('undetermined').read(path, probe.query, probe.headers);
