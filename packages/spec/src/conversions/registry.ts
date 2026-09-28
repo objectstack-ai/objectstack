@@ -224,6 +224,7 @@ const objectCompactLayoutRename: MetadataConversion = {
   id: 'object-compactLayout-to-highlightFields',
   toMajor: 11,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'object.compactLayout',
   summary: "object key 'compactLayout' → 'highlightFields' (ADR-0085 semantic roles)",
   apply(stack, emit) {
@@ -262,6 +263,7 @@ const stackRolesToPositions: MetadataConversion = {
   id: 'stack-roles-to-positions',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'stack.roles',
   summary: "stack collection key 'roles' → 'positions' (ADR-0090 D3)",
   apply(stack, emit) {
@@ -297,6 +299,7 @@ const owdLegacyReadAliases: MetadataConversion = {
   id: 'owd-legacy-read-aliases',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'object.sharingModel',
   summary: "object sharingModel 'read' → 'public_read', 'read_write' → 'public_read_write' (ADR-0090 D4)",
   apply(stack, emit) {
@@ -353,6 +356,7 @@ const sharingRecipientRoleToPosition: MetadataConversion = {
   id: 'sharing-recipient-role-to-position',
   toMajor: 13,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'sharingRule.sharedWith.type',
   summary: "sharing-rule recipient type 'role' → 'position' (ADR-0090 D3)",
   apply(stack, emit) {
@@ -413,6 +417,7 @@ const bookAudienceProfileToPermissionSet: MetadataConversion = {
   id: 'book-audience-profile-to-permission-set',
   toMajor: 14,
   retiredFromLoadPath: true,
+  retiredAfter: '15.0.0',
   surface: 'book.audience',
   summary: "book audience gated arm '{ profile }' → '{ permissionSet }' (ADR-0090 D2/D9)",
   apply(stack, emit) {
@@ -715,6 +720,7 @@ const actionExecuteToTarget: MetadataConversion = {
   id: 'action-execute-to-target',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.execute',
   summary: "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
   apply(stack, emit) {
@@ -754,6 +760,7 @@ const fieldConditionalRequiredToRequiredWhen: MetadataConversion = {
   id: 'field-conditionalRequired-to-requiredWhen',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'field.conditionalRequired',
   summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
   apply(stack, emit) {
@@ -808,6 +815,7 @@ const agentToolsToSkills: MetadataConversion = {
   id: 'agent-tools-to-skills',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'agent.tools',
   summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
   apply(stack, emit) {
@@ -1722,6 +1730,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
   id: 'app-dead-authoring-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
     + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
@@ -1835,6 +1844,7 @@ const appAreaFailOpenGatesRemoved: MetadataConversion = {
   id: 'app-area-fail-open-gates-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'app.areas.visible / app.areas.requiredPermissions',
   summary: "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
   apply(stack, emit) {
@@ -1936,6 +1946,7 @@ const permissionRlsPriorityRemoved: MetadataConversion = {
   id: 'permission-rls-priority-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'permission.rowLevelSecurity.priority',
   summary: "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
   apply(stack, emit) {
@@ -2004,6 +2015,7 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
   id: 'tool-inert-authoring-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'tool.category / tool.permissions / tool.active / tool.builtIn',
   summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
   apply(stack, emit) {
@@ -2115,6 +2127,7 @@ const actionInertKeysRemoved: MetadataConversion = {
   id: 'action-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.shortcut / action.bulkEnabled',
   summary: "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
   apply(stack, emit) {
@@ -2139,6 +2152,7 @@ const flowInertKeysRemoved: MetadataConversion = {
   id: 'flow-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId',
   summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
   apply(stack, emit) {
@@ -2197,6 +2211,7 @@ const viewInertKeysRemoved: MetadataConversion = {
   id: 'view-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria',
   summary: "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
   apply(stack, emit) {
@@ -2242,6 +2257,7 @@ const viewListPassthroughKeysRemoved: MetadataConversion = {
   id: 'view-list-passthrough-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.striped / view.list.bordered / view.list.virtualScroll',
   summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
   apply(stack, emit) {
@@ -2308,6 +2324,7 @@ const viewExportOptionsPdfRemoved: MetadataConversion = {
   id: 'view-export-options-pdf-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'view.list.exportOptions / view.listViews.*.exportOptions',
   summary:
     "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; "
@@ -2377,6 +2394,7 @@ const dashboardInertKeysRemoved: MetadataConversion = {
   id: 'dashboard-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.aria / dashboard.performance / dashboard.widgets[].performance',
   summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
   apply(stack, emit) {
@@ -2446,6 +2464,7 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
   id: 'dashboard-widget-responsive-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.widgets[].responsive',
   summary: "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
   apply(stack, emit) {
@@ -2523,6 +2542,7 @@ const dashboardWidgetActionAriaRemoved: MetadataConversion = {
   id: 'dashboard-widget-action-aria-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / '
     + 'dashboard.widgets[].actionIcon / dashboard.widgets[].aria',
@@ -2621,6 +2641,7 @@ const dashboardWidgetCompareToConverged: MetadataConversion = {
   id: 'dashboard-widget-compareto-converged',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dashboard.widgets[].compareTo',
   summary:
     "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract "
@@ -2695,6 +2716,7 @@ const agentKnowledgeRemoved: MetadataConversion = {
   id: 'agent-knowledge-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'agent.knowledge',
   summary: "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
   apply(stack, emit) {
@@ -2712,6 +2734,7 @@ const skillTriggerPhrasesRemoved: MetadataConversion = {
   id: 'skill-trigger-phrases-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'skill.triggerPhrases',
   summary: "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
   apply(stack, emit) {
@@ -2749,6 +2772,7 @@ const stackApiRequireAuthRemoved: MetadataConversion = {
   id: 'stack-api-require-auth-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'stack.api.requireAuth',
   summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
   apply(stack, emit) {
@@ -2829,6 +2853,7 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
   id: 'flow-node-wait-timeout-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'flow.node.waitEventConfig',
   summary:
     "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) " +
@@ -2909,6 +2934,7 @@ const datasourceInertBlocksRemoved: MetadataConversion = {
   id: 'datasource-inert-blocks-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission',
   summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
   apply(stack, emit) {
@@ -2996,6 +3022,7 @@ const mappingInertKeysRemoved: MetadataConversion = {
   id: 'mapping-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'mapping.extractQuery / mapping.errorPolicy / mapping.batchSize',
   summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
   apply(stack, emit) {
@@ -3050,6 +3077,7 @@ const bookTranslationsRemoved: MetadataConversion = {
   id: 'book-translations-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'book.translations / book.groups.translations',
   summary: "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
   apply(stack, emit) {
@@ -3111,6 +3139,7 @@ const jobIdRemoved: MetadataConversion = {
   id: 'job-id-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'job.id',
   summary: "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
   apply(stack, emit) {
@@ -3167,6 +3196,7 @@ const translationValidationMessagesRemoved: MetadataConversion = {
   id: 'translation-validation-messages-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'translation.validationMessages',
   summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
   apply(stack, emit) {
@@ -3224,6 +3254,7 @@ const datasourceCapabilitiesRemoved: MetadataConversion = {
   id: 'datasource-capabilities-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.capabilities',
   summary: "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
   apply(stack, emit) {
@@ -3278,6 +3309,7 @@ const datasourceReadReplicasRemoved: MetadataConversion = {
   id: 'datasource-read-replicas-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.readReplicas',
   summary: "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
   apply(stack, emit) {
@@ -3376,6 +3408,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
   id: 'datasource-config-driver-key-aliases',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'datasource.config',
   summary:
     "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', "
@@ -3617,6 +3650,7 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   id: 'flow-node-script-branch-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'flow.node.script.config.actionType / flow.node.script.config.template / '
     + 'flow.node.script.config.recipients / flow.node.script.config.variables / '
@@ -3716,6 +3750,7 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
   id: 'object-managed-by-system-to-system-data',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.managedBy',
   summary:
     "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the "
@@ -3782,6 +3817,7 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
   id: 'object-enable-trash-mru-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.enable.trash / object.enable.mru',
   summary:
     "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no "
@@ -3864,6 +3900,7 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
   id: 'object-index-type-partial-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'object.indexes[].type / object.indexes[].partial',
   summary:
     "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver "
@@ -4200,6 +4237,7 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
   id: 'hook-body-crypto-hash-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'hook.body.capabilities / action.body.capabilities',
   summary:
     "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed "
@@ -4369,6 +4407,7 @@ const datasetMeasureAggRemoved: MetadataConversion = {
   id: 'dataset-measure-array-string-agg-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'dataset.measures[].aggregate',
   summary:
     "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend "
@@ -4493,6 +4532,7 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
   id: 'connector-rate-limit-config-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'connector.rateLimitConfig',
   summary:
     "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; "
@@ -4617,6 +4657,7 @@ const fieldMappingTransformRemoved: MetadataConversion = {
   id: 'field-mapping-transform-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform',
   summary:
     "field-mapping key 'transform' removed (#5552 — the whole five-member "
@@ -4730,6 +4771,7 @@ const themeInertTokenScalesRemoved: MetadataConversion = {
   id: 'theme-inert-token-scales-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface:
     'theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight'
     + ' / theme.typography.letterSpacing / theme.typography.fontFamily.heading'
@@ -5111,6 +5153,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
   id: 'record-picker-display-field-to-label-field',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.displayField',
   summary:
     "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
@@ -5232,6 +5275,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
   id: 'record-picker-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple',
   summary:
     "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
@@ -5358,6 +5402,7 @@ const pageCardBodyToChildren: MetadataConversion = {
   id: 'page-card-body-to-children',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:card.body',
   summary:
     "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
@@ -5790,6 +5835,7 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
   id: 'page-tabs-type-to-tab-style',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:tabs.type',
   summary:
     "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
@@ -5977,6 +6023,7 @@ const pageStructureInertKeysRemoved: MetadataConversion = {
   id: 'page-structure-inert-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.page:header.icon / page.component.page:card.actions',
   summary:
     "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer "
@@ -6142,6 +6189,7 @@ const recordDetailsLayoutRemoved: MetadataConversion = {
   id: 'record-details-layout-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'page.component.record:details.layout',
   summary:
     "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were "
@@ -6283,6 +6331,7 @@ const appHiddenToUnpublished: MetadataConversion = {
   id: 'app-hidden-to-unpublished',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'app.hidden',
   summary:
     "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
@@ -6395,6 +6444,7 @@ const actionGlobalNavLocationRemoved: MetadataConversion = {
   id: 'action-global-nav-location-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
+  retiredAfter: '16.1.0',
   surface: 'action.locations[]',
   summary:
     "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K "
@@ -6488,6 +6538,7 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
   id: 'field-malformed-scale-precision-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'object.fields.*.scale / object.fields.*.precision',
   summary:
     "malformed field 'scale'/'precision' declarations (non-integer or negative) are removed — "
@@ -6595,6 +6646,7 @@ const recordChatterPositionVocabulary: MetadataConversion = {
   id: 'record-chatter-position-vocabulary',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'page.component.record:chatter.position / page.component.record:discussion.position',
   summary:
     "record:chatter / record:discussion 'position' respelled to the renderer's vocabulary — "
@@ -6712,6 +6764,7 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
   id: 'element-input-target-variable-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface:
     'page.component.element:text_input.targetVariable / page.component.element:record_picker.targetVariable',
   summary:
@@ -6866,6 +6919,7 @@ const elementFilterRemoved: MetadataConversion = {
   id: 'element-filter-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface:
     'page.component.element:filter.object / page.component.element:filter.fields / '
     + 'page.component.element:filter.targetVariable / page.component.element:filter.layout / '
@@ -7018,6 +7072,7 @@ const elementFormRemoved: MetadataConversion = {
   id: 'element-form-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface:
     'page.component.element:form.object / page.component.element:form.fields / '
     + 'page.component.element:form.mode / page.component.element:form.submitLabel / '
@@ -7198,6 +7253,7 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
   id: 'translation-per-app-settings-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
     "translation group 'settings' removed from both application-authored faces, the per-app bundle "
@@ -7305,6 +7361,7 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   id: 'translation-component-submit-label-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'translation.pages.components.submitLabel',
   summary:
     "translation component-copy key 'submitLabel' removed (#10926 — its only declared carrier, "
@@ -7446,6 +7503,7 @@ const fieldColumnListsCanonicalized: MetadataConversion = {
   id: 'field-column-lists-canonicalized',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.0.0',
   surface: 'field.inlineColumns[].field / field.relatedListColumns[] object entries',
   summary:
     "inline-grid column entries respelled 'field' → 'name' (objectui#3951's name-keyed GridColumn) "
@@ -7580,6 +7638,7 @@ const metricFiltersRemoved: MetadataConversion = {
   id: 'metric-filters-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.1.0',
   surface: 'analyticsCubes[].measures.<metric>.filters',
   summary:
     "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
@@ -7671,6 +7730,7 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
   id: 'cube-sub-day-granularities-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].dimensions.<dim>.granularities',
   summary:
     "cube dimension granularities 'second' / 'minute' / 'hour' removed (#17296, ADR-0049 — no "
@@ -7803,6 +7863,7 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
   id: 'cube-join-sql-and-relationship-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship',
   summary:
     "cube join keys 'sql' and 'relationship' removed (#18612, ADR-0049 — neither was ever read: "
@@ -7932,6 +7993,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
   id: 'record-highlights-field-icon-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.1.0',
   surface: 'page.component.record:highlights.fields[].icon',
   summary:
     "record:highlights highlight-field key 'icon' removed (#10054, ADR-0049 — no render path: "
@@ -8077,6 +8139,7 @@ const mappingLookupParamsRemoved: MetadataConversion = {
   id: 'mapping-lookup-params-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate',
   summary:
     "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (#10329, "
@@ -8186,6 +8249,7 @@ const pageComponentResponsiveRemoved: MetadataConversion = {
   id: 'page-component-responsive-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'page.components[].responsive',
   summary:
     "page component key 'responsive' removed (#11027 — no renderer ever applied per-component "
@@ -8286,6 +8350,7 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
   id: 'object-grid-default-sort-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'page.component.object-grid.defaultSort',
   summary:
     "object-grid component prop 'defaultSort' removed (#11805 — the legacy single-sort second "
@@ -8489,6 +8554,7 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
   id: 'object-kanban-quick-add-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.component.object-kanban.quickAdd',
   summary:
     "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
@@ -8663,6 +8729,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
   id: 'permission-allow-restore-purge-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge',
   summary:
     "object-permission keys 'allowRestore' and 'allowPurge' removed (#12497, ADR-0049 — the "
@@ -8759,6 +8826,7 @@ const formViewOptionDefaultRemoved: MetadataConversion = {
   id: 'form-view-option-default-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'view.form.sections[].fields[].options[].default',
   summary:
     "form-view per-option 'default' removed from the FormView vocabulary (ADR-0049 "
@@ -8979,6 +9047,7 @@ const fieldReferenceToAlias: MetadataConversion = {
   id: 'field-reference-to-alias',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.2.0',
   surface: 'field.reference_to',
   summary:
     "field key 'reference_to' → 'reference' (the legacy objectql runtime dialect for a "
@@ -9079,6 +9148,7 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   id: 'connector-error-mapping-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'connector.errorMapping',
   summary:
     "connector key 'errorMapping' removed (#14676, ADR-0049 — no engine ever mapped an external "
@@ -9181,6 +9251,7 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
   id: 'connector-connection-timeout-ms-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'connector.connectionTimeoutMs',
   summary:
     "connector key 'connectionTimeoutMs' removed (ADR-0049 — the platform never applied it as a "
@@ -9239,6 +9310,7 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
   id: 'hook-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'hook.timeout',
   summary: "hook key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
@@ -9279,6 +9351,7 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
   id: 'job-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'job.timeout',
   summary: "job key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
@@ -9332,6 +9405,7 @@ const apiEndpointCacheTtlToCacheTtlSeconds: MetadataConversion = {
   id: 'api-endpoint-cache-ttl-to-cache-ttl-seconds',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'apis[].cacheTtl',
   summary: "api endpoint key 'cacheTtl' \u2192 'cacheTtlSeconds' (#14478 \u2014 the unit lived only in the description; the value, seconds, is unchanged, and the key stays GET-only)",
   apply(stack, emit) {
@@ -9400,6 +9474,7 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
   id: 'dashboard-refresh-interval-to-refresh-interval-seconds',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'dashboard.refreshInterval',
   summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged)",
   apply(stack, emit) {
@@ -9458,6 +9533,7 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
   id: 'connector-health-and-trigger-durations-unit-in-key',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'connector.triggers[].interval',
   summary: "connector key 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged. The breaker half, 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs', was absorbed by the removal of the whole 'health' block)",
   apply(stack, emit) {
@@ -9559,6 +9635,7 @@ const connectorResilienceKeysRemoved: MetadataConversion = {
   id: 'connector-resilience-keys-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'connector.health / connector.status / connector.webhooks',
   summary:
     "connector keys 'health', 'status' and 'webhooks' removed (ADR-0049 — no connector health "
@@ -9639,6 +9716,7 @@ const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
   id: 'memory-persistence-auto-save-interval-to-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'datasource.config.persistence.autoSaveInterval',
   summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
@@ -9724,6 +9802,7 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   id: 'turso-config-timeout-to-timeout-ms',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.3.0',
   surface: 'datasource.config.timeout (turso)',
   summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (#14478 — the unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
   apply(stack, emit) {
@@ -9812,6 +9891,7 @@ const viewPageMountRemoved: MetadataConversion = {
   id: 'view-page-mount-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: "view.list / view.listViews.* — the list-view type 'page' and its pageName binding",
   summary:
     "list-view type 'page' and its `pageName` binding removed (#17063 — the delegating render half "
@@ -9916,6 +9996,7 @@ const listViewSortStringClauseToArray: MetadataConversion = {
   id: 'list-view-sort-string-clause-to-array',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.list.sort / view.listViews.*.sort — the bare string sort clause',
   summary:
     'the bare string list-view `sort` clause becomes the `{ field, order }[]` array (#17053 — '
@@ -10015,6 +10096,7 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
   id: 'page-assigned-profiles-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.assignedProfiles',
   summary:
     "page key 'assignedProfiles' removed (ADR-0090 D2 deleted the Profile concept it was named "
@@ -10090,6 +10172,7 @@ const chartConfigAriaRemoved: MetadataConversion = {
   id: 'chart-config-aria-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'dashboard.widgets[].chartConfig.aria / report.chart.aria / report.blocks[].chart.aria',
   summary:
@@ -10226,6 +10309,7 @@ const actionAriaRemoved: MetadataConversion = {
   id: 'action-aria-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'action.aria / object.actions[].aria',
   summary:
     "action key 'aria' removed (ADR-0049 enforce-or-remove — no action surface ever applied it; "
@@ -10301,6 +10385,7 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
   id: 'dashboard-widget-chart-config-structure-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'dashboard.widgets[].chartConfig.type / dashboard.widgets[].chartConfig.xAxis / '
     + 'dashboard.widgets[].chartConfig.yAxis / dashboard.widgets[].chartConfig.series',
@@ -10411,6 +10496,7 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
   id: 'object-tenancy-organization-field-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'object.tenancy.organizationField',
   summary:
     'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
@@ -10520,6 +10606,7 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
   id: 'view-item-owner-hidden-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on the view item record ({ name, object, viewKind, config })',
   summary:
     "view item keys 'owner'/'hidden' removed (#20085, ADR-0049 — declared on the view item record "
@@ -10663,6 +10750,7 @@ const viewOverlayOwnerHiddenRemoved: MetadataConversion = {
   id: 'view-overlay-owner-hidden-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'view.owner / view.hidden — on a flattened view overlay ({ name, object, viewKind, …, no config })',
   summary:
     "flattened view overlay keys 'owner'/'hidden' removed (#20230, ADR-0049 — the view item's pair on "
@@ -11150,6 +11238,7 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
   id: 'page-component-filter-record-to-rule-array',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface:
     'page.component.dataSource.filter / page.component.properties.filter (the object-* blocks, '
     + 'element:number, element:record_picker) / page.component.properties.defaultFilters '
@@ -11421,6 +11510,7 @@ const reportJoinedChartRemoved: MetadataConversion = {
   id: 'report-joined-chart-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'report.blocks[].chart / report.chart on a joined report',
   summary:
     "a joined report's 'chart' removed from its blocks and refused on the container (#20161 — "
@@ -11548,6 +11638,7 @@ const formLayoutInlineGridToVertical: MetadataConversion = {
   id: 'form-layout-inline-grid-to-vertical',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'page.component.object-form.layout / view.form.layout / view.formViews.*.layout',
   summary:
     "form 'layout' arms 'inline' and 'grid' rewritten to 'vertical' (#20221, ADR-0049 — no renderer "
@@ -11703,6 +11794,7 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
   id: 'currency-config-precision-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'object.fields.*.currencyConfig.precision',
   summary:
     "currency field key 'currencyConfig.precision' removed (#19992, ADR-0049 — no renderer or "
@@ -11806,6 +11898,7 @@ const permissionRlsTagsRemoved: MetadataConversion = {
   id: 'permission-rls-tags-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
   surface: 'permission.rowLevelSecurity[].tags',
   summary:
     "RLS-policy key 'tags' removed (#20321, ADR-0049 — nothing ever read a policy's tags and no "

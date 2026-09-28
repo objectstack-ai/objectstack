@@ -31,20 +31,34 @@
  *
  * Let `floor` be the lowest version the artifact's declared protocol range
  * admits (the leading version token of `engines.protocol`), and `runtime` the
- * `@objectstack/spec` version this process actually runs.
+ * `@objectstack/spec` version this process actually runs — its package label.
+ * The window is decided PER ENTRY: a registry entry E is replayed when
+ *
+ *     floor < runtime   OR   floor ≤ E.retiredAfter
+ *
+ * where `retiredAfter` is the version the registry stamps on every retired
+ * entry — the last published spec whose authoring surface still accepted the
+ * old shape (`MetadataConversion`, `@objectstack/spec`). Spelled out:
  *
  * - **`floor < runtime`** → the artifact predates this runtime's authoring
  *   surface. Replay the full conversion chain (retired entries included)
  *   before the strict parse — the artifact is the "consumer arriving late"
  *   ADR-0087 D3 keeps every conversion around for.
  * - **`floor >= runtime`** → the artifact claims the current (or a newer)
- *   surface. Nothing is replayed; the strict parse — tombstones included —
- *   is the authority. This is what keeps the conversion **versioned rather
- *   than a blanket amnesty**: a key retired at version V stays a loud refusal
- *   for anything authored at ≥ V, and when a retired key later returns to the
- *   spec (the roadmap-M2 shape: `allowRestore`/`allowPurge` come back with the
- *   lifecycle operations they gate), artifacts authored against that surface
- *   are never stripped by history.
+ *   surface as the label spells it. Only the retired entries whose
+ *   `retiredAfter` the floor does not exceed are replayed — retirements the
+ *   running spec enforces although its label has not moved past the release
+ *   the artifact was built by. `main` is exactly that runtime between two
+ *   releases: it refuses keys the next release retires while still carrying
+ *   the last release's label, so a label-only comparison read an artifact
+ *   built by that last release as "current" and refused it outright. When no
+ *   entry is that recent, nothing is replayed and the strict parse —
+ *   tombstones included — is the authority. This is what keeps the conversion
+ *   **versioned rather than a blanket amnesty**: a key retired at version V
+ *   stays a loud refusal for anything authored at ≥ V, and when a retired key
+ *   later returns to the spec (the roadmap-M2 shape: `allowRestore`/`allowPurge`
+ *   come back with the lifecycle operations they gate), artifacts authored
+ *   against that surface are never stripped by history.
  * - **No declared range** → replay the full chain. Same posture as the
  *   protocol handshake (which grandfathers range-less packages with a warning,
  *   ADR-0087 "never false-reject") and as the stored-row pass (whose rows
@@ -56,6 +70,11 @@
  *   the strict parse stays the authority (the refusal still carries the
  *   tombstone's prescription). Unreachable in practice — `@objectstack/spec`
  *   is a hard dependency — and injectable for tests either way.
+ *
+ * Below the label the label still stands in for every entry's own version, so
+ * an artifact authored between an entry's retirement and the running release
+ * is replayed rather than refused; narrowing that to the per-entry version
+ * alone is a separate decision, not taken here.
  *
  * The comparison uses the full `x.y.z`, not the major: within-line
  * retirements (17.1 → 17.2) are exactly the case that created this module.
@@ -88,9 +107,10 @@
  * ## What this deliberately is NOT
  *
  * - Not a second conversion table: the ADR-0087 registry in
- *   `@objectstack/spec` stays the single authority on *what* converts; this
- *   module only decides *whether the retired window opens* for one artifact —
- *   now per entry for the one named class above, rather than all-or-nothing.
+ *   `@objectstack/spec` stays the single authority on *what* converts — and,
+ *   through each retired entry's `retiredAfter`, on *since when* it stopped
+ *   being authorable; this module only decides *whether the retired window
+ *   opens* for one artifact, reading those facts off the registry per entry.
  * - Not a validator: like `applyConversions` itself, this never throws and
  *   never gates. Gating stays at the caller's schema parse.
  * - Not the flow-specific seam: flows convert here too (context-less, exactly
@@ -116,7 +136,7 @@ import { createRequire } from 'node:module';
 // to declaration emit once no exported type references the root — the public
 // surface speaks {@link ArtifactConversionNotice}, a structural mirror pinned
 // against the real thing in this module's test.
-import { applyConversions } from '@objectstack/spec';
+import { ALL_CONVERSIONS, applyConversions } from '@objectstack/spec';
 import { resolveDeclaredRange, type ProtocolHandshakeManifest } from './protocol-handshake.js';
 
 /**
@@ -152,9 +172,18 @@ export interface ArtifactConversionNotice {
 export type ArtifactForwardConversionVerdict =
   /** Declared floor predates the runtime spec — full chain replayed. */
   | 'converted-forward'
+  /**
+   * Declared floor is at or above the runtime spec's label, but at or below the
+   * `retiredAfter` of one or more retired entries this runtime enforces — only
+   * those entries replayed (see the module doc's per-entry rule).
+   */
+  | 'converted-retired-after'
   /** No declared range — treated as old data at rest, full chain replayed. */
   | 'converted-undeclared'
-  /** Declared floor is current-or-newer — nothing replayed, the strict parse decides. */
+  /**
+   * Declared floor is current-or-newer, and newer than every retirement's
+   * `retiredAfter` — nothing replayed, the strict parse decides.
+   */
   | 'authored-current'
   /** Runtime spec version unresolvable — nothing replayed (see module doc). */
   | 'runtime-version-unknown'
@@ -291,6 +320,28 @@ export function resolveInstalledSpecVersion(): string | null {
 const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = ['app-hidden-to-unpublished'];
 
 /**
+ * The per-entry half of the window, for a floor at or above the runtime label:
+ * the ids the door must NOT replay — {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}
+ * (read first, whatever an entry's version says), every live entry, and every
+ * retired entry whose `retiredAfter` the floor exceeds. `null` when that is
+ * every entry, i.e. the floor predates no retirement the runtime enforces.
+ *
+ * A `retiredAfter` this cannot read closes its entry: the strict parse and its
+ * tombstone stay the authority, which is the loud direction.
+ */
+function idsTheFloorPostdates(floor: [number, number, number]): string[] | null {
+  const closed = [...DEFAULT_FLIPS_NOT_REPLAYED_HERE];
+  let open = 0;
+  for (const conversion of ALL_CONVERSIONS) {
+    if (DEFAULT_FLIPS_NOT_REPLAYED_HERE.includes(conversion.id)) continue;
+    const retiredAfter = conversion.retiredFromLoadPath === true ? parseVersion(conversion.retiredAfter) : null;
+    if (retiredAfter && compareTriples(floor, retiredAfter) <= 0) open += 1;
+    else closed.push(conversion.id);
+  }
+  return open > 0 ? closed : null;
+}
+
+/**
  * Apply the versioned forward conversion to one compiled-artifact definition.
  *
  * Pure and copy-on-write; never throws, never validates. See the module doc
@@ -325,18 +376,29 @@ export function applyArtifactForwardConversions<T>(
   }
 
   let verdict: ArtifactForwardConversionVerdict;
+  let excludeConversionIds: readonly string[] = DEFAULT_FLIPS_NOT_REPLAYED_HERE;
   if (!floor) {
     verdict = 'converted-undeclared';
   } else if (compareTriples(floor, runtime) < 0) {
     verdict = 'converted-forward';
   } else {
-    return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [] };
+    const closed = idsTheFloorPostdates(floor);
+    if (closed === null) {
+      return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [] };
+    }
+    verdict = 'converted-retired-after';
+    // The per-entry half of the window: every entry the floor does NOT predate
+    // stays with the strict parse. Each id's reason is the same, read off the
+    // registry rather than written here — the floor is at or above the runtime
+    // label AND above the entry's own `retiredAfter` (or the entry is live, and
+    // a live entry has no retirement for the floor to predate).
+    excludeConversionIds = closed;
   }
 
   const notices: ArtifactConversionNotice[] = [];
   const converted = applyConversions(definition as Record<string, unknown>, {
     includeRetired: true,
-    excludeConversionIds: DEFAULT_FLIPS_NOT_REPLAYED_HERE,
+    excludeConversionIds,
     onNotice: (n) => {
       notices.push(n);
       options.onNotice?.(n);
