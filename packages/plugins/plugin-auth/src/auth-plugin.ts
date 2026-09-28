@@ -757,11 +757,16 @@ export class AuthPlugin implements Plugin {
           // misconfiguration loudly at boot instead of one failure per signup.
           const requiresEmail = !!this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification;
           if (requiresEmail) {
+            // [#20389] The second remedy is only real where the posture lets the
+            // deployment turn verification off: `email_domain` refuses it.
+            const disableRemedy = this.authManager.getAudience().posture === 'email_domain'
+              ? "; verification cannot be turned off under the 'email_domain' audience posture."
+              : ' or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).';
             ctx.logger.error(
               'Auth: email verification is REQUIRED but NO email service is registered — '
               + 'verification & password-reset emails will FAIL and new users will be locked '
-              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*) '
-              + 'or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).',
+              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*)'
+              + disableRemedy,
             );
           } else {
             ctx.logger.info('Auth: no email service registered — transactional mail disabled');

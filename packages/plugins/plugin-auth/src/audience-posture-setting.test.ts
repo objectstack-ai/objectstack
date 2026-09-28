@@ -317,6 +317,28 @@ describe('auth.audience_* — the settings switch surface (#11768)', () => {
     expect(warnLines()).not.toContain(OPEN_POSTURE_VERIFICATION_OFF_WARNING);
   });
 
+  it('the no-mail-transport boot error offers the env opt-out only where the posture honours it', async () => {
+    // The harness registers no email service, so a REQUIRED verification
+    // reports at boot. Under `open` turning it off is a real remedy now…
+    await boot({
+      pluginOptions: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } },
+    });
+    const openLine = errorLines().find((m: string) => m.includes('NO email service is registered'));
+    expect(openLine).toContain('OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false');
+  });
+
+  it('…and under email_domain, where it is refused, the error does not offer it', async () => {
+    await boot({
+      pluginOptions: {
+        audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'member_default' },
+      },
+    });
+    const line = errorLines().find((m: string) => m.includes('NO email service is registered'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false');
+    expect(line).toContain("cannot be turned off under the 'email_domain' audience posture");
+  });
+
   it('CONTROL — no opt-out warning when open keeps verification on', async () => {
     const { manager } = await boot({
       pluginOptions: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } },
