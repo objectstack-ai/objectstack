@@ -58,6 +58,10 @@ import {
   formatPermissionSetNameCollisions,
 } from '../utils/permission-set-name-collisions.js';
 import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
+// [#20331] The boot registrar's divergent view-container `name` refusal, walked
+// over the parsed stack the way the load path registers it. The verdict is
+// `@objectstack/objectql`'s; see the module header.
+import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
 
 export default class Validate extends Command {
   static override description =
@@ -325,6 +329,51 @@ export default class Validate extends Command {
         )) {
           console.log(chalk.dim(line));
         }
+        this.exit(1);
+      }
+
+      // 2c. [#20331] The boot registrar's divergent view-container `name`
+      //     refusal, judged here by the SAME function
+      //     `ObjectQL.registerMetadataCollections` throws the answer of
+      //     (`viewContainerNameRefusal`, `@objectstack/objectql`). This door
+      //     used to pass `{ name: 'order_line', object: 'my_app_order_line',
+      //     list: {…} }` at exit 0 while `os serve` refused the same stack at
+      //     boot — the silent-validator shape, on the command whose whole job
+      //     is to say what the runtime will accept.
+      //
+      //     ⛔ One judge, not a second rule: not an `@objectstack/lint`
+      //     registry member and not a re-spelling of the check. The helper
+      //     owns only the WALK (which `views:` entries boot registers, under
+      //     which package id); the verdict and its words are the runtime's,
+      //     so the author reads here exactly what the server would print.
+      //
+      //     Right after the parse, ahead of the rule table: this is the
+      //     runtime's own accept set, the same class as the schema, and
+      //     nothing below it is worth reading about a stack the server will
+      //     not load. `os build` does not run it (see the ledger row in
+      //     `test/validate-build-gate-parity.test.ts`).
+      const containerNameRefusals = findViewContainerNameRefusals(result.data as Record<string, unknown>);
+      if (containerNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: containerNameRefusals,
+            // [#12047] Every exit carries the lists the run has computed so
+            // far — here the pre-parse ones only.
+            warnings: warningsSoFar(),
+            // [#12125] Computed at step 2, above this gate.
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = containerNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} view container${n > 1 ? 's' : ''})`);
+        printBulletList(
+          containerNameRefusals.map((r) => r.message),
+          { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
         this.exit(1);
       }
 
