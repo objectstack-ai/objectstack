@@ -416,7 +416,7 @@ export const NoSQLIndexSchema = lazySchema(() => z.object({
    * carried by `FieldSchema.unique` and `IndexSchema.unique`).
    *
    * This file is the raw NoSQL driver-configuration descriptor layer, not an
-   * organization-aware authoring surface. Measured for #11215: nothing in the
+   * organization-aware authoring surface. Measured for commit 42a117b88: nothing in the
    * repo parses `NoSQLIndexSchema` or materializes indexes from it (a leaf
    * schema — no runtime, kernel, or driver import), and the one NoSQL driver
    * that does create indexes (driver-mongodb's `syncCollectionSchema`)

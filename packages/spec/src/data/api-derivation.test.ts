@@ -203,7 +203,7 @@ describe('api-derivation (#3391)', () => {
       expect(DATA_ACTION_TO_API_OPERATION.bulk).toBe('bulk');
     });
 
-    // [#6259] `batch: 'bulk'` was a producer-less row: `callData` has had no
+    // [commit 6968885ef] `batch: 'bulk'` was a producer-less row: `callData` has had no
     // `batch` arm since #5856, and REST gates `/batch` on the literal `'bulk'`.
     // Two pins, because the finding had two halves — the row AND the prose
     // that told readers `batch` was a live runtime action.

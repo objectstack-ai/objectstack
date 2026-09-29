@@ -17,9 +17,9 @@
  *
  * That is why this family kept arriving one card at a time:
  *
- * | card | the same question, one instance at a time |
+ * | card or commit | the same question, one instance at a time |
  * |---|---|
- * | #12380 | SQLite's `Field.json` codec was not injective — `'123'` read back as the number `123`; PG/MySQL disagreed |
+ * | commit 4045b954d | SQLite's `Field.json` codec was not injective — `'123'` read back as the number `123`; PG/MySQL disagreed |
  * | #11535 | a multi-value field read back as the string `'["x","y"]'` |
  * | #11782 | MySQL answered `1`/`0` for a declared boolean |
  * | #10995 | PG json values bound without `JSON.stringify` — the write half |
@@ -82,7 +82,7 @@
  *   question from "the driver did not change it", and it already has two
  *   tables.
  * - **Aggregated values** — `AGGREGATION_CASES` (#6409). `avg`/`sum` over a
- *   boolean (#11065 / #11151) is a value a driver *computes*, not one it
+ *   boolean (commit 20950404c / #11151) is a value a driver *computes*, not one it
  *   stored.
  * - **Which rows come back** — the filter, pagination and comparand tables.
  *
@@ -154,7 +154,7 @@ export interface ValueRoundTripCase {
 /**
  * The cases.
  *
- * The `v_json` block is #12380's measured boundary set: every string in it has
+ * The `v_json` block is commit 4045b954d's measured boundary set: every string in it has
  * content that is valid JSON or is number-like (or both) — the two classes the
  * pre-fix SQLite encoding destroyed — plus the ordinary strings that always
  * worked, kept as controls so a suite that goes red says *which* class broke.
@@ -261,7 +261,7 @@ export const VALUE_ROUNDTRIP_ROWS: readonly Record<string, unknown>[] = VALUE_RO
  * Pairs that must remain **distinguishable on read** — the injectivity half.
  *
  * Each pair is a string and the native value whose JSON encoding it looks like.
- * Three of these collided on SQLite before #12380 (`'123'`/`123`, `'[]'`/`[]`,
+ * Three of these collided on SQLite before commit 4045b954d (`'123'`/`123`, `'[]'`/`[]`,
  * `'{"a":1}'`/`{a:1}`) and a fourth collided on read (`'null'`/`null`); all
  * were distinct on Postgres and MySQL, which is what made it a driver defect
  * rather than a platform decision.

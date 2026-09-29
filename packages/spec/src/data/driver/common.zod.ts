@@ -222,7 +222,7 @@ export function urlUserinfoPassword(value: string): string | undefined {
  * The username component of a URL-ish string's userinfo, or `undefined` when
  * the string carries no userinfo at all — the other half of the grammar behind
  * {@link urlUserinfoPassword}, sharing {@link urlUserinfo}'s boundary parse so
- * the two halves cannot drift (#8876; the #8082 ruling names a single
+ * the two halves cannot drift (commit d634e665b; the #8082 ruling names a single
  * value-level parse precisely so no second copy exists to disagree with this
  * one).
  *
@@ -230,7 +230,7 @@ export function urlUserinfoPassword(value: string): string | undefined {
  * driver arm that binds a secret via `external.credentialsRef` against a DSN
  * (`MongoConfigSchema.url`'s declared contract) must hand its client the
  * username the URL already names — and reading it needs this grammar, because
- * `new URL()` rejects the multi-host DSN form outright (#8696). Hence two
+ * `new URL()` rejects the multi-host DSN form outright (commit 90a12fb18). Hence two
  * deliberate asymmetries with the password half:
  *
  *  - a `user:password@` URL is REFUSED at publish ({@link credentialFreeUrl})
@@ -341,14 +341,14 @@ export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): 
 /**
  * Refusal prescription for a credential written into the MongoClient
  * passthrough (`config.options.auth.password`) — the FOURTH spelling of the
- * same inline secret (#9040): #7990 refused the top-level key, #8082 the URL
+ * same inline secret (commit 24206416a): #7990 refused the top-level key, #8082 the URL
  * userinfo, #8337 the URL query parameter, and the `options` passthrough was
  * the next syntax over from all three, exactly as #8337 was one syntax over
  * from #8082.
  *
  * Same wording constraints as the sibling messages, plus one this message may
  * state that #8337's must not: the bound secret genuinely WINS over a
- * passthrough `auth` block at connect — measured by #8696's pin
+ * passthrough `auth` block at connect — measured by commit 90a12fb18's pin
  * (`bound-secret-dsn-branches.test.ts`), which asserts the injected
  * `external.credentialsRef` secret outranks `options.auth`. So the "wins over"
  * reassurance is true here, unlike turso's query form where the URL token
@@ -370,7 +370,7 @@ export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
 /**
  * The paths inside mongo's `options` passthrough that resolve into a login
  * credential the client honours AND the secret binder can replace — the CLOSED
- * refusal list behind {@link credentialFreeMongoOptions} (#9040).
+ * refusal list behind {@link credentialFreeMongoOptions} (commit 24206416a).
  *
  * Every entry is MEASURED against `mongodb@7.5.0`, the client
  * `@objectstack/driver-mongodb` pins and spreads `config.options` into
@@ -380,10 +380,10 @@ export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
  *  - `auth.password` — `OPTIONS.auth` transforms `{ username, password }` into
  *    `MongoCredentials`, so the passthrough password IS the login credential
  *    (measured: `c.options.credentials.password` carries it verbatim). The
- *    binder replaces it exactly: #8696's pin measures a bound
+ *    binder replaces it exactly: commit 90a12fb18's pin measures a bound
  *    `external.credentialsRef` secret outranking this block at connect. Only a
  *    NON-EMPTY STRING is refused — `auth.username` alone is not credential
- *    material (#8876's asymmetry, restated for this syntax), an empty password
+ *    material (commit d634e665b's asymmetry, restated for this syntax), an empty password
  *    is the passthrough twin of `user:@host` (accepted, #8082), and a
  *    non-string value is not a secret the client accepts (its
  *    `MongoCredentials` validation fails loudly at construction).
@@ -488,7 +488,7 @@ function valueAtPath(value: unknown, path: readonly string[]): unknown {
  *  - No `${…}` placeholder advice (measured broken escape, #8078/#8336) —
  *    same as every sibling message.
  *  - It must NOT promise the bound secret "wins over" this value: that claim
- *    is measured for `auth.password` only (#8696). For any other nested
+ *    is measured for `auth.password` only (commit 90a12fb18). For any other nested
  *    position nothing is measured to read the value at all — which is the
  *    point the message makes instead: the value performs no function the
  *    author can observe, while sitting cleartext at rest.
@@ -506,7 +506,7 @@ export const PASSTHROUGH_NESTED_CREDENTIAL_REFUSED = (path: string): string =>
   + 'at publish.';
 
 /**
- * Attach the #9040 passthrough-credential refusal to mongo's `options` slot.
+ * Attach commit 24206416a's passthrough-credential refusal to mongo's `options` slot.
  *
  * Composes with `placeholderFreeDeep` the same way `credentialFreeUrl`
  * composes with `placeholderFree` on the URL keys: both checks are
@@ -518,7 +518,7 @@ export const PASSTHROUGH_NESTED_CREDENTIAL_REFUSED = (path: string): string =>
  *
  *  1. The MEASURED paths ({@link MONGO_OPTIONS_CREDENTIAL_PATHS}) — positions
  *     the client resolves into a login credential the binder substitutes
- *     (#9040's original walk, message unchanged).
+ *     (commit 24206416a's original walk, message unchanged).
  *  2. The nested NAME judgment — a non-empty string under a key spelled like
  *     a credential ({@link CREDENTIAL_KEY_SPELLINGS}), at ANY object depth of
  *     the passthrough. Before this walk, `options.auth.password` was refused
