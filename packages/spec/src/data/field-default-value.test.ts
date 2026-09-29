@@ -55,6 +55,16 @@ const CASES: Case[] = [
     accepted: false,
     contains: ['ISO-8601 instant'],
   },
+  // [#20671] A time is a zone-less wall clock. This default parsed clean
+  // before, and every insert that fell back to it was then refused by the
+  // write door with `invalid_time` on a field the caller never sent.
+  {
+    label: 'time + a wall clock with a zone suffix',
+    field: { type: 'time', defaultValue: '10:00Z' },
+    accepted: false,
+    contains: ['"probe_field"', '(time)', '"10:00Z"', 'no time zone'],
+  },
+  { label: 'time + a bare wall clock', field: { type: 'time', defaultValue: '10:00' }, accepted: true },
   {
     label: 'select + a non-member of its own options',
     field: {
