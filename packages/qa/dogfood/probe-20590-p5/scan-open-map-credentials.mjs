@@ -280,9 +280,12 @@ function newFindings() {
   };
 }
 
+const CONTROL = process.argv.includes('--control');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim();
 const files = execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter(Boolean)
-  .filter((f) => !f.startsWith(SELF_DIR))
+  // Normal run: this directory's probe flows are excluded. `--control`: ONLY
+  // this directory, whose expected counts are pinned below.
+  .filter((f) => (CONTROL ? f.startsWith(SELF_DIR) : !f.startsWith(SELF_DIR)))
   .filter((f) => !/(^|\/)CHANGELOG\.md$/.test(f))
   .filter((f) => CODE_EXT.test(f) || DOC_EXT.test(f) || JSON_EXT.test(f));
 
@@ -348,3 +351,31 @@ const table = Object.entries(summary.corpora).map(([c, s]) => ({
 }));
 console.log(`scan-open-map-credentials at ${head} (${files.length} files)`);
 console.table(table);
+
+if (CONTROL) {
+  // Expected over this directory: probe-flow.ts (template-literal and
+  // identifier values -> computed), scan-control.fixture.ts (plain literals),
+  // scan-control.fixture.md (a bare-object doc block).
+  const c = summary.corpora['dogfood / qa fixtures'];
+  const want = {
+    httpNodes: 4,
+    'header literal': 3, 'header template': 1, 'header computed': 4,
+    connectorNodes: 2, 'input literal': 2, 'input computed': 2,
+    'cred-URL': 1,
+  };
+  const got = c && {
+    httpNodes: c.httpNodes,
+    'header literal': c.headerEntriesCredentialShaped.literal,
+    'header template': c.headerEntriesCredentialShaped.template,
+    'header computed': c.headerEntriesCredentialShaped.computed,
+    connectorNodes: c.connectorNodes,
+    'input literal': c.inputEntriesCredentialShaped.literal,
+    'input computed': c.inputEntriesCredentialShaped.computed,
+    'cred-URL': c.httpNodeUrlsCredentialBearing,
+  };
+  const bad = Object.entries(want).filter(([k, v]) => !got || got[k] !== v);
+  console.log(bad.length === 0
+    ? `CONTROL PASS: every arm fired as expected ${JSON.stringify(got)}`
+    : `CONTROL FAIL: ${JSON.stringify(bad.map(([k, v]) => ({ k, want: v, got: got?.[k] })))}`);
+  process.exitCode = bad.length === 0 ? 0 : 1;
+}
