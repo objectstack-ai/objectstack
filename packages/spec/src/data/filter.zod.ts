@@ -2506,10 +2506,10 @@ const AST_OPERATOR_MAP = {
   'is_not_null': '$null',
   'isnull': '$null',
   'isnotnull': '$null',
-  'is_empty': '$null',
-  'is_not_empty': '$null',
-  'isempty': '$null',
-  'isnotempty': '$null',
+  'is_empty': '$empty',
+  'is_not_empty': '$empty',
+  'isempty': '$empty',
+  'isnotempty': '$empty',
 } satisfies Record<string, string>;
 
 /**
@@ -2560,15 +2560,10 @@ export function canonicalAstOperator(op: string): string {
   const lower = String(op).toLowerCase();
   // Null predicates carry a DIRECTION that the shared `$null` lowering erases,
   // so they cannot round-trip through CANONICAL_INFIX — fold them by name.
-  if (lower === 'is_null' || lower === 'isnull' || lower === 'is_empty' || lower === 'isempty') {
-    return 'is_null';
-  }
-  if (
-    lower === 'is_not_null' || lower === 'isnotnull'
-    || lower === 'is_not_empty' || lower === 'isnotempty'
-  ) {
-    return 'is_not_null';
-  }
+  if (lower === 'is_null' || lower === 'isnull') return 'is_null';
+  if (lower === 'is_not_null' || lower === 'isnotnull') return 'is_not_null';
+  if (lower === 'is_empty' || lower === 'isempty') return 'is_empty';
+  if (lower === 'is_not_empty' || lower === 'isnotempty') return 'is_not_empty';
   // `like`/`ilike` used to need a hand-written exemption here: they SHARED the
   // `$contains` lowering while not being substring matches, so the generic
   // round-trip below would have folded them onto `contains` and silently
@@ -2694,14 +2689,17 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // would turn every stored 「is empty」 into a refusal. The flip card moves
   // both this branch and `canonicalAstOperator`'s fold once every face answers
   // `$empty`.
-  if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
+  if (op === 'is_null' || op === 'isnull') {
     return { [field]: { $null: true } } as FilterCondition;
   }
-  if (
-    op === 'is_not_null' || op === 'isnotnull'
-    || op === 'is_not_empty' || op === 'isnotempty'
-  ) {
+  if (op === 'is_not_null' || op === 'isnotnull') {
     return { [field]: { $null: false } } as FilterCondition;
+  }
+  if (op === 'is_empty' || op === 'isempty') {
+    return { [field]: { $empty: true } } as FilterCondition;
+  }
+  if (op === 'is_not_empty' || op === 'isnotempty') {
+    return { [field]: { $empty: false } } as FilterCondition;
   }
 
   const mapped = astOperatorLowering(op);
@@ -3121,7 +3119,7 @@ export const FILTER_OPERATORS = [
   // String
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   // Special
-  '$null', '$exists',
+  '$null', '$exists', '$empty',
 ] as const;
 
 /**
