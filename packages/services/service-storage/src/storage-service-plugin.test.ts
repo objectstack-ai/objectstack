@@ -464,7 +464,7 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
 
     // Lifecycle hooks (afterDelete/afterInsert, plus afterUpdate since #10171
     // gave the update verb its detach leg) + access hooks
-    // (beforeInsert/beforeUpdate/beforeDelete, #10091 added the update verb)
+    // (beforeInsert/beforeUpdate/beforeDelete; commit da891e0ef added the update verb)
     // — see attachment-lifecycle.ts and attachment-access-hooks.ts.
     //
     // [#10240] There is exactly ONE `beforeDelete` here, and it is the access

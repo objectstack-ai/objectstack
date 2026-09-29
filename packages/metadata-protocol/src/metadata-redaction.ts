@@ -468,17 +468,51 @@ function sameValue(a: unknown, b: unknown): boolean {
  * @param stored   the body currently at rest, RAW (never a served copy).
  */
 export function carryForwardRedactedValues<T>(type: string, incoming: T, stored: unknown): T {
-    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return incoming;
+    return planCarryForward(type, incoming, stored).out;
+}
+
+/**
+ * [#20611] WHERE {@link carryForwardRedactedValues} would restore a stored
+ * value into `incoming` — the landing positions, dotted and relative to
+ * `incoming` (`nodes.1.config.secret`: an array hop is the element's index in
+ * THIS body, which is where the carried value lands), and never the values.
+ *
+ * The answer the runtime authoring gate is handed, because the gate runs
+ * before the carry-forward on purpose — so that no gate handles a restored
+ * credential — and without it cannot tell a credential the read withheld and
+ * the row still holds from one that is missing. It is the SAME decision as the
+ * carry-forward's, computed by the same plan: the three outcomes, the identity
+ * walk, the relocation, the two-onto-one refusal and the position check that
+ * drops a value the read would not withhold where it lands. A position this
+ * returns is one the carry-forward fills; one it omits, the carry-forward
+ * leaves as the author sent it.
+ *
+ * @param type     request-shaped metadata type (plural or singular).
+ * @param incoming the body about to be persisted.
+ * @param stored   the body currently at rest, RAW (never a served copy).
+ */
+export function redactedPathsCarriedForward(type: string, incoming: unknown, stored: unknown): string[] {
+    return planCarryForward(type, incoming, stored).landed;
+}
+
+/**
+ * The one decision behind {@link carryForwardRedactedValues} and
+ * {@link redactedPathsCarriedForward}: the grafted body, and where each graft
+ * landed. `landed` is empty exactly when `out` is `incoming` by reference.
+ */
+function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out: T; landed: string[] } {
+    const unchanged = { out: incoming, landed: [] as string[] };
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return unchanged;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return unchanged;
     const redactor = redactorFor(type);
-    if (!redactor) return incoming;
+    if (!redactor) return unchanged;
 
     // What a read exit WOULD have served for the row at rest. Computed from the
     // stored body rather than remembered from a response, so the comparison
     // holds for any caller — Studio, the CLI, a raw `curl` — and needs no
     // session state.
     const served = redactor(stored as Record<string, unknown>);
-    if (served.redactedKeys.length === 0) return incoming;
+    if (served.redactedKeys.length === 0) return unchanged;
 
     const grafts: Array<{ at: string[]; key: string; value: unknown }> = [];
     for (const path of served.redactedKeys) {
@@ -521,10 +555,10 @@ export function carryForwardRedactedValues<T>(type: string, incoming: T, stored:
     for (;;) {
         let out: unknown = incoming;
         for (const graft of kept) out = withValueAt(out, graft.at, graft.key, graft.value);
-        if (kept.length === 0) return out as T;
+        if (kept.length === 0) return unchanged;
         const withheld = new Set(redactor(out as Record<string, unknown>).redactedKeys);
         const next = kept.filter((graft) => withheld.has(landing(graft)));
-        if (next.length === kept.length) return out as T;
+        if (next.length === kept.length) return { out: out as T, landed: kept.map(landing) };
         kept = next;
     }
 }

@@ -371,7 +371,7 @@ describe('createDefaultDatasourceDriverFactory — legacy config spellings are n
 // #7314 — the OPTIONAL libSQL driver is missing, and until now this arm said so
 // and stopped: `turso driver requested but @objectstack/driver-turso is not
 // installed (…)`. The HOST loader (`@objectstack/runtime`'s
-// `loadTursoDriverFactory`, single owner since #6268) has answered the same
+// `loadTursoDriverFactory`, single owner since commit 68f5eccb1) has answered the same
 // missing package with the install command, the consequence and the reason for
 // refusing since #5602 — so the SAME fault got two qualities of answer depending
 // on whether the datasource happened to be the host's `default` (told how to fix
@@ -437,7 +437,7 @@ describe('createDefaultDatasourceDriverFactory — the missing libSQL package is
   });
 
   it('is what the turso arm actually raises when the optional package is absent', async () => {
-    // ⭐ STAGED absence since #12943 — this case used to reach the arm with NO
+    // ⭐ STAGED absence since commit 090f2302e — this case used to reach the arm with NO
     // stub, and that is no longer possible. `@objectstack/driver-turso` is now
     // an OPTIONAL PEER of `@objectstack/service-datasource`
     // (`peerDependencies` + `peerDependenciesMeta.optional`): the honest

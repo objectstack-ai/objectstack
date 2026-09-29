@@ -162,7 +162,7 @@ describe('#5714 — which driver arms read a declared `pool`', () => {
   // literal as it stood on `origin/main` before this change, because "we only
   // added an arm" is a claim about bytes.
   // Byte-for-byte as #5714 wrote it, with ONE word changed: the closing clause
-  // names the pooled drivers, and #6345 renamed the canonical mongo id to
+  // names the pooled drivers, and commit e2798fab7 renamed the canonical mongo id to
   // `mongodb`. Naming the retired canon in an instruction the author is meant to
   // act on would send them to a spelling the catalog no longer publishes.
   it('leaves the sqlite arms\' message byte-for-byte as #5714 wrote it', () => {
@@ -305,7 +305,7 @@ function fakeEngine() {
     drivers,
     registerDriver: (driver: any) => { drivers.set(driver.name, driver); },
     registerDatasourceDef: () => {},
-    // [#12010] The double deliberately stores MINIMAL stand-ins (a bare
+    // [commit 77b91bdb4] The double deliberately stores MINIMAL stand-ins (a bare
     // `{ name }` is how these tests simulate an `onEnable`-registered
     // driver), while the derived seam member answers the contract's
     // `IDataDriver | undefined`. Narrowing on the way out keeps the double

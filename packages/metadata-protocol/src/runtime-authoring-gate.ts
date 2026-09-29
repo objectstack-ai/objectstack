@@ -673,6 +673,22 @@ export function evaluateRuntimeAuthoringGate(args: {
      * double), that judgement is skipped and every rule answers as before.
      */
     judgeFilter?: IObjectQLEngine['judgeFilter'];
+    /**
+     * [#20611] The positions in `body` where the write path will restore a
+     * credential the read path withheld — dotted, item-relative
+     * (`nodes.1.config.secret`), as `redactedPathsCarriedForward` answers
+     * them from the stored row. The fourth input of the #6285 kind: a fact only
+     * the host holds (the row at rest), gathered by the impure caller and passed
+     * in so this function stays pure.
+     *
+     * The carry-forward itself runs AFTER this gate, deliberately, so no rule
+     * handles a restored credential; this hands the rules the positions and
+     * nothing else. A rule judging whether a credential is present then reads a
+     * listed position as present (withheld and stored), and an unlisted one on
+     * the body as sent (absent and not stored is missing). Absent, every
+     * position is judged on the body as sent.
+     */
+    restoredCredentialPaths?: readonly string[];
 }): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
     // No rules ran, so there is nothing to report on either half.
@@ -696,6 +712,9 @@ export function evaluateRuntimeAuthoringGate(args: {
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
+        ...(args.restoredCredentialPaths !== undefined
+            ? { restoredCredentialPaths: args.restoredCredentialPaths }
+            : {}),
     });
 
     // [#6285] The gate-local refusal, folded into the SAME verdict set as the

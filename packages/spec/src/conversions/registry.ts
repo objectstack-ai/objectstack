@@ -463,7 +463,7 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (#13031). **Live window**: the protocol-15 loader accepts the deprecated
+ * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
@@ -2095,9 +2095,10 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  *
  * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
  * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
- * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
- * lossless delete or a rename — read that card, because the flag does not mean
- * what its name and every docblock around it say it means.
+ * (ADR-0087's 2026-09-13 addendum names all three). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that addendum, because the flag does not mean
+ * what its name says: its own docblock (`RetiredConversionState` in `types.ts`) has
+ * stated the authoring-only reach since commit 29dd1a6dd.
  */
 
 /**
@@ -3368,7 +3369,7 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // `mongodb` since commit e2798fab7 — the canonical id was renamed from `mongo` so the
   // contract canon matches what both boot hosts, the driver package and every
   // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
   // returns, so a stored `driver: 'mongo'` still lands here through the alias.
@@ -3473,14 +3474,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
  *
  * ## Why a stored value has to move at all
  *
  * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
  * still are — this conversion does NOT rescue a broken boot, and a deployment
  * that never runs it keeps connecting exactly as before. What moved is the
- * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
  * its config contract are one string with no mapping layer between them.
@@ -3525,7 +3526,8 @@ const datasourceDriverMongoToMongodb: MetadataConversion = {
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
-    + 'package and the published DRIVER_CATALOG already used (#6345)',
+    + 'package and the published DRIVER_CATALOG already used, so the id that selects a driver '
+    + 'and the id that selects its config contract are one string with no mapping between them',
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       // Only the exact legacy canon, trimmed and lower-cased the same way
@@ -7341,12 +7343,12 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
 
 /**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
- * key retired with its only declarer (protocol 18, #10926, ADR-0049).
+ * key retired with its only declarer (protocol 18, commit d173125fb, ADR-0049).
  *
  * The face is measured, not mirrored: each copy key exists because some
  * component in `ComponentPropsMap` declares it, and `submitLabel`'s only
  * declarer was `element:form` — retired whole by #9249 (`element-form-removed`
- * above). The maintainer ruled retire over re-anchor (#10926): the live form
+ * above). The maintainer ruled retire over re-anchor (2026-08-22, landed as commit d173125fb): the live form
  * surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`),
  * localizable at its own authoring site, so re-anchoring would have widened
  * the face for one word. The key, its `submit` alias and its
@@ -7367,10 +7369,11 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'translation.pages.components.submitLabel',
   summary:
-    "translation component-copy key 'submitLabel' removed (#10926 — its only declared carrier, "
-    + "'element:form', retired whole in #9249, so the resolver no longer overlays it and a stored "
-    + "string was read by nothing; the live form surface's submit copy is 'object-form''s "
-    + "'submitText', localized at its own authoring site)",
+    "translation component-copy key 'submitLabel' removed (retired rather than re-anchored — its "
+    + "only declared carrier, 'element:form', retired whole in #9249, so the resolver no longer "
+    + "overlays it and a stored string was read by nothing; the live form surface's submit copy "
+    + "is 'object-form''s 'submitText', localized at its own authoring site, and re-anchoring the "
+    + 'key there would only have added a second place to translate one word)',
   apply(stack, emit) {
     const stripFromData = (data: Record<string, unknown>, path: string): Record<string, unknown> => {
       const pages = data.pages;
@@ -7707,6 +7710,111 @@ const metricFiltersRemoved: MetadataConversion = {
     },
     // One notice: the single metric carrying `filters`.
     expectedNotices: 1,
+  },
+};
+
+/**
+ * `refreshKey` — a cube's refresh cadence (`every`) and data-change probe
+ * (`sql`), retired whole (#20637, ADR-0049 enforce-or-remove; maintainer ruling
+ * letter C).
+ *
+ * Nothing read either key, and there was nothing for them to key on: no
+ * analytics result is cached, so a declared cadence refreshed nothing. The
+ * tombstone on `CubeSchema` refuses the key at parse (see
+ * `CUBE_REFRESH_KEY_REMOVED` in `analytics.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * The key was optional with no default, so a persisted cube carries it only
+ * where an author wrote it — as the showcase did. After the tombstone the boot
+ * door refuses such a cube (`ObjectStackDefinitionSchema` spreads
+ * `analyticsCubes: z.array(CubeSchema)`), and only the D2 table is replayed at
+ * the rehydration seams (`applyArtifactForwardConversions`,
+ * `applyConversionsToStoredItem`), so a built artifact or a stored
+ * `analytics_cube` row that carries the key loads only through this entry. The
+ * strip is lossless: a key that never had an effect has none to lose.
+ *
+ * The WHOLE block leaves, whatever it holds — `every`, `sql`, both, neither, or
+ * a value no longer an object: the tombstone refuses every value, so a partial
+ * strip would leave a cube that still cannot load. The emitted path NAMES the
+ * cube, as `cube-join-sql-and-relationship-removed` does: an index into the
+ * author's `analyticsCubes[]` is a position, not a name. The D3 record is the
+ * semantic entry `cube-refresh-key-retired`.
+ */
+const cubeRefreshKeyRemoved: MetadataConversion = {
+  id: 'cube-refresh-key-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'analyticsCubes[].refreshKey',
+  summary:
+    "cube key 'refreshKey' removed, with its 'every' and 'sql' (ADR-0049 enforce-or-remove — nothing read "
+    + 'it: no analytics result is cached, so a declared refresh cadence refreshed nothing. Delete the key; '
+    + 'a refresh cadence is declared again when a result cache exists)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      // Name the cube, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH cube lost the key.
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      return stripKeys(cube, ['refreshKey'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          // The showcase's shape: a cadence alone.
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+          refreshKey: { every: '1 hour' },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them: both
+          // keys, the probe included.
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+          refreshKey: { every: '1 day', sql: 'SELECT MAX(updated_at) FROM invoice' },
+        },
+        {
+          // Already canonical — rides through untouched. The fixture's own
+          // control: the strip dispatches on key presence, and copy-on-write
+          // keeps this reference.
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+        },
+        {
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+        },
+        {
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    // Two notices, one per STRIPPED KEY (the whole block is one key): `delivery`
+    // and `billing`, none for the canonical `accounts`.
+    expectedNotices: 2,
   },
 };
 
@@ -8243,7 +8351,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
 };
 
 /**
- * `mapping.fieldMapping[].params` lookup keys removed (#10329, ADR-0049
+ * `mapping.fieldMapping[].params` lookup keys removed (commit 15d58dbf1, ADR-0049
  * enforce-or-remove — the sub-walk half of the 17.0.0 #4509 mapping cleanup).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
@@ -8253,7 +8361,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
  * `import-coerce.ts` off the TARGET FIELD's own metadata — never off these
  * keys. Implementing them (a second reference-resolution dialect on the import
  * path) is what the code comment in `packages/rest/src/import-mapping.ts`
- * declines to build, and the #10329 triage ruling confirms that posture.
+ * declines to build, and the triage ruling commit 15d58dbf1 landed confirms that posture.
  *
  * `autoCreate` was the one with teeth: it read as "create the referenced
  * record when nothing matches", and nothing was ever created — with or without
@@ -8278,10 +8386,11 @@ const mappingLookupParamsRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate',
   summary:
-    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (#10329, "
-    + 'ADR-0049 — the import path never read them: `lookup` copies the cell through and '
+    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (ADR-0049 — "
+    + 'the import path never read them: `lookup` copies the cell through and '
     + "reference resolution runs off the target field's own metadata. `autoCreate` never "
-    + 'created anything — an unresolved reference fails the row either way)',
+    + 'created anything — an unresolved reference fails the row either way. Implementing them '
+    + 'instead would have added a second reference-resolution dialect to the import path)',
   apply(stack, emit) {
     const RETIRED = ['object', 'fromField', 'toField', 'autoCreate'];
     return mapCollection(stack, 'mappings', (m, path) => {
@@ -8933,7 +9042,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
 };
 
 /**
- * [#12868] The per-option `default` key leaves the FORM-VIEW options
+ * [commit c459da6bc] The per-option `default` key leaves the FORM-VIEW options
  * vocabulary (protocol 18; maintainer-ruled narrowing 2026-08-28 on the
  * objectui#6263 analysis, disposition 甲).
  *
@@ -8951,7 +9060,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
  *
  * Walks the same payloads as `view-visibleOn-to-visibleWhen` — every FORM
  * payload {@link mapViewPayloads} reaches, in all three persisted spellings
- * (#13031) — through `sections[]`/`groups[]` and top-level
+ * (commit b799ac553) — through `sections[]`/`groups[]` and top-level
  * `fields[]`, recursing into nested `fields` (composite/repeater/record rows
  * carry their own option lists). Only the exact key `default` is stripped —
  * the alias spellings `isDefault`/`selected` were never accepted on this
@@ -9242,7 +9351,7 @@ const fieldReferenceToAlias: MetadataConversion = {
 };
 
 /**
- * `connector.errorMapping` removed (protocol 18, #14676 — ADR-0049
+ * `connector.errorMapping` removed (protocol 18, commit 13c48c2a5 — ADR-0049
  * enforce-or-remove; triage ruling 2026-09-02, route: removal via the
  * `spec-property-retirement` playbook; the split condition — a downstream
  * consumer in objectui or a customer stack — measured empty at objectui
@@ -9287,9 +9396,10 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   retiredAfter: '17.3.0',
   surface: 'connector.errorMapping',
   summary:
-    "connector key 'errorMapping' removed (#14676, ADR-0049 — no engine ever mapped an external "
+    "connector key 'errorMapping' removed (ADR-0049 — no engine ever mapped an external "
     + 'error through the rules, so the eleven nested keys configured nothing, and the rule-level '
-    + '`userMessage` shared its spelling with the live API-error channel while never being shown. '
+    + '`userMessage` shared its spelling with the live API-error channel while never being shown; '
+    + 'deleting the block resolves that collision without a rename. '
     + 'The whole ErrorMappingConfig / ErrorMappingRule shape and the ConnectorErrorCategory enum '
     + 'went with it)',
   apply(stack, emit) {
@@ -12548,6 +12658,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: connectorTriggersRemoved, order: 26 },
   { conversion: cubeJoinSqlAndRelationshipRemoved, order: 9 },
   { conversion: cubeMemberInnerNameRemoved, order: 44 },
+  { conversion: cubeRefreshKeyRemoved, order: 47 },
   { conversion: cubeSubDayGranularitiesRemoved, order: 8 },
   { conversion: currencyConfigPrecisionRemoved, order: 41 },
   { conversion: dashboardRefreshIntervalToRefreshIntervalSeconds, order: 24 },

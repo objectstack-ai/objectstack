@@ -681,7 +681,7 @@ export interface SaveMetaItemOptions {
      * empty spelling would pin the write against the empty string and refuse
      * every save with a 409 the caller never asked for.
      *
-     * [#12195] There is ONE door now. The compound-name twin
+     * [commit 7986d973f] There is ONE door now. The compound-name twin
      * `PUT /meta/:type/:section/:name` — which this note used to pair with —
      * is retired, and every name reaches `PUT /meta/:type/:name`
      * percent-encoded, so `if-match` behaviour no longer varies by how the
@@ -725,7 +725,7 @@ export interface SaveMetaItemOptions {
      * on the wire that the server ignores. Same shape the first-party
      * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
      *
-     * [#12195] REACHES EVERY SAVE — the carve-out this note used to carry is
+     * [commit 7986d973f] REACHES EVERY SAVE — the carve-out this note used to carry is
      * GONE, and it is worth recording why rather than deleting it silently.
      *
      * `mode` used to reach only the single-segment `PUT /meta/:type/:name`.
@@ -735,7 +735,7 @@ export interface SaveMetaItemOptions {
      * answered 200, with no signal at the call site (objectstack#11712).
      *
      * Two changes closed it at the source rather than from this side. Stage 1
-     * (#12194) made a slash-bearing name unwritable at all, and this stage
+     * (commit 311433f6b) made a slash-bearing name unwritable at all, and this stage
      * retired the twin and unified this file on `encodeURIComponent`, so every
      * save now arrives at the one door that reads `mode`. A name that would
      * once have forked to the silent-publish door is now refused `400
@@ -796,7 +796,7 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
 
 /**
  * Request options for `meta.deleteItem` — the carriers the REST reset door
- * reads, made reachable from the SDK (#12181).
+ * reads, made reachable from the SDK (commit cf71d73f8).
  *
  * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
  * reads THREE carriers. This bag declares TWO of them, and the third's
@@ -817,7 +817,7 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
  * ADDS destructive reach — it drops the object's physical table after the
  * metadata row goes — no caller was measured needing it from this client,
  * and the door's repeated-parameter refusal exists because of that
- * destructiveness. Maintainer-seat ruling on #12181: a destructive surface
+ * destructiveness. Maintainer-seat ruling, landed by commit cf71d73f8: a destructive surface
  * with no measured pull is not published. A caller that needs it is a
  * separate, separately reviewable widening.
  *
@@ -908,7 +908,7 @@ function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
  *
  * Deliberately a sibling of {@link metaSaveHeaders} rather than a call into
  * it: the two methods carry two separately-ruled option bags (#11713 for
- * `saveItem`, #12181 for this one), so neither type may quietly acquire the
+ * `saveItem`, commit cf71d73f8 for this one), so neither type may quietly acquire the
  * other's members. The two builders are pinned IN STEP by a test instead —
  * one token in, identical header bytes out.
  */
@@ -1831,11 +1831,11 @@ export class ObjectStackClient {
         // omits the `headers` key altogether, so a save without `ifMatch`
         // hands `fetch` the same `init` it always did.
         const headers = metaSaveHeaders(options);
-        // [#12195] ENCODED, like every other `/meta` item address in this file.
+        // [commit 7986d973f] ENCODED, like every other `/meta` item address in this file.
         // This site used to leave `type`/`name` RAW so a compound name's slash
         // would survive into a separate path segment and reach
         // `PUT /meta/:type/:section/:name`. That door is retired, and encoding
-        // is now the single spelling: a legal name (#12194's grammar — snake
+        // is now the single spelling: a legal name (commit 311433f6b's grammar — snake
         // case, optionally dot-qualified) contains nothing `encodeURIComponent`
         // alters, so this is byte-identical for every name that can be written,
         // and a pre-grammar residue name reaches the single-segment door with
@@ -1863,7 +1863,7 @@ export class ObjectStackClient {
      * resolved as `options.ifMatch` and the same situation answers `409
      * metadata_conflict` instead — the door has always read the header
      * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
-     * had no argument for it until #12181.
+     * had no argument for it until commit cf71d73f8.
      *
      * [#13023] READ `reset`, NEVER `deleted`. This method used to declare
      * `{ type, name, deleted }` — an UNINHABITED shape: the door answers
@@ -2018,12 +2018,12 @@ export class ObjectStackClient {
     /**
      * ADR-0033: the published version of a metadata item.
      *
-     * [#12195] The name is percent-encoded, like every other `/meta` item
+     * [commit 7986d973f] The name is percent-encoded, like every other `/meta` item
      * address in this file. This docblock used to promise the opposite — that
      * a compound name passed through UNENCODED, `getPublished('lead',
      * 'views/all_leads')`, so its slash would reach the compound arity
      * `GET /meta/:type/:section/:name/published`. That arity is retired and a
-     * slash-bearing name is refused at the publish door (#12194), so there is
+     * slash-bearing name is refused at the publish door (commit 311433f6b), so there is
      * one spelling and one door.
      */
     getPublished: async (type: string, name: string): Promise<GetPublishedMetaItemResponse> => {
@@ -3476,7 +3476,7 @@ export class ObjectStackClient {
 
   /**
    * @internal The CRUD data prefix this client's server actually mounts, read
-   * off the advertised routes (#14879).
+   * off the advertised routes (commit cf74a1128).
    *
    * `crud.dataPrefix` moves the mounted CRUD paths and the advertised
    * discovery document TOGETHER — REST builds every data route as
@@ -3549,7 +3549,7 @@ export class ObjectStackClient {
    * @internal The metadata prefix this client's server actually mounts, read
    * off the advertised routes (#16675).
    *
-   * The same defect as #14879 one key over, so deliberately the same
+   * The defect commit cf74a1128 fixed, one key over, so deliberately the same
    * derivation shape as {@link ObjectStackClient._dataPrefix}, fallback
    * discipline included. `metadata.prefix` moves the mounted metadata paths
    * and the advertised discovery document TOGETHER — REST builds every
@@ -3632,7 +3632,7 @@ export class ObjectStackClient {
    * `routes.data`: the REST discovery endpoint advertises it as
    * `{realBase}{dataPrefix}` with `dataPrefix` defaulting to `/data`. This
    * derivation strips that advertised suffix — `_dataPrefix()` reads which
-   * suffix it is (#14879), so a deployment that moves `crud.dataPrefix` off
+   * suffix it is (commit cf74a1128), so a deployment that moves `crud.dataPrefix` off
    * the default no longer forces this derivation to decline. When the suffix
    * is not derivable either, the caller falls back to the `/api/v1`
    * convention — exactly today's behavior, so the change is strictly "follow
@@ -4908,7 +4908,7 @@ export class ObjectStackClient {
      * Server policy decides which is required; pass whichever you have.
      *
      * ⚠️ NOT BOUND, and deliberately so — the one member of the `auth.*`
-     * family #14313 left at `Promise<any>`, with its
+     * family commit b1b978c8d left at `Promise<any>`, with its
      * `exported-any-returns.json` entry still open.
      *
      * The maintainer's ruling of 2026-08-12 on #7735 keeps better-auth's
@@ -6376,7 +6376,7 @@ export class ObjectStackClient {
      * List notifications for the current user.
      *
      * Returns the newest `limit` notifications — a WINDOW, not a page. The
-     * `cursor` parameter was removed in protocol 17 (#6361): it was appended to
+     * `cursor` parameter was removed in protocol 17 (commit 90bbf2510): it was appended to
      * the query string here and read by nothing on the server, so a caller
      * paginating by it re-read the first window forever. Omit `limit` to take
      * the server's window (the platform inbox answers 50, clamped to 1..200);
@@ -7403,7 +7403,7 @@ export class ObjectStackClient {
         // actually carries.
         error.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
         if (fieldErrors) error.fields = fieldErrors;
-        // [#9934] The producer-marked user-facing refusal text
+        // [commit 79c46da90] The producer-marked user-facing refusal text
         // (`ApiErrorSchema.userMessage`) — read from both live envelopes'
         // declared spots, same two-dialect rule as `code`/`fields` above: the
         // flat body carries it at the top level, the wrapped one inside
@@ -7533,7 +7533,7 @@ export class ScopedEnvironmentClient {
   }
 
   /**
-   * URL for a route mounted under the deployment's CRUD data prefix (#14879).
+   * URL for a route mounted under the deployment's CRUD data prefix (commit cf74a1128).
    *
    * Every route reached through here is mounted by REST as
    * `${dataPath}/...` with `dataPath = ${basePath}${crud.dataPrefix}`, so the
@@ -8119,7 +8119,7 @@ export type {
   GetPresenceResponse,
   // Workflow re-exports removed (#4451, v17): the types were deleted from
   // @objectstack/spec/api with the retired workflow slot.
-  // View-management re-exports removed (#6239, v17): the five viewId-addressed
+  // View-management re-exports removed (commit f549a0d4a, v17): the five viewId-addressed
   // methods and their ten schemas were deleted from @objectstack/spec/api with
   // the retired `ViewProtocol` — no host implemented them and no route reached
   // them. A view's stored definition travels on the metadata types

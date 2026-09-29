@@ -58,6 +58,9 @@
  *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481);
  *                   a string's leading day exists, and a `datetime` string is
  *                   an ISO 8601 spelling (#20525) — refused, never rolled over
+ *  - time:          a zone-less wall clock `HH:MM[:SS[.f]]`, or an ISO instant
+ *                   with a four-digit UTC year (#20671); a `Z` / offset suffix
+ *                   on a time of day is refused with its own sentence
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -86,6 +89,7 @@ import {
   NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
   parseNumericString,
+  classifyFilterToken,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isUninterpretableTemporalComparand } from '@objectstack/core';
@@ -840,6 +844,21 @@ function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message
   return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
 }
 
+/**
+ * [#20671] Is this a time of day with a zone suffix — `"10:00Z"`,
+ * `"10:00:00+08:00"`, `"10:00-0530"` — whose wall clock is one the `time`
+ * rule reads once the suffix is dropped? It chooses the sentence of an
+ * `invalid_time` refusal, never the verdict: a `time` field carries no zone
+ * (ADR-0053 D-C1), so the sentence says to drop the suffix or to use a
+ * `datetime` field for an instant. The wall-clock half is judged by core's
+ * rule, the one the verdict asks, so `"25:00Z"` gets the plain sentence.
+ */
+function isZonedTimeOfDay(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const m = /^(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:[Zz]|[+-]\d{2}:?\d{2})$/.exec(value.trim());
+  return m !== null && !isUninterpretableTemporalComparand('time', m[1]);
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -1264,22 +1283,34 @@ function validateOne(
   }
 
   // ── time (time-of-day) ──────────────────────────────────────────
-  // A `Field.time` is a wall-clock time, NOT an instant — `Date.parse('14:30')`
-  // is NaN, so reusing the date branch rejected every valid time. Accept
-  // `HH:MM`, `HH:MM:SS`, optional fractional seconds and an optional Z/offset;
-  // also accept a Date or a full ISO datetime (callers that send a timestamp
-  // for a time field).
+  // A `Field.time` is a zone-less wall clock, NOT an instant (ADR-0053 D-C1).
+  // [#20671] Judged by `@objectstack/core`'s one rule, the one the date /
+  // datetime arm above asks, so a value is refused as a written `time` exactly
+  // when it is refused as a `time` comparand. What that rule reads:
+  //
+  // - a bare `HH:MM[:SS[.fraction]]` in range, stored as `HH:MM:SS`;
+  // - an instant in one of the ISO 8601 spellings a `datetime` is written in,
+  //   on a calendar day that exists, whose UTC year has four digits; the
+  //   storage rule keeps its UTC time of day. A `Date` is judged by that year.
+  //
+  // It replaced a private pair of patterns that admitted what the rule does not
+  // read. A time of day with a `Z` or an offset (`"10:00Z"`, `"10:00+08:00"`)
+  // was stored verbatim on memory and SQLite and as `"10:00:00"` on
+  // PostgreSQL, so one write read back two ways. A `hasDate` test with no
+  // anchor matched inside `"+010000-01-01T10:00:00Z"`, so an extended-year
+  // instant was stored verbatim on memory and SQLite and was a 500 on
+  // PostgreSQL. Each is refused now with `invalid_time`, never a 500. A zone
+  // suffix on a time of day gets its own sentence, which says what to do: drop
+  // the suffix, or use a `datetime` field for an instant.
+  //
+  // `readable` holds the write door to what the comparand door exempts. A
+  // number is refused as a written `time` (a comparand may be epoch
+  // milliseconds), and so is a `{placeholder}`, which is filter vocabulary and
+  // not a value. A blank is missing before this arm.
   if (t === 'time') {
-    if (value instanceof Date) return null;
-    if (typeof value === 'string') {
-      const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/;
-      // Accept a valid time-of-day, OR a full datetime that carries a real date
-      // component. NOT a bare `Date.parse` check — `Date.parse('14:60')` returns
-      // a (bogus) number in Node, which would let malformed times through.
-      const hasDate = /\d{4}-\d{2}-\d{2}/.test(value);
-      if (timeOfDay.test(value.trim()) || (hasDate && !Number.isNaN(Date.parse(value)))) return null;
-    }
-    return fail('invalid_time');
+    const readable = value instanceof Date || (typeof value === 'string' && classifyFilterToken(value) === null);
+    if (readable && !isUninterpretableTemporalComparand(t, value)) return null;
+    return fail('invalid_time', undefined, isZonedTimeOfDay(value) ? 'invalid_time_zoned' : 'invalid_time');
   }
 
   // ── select / radio (single-value) ───────────────────────────────

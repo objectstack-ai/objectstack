@@ -155,7 +155,7 @@ const result = FlowSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **connectorId** | `string` | ✅ | Registered connector name |
 | **actionId** | `string` | ✅ | Action key declared by the connector |
-| **input** | `Record<string, any>` | optional | Mapped inputs for the action |
+| **input** | `Record<string, any>` | optional | Mapped inputs for the action. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: the connector authenticates through its own `auth.credentialRef`. |
 
 ### Nested Shape: `FlowNode.inputSchema[string]`
 

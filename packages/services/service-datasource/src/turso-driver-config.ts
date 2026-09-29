@@ -11,7 +11,7 @@
  * `default`:
  *
  *  - `@objectstack/runtime`'s `loadTursoDriverFactory` (the HOST-injected
- *    loader, single owner for the CLI and the standalone stack since #6268)
+ *    loader, single owner for the CLI and the standalone stack since commit 68f5eccb1)
  *    serves the `default` datasource;
  *  - the open-core `createDefaultDatasourceDriverFactory` in this package serves
  *    every other door — a datasource created in Setup, `testConnection`, a

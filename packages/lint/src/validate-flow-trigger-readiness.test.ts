@@ -19,7 +19,8 @@ import { runRuntimeAuthoringRules } from './runtime-gate.js';
 /**
  * [#20553] The flow-trigger family as the CLI table runs it: two registry
  * entries over one file — `validateFlowTriggerReadiness` and, split out because
- * it is CLI-only until #20611, `validateFlowApiTriggerSecret`. Cases that are
+ * at the runtime gate it reads the host's restored-credential positions
+ * (#20611), `validateFlowApiTriggerSecret`. Cases that are
  * about the WHOLE family's verdict on a stack (the severity map, the clean-stack
  * floor, the api-secret cases' exhaustive assertions) judge through this.
  */
@@ -1160,34 +1161,31 @@ describe('validateFlowTriggerReadiness', () => {
       expect(FLOW_API_TRIGGER_SECRET_MISSING).toBe('flow-api-trigger-secret-missing');
     });
 
-    // [#20611] The id is CLI-only until the runtime publish gate judges the
-    // carried-forward body: a `/meta` save is gated BEFORE `saveMetaItem`
-    // restores the `config.secret` the flow read path withholds (#20552), so a
-    // signed flow's GET → edit → PUT would reach the gate secretless. Each side
-    // of the wall is pinned, and the gate pin carries its own positive control.
-    describe('one rule id on ONE side of the runtime wall — CLI-only until #20611', () => {
+    // [#20611] The id crosses the runtime wall. A `/meta` save is gated BEFORE
+    // `saveMetaItem` restores the `config.secret` the flow read path withholds
+    // (#20552), so the gate is handed the positions that restore fills, and a
+    // withheld-and-stored secret reads as present. Both sides of the wall are
+    // pinned, and each gate verdict is paired with the input that flips it.
+    describe('#20611 — on both sides of the runtime wall; the gate reads restored positions as present', () => {
       const secretless = apiFlow({ hookId: 'intake' });
       const stack = { objects: [candidateObject], flows: [secretless] };
 
-      it('the split is whole: validateFlowTriggerReadiness alone no longer emits the id', () => {
+      it('the split is whole: validateFlowTriggerReadiness alone does not emit the id', () => {
         expect(validateFlowTriggerReadiness(stack).map((f) => f.rule)).not.toContain(
           FLOW_API_TRIGGER_SECRET_MISSING,
         );
         expect(validateFlowApiTriggerSecret(stack).map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
       });
 
-      it('its registry entry gates all three commands on the cli surface only, with a reason', () => {
+      it('its registry entry gates all three commands AND the runtime publish gate for `flow` writes', () => {
         const entry = AUTHORING_RULES.find((r) => r.name === 'validateFlowApiTriggerSecret');
         expect(entry).toBeDefined();
         expect(entry!.tier).toBe('gating');
         expect([...entry!.commands].sort()).toEqual([...AUTHORING_COMMANDS].sort());
-        expect(entry!.surfaces).toEqual(['cli']);
-        expect(entry!.runtimeTypes).toBeUndefined();
-        expect((entry!.surfaceReason ?? '').trim().length).toBeGreaterThan(40);
-        // …while the family's shared entry still crosses the wall.
-        expect(AUTHORING_RULES.find((r) => r.name === 'validateFlowTriggerReadiness')!.surfaces).toContain(
-          'runtime-publish',
-        );
+        expect([...entry!.surfaces].sort()).toEqual(['cli', 'runtime-publish']);
+        expect(entry!.runtimeTypes).toEqual(['flow']);
+        // The reason that held it CLI-only is gone with the wall.
+        expect(entry!.surfaceReason).toBeUndefined();
       });
 
       it.each([...AUTHORING_COMMANDS])('os %s still refuses a secretless api flow through the table', (command) => {
@@ -1197,26 +1195,64 @@ describe('validateFlowTriggerReadiness', () => {
         expect(hits.map((f) => [f.severity, f.path])).toEqual([['error', 'flows[0].nodes[0].config.secret']]);
       });
 
-      it('the runtime publish gate does not emit it — and still runs the rest of the family', () => {
+      it('the runtime publish gate refuses a secretless api flow — absent and not stored is missing', () => {
         const gated = runRuntimeAuthoringRules({ type: 'flow', item: secretless });
-        expect(gated.rulesRun).toContain('validateFlowTriggerReadiness');
-        expect(gated.rulesRun).not.toContain('validateFlowApiTriggerSecret');
-        expect([...gated.errors, ...gated.advisories].map((f) => f.rule)).not.toContain(
-          FLOW_API_TRIGGER_SECRET_MISSING,
-        );
-        // Positive control: the same door still refuses a flow the family
-        // proves dead, so the absence above is the wall, not a gate that ran
-        // nothing.
-        const dead = runRuntimeAuthoringRules({
+        expect(gated.rulesRun).toContain('validateFlowApiTriggerSecret');
+        expect(gated.errors.map((f) => [f.rule, f.severity, f.path])).toEqual([
+          [FLOW_API_TRIGGER_SECRET_MISSING, 'error', 'flows[0].nodes[0].config.secret'],
+        ]);
+      });
+
+      it('…and passes the same body when the host restores the secret at that position — withheld and stored is present', () => {
+        // The redactor registry's item-relative spelling, as the host states it.
+        const restored = runRuntimeAuthoringRules({
           type: 'flow',
-          item: {
-            name: 'declared_dead',
-            type: 'record_change',
-            status: 'active',
-            nodes: [{ id: 'start', type: 'start', config: { objectName: 'app_candidate', triggerType: 'onCreate' } }],
-          },
+          item: secretless,
+          restoredCredentialPaths: ['nodes.0.config.secret'],
         });
-        expect(dead.errors.map((f) => f.rule)).toContain(FLOW_TRIGGER_UNROUTABLE);
+        // The rule RAN — the pass is its verdict, not a gate that ran nothing.
+        expect(restored.rulesRun).toContain('validateFlowApiTriggerSecret');
+        expect(restored.errors).toEqual([]);
+      });
+
+      it('a restored position excuses that position only — spelled against where the start node really sits', () => {
+        // The start node second: the host names `nodes.1…`, and the gate spells
+        // it `flows[0].nodes[1].config.secret`, the rule's own finding path.
+        const startSecond = apiFlow({ hookId: 'intake' }, {
+          nodes: [
+            { id: 'end', type: 'end' },
+            { id: 'start', type: 'start', config: { hookId: 'intake' } },
+          ],
+        });
+        const at = (paths: string[]) =>
+          runRuntimeAuthoringRules({ type: 'flow', item: startSecond, restoredCredentialPaths: paths }).errors.map(
+            (f) => [f.rule, f.path],
+          );
+        expect(at(['nodes.1.config.secret'])).toEqual([]);
+        // A position that is not the start node's secret excuses nothing.
+        for (const other of [['nodes.0.config.secret'], ['nodes.1.config.signingSecret'], ['nodes.1.config']]) {
+          expect(at(other), other.join()).toEqual([[FLOW_API_TRIGGER_SECRET_MISSING, 'flows[0].nodes[1].config.secret']]);
+        }
+      });
+
+      it('the rule reads the set in its own finding-path spelling, and the CLI table never forwards it', () => {
+        const findingPath = 'flows[0].nodes[0].config.secret';
+        expect(validateFlowApiTriggerSecret(stack, { restoredCredentialPaths: new Set([findingPath]) })).toEqual([]);
+        expect(
+          validateFlowApiTriggerSecret(stack, { restoredCredentialPaths: new Set(['nodes.0.config.secret']) }).map(
+            (f) => f.rule,
+          ),
+        ).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+        // A CLI stack carries the author's own secret; the table does not hand
+        // a caller-stated set to any rule, so the refusal stands.
+        for (const command of AUTHORING_COMMANDS) {
+          const hits = runAuthoringRules(command, {
+            normalized: stack,
+            parsed: stack,
+            restoredCredentialPaths: new Set([findingPath]),
+          }).filter((f) => f.rule === FLOW_API_TRIGGER_SECRET_MISSING);
+          expect(hits.map((f) => f.path), command).toEqual([findingPath]);
+        }
       });
     });
   });

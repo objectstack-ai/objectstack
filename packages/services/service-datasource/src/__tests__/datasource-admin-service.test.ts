@@ -671,7 +671,7 @@ describe('migrateCredential (#8155)', () => {
 
 /**
  * The contract half the #8153 block was about: the row this migration WRITES
- * must be spec-valid. Before PR #8588 a managed row carrying
+ * must be spec-valid. Before commit 3dede582b a managed row carrying
  * `external.credentialsRef` failed re-parse, so the migration would have moved
  * rows from "invalid because it holds cleartext" to "invalid because it holds a
  * credentialsRef" while reporting success.

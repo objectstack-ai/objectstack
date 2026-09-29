@@ -24,7 +24,7 @@
  *     turns exactly that into `AuthzStoreUnavailableError`: declared `status:
  *     503`, declared `code: SERVICE_UNAVAILABLE`.
  *  3. `requireDatasourceAdmin`'s own `catch` re-raises it rather than
- *     laundering an outage into a denial — the #13279 ruling, which this card
+ *     laundering an outage into a denial — commit 6a180e42d's ruling, which this card
  *     leaves completely untouched. Only the RENDERING moves.
  *  4. The throw escapes the handler. Before this card the adapter answered
  *     `500 { code: 'INTERNAL_ERROR', message: 'No response from handler' }` —
@@ -50,7 +50,7 @@
  * ⭐ The controls answering `401` rather than `200` is the SHARPER reading, and
  * it is the discriminator this card is actually about: a 401 is a VERDICT the
  * door reached, while the outage arm reaches no verdict at all — which is
- * exactly why #13279 refuses to answer it as a denial. Two different 4xx/5xx
+ * exactly why commit 6a180e42d refuses to answer it as a denial. Two different 4xx/5xx
  * answers separated by whether a decision was ever taken.
  */
 
@@ -159,7 +159,7 @@ describe('GET /api/v1/datasources — an authz-store outage reaches the caller a
     const { listDatasources } = await list({ kind: 'throws' });
 
     // The card moves the RENDERING only. If the outage started resolving to a
-    // verdict, this would be non-zero and #13279 would have been reversed as a
+    // verdict, this would be non-zero and commit 6a180e42d would have been reversed as a
     // rider.
     expect(listDatasources).not.toHaveBeenCalled();
   });

@@ -26,9 +26,9 @@ function createMockClient(body: any, status = 200) {
 
 describe('client.meta (#3563 PR-5)', () => {
     it('[#12195] getPublished ENCODES the name — one spelling, one door', async () => {
-        // ⚠️ Inverted by #12195. This required the slash to pass through RAW so
+        // ⚠️ Inverted by commit 7986d973f. This required the slash to pass through RAW so
         // the request reached the compound arity
-        // `GET /meta/:type/:section/:name/published`. #12176 retired
+        // `GET /meta/:type/:section/:name/published`. Commit 7986d973f retired
         // compound-name addressing and that arity is un-mounted, so `%2F` —
         // which Hono decodes back to `views/all_leads` on the surviving
         // `/:type/:name/published` route — is the correct spelling now.
@@ -40,7 +40,7 @@ describe('client.meta (#3563 PR-5)', () => {
     });
 
     it('[#12195] a LEGAL name reaches getPublished byte-identically', async () => {
-        // The control: encoding must be a no-op for every name #12194's
+        // The control: encoding must be a no-op for every name commit 311433f6b's
         // grammar admits, so no working caller moved.
         const { client, fetchMock } = createMockClient({ success: true, data: {} });
         await client.meta.getPublished('lead', 'all_leads');

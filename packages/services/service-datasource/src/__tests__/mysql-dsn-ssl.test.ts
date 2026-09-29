@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8874 — a declared `ssl` reaches the mysql CLIENT on both branches of the
+ * Commit d70428ae7 — a declared `ssl` reaches the mysql CLIENT on both branches of the
  * mysql arm, in the spelling mysql2 can actually read.
  *
  * ## The defect, in two halves
@@ -37,7 +37,7 @@
  * {uri:'mysql://app@db.internal:3306/app', ssl:{}}  -> ssl {rejectUnauthorized:true}
  * ```
  *
- * The branch #8874 describes as "honouring" the declaration was therefore
+ * The branch commit d70428ae7's card describes as "honouring" the declaration was therefore
  * throwing on every connection acquisition for the commonest way of declaring
  * it. Emitting `ssl: true` onto the DSN branch to close the first half would
  * have shipped that throw to a second branch, so `mysqlSslOption` translates
@@ -50,7 +50,7 @@
  * the mysql2 module knex itself resolved (`knex.client.driver`), fed the exact
  * `connectionSettings` knex will hand it. Nothing asserts on the `connection`
  * object this factory emitted, and that is deliberate: it is the constraint
- * inherited from #8873, where the postgres arm passed the equivalent
+ * inherited from commit 096106522, where the postgres arm passed the equivalent
  * config-layer assertion throughout the defect's entire life while the client
  * threw the value away one layer below. Here it is the sharper of the two
  * lessons, because the boolean half of this card is invisible at the config
@@ -186,7 +186,7 @@ describe('#8874 — mysql: a declared `ssl` reaches the client on the DSN branch
   });
 
   it('carries TLS and a bound secret together on the DSN branch', async () => {
-    // The other DSN sub-case. #8696 made this branch return `{ uri, password }`
+    // The other DSN sub-case. Commit 72050cc47 made this branch return `{ uri, password }`
     // and deliberately left `ssl` out of it, because carrying TLS only for
     // datasources that happen to bind a credential would have been a second,
     // stranger asymmetry. Both channels now ride together.
@@ -260,7 +260,7 @@ describe('#8874 — mysql: a declared `ssl` reaches the client on the DSN branch
   it('leaves a DSN with only a secret bound as the #8696 shape (control)', async () => {
     // Green before this change and after it. The `ssl` key must not appear on a
     // connection that declared none — otherwise this card would have widened
-    // #8696's blast radius rather than added to it.
+    // commit 72050cc47's blast radius rather than added to it.
     const conn = await emittedConnection({
       name: 'secret-only',
       config: { url: BARE_USERNAME_DSN },
