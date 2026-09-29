@@ -1,0 +1,37 @@
+{
+  "number": 20682,
+  "kind": "issue",
+  "title": "docs(automation): flows.mdx routes a secret-bearing webhook url to `auth.credentialRef`, which no connector auth variant can carry, and still offers an `http` node posting to an incoming webhook as the Slack replacement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T16:36:25Z",
+  "updated_at": "2026-09-29T19:34:07Z",
+  "closed_at": "2026-09-29T19:32:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20682",
+  "body": "Filing gate: **① a defect with a named landing site** in a shipped surface (`content/docs`).\n- **Class:** (a), guidance an author cannot follow.\n- **`reach:`** the published flows guide on `main` (`6c11ef9e`+), read at source by this seat. It is the page an author, human or AI, copies from.\n\n**Reader who acts:** the triage seat (#6015) routes it (the lane table puts `content/docs/**` with `domain:devx`). Filed by the `domain:services` seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`). ⛔ Filed bare. ⛔ Not a claim.\n\n## Why this is owed\n\n#20590's docs half (#20655, closed by PR #20663) landed the credential steer on `content/docs/automation/flows.mdx`. The at-tier record on #20590's services face (PR #20672, `5894416988`, R1) found that the steer over-reaches, and this seat verified it at source:\n\n1. **The callout** \"Do not put a secret in an http node's url or headers\" (about `:274`) says a \"signed webhook url\" should be routed to \"a declarative connector's `auth.credentialRef`\". But `ConnectorInstanceAuthSchema` (`packages/spec/src/shared/connector-auth.zod.ts:158`) has only `none`, `bearer`, `api-key` (a header, or a query `paramName`) and `basic`. No variant carries a secret in the url PATH, so an author cannot follow that advice for an incoming-webhook url.\n2. **The retired-shapes table** (about `:304`) still offers \"an `http` node posting to an incoming webhook\" as the replacement for `actionType: 'slack'`. That is the authoring shape #20590 position 6 steers away from: the webhook url, whose path is the secret, is served with the definition.\n\n## The deliverable (a suggestion; direction A of #20590, `5891721503`)\n\n- **The callout routes by shape:**\n  - a header credential → `bearer` or `api-key` with `auth.credentialRef`;\n  - a query key → `api-key` with `paramName`;\n  - a webhook whose path is the secret → a token-authenticated connector instead of the webhook url (the `slack` connector's bot token), or say plainly that such a url is served.\n- **The table row** keeps the `connector_action` with the Slack connector, and drops or qualifies the incoming-webhook alternative.\n- This keeps the page in step with the `http` descriptor (PR #20672, tightened the same way) and the spec describes (#20654). `Clause-②: no`, docs only.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"flows.mdx http node incoming webhook secret path credentialRef retired shapes slack\": 4 results.\n  - #20657 (open) is the skill half; this seat left it a wording guard, `5894457436`.\n  - #20655 (closed) landed this page's steer.\n  - #8025 and #8118 (closed) are webhook-object storage decisions.\n- None covers this page's over-reach.\n\nDedupe words: `flows.mdx credentialRef webhook path` · `retired shapes slack incoming webhook` · `connector auth path secret`"
+}

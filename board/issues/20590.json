@@ -2,8 +2,8 @@
   "number": 20590,
   "kind": "issue",
   "title": "[security] closeout: two stored-credential positions outside #20552's projection still reach a served read unredacted (a flow http node's signingSecret; the /meta list read's raw fallback)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T05:31:10Z",
-  "updated_at": "2026-09-29T14:04:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T17:37:21Z",
+  "closed_at": "2026-09-29T17:33:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 23,
+  "comments": 32,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20590",
   "body": "Filing gate: **① a product defect with named landing sites.**\n- **Class:** (b). The read-path redactor registry states its invariant in the header of `packages/spec/src/kernel/metadata-type-redaction.ts`: a stored credential is never served in cleartext.\n- **`reach:` exception: could leak data.** ⚠️ **The first step of this card is to measure reachability, for each position, before any fix.**\n\n**Family closeout** (fold rule: the second instance opens one card covering the whole family, with an enumeration pin). #20552 is the first instance: the start node's `config.secret`. PR #20585 fixes it through `redactFlowCredentials`, registered as the `flow` read-path redactor. This card covers the positions that projection does not reach.\n\n**Reader who acts:** the triage seat (#6015) grades and routes it. It then goes to the `domain:services` seat, to dispatch after PR #20585 lands, because the fix extends that PR's helper and registry entry.\n\nFiled by the `domain:services` seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`) from the #20552 dev report's `out_of_scope_findings` (entries 1 and 3) and PR #20585's Acceptance notes. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim. This card stays abstract under the security-family disclosure rule, and so must its PR.\n\n## Positions\n\nRead at `origin/main` `f11b5f20`, and at PR #20585's head `c1a3b366` for the projection.\n\n**1. A flow `http` node's `config.signingSecret`.**\n- Declared in `HttpConfigSchema` (`packages/spec/src/automation/io-node-config.zod.ts`, anchor `signingSecret: z.string().optional()`).\n- Documented as authorable in `content/docs/references/automation/io-node-config.mdx`, and consumed by `packages/services/service-automation/src/builtin/http-nodes.ts`.\n- PR #20585's `redactFlowCredentials` withholds only the start node's `config.secret`, so the same definition reads still serve this key.\n- **Not live-measured**, and no shipped example authors it.\n- **A design constraint the fix must meet** (the #20552 dev's reading). This key is OPTIONAL, so drop-and-carry-forward cannot tell \"unchanged\" from \"removed\". An explicit removal needs its own unambiguous door.\n\n**2. The runtime `/meta` list read's fallback.**\n- Location: `packages/runtime/src/domains/meta.ts`, anchor `items = await (metadataService as any).list(typeOrName);`.\n- When `protocol.getMetaItems` throws, the `catch` swallows the fault, and the read falls through to the raw `metadataService.list()`.\n- That list applies no read-path redactor, and `answerMetaList` applies field visibility only.\n- This concerns every type with a registered redactor: datasources as well as flows.\n- **Source-read** by the #20552 dev and by this seat. Not reached on a composed boot.\n\n## Deliverable shape (a suggestion, not a ruling)\n\n- Measure each position: a member-level read for position 1, and a forced protocol-read fault for position 2.\n- **An enumeration pin.** Every credential-bearing key a flow node config schema declares must be withheld by the registered redactor. The pin derives the key list from the schemas, so a newly declared credential key turns it red until the key is covered.\n- For position 2, either the fallback applies the same registered redactor, or the `catch` stops swallowing a protocol fault (AGENTS.md: \"prefer failing to falling back\"). ⛔ Not both.\n\n## Related, not the same\n\n- #20552 / PR #20585: the first instance, the start node's secret.\n- #13405 (closed): a datasource's nested credential. It is the registry's precedent.\n- #13602 (closed): a mongo `kmsProviders` position.\n- #7990 (closed): `sys_metadata` as an at-rest cleartext sink.\n- The maintainer decision triage routes after #20552 lands: moving the inbound secret into a write-only persistence seam.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n\n- \"flow http node signingSecret served in flow definition read redaction\": 4 hits (#20552, #20529, #7571, #13405). None covers position 1.\n- \"metadata list fallback raw metadataService.list bypasses redaction credential datasource\": 6 hits (#15206, #13405, #20468, #7990, #7529, #6622). None covers position 2.\n- \"stored credential in metadata served cleartext on read redactor registry missing position\": 8 hits (#13405, #9124, #7990, #8192, #7522, #4624, #13602, #1892). None is this family's closeout.\n\nDedupe words: `signingSecret flow definition read` · `meta list fallback raw list redaction` · `credential position redactor registry closeout`"

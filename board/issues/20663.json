@@ -1,0 +1,33 @@
+{
+  "number": 20663,
+  "kind": "pull_request",
+  "title": "docs(automation): say an http node's url and headers are served; route credentials to connector credentialRef",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T15:37:39Z",
+  "updated_at": "2026-09-29T16:05:46Z",
+  "closed_at": "2026-09-29T16:05:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T16:05:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20663",
+  "body": "Fixes #20655\nClause-②: no\n\nDocs half of #20590 (guidance faces only, nothing withheld, no code touched). Two pages, three edits.\n\n## What changed\n- `content/docs/automation/flows.mdx`, HTTP Request example: the secret-bearing incoming-webhook url is replaced by a neutral `https://api.example.com/v1/order-events`, and a warning callout follows it.\n- `content/docs/automation/connectors.mdx`, `rest` provider: one paragraph pointing `headers` / `defaultHeaders` to `auth.credentialRef`.\n\n## The sentence (for #20654 to copy)\nNo open PR links #20654 and it has no PR yet, so this page writes the sentence first. #20654 must copy it verbatim into the spec describe text:\n\n> A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows.\n\nThe callout continues: a token, API key or signed webhook url written there is readable by all of them; route an outbound credential to a declarative connector's `auth.credentialRef` and call it with a `connector_action` node.\n\n## Claims verified against origin/main f4ce10c89d\n- Served: `GET /:name` answers `servedFlowDefinition(flow)` (`packages/runtime/src/domains/automation.ts:3028-3034`); the redactor is `packages/services/service-automation/src/flow-credential-projection.ts`, table `FLOW_NODE_CREDENTIAL_KEYS` (`start` -> `secret`, `http` -> `signingSecret`). Only those two keys are dropped, so `url` and `headers` are served as written. The callout says so, so it does not overclaim.\n- Consumed: the `http` node reads `cfg.url` and `cfg.headers` verbatim (`packages/services/service-automation/src/builtin/http-nodes.ts:125-129`), sends `headers` on the request (`:255-261`).\n- `credentialRef`: `auth` on a provider-bound instance (`packages/spec/src/integration/connector.zod.ts:1005`), `ConnectorInstanceAuthSchema` variants bearer / api-key / basic each with `credentialRef: z.string().min(1)` (`packages/spec/src/shared/connector-auth.zod.ts:123-152`); the rest provider receives the resolved auth (`packages/connectors/connector-rest/src/rest-provider.ts:53`).\n\n## Acceptance notes\n- Flows have no per-type read permission on this path (the per-caller read gate in `packages/rest/src/meta-item-read-gate.ts` covers docs, apps and books); the docs therefore say \"every member who can read flows\", the triage direction's wording, and do not name a permission.\n- `flows.mdx` still lists \"an `http` node posting to an incoming webhook\" as the Slack replacement in the retired-shapes table. Left untouched (out of this card's three edits).\n\n## Gates\n`node scripts/pm/dispatch-gates.mjs --commands`: 40 derived, 40 run, reconciled with `--ran` at head 2c78a7a2ec. All exit 0, except `pnpm --filter @objectstack/spec run check:skill-examples`, exit 3 PREREQUISITE NOT MET (`packages/client-react/dist` not built): NOT MEASURED, and it reads skills, not these pages.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

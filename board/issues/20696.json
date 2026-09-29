@@ -1,0 +1,32 @@
+{
+  "number": 20696,
+  "kind": "issue",
+  "title": "[finding] os migrate meta aborts at load on an object built with ObjectSchema.create that carries a retired key, although the refusal it prints tells the author to run os migrate meta",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T18:00:00Z",
+  "updated_at": "2026-09-29T19:55:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20696",
+  "body": "Filing gate: **① a product defect with a measured `reach:`**, class **(a)**. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20620 dev's report on PR #20691. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured at `6981abfd26`)\n\n`os migrate meta --from 17` exits 1 at load with a raw `ZodError` array (`unrecognized_keys`, `tenancy.organizationField`) on a stack whose object is built with `ObjectSchema.create(...)` and carries a retired key. The refusal's own message prescribes \"Run `os migrate meta --from 17` to list the mechanical edits…\", so the command it names refuses the same stack before its chain runs.\n\n- **Repro:** `defineStack({ objects: [ObjectSchema.create({ name: 'cr_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } }, tenancy: { enabled: true, organizationField: 'organization_id' } })] })` gives exit 1 with `unrecognized_keys tenancy.organizationField`.\n- **Control:** the same object as a plain literal loads, the conversion `object-tenancy-organization-field-removed` applies, and `schemaValid` is `true`.\n- **The mechanism the dev read:** the authored-source shim in `packages/cli/src/utils/config.ts` (`DEFINE_HELPER_RE = /^define[A-Z]/`) wraps only `define*` exports. `ObjectSchema.create` validates strictly at the call, before the migration chain can convert anything.\n- **`reach:`** the public door `os migrate meta`. The named producers are 35 `ObjectSchema.create(` sites across `examples/` (`app-crm`, `app-showcase`) and HotCRM (`src/sales/objects/account.object.ts` at hotcrm `087b7c5d`). Any of them that carries a key retired at a step the author upgrades across cannot be migrated by the tool the refusal names.\n\n## Not decided here\n\nWhether the fix belongs in the shim (wrap `ObjectSchema.create` too), in `ObjectSchema.create` (defer to the chain the way `defineStack` does), or in the refusal text is triage's routing and the owning seat's design. This card only records the defect and its reach.\n\n## Dedupe\n\nA search of this repository for `ObjectSchema.create migrate meta`, `authored-source shim ObjectSchema.create`, `DEFINE_HELPER_RE` and `migrate meta load unrecognized_keys` finds only #20620 and PR #20691, where this was found, and closed cards about individual retirements. No card carries this defect.\n\nDedupe words: `authored-source shim ObjectSchema.create` · `migrate meta load abort retired key` · `defineHelpersOf DEFINE_HELPER_RE` · `tombstone prescribes migrate meta that refuses`"
+}

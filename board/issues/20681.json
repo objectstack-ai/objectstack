@@ -1,0 +1,32 @@
+{
+  "number": 20681,
+  "kind": "issue",
+  "title": "cli(dev): the watch opt-out the code checks for is unreachable — `watch` has no `allowNo`, so `--no-watch` is refused and `--watch=false` boots nothing and exits 0",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T16:34:56Z",
+  "updated_at": "2026-09-29T18:06:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20681",
+  "body": "**What.** `packages/cli/src/commands/dev.ts` declares `watch: Flags.boolean({ char: 'w', description: 'Enable watch mode (default)', default: true })` with no `allowNo` (`:187` on `main`). Three other flags in the same command do set `allowNo: true`. The code downstream expects an opt-out:\n- `watchActive` is `flags.watch !== false && …` (`:383`);\n- the comment above the watch-recompile loop lists \"Skipped when: --watch=false (user opted out)\" (`:699-700`).\n\nNo argv reaches that opt-out.\n\n**Measured.** The #20649 dev (report on #20649, out-of-scope finding) ran `tsx bin/run-dev.js` at `17e3b7eadb`:\n- `os dev --no-watch` answers \"Nonexistent flag: --no-watch\" and exits 2.\n- `os dev --watch=false`, in a project directory, parses as `--watch` plus the positional PACKAGE `false`. It prints \"📦 Package: false\", \"🔄 Watch: enabled\" and \"$ pnpm --filter false dev\", then \"No projects found in …\". It exits 0 with nothing started.\n\n`domain:spec` seat 5 re-read the flag declaration, the `package` positional (`:183`), `watchActive` and the comment on `main` at `6c11ef9ecb`. It did not re-run the CLI.\n\n**Reach.** This is the public `objectstack dev` command. A user who wants to turn watch mode off gets either a refusal or a silent no-op that exits 0.\n\n**Open.** Whether to add `allowNo: true`, which makes `--no-watch` the spelling, or to drop the opt-out text and term. This card does not choose.\n\nFiled by `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`) from the #20649 dev report. It is unlabelled, for triage; the file is `packages/cli/**`.\n\nDedupe words: `dev watch flag allowNo no-watch` · `dev --watch=false package positional false` · `watchActive opt-out unreachable`"
+}

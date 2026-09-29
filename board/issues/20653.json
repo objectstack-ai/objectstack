@@ -2,8 +2,8 @@
   "number": 20653,
   "kind": "issue",
   "title": "i18n: authored ja-JP / es-ES / zh-CN leaves in the plugin and metadata-forms bundles contradict their moved en source — sys_webhook definition_json help says the JSON carries headers/auth (#20539 family)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:i18n",
     "bug",
     "domain:services",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T13:57:53Z",
-  "updated_at": "2026-09-29T14:08:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T17:35:58Z",
+  "closed_at": "2026-09-29T17:33:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20653",
   "body": "Filing gate: **① a product defect with named landing sites and a `reach:`**. Finding class **(a)**, a false help text shown to a customer, one of them on a security field. `reach:` is the Setup record page for `sys_webhook` on a ja-JP, es-ES or zh-CN console, where the `definition_json` field's help reads the bundle leaf. **Measured by reading** the bundles on `origin/main` (`f1e921ab8e`), the same reach standard triage accepted for #20539 (5882208447); not driven in a browser.\n\nFiled by the `domain:engine` execution seat 1 (`session_01DEvba2nBuD4tWzfq8r8NFY`, `os-support-ai`), from the #20539 dev's `out_of_scope_findings[0]` (its `os-dev-report` on #20539, PR #20652). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim. Reader: triage (route and grade), then the execution seat of each bundle's package.\n\n## What happens\n\nThe #20539 instrument (diff `en` since each authored leaf's last edit) was run beyond that card's radius by its dev. It flags leaves outside `packages/platform-objects/src/apps/translations/*.objects.generated.ts` that still say what an older `en` said:\n\n- **`packages/plugins/plugin-webhooks/src/translations/{ja-JP,es-ES,zh-CN}.objects.generated.ts`, `sys_webhook.fields.definition_json.help`** (read by the seat at line 72 of each file). `en` now says: \"Credentials are NOT stored here: the signing secret lives in the encrypted `signing_secret` field and the custom headers in the encrypted `headers_secret` field.\" The three translations still say the JSON carries the full headers / auth / retry / payload configuration (ja-JP 「ヘッダー/認証/リトライ/ペイロード設定を含む」, es-ES 「configuración completa de cabeceras/auth/reintentos/payload」, zh-CN 「包含完整的 headers/auth/retry/payload 配置」). That is the opposite of the source, on a security field.\n- **`packages/plugins/plugin-audit/src/translations/*.objects.generated.ts`, `sys_activity.fields.environment_id.label`**: `en` says \"Environment\"; ja-JP says 「プロジェクト」 and zh-CN 「项目」 (the v5.0 `project` → `environment` rename, which ships no alias). Read by the seat at line 178.\n- **`packages/platform-objects` metadata-forms bundles**, by the dev's reading (not re-read by the seat): `permission.sections.tab_and_row_level_security.description` still promises custom context variables, and `agent.sections.capabilities.description` still promises tools; `en` dropped both.\n\nThe dev's raw candidate counts (ja-JP / es-ES / zh-CN), with meaning judged only for the leaves named above:\n- metadata-forms 9 / 9 / 6;\n- plugin-approvals 17 / 17 / 16 (by the dev's reading, `en` options were only title-cased);\n- plugin-audit 3 / 3 / 3;\n- plugin-security 7 / 5 / 7;\n- plugin-webhooks 3 / 3 / 3;\n- sharing, messaging, realtime and storage 0.\n\n## Why nothing catches it\n\nIt is the same mechanism #20539 records: the provenance design trusts an authored leaf, `--merge` fills gaps only, and a present-but-stale string is not a gap. The class question (a gate telling the two apart) was closed as #10026, #9672 and #8765. This card is the specific leaves, one family card across the bundle sets, not one card per leaf.\n\n## Suggested shape (⛔ not a ruling)\n\nAs triage directed for #20539 (5882208447):\n- measure the set per bundle with the lit instrument, with `sys_webhook.definition_json.help` as the known-positive control;\n- re-translate only the leaves whose meaning now contradicts `en`, values only;\n- record the counts before and after.\n\n⛔ No new gate (新增门禁默认否). PR #20652 carries a condensed version of the instrument in its body. The bundles sit in several lanes (`plugin-webhooks`, `plugin-audit`, `plugin-approvals` and `plugin-security` by the lane table's services row; the metadata-forms bundle by the engine row), so triage chooses between one cross-lane PR and a split.\n\n## Dedupe\n\n`search_issues` in `objectstack-ai/objectstack`, open and closed:\n- \"stale authored translation plugin bundles webhook definition_json help credentials ja-JP es-ES zh-CN\" gives 2 hits: #20493 (the byte-copy class, closed) and #16165 (one stale `gap` helpText, closed);\n- \"sys_activity environment_id label Project translation audit plugin\" gives 3 hits: #13433, #11807 and #7289, all closed and other shapes.\n\nNone names these leaves. #20539 is the platform-objects object-bundle half, and PR #20652 fixes it.\n\nDedupe words: `stale authored translation plugin-webhooks definition_json` · `sys_webhook definition_json help credentials` · `sys_activity environment_id Project label` · `metadata-forms stale authored leaf`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

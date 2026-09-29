@@ -1,0 +1,33 @@
+{
+  "number": 20710,
+  "kind": "pull_request",
+  "title": "feat(spec)!: retire an analytics cube's refreshKey — every and sql, read by nothing (#20637)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs:contract-review",
+    "protocol:data",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T20:19:26Z",
+  "updated_at": "2026-09-29T20:25:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20710",
+  "body": "Closes #20637\n\n`analytics_cube.refreshKey` (`every` and `sql`) is retired whole, per the maintainer's ruling C: a tombstone that refuses it with a migration note, a D2 conversion that strips it from stored and authored cubes, one D3 entry, and the showcase author removed. Nothing read the key, and no analytics result cache exists.\n\nClause-②: no (narrowing)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T14:01:37Z",
-  "updated_at": "2026-09-29T14:06:59Z",
+  "updated_at": "2026-09-29T16:35:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20657",
   "body": "**This card carries the `skills/objectstack-automation` half of #20590.** Filing gate: **④ a coordination node**, a per-layer child in the #20618 pattern.\n- Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`).\n- ⛔ Filed bare: triage routes it (its lane split names `domain:skills`; `skills/**` is a governed surface). ⛔ Not a claim.\n\n## Why this is owed\n\nTriage's direction on #20590 (`5891721503`) is **A, taken whole**. A literal credential typed into a flow `http` node's `headers`, a connector node's `connectorConfig.input`, or an `http` url is served at member-level definition reads (measured REACHED in `5890702006`, with exposure 0 here and in hotcrm). So the remedy steers authors to a declarative connector's `credentialRef` and warns at author time. ⛔ Nothing is withheld. `Clause-②: no` for the guidance faces.\n\n## The deliverable (triage's text, point 1)\n\n- The `objectstack-automation` skill's `http` guidance says that a flow definition is served to every member who can read flows, and routes an outbound credential to a declarative connector's `credentialRef`. The skill mentions neither `credentialRef`, `headers_secret` nor `headers` today.\n- `skills/objectstack-automation/references/examples-flows.md` (about `:55` on `main`) teaches an incoming-webhook url whose path is the secret. It is replaced by the connector route, or says plainly that the url is served (position 6).\n- This is the AI-facing surface an author copies from, which is why triage took the guidance half whole.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"objectstack-automation skill http credential credentialRef\": 3 results. #20553, #14836 and #12048 are all closed; #20553 fixed the skill on the api-flow secret, and none covers outbound credentials.\n\nDedupe words: `objectstack-automation skill http credential` · `examples-flows webhook url secret`"

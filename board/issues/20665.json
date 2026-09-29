@@ -1,0 +1,32 @@
+{
+  "number": 20665,
+  "kind": "issue",
+  "title": "spec(ui): `record:related_list.actions` is declared (\"Action IDs available for related records\") and read by no renderer — ENFORCE or RETIRE under ruling A′ ④ (the remainder of objectui#8071)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T15:48:03Z",
+  "updated_at": "2026-09-29T15:48:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20665",
+  "body": "Filing gate: **① a declared≠enforced family of one key**, filed by the triage seat (#6015, session `session_01AavokzJ5DndAwitDXvKy4U`) as its answer to objectui#8071's `pm:retriage`. The rest of that card's population is pinned. This key can't be pinned, because nothing reads it.\n\n## The key and the reach\n\n- **Declared:** `packages/spec/src/ui/component.zod.ts:1285`, inside `RecordRelatedListProps` (`ComponentPropsMap['record:related_list']`): `actions: z.array(z.string()).optional().describe('Action IDs available for related records')`. It is published and parsed.\n- **Read by nothing:**\n  - objectui's `record:related_list` renderer (`packages/plugin-detail`'s `record-related-list.tsx`) never touches `schema.actions`. Its row actions come from the host bridge.\n  - objectui's parity ledger holds the key as its one remaining exemption, `NO_READ_SITE_TO_PIN` (`apps/console/src/__tests__/registry-inputs-spec-parity.test.ts`). `MEMBER_PIN_EXEMPTION_CEILING` is `1` since PR objectui#11113 (objectui#8071, slice 18).\n- **No open tracker:** the tracker the ledger names, objectui#7300, is closed `not_planned`. This card replaces it.\n\n## The one word (ruling A′ ④ on #18900, `5727134555`)\n\nThe criterion is the maintainer's: 「每族该问的是:主流平台有没有这个能力 —— 有 ⇒ 补消费端(一次做对);没有 ⇒ 退役」.\n\n### 维护者速读\n记录详情页里的「相关列表」(比如客户下的联系人列表),规范里允许作者写一个 `actions`:在这个列表上放哪些操作按钮。但目前没有任何渲染器读它,写了也不起作用。\n\n| 选项 | 做什么 | 用户看到什么 |\n|:--|:--|:--|\n| **ENFORCE**(席位推荐) | 渲染器读 `actions`,把这些操作按钮画在相关列表上 | 作者在相关列表上配置的按钮真的出现,和 Salesforce 相关列表的按钮一致 |\n| **RETIRE** | 从规范里删除这个键,并提供迁移转换 | 作者不能再写这个键,相关列表只显示宿主默认提供的操作 |\n\n**只问一字:ENFORCE / RETIRE?**\n\n**Recommendation: ENFORCE.**\n- **Mainstream has it:** a Salesforce related list carries its own action buttons (the standard `New`, plus custom list buttons). Real CRM authoring, hotcrm's included, wants per-list actions.\n- **The consumer is one read,** in objectui's renderer: resolve each action ID through the existing action registry and render it on the list, with host-bridge actions kept as the default when `actions` is absent.\n- **Confidence gap:** it hasn't been measured whether the host bridge already offers a per-list configuration that makes the key a duplicate channel. If it does, RETIRE is the honest answer. The spec seat measures that before either word is executed.\n\n## After the word\n\n- **ENFORCE** → an objectui `domain:ui` child implements the read. The ledger entry becomes a pin, and the ceiling goes `1` → `0`.\n- **RETIRE** → this card carries the spec retirement (conversion, ledger and describe) per `spec-property-retirement`. The objectui ledger entry is deleted in the same step.\n\nDedupe: no open objectstack card names `record:related_list` or `RecordRelatedListProps`. On objectui, objectui#7300 (closed `not_planned`) was the key's only tracker."
+}

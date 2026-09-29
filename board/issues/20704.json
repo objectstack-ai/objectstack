@@ -1,0 +1,33 @@
+{
+  "number": 20704,
+  "kind": "pull_request",
+  "title": "docs(flows): route an http node's credential by shape (#20682)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T19:04:36Z",
+  "updated_at": "2026-09-29T19:32:47Z",
+  "closed_at": "2026-09-29T19:32:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T19:32:46Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20704",
+  "body": "Fixes #20682\n\nClause-②: no\n\nDocs-only, `content/docs/automation/flows.mdx`, two spots.\n\n1. The `http` node callout no longer sends every credential to a declarative connector's `auth.credentialRef`. It routes by shape: a header credential to `bearer`/`basic`/`api-key`; a query key to `api-key` with `paramName`; a secret in the url path has no `credentialRef` variant, so it goes to a token-authenticated connector such as `slack`, whose bot token is supplied by host code (the Slack connector is plugin-registered, not a declarative `connectors:` provider; only `rest`, `openapi`, `mcp` register providers). The first sentence and the `signingSecret` / start-node `secret` sentence are unchanged.\n2. The retired-shapes row for `actionType: 'slack'` keeps the `connector_action` + Slack connector and drops the incoming-webhook `http` alternative.\n\nWording is in step with #20672's `http` descriptor and #20698's describes.\n\n## Acceptance notes\n\n- `pnpm --filter @objectstack/spec run check:skill-examples` (client dist not built) and `check:gitlink-declared` were not run: NOT MEASURED. The other derived gates ran green (33 of 40 derived; the rest are checker self-tests), `doc-security-posture` and `docs-spec-enumerations` included.\n- No changeset: docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv"
+}

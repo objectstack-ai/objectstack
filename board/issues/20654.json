@@ -2,8 +2,8 @@
   "number": 20654,
   "kind": "issue",
   "title": "spec+lint: flow `http` headers / connector input / url describes route credentials to `credentialRef`, and one exported predicate draws an author-time advisory on a credential-shaped literal (the spec half of #20590)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:access",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T14:00:12Z",
-  "updated_at": "2026-09-29T14:05:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T19:13:13Z",
+  "closed_at": "2026-09-29T19:06:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20654",
   "body": "**This card carries the `packages/spec` + `packages/lint` half of #20590.** #20590 keeps the `domain:services` face: the `http` descriptor's `configSchema` text and the showcase teaching site. Filing gate: **④ a coordination node**, a per-layer child in the #20618 pattern.\n- Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`).\n- ⛔ Filed bare: triage routes it (its lane split names `domain:spec`). ⛔ Not a claim.\n\n## Why this is owed\n\nTriage's direction on #20590 (`5891721503`) is **A, taken whole**. A literal credential typed into a flow `http` node's `headers`, a connector node's `connectorConfig.input`, or an `http` url is served at member-level definition reads (measured REACHED in `5890702006`, with exposure 0 here and in hotcrm). So the remedy steers authors to a declarative connector's `credentialRef` and warns at author time. ⛔ Nothing is withheld. `Clause-②: no` for the guidance faces.\n\n## The deliverable (triage's text, points 1 and 2)\n\n- **The describes.** `HttpConfigSchema.headers` and `connectorConfig.input` in `packages/spec` say that a flow definition is served to every member who can read flows, and they route an outbound credential to a declarative connector's `credentialRef`.\n- **One predicate, one home.** The measured R1/R2 rule becomes one exported predicate in `packages/lint`. The rule is in the scanner header of `scan-open-map-credentials.mjs`, on branch `claude/issue-20590-open-map-credentials` at `13b764d0a`. It covers a credential-shaped literal in `headers`, in a connector `input` (walked recursively), and a credential-named query key in an `http` url.\n  - It draws **one advisory** that names the connector route.\n  - The save door carries lint's advisories (`evaluateRuntimeAuthoringGate`, where `flow-try-catch-without-catch` already surfaces), and so do `os validate` and `os lint`.\n  - ⛔ There is no second copy of the name list.\n- **Severity: advisory / warning only, ⛔ never a refusal or an error.** Triage ruled the finding a product advisory for authors, not a new repo gate. If it ever becomes a refusal, it goes back to triage first.\n- A template value (`{var}`) is not a literal. The scanner's positive-control fixture is the natural pin set.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"flow http headers credential advisory lint credentialRef\": 5 results. #20590 is the parent; #13405, #8025, #8118 and #8075 are closed, and none covers an advisory on flow node literals.\n\nDedupe words: `http headers credential advisory` · `connector input literal credential lint` · `credentialRef steer describe`"

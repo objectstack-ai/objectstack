@@ -1,0 +1,33 @@
+{
+  "number": 20706,
+  "kind": "pull_request",
+  "title": "chore(objectui): bump the console pin to db11afd4967c (carries objectui#11119, the objectui#11105 fix)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T19:14:36Z",
+  "updated_at": "2026-09-29T20:06:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20706",
+  "body": "Fixes #20638\n\nClause-②: no\n\nBumps the console pin: `.objectui-sha` `dd3f7e1be356` -> `db11afd4967c` (objectui `origin/main` HEAD at bump time, on main). The pin ships `@object-ui/console` 17.6.0 (`apps/console/package.json` at the pin and `@object-ui/core` workspace version both 17.6.0; `npm view @object-ui/console@17.6.0 version` answers 17.6.0).\n\n## Containment (objectui `merge-base --is-ancestor C db11afd4967c`, full clone, not shallow)\n\n| commit | subject | result |\n|---|---|---|\n| `a5841be351` | flow designer shows a connector action's description (objectui#11028) | exit 0, contained |\n| `99878d8e3a` | validateTree no longer calls a declared bind unknown (objectui#11008) | exit 0, contained |\n| `49f76725aa` | matrix report with columns draws its declared chart (objectui#10964) | exit 0, contained |\n| `ae582b70a` | number field useGrouping (objectui#11026) | exit 0, contained |\n| `5b2ea17570` | Studio previews show authored descriptions and labels (objectui#11027) | exit 0, contained |\n| `3100bef65c` | server-grouped grid selects field names (objectui#11105, PR #11119) | exit 0, contained |\n| control `dd3f7e1be3` (old pin) | | exit 0 |\n\nThe target is objectui `origin/main` HEAD (`git branch -r --contains` lists `origin/main`).\n\n## What changed\n\n- `.objectui-sha`, `sdui.manifest.json`, `scripts/sdui-manifest.record.json` (via `scripts/gen-sdui-manifest-node.mjs`, no arguments: the `--objectui-version` route is retired per that script), and `.changeset/console-db11afd4967c.md` (written by `scripts/bump-objectui.sh`, minor).\n- `pnpm objectui:build` at the new pin built the console dist (64404 KB) with no API break against framework code.\n\n## Follow-up (pushed on this branch, two commits, written 2026-09-29T20:01Z)\n\nRequested by the PM seat after the first report: the two gates that sat outside the first file surface.\n\n- `packages/sdui-parser/objectui-lockstep.json` re-recorded with `pnpm gen:sdui-lockstep` against `db11afd4967c`; `pnpm check:sdui-lockstep` now exits 0.\n- The 49 spec sources that asserted the old pin were re-measured, not re-labelled: each anchor mapped through the `dd3f7e1be356..db11afd4967c` diff and re-read, hashes and counts re-taken with the method each record names, and only then the pin and the moved numbers updated. Files: `component.zod.ts`, `component.test.ts`, `view.zod.ts`, `dataset.zod.ts`, `functional-completeness.ts`, `api-methods-batch-conformance.test.ts`, six `migrations/entries/semantic/18.*` files and the regenerated `migrations/registry.ts`. `pnpm --filter @objectstack/spec run check:objectui-pin-citations` exits 0 (49 asserting citations match, 7 anchor content assertions verified).\n- `content/docs/references/ui/view.mdx` regenerated with `gen:docs`: the `FormField.span` describe names the pin, so its sha moved. This is the only non-comment text change; no schema or behaviour moved.\n- One claim was falsified, not just moved: objectui#5157 closed `ObjectMapConfigSchema` with `.strict()`, so the `ListMapConfigSchema` record in `view.zod.ts` no longer holds when it says the renderer's schema is a plain `z.object` that parses an undeclared key clean. The three anchors were re-pointed and the two false sentences were qualified in the comment. That prose wants a human read.\n- These edits ship inside published text (a describe sentence, and the migration entry descriptions), so a spec changeset is probably owed. Not added here; the PM decides.\n\n## Still open\n\n- The `adr-0087: TODO` placeholder in `.changeset/console-db11afd4967c.md` awaits a human disposition. No agent answers it. `check-adr-0087-registration.mjs --base origin/main` stays red on it until then.\n- NOT MEASURED locally: `pnpm check:dual-build-cjs-loads` and `pnpm check:type-check-debt` (both exit 3, PREREQUISITE NOT MET: they need a whole-workspace build), the Console Pin Gate job, the typecheck lanes and the Test Core shards (CI-owned).\n\n## Governed surface\n\nNone of the 19 changed paths is a row of `GOVERNED_SURFACES` in `scripts/pm/check-governed-merges.mjs` (rows: `docs/adr/`, `.claude/`, `skills/`, `AGENTS.md`, `CLAUDE.md`, `docs/NORTH-STAR.md`). No release act performed.\n\nGates at head db448bfbe0: 125 derived, 123 run, 2 NOT-MEASURED, 0 unrun; 122 exit 0 and 1 exits 1 (the ADR-0087 placeholder above).\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

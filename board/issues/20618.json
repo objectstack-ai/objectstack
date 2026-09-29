@@ -2,8 +2,8 @@
   "number": 20618,
   "kind": "issue",
   "title": "spec(stack): a refusing defineStack carries the conversions it applied on its StackRefusalError, so the doors can report them (the spec half of #20583)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T08:36:46Z",
-  "updated_at": "2026-09-29T14:06:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T15:02:40Z",
+  "closed_at": "2026-09-29T14:31:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20618",
   "body": "**This card carries the `packages/spec` half of #20583 (location 2). #20583 keeps the CLI half.** Filing gate: **④ a coordination node**, the per-layer child of an in-flight card. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`). ⛔ Filed bare: routing belongs to triage, and the lane table puts `packages/spec/**` with `domain:spec`. ⛔ Not a claim.\n\n## Why this is owed\n\nTriage's direction on #20583 (`5884692257`) reads: 「A `defineStack` that converts and then refuses carries the conversions it applied into the refusal's `--json`, so the author sees both.」 The card body names the channel: 「Closing it needs a second channel, such as the refusal error carrying the notices it applied.」\n\nThe #20583 dev measured that the CLI has no channel of its own (`os-dev-report` `5886640889`, at `main` `eb4b17c346`, through `bin/run-dev.js`):\n- **`reach:`** A strict config that converts (`page:header` `description`, notice `page-header-subtitle-alias`) and then refuses (`requires: ['no-such-capability']`) exits 1 with `STACK_CAPABILITY_UNKNOWN` and `conversions: []` on `os validate --json`, `os build --json` and `os lint --json`. The notice reaches stderr only.\n- **Stderr capture is lossy.** `warnConversionNotice` warns once per process. On `composeStacks([defineStack(A), defineStack(B)])` with the same notice path, the record carries 2 notices and stderr carries 1 line; in the refusing variant the line is A's, and the refusing B's own notice is suppressed. The line also lacks `surface`, `toMajor`, `code` and `message`.\n- **Recomputing** with `normalizeStackInput` on the authored argument is the second conversion pass the `stackConversionsOf` TSDoc rules out.\n- **No hook exists.** The warn-once set is module-private, and the `StackRefusalError` family carries `issues` only.\n\nSo the only channel that is not a consumer-side reconstruction is the producer's own record, carried on the refusal.\n\n## What the spec half is (the dev's proposal; ⛔ the spec seat owns the shape)\n\n- Stamp the conversions applied so far on the `StackRefusalError` that `defineStack`'s strict tail throws, under the same `Symbol.for('objectstack.stack.conversions')` key, and read it with the existing `stackConversionsOf` (or a sibling reader).\n- The dev read all 7 throw sites in `defineStack` as constructing `StackRefusalError` subclasses, so one `try`/`catch` around the strict tail may be enough (`packages/spec/src/stack.zod.ts`, `stack-provenance.ts`).\n- Amend the `stackConversionsOf` TSDoc section \"What it cannot hold\".\n- Add a spec test: a convert-then-refuse call whose thrown error answers the applied notices.\n- If the existing reader is reused, the api surface does not move. That is for the spec seat to confirm.\n\n## What #20583 keeps\n\n- The CLI fold in the three catch-alls (`validate`, `compile` / `build`, `lint`), one line each.\n- Triage's convert-then-refuse pin.\n- #20583's location 1 (`os lint --json` folds `LoadedConfig.stackConversions`) ships on its own in PR #20617, which says `Part of #20583`. #20583 waits on this card for location 2.\n\n## Re-check\n\n`git grep -n \"objectstack.stack.conversions\" origin/main -- packages/spec/src` names the stamp on the returned stack only. After this card lands, it also names the refusal path in `defineStack`.\n\nDedupe words: `defineStack refusal conversions` · `StackRefusalError conversions record` · `stackConversionsOf refusal`"

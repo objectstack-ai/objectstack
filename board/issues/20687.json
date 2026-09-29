@@ -1,0 +1,35 @@
+{
+  "number": 20687,
+  "kind": "pull_request",
+  "title": "feat(spec): AnalyticsResult declares object, the dataset answer's base object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T17:30:52Z",
+  "updated_at": "2026-09-29T18:56:37Z",
+  "closed_at": "2026-09-29T18:56:36Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-29T18:56:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20687",
+  "body": "Closes #20647\n\n`AnalyticsResult` and `AnalyticsResultResponseSchema.data` declare an optional `object: string`, the base object of the dataset an answer was computed from. This is the declaration only; setting it on every dataset answer is #20644's service change.\n\nClause-②: yes (widening)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

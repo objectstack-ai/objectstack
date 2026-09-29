@@ -2,8 +2,8 @@
   "number": 20549,
   "kind": "issue",
   "title": "temporal comparand door admits what the write door now refuses: an impossible day (`2026-02-30`) is rolled over as a datetime comparand and is a 500 on PostgreSQL as a date comparand, and a non-ISO datetime comparand is read in the host zone",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T02:07:02Z",
-  "updated_at": "2026-09-29T13:04:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T16:46:11Z",
+  "closed_at": "2026-09-29T16:44:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20549",
   "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**. `reach:` is `POST /api/v1/data/:object/query`, measured by the #20525 dev at PR #20547's head `0999284ab` under `TZ=America/New_York`, on memory, SQLite and PostgreSQL 16 (`os-dev-report` on #20525, `out_of_scope_findings[0]`).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n| `where` | memory | SQLite | PostgreSQL 16 |\n|:--|:--|:--|:--|\n| `opened_at` (`datetime`) `$eq '2026-02-30T10:00:00Z'` | admitted; matches the row stored at `2026-03-02T10:00:00.000Z` (rolled over) | the same | the same |\n| `opened_at` `$eq '07/15/2026 10:00'` (and `'2026/07/15 10:00'`) | admitted; matches the row at `2026-07-15T14:00:00.000Z` (host zone) | the same | the same |\n| `placed_on` (`date`) `$eq '2026-02-30'` | 200 `[]` (compared as text) | 200 `[]` | **500 `DATABASE_ERROR`** |\n\n## Why\n\nThe temporal-comparand door (`packages/objectql/src/temporal-comparand-door.ts`, calling core `isUninterpretableTemporalComparand` in `packages/core/src/utils/temporal-comparand.ts`) is unchanged by #20525:\n- its `readsAsCalendarDay` is a leading-shape test (`^\\d{4}-\\d{2}-\\d{2}`), which does not check that the day exists;\n- its `readsAsInstant` hands a non-ISO string to `Date.parse`.\n\n#20525 (PR #20547) makes the **write** door refuse both, through a private predicate in `record-validator.ts` (`namesRealCalendarDay` / `ISO_DATETIME_WRITE_FORM`). The write door is now strictly narrower than the comparand door. #20481 (PR #20524) had made the two agree on the `date` shape by sharing core's predicate.\n\n## Suggested shape (⛔ not a ruling)\n\n- Lift the write door's two predicates into core, beside `readsAsCalendarDay`, as a move, and have the comparand door refuse what the write door refuses (`INVALID_FILTER` / 400).\n- The analytics raw-SQL decline shares the predicate.\n- Pins: memory, SQLite and PostgreSQL, with the `2028-02-29` leap control and an ISO control.\n- Serial after PR #20547.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"temporal comparand door impossible day 2026-02-30 admitted rolled over non-ISO datetime comparand host timezone\" gives 12 hits.\n- #20525 is the write-door twin.\n- #20480 is an extended-year `time` comparand.\n- #20240, #20264, #20263, #8690, #20481 and #20203 are other temporal classes, all closed.\n\nNone is this.\n\nDedupe words: `comparand impossible day 2026-02-30 rolled over` · `where datetime non-ISO host timezone` · `isUninterpretableTemporalComparand real calendar day` · `date comparand 2026-02-30 postgres 500`"

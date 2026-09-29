@@ -1,0 +1,36 @@
+{
+  "number": 20670,
+  "kind": "pull_request",
+  "title": "docs(automation): say a packaged scheduled flow does not serve multiple tenants under isolated, and never hard-code an organization id into it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T16:09:34Z",
+  "updated_at": "2026-09-29T16:50:12Z",
+  "closed_at": "2026-09-29T16:50:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T16:50:10Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20670",
+  "body": "Fixes #20619\nClause-②: no\n\n## What changed\n\nOne file, `content/docs/automation/flows.mdx`, in \"The acting organization\", directly after the \"No fan-out\" paragraph: +16 lines, nothing removed, nothing else on the page touched.\n\n- A paragraph saying that a **packaged** scheduled flow (one shipped inside an app package that other organizations install) does not serve multiple tenants under `isolated`. The once-per-organization declaration needs an author who already knows the organization ids; a package written before its tenants exist does not, and there is no key that means \"each organization that installs this package\". Without a declaration the flow stays unarmed: refused at bind, or, while `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` is off, listed as disabled by deployment policy. The switch is linked to the subsection where the page already names it.\n- A ⛔ paragraph: never hard-code an organization id into a package flow to get around this. The id would be a guess by an author who cannot know who installs the package, and a wrong `organization_id` is worse than a missing one.\n\nThe 17.5 release notes are not edited (release-owned). `content/docs` ships in no package, so this diff needs no changeset; the `skip-changeset` label goes on with the PR assignee.\n\n## Ruling this implements\n\nThe maintainer's 「20619 A」, relayed by the director seat in the ruling comment on #20619 (5890848676). The operative lines, verbatim:\n\n> **Ruled: A.** Ruling G on #17396 (`5642381255`, addendum `5642795312`) stands: package-authored scheduled work stays behind its deployment switch, default OFF, off for multi-tenant kernels; under `isolated` a `schedule` / `time_relative` flow declares one `config.organization` and there is no fan-out.\n\n> The docs say so plainly, beside `content/docs/automation/flows.mdx`'s 「No fan-out」 paragraph: a packaged scheduled flow does not serve multiple tenants under `isolated`, and ⛔ an organization id is never hard-coded into a package flow to get around it (the failure the key exists to prevent).\n\n## What the sentence rests on (measured on the branch base, 9b402dbae)\n\n- The page already names the switch in \"Does this deployment run scheduled work at all?\" and says it is off by default in every tenancy posture and every kernel.\n- `packages/triggers/trigger-schedule/src/schedule-trigger.ts`: under `isolated` with the switch on, a time-triggered flow declares its organization or is not armed, no fan-out, no organization chosen for it. `packages/types/src/env.ts` holds the switch and the disabled-by-deployment-policy reason the new text names.\n- `content/docs/deployment/tenancy-modes.mdx`, `isolated` row, says the same without the packaged qualifier: consistent, not edited.\n\n## Verification\n\nAll of it is the full re-run at head `abc548399` (a container restart cut the first pass).\n\n- MDX compile of the edited page: OK (128616 bytes; the base version compiles at 127671, so the check reads the file).\n- Derived gates: re-derived against the real diff (merge base 9b402dbae), the same 40 commands as at dispatch. All 40 exit 0, exit codes captured before any pipe. `dispatch-gates --ran`: 40 derived, 40 run, 0 NOT-MEASURED, every exit code recorded. Among them `check:doc-anchors` (the new in-page link resolves; 392 links over 412 files), `check:doc-authoring`, `check:docs-transcript-drift`, `check:docs-single-h1`, `check:nul-bytes`.\n- Roster families printed outside the runnable list (58), run and listed separately: 55 exit 0, 3 exit 2. Of the 55, 18 are checker-health only (self-test), so they say nothing about this diff, and 1 (`check:console-injection`) exits 0 but prints that it skipped for lack of a console build, which reads NOT MEASURED. That leaves 36 verdict-bearing greens.\n- NOT MEASURED locally: `check-closing-target-claim.mjs`, `check-partof-closing-keyword.mjs` (run afterwards against this body) and `check-single-claim-paths.mjs` need a PR number and token (exit 2, wiring); `check:console-injection` needs `pnpm objectui:build`, which clones the sibling repo, outside this card's read scope.\n- CI owns the rest: `pnpm lint`, the type-check lanes, Build Docs, Test Core shards.\n\n## Acceptance notes\n\n- `main` advanced five commits since the base, one of them a docs change to another section of this page; a merge probe against it is clean and this diff stays the 16 added lines.\n- The same section shows a literal example id for a deployment-authored flow, above the new ⛔. The ⛔ is scoped to package flows and the ruling asked for the paragraph and the ⛔ only, so the example is unchanged. Noted, not filed.\n- The end state, `config.organization: '*'` on a packaged flow, is recorded on #20645, which stays open and is not touched here.\n\n## Patch round 1 (the seat's append)\n\n- The phrase `no key means \"each organization that installs this package\"` could parse as \"having no key means every installing organization\", which is the fan-out ruling A declines. At `14711581` it reads `there is no key that means \"each organization that installs this package\"`: three lines replaced by three, and nothing else on the page changed. The seat corrected the quote under What changed in place.\n- **At `14711581`:** `check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`, the frontmatter check and `check:nul-bytes` all exit 0. The MDX compile passes. All 40 derived gates exit 0 (`--ran` 40 / 40 / 0). `check:doc-authoring` was also measured against current `main`'s baseline (the derivation flagged it moved): exit 0. The Verification section above describes round one at `abc548399`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XY5uCwTjZj7884yYtyur4H)_\n"
+}

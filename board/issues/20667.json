@@ -1,0 +1,34 @@
+{
+  "number": 20667,
+  "kind": "pull_request",
+  "title": "chore(changeset): upgrade note and the changes 17.5.0 shipped without notes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T16:01:54Z",
+  "updated_at": "2026-09-29T16:39:28Z",
+  "closed_at": "2026-09-29T16:39:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T16:39:26Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20667",
+  "body": "Fixes #20622\n\nClause-②: no\n\nOne new `patch` changeset (`@objectstack/cli`, in the fixed release group) and nothing else. No code, no docs pages, no edit to any existing changeset.\n\n## What it carries\n\n1. An upgrade line: the raised dependency floors cover what objectstack loads; a lockfile-preserving upgrade can keep an older `hono` under `@modelcontextprotocol/sdk` (via `@objectstack/cli` to `@objectstack/mcp`), which objectstack never loads. `pnpm update hono` clears a scanner. It states no version number.\n2. A section naming, by PR number and title only, the 16 changesets (15 PRs) that shipped inside 17.5.0 without being consumed. Breaking entries first: #20458, #20504, #20567 (two changesets).\n\n## Measurement\n\nThe brief's range command (`git log --diff-filter=A --name-only 8c87d26a5d..0f6dcac5e9 -- .changeset/`) yields only 8 files. The other 8 were added BEFORE the version commit and were already left unconsumed by it (the tree at `8c87d26a5d` still holds them). The set that shipped in 17.5.0 and is still pending is the changeset directory at `0f6dcac5e9` intersected with `origin/main`: 16 files, all still pending, matching the triage's 16 and its breaking set (3 PRs, 4 files). Breaking was decided by each file's text (`BREAKING` banner / narrowing arm).\n\nCode anchors for the upgrade line: `packages/mcp/package.json` depends on `@modelcontextprotocol/sdk ^1.30.0`; `packages/cli/package.json` depends on `@objectstack/mcp`; `packages/plugins/plugin-hono-server/package.json` carries `hono ^4.13.5`; `packages/mcp/src` imports only `server/mcp`, `server/stdio`, `server/webStandardStreamableHttp` and `types` from the SDK (no `server/streamableHttp`).\n\n## Gates\n\n19 derived by `dispatch-gates.mjs --commands`, all 19 run and exit 0 (adr-0087-registration, changeset-no-major, closing-keyword-parity, comment-mask-corpus, empty-changeset, gate self-tests, nul-bytes, published-files and the rest); `--ran` reconciliation: 19 derived, 19 run, 0 NOT-MEASURED, 0 UNRUN. `check-changeset-fixed` green. Ordering: must land before #20639 (Version Packages, open at the time of writing).\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv"
+}

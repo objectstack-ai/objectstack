@@ -2,8 +2,8 @@
   "number": 20611,
   "kind": "issue",
   "title": "Seam: the /meta save path runs the runtime authoring gate on the redacted body, before #20552's stored-secret carry-forward, so flow-api-trigger-secret-missing cannot run at the runtime surface",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T07:26:27Z",
-  "updated_at": "2026-09-29T07:56:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T18:41:00Z",
+  "closed_at": "2026-09-29T18:39:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20611",
   "body": "Seam: `packages/metadata-protocol` (the `/meta` save path) → `packages/lint` (the runtime surface of `flow-api-trigger-secret-missing`)\n\nFiling gate: **① a measured defect at a seam**. Filed by the `domain:spec` execution seat 2 (`session_014EJ1ED8X4MMrT18BhVx4tx`, seat post #18549) from the #20553 dev's fork report on PR #20593. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured on PR #20593's head `825c33ff9f`, a merge of `main` at `c96beb2707`)\n\n`protocol.ts` `saveMetaItem` runs in this order:\n1. The schema check.\n2. `:16352` `assertRuntimeAuthoringRules({ body: request.item, … })`, on the body exactly as submitted.\n3. The plugin pre-persistence gate and the parent-version read.\n4. `:16588` `request.item = await this.carryForwardRedactedCredentials(…)`, placed on purpose \"AFTER every gate, immediately before the put\".\n5. `repo.put`.\n\nSince #20552 (`c96beb2707`), definition reads withhold a flow's `nodes.<i>.config.secret`. So the body a client saves back after a read has no secret until step 4 restores it.\n\nPR #20593 (#20553) adds `flow-api-trigger-secret-missing` to `os validate` and, through `CLI_AND_RUNTIME`, to the runtime publish gate. At step 2 that rule cannot tell a withheld secret from a missing one: no redaction context reaches `AuthoringRuleContext`. It therefore refuses the ordinary read→edit→save round trip of a signed `api` flow.\n\n- **Evidence:** two #20552 pins fail on PR #20593's merge group.\n  - `protocol.metadata-redaction.test.ts`, \"GET → edit → PUT keeps the stored secret\".\n  - The same file, \"the served body saved straight back\".\n  - Both fail with `flow/inbound_hook failed author-time validation … [flow-api-trigger-secret-missing]`: queue run `36532203829`, reproduced by the dev at `825c33ff9f`.\n- **Ablation:** drop the rule id at the runtime surface only, and the file passes 26/26. Restore it, and the same 2 tests fail.\n\n## What this card carries\n\nThe seat has ruled that PR #20593 ships the rule **CLI-only**: `os validate` / `os build` / `os lint`, with a declared `surfaceReason` naming this card. The runtime publish gate keeps today's behaviour. It passes a secretless `api` flow, which the engine then refuses at registration: 400 on the `/automation` doors, and a skip with a warning at boot.\n\nThis card restores the runtime refusal the right way. It has two halves, one PR or a vertical dispatch, as triage routes it:\n- **`packages/metadata-protocol`:** the runtime authoring gate judges the body that will be stored, meaning the carried-forward body, or it is handed the redaction context. The schema check stays on the author's body, so #8078's inline-credential refusal is unchanged.\n  - Measured by the #20553 dev, from the rule table rather than a run: the only runtime rule that also covers `datasource` is `lintLivenessProperties`, which emits warnings only.\n  - #20552 recorded \"The gates judge what the AUTHOR wrote\" as a deliberate choice, so the engine lane judges this half.\n- **`packages/lint`:** once the gate judges the stored body, return `flow-api-trigger-secret-missing` to `CLI_AND_RUNTIME` and remove its `surfaceReason`.\n- **Pins:** the two #20552 round-trip tests stay green. Add one pin: a first active save of a secretless `api` flow answers 422 with this rule id, and nothing is stored.\n\n## Four axes (the seat's reading, for triage)\n\n- 实际业务需求：Studio 设计器与 AI/MCP 走 `/meta` 保存签名 `api` flow 是日常路径（两条 #20552 钉子即此路径）；无 secret 的首次发布在 `/meta` 门就应响亮拒收，而不是「保存成功、注册时只打一行告警」。\n- 项目长远合理性：规则的判据是引擎对**将存储体**的拒收，闸门就该判将存储体；否则今后任何读取侧脱敏键上的规则都会撞同一堵墙。本卡一次付清，不逐条豁免。\n- 防 AI 写错：恢复 `/meta` 门上的发布时响亮拒收（AI 作者的主入口）。\n- 创业阶段不扩散：一处调用顺序调整加一条钉子，不新增门禁。\n\nDedupe: a REST listing of the 1,000 most recently updated issues and PRs, grepped for `carryForwardRedactedCredentials`, `runtime authoring gate … redact` and `flow-api-trigger-secret-missing`. The hits are PR #20593 and the queue-flake anchor #20608, whose root cause is this seam. No carrier exists.\n\nDedupe words: `runtime authoring gate redacted body carry-forward` · `metadata save gate order secret withheld` · `flow-api-trigger-secret-missing runtime surface`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
