@@ -17,9 +17,10 @@ description: "Release notes and upgrade checklist for 17.5.0 of the v17 line."
 - **An edge-branched `decision` takes only its first matching branch**
   (`0283cb9`, #20344). A decision with no `config.conditions` used to run every
   out-edge whose condition held; it now runs the first one in declaration
-  order, and `mode: 'inclusive'` keeps every true branch. `os migrate meta --from 17`
-  writes `mode: 'inclusive'` into authored sources, but ⚠️ **a flow stored in
-  `sys_metadata` is not rewritten** and switches to first-match on upgrade.
+  order, and `mode: 'inclusive'` keeps every true branch.
+  `os migrate meta --from 17` writes `mode: 'inclusive'` into authored sources,
+  but ⚠️ **a flow stored in `sys_metadata` is not rewritten** and switches to
+  first-match on upgrade.
 - **Row-level security stops admitting what it cannot enforce.** A policy with
   no `check` now holds inserts and updates to its `using` (`b7c792b`, #19952) —
   the documented default that the write gate never applied. Predicates that
@@ -103,8 +104,7 @@ description: "Release notes and upgrade checklist for 17.5.0 of the v17 line."
 The 69 package `CHANGELOG.md` files that carry a 17.5.0 section list them as
 1,372 per-package entries (703 minor, 669 patch) in 56 of those files, because
 a changeset that bumps several packages is listed in each; the entries
-de-duplicate to the same 958. The bundled Console
-advances four pins,
+de-duplicate to the same 958. The bundled Console advances four pins,
 `53ded82bf7a4 → 87af769e9a3e → 62597c588072 → f8a9d0fb0596 → dd3f7e1be356`.
 The npm packages also carry eight commits that landed after the version
 commit and are in no 17.5.0 `CHANGELOG.md` entry — see [Also shipped in
@@ -261,8 +261,8 @@ hook. Compare a field only with a field of the same class — a number with a
 number, text with text, a date with a date — or with a literal or a
 `current_user` value; test a file field with `!= null`; and where the two
 columns really hold comparable values, correct the declaration of the one
-declared with the wrong type. A `using`-only policy that relied on writes landing outside its scope
-declares a `check` that admits them. Remove `check` from every `select` /
+declared with the wrong type. A `using`-only policy that relied on writes
+landing outside its scope declares a `check` that admits them. Remove `check` from every `select` /
 `delete` policy — AND it into `using`, or move it to an `insert` / `update` /
 `all` policy. A hook that deliberately writes outside the caller's policy does
 that write separately under a system context.
@@ -320,11 +320,12 @@ into a logged warning for a migration window.
 
 #### Written values are held to the field's declared type
 
-Each entry below narrows what a record write accepts. The record validator
-judges it on insert, update, a multi-row update and `engine.validate` (the dry
-run), before any driver write, and answers `400 VALIDATION_FAILED` with a field
-code; nothing is stored. Only new writes are judged — a stored value is never
-re-read — but an update that sends an old value back is refused.
+Each entry below narrows what a record write accepts. All but the last are
+judged by the record validator on insert, update, a multi-row update and
+`engine.validate` (the dry run), before any driver write, and answered
+`400 VALIDATION_FAILED` with a field code; nothing is stored. Only new writes
+are judged — a stored value is never re-read — but an update that sends an old
+value back is refused. The last is the `/import` door's own cell reader.
 
 - **A `date` string must lead with a real `YYYY-MM-DD` day** (`b2b6a06`,
   #20524; `92ea760`, #20547). `"2026/07/15"`, `"07/15/2026"` or
@@ -617,9 +618,9 @@ rules. Each refusal is `INVALID_FILTER` / `400` at run time and
   strings treats them as numbers. `sum` over a fractional column and every
   `avg` now also accumulate in double there, as on SQLite, and the engine's
   in-memory rows path adds with SQLite's compensated summation (`fc0db22`,
-  #20486; `8538edf`, #20543): `0.1 + 0.2` is `0.30000000000000004` on every
-  face, so compare a fractional sum with a range, not `$eq`. On MySQL this
-  needs 8.0.17 or later.
+  #20486; `8538edf`, #20543): `0.1 + 0.2` is `0.30000000000000004` on SQLite,
+  PostgreSQL, MySQL and the rows path alike, so compare a fractional sum with a
+  range, not `$eq`. On MySQL this needs 8.0.17 or later.
 
 **Migration.**
 
@@ -1056,8 +1057,9 @@ Sibling flows still register. Check boot logs after upgrading.
   `url: 'file:./data/replica.db'` with the remote in `syncUrl` and no `mode`.
 - **Remote-mode Turso refuses a missing table or column as local mode does**
   (`3e8b492`, #20461): `DATABASE_ERROR` / `500` for an absent table, and
-  `INVALID_FIELD` or `INVALID_FILTER` / `400` for an absent column, where it
-  answered `[]` or `null` and schema drift read as "no data". Run schema sync,
+  `INVALID_FIELD` or `INVALID_FILTER` / `400` for an absent column, where most
+  of those reads answered `[]` or `null` and schema drift read as "no data".
+  Run schema sync,
   or name a column the table has. Remote mode now also reads a federated
   object's `external.remoteName` table, which it ignored, and refuses an
   `external.columnMap` that renames a column with `NOT_IMPLEMENTED` / `501`
@@ -1160,7 +1162,8 @@ on metadata that ran — often wrongly — on 17.4.0:
   `indexes[].fields` (`4b2d904`, #20479): `error` in `os validate`,
   `os build` and `os lint`, and `422` at the runtime publish door on an object
   write. A misspelt name used to surface only when a user opened the view or
-  picker, and a misspelt index column skipped a `unique` index without a word.
+  picker, and a misspelt index column made the SQL driver skip the whole
+  index, a `unique` one included, with only a warning.
 - `os validate` and `os build` refuse a `views:` container whose own `name`
   disagrees with the object it binds to (`c5d6b2b`, #20391; `acd0095`,
   #20459) — a stack the server already refused at boot, and which `os build`
@@ -1493,8 +1496,8 @@ on the Invite user dialog among them (`9bf5e67`, #20490; `6427e2c`, #20530).
 (`ca31ff6`), and `nodemailer` a major, to `^10.0.2` (`f572a7e`, #20564), for
 GHSA-6vj9-mwq6-2f5v — nodemailer's process-global DNS cache could give a
 second SMTPS transport to the same host the first one's SNI and certificate
-identity, sending its credentials to the wrong TLS virtual host. Every release from
-5.0.0 through 10.0.1 is affected, so the 9.x line has no fix. ⚠️ From
+identity, sending its credentials to the wrong TLS virtual host. Every release
+from 5.0.0 through 10.0.1 is affected, so the 9.x line has no fix. ⚠️ From
 nodemailer 10.0.12, the version a fresh install resolves, `requireTLS` wins
 over `ignoreTLS` / `opportunisticTLS`, and `SmtpTransport` sets `requireTLS`
 whenever TLS is on and the port is not 465. A
@@ -1650,8 +1653,10 @@ walked](/docs/releases/v17#upgrade-checklists).
 
 ⛔ **Nobody has walked 17.4.0 → 17.5.0.** Every line below is derived from a
 change's own **Migration** note in [Breaking changes & migration in
-17.5.0](#breaking-changes--migration-in-1750) and is marked **not exercised**:
-accurate about what changed, unproven about what it costs to cross. A step
+17.5.0](#breaking-changes--migration-in-1750) — or, for the cube member
+`name`, in [Also shipped in 17.5.0](#also-shipped-in-1750--not-in-its-changelog)
+— and is marked **not exercised**: accurate about what changed, unproven about
+what it costs to cross. A step
 nobody has run, presented beside steps that were, is how a reader finishes a
 checklist and believes they are done — so this list claims nothing it has not
 been given.
