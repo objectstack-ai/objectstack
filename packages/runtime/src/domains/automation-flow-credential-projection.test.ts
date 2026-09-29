@@ -164,3 +164,29 @@ describe('#20552 — anti-vacuity: the door serves exactly what the registry ent
         expect(JSON.stringify(result.response?.body)).toContain(SECRET);
     });
 });
+
+describe('#20590 — a relocating PUT never lands the secret where the next read serves it', () => {
+    it('the start node’s kind changed and a new start node added: the member’s next read carries no credential', async () => {
+        const { dispatcher, spies } = makeDispatcher();
+        const served = dataOf(await dispatcher.handleAutomation('/inbound_hook', 'GET', undefined, MEMBER));
+        const [finish, begin] = served.nodes;
+        const relocated = {
+            ...served,
+            nodes: [
+                finish,
+                { ...begin, type: 'assignment', label: 'Was the start node', config: {} },
+                { id: 'begin_v2', type: 'start', label: 'On Webhook', config: { triggerType: 'api', hookId: 'intake' } },
+            ],
+            edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }],
+        };
+
+        const put = await dispatcher.handleAutomation('/inbound_hook', 'PUT', relocated, AUTHOR);
+        expect(put.response?.status).toBe(200);
+        const next = await dispatcher.handleAutomation('/inbound_hook', 'GET', undefined, MEMBER);
+        expect(next.response?.status).toBe(200);
+        expect(dataOf(next).nodes.map((n: any) => n.id)).toEqual(['finish', 'begin', 'begin_v2']);
+        expect(JSON.stringify(next.response?.body)).not.toContain(SECRET);
+        // …and nothing was grafted into what the engine was handed.
+        expect(JSON.stringify(spies.registerFlow.mock.calls.at(-1)![1])).not.toContain(SECRET);
+    });
+});

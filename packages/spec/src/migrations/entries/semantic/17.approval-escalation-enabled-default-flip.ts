@@ -16,7 +16,8 @@ export const entry: SemanticMigration = {
     + 'the escalation sweep actually reads',
   reason:
     'A DECLARED-DEFAULT CORRECTION plus the enforcement that makes the key real '
-    + "(#12278, maintainer ruling 2026-08-27) — the same category as protocol 17's "
+    + "(maintainer ruling 2026-08-27, which moved the declared default to what the sweep had "
+    + "always done) — the same category as protocol 17's "
     + '`import-run-automations-declared-default-corrected`: the schema promised '
     + '`enabled` defaults to `false` (SLA off) while the plugin-approvals sweep never '
     + 'read the key at all — any escalation block with a positive `timeoutHours` '

@@ -8,15 +8,17 @@ export const entry: SemanticMigration = {
   replacement:
     '(removed — never implemented; delete the key from the call. It is NOT replaced by '
     + '`organizationId`: that member is the delivery row\'s tenant stamp '
-    + '(`sys_email.organization_id` pass-through, #11741) and opts into no template overlay '
+    + '(`sys_email.organization_id` pass-through, added so the email writer stamps a '
+    + 'delivery row\'s organization at the source) and opts into no template overlay '
     + 'resolution)',
   reason:
-    'ADR-0049 enforce-or-remove (#11832). `SendTemplateInput.org` was declared as "Tenant id '
+    'ADR-0049 enforce-or-remove. `SendTemplateInput.org` was declared as "Tenant id '
     + 'for org-overlay resolution (when supported)" and no implementation ever read it: '
     + '`@objectstack/plugin-email` — the only IEmailService implementation — resolves templates '
     + 'on `(name, locale)` only, so a caller passing `org` got no org-overlay resolution and no '
-    + 'error; the "(when supported)" hedge was the declaration admitting the gap. After #11741 '
-    + 'landed `organizationId` beside it, the input carried two org-shaped keys of which one did '
+    + 'error; the "(when supported)" hedge was the declaration admitting the gap. After the '
+    + 'delivery-row stamp landed `organizationId` beside it, the input carried two org-shaped '
+    + 'keys of which one did '
     + 'nothing — exactly the shape that invites an AI author to pick the wrong one. There is no '
     + 'behaviour to preserve and nothing stored to rewrite: the key only ever appeared in a '
     + 'call-time input bag (the `data.engine.update options.upsert` precedent), which is why '

@@ -10,7 +10,9 @@ export const entry: SemanticMigration = {
     + 'in the device-flow response body',
   replacement: 'intervalSeconds — rename the key; the value (seconds, default 2) is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B (2026-09-02, extended on 2026-09-05 to runtime-emitted durations): '
+    + 'the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying '
+    + 'value, never only in the describe prose, and no existing offender is grandfathered. '
     + 'This key was ATTRIBUTED to RFC 8628 by the campaign card and reached this card only after '
     + 'the attribution failed verification, so the evidence is recorded here rather than left in a '
     + 'PR body. Ruling B exempts a key that mirrors a name fixed outside this repo, declared on the '
@@ -23,8 +25,7 @@ export const entry: SemanticMigration = {
     + 'marked key is exempted permanently and silently, while a wrongly renamed one is visible. '
     + 'A SEMANTIC entry rather than a D2 conversion because the shape is RUNTIME-EMITTED — the '
     + 'body of POST /api/v1/auth/device/request, never a stack collection member and never a '
-    + 'sys_metadata row, so the conversion chain has no seam that would see one. #15677, #14478, '
-    + 'ADR-0087.',
+    + 'sys_metadata row, so the conversion chain has no seam that would see one. ADR-0087.',
   acceptanceCriteria:
     'No producer emits `interval` and no consumer reads it. The old spelling is a retiredKey() '
     + 'tombstone, so authoring it fails tsc (the key types never) and fails the parse with the '

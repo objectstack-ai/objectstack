@@ -12,7 +12,7 @@ export const entry: SemanticMigration = {
     + 'a self-provided transport. A config naming `postgres` or `nats` never '
     + 'worked: pick `redis`, or register the transport yourself under `custom`',
   reason:
-    'Maintainer ruling on objectstack-ai/cloud#1626 (2026-08-24, option B '
+    'Maintainer ruling of 2026-08-24 on the cluster driver line-up (option B '
     + 'adopted): single-node is the ObjectOS EE boundary, multi-node is Cloud '
     + 'differentiation, and a DB-first postgres cluster driver is not built '
     + 'absent concrete customer pull. The ruling\'s principle rider decides '

@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     + 'exactly `lat`, `lng`, `altitude`, `accuracy`. Every rejection carries the surface, the '
     + 'offending key and a rename (`postal_code` / `zipCode` / `zip` / `postcode` → `postalCode`, '
     + '`latitude` → `lat`, `longitude` → `lng`). A key that names no declared member is removed '
-    + 'at the producer — never tolerated at a consumer (AGENTS.md #0.1)',
+    + 'at the producer — never tolerated at a consumer: an alias for an off-spec key in a '
+    + 'consumer stays forbidden (contract-first — fix the metadata, not the runtime)',
   reason:
     'Maintainer ruling 2026-09-01, option A: both value classes refuse undeclared keys. Both '
     + 'value classes were all-optional '

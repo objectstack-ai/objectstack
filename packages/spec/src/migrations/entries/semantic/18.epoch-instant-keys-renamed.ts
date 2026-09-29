@@ -18,7 +18,7 @@ export const entry: SemanticMigration = {
     + 'milliseconds since the Unix epoch, still Date.now(). Only the key name '
     + 'and the declared schema move',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): a '
+    'Maintainer ruling B (2026-09-05, on the population the 2026-09-02 rule reaches): a '
     + 'duration-shaped z.number() carries its unit in the key NAME, minus two '
     + 'structural classes declared ON THE SCHEMA rather than in a gate ledger. '
     + 'Epoch instants are the first class. They read to the rule exactly like '
@@ -43,7 +43,7 @@ export const entry: SemanticMigration = {
     + 'disposition kernel/KernelContext:previewMode already carries on one of '
     + 'these very defs, and ruling B prescribes it explicitly: an ADR-0087 '
     + 'conversion where the key is authorable, a semantic entry where it is '
-    + 'runtime-emitted. #15676, #14478, ADR-0087.',
+    + 'runtime-emitted. ADR-0087.',
   acceptanceCriteria:
     'No producer emits the old key and no consumer reads it. All four are '
     + 'tombstoned with retiredKey(), so each fails tsc at the construction '
