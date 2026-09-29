@@ -290,6 +290,9 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     registerService: vi.fn(),
+    // As in rig 2: the lifecycle hooks are collected and never fired, so no
+    // bootstrap read is left running into the engine teardown.
+    hook: () => undefined,
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
       return services[name];
@@ -576,6 +579,7 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     registerService: (name: string, svc: unknown) => { if (name === 'security') security = svc; },
+    hook: () => undefined,
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
       return services[name];
