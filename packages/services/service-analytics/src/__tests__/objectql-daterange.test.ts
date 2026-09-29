@@ -427,6 +427,29 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
     expect(sql).toContain('(close_date >= $2 AND close_date < $3)');
     expect(params).toEqual(['won', '2026-01-01', '2026-02-01']);
   });
+
+  // [#20600] 9999-12-31, the last supported day, has no next day: the driver
+  // compiles no upper bound for it, so the echo renders none. It used to bind
+  // the five-digit '10000-01-01' as the upper bound — SQL that answers no rows
+  // on SQLite, where the column is ISO text that sorts above it.
+  it('renders a window ending on the last supported day with no upper bound; 9999-12-30 keeps one', async () => {
+    const svc = makeService([]);
+    const echo = (end: string) => svc.generateSql!({
+      cube: 'sales',
+      dimensions: ['stage'],
+      measures: ['revenue'],
+      timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', end] }],
+    });
+
+    const last = await echo('9999-12-31');
+    expect(last.sql).toContain('(close_date >= $1)');
+    expect(last.sql).not.toContain('close_date <');
+    expect(last.params).toEqual(['2026-01-01']);
+
+    const control = await echo('9999-12-30');
+    expect(control.sql).toContain('(close_date >= $1 AND close_date < $2)');
+    expect(control.params).toEqual(['2026-01-01', '9999-12-31']);
+  });
 });
 
 describe('ObjectQLStrategy — cross-object FK-expand carries the window (#3650 × #3654)', () => {
