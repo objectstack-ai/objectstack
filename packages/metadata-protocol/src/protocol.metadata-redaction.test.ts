@@ -36,7 +36,7 @@
  *     after redaction instead of before — which is the ordering that would
  *     destroy the #8081 item-3 operator inventory.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
     getMetadataTypeRedactor,
@@ -466,5 +466,181 @@ describe('#8154 — carryForwardRedactedValues, the three outcomes', () => {
 
         const view = { name: 'v', label: 'V' };
         expect(carryForwardRedactedValues('view', view, { name: 'v', secret: 'x' })).toBe(view);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20552 — a credential on an ARRAY element: a flow's inbound-hook secret
+// ---------------------------------------------------------------------------
+//
+// The `flow` redactor is registered by `@objectstack/service-automation` (the
+// package that knows which start-node key is the hook's HMAC secret), which this
+// package does not depend on. The stand-in below emits the SAME path shape that
+// redactor is pinned to emit (`nodes.<index>.config.secret`, service-automation
+// `flow-credential-projection.test.ts`), so what is exercised here is this
+// package's half: every read exit applies it, the execution face does not, and
+// the write-path inverse walks an ARRAY hop — by identity, not by position.
+
+const FLOW_SECRET = 'stored-hook-secret-20552';
+const ROTATED = 'rotated-hook-secret-20552';
+
+const flowStandInRedactor = (item: Record<string, unknown>) => {
+    const nodes = item.nodes;
+    if (!Array.isArray(nodes)) return { item, redactedKeys: [] as string[] };
+    const redactedKeys: string[] = [];
+    const projected = nodes.map((node: any, index: number) => {
+        if (node?.type !== 'start' || !node.config || !('secret' in node.config)) return node;
+        const { secret: _s, ...rest } = node.config;
+        void _s;
+        redactedKeys.push(`nodes.${index}.config.secret`);
+        return { ...node, config: rest };
+    });
+    return redactedKeys.length === 0 ? { item, redactedKeys } : { item: { ...item, nodes: projected }, redactedKeys };
+};
+
+/** An inbound flow as stored — the start node deliberately NOT first. */
+function storedInboundFlow(secret: string = FLOW_SECRET) {
+    return {
+        name: 'inbound_hook',
+        label: 'Inbound hook',
+        type: 'api',
+        nodes: [
+            { id: 'finish', type: 'end', label: 'End' },
+            { id: 'begin', type: 'start', label: 'On Webhook', config: { triggerType: 'api', hookId: 'intake', secret } },
+        ],
+        edges: [{ id: 'e1', source: 'begin', target: 'finish' }],
+    };
+}
+
+function seedFlowRow(rows: Map<string, Row>) {
+    const where = { type: 'flow', name: 'inbound_hook', organization_id: null, package_id: null, state: 'active' };
+    const body = storedInboundFlow();
+    rows.set(keyOf(where), {
+        id: 'r_flow',
+        ...where,
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body),
+        version: 1,
+    } as Row);
+}
+
+const storedFlowBody = (rows: Map<string, Row>) =>
+    JSON.parse(Array.from(rows.values()).find((r) => r.type === 'flow' && r.state === 'active')!.metadata);
+
+const startNodeOf = (flow: any) => (flow.nodes as any[]).find((n) => n.type === 'start');
+
+describe('#20552 — carryForwardRedactedValues walks an array hop by IDENTITY', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('carries the secret back onto the start node even when the edit REORDERED the nodes', () => {
+        const stored = storedInboundFlow();
+        const served = redactMetadataItem('flow', stored) as any;
+        expect(JSON.stringify(served)).not.toContain(FLOW_SECRET);
+
+        // The designer moved the start node to the front and renamed the flow.
+        const incoming = { ...served, label: 'Edited', nodes: [served.nodes[1], served.nodes[0]] };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+
+        // By position this would have landed on the END node — the one now at
+        // the stored start node's index.
+        expect(startNodeOf(out).config.secret).toBe(FLOW_SECRET);
+        expect(out.nodes[1]).toEqual({ id: 'finish', type: 'end', label: 'End' });
+        expect(out.label).toBe('Edited');
+        // Copy-on-write: the caller's body is untouched.
+        expect(startNodeOf(incoming).config.secret).toBeUndefined();
+    });
+
+    it('an explicit value is the author`s word — a rotation replaces the stored secret', () => {
+        const stored = storedInboundFlow();
+        const served = redactMetadataItem('flow', stored) as any;
+        const incoming = structuredClone(served);
+        startNodeOf(incoming).config.secret = ROTATED;
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(startNodeOf(out).config.secret).toBe(ROTATED);
+    });
+
+    it('carries nothing where identity cannot be established, or the author removed the container', () => {
+        const stored = storedInboundFlow();
+        const served = redactMetadataItem('flow', stored) as any;
+
+        // The start node's config was removed — the author's word.
+        const noConfig = { ...served, nodes: [served.nodes[0], { ...served.nodes[1], config: undefined }] };
+        expect(startNodeOf(carryForwardRedactedValues('flow', noConfig, stored)).config).toBeUndefined();
+
+        // The start node itself is gone.
+        const noStart = { ...served, nodes: [served.nodes[0]] };
+        expect(carryForwardRedactedValues('flow', noStart, stored)).toEqual(noStart);
+
+        // Two nodes share the stored start node's id — neither is chosen.
+        const twins = { ...served, nodes: [served.nodes[1], { ...served.nodes[1], label: 'Twin' }] };
+        const out: any = carryForwardRedactedValues('flow', twins, stored);
+        expect(out.nodes.every((n: any) => n.config?.secret === undefined)).toBe(true);
+
+        // A stored start node with no `id` gives the hop no identity to follow.
+        const idless: any = storedInboundFlow();
+        delete idless.nodes[1].id;
+        const idlessServed = redactMetadataItem('flow', idless) as any;
+        const idlessOut: any = carryForwardRedactedValues('flow', idlessServed, idless);
+        expect(startNodeOf(idlessOut).config.secret).toBeUndefined();
+    });
+});
+
+describe('#20552 — the protocol serves the projection and executes the stored body', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('every read exit withholds the secret; the EXECUTION face carries it', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const list: any = await protocol.getMetaItems({ type: 'flow' });
+        expect(list.items.some((i: any) => i.name === 'inbound_hook')).toBe(true);
+        const one: any = await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' });
+        expect(one.item.name).toBe('inbound_hook');
+        const layered: any = await protocol.getMetaItemLayered({ type: 'flow', name: 'inbound_hook' });
+        expect(layered.effective).not.toBeNull();
+        for (const served of [list, one, layered]) expect(allStrings(served)).not.toContain(FLOW_SECRET);
+
+        // The engine's face: the same item, the stored secret, no decorations.
+        const exec: any = await protocol.getMetaItemsForExecution({ type: 'flows' });
+        const executed = exec.items.find((i: any) => i.name === 'inbound_hook');
+        expect(startNodeOf(executed).config.secret).toBe(FLOW_SECRET);
+        expect(executed._diagnostics).toBeUndefined();
+        expect(exec.items.map((i: any) => i.name)).toEqual(list.items.map((i: any) => i.name));
+    });
+
+    it('GET → edit → PUT keeps the stored secret; an explicit rotation replaces it', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({
+            type: 'flow',
+            name: 'inbound_hook',
+            item: { ...editable, label: 'Edited', nodes: [editable.nodes[1], editable.nodes[0]] },
+        });
+        let stored = storedFlowBody(rows);
+        expect(stored.label).toBe('Edited');
+        expect(startNodeOf(stored).config.secret).toBe(FLOW_SECRET);
+
+        const again: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d2, ...rotated } = again;
+        void _d2;
+        startNodeOf(rotated).config.secret = ROTATED;
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: rotated });
+        stored = storedFlowBody(rows);
+        expect(startNodeOf(stored).config.secret).toBe(ROTATED);
+    });
+
+    it('ABLATION — with the `flow` redactor removed the served exits carry the secret again', async () => {
+        registerMetadataTypeRedactor('flow', (item) => ({ item, redactedKeys: [] }));
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const one: any = await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' });
+        expect(allStrings(one)).toContain(FLOW_SECRET);
     });
 });
