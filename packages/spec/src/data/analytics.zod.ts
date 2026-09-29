@@ -424,8 +424,8 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
  * surfaces, the migration notes and one author (`examples/app-showcase`,
  * `every: '1 hour'`). And nothing for it to key on: `service-analytics`
  * references no cache or job service — its one cache is the request-scoped
- * `dimension-labels.ts#withLabelFetchCache` — so every analytics query is
- * computed when it is asked. `sql` was security-adjacent as well: raw SQL run on
+ * `packages/services/service-analytics/src/dimension-labels.ts#withLabelFetchCache`
+ * — so every analytics query is computed when it is asked. `sql` was security-adjacent as well: raw SQL run on
  * a schedule, outside the read-scope machinery every other cube `sql` goes
  * through.
  *
