@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE #17883 PIN: one `os generate migration`, one column width for the file
+ * THE commit b06b2db5c PIN: one `os generate migration`, one column width for the file
  * family — whichever `--format` the author picked.
  *
  * ## The defect
@@ -26,7 +26,7 @@
  * 2048 is not a width invented to settle a disagreement. It is the width
  * ADR-0104 ruled and the rest of the tree has already shipped:
  *
- *   - ADR-0104, recording the maintainer ruling on #15041: "The driver is the
+ *   - ADR-0104's 2026-09-05 addendum, recording the maintainer ruling: "The driver is the
  *     side that moves; the generator's `VARCHAR(2048)` already states the ruled
  *     end-state and stands."
  *   - #15989 moved `driver-sql`: `MEDIA_ID_VARCHAR_CHARS = 2048` and

@@ -49,13 +49,13 @@
  * back to SQLite, which is the #3276 lesson kept intact: a silent step-down onto
  * a *different* engine writes an operator's data into the wrong database.
  *
- * ## #6268 — the loader itself lives in the runtime now
+ * ## Commit 68f5eccb1 — the loader itself lives in the runtime now
  *
  * That loader used to be written out twice: here, and in
  * `packages/runtime/src/turso-driver-factory.ts` (#5820, for `os migrate` /
  * `createStandaloneStack`). The two were kept equal BY HAND — one decision, two
  * implementations, which is the #3741 → #3758 shape that goes wrong three months
- * later. It had already started: #6345 moved this half onto `@objectstack/spec`'s
+ * later. It had already started: commit e2798fab7 moved this half onto `@objectstack/spec`'s
  * shared driver vocabulary and left the runtime half on a private
  * `Set(['turso', 'libsql'])`.
  *
@@ -88,7 +88,7 @@ import {
 
 /**
  * The libSQL/Turso loader's single-sourced surface, re-exported so this module
- * stays the CLI's one door to storage-driver concerns (#6268). These are the
+ * stays the CLI's one door to storage-driver concerns (commit 68f5eccb1). These are the
  * runtime's declarations, not copies of them — in particular
  * {@link MissingDriverPackageError} is ONE class across both packages.
  */
@@ -124,7 +124,7 @@ const MISSING_URL_EXAMPLES: Readonly<Partial<Record<BuiltinDriverId, string>>> =
 
 /**
  * The refusal for "you named a driver whose database lives somewhere I cannot
- * guess, and then did not tell me where" (#6345 fork 2).
+ * guess, and then did not tell me where" (commit e2798fab7's fork 2).
  *
  * Generalized from the wording `turso` has carried since #5602, because that
  * wording was already right for every one of these kinds — the maintainer's
@@ -152,7 +152,7 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
 
 /**
  * Thrown by {@link resolveStorageDefinition} for a driver selection that cannot
- * become a datasource definition. Two cases since #6345:
+ * become a datasource definition. Two cases since commit e2798fab7:
  *
  *  - a spelling no builtin claims (`--database-driver sqlite3`), which used to
  *    fall through to the dev SQLite default while `os migrate` refused the same
@@ -193,7 +193,7 @@ export class UnsupportedDriverError extends Error {
    *
    * That consumer is real: `commands/database-driver-allowlist.pin.test.ts`
    * (#6860) derives the canonical kinds by using {@link resolveStorageDefinition}
-   * as its oracle and reading `driverType` out of this error. When #6345 taught
+   * as its oracle and reading `driverType` out of this error. When commit e2798fab7 taught
    * the resolver to refuse unknown spellings too, that oracle started reporting
    * every stray string literal in this file (`safe`, `on-disconnect`, `factory`)
    * as a driver kind. This flag is what keeps the two answers apart.
@@ -203,7 +203,7 @@ export class UnsupportedDriverError extends Error {
     super(message);
     this.name = 'UnsupportedDriverError';
     this.driverType = driverType;
-    // Defaults to `true` so the pre-#6345 call sites (turso with no URL) keep
+    // Defaults to `true` so the call sites predating commit e2798fab7 (turso with no URL) keep
     // their meaning without restating it.
     this.recognized = opts.recognized ?? true;
   }
@@ -323,21 +323,21 @@ export function resolveStorageDefinition(
   // kinds. Never in production, never destructive.
   const autoMigrate = isDev ? ({ autoMigrate: 'safe' } as const) : {};
 
-  // ONE vocabulary since #6345 (`@objectstack/spec`'s driver table). The arms
+  // ONE vocabulary since commit e2798fab7 (`@objectstack/spec`'s driver table). The arms
   // below therefore branch on the CANONICAL id and never on a spelling: the
   // hand-written `driverType === 'pg' || driverType === 'postgresql'` chains
   // were half of the fork this card closes — the standalone stack's enum had
   // its own answer, and 10 of 21 spellings disagreed.
   const kind = resolveDatabaseDriverId(driverType);
 
-  // An EXPLICIT selection nothing claims is refused, loudly (#6345 fork 1).
+  // An EXPLICIT selection nothing claims is refused, loudly (commit e2798fab7's fork 1).
   //
   // `driverType` is `explicit || inferDriverTypeFromUrl(url)`, and the inferring
   // half only ever yields a canonical id or `''` — so a non-empty value that
   // resolves to nothing can only have come from an operator naming a driver.
   // It used to fall through to the trailing dev default, i.e. `os dev
   // --database-driver sqlite3` silently booted SQLite while `os migrate` refused
-  // the same value by name. #6344 killed that silent fallback on the standalone
+  // the same value by name. Commit cfb549db8 killed that silent fallback on the standalone
   // side; this is its mirror, and it is what makes the two hosts answer the same
   // question the same way for EVERY input rather than only for the legal ones.
   if (driverType && !kind) {
@@ -354,7 +354,7 @@ export function resolveStorageDefinition(
     );
   }
 
-  // Fork 2 (#6345): a kind with NO local default, selected with no URL. Every
+  // Fork 2 (commit e2798fab7): a kind with NO local default, selected with no URL. Every
   // such selection used to be answered by a guess, differently on each side:
   // postgres/mysql got `config.url === undefined` and the `pg`/`mysql2` client
   // then connected to ITS own localhost; mongodb got an invented
@@ -491,7 +491,7 @@ export function resolveStorageDefinition(
  * Load the OPTIONAL libSQL/Turso driver package and wrap it as the host driver
  * factory `DefaultDatasourcePlugin` accepts (#5602).
  *
- * A thin delegation to the runtime's single owner since #6268 — the loading, the
+ * A thin delegation to the runtime's single owner since commit 68f5eccb1 — the loading, the
  * error class, the install command, the missing-package wording and the handle
  * shape all live in `@objectstack/runtime`'s `turso-driver-factory.ts`. What this
  * wrapper supplies is the two things that are genuinely the CLI's, and would be a
@@ -511,7 +511,7 @@ export function resolveStorageDefinition(
  *     written here, in the package that peer-declares it, and is typed rather
  *     than `as any` for the same reason.
  *  2. **{@link UnsupportedDriverError} for a url-less turso config.** CLI-only
- *     semantics by the #6268 ruling — `serve.ts` re-throws it as a fatal boot
+ *     semantics by the ruling commit 68f5eccb1 landed — `serve.ts` re-throws it as a fatal boot
  *     error. Only the error TYPE is chosen here; the message comes from the
  *     runtime, so the wording is not duplicated.
  */

@@ -28,7 +28,7 @@ import { extractHookBody, HookBodyExtractionError, type HookBodyRefusalKind } fr
  *
  * `origin` and `reason` are unchanged — `os build`'s warn-and-bundle line,
  * `--strict-body`'s diagnostic and the `--json` payload all read them.
- * `kind` (#13651) is the classification the refusing rule already had and used
+ * `kind` (commit ada3834ad) is the classification the refusing rule already had and used
  * to throw away at the catch below; `freeIdentifiers` is the list
  * `detectFreeIdentifiers` had already computed. Both are ADDITIVE: nothing here
  * changes which callables are bundled, or the exit code.
@@ -281,7 +281,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           //   carefully kept.
           //
           //   MALFORMED — the headless husk `{ effect: 'writes' }` that a plain
-          //   `JSON.stringify(stack)` leaves where a declaration was (#6293).
+          //   `JSON.stringify(stack)` leaves where a declaration was (as commit c39a911ae found).
           //   Deleting it here erased the evidence BEFORE the parse: the artifact
           //   came out `functions: {}` and validated green, so the build shipped
           //   an app missing the function instead of refusing. Handed on, it

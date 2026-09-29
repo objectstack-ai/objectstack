@@ -6,9 +6,9 @@
  *
  * ── What this closes ─────────────────────────────────────────────────────
  *
- * PR #12463 (#12151) single-sourced every operator-facing occurrence in
+ * Commit 27b690272 (PR #12463) single-sourced every operator-facing occurrence in
  * `serve.ts` onto `Serve.ORGANIZATIONS_RUNTIME_PKG` and pinned what those
- * messages render. `doctor.ts` sat outside that card's file surface and kept
+ * messages render. `doctor.ts` sat outside that commit's file surface and kept
  * its own bare `@objectstack/organizations` literal inside
  * `TENANCY_POSTURE_FIX_HINTS`, under no check of any kind — so a roster-key
  * rename left `os doctor` printing a package name that boot no longer

@@ -271,7 +271,7 @@ export default class MigrateFilesToReferences extends Command {
         includeUnreferenced: flags['include-unreferenced'],
       });
 
-      // ── The COLUMN step (#15989, the ruling on #15041 step 2) ────────────
+      // ── The COLUMN step (#15989, sequencing step 2 of ADR-0104's 2026-09-05 addendum) ──
       //
       // Runs only after the backfill and its self-check reported zero blocking
       // rows — the ruling's own "abort otherwise", and the reason it lives

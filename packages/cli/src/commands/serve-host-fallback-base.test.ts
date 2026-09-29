@@ -1,15 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `serve` hands `createHostImporter` its OWN resolution base (#11157) — the
- * half of that card an in-process test can honestly measure.
+ * `serve` hands `createHostImporter` its OWN resolution base (commit a4cb7817f) — the
+ * half of that fix an in-process test can honestly measure.
  *
  * ── The defect ───────────────────────────────────────────────────────────
  *
  * `createHostImporter`'s UNDECLARED leg falls back to "the importing package's
  * own resolution", and which package that is depends on where the `import()` is
  * physically WRITTEN: Node ESM resolves a bare specifier against the module
- * containing the call. #10943 made it an explicit parameter,
+ * containing the call. Commit 46d34ab7c made it an explicit parameter,
  * `options.fallbackImport`. `@objectstack/verify` and the `packages/qa/dogfood`
  * probe pass theirs; `serve`'s `importFromHost` did not, so its fallback
  * resolved from `@objectstack/types` — which under a pnpm-isolated layout sees
@@ -91,7 +91,7 @@ describe('os serve → the undeclared diagnostic takes the caller-supplied-base 
     // #11185's text: the app being served, never the process CWD.
     expect(err.message).toContain(`host app: ${root}`);
     expect(err.message).not.toContain(`host app: ${process.cwd()}`);
-    // #11157: the other branch of the same message. `serve` supplies its base
+    // Commit a4cb7817f: the other branch of the same message. `serve` supplies its base
     // now, so the note that exists to report the gap must not be printed.
     expect(err.message).not.toContain('the caller did not pass `fallbackImport`');
     // The #4719 remedy the helper owns is unchanged — this card moved a base,
@@ -125,7 +125,7 @@ describe('os serve → the base is wired at the single importer construction', (
   });
 
   it('the config-plugin path no longer re-implements the declaration read', () => {
-    // Collapsed in #11157: the undeclared branch's local `import()` and the
+    // Collapsed in commit a4cb7817f: the undeclared branch's local `import()` and the
     // re-entry branch became the same call once the base was threaded, so the
     // declaration is read once, by `readHostDeclaration` inside the helper.
     const helper = SERVE_SOURCE.slice(SERVE_SOURCE.indexOf('static async importConfigPlugin'));

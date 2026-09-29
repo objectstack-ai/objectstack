@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE pin #6345 exists for: both boot hosts answer the SAME question about the
+ * THE pin of commit e2798fab7: both boot hosts answer the SAME question about the
  * SAME `OS_DATABASE_DRIVER` value the same way.
  *
  * ## Why this file, and why here
  *
- * The fork survived three separate cards (#3276, #5820, #6265) that each fixed
+ * The fork survived three separate changes (#3276, #5820, commit cfb549db8) that each fixed
  * one spelling on one side. Every one of them was pinned — by a test that drove
  * exactly one host. `packages/cli/src/utils/storage-driver.test.ts` proved the
  * CLI accepted `pg`; `packages/runtime/src/standalone-stack*.test.ts` proved the
@@ -56,7 +56,7 @@ const URL_FOR: Readonly<Record<string, string>> = {
   turso: 'libsql://my-db.turso.io',
 };
 
-/** Spellings NEITHER host accepted before #6345, and which must stay refused. */
+/** Spellings NEITHER host accepted before commit e2798fab7, and which must stay refused. */
 const CONTRACT_ONLY_SPELLINGS = ['sqlite3', 'better-sqlite3', 'mariadb', 'inmemory'] as const;
 
 type Verdict = { accepted: true; driverId: string } | { accepted: false };
@@ -134,7 +134,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   );
 
   // The other half of "the same answer": a spelling one host refuses, the other
-  // must refuse too. Before #6345 the CLI silently booted SQLite in dev for
+  // must refuse too. Before commit e2798fab7 the CLI silently booted SQLite in dev for
   // these while `os migrate` named them in a refusal.
   it.each([...CONTRACT_ONLY_SPELLINGS, 'nonsense', 'com.vendor.snowflake'])(
     'both hosts REFUSE `%s`, in dev AND in prod',
@@ -150,7 +150,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   );
 
   // The card's own reproduction, kept verbatim as a named case: it is the line a
-  // reader of #6345 will look for, and a table row does not read as one.
+  // reader of commit e2798fab7 will look for, and a table row does not read as one.
   it('the card repro: OS_DATABASE_DRIVER=pg is accepted by BOTH (was: start yes, migrate no)', () => {
     const url = 'postgres://u:p@localhost:5432/db';
     expect(cliVerdict('pg', url)).toEqual({ accepted: true, driverId: 'postgres' });
@@ -214,7 +214,7 @@ describe('fork 2: no local default + no URL is refused on BOTH sides — all 8 c
     'cell A — `os start` refuses `%s` with no URL instead of guessing one',
     (kind) => {
       expect(() => resolveStorageDefinition(kind, { isDev: false })).toThrow(UnsupportedDriverError);
-      // Dev is not an escape hatch: the pre-#6345 dev path was the one that
+      // Dev is not an escape hatch: the dev path before commit e2798fab7 was the one that
       // silently produced a definition.
       expect(() => resolveStorageDefinition(kind, { isDev: true })).toThrow(UnsupportedDriverError);
     },

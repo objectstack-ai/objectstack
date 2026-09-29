@@ -61,7 +61,7 @@ import { getCredentialsPath, readAuthConfig } from './auth-config.js';
  * package's build renames and relocates nothing). Its output was checked
  * against the built `Config` while writing this pin: same ids. The same
  * reasoning, and the same derivation, is documented at length in
- * `src/commands/environments/environments.test.ts`'s `#10967` pin — which
+ * `src/commands/environments/environments.test.ts`'s pin from commit e4a71d418 — which
  * covers `static override examples` arrays via AST and structurally cannot
  * see a thrown-error string, which is why this class needed its own pin
  * rather than an extension of that one. The derivation is duplicated rather

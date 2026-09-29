@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13347] `errorCodeFields` — the ADR-0112 carriers a `--format json` failure
+ * [commit 098a08ffa] `errorCodeFields` — the ADR-0112 carriers a `--format json` failure
  * envelope adds beside its `error` sentence, and the arm that adds NOTHING.
  *
  * ## What is being pinned, and why it is pinned on BYTES

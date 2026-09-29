@@ -2,7 +2,7 @@
 
 /**
  * The operator-facing prose that names the multi-org runtime spells it from the
- * ONE declaration, and these pins read what it RENDERS (#12151).
+ * ONE declaration, and these pins read what it RENDERS (commit 27b690272).
  *
  * ── What this closes ─────────────────────────────────────────────────────
  *
@@ -77,7 +77,7 @@
  *
  * ⛔ The pins were NOT relaxed or deleted to accommodate the reword: they still
  * compare the whole rendered line, whitespace included, against text built from
- * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and the #12151 CONTROL block below still
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and the CONTROL block commit 27b690272 added below still
  * proves they can say no. Only the expected PROSE moved, in the same diff as
  * the prose itself, which is the shape this file is for — a wording change that
  * does not redden a pin here would mean the pin had stopped reading.
@@ -179,7 +179,7 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
     // DRIVEN on both shapes this one kind covers, that text was wrong twice:
     // for a genuinely broken install it repeats, word for word, the three
     // remedies `unresolvableMessage` already prints in the `cause:` line four
-    // lines below; and for #15045's location sub-case — narrowed by #17046 but
+    // lines below; and for the location sub-case commit 288fe9c34 reworded — narrowed by #17046 but
     // NOT removed, since pnpm's `file:` virtual-store copy and every git /
     // tarball declaration still reach it — the same `cause:` says outright
     // that re-running `pnpm install`, un-pruning and rebuilding change

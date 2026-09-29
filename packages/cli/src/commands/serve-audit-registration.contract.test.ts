@@ -53,7 +53,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The separator (#9367) is a plain `.mjs`, but it ships a hand-written `.d.mts`
-// declaration alongside it (#10398), so this import is typed and needs no
+// declaration alongside it (commit 0681a76b8), so this import is typed and needs no
 // suppression. A `@ts-expect-error` here is an UNUSED directive, and cli's tsc
 // program does include this file, so tsc fails the build on one.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';

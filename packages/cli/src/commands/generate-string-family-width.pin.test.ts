@@ -17,7 +17,7 @@
  * ```
  *
  * A row the platform stores today could not be stored in a table generated for
- * the same object. That is the hard-failure class of #15040's `22P02`, not the
+ * the same object. That is the hard-failure class of the `22P02` commit 8644d1d33 fixed, not the
  * cosmetic-schema-diff class of #15521.
  *
  * ## The class is nine rows wide, not one
@@ -335,7 +335,7 @@ function armMembers(type: string): string[] {
  *
  * ⚠️ [#15989] `FILE_REFERENCE_TYPES` is excluded for a DIFFERENT reason from
  * the other two, and the difference is the point. It is no longer json-seeded —
- * the maintainer ruling on #15041 took the family out of `JSON_COLUMN_TYPES`
+ * the maintainer ruling in ADR-0104's 2026-09-05 addendum took the family out of `JSON_COLUMN_TYPES`
  * altogether — but it did not join the character half either: inside the
  * catch-all it has its own arm, answered per DEPLOYMENT (a json column until
  * this deployment has moved its media columns, then a `varchar` at the width

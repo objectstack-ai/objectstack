@@ -2,7 +2,7 @@
 
 /**
  * `os lint` rule: a registered handler that cannot be lowered to a
- * metadata-only body (#13651).
+ * metadata-only body (commit ada3834ad).
  *
  * ## The defect this closes
  *
@@ -189,7 +189,7 @@ function judge(fn: AnyFn, originLabel: string, path: string): HookBodyLintIssue 
       // fell short — the event says nothing about what the author chose, so it
       // must not borrow the bundled-fallback prose below ("the body uses
       // something the sandbox cannot provide"), which asserts a verdict about
-      // the handler. Kept distinct on purpose (#13651): an instrument failure
+      // the handler. Kept distinct on purpose (commit ada3834ad): an instrument failure
       // must not read as a verdict about the author.
       const [rule, instrument] =
         kind === 'unparseable'

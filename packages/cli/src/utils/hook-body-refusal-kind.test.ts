@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13651 — the refusal carries its classification, and the messages did not move.
+ * Commit ada3834ad — the refusal carries its classification, and the messages did not move.
  *
  * Two halves, and the second matters as much as the first: `os build`'s
  * warn-and-bundle line, `--strict-body`'s per-callable diagnostic and

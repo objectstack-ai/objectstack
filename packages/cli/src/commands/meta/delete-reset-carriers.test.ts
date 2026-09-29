@@ -2,7 +2,7 @@
 
 /**
  * [#13024] `os meta delete` can pin its reset and can discard only the pending
- * draft — the CLI reaches the carriers the SDK gained in #12181.
+ * draft — the CLI reaches the carriers the SDK gained in commit cf71d73f8.
  *
  * ## The defect
  *
@@ -19,7 +19,7 @@
  *    an operator who wanted to throw away only an unpublished draft had to take
  *    the more destructive path.
  *
- * Until #12181 there was no argument to pass either through. With
+ * Until commit cf71d73f8 there was no argument to pass either through. With
  * `DeleteMetaItemOptions` on both `deleteItem` declarations, only the CLI
  * surface was missing.
  *
@@ -390,7 +390,7 @@ describe('[#13024] the flags `os meta delete` declares', () => {
 
   it('the withheld third carrier has no flag, under either spelling', () => {
     const names = Object.keys(MetaDelete.flags as Record<string, unknown>);
-    // #12181 shipped two of the door's three carriers on purpose; `?dropStorage`
+    // Commit cf71d73f8 shipped two of the door's three carriers on purpose; `?dropStorage`
     // is the one that ADDS destructive reach. A CLI flag for it would reverse
     // that ruling from the layer above.
     expect(names).not.toContain('dropStorage');

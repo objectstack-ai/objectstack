@@ -250,7 +250,7 @@ function recordingProcessSend(fn: () => void): unknown[] {
  *
  * They read the source because `run()` is one ~3000-line method needing a whole
  * kernel to enter, so nothing in-process could observe what its three publish
- * sites read. #13193 changed the shape: the publish is now one exported seam,
+ * sites read. Commit faff497fd changed the shape: the publish is now one exported seam,
  * {@link publishBoundPort}, that takes its three channels as ARGUMENTS. So
  * "all three publish that one number" is now driven and observed instead of
  * grepped — strictly stronger, because a grep passes on text that never runs,
@@ -261,7 +261,7 @@ function recordingProcessSend(fn: () => void): unknown[] {
  * un-enterable in-process, so it stays a source pin, and it is a better one
  * than before: there is now exactly ONE site to get wrong instead of three.
  *
- * ⛔ The ORDER the seam drives the three in is #13193's property, pinned in
+ * ⛔ The ORDER the seam drives the three in is what commit faff497fd fixed, pinned in
  * `test/serve-bound-port-publish-order.test.ts`. Kept separate deliberately —
  * these two files fail for different reasons and should keep naming them.
  */
@@ -415,7 +415,7 @@ describe('#13062 all THREE channels publish that one number', () => {
     // one leaves two lying in a place nobody thinks to look next time.
     expect(SERVE).not.toContain('port: Number(port)');
     expect(SERVE).not.toContain('externalBaseOrigin: resolveAuthBaseUrl(port)');
-    // ⛔ `const runtimeUrl = ...` is gone (#13193 folded it into the seam), so a
+    // ⛔ `const runtimeUrl = ...` is gone (commit faff497fd folded it into the seam), so a
     // negative naming it would pass for the wrong reason. The live spelling of
     // the same regression is the seam being handed the REQUESTED port.
     expect(SERVE).not.toContain('publishBoundPort(port,');
