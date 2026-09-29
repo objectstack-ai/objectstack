@@ -1,7 +1,0 @@
----
-"@objectstack/platform-objects": patch
----
-
-The `zh-CN`, `ja-JP` and `es-ES` help text for `sys_user.role` told a Setup administrator to press the "Set Platform Role" action retired earlier — the `en` text had already moved on (renamed to describe `OS_PLATFORM_OWNER_EMAIL` and the `single`-posture `admin_full_access` grant) but the three translations were never updated to match. Retranslated the leaf into each locale as a faithful rendering of the current `en` text, with code spans (`OS_PLATFORM_OWNER_EMAIL`, `single`, `admin_full_access`, `sys_user_permission_set`) kept verbatim.
-
-No source-hash entry was added for this leaf — measured to be architecturally unreachable for a genuinely translated (non-literal-copy) leaf under the `objects`/`metadataForms` provenance mechanism (`source-hash.ts`, ruling #12069 Option A): `collectFilledFromHashes` records a hash only when the translated value is currently a byte copy of the source, and a real translation satisfies neither `value === currentSource` nor `previous[path] === hash(value)`, so it stays legacy-trusted by the ruling's own stated design. Verified empirically: mutating the source description and re-running `pnpm i18n:extract`, `pnpm check:i18n` and `pnpm check:i18n-stale-fill` reports nothing for this leaf either before or after this fix — this class of leaf has no gate-visible staleness detection today, which is the pre-existing status quo for every hand-translated leaf in the `objects` bundle, not a regression this PR introduces.

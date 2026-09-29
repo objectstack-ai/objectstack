@@ -395,7 +395,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     });
   });
 
-  // ── #9933: `columnState` — runtime-only overlay key, BOTH halves pinned ───
+  // ── commit d5552ca13: `columnState` — runtime-only overlay key, BOTH halves pinned ───
   //
   // The maintainer-accepted ruling (objectui#5233, 「全部接受」 2026-08-19):
   // `columnState` is admitted to the view-metadata surface as an EXPLICITLY
@@ -407,7 +407,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     // The REAL payload, measured: objectui's `persistViewPatch` sends
     // `{ columnState: { order?, widths? }, _isOverride: true }` and
     // `normalizeViewMetadata` inherits `name`/`object`/`viewKind` from the
-    // shadowed entry (#2555). Before #9933 this body carried no declared key,
+    // shadowed entry (#2555). Before commit d5552ca13 this body carried no declared key,
     // so the identity precondition 422'd it — the ruled patch-only write for
     // a column drag could not persist.
     it('HALF 1 — the overlay face accepts a `columnState`-only patch (the objectui#5233 payload)', () => {

@@ -103,7 +103,7 @@ describe('TimeUpdateInterval', () => {
     // narrowing that reached only one of them would still parse a cube
     // offering a granularity no query may ask for.
     const dim = (granularities: string[]) => ({
-      name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at', granularities,
+      label: 'Created At', type: 'time', sql: 'created_at', granularities,
     });
     expect(DimensionSchema.safeParse(dim(['day', 'month'])).success).toBe(true);
     expect(DimensionSchema.safeParse(dim(['hour'])).success).toBe(false);
@@ -113,19 +113,19 @@ describe('TimeUpdateInterval', () => {
 describe('MetricSchema', () => {
   it('should accept valid minimal metric', () => {
     const metric = MetricSchema.parse({
-      name: 'total_revenue',
       label: 'Total Revenue',
       type: 'sum',
       sql: 'amount',
     });
 
-    expect(metric.name).toBe('total_revenue');
     expect(metric.type).toBe('sum');
+    // The record key in `measures` is the metric's name; the parse output
+    // carries no inner copy of it.
+    expect(metric).not.toHaveProperty('name');
   });
 
   it('should accept metric with all fields', () => {
     const metric = MetricSchema.parse({
-      name: 'avg_order_value',
       label: 'Average Order Value',
       description: 'Average revenue per order',
       type: 'avg',
@@ -146,7 +146,6 @@ describe('MetricSchema', () => {
   // migration channel — not merely throw.
   it('rejects the removed `filters` key with the retirement prescription (#10414)', () => {
     expect(() => MetricSchema.parse({
-      name: 'avg_order_value',
       label: 'Average Order Value',
       type: 'avg',
       sql: 'order_total',
@@ -154,9 +153,22 @@ describe('MetricSchema', () => {
     })).toThrow(/`measures\.<metric>\.filters`.*removed in @objectstack\/spec 17 \(.*os migrate meta --from 17/s);
   });
 
+  // #20300 (ADR-0049 enforce-or-remove): the inner `name` REMOVED. This file
+  // used to pin its snake_case regex ('should reject metric with invalid
+  // snake_case name') — a check on a value nothing read, because the record key
+  // was always the identity. The pin flips to the tombstone: EVERY value is
+  // refused, the key-equal one included, and the refusal carries the
+  // prescription. The full door-by-door pin lives in
+  // `cube-member-inner-name-retirement.test.ts`.
+  it('refuses the retired inner `name` with the prescription, whatever its value (#20300)', () => {
+    for (const name of ['total_revenue', 'TotalRevenue', '']) {
+      expect(() => MetricSchema.parse({ name, label: 'Total Revenue', type: 'sum', sql: 'amount' }), name)
+        .toThrow(/`measures\.<metric>\.name` was removed in @objectstack\/spec 17\.5\.0.*the record key is the metric's name.*os migrate meta --from 17/s);
+    }
+  });
+
   it('should apply defaults for optional fields', () => {
     const metric = MetricSchema.parse({
-      name: 'count_users',
       label: 'User Count',
       type: 'count',
       sql: 'id',
@@ -166,53 +178,38 @@ describe('MetricSchema', () => {
     expect(metric.format).toBeUndefined();
   });
 
-  it('should reject metric with invalid snake_case name', () => {
-    expect(() => MetricSchema.parse({
-      name: 'TotalRevenue',
-      label: 'Total Revenue',
-      type: 'sum',
-      sql: 'amount',
-    })).toThrow();
-
-    expect(() => MetricSchema.parse({
-      name: 'total-revenue',
-      label: 'Total Revenue',
-      type: 'sum',
-      sql: 'amount',
-    })).toThrow();
-  });
-
   it('should reject metric without required fields', () => {
+    // No inner `name` in either literal: with one, the tombstone alone would
+    // refuse the parse and the missing field would never be what was measured.
     expect(() => MetricSchema.parse({
-      name: 'revenue',
       label: 'Revenue',
       type: 'sum',
     })).toThrow();
 
     expect(() => MetricSchema.parse({
-      name: 'revenue',
       type: 'sum',
       sql: 'amount',
     })).toThrow();
+
+    // CONTROL: the same shape with every required field parses.
+    expect(MetricSchema.safeParse({ label: 'Revenue', type: 'sum', sql: 'amount' }).success).toBe(true);
   });
 });
 
 describe('DimensionSchema', () => {
   it('should accept valid minimal dimension', () => {
     const dim = DimensionSchema.parse({
-      name: 'product_category',
       label: 'Product Category',
       type: 'string',
       sql: 'category',
     });
 
-    expect(dim.name).toBe('product_category');
     expect(dim.type).toBe('string');
+    expect(dim).not.toHaveProperty('name');
   });
 
   it('should accept time dimension with granularities', () => {
     const dim = DimensionSchema.parse({
-      name: 'created_at',
       label: 'Created At',
       type: 'time',
       sql: 'created_at',
@@ -225,7 +222,6 @@ describe('DimensionSchema', () => {
 
   it('should accept dimension with all fields', () => {
     const dim = DimensionSchema.parse({
-      name: 'region',
       label: 'Region',
       description: 'Geographic region',
       type: 'geo',
@@ -236,21 +232,23 @@ describe('DimensionSchema', () => {
     expect(dim.description).toBe('Geographic region');
   });
 
-  it('should reject dimension with invalid name', () => {
-    expect(() => DimensionSchema.parse({
-      name: 'ProductCategory',
-      label: 'Product Category',
-      type: 'string',
-      sql: 'category',
-    })).toThrow();
+  // #20300 — the same flip as the metric's (see that block): the snake_case
+  // check on the inner `name` pinned a value nothing read.
+  it('refuses the retired inner `name` with the prescription, whatever its value (#20300)', () => {
+    for (const name of ['product_category', 'ProductCategory']) {
+      expect(() => DimensionSchema.parse({ name, label: 'Product Category', type: 'string', sql: 'category' }), name)
+        .toThrow(/`dimensions\.<dimension>\.name` was removed in @objectstack\/spec 17\.5\.0.*the record key is the dimension's name.*os migrate meta --from 17/s);
+    }
   });
 
   it('should reject dimension without required fields', () => {
     expect(() => DimensionSchema.parse({
-      name: 'category',
       label: 'Category',
       sql: 'category',
     })).toThrow();
+
+    // CONTROL: the same shape with its `type` parses.
+    expect(DimensionSchema.safeParse({ label: 'Category', type: 'string', sql: 'category' }).success).toBe(true);
   });
 });
 
@@ -316,8 +314,8 @@ describe('a persisted cube heals at the door (#18612, ADR-0087 D2)', () => {
     analyticsCubes: [{
       name: 'showcase_delivery',
       sql: 'showcase_task',
-      measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: '*' } },
-      dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+      measures: { count: { label: 'Tasks', type: 'count', sql: '*' } },
+      dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
       joins: {
         project: {
           name: 'showcase_project',
@@ -364,8 +362,8 @@ describe('a persisted cube heals at the door (#18612, ADR-0087 D2)', () => {
         {
           name: 'billing_revenue',
           sql: 'showcase_invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
-          dimensions: { issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
           joins: {
             account: { name: 'showcase_account', relationship: 'many_to_one' },
             // Already canonical: the control that produces NO notice.
@@ -391,7 +389,6 @@ describe('CubeSchema', () => {
     sql: 'SELECT * FROM orders',
     measures: {
       count: {
-        name: 'count',
         label: 'Order Count',
         type: 'count',
         sql: 'id',
@@ -399,7 +396,6 @@ describe('CubeSchema', () => {
     },
     dimensions: {
       status: {
-        name: 'status',
         label: 'Status',
         type: 'string',
         sql: 'status',

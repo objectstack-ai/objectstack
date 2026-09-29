@@ -106,11 +106,11 @@ const CONFORMANCE_CUBE: Cube = {
   name: TABLE,
   title: 'Filter logic conformance',
   sql: TABLE,
-  measures: { count: { name: 'count', label: 'Rows', type: 'count', sql: 'id' } },
+  measures: { count: { label: 'Rows', type: 'count', sql: 'id' } },
   dimensions: Object.fromEntries(
     (['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'] as const).map((f) => [
       f,
-      { name: f, label: f, type: 'string' as const, sql: f },
+      { label: f, type: 'string' as const, sql: f },
     ]),
   ),
   public: true,
@@ -314,9 +314,9 @@ const COMPARAND_CUBE: Cube = {
   name: COMPARAND_TABLE,
   title: 'Comparand round-trip',
   sql: COMPARAND_TABLE,
-  measures: { count: { name: 'count', label: 'Rows', type: 'count', sql: 'id' } },
+  measures: { count: { label: 'Rows', type: 'count', sql: 'id' } },
   dimensions: Object.fromEntries(
-    Object.keys(COMPARAND_FIELDS).map((f) => [f, { name: f, label: f, type: 'string' as const, sql: f }]),
+    Object.keys(COMPARAND_FIELDS).map((f) => [f, { label: f, type: 'string' as const, sql: f }]),
   ),
   public: true,
 };

@@ -21,6 +21,7 @@ import { DateGranularity } from './query.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { retiredKey } from '../shared/retired-key';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const AggregationMetricType = z.enum([
   'count', 
@@ -148,6 +149,50 @@ export const TimeUpdateInterval = z.enum(
 export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 
 /**
+ * The inner `name` a cube member used to REQUIRE — RETIRED (#20300, ADR-0049
+ * enforce-or-remove; triage verdict RETIRE by the maintainer's criterion for
+ * declared-but-unenforced families: Cube.dev and LookML key a member by its
+ * declared name, with no second inner name that can disagree).
+ *
+ * `measures` and `dimensions` are RECORDS, and the record key was always the
+ * member's identity: `AnalyticsService#getMeta` and the in-memory driver
+ * publish every member as `${cube.name}.${key}`,
+ * `NativeSQLStrategy#lookupMember` and the in-memory driver's
+ * `resolveMeasure` / `resolveDimension` index the bag by key, and a query names
+ * the member that way. Measured before removal with a lit control: zero reads
+ * of a member's inner `name` in non-test source, against four reads of the
+ * neighbouring `measure.label` / `dimension.label` in the same two `getMeta`
+ * projections. So the key was a REQUIRED second copy of the identity that
+ * nothing read — and one that disagreed with its key was inert (the in-memory
+ * driver's own fixtures authored `totalAmount: { name: 'total_amount' }` and
+ * queried `orders.totalAmount`).
+ *
+ * A `retiredKey()` tombstone rather than a bare deletion, although the member
+ * shapes are `strictObject`s (the `action.aria` precedent): a bare delete is
+ * loud only as a generic unrecognized-key report, which cannot carry the
+ * prescription, and the tombstone also types the key `never` so a typed
+ * authoring site fails `tsc` first. Stored and built cubes carry the key —
+ * it was REQUIRED — so the ADR-0087 D2 conversion
+ * `cube-member-inner-name-removed` strips it at every rehydration seam, and the
+ * D3 entry `cube-member-inner-name-retired` carries the judgement a disagreeing
+ * value still owes its author.
+ */
+const CUBE_MEMBER_NAME_MIGRATE =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const cubeMemberNameRemoved = (qualifiedKey: string, bag: 'measures' | 'dimensions', member: string) =>
+  `\`${qualifiedKey}\` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — `
+  + `it never had an effect: the record key is the ${member}'s name. Every consumer resolves a ${member} `
+  + `by its key in \`${bag}\` (\`GET /analytics/meta\` publishes it as \`<cube>.<key>\`, and a query names it `
+  + 'that way), so the inner `name` was a second copy of the identity that nothing read, and one that '
+  + 'disagreed with its key was silently ignored. Delete the key. To rename a '
+  + `${member}, rename its key in \`${bag}\` — and every query, dashboard and report that names `
+  + `\`<cube>.<key>\`. ${CUBE_MEMBER_NAME_MIGRATE}`;
+
+const CUBE_METRIC_NAME_REMOVED = cubeMemberNameRemoved('measures.<metric>.name', 'measures', 'metric');
+const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension>.name', 'dimensions', 'dimension');
+
+/**
  * Metric Schema
  * A quantitative measurement (e.g., "Total Revenue", "Average Order Value").
  *
@@ -157,6 +202,10 @@ export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
  * roots + `ObjectStackSchema` resolves the whole family reachable, with
  * `ObjectSchema` as positive control and a fresh uncarried shape as negative
  * control in the same run).
+ *
+ * A metric carries no name of its own: its key in the cube's `measures` record
+ * IS its name (the inner `name` was retired, see
+ * {@link CUBE_METRIC_NAME_REMOVED}).
  */
 export const MetricSchema = lazySchema(() => strictObject(
   {
@@ -188,7 +237,10 @@ export const MetricSchema = lazySchema(() => strictObject(
     },
   },
   {
-    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique metric ID'),
+    // `name` REMOVED (#20300, ADR-0049 enforce-or-remove) — the record key in
+    // `measures` is the metric's name. See the module-level note above
+    // `CUBE_METRIC_NAME_REMOVED`.
+    name: retiredKey(CUBE_METRIC_NAME_REMOVED),
     label: z.string().describe('Human readable label'),
     description: z.string().optional(),
 
@@ -214,6 +266,10 @@ export const MetricSchema = lazySchema(() => strictObject(
  * A categorical attribute to group by (e.g., "Product Category", "Order Date").
  *
  * Strict as of #4001 batch D — same doors as {@link MetricSchema}.
+ *
+ * A dimension carries no name of its own: its key in the cube's `dimensions`
+ * record IS its name (the inner `name` was retired, see
+ * {@link CUBE_DIMENSION_NAME_REMOVED}).
  */
 export const DimensionSchema = lazySchema(() => strictObject(
   {
@@ -227,7 +283,10 @@ export const DimensionSchema = lazySchema(() => strictObject(
     },
   },
   {
-    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique dimension ID'),
+    // `name` REMOVED (#20300, ADR-0049 enforce-or-remove) — the record key in
+    // `dimensions` is the dimension's name. See the module-level note above
+    // `CUBE_METRIC_NAME_REMOVED`.
+    name: retiredKey(CUBE_DIMENSION_NAME_REMOVED),
     label: z.string().describe('Human readable label'),
     description: z.string().optional(),
 
@@ -299,9 +358,11 @@ const CUBE_JOIN_ON_REMOVED =
  * and `sql` outright (ADR-0049 enforce-or-remove, maintainer-ruled batch #154):
  * the near-miss was the smaller half of the defect, because the DECLARED
  * spellings were being replaced just as silently. `MetricSchema.filters` above
- * took the same route one shape over — every cube shape is a `strictObject`, so
- * the route is strict deletion plus a `guidance` entry carrying the prescription,
- * never a `retiredKey()` tombstone (the key leaves the walked shape entirely).
+ * took the same route one shape over: strict deletion plus a `guidance` entry
+ * carrying the prescription, so the key leaves the walked shape entirely. That
+ * is one of two routes on a `strictObject`, not the only one — the members'
+ * inner `name` (#20300) is a `retiredKey()` tombstone instead, which keeps the
+ * key in the walked shape and types it `never` for `tsc`.
  */
 export const CubeJoinSchema = lazySchema(() => strictObject(
   {
@@ -375,8 +436,14 @@ export const CubeSchema = lazySchema(() => strictObject(
     sql: z.string().describe('Base SQL statement or Table Name'),
 
     /** Semantic Definitions */
-    measures: z.record(z.string(), MetricSchema).describe('Quantitative metrics'),
-    dimensions: z.record(z.string(), DimensionSchema).describe('Qualitative attributes'),
+    measures: z.record(z.string(), MetricSchema).describe(
+      'Quantitative metrics, keyed by metric name: the record key IS the metric\'s name, published and '
+      + 'queried as `<cube>.<key>`. A metric declares no inner `name`.',
+    ),
+    dimensions: z.record(z.string(), DimensionSchema).describe(
+      'Qualitative attributes, keyed by dimension name: the record key IS the dimension\'s name, published '
+      + 'and queried as `<cube>.<key>`. A dimension declares no inner `name`.',
+    ),
 
     /** Relationships */
     joins: z.record(z.string(), CubeJoinSchema).optional(),

@@ -99,7 +99,11 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    sync-enabled check still answered true. It was refused here first,
 //    because a declared setting that changes nothing is the shape ADR-0049
 //    does not ship; since #20200 the constructor refuses it too, in this
-//    arm's own words.
+//    arm's own words;
+//  - a forced `mode: 'replica'` with no `syncUrl` (#20437): a replica with no
+//    remote to replicate from. The driver used to build it as a replica, never
+//    synced it and ran it as a plain local database; authoring and the
+//    constructor now refuse it together, in this arm's words.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
@@ -159,7 +163,7 @@ interface TursoTransportKeys {
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
   message: string;
 }
 
@@ -241,6 +245,22 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + "turso driver refuses this configuration when it starts. Point `url` at a local file "
           + "(`url: 'file:./data/replica.db'` beside `syncUrl`), or drop "
           + `${drop} for a plain in-memory local database.`,
+      }];
+    }
+    if (mode === 'replica' && !hasSyncUrl) {
+      // #20437. Only a FORCED replica reaches here: with no `mode`, a replica is
+      // selected by `syncUrl` alone. The url is a `file:` url (every other one
+      // met a refusal above), so the url is fine and the MODE is what cannot be
+      // honoured — the issue sits on `mode`, as the `sync` refusal sits on `sync`.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with "
+          + 'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would '
+          + 'run as a plain local database that never replicates — the turso driver refuses this '
+          + 'configuration when it starts. For an embedded replica, name the remote in `syncUrl` beside '
+          + "the local file: `url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or "
+          + "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.",
       }];
     }
     return [];

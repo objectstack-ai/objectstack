@@ -113,7 +113,7 @@ describe('[#4988] ui/ interaction config family retirement', () => {
    * - `NotificationTypeSchema` — `ui/notification.zod.ts` kept its presentation
    *   enums when PR #5300 retired `NotificationActionSchema` out of it.
    * - `SharingConfigSchema` — `ui/sharing.zod.ts`'s live door.
-   * - (`ThemeSchema` stood here until #10485 retired the theme surface whole,
+   * - (`ThemeSchema` stood here until commit 35ad101bc retired the theme surface whole,
    *   ADR-0049 — a survivor list entry follows its subject out.)
    * - `PageSchema` / `PageComponentSchema` — the authoring roots the five
    *   vocabularies would have hung off had they ever had a carrier.

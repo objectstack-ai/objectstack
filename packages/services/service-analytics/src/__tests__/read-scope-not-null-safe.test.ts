@@ -91,8 +91,8 @@ const cube: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+  measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
   public: true,
 };
 

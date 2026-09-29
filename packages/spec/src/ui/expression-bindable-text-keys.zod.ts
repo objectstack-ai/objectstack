@@ -69,7 +69,7 @@
  * spelling for the same slot `content` already evaluates (see `content` NOT a
  * member, above), not a second read point, so a `text: ['value']` row would
  * legitimize the fallback spelling and give one slot two declared evaluation
- * paths. The objectstack#13670 ruling settled `text`'s intended evaluation
+ * paths. The ruling that commit 8c6a7fc0b records settled `text`'s intended evaluation
  * channel as `content` alone and declared `text.value` OUT on those grounds —
  * this omission is deliberate, not pending measurement. Adding a row is
  * additive and spec-first; do it here, never as a renderer-side inference.
@@ -86,7 +86,7 @@
  * `properties` bag and never read these keys at the node's top level.
  *
  * `action:button` is therefore deliberately OUT, and `ui:button` with it
- * (objectstack#13672); the `button` row above covers the bare `button`
+ * (commit e854a531a); the `button` row above covers the bare `button`
  * spelling alone, which is why its citation names `form/button.tsx` only. Two
  * measured grounds, the same two kinds every other row runs on — zero pull
  * (the objectui corpus census of 736 JSON documents / 2747 typed nodes finds 5

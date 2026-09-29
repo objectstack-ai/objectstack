@@ -155,7 +155,7 @@ interface TursoTransportKeys {
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
   message: string;
 }
 
@@ -237,6 +237,24 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + "turso driver refuses this configuration when it starts. Point `url` at a local file "
           + "(`url: 'file:./data/replica.db'` beside `syncUrl`), or drop "
           + `${drop} for a plain in-memory local database.`,
+      }];
+    }
+    if (mode === 'replica' && !hasSyncUrl) {
+      // #20437. Only a FORCED replica reaches here: with no `mode`, a replica is
+      // selected by `syncUrl` alone. The url is a `file:` url (every other one
+      // met a refusal above), so the url is fine and the MODE is what cannot be
+      // honoured — the issue sits on `mode`, as the `sync` refusal sits on `sync`.
+      // Unreachable through this mirror, which strips `mode` (see above); kept
+      // byte-identical to the spec contract's arm.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'replica'` makes this datasource an embedded replica, a local file kept in sync with "
+          + 'the remote named in `syncUrl`, but no `syncUrl` is set: nothing would ever sync, so it would '
+          + 'run as a plain local database that never replicates — the turso driver refuses this '
+          + 'configuration when it starts. For an embedded replica, name the remote in `syncUrl` beside '
+          + "the local file: `url: 'file:./data/replica.db'` with `syncUrl` set to the `libsql://` or "
+          + "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.",
       }];
     }
     return [];

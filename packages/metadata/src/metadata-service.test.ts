@@ -1,9 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MetadataManager } from './metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeRedactor, registerMetadataTypeRedactor } from '@objectstack/spec/kernel';
 
 // Suppress logger output during tests
 vi.mock('@objectstack/core', async (orig) => ({
@@ -862,6 +862,55 @@ describe('MetadataManager — IMetadataService Contract', () => {
     it('should return undefined for non-existent item', async () => {
       const result = await manager.getPublished('object', 'nonexistent');
       expect(result).toBeUndefined();
+    });
+
+    // [#20552] `getPublished` is what both `GET /meta/:type/:name/published`
+    // doors serve when no runtime overlay exists — so it is a SERVED body, and
+    // the type's registered read-path redactor applies to it as it does at every
+    // protocol read exit. A code-published inbound flow served its hook secret
+    // here to any reader of the door. The `flow` redactor is registered by
+    // `@objectstack/service-automation` (not a dependency of this package); the
+    // stand-in drops the same key the real one does.
+    describe('the per-type read-path redaction (#20552)', () => {
+      const SECRET = 'stored-hook-secret-20552';
+      const previous = getMetadataTypeRedactor('flow');
+      const standIn = (item: Record<string, unknown>) => {
+        const nodes = item.nodes as Array<Record<string, any>>;
+        const at = nodes.findIndex((n) => n.type === 'start' && 'secret' in (n.config ?? {}));
+        if (at < 0) return { item, redactedKeys: [] as string[] };
+        const { secret: _s, ...rest } = nodes[at]!.config;
+        void _s;
+        const projected = nodes.map((n, i) => (i === at ? { ...n, config: rest } : n));
+        return { item: { ...item, nodes: projected }, redactedKeys: [`nodes.${at}.config.secret`] };
+      };
+      const inbound = () => ({
+        name: 'inbound_hook',
+        label: 'Inbound hook',
+        type: 'api',
+        nodes: [{ id: 'begin', type: 'start', label: 'Start', config: { triggerType: 'api', secret: SECRET } }],
+        edges: [],
+      });
+
+      beforeEach(() => registerMetadataTypeRedactor('flow', standIn));
+      afterEach(() => registerMetadataTypeRedactor('flow', previous ?? ((item) => ({ item, redactedKeys: [] }))));
+
+      it('withholds what the redactor withholds, and leaves the stored item intact', async () => {
+        await manager.register('flow', 'inbound_hook', inbound());
+
+        const published = await manager.getPublished('flow', 'inbound_hook');
+        expect(JSON.stringify(published)).not.toContain(SECRET);
+        expect((published as any).nodes[0].config).toEqual({ triggerType: 'api' });
+        // A plural spelling folds to the singular registry key first.
+        expect(JSON.stringify(await manager.getPublished('flows', 'inbound_hook'))).not.toContain(SECRET);
+        // Redaction is a serving act: what is at rest still carries it.
+        expect(JSON.stringify(await manager.get('flow', 'inbound_hook'))).toContain(SECRET);
+      });
+
+      it('anti-vacuity: with an identity redactor the secret is served again', async () => {
+        registerMetadataTypeRedactor('flow', (item) => ({ item, redactedKeys: [] }));
+        await manager.register('flow', 'inbound_hook', inbound());
+        expect(JSON.stringify(await manager.getPublished('flow', 'inbound_hook'))).toContain(SECRET);
+      });
     });
   });
 

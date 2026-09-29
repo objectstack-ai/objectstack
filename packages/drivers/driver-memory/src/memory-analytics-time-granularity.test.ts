@@ -34,12 +34,11 @@ const cubes: Cube[] = [
     title: 'Events',
     sql: 'events',
     measures: {
-      count: { name: 'count', label: 'Event Count', type: 'count', sql: 'id' },
-      latest: { name: 'latest', label: 'Latest Event', type: 'max', sql: 'created_at' },
+      count: { label: 'Event Count', type: 'count', sql: 'id' },
+      latest: { label: 'Latest Event', type: 'max', sql: 'created_at' },
     },
     dimensions: {
       createdAt: {
-        name: 'createdAt',
         label: 'Created At',
         type: 'time',
         sql: 'created_at',

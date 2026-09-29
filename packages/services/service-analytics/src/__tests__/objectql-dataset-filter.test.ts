@@ -430,7 +430,7 @@ describe('[#10413] what the dataset filter must and must not do', () => {
       },
       cubes: [{
         name: 'crm_opportunity', title: 'Opportunities', sql: 'crm_opportunity', public: true,
-        measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+        measures: { count: { label: 'Count', type: 'count', sql: '*' } },
         dimensions: {},
       }],
     });

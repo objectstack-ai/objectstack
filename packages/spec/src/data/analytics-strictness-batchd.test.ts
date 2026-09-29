@@ -70,8 +70,8 @@ function accept(
 const CUBE = {
   name: 'batchd_probe',
   sql: 'batchd_probe_table',
-  measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
-  dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+  measures: { count: { label: 'Count', type: 'count', sql: '*' } },
+  dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
 } as const;
 
 /** A minimal query the REST wrapper accepts (it requires `cube`). */
@@ -142,7 +142,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     expect(
       reject(CubeSchema, {
         ...CUBE,
-        measures: { m: { name: 'm', label: 'M', type: 'count', sql: '*', drillMembers: [] } },
+        measures: { m: { label: 'M', type: 'count', sql: '*', drillMembers: [] } },
       }),
     ).toContain('drillMembers');
   });
@@ -155,7 +155,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
   // The key itself now rejects with the retirement prescription:
   it('`Metric.filters` — REMOVED; the key rejects with the prescription, not as a bare unknown', () => {
     expect(
-      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
+      reject(MetricSchema, { label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
     ).toContain('was removed in @objectstack/spec 17 (ADR-0049)');
   });
 
@@ -163,7 +163,7 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     expect(
       reject(CubeSchema, {
         ...CUBE,
-        dimensions: { d: { name: 'd', label: 'D', type: 'string', sql: 'd', primaryKey: true } },
+        dimensions: { d: { label: 'D', type: 'string', sql: 'd', primaryKey: true } },
       }),
     ).toContain('primaryKey');
   });
@@ -246,7 +246,7 @@ describe('#4001 batch D — alias claims are true of the surfaces they point at'
     expect(Object.keys(CubeSchema.shape)).not.toContain('label');
     expect(Object.keys(MetricSchema.shape)).toContain('label');
     expect(Object.keys(DimensionSchema.shape)).toContain('label');
-    expect(reject(MetricSchema, { name: 'm', title: 'M', label: 'M', type: 'count', sql: '*' })).toContain('label');
+    expect(reject(MetricSchema, { title: 'M', label: 'M', type: 'count', sql: '*' })).toContain('label');
     expect(reject(CubeSchema, { ...CUBE, label: 'Probe' })).toContain('title');
   });
 

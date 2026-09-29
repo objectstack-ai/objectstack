@@ -1,15 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ⚠️ RE-JUDGED under the one-authoring-shape ruling (#20367). The command now
- * refuses a default export `defineStack` did not build, and `defineStack`
- * applies every ADR-0087 D2 conversion itself at load (either mode), reporting
- * it on stderr. So the door's step-2 sink converts nothing for any accepted
- * config and every exit below carries `conversions: []` — which is still
- * exactly "what the run computed". The pins now assert that, plus the live
- * notice on the producer's stderr line (`expectTheOneNotice`). Whether the
- * producer's notices should reach this envelope is an open question the PR
- * reports; it was not this change's to decide.
+ * ⭐ The producer's record reaches every exit (#20476). Under the
+ * one-authoring-shape ruling (#20367) the command accepts only a default export
+ * `defineStack` built, and `defineStack` applies every ADR-0087 D2 conversion
+ * itself at load (either mode) — so the door's own step-2 pass has nothing of
+ * the default export left to convert, and these pins spent one release
+ * recording `conversions: []` beside the producer's stderr line. The producer
+ * now RECORDS what it applied on the stack it returns (`stackConversionsOf`,
+ * beside the provenance mark); `loadConfig` reads it off the default export and
+ * the command folds it into its one `conversions` sink at step 1b, right after
+ * load. So every exit below carries the notice again, asserted whole by
+ * identity (`expectTheOneNotice`), and the producer's stderr line is asserted
+ * to appear exactly ONCE — the payload now carries the notice, and the terminal
+ * gains no second stderr line for it.
  *
  * #12125 — `os build --json`'s FAILURE payloads dropped the `conversions` field
  * the run had ALREADY COMPUTED, on all nine of its failure exits.
@@ -60,12 +64,15 @@
  * the same exit with the canonical `kind: 'html'` and requires `[]`, which is
  * the negative whose positive is every other test here.
  *
- * ## Why no `dist/` sits on the measured path
+ * ## Which half of the measured path is `dist/`
  *
  * These run the CLI through `bin/run-dev.js`, the SOURCE entry point (src/ via
  * tsx), so `compile.ts` is loaded from source and an ablation of it is measured
  * without a rebuild. Its DEPENDENCY `@objectstack/spec` — which owns the
- * conversion — resolves through `exports` to `dist/`, and is untouched here.
+ * conversion AND the record (`stackConversionsOf`) — resolves through `exports`
+ * to `dist/`, in the child and in the fixture's own `defineStack` alike: an
+ * edit to the spec half is measured here only after
+ * `pnpm --filter @objectstack/spec build`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -187,17 +194,28 @@ const THE_NOTICE = {
 
 /** Asserts EXACTLY the one computed notice. `toEqual` is the "and NO MORE" half. */
 function expectTheOneNotice(payload: Record<string, unknown>, label: string, run: Run): void {
-  // [#20367 ruling B] Re-judged. The door accepts only `defineStack` output,
-  // and `defineStack` applies the D2 conversion at load (either mode) and
-  // reports it on stderr — so the notice is computed by the PRODUCER, and the
-  // door's own step-2 sink has nothing left to convert. What this exit carries
-  // is therefore exactly what the door computed: `[]`, asserted whole. The
-  // notice itself is asserted where it now lives — the producer's stderr line,
-  // by conversion id AND path, so a different conversion cannot satisfy it.
-  expect(conversionsOf(payload), `${label}: the door computes no conversion for a defineStack export`).toEqual([]);
-  expect(run.stderr, `${label}: the producer reported the conversion at load`).toContain(
-    `defineStack: ${THE_NOTICE.path}: '${THE_NOTICE.from}' → '${THE_NOTICE.to}' (converted at load; conversion '${THE_NOTICE.conversionId}'`,
-  );
+  // [#20476] The notice is computed by the PRODUCER — `defineStack` converts at
+  // load — and reaches this exit through the record it left on the default
+  // export, folded at step 1b. Asserted whole: exactly one entry, carrying the
+  // identity, the site, the direction and the expiry, so neither a different
+  // conversion nor a second copy of this one can satisfy it.
+  const entries = conversionsOf(payload) as Array<Record<string, unknown>>;
+  expect(
+    entries.map((n) => ({
+      conversionId: n.conversionId,
+      surface: n.surface,
+      from: n.from,
+      to: n.to,
+      path: n.path,
+    })),
+    `${label}: the producer's conversion reaches the payload, once`,
+  ).toEqual([THE_NOTICE]);
+  expect(entries[0].code, `${label}: the entry is the conversion layer's own notice`).toBe('OS_METADATA_CONVERTED');
+  expect(typeof entries[0].retiresIn, `${label}: the expiry rides the entry`).toBe('number');
+  // The producer's stderr line stays, and stays ONE line: the envelope now
+  // carries the notice, and nothing on the door's side repeats it on stderr.
+  const producerLine = `defineStack: ${THE_NOTICE.path}: '${THE_NOTICE.from}' → '${THE_NOTICE.to}' (converted at load; conversion '${THE_NOTICE.conversionId}'`;
+  expect(run.stderr.split(producerLine).length - 1, `${label}: one stderr line for the one conversion`).toBe(1);
 }
 
 const dirs: Record<string, string> = {};
@@ -283,7 +301,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     const payload = payloadOf(run, 'control');
     expect(payload.success).toBe(true);
     expectTheOneNotice(payload, 'control', run);
-    // The expiry still reaches the author — on the producer's line.
+    // The expiry rides the payload entry (`expectTheOneNotice`) and the producer's line.
     expect(run.stderr).toMatch(/conversion 'page-kind-jsx-to-html', retires in protocol \d+\)/);
   }, 180_000);
 
