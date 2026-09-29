@@ -63,11 +63,7 @@ with a prescription naming the two shapes that work, and in `tsc` (its input typ
   this removal, as its breaker half already was by the `health` removal, so with neither
   half left the rename conversion is gone from the table and from step 18; an author
   holding either spelling ends with no `triggers` at all. The retired-key row
-  `integration/ConnectorTrigger:interval` stays as the record. This corrects the 17.5.0
-  note for the connector resilience retirement (D2 `connector-resilience-keys-removed`,
-  from `.changeset/20273-connector-resilience-keys-retired.md`), whose sentence "The
-  conversion's `triggers[].interval` → `intervalSeconds` rename is unaffected." no longer
-  holds, because this retirement absorbs that rename.
+  `integration/ConnectorTrigger:interval` stays as the record.
 - **D3 entry `connector-triggers-retired`** carries the family's judgement: which
   triggers should exist now as flows, the cadence in seconds, and whether an external
   sender can sign the calls a signed `api` flow requires. The absorbed rename's own D3 entry
