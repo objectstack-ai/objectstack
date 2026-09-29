@@ -39,7 +39,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "Actor",
+        label: "Usuario",
         help: "Usuario que realizó la acción (null para acciones del sistema)."
       },
       actor: {
@@ -175,8 +175,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Enlace profundo opcional al destino de la actividad."
       },
       environment_id: {
-        label: "Proyecto",
-        help: "Contexto del proyecto (implementaciones multiproyecto)."
+        label: "Entorno",
+        help: "Contexto del entorno (implementaciones multientorno)."
       },
       metadata: {
         label: "Metadatos",
