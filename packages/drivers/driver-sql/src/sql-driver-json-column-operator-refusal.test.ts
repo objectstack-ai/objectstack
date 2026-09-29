@@ -164,6 +164,10 @@ const KEPT: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
   ['$icontains', U1],
   ['$null', false],
   ['$exists', true],
+  // [#20446] `$empty` joined `FILTER_OPERATORS`. It asks the question this
+  // column's declared row answers — a multi-value lookup is null or `[]` when
+  // empty — so it compiles here like the two presence flags above.
+  ['$empty', true],
 ];
 
 describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-value columns', () => {

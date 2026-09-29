@@ -58,9 +58,9 @@
  *   refuses whitespace-padded strings by name, and one grammar serves both
  *   sides. A blank comparand on a number field has no numeric reading: the
  *   write side turns a blank into `null` BEFORE the number arm (#20308), and
- *   on the read side the emptiness operator lowers to the null test on a
- *   number field (`is_empty` → `$null`; #20311's ruling B keeps a number field
- *   on null alone) — neither hands this grammar a blank, so a blank that
+ *   on the read side the emptiness operator is the null test on a number field
+ *   (`is_empty` → `$empty`, whose number row is null alone — #20311's ruling
+ *   B) — neither hands this grammar a blank, so a blank that
  *   reaches it is a mistake, and on PostgreSQL a 500.
  * - **Refused: `"0x10"`, `"0o17"`, `"0b101"`.** `Number()` reads them; SQLite
  *   stores `'0x10'` as TEXT (measured on #20309); the write side's direction

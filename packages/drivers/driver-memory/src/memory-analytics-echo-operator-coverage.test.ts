@@ -179,8 +179,12 @@ const ACCEPTED_CASES: Record<string, FilterCondition> = {
   $exists: { name: { $exists: true } },
 };
 
-/** The spellings this face REFUSES — the complement, so the two sets are total. */
-const REFUSED_OPERATORS = ['$between', '$startsWith', '$endsWith', '$null'] as const;
+/**
+ * The spellings this face REFUSES — the complement, so the two sets are total.
+ * [#20446] `$empty` joined `FILTER_OPERATORS`, and this cube face refuses it as
+ * it refuses `$null`: a declared operator it has no lowering for.
+ */
+const REFUSED_OPERATORS = ['$between', '$startsWith', '$endsWith', '$null', '$empty'] as const;
 
 describe('[#7117] the analytics echo renders the query it describes', () => {
   let db: any;

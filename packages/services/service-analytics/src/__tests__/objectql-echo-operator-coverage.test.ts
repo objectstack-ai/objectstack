@@ -31,7 +31,7 @@
  *    refuses an operator it cannot map (`Unsupported filter operator …`), so the
  *    leaf operators that can ever reach this compiler are exactly what
  *    {@link fieldLeaves} emits for the spec's `FILTER_OPERATORS` — a finite,
- *    enumerable set. Driving all sixteen authorable spellings through the echo (#6520 added `$icontains`)
+ *    enumerable set. Driving every authorable spelling through the echo (#6520 added `$icontains`, #20446 `$empty`)
  *    turns "the two tables drifted" from something a reader has to notice into a
  *    failing test, which is what #4128 asked for and did not get for this third
  *    compiler.
@@ -136,7 +136,18 @@ const OPERATOR_CASES: Record<string, FilterCondition> = {
   $endsWith: { stage: { $endsWith: 'n' } },
   $null: { stage: { $null: true } },
   $exists: { stage: { $exists: false } },
+  // [#20446] `stage` is text, so its row is null or `''`; the fixture's empty
+  // rows are the two NULLs.
+  $empty: { stage: { $empty: true } },
 };
+
+/**
+ * [#20446] The declared value shape `$empty` is answered by — the host's
+ * `sourceFieldMeta`, as `AnalyticsServicePlugin` relays it. Both strategy
+ * contexts and the stand-in engine read it.
+ */
+const DECLARED: Readonly<Record<string, { type: string }>> = { id: { type: 'text' }, stage: { type: 'text' }, amount: { type: 'number' } };
+const declaredValueShape = (_object: string, field: string) => DECLARED[field];
 
 describe('[#5333] `/analytics/sql` echo — every authorable operator renders a predicate', () => {
   let db: any;
@@ -158,6 +169,7 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
     nativeCtx = {
       getCube: (name: string) => (name === 'deals' ? CUBE : undefined),
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      declaredValueShape,
       executeRawSql: async (_object: string, sql: string, params: unknown[]) => {
         const stmt = db.prepare(sql.replace(/\$\d+/g, '?'));
         stmt.bind(params as any[]);
@@ -176,6 +188,7 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
     objectqlCtx = {
       getCube: (name: string) => (name === 'deals' ? CUBE : undefined),
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      declaredValueShape,
       executeAggregate: async (
         _object: string,
         options: { groupBy?: string[]; filter?: Record<string, unknown> },
@@ -183,6 +196,7 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
         const { sql, params } = compileScopedFilterToSql(
           (options.filter ?? {}) as FilterCondition,
           'deal',
+          { declaredValueShape: (field: string) => declaredValueShape('deal', field) },
         );
         const stmt = db.prepare(
           `SELECT "id" FROM "deal" AS "deal" WHERE ${sql.length > 0 ? sql : '1 = 1'}`,

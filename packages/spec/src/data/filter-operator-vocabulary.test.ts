@@ -59,18 +59,14 @@ const declaredKeys = () => Object.keys(FieldOperatorsSchema.shape).sort();
  * `match()` returned `true` for a non-matching record). Cleared by giving the
  * remaining faces arms in one PR, the #6520 direction.
  *
- * `$empty` (#20311): declared by `SpecialOperatorSchema` and
- * `FieldOperatorsSchema` with the per-type 「is empty」 table as its
- * description (ruling B on #20311, record 5861435168; spelled by ruling A on
- * #20399, record 5865693155) and answered by NO face yet — every one refuses
- * it loudly, which the staging keeps true (the maintainer's amendment,
- * record 5868169573: 「照 $like 先例分阶段」). Each compile-surface lane card
- * gives its face an arm; the FLIP CARD — the last card of ruling A's
- * sequence, `Blocked-by` every lane card — is the one that adds `$empty` to
- * `FILTER_OPERATORS`, removes it from this list, and flips the
- * `is_empty` / `is_not_empty` lowering from `$null` to `$empty`.
+ * `$empty` (#20311) was staged here too (the maintainer's amendment, record
+ * 5868169573: 「照 $like 先例分阶段」) until every compile face had its arm
+ * (#20444, #20445). #20446 cleared it — the first operator to leave this list
+ * — by adding it to `FILTER_OPERATORS` and flipping the `is_empty` /
+ * `is_not_empty` lowering to it in one commit, after measuring that no face
+ * drops it.
  */
-const STAGED_AHEAD_OF_BACKENDS = ['$empty', '$ilike', '$like'];
+const STAGED_AHEAD_OF_BACKENDS = ['$ilike', '$like'];
 
 describe('the declaration surface and the enforcement surface', () => {
   it('differ by EXACTLY the operators staged ahead of their backends', () => {

@@ -261,11 +261,12 @@ function comparandShapeRefusalAtSave(
  * position, because the backends read one in opposite directions.
  *
  * [#20311] `$empty` is a flag by the same declaration (ruling A on #20399,
- * record 5865693155: "`$empty: boolean`"). It is staged — no query face has an
- * arm for it yet, and each refuses it whole — so this door holds it to its
- * declared type from the day it is declared, the rule each face's arm then
- * inherits, rather than letting a `"true"` string be saved into a stored
- * filter that no later arm will read the way its author meant.
+ * record 5865693155: "`$empty: boolean`"). This door has held it to its
+ * declared type since the day it was declared — before any query face had an
+ * arm for it — and each face's arm inherited the rule, so a `"true"` string was
+ * never saved into a stored filter no arm reads the way its author meant.
+ * [#20446] Every face answers it now, and the view operators `is_empty` /
+ * `is_not_empty` lower to it.
  */
 const BOOLEAN_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists', '$empty']);
 
@@ -289,8 +290,9 @@ function describeFlagComparand(value: unknown): string {
  * the issue's own `path` carries the location.
  *
  * [#20311] `$empty` keeps the first sentence and the prescription's form; its
- * reason cannot be the opposite-directions history (no backend reads it yet),
- * so it names the rule it shares with the two null flags instead.
+ * reason cannot be the opposite-directions history (no backend ever read it
+ * the other way), so it names the rule it shares with the two null flags
+ * instead.
  */
 function nonBooleanFlagComparandMessage(op: string, field: string, value: unknown): string {
   if (op === '$empty') {
