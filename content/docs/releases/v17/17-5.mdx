@@ -1692,7 +1692,7 @@ nothing it has not been given.
 - **Run `os migrate account-issuer`** against each existing database and
   resolve every collision it reports, then back up. *Exercised on HotCRM (a
   17.4.0 app with a 17.4.0-created SQLite DB), 2026-09-29:* on the 17.4.0
-  database the pre-flight reported the column safe to drop.
+  database the pre-flight reported the `sys_account.issuer` drop safe.
 - **Give every `api` flow's start node a non-blank `config.secret`**, and sign
   each post with it, or declare a flow that is only started explicitly
   `type: 'autolaunched'`; an `api` flow without one stops registering at boot.
