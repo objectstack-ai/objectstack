@@ -39,7 +39,7 @@
  * this table names is a live (non-retired) key on its `ComponentPropsMap`
  * schema, and `component-field-specs-liveness.test.ts` pins that: a future
  * retirement that forgets this table turns that test red instead of leaving a
- * tombstoned key listed here as if it were still-valid spelling (#6629).
+ * tombstoned key listed here as if it were still-valid spelling (commit cd584d559).
  *
  * ── Shared with the react page surface ──────────────────────────────────
  *
@@ -205,7 +205,7 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   // Every `ElementFilterProps` key is a `retiredKey()` tombstone now, so no
   // spec-conformant page carries `fields` on it, and the #5068 props gate
   // reports an authored one by name with the element-retirement prescription —
-  // the same #5775/#6629 residue class as the record-picker entries below.
+  // the same #5775 residue class (commit cd584d559) as the record-picker entries below.
   // `element:form` had the same `{ props: ['fields'] }` entry until #9249
   // retired that element the same way (ADR-0049, the #9220 shape one element
   // over); its tombstones' prescription names the live replacement, the
@@ -215,7 +215,7 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   // `searchFields` (deleted, ADR-0049) were retired in #5775 and are
   // `retiredKey()` tombstones on `ElementRecordPickerPropsSchema` — so no
   // spec-conformant page carries either, and this rule's job (resolve a field
-  // NAME against the object) is not the question a retired key raises (#6629).
+  // NAME against the object) is not the question a retired key raises (commit cd584d559).
   //
   // A non-conformant page that writes one anyway is not left unattended: the
   // #5068 props gate reports the key with its rename/delete prescription. That
@@ -397,9 +397,9 @@ export function checkFieldRefs(
   // it: `validatePageFieldBindings` below, and `checkBlockFieldProps` in
   // `validate-react-page-props`.
   //
-  // [#8664] What NOTICES if one stops is a behaviour test through the
+  // [commit 8798cd2a6] What NOTICES if one stops is a behaviour test through the
   // top-level entry point — nothing else can. No CI gate reads call sites:
-  // `check-cross-package-test-inputs`, named here until #8664, is an
+  // `check-cross-package-test-inputs`, named here until commit 8798cd2a6, is an
   // input-scoping gate (it decides which packages CI runs and how the `test`
   // task cache is keyed, from a declared glob list) and has no view of
   // argument passing. Measured by dropping the argument at each site: both

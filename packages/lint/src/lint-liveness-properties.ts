@@ -273,7 +273,7 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
 
 /**
  * ── Coverage seam (#14057). Package-internal: NOT part of the published surface,
- *    same posture as the #10262 seam below `getNested` (exported from the MODULE
+ *    same posture as the test seam commit 2aca1bc4c added below `getNested` (exported from the MODULE
  *    only; `src/index.ts` re-exports neither, and this package's `exports` map
  *    publishes just `.` and `./runtime`). ────────────────────────────────────
  *
@@ -431,7 +431,7 @@ export function getNested(obj: AnyRec, path: string): unknown[] {
 }
 
 /**
- * ── Test seam (#10262). Package-internal: NOT part of the published surface ──
+ * ── Test seam (commit 2aca1bc4c). Package-internal: NOT part of the published surface ──
  *
  * `getNested` above and this wrapper are exported for
  * `lint-liveness-properties.test.ts` to drive the array fan-out against a
@@ -455,7 +455,7 @@ export function getNested(obj: AnyRec, path: string): unknown[] {
  *   - #7079 was closed by re-subjecting to `app.…navigation.children.runAction`;
  *   - #10068 flipped THAT live → subject lost again, and measured across all 30
  *     shipped ledgers every remaining warned entry is top-level, so there is
- *     nothing left to re-subject to. Filed as #10262 (this seam).
+ *     nothing left to re-subject to. This seam is commit 2aca1bc4c.
  *
  * A broken walk is invisible without it: a `getNested` that stopped at index 0
  * "still warns on every single-entry fixture, on every top-level warned key,
