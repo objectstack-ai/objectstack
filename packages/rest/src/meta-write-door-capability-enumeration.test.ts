@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8919] EVERY metadata write door on the REST `/meta` surface demands the
+ * [commit b5378550e] EVERY metadata write door on the REST `/meta` surface demands the
  * ADR-0066 D1 `manage_metadata` authoring capability.
  *
  * ## Why this is an enumeration and not two more assertions
@@ -113,11 +113,11 @@ interface Door {
 
 /**
  * The metadata write doors, as registered by `registerMetadataEndpoints` — five
- * of them since #12195 retired the compound-name save (the count is the table's
+ * of them since commit 7986d973f retired the compound-name save (the count is the table's
  * own length, never a number written in prose: it read "six" for as long as it
- * took #12195 to remove an entry without touching this sentence).
+ * took commit 7986d973f to remove an entry without touching this sentence).
  *
- * Four carried the gate before #8919 (`_migrate-stored` #4857-era, the single
+ * Four carried the gate before commit b5378550e (`_migrate-stored` #4857-era, the single
  * and compound saves #6603/#7019, the reset #7019); `publish` and `rollback`
  * are the two that card added.
  *
@@ -156,7 +156,7 @@ const DOORS: readonly Door[] = [
         protocolMethod: 'rollbackMetaItem',
         params: { type: 'object', name: 'account' }, body: { toVersion: 1 },
     },
-    // [#12195] `PUT /meta/:type/:section/:name — compound-name save` was
+    // [commit 7986d973f] `PUT /meta/:type/:section/:name — compound-name save` was
     // enumerated here until its arity was retired. It reached the same
     // `saveMetaItem` as the single-segment save above and carried the same
     // capability gate, so the door set loses a spelling, not a capability.

@@ -2,7 +2,7 @@
 
 /**
  * The declared default of `runAutomations` AGREES with the server's decision
- * (#6704).
+ * (commit c3f491626).
  *
  * ## Why the agreement, and not either half
  *
@@ -26,7 +26,7 @@
  *
  * ## Behaviour is deliberately UNCHANGED
  *
- * #6704 moved the DECLARATION to the runtime, never the runtime to the
+ * Commit c3f491626 moved the DECLARATION to the runtime, never the runtime to the
  * declaration: `packages/rest/src/import-prepare.ts` is untouched. The
  * `serverDecision` column below therefore reads identically before and after the
  * change, and the `declared` column is what moved. If a future edit "fixes" the
@@ -68,7 +68,7 @@ const declared = (body: Record<string, unknown>): boolean =>
 
 describe('runAutomations — declared default agrees with the server (#6704)', () => {
   const cases: Array<{ label: string; body: Record<string, unknown>; expected: boolean }> = [
-    // THE case. Before #6704 this row was the divergence: declared `false`,
+    // THE case. Before commit c3f491626 this row was the divergence: declared `false`,
     // server `true`. Everything else in this file already agreed.
     { label: 'omitted', body: {}, expected: true },
     { label: 'explicit true', body: { runAutomations: true }, expected: true },
@@ -86,7 +86,7 @@ describe('runAutomations — declared default agrees with the server (#6704)', (
   }
 
   it('validating before sending cannot change the outcome', async () => {
-    // The concrete harm #6704 names: a client that parses its request through
+    // The concrete harm commit c3f491626 removed: a client that parses its request through
     // the published schema and sends the PARSED object used to get the opposite
     // behaviour from one that sent the same body unvalidated. Drive both paths
     // through the server and require one answer.
@@ -109,7 +109,7 @@ describe('runAutomations — declared default agrees with the server (#6704)', (
 
   it('an omitted flag is the only input whose declaration ever moved', async () => {
     // Guards the reverse direction of the fix: the explicit spellings were
-    // already in agreement before #6704 and must not have been "fixed" into
+    // already in agreement before commit c3f491626 and must not have been "fixed" into
     // something else while the omitted case was corrected.
     expect(declared({ runAutomations: false })).toBe(false);
     expect(await serverDecision({ runAutomations: false })).toBe(false);

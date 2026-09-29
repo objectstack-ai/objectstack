@@ -2,7 +2,7 @@
 
 /**
  * The one place this package asserts around `exceljs`'s broken `load` signature
- * (#13378). Test layer only — nothing in `src/index.ts` reaches it, so tsup
+ * (commit 82faea03f). Test layer only — nothing in `src/index.ts` reaches it, so tsup
  * (entry: `src/index.ts`) never emits it into `dist` and it is not published.
  *
  * ## Why the assertion below is unavoidable, in the dependency's own bytes
@@ -35,7 +35,7 @@
  * ⭐ There is NO Node `Buffer` value that satisfies that parameter. The defect is
  * in the published declaration, not at any call site — so this is not laziness,
  * and no amount of care at a call site can remove it. What a call site CAN do is
- * not restate it: before #13378 the package paid this at 6 anonymous `as any`s
+ * not restate it: before commit 82faea03f the package paid this at 6 anonymous `as any`s
  * and left a 7th site as a ledgered `TS2345`. Now it is stated once, here.
  *
  * ## Why option C (upgrade) is not the answer — measured 2026-08-30

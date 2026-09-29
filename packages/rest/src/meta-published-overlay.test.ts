@@ -358,7 +358,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         // registration than §1, so the overlay consult has to be on both or
         // the fix covers only one of the two doors this card puts in scope.
         //
-        // [#12194] The fixture used to be authored through `runtimePublish` —
+        // [commit 311433f6b] The fixture used to be authored through `runtimePublish` —
         // the item-name grammar now refuses a slash name at that door, and the
         // READ door deliberately stays open for pre-grammar residue rows. So
         // the row is seeded directly in the store, which is exactly what such
@@ -377,7 +377,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
 
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(1);
 
-        // [#12195] Read through the SINGLE-SEGMENT door, which is where a
+        // [commit 7986d973f] Read through the SINGLE-SEGMENT door, which is where a
         // pre-grammar residue row is addressed now. This used to drive the
         // compound arity `GET /:type/:section/:name/published` with
         // `{ section: 'views', name: 'all_leads' }`, which the handler folded
@@ -387,7 +387,7 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         // percent-encodes the name, `%2F` matches `/:type/:name/published`
         // (Hono does not split on an encoded slash — measured), and Hono decodes
         // the parameter back to `views/all_leads` before the handler runs. So
-        // the handler receives exactly the value passed below, and #12194's
+        // the handler receives exactly the value passed below, and commit 311433f6b's
         // "any stored junk name remains listable and clearable" still holds.
         const res = await callPublished(
             setup(protocol, metadata),

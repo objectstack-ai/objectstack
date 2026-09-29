@@ -188,7 +188,7 @@ async function readRows(engine: ObjectQL, object: string): Promise<Record<string
 
 /**
  * Every `sys_account` row INCLUDING the credential hash — `password` is
- * `internal: true`, so a system read arrives without it (#8676) and a
+ * `internal: true`, so a system read arrives without it (commit d6e80b28b) and a
  * "nothing changed" assertion that skipped it would be blind to exactly the
  * column an overwrite would rewrite.
  */
@@ -277,7 +277,7 @@ describe('[#14157] the dev-admin seed gates on a LOGIN, not on user rows', () =>
     const seeded = users.find((u) => String(u.email).toLowerCase() === SEED_EMAIL);
     expect(seeded, 'the seed address must exist as a user').toBeTruthy();
     expect(accounts[0].user_id).toBe(seeded!.id);
-    // …and the row the account belongs to is stamped verified (#11343).
+    // …and the row the account belongs to is stamped verified (commit c0714eb5d).
     expect(seeded!.email_verified).toBeTruthy();
     // The banner the CLI prints reads this.
     expect(manager.devSeedResult).toEqual({ email: SEED_EMAIL, password: SEED_PASSWORD });
@@ -511,7 +511,7 @@ describe('[#14157] the dev-admin seed gates on a LOGIN, not on user rows', () =>
       // IS admitted — the fix narrows admission to the ticket holder, it
       // does not also break the seed's own path. This calls `signUpEmail`
       // directly (as `maybeSeedDevAdmin` does), not the seed's OWN separate
-      // post-creation `email_verified` write (#11343, a step in
+      // post-creation `email_verified` write (commit c0714eb5d, a step in
       // `auth-plugin.ts` outside the admission gate this card touches), so
       // admission is what this proves — creation, and that the credential
       // actually authenticates.

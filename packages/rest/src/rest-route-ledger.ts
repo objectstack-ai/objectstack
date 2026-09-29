@@ -278,9 +278,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // so the SDK guard (#3642) certified them off a DECLARATION while they died
   // at runtime. Both are `route-manager` mounts here now.
   //
-  // [#12195] The ordering constraint this note used to carry is DISCHARGED,
+  // [commit 7986d973f] The ordering constraint this note used to carry is DISCHARGED,
   // not merely unstated: the compound `/:type/:section/:name` arities are
-  // retired (stage 3 of #12176), and they were the three-segment catch-all
+  // retired (stage 3, commit 7986d973f), and they were the three-segment catch-all
   // that every literal three-segment sibling had to be registered above. The
   // four-segment `/state/:field` collision with the compound `/published`
   // twin is gone with it. `meta-route-registration-order.test.ts` still pins
@@ -292,11 +292,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     responseSchema: 'GetPublishedMetaItemResponseSchema',
     note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name). [#12038 ruling 1C] the named schema is DELIBERATELY OPAQUE (`z.unknown()`): the route answers an arbitrary metadata item body, BARE on this surface (enveloped on the dispatcher twin) — never a union frozen against the type registry' },
 
-  // [#12195] THREE ROWS RETIRED HERE — `GET /api/v1/meta/:type/:section/:name`,
+  // [commit 7986d973f] THREE ROWS RETIRED HERE — `GET /api/v1/meta/:type/:section/:name`,
   // `PUT` on the same path, and `GET …/:section/:name/published`. They were the
   // compound-name arities: `section` and `name` folded back into one
   // slash-bearing key the protocol layer treated as a single opaque string.
-  // Stage 1 (#12194) made every such name unwritable at the publish door, so
+  // Stage 1 (commit 311433f6b) made every such name unwritable at the publish door, so
   // the arities addressed only names that can no longer be created.
   //
   // No `client:` disposition moved to `absent` as a result: `meta.getItem`,
@@ -305,7 +305,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // name — it percent-encodes, and `%2F` matches the single-segment pattern
   // with the parameter decoded back to the stored spelling. That is what keeps
   // a pre-grammar residue row readable, writable and deletable after the
-  // removal, per #12194's "any stored junk name remains listable and
+  // removal, per commit 311433f6b's "any stored junk name remains listable and
   // clearable".
 
   // ── ui ────────────────────────────────────────────────────────────────────

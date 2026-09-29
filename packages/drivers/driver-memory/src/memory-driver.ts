@@ -70,8 +70,9 @@ import {
  * Read straight off {@link SUPPORTED_FIELD_OPERATORS}, which is
  * `[...FILTER_OPERATORS, '$like', '$ilike']` — the spec's declaration order,
  * not a hand-copy of it. That matters twice: a nineteenth operator is ranked
- * the day it is declared, and the rank of `$exists` (last in the spec's list)
- * is what makes this generalisation emit, byte for byte, the documents
+ * the day it is declared, and the rank of `$exists` (after every comparison,
+ * set and text operator in the spec's list; only `$empty` follows it since
+ * #20446) is what makes this generalisation emit, byte for byte, the documents
  * #13195's guard already emits for the one operator it moved.
  *
  * An operator absent from the vocabulary cannot reach the assembly — the
@@ -1438,19 +1439,33 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`) } };
       case 'endswith': case 'ends_with':
         return { [field]: { $regex: new RegExp(`${this.escapeRegex(value)}$`) } };
-      // Null / empty predicates. These are in `VALID_AST_OPERATORS` and were
-      // absent here, so every one of them fell to `default: return null` and was
+      // Null predicates. These are in `VALID_AST_OPERATORS` and were absent
+      // here, so every one of them fell to `default: return null` and was
       // dropped — `is_null` narrowed nothing instead of matching null rows.
       // Alias sets and semantics mirror driver-sql's `whereNull`/`whereNotNull`
       // arms so both backends accept the same vocabulary. In a document store
       // `{field: null}` matches null AND missing, and `$ne: null` excludes both,
       // which is the right analogue of SQL IS [NOT] NULL. #3948.
-      case 'is_null': case 'isnull': case 'is_empty': case 'isempty': case 'empty':
+      case 'is_null': case 'isnull':
         return { [field]: null };
-      case 'is_not_null': case 'isnotnull':
-      case 'is_not_empty': case 'isnotempty': case 'not_empty': case 'notempty':
-      case 'is_set': case 'set':
+      case 'is_not_null': case 'isnotnull': case 'is_set': case 'set':
         return { [field]: { $ne: null } };
+      // [#20446] Empty predicates are NOT null predicates any more.
+      // `canonicalAstOperator` folds `is_empty` / `isempty` onto `is_empty`
+      // (and the not-pair onto `is_not_empty`) instead of onto `is_null`, and
+      // `parseFilterAST` lowers them to `$empty` — the field's DECLARED row of
+      // the 「is empty」 table (text: null or `''`; multi-value: null or `[]`;
+      // every other type: null). This node path answers them through the SAME
+      // arm the FilterCondition path uses ({@link emptyOperatorCondition}), so
+      // one rule gets one answer whichever shape it arrived in, and a field
+      // this driver holds no declaration for is refused here too. The bare
+      // `empty` / `not_empty` / `notempty` spellings (no canonical fold; this
+      // switch's own legacy words) take the same arm rather than a second
+      // meaning.
+      case 'is_empty': case 'empty':
+        return this.emptyOperatorCondition(object, field, true, `filter.${field}.${operator}`);
+      case 'is_not_empty': case 'not_empty': case 'notempty':
+        return this.emptyOperatorCondition(object, field, false, `filter.${field}.${operator}`);
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
           // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).

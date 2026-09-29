@@ -2,7 +2,7 @@
 
 import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
-    // [#13279] Re-raise a permission-store OUTAGE through the fail-closed nets
+    // [commit 6a180e42d] Re-raise a permission-store OUTAGE through the fail-closed nets
     // below instead of degrading it into an anonymous/denied answer.
     rethrowAuthzStoreUnavailable,
     // [#13476] Raised HERE too, at the data-engine seam: an engine that cannot
@@ -111,7 +111,7 @@ import {
     HistoryMetaItemRequestSchema,
     AuditMetaItemRequestSchema,
 } from '@objectstack/spec/api';
-// [#9741] Declared request shapes for the meta-read doors below — imported so
+// [commit 2a29caa53] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
 import type {
@@ -147,7 +147,7 @@ import type {
 // runtime surprise on whichever arm a test happens to drive.
 import type { ErrorCode } from '@objectstack/spec/api';
 // The async-import row ceiling has exactly one definition, in the spec, whose
-// TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
+// TSDoc is its public statement (commit a92b1793c). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
 import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 // [#10235] The per-column sortability projection the object read serves on its
@@ -232,11 +232,11 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
 export type RestProtocol = DataProtocol & MetadataProtocol;
 
 /**
- * [#9741] Typed TRANSPORT envelope for the meta-read doors.
+ * [commit 2a29caa53] Typed TRANSPORT envelope for the meta-read doors.
  *
  * `environmentId` is the multi-kernel routing key, and it is OUT of the
  * protocol request shape **by explicit maintainer decision** (ruling recorded
- * 2026-08-18 on #9741): `resolveProtocol(environmentId)` selects the target
+ * 2026-08-18, landed as commit 2a29caa53): `resolveProtocol(environmentId)` selects the target
  * kernel *before* the protocol call, and the implementation's parameter types
  * (`@objectstack/metadata-protocol`) never read it off the request — the spec
  * schemas (`protocol.zod.ts`) record the same exclusion schema-side. The doors
@@ -248,7 +248,7 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * error at the call site, not a cast-and-hope. Never add protocol members
  * here; a key that belongs to the request belongs in the spec schema.
  *
- * [#9805] The same typing now covers the NON-door `getMetaItems` helper call
+ * [commit 45862a53d] The same typing now covers the NON-door `getMetaItems` helper call
  * sites in this file (the object, book, doc, view and dataset listings). Two
  * spellings those sites carry deliberately SURVIVE the tightening, because
  * retiring either would change behaviour rather than typing:
@@ -279,7 +279,7 @@ type TransportScopedMetaRequest<R> = R & { environmentId?: string };
  * doors' transport key.
  *
  *   - `environmentId` — identical to the meta case and covered by the same
- *     ruling (2026-08-18, #9741): `resolveProtocol(environmentId)` picks the
+ *     ruling (2026-08-18, commit 2a29caa53): `resolveProtocol(environmentId)` picks the
  *     target kernel BEFORE the call, `@objectstack/metadata-protocol`'s data
  *     methods never read it off the request, and `protocol.zod.ts` records the
  *     exclusion schema-side. The doors still spread it (long-standing wire
@@ -363,7 +363,7 @@ import {
 } from './served-endpoints.js';
 
 import { logError, logWarn } from './log.js';
-// [#8850] The ADR-0112 error/fault-classification prologue — how a thrown thing
+// [commit 8664a2c99] The ADR-0112 error/fault-classification prologue — how a thrown thing
 // becomes an HTTP answer — was module-level code sitting ahead of this class for
 // historical reasons and now lives in its own module. A move, not a redesign:
 // same functions, same wire answers, and `mapDataError` re-exported below so the
@@ -905,7 +905,7 @@ function importJobUndoable(row: any): boolean {
  * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
  * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
  * because a guard on some arms and not others re-opens the drift the single
- * spelling closed. Reachability is MEASURED, not assumed (#14409, landed
+ * spelling closed. Reachability is MEASURED, not assumed (landed as commit
  * `3ecb7dc1a`): mysql2 3.23.1 returns a module constant literally named
  * `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds
  * `new Date(NaN)` for every year in 275760..294276 — years Postgres itself
@@ -1112,7 +1112,7 @@ type NormalizedRestServerConfig = {
         enableSearch: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        // [#14366] The PARSED shape, not the authored one: this block is
+        // [commit 53cbad9f7] The PARSED shape, not the authored one: this block is
         // built from `RestApiConfigSchema`'s output, so a `documentation` the
         // caller wrote arrives with its OWN declared inner defaults applied
         // (`.title`). [#20295] `documentation.enabled` and the whole
@@ -1166,10 +1166,10 @@ type NormalizedRestServerConfig = {
         };
     };
     /**
-     * [#14691] Every key of `RouteGenerationConfigSchema` is a `retiredKey()`
+     * [commit b3a63d32c] Every key of `RouteGenerationConfigSchema` is a `retiredKey()`
      * tombstone (ADR-0049 enforce-or-remove — nothing here ever read
      * `includeObjects` / `excludeObjects` / `nameTransform` / `overrides`; the
-     * #14369 census). The sub-object is still PARSED, so an authored key is
+     * liveness census recorded in commit a3d5724c8). The sub-object is still PARSED, so an authored key is
      * refused at construction with its prescription rather than stripped, but
      * nothing is threaded: per-object exposure is the object's own
      * `enable.apiEnabled` / `enable.apiMethods`, enforced by `enforceApiAccess`.
@@ -1210,7 +1210,7 @@ function buildDeclaredSubConfigSchemas() {
 type DeclaredSubConfigSchemas = ReturnType<typeof buildDeclaredSubConfigSchemas>;
 type DeclaredSubConfigName = keyof DeclaredSubConfigSchemas;
 /**
- * [#14366] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
+ * [commit 53cbad9f7] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
  * FROM. Taken off the table's own entry rather than off `RestApiConfigParsed`,
  * so it is the post-`.omit()` shape: the retired `requireAuth` tombstone is
  * absent here exactly as it is absent from the schema this seam runs.
@@ -1371,7 +1371,7 @@ export interface MountedRoute extends RouteEntry {
  * post-identity fault SHOULD discard identity; that is a behaviour change on a
  * public door and is deliberately left unruled here.
  *
- * ⚠️ Absorbing here cannot weaken the #13279 loud path, but the reason is
+ * ⚠️ Absorbing here cannot weaken the loud path commit 6a180e42d built, but the reason is
  * no longer "one construction site" — [#13476] added a SECOND one, at the
  * data-engine seam below ({@link wiredEngineOrLoud}). The invariant that
  * matters is narrower and is what this helper actually needs: no branded
@@ -1423,7 +1423,7 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
  * | no engine wired at all (supported shape) | 403 | 403 — unchanged |
  * | the engine cannot be RESOLVED            | **403** | **503** |
  *
- * ⭐ This is COVERAGE of #13279's already-ruled class, not a new trade-off.
+ * ⭐ This is COVERAGE of the already-ruled class commit 6a180e42d landed, not a new trade-off.
  * That ruling (2026-08-30, verbatim 「第一批其余同意」) settled the DIRECTION — a
  * permission-store read that fails must fail LOUD rather than resolve as an
  * authenticated principal holding zero capabilities. `tryFind` implemented it
@@ -1450,7 +1450,7 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
  * undefined>`) declaring absence, not failing. Only a THROW or a REJECTION is
  * the outage — which is why this helper, like {@link seamOrUndefined}, invokes
  * `call` synchronously so a non-`async` provider that throws before returning a
- * promise reaches the same answer as one that rejects (#13280).
+ * promise reaches the same answer as one that rejects (commit add6a1b1c).
  *
  * ⚠️ RESIDUE, deliberately not repaired here and filed separately — do not
  * read this helper as covering it. The KERNEL branch of the seam resolves
@@ -2233,7 +2233,7 @@ export class RestServer {
     }
 
     /**
-     * [#13214] Refuse a request whose RESOLVED environment is not one the CALLER
+     * [commit cc837dbfe] Refuse a request whose RESOLVED environment is not one the CALLER
      * holds — the comparison this server did not have.
      *
      * ## The defect this closes, and why the anonymous gate alone did not
@@ -2244,8 +2244,8 @@ export class RestServer {
      * identity resolved at all, so an ANONYMOUS caller received another
      * environment's UI view — object label plus every field's name / label /
      * type / required — and the route doubled as an object-existence oracle for
-     * whatever environment it named. Driven and reported on #13214 (PRs #13244,
-     * #13258).
+     * whatever environment it named. Measured in commits 889ec5b42 (identity) and
+     * 3d10755f0 (tenancy).
      *
      * Adding `resolveExecCtx` + `enforceAuth` was measured NOT to be the repair
      * (it was the rejected option B of the 2026-08-30 ruling): it stops the
@@ -2673,7 +2673,7 @@ export class RestServer {
      * an anonymous reader on a publicly-served deployment. Same route, gate
      * enforced on one spelling of it.
      *
-     * Calling this at each gate is NOT the durable form — #6241 proved it.
+     * Calling this at each gate is NOT the durable form — commit 83a3b1f2e proved it.
      * Eight days after #3984, the single-item read's cache-branch condition
      * still excluded `doc`/`book` by literal comparison, so the plural read
      * skipped the branch that holds the gate and the same authorization hole
@@ -2755,7 +2755,7 @@ export class RestServer {
             // environmentId.
             let authService: any;
             let kernel: any;
-            // [#13214] WHICH environment's auth service actually validated this
+            // [commit cc837dbfe] WHICH environment's auth service actually validated this
             // caller — the fact an ownership check needs and the one this method
             // used to compute and drop. Three branches below can answer, and the
             // SECOND of them answers for a DIFFERENT environment than the one the
@@ -2966,7 +2966,7 @@ export class RestServer {
                 );
             }
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
-            // [#6216] The anonymous contract IS the shared assembler's default
+            // [commit f586f1a89] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
             // only so an anonymous request does not pay for the localization and
             // auth-gate reads it would never use; `assembleExecutionContext`
@@ -3040,14 +3040,14 @@ export class RestServer {
                 authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
             }
 
-            // [#6216 — maintainer ruling 2026-08-08, Option A] The assembly of
+            // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The assembly of
             // the ExecutionContext itself is now the SINGLE shared one
             // (`assembleExecutionContext`, @objectstack/core), the same module
             // the runtime / MCP dispatcher assembles through. Before this, the
             // step AFTER `resolveAuthzContext` was two hand-written copies and
             // the copies drifted: #6071 (this face never set `principalKind`,
             // so every enforcement judgment reading it was silently never-true
-            // here) and #6206 / #6551 (a dropped `accessible_org_ids` produced
+            // here) and commit 8e13ca876 / #6551 (a dropped `accessible_org_ids` produced
             // real 403s on the share-link faces). The field set is closed by
             // type there, so a new `ExecutionContext` field cannot land on one
             // face and miss another.
@@ -3067,7 +3067,7 @@ export class RestServer {
                 // [#3957] The request's OWN locale wins over the workspace
                 // default; the precedence itself lives in the shared assembler.
                 requestLocale: this.extractLocale(req),
-                // A NAMED divergence, deliberately preserved (#6216): this
+                // A NAMED divergence, deliberately preserved (commit f586f1a89): this
                 // transport has never carried the better-auth session bearer on
                 // the envelope, and `ExecutionContext.accessToken` is a
                 // PUBLISHED hook surface (`session.accessToken`, hook.zod.ts).
@@ -3094,7 +3094,7 @@ export class RestServer {
                 // NOT an `ExecutionContext` field — hence the cast, which now
                 // covers this key and `__authEnvironmentId` below.
                 __kernel: kernel,
-                // [#13214] Internal: the environment whose auth service actually
+                // [commit cc837dbfe] Internal: the environment whose auth service actually
                 // validated this caller — the left-hand side of the ownership
                 // comparison at the UI-view seam. ⚠️ Unlike `__kernel` this one IS
                 // an authorization input, at exactly one reader
@@ -3117,7 +3117,7 @@ export class RestServer {
 
             return execCtx;
         } catch (err) {
-            // [#13279] The FIRST net, and the one that actually fires: every
+            // [commit 6a180e42d] The FIRST net, and the one that actually fires: every
             // seam below this resolves with `undefined` rather than rejecting,
             // so a blanket swallow here decides the answer for the whole
             // server. A permission-store OUTAGE must not be laundered into
@@ -3597,7 +3597,7 @@ export class RestServer {
      * they were handed.
      */
     private async translateMetaItem(req: any, type: string, environmentId: string | undefined, item: any, i18nService?: any): Promise<any> {
-        // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
+        // [commit 2443bb4c4] Normalize HERE, not at the call sites. `isTranslatableMetaType`
         // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
         // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only,
         // matching `translateMetadataDocument`'s "Canonical metadata type string". The
@@ -3612,7 +3612,7 @@ export class RestServer {
         //
         // This is #3984's family (per-type judgements seeing only the singular)
         // landing on the i18n predicate instead of on a gate. It folds at the
-        // HELPER rather than at the four call sites for the reason #6241 proved
+        // HELPER rather than at the four call sites for the reason commit 83a3b1f2e proved
         // the hard way: a normalization the callers own is one a later caller
         // forgets. The helper owns "does this type translate", so it owns the
         // spelling that question is asked in. `metaTypeSingular` leaves an
@@ -3768,7 +3768,7 @@ export class RestServer {
         // same fold over the vetted `tenantId`), the one answer the runtime
         // dispatcher's layered read asks too.
         const layeredOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, layeredCtx);
-        // [#9741] This door never carried an `as any`, but `p: any` meant its
+        // [commit 2a29caa53] This door never carried an `as any`, but `p: any` meant its
         // request literal was never checked either — the same blind spot with
         // a different spelling. Typing the literal (spec shape + the
         // transport-level `environmentId`, see `TransportScopedMetaRequest`)
@@ -3817,7 +3817,7 @@ export class RestServer {
      * call site can stand unconditionally at an exit that serves all types.
      * `metaType` must be the NORMALIZED type (`/meta/objects/x` is the canonical
      * plural spelling; a gate comparing the raw param is a gate the canonical
-     * spelling walks past — #3984 / #6241).
+     * spelling walks past — #3984 / commit 83a3b1f2e).
      *
      * The returned function REJECTS with {@link ObjectSchemaMaskEvaluationError}
      * on D6 tier 3 — the security service threw. Call sites answer 5xx via
@@ -3886,7 +3886,7 @@ export class RestServer {
      * Translate a list of metadata documents using `translateMetaItem`.
      *
      * Normalizes the `:type` spelling for the same reason, and on the same
-     * terms, as {@link translateMetaItem} — see the note there (#6349). The
+     * terms, as {@link translateMetaItem} — see the note there (commit 2443bb4c4). The
      * list route is one of the three that hands this the raw path segment, and
      * splitting the fix (list normalized, single-item not) would trade one
      * missing translation for the far harder "the list is localized but the
@@ -4062,7 +4062,7 @@ export class RestServer {
      * walked straight past it and mounted the whole API at `/api//`, and
      * `'v1/beta'` spliced an extra path segment into every route.
      *
-     * [#14366] The parsed output is CONSUMED — `normalizeConfig` builds the
+     * [commit 53cbad9f7] The parsed output is CONSUMED — `normalizeConfig` builds the
      * `api` block from what this returns. It was VALIDATE-ONLY from #11637
      * until then, for two measured reasons that have both since expired:
      *
@@ -4077,7 +4077,7 @@ export class RestServer {
      *
      *  - `api.projectResolution` was `.omit()`ed until #12450 withdrew it.
      *
-     *    ⇒ Re-measured at #14366 on the landed tree, because the discard is
+     *    ⇒ Re-measured by commit 53cbad9f7 on the landed tree, because the discard is
      *    only safe to remove if the key diff is EMPTY: the 14 keys
      *    `normalizeConfig` reads and the 14 `RestApiConfigSchema` declares
      *    after the `.omit()` are the same 14, in both directions. So the
@@ -4089,7 +4089,7 @@ export class RestServer {
      *    `documentation` or `responseFormat` object the caller WRITES now
      *    arrives carrying its own declared inner defaults, where the `??`
      *    chain copied the authored object through untouched. Both keys have
-     *    zero read sites outside this block (the #14369 census), so nothing
+     *    zero read sites outside this block (the census commit 53cbad9f7 took), so nothing
      *    observes it today — but it is a real change to this structure's
      *    contents and belongs in the record rather than in a reader's surprise.
      *
@@ -4148,7 +4148,7 @@ export class RestServer {
      * CONSUMED. The asymmetry with `api` is measured, not stylistic: for each
      * of the four, every key `normalizeConfig` reads is one its schema
      * declares (the key diff is empty), and none carries a tombstone, so a
-     * consumed parse cannot strip anything the runtime honours. [#14366] `api`
+     * consumed parse cannot strip anything the runtime honours. [commit 53cbad9f7] `api`
      * went through the same door last, separately measured rather than ridden
      * on the siblings: the asymmetry is gone and all five now build from their
      * parsed output.
@@ -4174,16 +4174,16 @@ export class RestServer {
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
-        // [#11637 / #14366] `api`: parsed AND consumed. #11637 ran the declared
+        // [#11637 / commit 53cbad9f7] `api`: parsed AND consumed. #11637 ran the declared
         // contract here but discarded its output, leaving the block below to be
         // built from a cast over the raw input through a `??` chain that
         // duplicated `RestApiConfigSchema`'s defaults key for key — ELEVEN
         // literals in `packages/rest` restating the eleven top-level
         // `z.default(...)`s in `packages/spec`, with nothing pinning that the
-        // two stayed equal. (Eleven, measured on both sides at #14366; the
+        // two stayed equal. (Eleven, measured on both sides by commit 53cbad9f7; the
         // filing card said twelve, having counted the `config.api ?? {}` that
         // guards the whole object rather than a per-key default.)
-        // #14366 folded the chain onto the parse after re-measuring the key
+        // Commit 53cbad9f7 folded the chain onto the parse after re-measuring the key
         // diff empty in both directions (see `parseDeclaredApiConfig`), so the
         // schema is now the single source of these defaults. The cast is gone
         // with it: the parsed output is already typed.
@@ -4242,14 +4242,14 @@ export class RestServer {
                     delete: crud.operations?.delete ?? true,
                     list: crud.operations?.list ?? true,
                 },
-                // `patterns` / `objectParamStyle` are tombstones since #14691 —
+                // `patterns` / `objectParamStyle` are tombstones since commit b3a63d32c —
                 // refused by the parse above, never threaded.
                 dataPrefix: crud.dataPrefix,
             },
             metadata: {
                 prefix: metadata.prefix,
                 enableCache: metadata.enableCache,
-                // `cacheTtl` is a tombstone since #14691 (`enableCache` selects the
+                // `cacheTtl` is a tombstone since commit b3a63d32c (`enableCache` selects the
                 // protocol's cached read path, which takes no TTL).
                 // [ADR-0106 D8] Default ON — masking is the platform default and
                 // ships with the current major. The key has a declared seat
@@ -4272,7 +4272,7 @@ export class RestServer {
                     // the `POST /_migrate-stored` door, which used to leave with
                     // that switch — the compatibility cost the ruling priced.
                     maintenance: metadata.endpoints?.maintenance ?? true,
-                    // `schema` is a tombstone since #14691: it gated a route that
+                    // `schema` is a tombstone since commit b3a63d32c: it gated a route that
                     // does not exist.
                 },
             },
@@ -4284,13 +4284,13 @@ export class RestServer {
                     createMany: batch.operations?.createMany ?? true,
                     updateMany: batch.operations?.updateMany ?? true,
                     deleteMany: batch.operations?.deleteMany ?? true,
-                    // `upsertMany` is a tombstone since #14691: there is no upsertMany
+                    // `upsertMany` is a tombstone since commit b3a63d32c: there is no upsertMany
                     // route to gate (upsert is an operation type of the generic batch
                     // endpoint). So is `defaultAtomic`: atomicity is the per-request
                     // `options.atomic` (ADR-0119 D4).
                 },
             },
-            // [#14691] Parsed for the refusal, threaded as nothing — every key of
+            // [commit b3a63d32c] Parsed for the refusal, threaded as nothing — every key of
             // the sub-object is a tombstone (see the type above). `routes` is kept
             // as a key so the normalized shape still has one seat per sub-object.
             routes: routes as Record<string, never>,
@@ -4300,7 +4300,7 @@ export class RestServer {
     /**
      * The full API base path — THE base for this deployment's REST surface.
      *
-     * [#6306] Public because it is the single source of truth, not merely a
+     * [commit fec784863] Public because it is the single source of truth, not merely a
      * convenience: `rest-api-plugin.ts` threads this very value into the
      * direct-mount registrars (`packages.*`, `datasources/:name/external/*`)
      * so those nine routes mount under the same prefix as everything the
@@ -4525,7 +4525,7 @@ export class RestServer {
                     // NOT overwritten here. `DiscoverySchema` declares the field
                     // under "System Identity", grouped with `name` and
                     // `environment` — the "what server is this" question, settled
-                    // by the #10993 ruling and reaffirmed by #11235/#11242.
+                    // by the #10993 ruling, landed by commits 98ea3443f and 376c70f98.
                     //
                     // This line used to read `discovery.version =
                     // this.config.api.version`, which is a different fact
@@ -4537,9 +4537,9 @@ export class RestServer {
                     // carried no identity.
                     //
                     // It also masked the producer. `getDiscovery()` derives the
-                    // value from `OS_RUNTIME_VERSION` (#11235) — the same stamp
+                    // value from `OS_RUNTIME_VERSION` (commit 376c70f98) — the same stamp
                     // `/health` and the runtime dispatcher's own `/discovery`
-                    // read (#10993/#11242) — so after #11297 this overwrote a
+                    // read (#10993, commit 98ea3443f) — so after #11297 this overwrote a
                     // value that already AGREED with the other producer, turning
                     // one answer back into two dialects of one field.
                     //
@@ -4624,7 +4624,7 @@ export class RestServer {
                         // direct mounts (#5822): the advertised base is read off
                         // the very route arrays the registrars iterated to mount,
                         // so advertisement and mounting derive from one fact and
-                        // cannot drift. Since #6306 those registrars mount at
+                        // cannot drift. Since commit fec784863 those registrars mount at
                         // this server's own `getApiBasePath()` — the single
                         // base — so an `apiPath` deployment advertises
                         // `{apiPath}/packages` and `{apiPath}/datasources`.
@@ -5064,7 +5064,7 @@ export class RestServer {
                 //    lives where it is observable, in the mount
                 //    `${basePath}/${version}` -> `/api/v1`. The runtime version
                 //    is answered by `{basePath}/discovery` and `/health`, derived
-                //    from `OS_RUNTIME_VERSION` (#10993/#11235/#11292). OpenAPI
+                //    from `OS_RUNTIME_VERSION` (#10993, commit 376c70f98, #11292). OpenAPI
                 //    3.1 defines this field as "the version of the OpenAPI
                 //    document (which is distinct from the OpenAPI Specification
                 //    version or the API implementation version)" — the document
@@ -5291,8 +5291,8 @@ export class RestServer {
      * and the ruling that drew these four radii does not name it. Moving it
      * under a switch is a decision, not a tidy-up.
      *
-     * [#12195] The compound-name twins spelled `/:type/:section/:name` used to
-     * close that list. They are RETIRED (stage 3 of #12176): every item is
+     * [commit 7986d973f] The compound-name twins spelled `/:type/:section/:name` used to
+     * close that list. They are RETIRED (stage 3, commit 7986d973f): every item is
      * addressed through the single-segment `/:type/:name`, with the name
      * percent-encoded by the caller.
      *
@@ -5450,15 +5450,15 @@ export class RestServer {
                         // `getMetaDiagnostics` reads each swept type through
                         // `getMetaItems({ type: t, organizationId })`.
                         //
-                        // ⚠️ [#14683] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+                        // ⚠️ [commit 96326040f] `getMetaItems` NOW APPLIES THE REGISTRY GATE
                         // ITSELF — `organizationIdForMetaRead(request.type,
                         // request.organizationId)`, one statement after it folds the
                         // type through `canonicalizeMetaRequestType`. That is the
                         // ONE inner gate this call site now sits above; the sibling
                         // gate in the same file guards `getMetaItem` (the singular
-                        // overlay read, #14908), which this arm never reaches.
+                        // overlay read, commit d5cbb44f3), which this arm never reaches.
                         //
-                        // ⛔ Until #14683 this comment said `getMetaItems` applied NO
+                        // ⛔ Until commit 96326040f this comment said `getMetaItems` applied NO
                         // registry gate of its own and the scope was therefore
                         // decided HERE, per type, by the caller. That sentence is
                         // FALSE on today's tree — do not reintroduce it, and do not
@@ -5471,7 +5471,7 @@ export class RestServer {
                         // arm Studio's per-type directory drill-down uses, and
                         // it is the arm #13753 repaired.
                         //
-                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
+                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (commit abf9101f1) ──
                         //
                         // The VALUE is redundant, and measured to be. Both sites fold
                         // the identical string through the identical map — here
@@ -5509,7 +5509,7 @@ export class RestServer {
                         // a fan-out per overridable type plus a REST-side
                         // re-aggregation of `total`/`stats`/`scannedTypes`.
                         //
-                        // ⚠️ #14683 DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // ⚠️ Commit 96326040f DISSOLVED THAT OBSTACLE (commit abf9101f1 recorded
                         // it, #15622 acted on it). `getMetaDiagnostics` does
                         // not spend the organization once: it loops `for (const
                         // t of targetTypes)` calling `getMetaItems({ type: t,
@@ -5575,7 +5575,7 @@ export class RestServer {
                             .catch(rethrowAuthzStoreUnavailable);
                         const diagnosticsOrganizationId: string | undefined = diagnosticsType
                             ? organizationIdForMetaRead(
-                                // [#10340] FOLDED, not raw — see the PUT door's
+                                // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                                 // org-scope comment for the measurement. The
                                 // protocol keeps receiving the caller's own
                                 // spelling (it normalises, and refuses an
@@ -5872,7 +5872,7 @@ export class RestServer {
                         const previewDrafts = typeof req.query?.preview === 'string'
                             && req.query.preview.toLowerCase() === 'draft'
                             && mayReadPendingDrafts(listCtx);
-                        // [#9741] Typed against the spec request shape plus the
+                        // [commit 2a29caa53] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
                         // literal used to carry is retired now that the spec
                         // declares `previewDrafts` (and `organizationId`, #9726).
@@ -6016,7 +6016,7 @@ export class RestServer {
                         // looks like its repair.
                         //
                         // ⭐ And RAW is not the unconditional tenant that
-                        // predicate exists to prevent, because since #14683
+                        // predicate exists to prevent, because since commit 96326040f
                         // `getMetaItems` applies it ITSELF, to its OWN
                         // `request.type`, after the fold. The per-SOURCE-type
                         // decision is already the callee's: an overridable
@@ -6089,7 +6089,7 @@ export class RestServer {
             // [#5882] GET /meta/:type/:name/layers — the three-layer diagnostic
             // projection as its OWN resource. Registered BEFORE
             // /meta/:type/:name for the same first-match reason as
-            // /references above. [#12195] It also used to have to precede the
+            // /references above. [commit 7986d973f] It also used to have to precede the
             // compound `/:type/:section/:name`, which would otherwise capture
             // this path with section=<name>, name="layers"; that catch-all is
             // retired, so only the /references-style reason remains.
@@ -6113,7 +6113,7 @@ export class RestServer {
                         // [ADR-0106 D2/D5] The dedicated path is its own
                         // schema-serving outlet — it resolves the caller's
                         // field-visibility posture exactly like the plain meta
-                        // read does, with the NORMALIZED type (#3984 / #6241).
+                        // read does, with the NORMALIZED type (#3984 / commit 83a3b1f2e).
                         const layeredMetaType = RestServer.metaTypeSingular(req.params.type);
                         let maskPosture: ObjectSchemaMaskPosture;
                         try {
@@ -6217,7 +6217,7 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
-                        // [#3984 / #6241] Normalize the `:type` segment ONCE,
+                        // [#3984 / commit 83a3b1f2e] Normalize the `:type` segment ONCE,
                         // here at the top, and let every gate below read THIS
                         // value. The route serves both spellings and Prime
                         // Directive #3 makes the plural one canonical
@@ -6226,7 +6226,7 @@ export class RestServer {
                         //
                         // #3984 ruled this shape for exactly that reason ("每个
                         // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
-                        // #6241 is why the ruling is written into the code
+                        // commit 83a3b1f2e is why the ruling is written into the code
                         // rather than trusted to memory: eight days after
                         // #3984 landed, the cache-branch condition below still
                         // excluded `doc`/`book` by LITERAL comparison, so
@@ -6369,7 +6369,7 @@ export class RestServer {
                         // audience gate is per-caller, and a shared ETag would
                         // leak gated content across viewers.
                         //
-                        // [#6241] That sentence was already here while the
+                        // [commit 83a3b1f2e] That sentence was already here while the
                         // exclusion beneath it compared the RAW param against
                         // the literals `'doc'` / `'book'`, so the canonical
                         // plural spelling took the cached branch and shipped
@@ -6424,7 +6424,7 @@ export class RestServer {
                         // #3, and an exclusion it could be spelled around would
                         // not be an exclusion). The `doc` / `book` literals
                         // that stood at the end of this condition had exactly
-                        // that hole; #6241 closed it.
+                        // that hole; commit 83a3b1f2e closed it.
                         const isDashboardType = metaType === 'dashboard';
                         // ADR-0046 §6.7 — the two audience-gated types, excluded
                         // from the cache so {@link metaItemReadGate} judges them.
@@ -6471,7 +6471,7 @@ export class RestServer {
                             const cacheI18n = await this.resolveI18nService(environmentId, req);
                             const cacheLocale = this.extractLocale(req, cacheI18n);
 
-                            // [#9741] Typed request — `as any` retired. The
+                            // [commit 2a29caa53] Typed request — `as any` retired. The
                             // cached read carries NO draft-visibility members
                             // on purpose: this branch is unreachable when a
                             // draft switch is ADMITTED (`previewDrafts` /
@@ -6598,7 +6598,7 @@ export class RestServer {
                         } else {
                             // Non-cached version
                             const packageId = req.query?.package || undefined;
-                            // [#9741] Typed against the spec request shape —
+                            // [commit 2a29caa53] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
                             // `previewDrafts` (and `organizationId`, #9726).
@@ -6941,7 +6941,7 @@ export class RestServer {
                     // else the session's `activeOrganizationId`, which is the
                     // very field the dispatcher twin reads.
                     //
-                    // [#10340] The type is FOLDED before the scope decision,
+                    // [commit 26f3588fb] The type is FOLDED before the scope decision,
                     // never the raw URL spelling. Storage folds `:type`
                     // through `META_URL_TO_SINGULAR` — the COMPLETE map —
                     // while `declaresOrgOverride` tolerates only the
@@ -6967,7 +6967,7 @@ export class RestServer {
                     // REQUEST SHAPE alone: the schema declared only
                     // `{ type, name, item }`, and removing the cast surfaced
                     // TS2353 on every other key. The literal is now compiled
-                    // against the spec contract through the #9741
+                    // against the spec contract through the commit 2a29caa53
                     // `TransportScopedMetaRequest` wrapper — `environmentId`
                     // is the transport-level routing key that wrapper layers
                     // on, ⛔ never a protocol key; every other key here is
@@ -6979,7 +6979,7 @@ export class RestServer {
                         name: req.params.name,
                         item,
                         organizationId,
-                        // [#10888] This door answers with an ADR-0112 error
+                        // [commit d806081dd] This door answers with an ADR-0112 error
                         // envelope that carries the refusal's `issues[]`
                         // structurally beside the message (`sendError` threads a
                         // top-level `issues`), so `saveMetaItem`'s 422 renders
@@ -7130,7 +7130,7 @@ export class RestServer {
                     // together. `ctx` is the capability gate's own
                     // `resolveExecCtx` result, resolved above.
                     const organizationId = organizationIdForMetaWrite(
-                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
@@ -7141,7 +7141,7 @@ export class RestServer {
                     // on REQUEST SHAPE: the member was declared all along, but
                     // the schema declared only `{ type, name }`, so removing the
                     // cast surfaced TS2353 on six keys. The literal is now
-                    // compiled against the spec contract through the #9741
+                    // compiled against the spec contract through the commit 2a29caa53
                     // `TransportScopedMetaRequest` wrapper — `environmentId` is
                     // the transport-level routing key that wrapper layers on,
                     // ⛔ never a protocol key; every other key here is checked
@@ -7218,7 +7218,7 @@ export class RestServer {
                     if (refuseNonAuthoringCaller(historyCtx, res, 'Reading a metadata item\'s version history')) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     // The cast came off when `MetadataProtocol` declared
-                    // `historyMetaItem` (#12005 — the #11006 pattern, exactly
+                    // `historyMetaItem` (#12005 — the commit cccbe51bf pattern, exactly
                     // as #11678 de-cast the audit twin below). The member is
                     // declared OPTIONAL, so this truthiness guard is not just
                     // feature detection: it is what narrows the member to
@@ -7302,7 +7302,7 @@ export class RestServer {
                     // `req`), the same result the audit twin and 40+ handlers
                     // here already share.
                     const historyOrganizationId = organizationIdForMetaRead(
-                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), historyCtx?.tenantId,
                     );
@@ -7310,7 +7310,7 @@ export class RestServer {
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
                     // like the audit door below: this door still spreads the
                     // transport-level `environmentId` (long-standing wire
-                    // shape, deliberately unchanged — the #9741 ruling keeps
+                    // shape, deliberately unchanged — the ruling commit 2a29caa53 landed keeps
                     // it out of the protocol schema, and the implementation
                     // never reads it), so the wrapper is what layers that one
                     // member on. Every OTHER key is compiled against the spec
@@ -7523,7 +7523,7 @@ export class RestServer {
                     // (#20441), not a second resolution.
                     //
                     // The `(p as any)` casts this door carried came off when
-                    // `MetadataProtocol` declared `auditMetaItem` (the #11006
+                    // `MetadataProtocol` declared `auditMetaItem` (the commit cccbe51bf
                     // pattern, same as the publish door below): the literal is
                     // now compiled against the spec contract, so an undeclared
                     // key here is a compile error (TS2353) instead of a payload
@@ -7561,7 +7561,7 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#8919] Authoring capability gate — the SAME four lines the
+                    // [commit b5378550e] Authoring capability gate — the SAME four lines the
                     // `PUT` / `DELETE` / `_migrate-stored` doors carry, deliberately
                     // not a second way of demanding the same capability.
                     //
@@ -7631,7 +7631,7 @@ export class RestServer {
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
 
-                    // [#10063] Software-package binding for the PROMOTION —
+                    // [commit 9e04c3e35] Software-package binding for the PROMOTION —
                     // `?package=<id>`, deliberately the SAME wire spelling and the
                     // same normalisation the `PUT` door states it with a few
                     // hundred lines up, not a second dialect for one value.
@@ -7690,7 +7690,7 @@ export class RestServer {
                     // save without scoping the publish is not a smaller change,
                     // it is a broken one.
                     //
-                    // [#8919] The context is now the one the capability gate above
+                    // [commit b5378550e] The context is now the one the capability gate above
                     // already resolved, so the caller a publish is SCOPED to can
                     // never drift from the caller it was AUTHORIZED against — the
                     // same single-resolution shape the `PUT` door carries.
@@ -7698,12 +7698,12 @@ export class RestServer {
                     // handlers in this file (see the `/published` comment's seam
                     // warning, which stands).
                     const organizationId = organizationIdForMetaWrite(
-                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     // [#11145] The `(p as any)` cast this call carried came off
-                    // when `MetadataProtocol` declared `publishMetaItem` (#11006,
+                    // when `MetadataProtocol` declared `publishMetaItem` (commit cccbe51bf,
                     // maintainer ruling 2026-08-22, option B). What the cast was
                     // load-bearing FOR is recorded because it is counter-intuitive
                     // and was measured, not assumed: deleting it while the member
@@ -7715,12 +7715,12 @@ export class RestServer {
                     // declaring the member could retire it; widening the
                     // implementation's own request type in
                     // `@objectstack/metadata-protocol` (which this package
-                    // deliberately does not depend on) never could, and #10350
+                    // deliberately does not depend on) never could, and commit 490879ad0
                     // measured exactly that.
                     //
                     // What replaces it is the point of the exercise, not a
                     // side effect: the literal below is compiled against the spec
-                    // contract through the #9741 `TransportScopedMetaRequest`
+                    // contract through the commit 2a29caa53 `TransportScopedMetaRequest`
                     // wrapper, so an undeclared key here is a COMPILE ERROR
                     // (`TS2353`, measured) instead of a payload member no contract
                     // has ever seen. `environmentId` is the transport-level
@@ -7762,7 +7762,7 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#8919] Authoring capability gate — the same four lines as
+                    // [commit b5378550e] Authoring capability gate — the same four lines as
                     // the sibling doors, and the sharper half of this pair.
                     // `rollbackMetaItem` restores a CALLER-SUPPLIED `toVersion` as
                     // the new live row, so without this gate it is a mechanism for
@@ -7845,10 +7845,10 @@ export class RestServer {
                     // env-wide row — a write to a partition the caller never
                     // named, audited as `null`. See the `PUT` door above.
                     //
-                    // [#8919] `ctx` is the one the capability gate above resolved,
+                    // [commit b5378550e] `ctx` is the one the capability gate above resolved,
                     // so scope and authorization read the same identity.
                     const organizationId = organizationIdForMetaWrite(
-                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
@@ -8002,7 +8002,7 @@ export class RestServer {
                     // `diffCtx` is the caller resolved at the head of this door
                     // (#20378), not a second resolution.
                     const diffOrganizationId = organizationIdForMetaRead(
-                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), diffCtx?.tenantId,
                     );
@@ -8106,7 +8106,7 @@ export class RestServer {
         // boundary's accept set for `/meta/:type/...` is unchanged, which is
         // what the 2026-08-17 re-weigh (item 3) requires of this step.
         //
-        // [#12195] The four-segment collision this comment used to describe is
+        // [commit 7986d973f] The four-segment collision this comment used to describe is
         // GONE with the compound `/:type/:section/:name/published` twin. That
         // twin captured `/meta/object/x/state/published` as "the published
         // version of the compound name object/x/state", and only the literal
@@ -8160,7 +8160,7 @@ export class RestServer {
                     // `wiredEngineOrLoud` also invokes the provider
                     // SYNCHRONOUSLY, so a host wiring a non-`async` provider —
                     // which the seam's declared type cannot prevent — reaches the
-                    // same answer as one that rejects (#13280) instead of
+                    // same answer as one that rejects (commit add6a1b1c) instead of
                     // escaping past a `.catch` that never came into existence.
                     const ql = await wiredEngineOrLoud(
                         Boolean(this.objectQLProvider),
@@ -8231,14 +8231,14 @@ export class RestServer {
         // after publish, identical for a name that does not exist: a route
         // that structurally could not 404.
         //
-        // ONE arity since #12195 (stage 3 of #12176's maintainer-ruled
+        // ONE arity since commit 7986d973f (stage 3 of the maintainer-ruled
         // retirement of compound-name addressing, 2026-08-25). This route used
         // to be mounted twice — the second registration was
         // `/:type/:section/:name/published`, folding `section` and `name` back
         // into one slash-bearing key so the SDK's
         // `getPublished('lead', 'views/all_leads')` could reach it.
         //
-        // Stage 1 (#12194) declared the item-name grammar and refuses every
+        // Stage 1 (commit 311433f6b) declared the item-name grammar and refuses every
         // slash-bearing name at the publish door, so no name reachable ONLY
         // through that arity can exist any more. What remains addressable is a
         // pre-grammar residue row, and it is reachable HERE: a percent-encoded
@@ -8255,7 +8255,7 @@ export class RestServer {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const type = String(req.params?.type ?? '');
-                        // [#12195] No `section` fold: this route has one arity.
+                        // [commit 7986d973f] No `section` fold: this route has one arity.
                         // A percent-encoded slash arrives already decoded here,
                         // so a residue name reads exactly as it is stored.
                         const name = String(req.params?.name ?? '');
@@ -8323,10 +8323,10 @@ export class RestServer {
                         // inventing org RESOLUTION here, and this reads
                         // `tenantId` off the execution context `resolveExecCtx`
                         // already resolves, exactly as #8803 did for the audit
-                        // read. [#14907] The CALLEE gates: `getMetaItemLayered`
+                        // read. [commit e1d4f9e3f] The CALLEE gates: `getMetaItemLayered`
                         // resolves `organizationIdForMetaRead` AFTER its canonical
                         // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
-                        // the unfolded `:type`, would be the #10340 defect. ⛔ And
+                        // the unfolded `:type`, would be the defect commit 26f3588fb fixed. ⛔ And
                         // the old "fail-open in the safe direction" reading is the
                         // argument the predicate refutes: an org named on a type
                         // the registry does not declare overridable resurrects the
@@ -8454,7 +8454,7 @@ export class RestServer {
                             });
                             return;
                         }
-                        // [#10340] FOLDED here too — the smaller second site
+                        // [commit 26f3588fb] FOLDED here too — the smaller second site
                         // of the same class. The layered consult above folds
                         // internally (protocol boundary), but this fallback
                         // reads the code/package registry, which stores
@@ -8488,14 +8488,14 @@ export class RestServer {
         // ── RETIRED: the compound `/:type/:section/:name` arities ──────────
         //
         // `GET` and `PUT /meta/:type/:section/:name` were mounted here until
-        // #12195 (stage 3 of #12176's maintainer-ruled retirement of
+        // commit 7986d973f (stage 3 of the maintainer-ruled retirement of
         // compound-name addressing, 2026-08-25). Both folded `section` and
         // `name` back into one slash-bearing key (`views/all_leads`) that the
         // protocol layer then treated as a single opaque string — the section
         // half was never stored, filtered or enumerated, so it was addressing
         // syntax and nothing else.
         //
-        // Stage 1 (#12194) declared the item-name grammar and refuses every
+        // Stage 1 (commit 311433f6b) declared the item-name grammar and refuses every
         // slash-bearing name at the publish door, which is what makes this a
         // removal of dead addressing rather than of a capability: no name
         // reachable only through these arities can be created any more.
@@ -8516,7 +8516,7 @@ export class RestServer {
     /**
      * Register UI endpoints
      *
-     * ## [#13214] This registrar's one route is identity- AND ownership-gated
+     * ## [commit cc837dbfe] This registrar's one route is identity- AND ownership-gated
      *
      * It used to be the single route in this server's table that resolved NO
      * identity: it went straight from `resolveProtocol` to `getUiView`, so it
@@ -8553,7 +8553,7 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const routeEnvironmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#13214] THE environment decision for this request, taken
+                    // [commit cc837dbfe] THE environment decision for this request, taken
                     // once through the shared entry point and then reused — so
                     // the identity below, the ownership comparison and the
                     // protocol that answers cannot be about three different
@@ -8579,7 +8579,7 @@ export class RestServer {
                         const viewRequest: TransportScopedMetaRequest<GetUiViewRequest> = {
                             object: req.params.object,
                             type: req.params.type,
-                            // [#13214] `routeEnvironmentId`, NOT the resolved id.
+                            // [commit cc837dbfe] `routeEnvironmentId`, NOT the resolved id.
                             // The gate above changed WHO may reach the producer;
                             // it deliberately did not change WHAT the producer is
                             // told. This key has only ever been present on the
@@ -10150,7 +10150,7 @@ export class RestServer {
                     // `RestServer`'s constructor is the public wiring point —
                     // throws while the expression is still being evaluated, so
                     // there is no promise to attach to and the handler is never
-                    // reached (#13280).
+                    // reached (commit add6a1b1c).
                     //
                     // ⚠️ NOT reachable from the SHIPPED wiring: the provider
                     // `rest-api-plugin.ts` hands over is declared `async`.
@@ -11131,7 +11131,7 @@ export class RestServer {
                     const clientMsg = sandboxBusinessMessage(error) ?? msg;
 
                     // ── [#12710] The producer's marked sentence, resolved once ─
-                    // #9934's `userMessage` channel is STATUS- and BRANCH-agnostic
+                    // Commit 79c46da90's `userMessage` channel is STATUS- and BRANCH-agnostic
                     // by construction: `withDeclaredUserMessage` applies it ONCE at
                     // the `/data` door's exit, over whatever envelope classification
                     // chose. This door has no such wrapper — it builds ①, ③a and ③b
@@ -11909,7 +11909,7 @@ export class RestServer {
                     : undefined;
                 // [#12669] …and so does the sentence the producer addressed to
                 // the CALLER. The flat `/data` door attaches it in
-                // `withDeclaredUserMessage` (`error-response.ts`, #9934) and
+                // `withDeclaredUserMessage` (`error-response.ts`, commit 79c46da90) and
                 // the one classification asked above is already holding the
                 // result; this family dropped it at the same re-dress, with the
                 // same one-directional silence — an author's own remedy text
@@ -12549,7 +12549,7 @@ export class RestServer {
                 // row is invisible inside the caller's organization scope, so
                 // the result envelope cannot be built. Same class as
                 // RESUME_FAILED — a genuine server-side inconsistency, named
-                // (#13182): read the request back with a system or
+                // (commit 5b3ff63cc): read the request back with a system or
                 // matching-organization context.
                 [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
@@ -13023,7 +13023,7 @@ export class RestServer {
                     // rather than failing. `wiredEngineOrLoud` also invokes the
                     // provider SYNCHRONOUSLY, so a host wiring a non-`async`
                     // provider — which the seam's declared type cannot prevent —
-                    // reaches the same answer as one that rejects (#13280).
+                    // reaches the same answer as one that rejects (commit add6a1b1c).
                     const ql = await wiredEngineOrLoud(
                         Boolean(this.objectQLProvider),
                         () => this.objectQLProvider!(environmentId),
@@ -13467,7 +13467,7 @@ export class RestServer {
      *
      * This is the load-bearing half of the mounted ⇒ advertised parity
      * (ADR-0076 D12): the registrars mount at whatever base the plugin threads
-     * in (since #6306 that is `getApiBasePath()`), the recorder keeps the
+     * in (since commit fec784863 that is `getApiBasePath()`), the recorder keeps the
      * very arrays they iterated to mount (#5822), and this method projects the
      * advertised `routes.packages` / `routes.datasources` out of those arrays.
      * One expression, two consumers — a future change that moves the mount

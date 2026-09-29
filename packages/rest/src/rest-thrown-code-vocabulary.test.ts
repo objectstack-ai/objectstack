@@ -100,7 +100,7 @@ const thrownWithStatus = (status: number, code?: unknown) =>
 const thrownWithStatusCode = (statusCode: number, code?: unknown) =>
     Object.assign(new Error('boom'), { statusCode, ...(code !== undefined ? { code } : {}) });
 /**
- * [#10345] `runtime/src/sandbox/quickjs-runner.ts`'s `SandboxError`: the debug
+ * [commit cad8b42f0] `runtime/src/sandbox/quickjs-runner.ts`'s `SandboxError`: the debug
  * wrapper on `.message`, the business text on `.innerMessage`. Reaches the
  * unwrap door, which sits above the passthrough.
  */
@@ -119,7 +119,7 @@ const sandboxThrownWithStatus = (status: number, code?: unknown) => {
  * at a time because the defect this card measured was FOUR verbatim
  * passthroughs, and a fix that reached three of them would read as done.
  *
- * [#10345] A FIFTH arm joined the list. The sandbox unwrap door emitted no
+ * [commit cad8b42f0] A FIFTH arm joined the list. The sandbox unwrap door emitted no
  * `code` at all, so #9232 had nothing to narrow there and left it out — and
  * "no code, ever" is exactly the shape a vocabulary sweep cannot see. It now
  * carries the producer's declared code like its four siblings, so it is
@@ -155,7 +155,7 @@ const ARMS = [
         status: 503,
     },
     {
-        // [#10345] The sandbox unwrap — reached by `.innerMessage` plus a
+        // [commit cad8b42f0] The sandbox unwrap — reached by `.innerMessage` plus a
         // declared client-band status, and the ONLY arm whose body text is the
         // unwrapped business message rather than `error.message`.
         name: 'mapDataError sandbox unwrap 4xx (`.innerMessage`)',

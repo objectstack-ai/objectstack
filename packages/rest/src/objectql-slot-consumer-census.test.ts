@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#18546] The `objectQLProvider` slot's consumer census, made MECHANICAL —
+ * [commit 58f60e37e] The `objectQLProvider` slot's consumer census, made MECHANICAL —
  * and its THIRD consumer, `POST /batch`, driven for the first time.
  *
  * ## Why this file exists
@@ -40,7 +40,7 @@
  *   | no provider wired at all                  | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
  *   | provider RESOLVES `undefined` (absence)   | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
  *   | provider REJECTS (wired, failed to build) | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
- *   | provider THROWS SYNCHRONOUSLY (#13280)    | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
+ *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c) | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
  *
  * ⇒ this consumer never re-collapsed: a rejection and a resolved `undefined`
  * always reached two different answers, which is the whole of the decidable
@@ -327,7 +327,7 @@ const ONE_OP = { operations: [{ object: 'account', action: 'create', data: { nam
 const providerAbsent = async () => undefined;
 /** Wired and failed to build — a rejection, the shape #13904 made visible. */
 const providerRejecting = async () => { throw new Error('driver handshake failed'); };
-/** The same fault from a host that wired a NON-`async` provider (#13280). */
+/** The same fault from a host that wired a NON-`async` provider (commit add6a1b1c). */
 const providerSyncThrowing = (() => { throw new Error('driver handshake failed'); }) as any;
 /** An engine that can open a transaction — enough to pass this door's probe. */
 const engineHealthy = async () => ({ transaction: async (fn: any) => fn({}) });

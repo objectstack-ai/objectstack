@@ -12,7 +12,7 @@
  * with `VALIDATION_FAILED`.
  *
  * Ruling D (maintainer, 2026-08-06) replaced prediction with the verdict
- * itself: the dry run asks `DataProtocol.validateData` (#6037 / PR #6474),
+ * itself: the dry run asks `DataProtocol.validateData` (commit 18189983d),
  * which runs the same `validateRecord` / `evaluateValidationRules` `insert()`
  * runs. So this file never pins the dry run's output ALONE — every case runs
  * BOTH halves against one live engine and asserts they agree. A test that

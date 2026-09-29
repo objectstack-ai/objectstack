@@ -20,7 +20,7 @@
  *     engine (the `audience-bootstrap-seam` harness shape): the declared
  *     owner's operator-provisioned row is BORN `email_verified`, and every
  *     "never" cell of the matrix stays unverified through the same pipeline.
- *     The verified read-back uses the shared [#11343] allow-list
+ *     The verified read-back uses the shared [commit c0714eb5d] allow-list
  *     (`isEmailVerifiedUserRow`) — the predicate the derivation itself
  *     refuses on — so a green here IS "`resolve-authz-context.ts` §6b-config
  *     would resolve PLATFORM_ADMIN for this row", without booting
@@ -450,7 +450,7 @@ describe('#12751 — the stamp lands through the REAL creation pipeline', () => 
 
   it('…and the seed’s own server-side lane (api.signUpEmail) lands the same way — the walled dev boot keeps working', async () => {
     // The dev-admin seed calls `api.signUpEmail` in-process and then applies
-    // its own #11343 stamp. With #12751 the row is already BORN verified on a
+    // its own commit c0714eb5d stamp. With #12751 the row is already BORN verified on a
     // walled boot (this lane), so the seed's later update is an idempotent
     // no-op — same terminal state, no behaviour change.
     process.env.NODE_ENV = 'development';

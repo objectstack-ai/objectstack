@@ -739,7 +739,7 @@ export const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
 export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
 
 /**
- * [#8734] The three lists above, keyed by the table each one judges — the shape
+ * [commit f8eb73601] The three lists above, keyed by the table each one judges — the shape
  * the correspondence gate consumes.
  *
  * The gate (`last-admin-standing-keys.test.ts`) reads
@@ -763,7 +763,7 @@ export const STANDING_KEYS_BY_TABLE: Readonly<Record<string, readonly string[]>>
 };
 
 /**
- * [#8734] Columns the resolver reads that this guard deliberately does NOT
+ * [commit f8eb73601] Columns the resolver reads that this guard deliberately does NOT
  * treat as standing-bearing, each with the reason it cannot empty the
  * administrator population.
  *

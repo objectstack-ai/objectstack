@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #10063 — the draft→active promotion door could not state the package its
+// Before commit 9e04c3e35 the draft→active promotion door could not state the package its
 // write belongs to, so #9612's package-closure narrowing never fired for the
 // one door that needed it most.
 //
@@ -91,7 +91,7 @@ function mockRes() {
 
 /**
  * @param execCtx what `resolveExecCtx` resolves to for the request under test.
- *   The publish door gates on `manage_metadata` (#8919) BEFORE it reaches any
+ *   The publish door gates on `manage_metadata` (commit b5378550e) BEFORE it reaches any
  *   of this, so the capability is present in every case except the one that
  *   deliberately withholds it — without it each case would 403 and pass for
  *   the wrong reason.

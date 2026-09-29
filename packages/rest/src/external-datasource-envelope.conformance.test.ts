@@ -51,9 +51,9 @@ interface Captured {
  * would read the 401 body instead of the arm it names, and this file would
  * silently stop measuring what it exists to measure.
  *
- * [#9901/#10255] …and an ENTITLED one: every route now also requires a
+ * [#9901 / commit 6ce58a735] …and an ENTITLED one: every route now also requires a
  * capability (`manage_platform_settings` on the reads — `validate` among them
- * since the 2026-08-20 #10255 ruling — `manage_metadata` on the writes), so
+ * since the 2026-08-20 ruling, commit 6ce58a735 — `manage_metadata` on the writes), so
  * this stub holds both. Same reasoning one step further — a
  * resolver carrying an identity but no grants would turn every case below into
  * a reading of the 403 body. Holding both rather than one per case is

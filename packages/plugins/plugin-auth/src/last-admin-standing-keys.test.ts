@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8734] The SECOND of the two links that bind this guard's standing-key lists
+ * [commit f8eb73601] The SECOND of the two links that bind this guard's standing-key lists
  * to what the authorization resolver actually reads.
  *
  * Link 1 lives in `@objectstack/core`

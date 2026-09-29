@@ -294,7 +294,7 @@ describe('#15685 the /references door answers its two refusals in ONE envelope',
     // POPULATION, because "survives the bound" is meaningless without one. The
     // enforced ceiling on a metadata item name is the `maxLength` of the column
     // that stores it, not a `.max()` in `packages/spec`: the identifier schemas
-    // declare a floor and a grammar and deliberately no ceiling (#12144), and
+    // declare a floor and a grammar and deliberately no ceiling (commit 3a04b0125), and
     // the widest storing column is `sys_metadata.name` at 255
     // (`packages/metadata-core/src/objects/sys-metadata.object.ts`; the
     // length-ceiling note on `SystemIdentifierSchema` is the authority). Both

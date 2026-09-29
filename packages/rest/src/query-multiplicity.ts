@@ -55,7 +55,7 @@ import { RPC_QUERY_ALIAS_SLOTS } from '@objectstack/spec/data';
  * site names the parameters it declares single-valued instead of gating "every
  * key in `req.query`".
  *
- * #6307 landed the first copy of this rule in `package-routes.ts`, on the
+ * Commit 293476148 landed the first copy of this rule in `package-routes.ts`, on the
  * `?version=` of that registrar's package read/delete routes. Those routes are
  * gone (#14503 — the dispatcher's `/packages` domain is their single
  * implementation), so the rule has one home: here.
@@ -93,7 +93,7 @@ export type SingleQueryRead =
 
 /**
  * Read a query parameter the route declares single-valued out of the shape the
- * transport contract actually declares (#6307).
+ * transport contract actually declares (commit 293476148).
  *
  * See this module's header for why repetition is refused rather than resolved,
  * and why the rule counts occurrences instead of inspecting the value.
@@ -130,7 +130,7 @@ export function repeatedQueryParamMessage(name: string, count: number): string {
  * position ADR-0112 declares and the one PR #7293 (#7035) just converged this
  * file's `/meta` 501 refusals onto. `VALIDATION_ERROR` is not a new code: it is
  * the standard catalog's member for 400 (`spec/src/api/errors.zod.ts`,
- * `standardErrorCodeForHttpStatus(400)`), and the same code #6307 chose for
+ * `standardErrorCodeForHttpStatus(400)`), and the same code commit 293476148 chose for
  * this same condition on `/packages/:id`. Nothing in `packages/spec` moves.
  *
  * ## Why it also normalises

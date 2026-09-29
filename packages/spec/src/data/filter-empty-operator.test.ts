@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20311] `$empty` — the declared emptiness operator, STAGED.
+ * [#20311] `$empty` — the declared emptiness operator.
  *
  * Ruling B on #20311 (record 5861435168) set what 「is empty」 means once, per
  * field type: text-like = null or `''`; multi-value (multi-select, tags,
@@ -9,8 +9,10 @@
  * #20399 (record 5865693155) spelled it as `$empty: boolean`, "whose describe
  * IS the per-type table", expanded by each compile surface "through one spec
  * function". The maintainer's amendment (record 5868169573, 「照 $like 先例分阶段」)
- * staged it: declared in `FieldOperatorsSchema`, ABSENT from `FILTER_OPERATORS`
- * until every face has its arm, the `is_empty` lowering still `$null`.
+ * staged it: declared in `FieldOperatorsSchema`, absent from `FILTER_OPERATORS`
+ * until every face had its arm, the `is_empty` lowering `$null` meanwhile.
+ * [#20446] ended the staging: `$empty` is in `FILTER_OPERATORS` and the
+ * `is_empty` / `is_not_empty` lowering emits it (§4).
  *
  * The pins ruling A lists for this card, one `describe` each:
  *
@@ -21,8 +23,12 @@
  * 3. the expansion function (`./filter-empty-operator.ts`, published on the
  *    data entry) returns the text, multi-value and null arms for the three
  *    field kinds, and the value predicate answers each arm;
- * 4. `$empty` is ABSENT from `FILTER_OPERATORS`, and the lowering still emits
- *    `$null`.
+ * 4. [#20446, inverted from the staging pin] `$empty` is IN
+ *    `FILTER_OPERATORS`, and every spelling of the view operators `is_empty` /
+ *    `is_not_empty` lowers to it — on the array sugar and in
+ *    `canonicalAstOperator`'s fold. The rows those lowered rules answer are
+ *    each face's own suite (`memory-20446-empty-flip.test.ts`,
+ *    `sql-driver-20446-empty-flip.test.ts`).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -41,6 +47,7 @@ import {
   FilterConditionSchema,
   NormalizedFilterSchema,
   SpecialOperatorSchema,
+  canonicalAstOperator,
   parseFilterAST,
 } from './filter.zod';
 import * as dataBarrel from './index';
@@ -84,10 +91,10 @@ describe('#20311 §1 — the $empty description is the ruled per-type table', ()
     + 'qrcode) = null or \'\' (the empty string); multi-value types (multiselect, checkboxes, '
     + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
     + '(the empty list); every other type = null only. A face that holds no field declaration '
-    + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
-    + 'backends and absent from FILTER_OPERATORS. Until each face has its arm, the query '
-    + 'executors refuse it and the write-side check matcher matches no record; the view '
-    + 'operators is_empty / is_not_empty still lower to $null.';
+    + 'judges by the value: null, \'\' and [] are empty. A face that answers by the declared '
+    + 'type refuses the operator on a column whose declaration it does not hold (the built-in '
+    + 'id, for one) rather than guess a row; use $null there for "has no value". The view '
+    + 'operators is_empty / is_not_empty lower to this operator.';
 
   it('the enforced copy and the documentation copy carry the same string, and it is the table', () => {
     expect(descriptionOf(FieldOperatorsSchema.shape, '$empty')).toBe(RULED_TABLE);
@@ -239,29 +246,46 @@ describe('#20311 §3 — expandEmptyOperator answers the ruled arm per field def
 });
 
 // ---------------------------------------------------------------------------
-// §4 The staging: absent from FILTER_OPERATORS, lowering unchanged
+// §4 The flip: in FILTER_OPERATORS, and the view operators lower to it
 // ---------------------------------------------------------------------------
 
-describe('#20311 §4 — staged: $empty is ABSENT from FILTER_OPERATORS', () => {
-  it('is not in FILTER_OPERATORS', () => {
-    // ⛔ Deliberately absent (the maintainer's amendment, record 5868169573):
-    // driver-memory's accepted set is built from this array and its matcher's
-    // `default:` arm lets the row pass, so membership before every face has an
-    // arm would DROP the predicate and return every row. The FLIP CARD — the
-    // last card of ruling A's sequence on #20399, `Blocked-by` every lane
-    // card — is the one that adds `$empty` here, empties it out of
-    // `STAGED_AHEAD_OF_BACKENDS` (`filter-operator-vocabulary.test.ts`), and
-    // flips the lowering below. This assertion is the one it inverts.
-    expect(FILTER_OPERATORS as readonly string[]).not.toContain('$empty');
+describe('#20446 §4 — $empty is IN FILTER_OPERATORS and is_empty / is_not_empty lower to it', () => {
+  it('is in FILTER_OPERATORS, beside the other value-presence flags', () => {
+    // Inverted from #20311's staging pin (the maintainer's amendment, record
+    // 5868169573): every compile face answers `$empty` now (#20444, #20445),
+    // so the enforcement surface names it. `STAGED_AHEAD_OF_BACKENDS`
+    // (`filter-operator-vocabulary.test.ts`) no longer does.
+    expect(FILTER_OPERATORS as readonly string[]).toContain('$empty');
+    expect(FILTER_OPERATORS.slice(-3)).toEqual(['$null', '$exists', '$empty']);
     expect(Object.keys(FieldOperatorsSchema.shape)).toContain('$empty');
   });
 
-  it('the is_empty / is_not_empty lowering still emits $null — the flip is a later card', () => {
-    for (const op of ['is_empty', 'isempty']) {
-      expect(parseFilterAST(['tags', op, true])).toEqual({ tags: { $null: true } });
+  it('every spelling of is_empty lowers to $empty: true and of is_not_empty to $empty: false, whatever the filler', () => {
+    for (const op of ['is_empty', 'isempty', 'IS_EMPTY', 'IsEmpty']) {
+      for (const filler of [true, false, 'x', undefined]) {
+        expect(parseFilterAST(['tags', op, filler]), `${op} ${String(filler)}`).toEqual({ tags: { $empty: true } });
+      }
     }
-    for (const op of ['is_not_empty', 'isnotempty']) {
-      expect(parseFilterAST(['tags', op, true])).toEqual({ tags: { $null: false } });
+    for (const op of ['is_not_empty', 'isnotempty', 'IS_NOT_EMPTY']) {
+      for (const filler of [true, false, 'x', undefined]) {
+        expect(parseFilterAST(['tags', op, filler]), `${op} ${String(filler)}`).toEqual({ tags: { $empty: false } });
+      }
     }
+    // Nested under the array sugar's combinators too — a stored view rule set.
+    expect(parseFilterAST(['or', ['tags', 'is_empty', true], ['name', 'is_not_empty', true]])).toEqual({
+      $or: [{ tags: { $empty: true } }, { name: { $empty: false } }],
+    });
+  });
+
+  it('the null pair keeps its own lowering — is_null is not is_empty', () => {
+    expect(parseFilterAST(['tags', 'is_null', true])).toEqual({ tags: { $null: true } });
+    expect(parseFilterAST(['tags', 'isnotnull', true])).toEqual({ tags: { $null: false } });
+  });
+
+  it('canonicalAstOperator folds the empty pair onto its OWN names, not onto is_null / is_not_null', () => {
+    for (const op of ['is_empty', 'isempty', 'IS_EMPTY']) expect(canonicalAstOperator(op), op).toBe('is_empty');
+    for (const op of ['is_not_empty', 'isnotempty']) expect(canonicalAstOperator(op), op).toBe('is_not_empty');
+    for (const op of ['is_null', 'isnull']) expect(canonicalAstOperator(op), op).toBe('is_null');
+    for (const op of ['is_not_null', 'isnotnull']) expect(canonicalAstOperator(op), op).toBe('is_not_null');
   });
 });

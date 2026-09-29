@@ -197,7 +197,7 @@ function oldestFirst(a: any, b: any): number {
  *    operator-provisioned account (`walled-owner-operator-stamp.ts`) or a
  *    trusted-IdP insert arrives ALREADY VERIFIED, so the row that confers
  *    standing can exist the moment it is created.
- *  - **`sys_user` update touching `email` / `email_verified`** — the #11343
+ *  - **`sys_user` update touching `email` / `email_verified`** — commit c0714eb5d's
  *    trigger set (design §2 step 5): the declared owner's verifying update is
  *    exactly the moment `matchesConfiguredPlatformAdmin` starts answering
  *    `true`, and on a fresh walled rig it is the ONLY write that ever will —

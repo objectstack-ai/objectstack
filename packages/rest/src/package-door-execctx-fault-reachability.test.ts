@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13255] REACHABILITY and CONSEQUENCE of a swallowed execution-context
+ * [commit 43028a8f8] REACHABILITY and CONSEQUENCE of a swallowed execution-context
  * resolution, measured at the PACKAGE-MANAGEMENT door.
  *
  * ## What this file is, and what its sibling already answered
@@ -29,7 +29,7 @@
  *      anonymous floor decides: **401 `UNAUTHENTICATED`**, "Authentication is
  *      required to access this endpoint." The caller may hold a valid session;
  *      the fault is elsewhere.
- *    - `GRANTS LOST` (two classes, ⭐ both since repaired — #13279 and
+ *    - `GRANTS LOST` (two classes, ⭐ both since repaired — commit 6a180e42d and
  *      [#13476]) — identity survives and the CAPABILITY
  *      aggregation is what faulted, so the door answered **403 `FORBIDDEN`**,
  *      "Reading packages requires the `studio.access` or `setup.access`
@@ -40,7 +40,7 @@
  *      inside `resolveAuthzContext` (`@objectstack/core`), one layer further
  *      out.
  *
- *      ⭐ **[#13279] REPAIRED, and this file now pins the repair.** Maintainer
+ *      ⭐ **[commit 6a180e42d] REPAIRED, and this file now pins the repair.** Maintainer
  *      ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` distinguishes
  *      "no rows" from "the read failed", and a read failure fails LOUD. The
  *      `PERMISSION_STORE_DOWN` class therefore answers **503
@@ -73,7 +73,7 @@
  *    any class — that zero was read against a WORKING instrument: section 1
  *    shows this same door answering **500 `INTERNAL_ERROR`** when the fault is
  *    raised one layer later, by the package service. So "no 5xx" was a property
- *    of the degradation, not of the harness. ⭐ **[#13279] Now partitioned
+ *    of the degradation, not of the harness. ⭐ **[commit 6a180e42d] Now partitioned
  *    rather than zero**: the ruled permission-store class answers 503 on every
  *    route, and every class the ruling did not reach still answers a refusal.
  *    Section 3 asserts both halves, so the test still fails if a door goes
@@ -90,11 +90,11 @@
  *    lets anything through. Section 4 measures this per class, against a
  *    control that shows the witness CAN report a rejection.
  *
- * ## What this file does, and no longer does not (#13279)
+ * ## What this file does, and no longer does not (commit 6a180e42d)
  *
- * As written for #13255 this file repaired nothing and asserted no verdict —
+ * As first written (commit 43028a8f8) this file repaired nothing and asserted no verdict —
  * distinguishing "no context" from "resolution failed" was a behaviour change
- * on a public door and out of that card's scope. #13279 RULED that change for
+ * on a public door and out of that measurement's scope. Commit 6a180e42d landed that ruled change for
  * the permission-store half, so the assertions covering it are now regression
  * pins on the repaired behaviour rather than measurements of a defect.
  *
@@ -105,7 +105,7 @@
  * half of that sentence — it is repaired, and its assertions are regression
  * pins now rather than measurements of a defect.
  *
- * ## ⭐ [#13280] The SEAM ASYMMETRY is repaired; section 7 pins the repair
+ * ## ⭐ [commit add6a1b1c] The SEAM ASYMMETRY is repaired; section 7 pins the repair
  *
  * Section 7 was filed as a finding of its own: at one and the same provider
  * seam, a REJECTION was absorbed and a SYNCHRONOUS throw lost the whole
@@ -144,7 +144,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
-  // [#13279] The loud permission-store outage, and its brand predicate.
+  // [commit 6a180e42d] The loud permission-store outage, and its brand predicate.
   AUTHZ_STORE_UNAVAILABLE_CODE, AUTHZ_STORE_UNAVAILABLE_STATUS, isAuthzStoreUnavailableError,
 } from '@objectstack/core';
 import type { RouteHandler } from '@objectstack/spec/contracts';
@@ -339,7 +339,7 @@ interface FaultClass {
   /**
    * `lost`   — the whole execution context is gone.
    * `grants` — identity survives, the capability aggregation is empty.
-   * `loud`   — [#13279] the resolution REFUSES rather than resolving at all.
+   * `loud`   — [commit 6a180e42d] the resolution REFUSES rather than resolving at all.
    */
   ctx: 'lost' | 'grants' | 'loud';
   read: { status: number; code: string };
@@ -349,7 +349,7 @@ interface FaultClass {
 const DENY = { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE };
 /**
  * The capability refusal. ⭐ [#13476] No fault CLASS carries this any more — the
- * two that did are both repaired (#13279, #13476) — but it is deliberately kept
+ * two that did are both repaired (commit 6a180e42d, #13476) — but it is deliberately kept
  * rather than deleted: it is now the answer the INNOCENT shapes must keep, and
  * section 3's `UNRESOLVABLE vs UNWIRED` pin asserts it through this constant so
  * "what an unwired embedder gets" and "what a genuine capability denial gets"
@@ -358,7 +358,7 @@ const DENY = { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE };
  */
 const FORBID = { status: 403, code: 'FORBIDDEN' };
 /**
- * [#13279] The LOUD cohort — a permission-store outage, answered as the outage
+ * [commit 6a180e42d] The LOUD cohort — a permission-store outage, answered as the outage
  * it is. Ruled 2026-08-30 (maintainer, verbatim 「第一批其余同意」):
  * `tryFind` distinguishes "no rows" from "the read failed", and a read failure
  * fails LOUD, so an outage can no longer be answered as a capability denial.
@@ -397,7 +397,7 @@ const CLASSES: FaultClass[] = [
     faulted: () => ({ ...healthy(), authServiceProvider: async () => ({ api: { getSession: async () => { throw new Error('session store down'); } } }) }),
     ctx: 'lost', read: DENY, write: DENY,
   },
-  // ⭐ [#13280] `SETTINGS_PROVIDER_SYNC_THROW` USED TO LIVE HERE, and its
+  // ⭐ [commit add6a1b1c] `SETTINGS_PROVIDER_SYNC_THROW` USED TO LIVE HERE, and its
   // removal from this table is the repair, not a gap in it. The row read:
   //
   //     id: 'SETTINGS_PROVIDER_SYNC_THROW',
@@ -420,7 +420,7 @@ const CLASSES: FaultClass[] = [
     id: 'PERMISSION_STORE_DOWN',
     what: 'identity resolves, then every permission-store read throws',
     faulted: () => ({ ...healthy(), objectQLProvider: async () => qlDown() }),
-    // ⭐ [#13279] INVERTED IN PLACE, not re-baselined. Until the 2026-08-30
+    // ⭐ [commit 6a180e42d] INVERTED IN PLACE, not re-baselined. Until the 2026-08-30
     // ruling this row read `ctx: 'grants', read: FORBID, write: FORBID` — an
     // authenticated principal with an empty capability set, refused 403. That
     // was the DISGUISE the ruling reverses: the store that holds the
@@ -435,11 +435,11 @@ const CLASSES: FaultClass[] = [
     // read `ctx: 'grants', read: FORBID, write: FORBID` — an authenticated
     // administrator whose engine was simply GONE, told they lack a capability.
     // It was the LAST surviving member of the GRANTS-LOST disguise on this
-    // door: #13279 made a read that was ISSUED and threw fail loud, and this
+    // door: commit 6a180e42d made a read that was ISSUED and threw fail loud, and this
     // class never issues a read, so that ruling's landing point could not see
     // it. The engine seam now keeps "no engine is wired" and "the engine could
     // not be resolved" apart (`wiredEngineOrLoud`, `rest-server.ts`), so this
-    // class takes the SAME loud answer #13279 chose, for the same reason:
+    // class takes the SAME loud answer commit 6a180e42d chose, for the same reason:
     // nothing was read, so no capability judgement was ever reached.
     //
     // ⚠️ Its innocent twin is NOT here and must never be: an embedder that
@@ -455,7 +455,7 @@ describe('[#13255] reachability — each production fault class, driven, with it
     // ---- the fault -------------------------------------------------------
     const rest = serverWith(klass.faulted());
     const req = { params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH, ...(klass.req ?? {}) };
-    // [#13279] The loud cohort never produces a context to inspect — that IS
+    // [commit 6a180e42d] The loud cohort never produces a context to inspect — that IS
     // the repair. The resolution REJECTS with the branded outage error instead
     // of fabricating an envelope that reports a capability set nobody read.
     if (klass.ctx === 'loud') {
@@ -541,7 +541,7 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     //   > see it.
     //
     // That class is now in the `loud` cohort above. What remains `quiet` is the
-    // CONTEXT-LOST family (#13255), still unruled and still measured, never
+    // CONTEXT-LOST family (first measured by commit 43028a8f8), still unruled and still measured, never
     // asserted away — so this half keeps its original reading and this test
     // stays a regression pin rather than a rubber stamp.
     expect(quiet.filter((s) => s >= 500)).toEqual([]);
@@ -635,7 +635,7 @@ describe('[#13255] the private resolver FULFILS on every production fault class'
     // The PRIVATE resolver, read BEFORE the wrapper's `.catch` can act — so
     // this reads the supplier, not the net over it.
     const inner = (rest as any).resolveExecCtx(req.params?.environmentId, req);
-    // ⭐ [#13279] INVERTED IN PLACE for the loud cohort. This assertion used to
+    // ⭐ [commit 6a180e42d] INVERTED IN PLACE for the loud cohort. This assertion used to
     // read `'fulfilled'` for EVERY class, and that uniformity was the finding:
     // every fault reached the door as a value, so no fault could be told from a
     // verdict. A permission-store outage now REJECTS all the way out here —
@@ -674,7 +674,7 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
   });
 
   it('⭐ [#13279] GRANTS LOST: a permission-store outage NO LONGER answers what "you hold nothing" answers', async () => {
-    // ⭐ THE INVERSION. This is the #13282 assertion the 2026-08-30 ruling
+    // ⭐ THE INVERSION. This is the commit 43028a8f8 assertion the 2026-08-30 ruling
     // reverses, inverted IN PLACE with its reason recorded — ⛔ not deleted and
     // ⛔ not re-baselined. It used to read:
     //
@@ -758,10 +758,10 @@ describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a 
 });
 
 // ---------------------------------------------------------------------------
-// 7. ⭐ [#13280] SEAM AGREEMENT — the same provider seam, the same fault, and
+// 7. ⭐ [commit add6a1b1c] SEAM AGREEMENT — the same provider seam, the same fault, and
 //    now the SAME answer whichever way the provider fails.
 //
-//    ⭐ INVERTED IN PLACE, not re-baselined. As written for #13255 this section
+//    ⭐ INVERTED IN PLACE, not re-baselined. As first written in commit 43028a8f8 this section
 //    RECORDED a divergence and asserted it, under the heading "sync-throw and
 //    rejection do not agree":
 //
@@ -806,7 +806,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
   });
 
   it('⭐ objectQL — the SECOND divergent seam the card did not measure: both shapes answer 503', async () => {
-    // [#13280] Not in the card's table, found while verifying it: this seam
+    // [commit add6a1b1c] Not in the card's table, found while verifying it: this seam
     // diverged too, 403 (reject) vs 401 (sync throw). It agrees — and ⭐
     // [#13476] MOVED THE AGREED VALUE, 403 → 503. The superseded reading:
     //
@@ -816,7 +816,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     //
     // "Reaches an EMPTY grant set" was the defect: a WIRED engine that failed
     // is not an empty grant set, it is an UNDETERMINED one. Both shapes are now
-    // the outage they are. ⚠️ #13280's property is untouched and is what this
+    // the outage they are. ⚠️ The property commit add6a1b1c established is untouched and is what this
     // test still exists for — the two shapes AGREE; only the value they agree
     // on moved, and it moved for both together.
     const { rejecting, syncThrowing } = await bothShapes('objectQLProvider');

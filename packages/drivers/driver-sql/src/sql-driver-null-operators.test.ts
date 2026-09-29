@@ -35,6 +35,17 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
       t.string('assignee').nullable();
     });
 
+    // [#20446] The table is built through knex, outside the driver's
+    // registration, so its declaration is registered beside it — as the engine
+    // does for every object it serves. `is_empty` / `is_not_empty` lower to
+    // `$empty` now, which this driver answers by the column's DECLARED row and
+    // refuses on a column it was never told the type of; `assignee` is text,
+    // so its row is null or `''`, and this fixture stores no `''`, so the rows
+    // below are the IS NULL / IS NOT NULL rows they always were.
+    driver.registerObjectMetadata([
+      { name: 'tasks', fields: { title: { type: 'text' }, assignee: { type: 'text' } } } as any,
+    ]);
+
     await k('tasks').insert([
       { id: '1', title: 'A', assignee: 'alice' },
       { id: '2', title: 'B', assignee: null },

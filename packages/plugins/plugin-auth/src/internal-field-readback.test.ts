@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #7823 + #7987 + #8676 — the internal-field READBACK seams, unit-pinned from
+// #7823 + #7987 + commit d6e80b28b — the internal-field READBACK seams, unit-pinned from
 // both directions.
 //
 // The engine's `internal: true` read strip removes the flagged column from
@@ -23,7 +23,7 @@
 //    silent no-op and an OAuth refresh into a 400, so it must never pass
 //    quietly.
 //
-// [#8676] The module now owns TWO seams and this file pins both. The adapter
+// [commit d6e80b28b] The module now owns TWO seams and this file pins both. The adapter
 // seam above is reachable only from `objectql-adapter.ts`; plugin-auth's own
 // raw-engine readers (the ADR-0069 D1 password-reuse ring, the dev seed-admin
 // probe) bypass it entirely and are recovered by
@@ -153,7 +153,7 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
     expect(rows[0].refresh_token).toBe('rt-1');
     expect(rows[0].id_token).toBe('it-1');
     expect(rows[1].refresh_token).toBe('rt-2');
-    // FOUR columns (#8676 added `password`), two rows ⇒ FOUR reads, not eight.
+    // FOUR columns (commit d6e80b28b added `password`), two rows ⇒ FOUR reads, not eight.
     // The accessor resolves one field per call by contract (#8118); the
     // batching that matters is per-page.
     expect(resolveInternalField).toHaveBeenCalledTimes(4);
@@ -219,7 +219,7 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
   it('[#8676] re-attaches `password` — better-auth\'s sign-in verifier reads it off the row', async () => {
     // `internalAdapter.findCredentialAccount(userId)` returns the row whose
     // `password` the verifier compares the submitted one against. Under the
-    // #8676 flag that row arrives stripped, so without this entry password
+    // commit d6e80b28b flag, that row arrives stripped, so without this entry password
     // sign-in fails for every user.
     const resolveInternalField = resolver({ a1: { password: 'argon2:stored' } });
     const row: any = ACCOUNT_ROW();
@@ -229,7 +229,7 @@ describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () 
 
   it('⛔ [#8676] never re-attaches `previous_password_hashes` — better-auth has ZERO readers', async () => {
     // The bound on the table, and the half of the old scope guard that
-    // SURVIVES #8676. The reuse ring is an ObjectStack-only column read solely
+    // SURVIVES commit d6e80b28b. The reuse ring is an ObjectStack-only column read solely
     // by `auth-manager.ts` off the RAW engine, which never passes through this
     // adapter seam — so a row here would be dead code, and re-attaching it
     // would hand better-auth a credential column nothing asked for. Pinned so a

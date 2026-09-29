@@ -99,7 +99,7 @@ describe('every view filter operator has an AST lowering', () => {
       '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
       '$between', '$contains', '$notContains', '$startsWith', '$endsWith',
       '$icontains',
-      '$null', '$exists',
+      '$null', '$exists', '$empty',
     ]);
     const bad: string[] = [];
     for (const op of VIEW_FILTER_OPERATORS) {
@@ -131,11 +131,15 @@ describe('every view filter operator has an AST lowering', () => {
   });
 
   it('keeps null-direction keyed on the operator name, not the filler value', () => {
-    // Clients send a truthy placeholder for both directions.
-    expect(parseFilterAST(['note', 'is_empty', true])).toEqual({ note: { $null: true } });
-    expect(parseFilterAST(['note', 'isempty', true])).toEqual({ note: { $null: true } });
-    expect(parseFilterAST(['note', 'is_not_empty', true])).toEqual({ note: { $null: false } });
-    expect(parseFilterAST(['note', 'isnotempty', true])).toEqual({ note: { $null: false } });
+    // Clients send a truthy placeholder for both directions. [#20446] The empty
+    // pair lowers to `$empty` (the field's declared 「is empty」 row), the null
+    // pair to `$null`; the direction still comes from the NAME in both.
+    expect(parseFilterAST(['note', 'is_empty', true])).toEqual({ note: { $empty: true } });
+    expect(parseFilterAST(['note', 'isempty', true])).toEqual({ note: { $empty: true } });
+    expect(parseFilterAST(['note', 'is_not_empty', true])).toEqual({ note: { $empty: false } });
+    expect(parseFilterAST(['note', 'isnotempty', true])).toEqual({ note: { $empty: false } });
+    expect(parseFilterAST(['note', 'is_null', true])).toEqual({ note: { $null: true } });
+    expect(parseFilterAST(['note', 'is_not_null', true])).toEqual({ note: { $null: false } });
   });
 
   it('still refuses an operator in neither vocabulary', () => {

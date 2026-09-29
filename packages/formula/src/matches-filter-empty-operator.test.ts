@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on `matchesFilterCondition` — the RLS
+ * [#20444] The `$empty` operator on `matchesFilterCondition` — the RLS
  * write-side `check` evaluator.
  *
  * This face judges a RECORD, not a declaration, so ruling A on #20399 (record

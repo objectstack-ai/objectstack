@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on this package's three filter faces.
+ * [#20444] The `$empty` operator on this package's three filter faces.
  *
  * - **The live query path** (`InMemoryDriver.find` → mingo) holds the field
  *   declarations `syncSchema` recorded, so it answers by the field's DECLARED

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14541 — the two REST error doors must answer one refusal with one body.
+ * Commit 6d178a408 — the two REST error doors must answer one refusal with one body.
  *
  * ## What was measured, on `origin/main` @ `9b30cc18d9`
  *
@@ -46,7 +46,7 @@
  *     passthrough's prose-withholding arm (#5437 / #5582 / #5907), a 5xx ARM
  *     never displaces a declared 4xx, a sandboxed producer keeps the unwrap
  *     door's sentence on BOTH doors (#11588 / #7543; the single door's mirror
- *     defect was closed by #14704, which FLIPPED that case's verdict here from
+ *     defect was closed by commit 1c7adc73d, which FLIPPED that case's verdict here from
  *     ACCEPTED DIVERGENCE to CONVERGED rather than deleting it; #17273 flipped
  *     the sandboxed-CRASH case the same way, and added the 5xx band and the
  *     refusal negative control beside it), and the one
@@ -456,11 +456,11 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(single.status).toBe(400);
             expect(single.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
             expect(bulk.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
-            // [#14725] The bodies used to differ by ONE key here — the residue
+            // [commit f5cc78b63] The bodies used to differ by ONE key here — the residue
             // this case pinned so it was visible rather than implied:
             // `classifyDataError`'s GENERIC declared-status passthrough
             // appended `object` from the door's argument and
-            // `resolveErrorResponse`'s did not. That card added the limb, so
+            // `resolveErrorResponse`'s did not. That commit added the limb, so
             // the verdict this case is labelled with now holds for the BODY
             // too, and the pin says so rather than describing a closed gap.
             expect(single.body).toHaveProperty('object', 'account');
@@ -480,19 +480,19 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
         });
 
         /**
-         * FLIPPED by #14704, deliberately and in that card's PR, from
+         * FLIPPED by commit 1c7adc73d, deliberately and in that commit, from
          * `ACCEPTED DIVERGENCE` to `CONVERGED (sentence)`. ⛔ The case is not
          * DELETED: it is the only thing that would notice the divergence coming
          * back, and what changes is its verdict, not its existence.
          *
          * The divergence it recorded was the SENTENCE: the bulk door read
          * `sandboxBusinessMessage` (#11588) while the single door reached the
-         * arm and shipped `error.message` — the QuickJS debug wrapper. #14704
+         * arm and shipped `error.message` — the QuickJS debug wrapper. Commit 1c7adc73d
          * gave the code-gated arms the same two-read rule (`armSentence`), so
          * both doors now answer the business sentence for one hook refusal.
          *
          * ⚠️ What remains different is the KEY SET, and it is not this card's:
-         * #14541's `isSandboxOrigin` guard declines the shared consult on the
+         * Commit 6d178a408's `isSandboxOrigin` guard declines the shared consult on the
          * bulk door outright, so the arm's structured fields never ride there.
          * That is stated below rather than left implied — a case labelled
          * CONVERGED whose bodies are unequal has to say where and why.
@@ -512,26 +512,26 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             // the business sentence; ⛔ never the QuickJS debug wrapper.
             expect(bulk.body.error).toBe('Opportunity is closed.');
             expect(String(bulk.body.error)).not.toContain('threw:');
-            // [#14704] The single door now reads the same rule through the
+            // [commit 1c7adc73d] The single door now reads the same rule through the
             // arm. This assertion IS the flip — it read
             // `"hook 'guard' threw: Error: Opportunity is closed."` before.
             expect(single.body.error).toBe('Opportunity is closed.');
             expect(String(single.body.error)).not.toContain('threw:');
-            // The residue, named: #14541's sandbox guard keeps the arm's
+            // The residue, named: commit 6d178a408's sandbox guard keeps the arm's
             // structured fields off the bulk door. Owned there, not here.
             expect(single.body).toHaveProperty('dependentObject', 'contact');
             expect(bulk.body).not.toHaveProperty('dependentObject');
         });
 
         /**
-         * [#15071] The crash sibling of the case above — CONVERGED where the
+         * [commit cf6e0a193] The crash sibling of the case above — CONVERGED where the
          * producer declared no status, and named as a DIVERGENCE where it did.
          *
          * The maintainer ruling (2026-09-04, batch #27, option B) moved the
          * crash terminal above `classifyDataError`'s code-gated arms, so the
          * single door answers a sandboxed CRASH with the sanitised 500 whatever
          * code it declares. The bulk door never reached those arms for a
-         * sandbox producer (#14541's `isSandboxOrigin` guard), so nothing the
+         * sandbox producer (commit 6d178a408's `isSandboxOrigin` guard), so nothing the
          * ruling names moved there — its answer for a crash comes from
          * `resolveErrorResponse`'s declared-status passthrough, which
          * `sandboxBusinessMessage` declines a crash for and which therefore
@@ -565,8 +565,8 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
 
         /**
          * FLIPPED by #17273, deliberately and in that card's PR, from
-         * `ACCEPTED DIVERGENCE (#15071 widens it)` to `CONVERGED` — the same
-         * discipline #14704 used on the sentence case above and #15071 used on
+         * `ACCEPTED DIVERGENCE (commit cf6e0a193 widens it)` to `CONVERGED` — the same
+         * discipline commit 1c7adc73d used on the sentence case above and commit cf6e0a193 used on
          * `error-response-sandbox-arm-message.test.ts` §4. ⛔ The case is not
          * DELETED: it is the only thing that would notice the divergence coming
          * back, and what changes is its verdict, not its existence.
@@ -574,7 +574,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * ## What the old verdict bought, and why it had to change
          *
          * `ACCEPTED DIVERGENCE` bought "the next reader knows this is
-         * unconverged" — never "nothing is wrong here". #15071 could not take
+         * unconverged" — never "nothing is wrong here". Commit cf6e0a193 could not take
          * this shape because closing it means moving the STATUS
          * `resolveErrorResponse`'s passthrough decided, the #11588-fenced
          * contract question, so it recorded the boundary IN the pin and had the
@@ -587,7 +587,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * `500`, the declared `DELETE_RESTRICTED` → the catalog's
          * `INTERNAL_ERROR`, and the runner's `hook 'guard' threw: TypeError: …`
          * debug wrapper → the generic sentence. Nothing is added to the body.
-         * The single door is byte-identical to what #15071 left.
+         * The single door is byte-identical to what commit cf6e0a193 left.
          */
         it('CONVERGED (#17273): a sandboxed CRASH that DECLARED a 4xx status is the fault terminal at both doors', () => {
             const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
@@ -597,7 +597,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.object = 'account';
             const bulk = bulkDoor(err, 'account');
             const single = singleDoor(err, 'account');
-            // The single door: what #15071 ruled — a crash is a fault.
+            // The single door: what commit cf6e0a193 decided — a crash is a fault.
             expect(single.status).toBe(500);
             expect(single.body.code).toBe('INTERNAL_ERROR');
             expect(String(single.body.error)).not.toContain('threw:');
@@ -621,7 +621,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * The crash terminal in `resolveErrorResponse` is deliberately not
          * band-scoped: scoping it to 4xx would have converged the shape above
          * while minting a NEW divergence one band over — the single door has
-         * answered `500 INTERNAL_ERROR` for this error since #15071, and the
+         * answered `500 INTERNAL_ERROR` for this error since commit cf6e0a193, and the
          * bulk door's 5xx arm would have kept `503` with the declared code.
          *
          * ⛔ This is NOT a narrowing of the 5xx arm's unconditional prose-drop
@@ -651,7 +651,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * the flip moved. An implementation that degraded every SANDBOX-origin
          * error to the fault terminal would turn both cases above green while
          * deleting the whole sandbox-refusal surface on the bulk door —
-         * #15071's ruling fences exactly that: *"Ordinary declared refusals (a
+         * the ruling commit cf6e0a193 implemented fences exactly that: *"Ordinary declared refusals (a
          * hook that throws a business error carrying a code, no crash) are
          * **untouched** — only the crash branch moves."*
          *

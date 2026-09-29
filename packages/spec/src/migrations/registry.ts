@@ -4607,7 +4607,7 @@ const step17: MigrationStep = {
         + 'through a new ADR — carrier key and renderer first, vocabulary second)',
       reason:
         'Both shapes were published `@objectstack/spec/ui` vocabulary with NO AUTHORING DOOR. '
-        + 'The v17 unknown-key strictness sweep (its ui/ batch 14), which measured each ui/ '
+        + 'The v17 unknown-key strictness sweep, which measured each ui/ '
         + 'file for an authoring door before closing any shape, measured them three ways on '
         + '2026-08-03 and this retirement re-ran all '
         + 'three against `origin/main` before removing anything, each with a positive control '
@@ -4628,7 +4628,7 @@ const step17: MigrationStep = {
         + 'ADR-0033 trap where an AI author takes `EmbedConfigSchema` in the published bundle '
         + 'as proof the platform serves iframes. Neither is stored metadata and neither has a '
         + 'carrier, so no `sys_metadata` row can hold one and there is no source for the D2 '
-        + 'chain to rewrite; this entry is the D3 record. That batch deliberately did NOT close '
+        + 'chain to rewrite; this entry is the D3 record. The sweep deliberately did NOT close '
         + 'them with `.strict()` — strictness is a property of a PARSE, and closing a shape nothing '
         + 'parses buys only "a precisely-validated dead slot, the more convincing lie" (the lesson '
         + 'of the datasource capability flags, whose `readOnly` was precisely validated and read '
@@ -10959,6 +10959,58 @@ const step18: MigrationStep = {
         + 'NOT measured, so re-check '
         + 'what the view is supposed to show rather than assuming the old result set was correct. '
         + 'Both refusals now arrive at the authoring path.',
+    },
+    // #20446 — the last step of ruling A on #20399: `$empty` joins FILTER_OPERATORS
+    // and the view operators is_empty / is_not_empty lower to it instead of `$null`.
+    // Nothing stored is rewritten; a stored 「is empty」 rule is re-read under the new
+    // meaning, which widens on text and multi-value fields and refuses where no face
+    // holds the column's declared type. The changeset declares Clause-② yes
+    // (narrowing); this entry is where the prescription reaches os migrate meta,
+    // the upgrade guide and spec-changes.json.
+    {
+      id: 'filter-is-empty-lowers-to-empty-operator',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it. No ' / ' either: the
+      // schema build reads that separator as a boundary between registered clauses.
+      surface:
+        'data.FilterCondition — the lowering of the view operators is_empty, isempty, is_not_empty '
+        + 'and isnotempty (on a ViewFilterRule, a sharing rule and any filter array), and a $empty '
+        + 'object written as a record field value',
+      replacement:
+        'Nothing to rewrite for a rule on a declared field: is_empty now lowers to { field: { $empty: '
+        + 'true } } and is_not_empty to { field: { $empty: false } }, answered by the field\'s declared '
+        + 'type — a text-like field is empty when it is null or the empty string, a multi-value field '
+        + 'when it is null or the empty list, every other type only when it is null. Where no face holds '
+        + 'the column\'s declared type the rule is refused: on the built-in id, write is_null / '
+        + 'is_not_null; on a federated object whose driver does not implement external-object '
+        + 'registration (driver-memory, driver-mongodb), bind it on a driver that implements federation '
+        + '(the boot error names the object); on an AnalyticsService built without sourceFieldMeta, pass '
+        + 'sourceFieldMeta or write is_null / is_not_null; on a multi-value column over a SQL dialect '
+        + 'driver-sql does not model, write is_null / is_not_null. A record write that carries a $empty '
+        + 'object as a field value writes the value itself instead; a filter belongs in where',
+      reason:
+        'One ruling set what 「is empty」 means once, per field type; a second spelled it as the $empty '
+        + 'operator, which each compile face expands from the field\'s declaration. It was staged out '
+        + 'of FILTER_OPERATORS until every face answered it, then added in the same change that flipped '
+        + 'the lowering, after measuring that no face drops it. Two consequences reach stored metadata. '
+        + 'A stored 「is empty」 on a text or multi-value field finds more rows: the ones holding the '
+        + 'empty string or the empty list, which the $null lowering missed. '
+        + 'And the rule is refused '
+        + 'where the face that answers it holds no declaration for the column — the four '
+        + 'compositions the replacement names — where the $null lowering compiled IS NULL. The same '
+        + 'change made the write door refuse a $empty object as a field value, because that door '
+        + 'refuses every filter operator the protocol enforces as a value: before, a text-like field '
+        + 'stored it. Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 '
+        + 'conversion: the stored spelling is unchanged, and its new meaning is the ruled one. '
+        + 'ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your stored views, sharing rules and filter arrays for is_empty / is_not_empty. On a text '
+        + 'or multi-value field, re-check what the view or rule is supposed to select. '
+        + 'On the built-in id, rewrite it '
+        + 'to is_null / is_not_null. If a federated object on driver-memory or driver-mongodb, or an '
+        + 'AnalyticsService host without sourceFieldMeta, carries such a rule, the query now fails '
+        + 'instead of answering — bind the object on a federation-capable driver, or pass '
+        + 'sourceFieldMeta. No insert or update payload carries a $empty object as a field value.',
     },
     // Ruling A on #19886, item 1: the $ne slot's half of the question
     // filter-equality-array-comparand-refused answered for equality. One entry for
@@ -17503,7 +17555,9 @@ const step18: MigrationStep = {
         + 'the same consequence, but it only runs where an app is validated against its object '
         + 'definitions; the producer accepted the value regardless. ⛔ NOT a `.trim()`: a trimming '
         + 'schema makes `\' stage\'` and `\'stage\'` silently equivalent, the consumer-tolerance '
-        + 'direction AGENTS.md #0.1 refuses — and on the REQUIRED kanban key the author cannot '
+        + 'direction the contract-first rule refuses (fix the metadata, not the renderer: '
+        + 'off-spec metadata is refused where it is authored, never coerced into working) — and '
+        + 'on the REQUIRED kanban key the author cannot '
         + 'withdraw the value by omitting the key, so a normalising producer would be their only '
         + 'feedback channel and it would say nothing. The narrowing is non-padded ONLY and '
         + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this package '
@@ -17553,7 +17607,9 @@ const step18: MigrationStep = {
         + 'silent wrong answer that reads as a true statement about the data, which is why '
         + 'nothing weaker than a parse refusal is honest here. ⛔ NOT a `.trim()`: a trimming '
         + 'schema makes `\'  a  \'` and `\'a\'` silently equivalent, the consumer-tolerance '
-        + 'direction AGENTS.md #0.1 refuses. objectui\'s harvester trim stays as '
+        + 'direction the contract-first rule refuses (fix the metadata, not the renderer: '
+        + 'off-spec metadata is refused where it is authored, never coerced into working). '
+        + 'objectui\'s harvester trim stays as '
         + 'defence-in-depth; nothing is removed there. The narrowing is non-padded ONLY and '
         + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this '
         + 'package spells inline for object/field/tool NAMES: a grouping level is authored as '

@@ -1195,7 +1195,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 severity: 'warning',
                 rule: REACT_PROP_DEPRECATED,
                 where, path,
-                message: `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}" and is removed after the deprecation window (#11284).`,
+                message: `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}": the react tier converges on the metadata-tier vocabulary, so this spelling keeps working through the deprecation window and is removed after it.`,
                 hint: dep.note,
               });
             }

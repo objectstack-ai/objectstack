@@ -287,7 +287,6 @@
   "#7696": 1
  },
  "packages/lint/src/validate-react-page-props.ts": {
-  "#11284": 1,
   "#5583": 1
  },
  "packages/lint/src/validate-readonly-flow-writes.ts": {

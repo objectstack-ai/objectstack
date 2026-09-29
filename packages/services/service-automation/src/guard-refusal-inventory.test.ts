@@ -154,6 +154,13 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         expect: 'does not satisfy the http contract',
     },
     {
+        name: 'http whose signingSecret did not resolve',
+        why: 'the call would leave unsigned — a fault edge must not turn a missing credential into a sent request',
+        // The record carries no `signing_key`, so the template renders nothing.
+        node: { type: 'http', config: { url: 'http://127.0.0.1:9/never', method: 'POST', signingSecret: '{record.signing_key}' } },
+        expect: 'signingSecret',
+    },
+    {
         name: 'subflow without flowName',
         why: 'a required config key',
         node: { type: 'subflow', config: { flowName: 'child_flow' } },

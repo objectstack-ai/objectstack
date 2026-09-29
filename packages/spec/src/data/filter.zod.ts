@@ -1553,12 +1553,15 @@ const EXISTS_PREDICATE_DESCRIPTION =
  * module-scope read of a set is not safe under `OS_EAGER_SCHEMAS=1`), and the
  * expansion lives in its own module for the same reason.
  *
- * The last sentences are load-bearing too: the operator is STAGED (the
- * maintainer's amendment of ruling A, record 5868169573, 「照 $like 先例分阶段」),
- * so an author reading this description is told that no face answers it yet —
- * the query executors refuse it, and `@objectstack/formula`'s write-side
- * matcher answers its fail-closed `false` — rather than discovering either
- * at run time. The measured per-face table is on {@link FILTER_OPERATORS}.
+ * The last sentences are load-bearing too. [#20446] The staging is over
+ * (the maintainer's amendment of ruling A, record 5868169573, 「照 $like
+ * 先例分阶段」, ended with every face holding an arm): the operator is in
+ * {@link FILTER_OPERATORS} and the view operators `is_empty` /
+ * `is_not_empty` lower to it. So the description tells an author the one
+ * place it is refused rather than guessed — a face that answers by the
+ * declared type, asked about a column it holds no declaration for — and what
+ * to write there instead. The measured per-face table is on
+ * {@link FILTER_OPERATORS}.
  */
 const EMPTY_PREDICATE_DESCRIPTION =
   'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
@@ -1567,10 +1570,10 @@ const EMPTY_PREDICATE_DESCRIPTION =
   + 'qrcode) = null or \'\' (the empty string); multi-value types (multiselect, checkboxes, '
   + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
   + '(the empty list); every other type = null only. A face that holds no field declaration '
-  + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
-  + 'backends and absent from FILTER_OPERATORS. Until each face has its arm, the query '
-  + 'executors refuse it and the write-side check matcher matches no record; the view '
-  + 'operators is_empty / is_not_empty still lower to $null.';
+  + 'judges by the value: null, \'\' and [] are empty. A face that answers by the declared '
+  + 'type refuses the operator on a column whose declaration it does not hold (the built-in '
+  + 'id, for one) rather than guess a row; use $null there for "has no value". The view '
+  + 'operators is_empty / is_not_empty lower to this operator.';
 
 /**
  * Special check operators for null, existence and emptiness.
@@ -1589,8 +1592,9 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
   /**
    * [#20311] Field IS EMPTY by its declared type — the per-type table
    * {@link EMPTY_PREDICATE_DESCRIPTION} carries, expanded per field by
-   * `expandEmptyOperator` (`./filter-empty-operator.ts`). STAGED: not in
-   * {@link FILTER_OPERATORS}.
+   * `expandEmptyOperator` (`./filter-empty-operator.ts`). [#20446] In
+   * {@link FILTER_OPERATORS}; the view operators `is_empty` / `is_not_empty`
+   * lower to it.
    */
   $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
@@ -1665,9 +1669,9 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
   // [#20311] Emptiness by the field's declared type — the ruled per-type table
-  // IS the description. STAGED like `$like` (#7536): declared here and in
-  // `SpecialOperatorSchema`, deliberately ABSENT from `FILTER_OPERATORS` until
-  // every face has its arm — see the `$empty` paragraph there.
+  // IS the description. [#20446] Declared here and in `SpecialOperatorSchema`
+  // and, now that every face has its arm, enforced by `FILTER_OPERATORS` —
+  // see the `$empty` paragraph there.
   $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
@@ -2506,10 +2510,10 @@ const AST_OPERATOR_MAP = {
   'is_not_null': '$null',
   'isnull': '$null',
   'isnotnull': '$null',
-  'is_empty': '$null',
-  'is_not_empty': '$null',
-  'isempty': '$null',
-  'isnotempty': '$null',
+  'is_empty': '$empty',
+  'is_not_empty': '$empty',
+  'isempty': '$empty',
+  'isnotempty': '$empty',
 } satisfies Record<string, string>;
 
 /**
@@ -2558,17 +2562,16 @@ const CANONICAL_INFIX: Record<string, string> = {
 
 export function canonicalAstOperator(op: string): string {
   const lower = String(op).toLowerCase();
-  // Null predicates carry a DIRECTION that the shared `$null` lowering erases,
-  // so they cannot round-trip through CANONICAL_INFIX — fold them by name.
-  if (lower === 'is_null' || lower === 'isnull' || lower === 'is_empty' || lower === 'isempty') {
-    return 'is_null';
-  }
-  if (
-    lower === 'is_not_null' || lower === 'isnotnull'
-    || lower === 'is_not_empty' || lower === 'isnotempty'
-  ) {
-    return 'is_not_null';
-  }
+  // Null and empty predicates carry a DIRECTION that their shared `$null` /
+  // `$empty` lowering erases, so they cannot round-trip through
+  // CANONICAL_INFIX — fold them by name. [#20446] The empty pair is its OWN
+  // canonical name now, not `is_null` / `is_not_null`: it lowers to `$empty`
+  // (the field's declared row of the 「is empty」 table), which is a different
+  // question from `$null` on a text or multi-value field.
+  if (lower === 'is_null' || lower === 'isnull') return 'is_null';
+  if (lower === 'is_not_null' || lower === 'isnotnull') return 'is_not_null';
+  if (lower === 'is_empty' || lower === 'isempty') return 'is_empty';
+  if (lower === 'is_not_empty' || lower === 'isnotempty') return 'is_not_empty';
   // `like`/`ilike` used to need a hand-written exemption here: they SHARED the
   // `$contains` lowering while not being substring matches, so the generic
   // round-trip below would have folded them onto `contains` and silently
@@ -2689,19 +2692,24 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Null / empty predicates — direction comes from the operator NAME, not the
   // (filler) value: the ObjectUI client sends a truthy placeholder value for
   // both `isnull` and `isnotnull`, so keying off `value` would collapse them.
-  // [#20311] The empty pair still lowers to `$null`, on purpose: its ruled
-  // spelling `$empty` is staged out of `FILTER_OPERATORS`, so emitting it here
-  // would turn every stored 「is empty」 into a refusal. The flip card moves
-  // both this branch and `canonicalAstOperator`'s fold once every face answers
-  // `$empty`.
-  if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
+  // [#20446] The empty pair lowers to `$empty`, its ruled spelling (ruling A
+  // on #20399, record 5865693155), typelessly: each face expands it by the
+  // field's DECLARED row (`expandEmptyOperator`), so a stored 「is empty」 on a
+  // text field also finds `''` and on a multi-value field also finds `[]`
+  // (ruling B on #20311). It lowered to `$null` while `$empty` was staged out
+  // of `FILTER_OPERATORS`; the face that holds no declaration for the column
+  // now refuses it loudly (prescribing `$null`) where `$null` answered.
+  if (op === 'is_null' || op === 'isnull') {
     return { [field]: { $null: true } } as FilterCondition;
   }
-  if (
-    op === 'is_not_null' || op === 'isnotnull'
-    || op === 'is_not_empty' || op === 'isnotempty'
-  ) {
+  if (op === 'is_not_null' || op === 'isnotnull') {
     return { [field]: { $null: false } } as FilterCondition;
+  }
+  if (op === 'is_empty' || op === 'isempty') {
+    return { [field]: { $empty: true } } as FilterCondition;
+  }
+  if (op === 'is_not_empty' || op === 'isnotempty') {
+    return { [field]: { $empty: false } } as FilterCondition;
   }
 
   const mapped = astOperatorLowering(op);
@@ -3070,43 +3078,38 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
  * the #6520 direction — tracked as the follow-up filed on #7536.
  *
- * ## `$empty` is STAGED here too (#20311)
+ * ## `$empty` JOINED this array in #20446 — its staging is over
  *
  * Declared by {@link SpecialOperatorSchema} and {@link FieldOperatorsSchema},
  * its description the ruled per-type 「is empty」 table (ruling B on #20311,
  * record 5861435168; the spelling is ruling A on #20399, record 5865693155),
  * with `expandEmptyOperator` / `isEmptyFilterValue`
- * (`./filter-empty-operator.ts`) as the one expansion every face calls — and
- * deliberately ABSENT from this array (the maintainer's amendment of ruling A,
- * record 5868169573: 「照 $like 先例分阶段」),
- * for the mechanism measured above: membership is what `driver-memory`'s gate
- * accepts, and its matcher's `default:` arm lets the row pass.
+ * (`./filter-empty-operator.ts`) as the one expansion every face calls. It was
+ * staged out of this array (the maintainer's amendment of ruling A, record
+ * 5868169573: 「照 $like 先例分阶段」) for the mechanism measured above, until one
+ * compile-surface lane card per face (#20444, #20445) had given every face its
+ * arm. #20446 added it here — measured first, with `$empty` in this array and
+ * no other change, on every face: no face drops the predicate — and flipped the
+ * `is_empty` / `is_not_empty` lowering from `$null` to `$empty` in the same
+ * commit.
  *
- * No face answers it yet. Measured with this declaration built, a hand-authored
- * `{ f: { $empty: true } }` (and `false`, and nested under `$and`):
- *
- * | face | `$empty` today |
+ * | face | `$empty` |
  * |---|---|
- * | `driver-sql` — measured on it; `driver-sqlite-wasm` and `driver-turso`'s local transport inherit its compiler | REFUSES — `INVALID_FILTER` / 400 |
- * | `driver-turso` remote transport | REFUSES — `INVALID_FILTER` / 400 |
- * | `driver-memory` — query path and reference matcher | REFUSES — `INVALID_FILTER` / 400 |
- * | `driver-mongodb` | REFUSES — `INVALID_FILTER` / 400 |
- * | objectql `having` | REFUSES — `INVALID_FILTER` / 400 |
- * | `service-analytics` — the `where` lowering passes it on, the compile after it | REFUSES — `INVALID_FILTER` / 400 |
- * | `service-analytics` — the read-scope SQL compiler | REFUSES, fail-closed — `READ_SCOPE_COMPILE_FAILED` / 500 |
- * | `@objectstack/formula` `matchesFilterCondition` | answers `false` for every record, flag `true` or `false` — its decided fail-closed posture for an operator it has no arm for, the same answer an undeclared name gets |
+ * | `driver-sql` (and `driver-sqlite-wasm`, `driver-turso`'s local transport) | the field's DECLARED row, from `initObjects` / `registerObjectMetadata` / `registerExternalObject` |
+ * | `driver-turso` remote transport | the declared row, through the resolver `TursoDriver` wires |
+ * | `driver-memory` query path, `driver-mongodb` | the declared row, from `syncSchema` |
+ * | `service-analytics` — `where` and read-scope SQL | the declared row, from the host's `sourceFieldMeta` |
+ * | `driver-memory` reference matcher, objectql `having`, `@objectstack/formula` `matchesFilterCondition` | by VALUE — null, `''` and `[]` are empty (they hold no declarations) |
+ * | `driver-memory` analytics (cube) face | REFUSES — `INVALID_FILTER` / 400, as it refuses `$null` |
  *
- * Nothing DROPS it, which is what the staging exists to guarantee. The formula
- * row is the one that is not loud, and it is not a widening: that face judges
- * a write-side `check`, where `false` denies the write. It is still the thing
- * its own docblock calls "the same defect under a new name" for a DECLARED
- * operator, so its arm is owed by its lane card like every other face's.
- *
- * Clearing the staging is the FLIP CARD's — the last card of ruling A's
- * sequence, after one compile-surface lane card per face has given that face
- * its arm: it adds `$empty` here, empties it out of
- * `filter-operator-vocabulary.test.ts`' `STAGED_AHEAD_OF_BACKENDS`, and flips
- * the `is_empty` / `is_not_empty` lowering from `$null` to `$empty`.
+ * A declared-row face asked about a column it holds NO declaration for refuses
+ * the operator loudly (`INVALID_FILTER` / 400; `READ_SCOPE_COMPILE_FAILED` /
+ * 500 on a read scope) and prescribes `$null`, rather than guessing a row. The
+ * flip made that refusal reachable from a stored view rule, where `$null`
+ * answered before: the built-in `id`, a federated object on a driver with no
+ * `registerExternalObject` (the boot reports it unbound), an analytics host
+ * built without `sourceFieldMeta`, and a multi-value column over a SQL dialect
+ * `driver-sql` does not model. The changeset declares it as a narrowing.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.
@@ -3121,7 +3124,7 @@ export const FILTER_OPERATORS = [
   // String
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   // Special
-  '$null', '$exists',
+  '$null', '$exists', '$empty',
 ] as const;
 
 /**

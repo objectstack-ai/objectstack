@@ -548,7 +548,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // those are; the route-ledger conformance guard drives the same
             // function, so a registrar added there cannot slip past it.
             if (restServer) {
-                // [#6306] ONE base for the whole surface. This is the same
+                // [commit fec784863] ONE base for the whole surface. This is the same
                 // value `registerRoutes()` mounted everything else under —
                 // asked of the server that owns it, never recomputed here.
                 // The old line was `${basePath}/${version}`, which is

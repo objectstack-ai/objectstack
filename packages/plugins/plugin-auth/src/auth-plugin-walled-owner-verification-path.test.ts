@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11640] The boot-time warning for a walled deployment that declares a
+ * [commit bf8d129b5] The boot-time warning for a walled deployment that declares a
  * platform owner it can never verify — maintainer ruling 2026-08-25 (option
  * A, verbatim 「全部同意」).
  *
@@ -229,7 +229,7 @@ describe('#11640 — controls: every neighbouring shape stays SILENT', () => {
 
   it('a dev/harness boot that seeds THIS owner verifies it at startup ⇒ no warning', () => {
     // The dev-admin seed provisions the declared owner and stamps it
-    // `email_verified` (#11343), which is a verification path even with no
+    // `email_verified` (commit c0714eb5d), which is a verification path even with no
     // mailbox anywhere — the verify harness boots exactly this shape. The
     // seed acts on an empty store, and the harness boots that cannot probe
     // one hand in 'unknown' — both stay silent.

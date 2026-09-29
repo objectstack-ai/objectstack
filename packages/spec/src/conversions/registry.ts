@@ -11134,9 +11134,11 @@ interface MappedFilterRule {
  * door runs on `operator` — to a canonical `VIEW_FILTER_OPERATORS` member.
  * That maps the fourteen comparison, set, range and text operators
  * (`$gt` → `greater_than`, `$nin` → `not_in`, `$notContains` → `not_contains`,
- * …) and declines the two whose meaning lives in their VALUE (`$null`,
- * `$exists`); the lowering of every mapped rule back to the same `$` operator
- * is pinned per operator against `parseFilterAST` by the test.
+ * …) and declines the three whose meaning lives in their VALUE (`$null`,
+ * `$exists`, and — in `FILTER_OPERATORS` since #20446 — `$empty`, whose
+ * `true` / `false` is `is_empty` / `is_not_empty`); the lowering of every
+ * mapped rule back to the same `$` operator is pinned per operator against
+ * `parseFilterAST` by the test.
  */
 function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefined {
   if (!(FILTER_OPERATORS as readonly string[]).includes(op)) return undefined;

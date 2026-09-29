@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13214] Does `GET /api/v1/ui/view/:object/:type` cross ENVIRONMENTS?
+ * [commit 3d10755f0] Does `GET /api/v1/ui/view/:object/:type` cross ENVIRONMENTS?
  *
  * ## ⭐ What this file is NOW: the regression pin for the repair it measured
  *
@@ -23,7 +23,7 @@
  *
  * ## Why it exists separately from `ui-view-route-identity.measurement.test.ts`
  *
- * That file (PR #13244) settled the SINGLE-TENANT half and settled it hard:
+ * That file (commit 889ec5b42) settled the SINGLE-TENANT half and settled it hard:
  * this route resolves no identity at the REST seam, and `getUiView` applies no
  * authorization downstream because the seam hands it exactly `{ object, type }`.
  * ⛔ None of that is re-measured here.
@@ -65,7 +65,7 @@
  *
  * ## ⚠️ Constructor arity — the previous run's self-caught bug, mechanised
  *
- * PR #13244 wrote a 27-argument call to the 20-parameter `RestServer`
+ * Commit 889ec5b42 wrote a 27-argument call to the 20-parameter `RestServer`
  * constructor. It RAN, while silently shifting three providers onto the wrong
  * parameters: a harness that executes can still be wrong at the reading level,
  * and a tenancy harness is exactly where that bites, because `kernelManager`
@@ -132,7 +132,7 @@ const SCHEMA_A = {
  * Environment B — the environment an anonymous caller is trying to reach.
  *
  * Two `hidden` fields, deliberately of DIFFERENT kinds, because §3 measures the
- * blast radius on the crossed path rather than inheriting #13244's
+ * blast radius on the crossed path rather than inheriting commit 889ec5b42's
  * single-tenant answer:
  *   - `beta_secret` is hidden and NOT one of the producer's priority names;
  *   - `status` is hidden and IS one of them (`name`, `title`, `label`,
@@ -775,7 +775,7 @@ describe('[#13214] §3 what the response contains, on the owned path and on the 
         // ⚠️ Read the history before the assertions: they were the other way
         // round two days ago, and that sequence is part of the record.
         //
-        //   - #13244 measured this SINGLE-TENANT with ONE hidden field, which
+        //   - commit 889ec5b42 measured this SINGLE-TENANT with ONE hidden field, which
         //     happened not to be a priority name, saw it dropped, and reported
         //     "hidden is dropped by declaration" — true of the field it drove,
         //     false of the class.

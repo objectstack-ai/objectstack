@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14389 — `classifyDataError`'s arm for the engine's insert-conflict envelope.
+ * Commit 10220a7bf — `classifyDataError`'s arm for the engine's insert-conflict envelope.
  *
  * ## What was measured
  *
@@ -106,7 +106,7 @@ const mysqlRaw = () =>
     });
 
 /**
- * driver-memory (#13197): already an ADR-0112 envelope of its own —
+ * driver-memory (commit 56c093c4d): already an ADR-0112 envelope of its own —
  * `UNIQUE_VIOLATION` / 409 — whose sentence quotes the offending value as JSON.
  * Measured template, byte for byte (`memory-unique-constraint.ts`).
  */
@@ -237,7 +237,7 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         );
         // The envelope's OWN `developerMessage` addresses the in-process caller
         // of `engine.insert` ("attached as `cause`", and the in-process
-        // spelling beside the wire one — #14723) and `cause` never reaches
+        // spelling beside the wire one — commit 65846bc46) and `cause` never reaches
         // this wire — it is not relayed.
         expect(r.body.developerMessage).not.toBe(env.developerMessage);
         expect(String(r.body.developerMessage)).not.toContain('cause');
@@ -383,7 +383,7 @@ describe('#14389 §2 — a real insert conflict, real engine on real better-sqli
 
 describe('#14389 §3 — the envelope and the raw error it carries answer the same status / code / field / sentence', () => {
     // The raw error still reaches this boundary from engine-direct callers and
-    // from every write door that is not `insert` (#14390 is the `update` door),
+    // from every write door that is not `insert` (commit 9d7f7259f is the `update` door),
     // through the untouched `isUniqueViolationError` arm. For ONE conflict the
     // two must agree, or the platform gives two answers to one constraint
     // depending on whether the engine happened to envelope it.

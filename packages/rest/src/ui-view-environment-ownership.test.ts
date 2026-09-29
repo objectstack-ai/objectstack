@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13214] The fact the ownership gate reads — pinned against its PRODUCER.
+ * [commit cc837dbfe] The fact the ownership gate reads — pinned against its PRODUCER.
  *
  * ## Why this file has to exist separately
  *

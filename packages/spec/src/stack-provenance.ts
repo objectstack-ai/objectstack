@@ -79,6 +79,20 @@ import type { ConversionNotice } from './conversions/types.js';
  * nor the compiled artifact carries it; every copy that drops the mark drops
  * the record with it, and an unmarked value has no record ({@link
  * stackConversionsOf} answers `[]`).
+ *
+ * ## The same record on a refusal
+ *
+ * A producer that REFUSES returns no stack, yet the conversions it applied
+ * before refusing are just as real — and a door that catches the refusal is
+ * where the author reads both. So a producer stamps the record of what it
+ * applied so far, under the same symbol key and with the same properties, on
+ * the ADR-0112 refusal it throws (the `StackRefusalError` family in
+ * `stack.zod.ts`), and {@link stackConversionsOf} reads it off the caught
+ * error. It is the producer's own record at the throw, never a second
+ * conversion pass, and never the stderr line (which is warn-once per process,
+ * so a refusal whose notice an earlier stack already printed would lose it).
+ * The refusal carries NO mark: an error is not a built stack, so
+ * {@link hasStackProvenance} still answers `false` for it.
  */
 
 /** The producers whose output is a judged stack. */
@@ -135,13 +149,50 @@ export function markStackProvenance<T>(
     writable: false,
     configurable: false,
   });
+  stampConversionRecord(target as object, conversions);
+  return target;
+}
+
+/**
+ * Stamp the record of the ADR-0087 conversions a producer applied BEFORE it
+ * refused on the refusal it is about to throw, and return that refusal — the
+ * refusing half of {@link markStackProvenance}: same key, same properties,
+ * same frozen `ConversionNotice[]`, and no mark (see the module header).
+ *
+ * `conversions` is the record as it stands at the throw — what was applied so
+ * far — so a refusal whose source needed no conversion carries the empty
+ * record, stamped, rather than none: every refusal a producer throws answers
+ * the same question the same way.
+ *
+ * The first stamp wins. A refusal that already carries its own record is
+ * returned unchanged: the innermost producer's record is the one that
+ * describes what was applied to the source that refused, and the property is
+ * non-configurable, so a second stamp could not replace it anyway. A
+ * non-extensible error cannot take the property and is returned as-is.
+ *
+ * Internal to the two producers: NOT re-exported from the package entry.
+ */
+export function markRefusalConversions<E extends Error>(
+  refusal: E,
+  conversions: readonly ConversionNotice[],
+): E {
+  if (Object.prototype.hasOwnProperty.call(refusal, STACK_CONVERSIONS)) return refusal;
+  if (!Object.isExtensible(refusal)) return refusal;
+  stampConversionRecord(refusal, conversions);
+  return refusal;
+}
+
+/**
+ * The one writer of the record's property, shared by both stamps so the stack
+ * and the refusal can never carry two shapes of it.
+ */
+function stampConversionRecord(target: object, conversions: readonly ConversionNotice[]): void {
   Object.defineProperty(target, STACK_CONVERSIONS, {
     value: conversions.length === 0 ? NO_CONVERSIONS : Object.freeze(conversions.map((notice) => Object.freeze(notice))),
     enumerable: false,
     writable: false,
     configurable: false,
   });
-  return target;
 }
 
 /**
@@ -179,21 +230,49 @@ export function hasStackProvenance(value: unknown): boolean {
  *   once). A notice's `path` is relative to the `defineStack` call that
  *   applied it — the source the author wrote — not to the composed artifact.
  *   A single input is returned as-is, record included.
+ * - **A refusal** — the ADR-0112 error a producer THROWS instead of returning
+ *   a stack (`code` + `status: 422`) — carries the conversions that producer
+ *   applied before it refused: the record the stack would have carried, as it
+ *   stood at the throw. A door reads it off the error its catch-all caught,
+ *   `stackConversionsOf(error)`. `defineStack` stamps every refusal it throws
+ *   after its conversion pass, in both modes; `composeStacks` stamps every
+ *   refusal it throws with its inputs' records, by the rule above. A refusal
+ *   whose source needed no conversion answers `[]`.
  *
- * `[]` for a value no producer returned (the doors refuse it anyway, with
- * `STACK_PROVENANCE_MISSING`), and for a stack whose source needed no
- * conversion. Like the mark, the record does not survive a spread or JSON
- * copy — read it off the value the producer returned, BEFORE any merge.
+ * `[]` for a value no producer returned or threw (the doors refuse an
+ * unbuilt stack anyway, with `STACK_PROVENANCE_MISSING`), and for a stack
+ * whose source needed no conversion. Like the mark, the record does not
+ * survive a spread or JSON copy — read it off the value the producer returned
+ * or threw, BEFORE any merge or serialisation.
  *
- * ⚠️ What it cannot hold: a `defineStack` call that REFUSES returns no stack,
- * so the conversions it applied before refusing reach stderr only; and a key
- * merged onto the stack after the producer ran (a config module's named
- * export, say) was never seen by it, which is why a door still runs its own
- * pass over the merged stack and folds this record in beside that pass's
- * findings.
+ * ⚠️ What it cannot hold: a key merged onto the stack after the producer ran
+ * (a config module's named export, say) was never seen by it, which is why a
+ * door still runs its own pass over the merged stack and folds this record in
+ * beside that pass's findings. And a throw that is NOT one of the producers'
+ * ADR-0112 refusals carries no record, however many conversions were applied
+ * before it: an error some other layer raised, a non-refusal error raised
+ * inside a producer (`composeStacks`' own options parse throws a bare zod
+ * error), or anything thrown while a config module loads outside a producer.
+ * The stderr line is no substitute for any of these — it is warn-once per
+ * process, so a notice an earlier stack already printed is not printed again.
  */
 export function stackConversionsOf(value: unknown): readonly ConversionNotice[] {
-  if (!hasStackProvenance(value)) return NO_CONVERSIONS;
+  if (!hasStackProvenance(value) && !isStampedRefusal(value)) return NO_CONVERSIONS;
   const record = (value as Record<symbol, unknown>)[STACK_CONVERSIONS];
   return Array.isArray(record) ? (record as readonly ConversionNotice[]) : NO_CONVERSIONS;
+}
+
+/**
+ * An error carrying the record as its OWN property — what
+ * {@link markRefusalConversions} leaves on a producer's refusal. The record is
+ * read off a value a producer stamped it on, and only two kinds exist: a
+ * built stack (under the mark) and an error it threw. A plain object carrying
+ * the key without the mark is neither, and is not read.
+ *
+ * `instanceof Error`, not the refusal class: a CLI and the config it loads may
+ * resolve two copies of this package, so the refusal's class is not the
+ * reader's — but both run in one realm, where `Error` is one constructor.
+ */
+function isStampedRefusal(value: unknown): boolean {
+  return value instanceof Error && Object.prototype.hasOwnProperty.call(value, STACK_CONVERSIONS);
 }

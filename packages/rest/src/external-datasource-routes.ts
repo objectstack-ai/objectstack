@@ -73,7 +73,7 @@ import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
  * is not a second envelope flag, so it belongs inside `data` rather than being
  * dropped.
  *
- * [#10537] `POST /validate` does URL-SCOPED WORK. It used to call
+ * [commit e634ecf6a] `POST /validate` does URL-SCOPED WORK. It used to call
  * `validateAll()` — every federated object on every federated datasource, each
  * validation driving a live `introspect(datasource)` — and then keep only the
  * rows matching `:name`. The rows were right; the work was not scoped, so one
@@ -126,7 +126,7 @@ export interface ExternalDatasourceRoutesOptions {
 /**
  * [#9901] The capability the federation family's READ routes require:
  * `GET /external/tables`, `POST /external/tables/:remote/draft` and
- * [#10255] `POST /external/validate`.
+ * [commit 6ce58a735] `POST /external/validate`.
  *
  * It is `manage_platform_settings` because the first two routes are the
  * DECLARED TWINS of `GET /:name/remote-tables` and `POST /:name/object-draft`
@@ -139,10 +139,10 @@ export interface ExternalDatasourceRoutesOptions {
  * Maintainer ruling, 2026-08-20 (verbatim: 「其他接受你的建议。」): the
  * federation family is NOT deliberately the lower-privilege door.
  *
- * [#10255] `validate` has no admin twin to converge with, so #9901 left it on
+ * [commit 6ce58a735] `validate` has no admin twin to converge with, so #9901 left it on
  * the #9686 authentication floor and filed the question instead of deciding
  * it. The follow-up ruling (maintainer, 2026-08-20, verbatim:
- * 「同意你的意见。」, accepting option A on #10255) converged it here: what
+ * 「同意你的意见。」, accepting option A, landed as commit 6ce58a735) converged it here: what
  * validation does is drive the SAME live remote-schema introspection the
  * two read twins gate (`introspect` per datasource, in
  * `service-datasource/src/external-datasource-service.ts`), and its report —
@@ -150,7 +150,7 @@ export interface ExternalDatasourceRoutesOptions {
  * unreachable remotes — is a read of the same federation surface. One family,
  * one door-type: reads here, writes on {@link FEDERATION_WRITE_CAPABILITY}.
  *
- * [#10537] The reasoning is unchanged by the scoping fix and was never about
+ * [commit e634ecf6a] The reasoning is unchanged by the scoping fix and was never about
  * the sweep's WIDTH: it is the same introspection whether one datasource is
  * read or all of them, so `validate` answers to the read capability either way.
  */
@@ -225,7 +225,7 @@ export function registerExternalDatasourceRoutes(
    * `503` which services a deployment has wired, and — for the two routes that
    * write — so the refusal provably precedes the write rather than following it.
    *
-   * ## [#9901/#10255] …and a CAPABILITY above it, on every route
+   * ## [#9901 / commit 6ce58a735] …and a CAPABILITY above it, on every route
    *
    * #9686 left this family gated on authentication alone and pointed the
    * capability question at #9593, which answered it for the admin half only.
@@ -271,13 +271,13 @@ export function registerExternalDatasourceRoutes(
    * — since `isSystem` is never resolved from inbound HTTP — one no wire caller
    * could ever take, so it would be unfalsifiable divergence from the twin.
    *
-   * ## [#10255] `validate` joined the reads; the `'authenticated'` kind retired
+   * ## [commit 6ce58a735] `validate` joined the reads; the `'authenticated'` kind retired
    *
    * #9901's ruling enumerated four routes, so `POST /external/validate` — no
    * twin on the admin spelling, no metadata created — kept the #9686
    * authentication floor under its own explicit kind: an un-ruled route
    * silently inheriting a neighbour's gate would have read as ruled. The
-   * question was filed as #10255 and ruled on 2026-08-20: validate takes the
+   * question was ruled on 2026-08-20 and landed as commit 6ce58a735: validate takes the
    * READ capability (see {@link FEDERATION_READ_CAPABILITY}'s note for why it
    * is a read). With every route now ruled, the `'authenticated'` kind would
    * be a door no route walks through, so it is REMOVED rather than kept — a
@@ -341,7 +341,7 @@ export function registerExternalDatasourceRoutes(
   };
 
   /**
-   * [#10537] The scoped validation the `POST /validate` route needs: validate
+   * [commit e634ecf6a] The scoped validation the `POST /validate` route needs: validate
    * the federated objects bound to ONE datasource, composed service-side from
    * the same primitives the whole-farm sweep uses (`listObjects` → filter →
    * `validateObject`).
@@ -362,7 +362,7 @@ export function registerExternalDatasourceRoutes(
    *
    * A wired service with no scoped spelling could be served by falling back to
    * `validateAll()` and post-filtering — which is precisely the behaviour
-   * #10537 removed. A silent fallback would leave the fan-out reachable, on a
+   * commit e634ecf6a removed. A silent fallback would leave the fan-out reachable, on a
    * path no test drives, for exactly the deployments nobody is looking at. So
    * absence takes the same 503 arm every other route here takes when the
    * service cannot serve it: loud, and already the declared shape of "this
@@ -494,12 +494,12 @@ export function registerExternalDatasourceRoutes(
       },
     },
 
-    // Validate the federated objects on this datasource. [#10255] A 'read':
+    // Validate the federated objects on this datasource. [commit 6ce58a735] A 'read':
     // validation drives the same live remote-schema introspection the two
     // read twins gate, so it answers to the same capability (ruled 2026-08-20;
     // the constant's doc carries the reasoning).
     //
-    // [#10537] The work is scoped by the CALL, not by a filter over a
+    // [commit e634ecf6a] The work is scoped by the CALL, not by a filter over a
     // whole-farm sweep: `validateDatasource(:name)` introspects the named
     // datasource's remote and no other. The response is unchanged — the rows
     // the post-filter used to keep are exactly the rows this returns (see

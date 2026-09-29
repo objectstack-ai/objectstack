@@ -198,7 +198,7 @@ export interface AuthoringFinding {
    * on the runtime gate's wire surface the top-level collection index of a
    * collection-resident finding is rewritten to the entry's NAME
    * (`objects.acme_invoice.sharingModel`) — see `nameKeyFindingPath` in
-   * `runtime-gate.ts` (#10064).
+   * `runtime-gate.ts` (commit def0d3e63).
    */
   path: string;
   /** What is wrong. */
@@ -1120,7 +1120,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow).
   //
-  // #16659 added a sixth id, `flow-schedule-organization-missing`, at
+  // Commit ecdfc9411 added a sixth id, `flow-schedule-organization-missing`, at
   // `warning`; #17396 RETIRED it. The criterion above is what retired it: this
   // stack is not enough to know the flow is dead, because a deployment-level
   // switch and the tenancy posture decide whether the key is required, and
@@ -1719,7 +1719,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    `security-master-detail-ungranted` per-write vs 4 whole-stack,
   //    PR #7886). `RuntimeStackContext` now carries `permissions`/`books` in
   //    BOTH differential passes and `TYPE_TO_STACK_KEY` maps both types.
-  //  - #8310 slice 1: `runtimeTypes` gains `permission` + `book` (PR #8546).
+  //  - #8310 slice 1: `runtimeTypes` gains `permission` + `book` (commit ba5e957ef).
   //    `object` measured DIRTY on that tree and was escalated, not forced.
   //  - #8310 slice 2 (this state): `object` crosses under the maintainer
   //    ruling recorded on #8310 (2026-08-13, 「接受你的全部建议」): an
@@ -1745,7 +1745,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // where a permission set named `role_manager` is refused and a position named
   // `sales_role` walks through, the #7220 failure this table refuses to build
   // in either direction. So it was split out and held back WHOLE (#8310's
-  // explicit call). [#19370] It has since crossed, also whole, on its own
+  // explicit call). [commit a227afa41] It has since crossed, also whole, on its own
   // entry; the split is what let each half cross on its own evidence, and it
   // stays split for that reason rather than being folded back.
   //
@@ -1765,7 +1765,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['seed', 'permission', 'book', 'object'],
     run: (stack) => validateSecurityPosture(stack),
   },
-  // [ADR-0090 D3 / #8310 → #19370] The vocabulary freeze, split out of
+  // [ADR-0090 D3 / #8310 → commit a227afa41] The vocabulary freeze, split out of
   // `validateSecurityPosture` the day the rest of that block crossed the
   // runtime wall — so that it could stay behind WHOLE rather than cross for
   // three of the six collections it judges (#7220: one rule id must sit on ONE

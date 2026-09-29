@@ -542,8 +542,14 @@ export function compileListViewGroupQuery(
  * for the empty group, whose header key is `null`: the `$null` predicate is
  * the AST's own spelling for absence (`data/filter.zod.ts`, lowered to
  * `IS NULL` on the SQL family) and the one the view filter dialect's
- * `is_empty` / `is_null` lower to (`parseFilterAST`), so a group predicate
- * and a view filter agree on what "empty" means.
+ * `is_null` lowers to (`parseFilterAST`), so the empty group selects exactly
+ * the rows its header counted. It is deliberately NOT `$empty`, which the
+ * view filter's `is_empty` lowers to since #20446: a group key is ONE stored
+ * value, so the header row counts `''` (a text field) under a group of its
+ * own, apart from the `null` group, and a `[]` cell is not a scalar key at
+ * all. `$empty` would open the `null` group onto the `''` group's rows too.
+ * So a group predicate and a view filter's `is_null` agree on "no value";
+ * `is_empty` asks the wider, per-type question.
  *
  * `groupKey` must carry a PREFIX of the nesting order — every level from the
  * outermost down to the group being opened, and no level past it — so the

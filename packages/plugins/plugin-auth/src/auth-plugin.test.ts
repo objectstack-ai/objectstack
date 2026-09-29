@@ -1391,7 +1391,7 @@ describe('AuthPlugin', () => {
       expect(ql.insert).not.toHaveBeenCalled();
     });
 
-    // [#11973 / #11663 L3] The trigger set widened to the #11343 `sys_user`
+    // [#11973 / #11663 L3] The trigger set widened to commit c0714eb5d's `sys_user`
     // arms: a config-anchored administrator comes into standing through a
     // `sys_user` insert (operator-provisioned, arrives verified) or a
     // verifying/email update — with no grant insert ever firing post-L4.

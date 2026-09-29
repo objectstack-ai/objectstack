@@ -14,15 +14,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { validateJsxPages } from '@objectstack/lint';
 import {
-  CONSOLE_SDUI_MANIFEST_SPECIFIER,
+  CONSOLE_SDUI_MANIFEST,
   JSX_PARSE_LEVEL_ONLY_RULE,
   PROJECT_SDUI_MANIFEST_FILE,
   SduiManifestRefusalError,
+  consoleSduiManifestPath,
   countJsxGatePages,
   jsxGateStacks,
   printJsxGateNotices,
@@ -59,10 +62,11 @@ const PACKAGE_CARRIED: Record<string, Record<string, unknown>> = {
 
 const ABSENT: SduiManifestResolution = {
   status: 'absent',
-  lookedAt: ['/proj/sdui.manifest.json', CONSOLE_SDUI_MANIFEST_SPECIFIER],
+  lookedAt: ['/proj/sdui.manifest.json', CONSOLE_SDUI_MANIFEST],
 };
 const UNUSABLE: SduiManifestResolution = {
   status: 'unusable',
+  source: 'project',
   path: '/proj/sdui.manifest.json',
   reason: 'it is not valid JSON (x)',
 };
@@ -82,13 +86,17 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     expect(r).toEqual({ status: 'resolved', manifest: MANIFEST, path: join(dir, PROJECT_SDUI_MANIFEST_FILE) });
   });
 
-  // Holds in any checkout: `packages/console/dist/` is gitignored and absent
-  // unless the console is built, and today the specifier is not in the
-  // console's `exports` either. Both legs are named, in order.
-  it('absent: names the project path, then the console specifier', () => {
-    expect(resolveSduiManifest(dir)).toEqual({
+  // Hermetic: the console is located from an origin nothing resolves from
+  // (`createRequire` refuses a relative one), so the answer does not depend on
+  // whether this checkout has built the console. ⚠️ An absolute origin in an
+  // empty directory is NOT that: a runner started through pnpm's `.bin` shim
+  // inherits a NODE_PATH carrying the virtual store's hoisted packages, and
+  // `@objectstack/console` resolves from anywhere through it. Both legs are
+  // named, in order; the console-leg block below pins the absolute spelling.
+  it('absent: names the project path, then the console copy', () => {
+    expect(resolveSduiManifest(dir, 'not-an-absolute-origin.mjs')).toEqual({
       status: 'absent',
-      lookedAt: [join(dir, PROJECT_SDUI_MANIFEST_FILE), CONSOLE_SDUI_MANIFEST_SPECIFIER],
+      lookedAt: [join(dir, PROJECT_SDUI_MANIFEST_FILE), CONSOLE_SDUI_MANIFEST],
     });
   });
 
@@ -103,6 +111,7 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     const r = resolveSduiManifest(dir);
     expect(r.status).toBe('unusable');
     if (r.status !== 'unusable') return;
+    expect(r.source).toBe('project');
     expect(r.path).toBe(join(dir, PROJECT_SDUI_MANIFEST_FILE));
     expect(r.reason).toMatch(reason);
   });
@@ -112,6 +121,113 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     const r = resolveSduiManifest(dir);
     expect(r.status).toBe('unusable');
     if (r.status === 'unusable') expect(r.reason).toMatch(/could not be read/);
+  });
+});
+
+/**
+ * The `package.json` of the REAL `@objectstack/console` this package depends
+ * on, resolved the way any installed dependency is — through `node_modules` —
+ * so the layouts below carry the console's actual `exports` map, which is what
+ * decides whether a subpath resolves at all.
+ */
+const REAL_CONSOLE_PACKAGE_JSON = createRequire(import.meta.url).resolve('@objectstack/console/package.json');
+
+/**
+ * An installed-package layout under `root`: `node_modules/@objectstack/console`
+ * carrying the real console `package.json`, plus a `dist/sdui.manifest.json`
+ * with `body` (`null` for a console that ships none, as 17.0.0 to 17.4.0 did).
+ * Returns the origin a CLI installed beside it resolves from.
+ */
+function installConsole(root: string, body: string | null): URL {
+  const pkgDir = join(root, 'node_modules', '@objectstack', 'console');
+  mkdirSync(join(pkgDir, 'dist'), { recursive: true });
+  writeFileSync(join(pkgDir, 'package.json'), readFileSync(REAL_CONSOLE_PACKAGE_JSON, 'utf8'));
+  if (body !== null) writeFileSync(join(pkgDir, 'dist', 'sdui.manifest.json'), body);
+  return pathToFileURL(join(root, 'node_modules', '@objectstack', 'cli', 'dist', 'index.js'));
+}
+
+describe('the console leg — the copy @objectstack/console ships is reached, through its package.json', () => {
+  let root = '';
+  let project = '';
+  beforeEach(() => {
+    // Real path: module resolution answers with one (`/var` is `/private/var` on macOS).
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'os-sdui-console-')));
+    project = join(root, 'project');
+    mkdirSync(project);
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // The production default: from the CLI's OWN location, where its declared
+  // dependency lives. Asking for the file by its own subpath resolves nothing
+  // (the console's `exports` publishes `./package.json` alone), so this reds
+  // the moment the leg goes back to that spelling.
+  it("locates the CLI's own @objectstack/console dependency, whether or not it is built", () => {
+    const path = consoleSduiManifestPath();
+    expect(path).toBeDefined();
+    expect(path!.endsWith(join('dist', 'sdui.manifest.json'))).toBe(true);
+    const owner = JSON.parse(readFileSync(join(dirname(dirname(path!)), 'package.json'), 'utf8'));
+    expect(owner.name).toBe('@objectstack/console');
+  });
+
+  it('resolved: a project with no manifest of its own is checked against the shipped copy', () => {
+    const origin = installConsole(root, JSON.stringify(MANIFEST));
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+    });
+  });
+
+  it("resolved: the project's own manifest is read first", () => {
+    const origin = installConsole(root, JSON.stringify({ components: {} }));
+    writeFileSync(join(project, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: join(project, PROJECT_SDUI_MANIFEST_FILE),
+    });
+  });
+
+  it('absent: a console that ships no manifest is named by the absolute path looked at', () => {
+    const origin = installConsole(root, null);
+    expect(resolveSduiManifest(project, origin)).toEqual({
+      status: 'absent',
+      lookedAt: [
+        join(project, PROJECT_SDUI_MANIFEST_FILE),
+        join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+      ],
+    });
+  });
+
+  it('unusable: a damaged shipped copy is refused with its own remedy, never read as "not found"', () => {
+    const origin = installConsole(root, '{ "components": [ oops');
+    const r = resolveSduiManifest(project, origin);
+    expect(r).toMatchObject({
+      status: 'unusable',
+      source: 'console',
+      path: join(root, 'node_modules', '@objectstack', 'console', 'dist', 'sdui.manifest.json'),
+    });
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let thrown: unknown;
+      try {
+        resolveJsxGateManifest(HTML_STACK, r);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(SduiManifestRefusalError);
+      const e = thrown as SduiManifestRefusalError;
+      expect(e.message).toContain(join('@objectstack', 'console', 'dist', 'sdui.manifest.json'));
+      // The remedy names the package to reinstall, not the file to edit.
+      const remedy = e.hints[e.hints.length - 1];
+      expect(remedy).toContain('@objectstack/console');
+      expect(remedy).not.toContain(PROJECT_SDUI_MANIFEST_FILE);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
 

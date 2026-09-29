@@ -145,7 +145,7 @@ function boot(opts: BootOptions) {
         hasOverlay: () => overlays.has('account'),
 
         /**
-         * [#12195] The compound arity's REGISTRATIONS, not calls to them. These
+         * [commit 7986d973f] The compound arity's REGISTRATIONS, not calls to them. These
          * used to be `compoundGet()` / `compoundPut()`; the arity is retired, so
          * what is assertable now is that nothing is mounted there.
          */
@@ -172,7 +172,7 @@ describe('[#7019 / #12195] the compound-name arity is retired', () => {
      * object schema, edit a label, PUT it back) still deleted the fields the
      * caller was never allowed to see, through this door.
      *
-     * #12176 retired the arity, so the bypass is closed by removal instead of
+     * Commit 7986d973f retired the arity, so the bypass is closed by removal instead of
      * by a second gate. The pin inverts to match: what must stay true is that
      * the door is not mounted, because a re-mounted compound door arrives
      * UNGATED unless whoever mounts it re-derives #6603/#7019 — which is

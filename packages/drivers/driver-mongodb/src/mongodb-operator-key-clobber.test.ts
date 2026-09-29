@@ -47,8 +47,14 @@ import { FILTER_OPERATORS } from '@objectstack/spec/data';
 
 import { translateFilter } from './mongodb-filter.js';
 
+/**
+ * [#20446] Every probed field is declared `text`, so `$empty` — in
+ * `FILTER_OPERATORS` since #20446 — translates its text row rather than being
+ * refused for want of a declaration. No other operator reads the resolver.
+ */
+const TEXT_SHAPE = { type: 'text' } as const;
 const doc = (where: unknown): Record<string, unknown> =>
-  translateFilter(where as never) as Record<string, unknown>;
+  translateFilter(where as never, undefined, () => TEXT_SHAPE) as Record<string, unknown>;
 
 /** Both key orders of one two-operator field constraint. */
 function bothOrders(
@@ -115,6 +121,8 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
     ['$null', false, ['$ne']],
     ['$exists', true, ['$ne']],
     ['$exists', false, ['$eq']],
+    ['$empty', true, ['$in']],                        // the text row: null or ''
+    ['$empty', false, ['$nin']],
   ];
 
   it('the probe table covers the declared vocabulary exactly', () => {
@@ -149,6 +157,13 @@ describe('[#13524] the ENUMERATION — which lowered key each declared operator 
       $lt: ['$between', '$lt', '$lte'],
       $lte: ['$between', '$lte'],
       $regex: ['$contains', '$endsWith', '$icontains', '$startsWith'],
+      // [#20446] `$empty` (in `FILTER_OPERATORS` since #20446) writes `$in` /
+      // `$nin` on its text row, so it contests those two keys BY KEY — but the
+      // translator never puts it in the shared slot: it is always a document of
+      // its own, AND-ed beside the field's other operators, so no pairing can
+      // clobber it (the sweep below holds every pair to that).
+      $in: ['$empty', '$in'],
+      $nin: ['$empty', '$nin'],
     });
     // `$not` is written by `$notContains` and by nothing else — the card's
     // third named member, measured NOT reachable.
@@ -237,6 +252,7 @@ describe('[#13524] the sweep — every declared pair, both orders, nothing dropp
     $icontains: '07-15',
     $null: false,
     $exists: true,
+    $empty: false,
   });
 
   it('the comparand table covers the declared vocabulary exactly', () => {
