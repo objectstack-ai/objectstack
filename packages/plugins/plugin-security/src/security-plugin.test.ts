@@ -3795,6 +3795,39 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_east_1' }, plain);
     expect(self.principal.userId).toBe('u_east_1');
   });
+
+  // [#20515] Explaining ANOTHER user resolves that user's grants in the CALLER's
+  // organization — the one the explain right was checked in. A grant scoped to
+  // an organization applies only while that organization is the one resolved
+  // in; with no organization only global grants do, which is what enforcement
+  // answers for that user with none.
+  describe('[#20515] the explained user is resolved in the caller\'s organization', () => {
+    const scopedTarget = async () => {
+      const b = await boot();
+      b.h.tables.sys_user_permission_set.push(
+        { user_id: 'u_west_1', permission_set_id: 'ps_sub', organization_id: 'org_alpha' },
+      );
+      b.h.tables.sys_permission_set.push({ id: 'ps_sub', name: 'sub_admin' });
+      return b;
+    };
+    const hr = (tenantId?: string) => ({
+      userId: 'u_hr', positions: [], permissions: ['hr_admin'], ...(tenantId ? { tenantId } : {}),
+    });
+
+    it('caller in org_alpha: the org_alpha-scoped set is part of the explained principal', async () => {
+      const { plugin } = await scopedTarget();
+      const d = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr('org_alpha'));
+      expect(d.principal.permissionSets).toContain('sub_admin');
+    });
+
+    it('caller in another organization, or in none: it is not', async () => {
+      const { plugin } = await scopedTarget();
+      const inBeta = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr('org_beta'));
+      expect(inBeta.principal.permissionSets).not.toContain('sub_admin');
+      const orgless = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr());
+      expect(orgless.principal.permissionSets).not.toContain('sub_admin');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

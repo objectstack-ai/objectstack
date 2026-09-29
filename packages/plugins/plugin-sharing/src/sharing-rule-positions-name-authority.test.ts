@@ -22,7 +22,10 @@
  *
  * ⭐ WHAT THE ESCALATION BUYS, driven rather than argued (see the arms below):
  * `manage_sharing` is an ORG-scoped capability (ADR-0111 D6) that an ordinary
- * tenant admin may grant. Holding it with no organization resolved is refused
+ * tenant admin may grant. (Since #20515 a grant scoped to an organization no
+ * longer applies to a resolution with no organization at all, so the arms below
+ * hold it through a GLOBAL grant — the one way an org-less caller still holds
+ * it.) Holding it with no organization resolved is refused
  * by `assertResolvableAdminScope` precisely because an unscoped answer "would
  * expose every tenant's rules". The D4 name-read was the bypass: it satisfied
  * that gate, `adminOrgScope` then returned the UNFILTERED `where`, and
@@ -100,10 +103,14 @@ function authzTables(shape: 'name-only' | 'genuine') {
         ]
       : [];
   const userSets: Array<Record<string, unknown>> = [
-    // The ORG-scoped capability both shapes hold — the precondition, not the
-    // axis under test. Scoped to `HOME_ORG`, so it can never be mistaken for
-    // the unscoped grant that confers standing.
-    { user_id: USER, permission_set_id: PS_SHARING, organization_id: HOME_ORG },
+    // The `manage_sharing` capability both shapes hold — the precondition, not
+    // the axis under test. GLOBAL (no organization): this caller resolves with
+    // NO organization, and an organization-less resolution applies only global
+    // grants (#20515), so an org-scoped grant here would simply not be held and
+    // every arm below would be vacuous. It is still `sharing_admin`, never
+    // `admin_full_access`, so it cannot be mistaken for the grant that confers
+    // standing.
+    { user_id: USER, permission_set_id: PS_SHARING, organization_id: null },
   ];
   if (shape === 'genuine') {
     userSets.push({ user_id: USER, permission_set_id: PS_ADMIN, organization_id: null });

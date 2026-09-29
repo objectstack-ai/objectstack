@@ -100,9 +100,10 @@ describe('renderCapabilityMessage (#3366)', () => {
   });
 
   it('a RETIRED token renders its retirement prescription, never the typo hint', () => {
-    // `os validate` / `os build` parse a plain-object config without the
-    // `defineStack` vocabulary check, so this renderer is the only text an
-    // author at those doors sees. It must be the spec-owned prescription
+    // A `defineStack(x, { strict: false })` config reaches `os validate` /
+    // `os build` without the `defineStack` vocabulary check (a plain-object
+    // export no longer reaches them at all), so this renderer is the only text
+    // an author at those doors sees for it. It must be the spec-owned prescription
     // verbatim — the same words `defineStack` refuses the token with.
     const c = classifyRequiredCapability('reports', () => true);
     expect(c.status).toBe('unknown');

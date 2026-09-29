@@ -367,7 +367,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * Options resolve through `resolveCascadingOptions` against that scope
    * (ADR-0068 / objectui#2284), while field- and section-level rules go through
    * `evalFieldPredicate` — a different evaluator, but since objectui#6010 (field)
-   * and objectui#6110 + #6111 (section) it is handed the same host scope, so
+   * and objectui#6110 + objectui#6111 (section) it is handed the same host scope, so
    * `current_user` resolves on those surfaces too. What still separates this one
    * is ENFORCEMENT, not vocabulary: per-option `visibleWhen` is the only
    * VISIBILITY predicate the SERVER also evaluates — the rule validator refuses

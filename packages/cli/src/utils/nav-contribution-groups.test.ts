@@ -53,7 +53,7 @@
 // must not pull the data engine in to judge a stack with no contributions.
 import '@objectstack/objectql/core';
 import { describe, it, expect } from 'vitest';
-import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { composeStacks, defineStack, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { artifactPackages } from './artifact-packages.js';
 import { collectNavGroupInputs, findNavGroupDiagnostics } from './nav-contribution-groups.js';
 
@@ -114,9 +114,13 @@ const ordersStack = (group: string) => ({
   }],
 });
 
-/** Compose exactly as `examples/app-multi-package/objectstack.config.ts` does. */
+/**
+ * Compose exactly as `examples/app-multi-package/objectstack.config.ts` does —
+ * each package through `defineStack` first, which `composeStacks` requires of
+ * every input (#20367 ruling B).
+ */
 const artifact = (group: string): AnyRec =>
-  composeStacks([ordersStack(group), coreStack()], { manifest: 'preserve' }) as unknown as AnyRec;
+  composeStacks([defineStack(ordersStack(group)), defineStack(coreStack())], { manifest: 'preserve' }) as unknown as AnyRec;
 
 /**
  * The composed artifact as `compile.ts` actually hands it to this check —

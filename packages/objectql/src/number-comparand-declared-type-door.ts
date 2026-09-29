@@ -5,8 +5,11 @@
  * filter collection point: the fifth gate on the seam that already carries
  * the #5869 comparand-shape gate, the #8296 unmaterializable-field gate, the
  * #15661 text-operator declared-type gate and the #8690 temporal-comparand
- * gate. It answers a fifth question about the same predicate: *is this string
- * a number the column can be compared with.*
+ * gate. It answers a fifth question about the same predicate: *is this
+ * comparand a number the column can be compared with.* [#20502] widened the
+ * question from strings to every comparand, in the spec's verdict alone: a
+ * boolean, a `Date` and an array are refused beside a non-numeric string,
+ * and this file changed only to carry a refused value that is not a string.
  *
  * ## The direction this implements (triage, recorded on #20336)
  *
@@ -45,9 +48,12 @@
  *
  * ## The door's two answers
  *
- * - **Refuse** a string the grammar does not read as a number: `INVALID_FILTER`
- *   / 400, the existing filter envelope, in the contract's words, before any
- *   driver is resolved. A `{placeholder}` is refused too, unresolved: every
+ * - **Refuse** a string the grammar does not read as a number, and a boolean,
+ *   a `Date` or an array (#20502): `INVALID_FILTER` / 400, the existing filter
+ *   envelope, in the contract's words, before any driver is resolved. A value
+ *   outside the comparand-type door's accepted set (`undefined`, a plain
+ *   object, a `Map`) passes the verdict and is refused by that door, one call
+ *   later, in its own words. A `{placeholder}` is refused too, unresolved: every
  *   filter token resolves to an id or a date, never a number (the contract
  *   argues it), and this door runs before `resolveWhereTokens`, as its
  *   temporal neighbour records it must.
@@ -178,7 +184,11 @@ function fieldMetaOf(def: unknown): NumberComparandDoorFieldMeta | null {
   return typeof returnType === 'string' ? { type, returnType } : { type };
 }
 
-/** One comparand at a judged position: the spec's verdict, routed. */
+/**
+ * One comparand at a judged position: the spec's verdict, routed. Whatever
+ * the comparand is — a string, a boolean, a `Date`, an array (#20502) — the
+ * verdict alone decides; this function only turns its answer into an outcome.
+ */
 function judgeComparand(
   meta: NumberComparandDoorFieldMeta,
   field: string,
@@ -195,8 +205,7 @@ function judgeComparand(
       declaredType: meta.type,
       ...(meta.returnType === undefined ? {} : { returnType: meta.returnType }),
       path,
-      // `door-refusal` is answered for a string comparand only.
-      value: comparand as string,
+      value: comparand,
       form: verdict.form,
     },
   };
@@ -292,7 +301,7 @@ function declaredMetaOf(schema: unknown): MetaOf | null {
 }
 
 /**
- * Walk one `FilterCondition` and return the FIRST string a declared numeric
+ * Walk one `FilterCondition` and return the FIRST comparand a declared numeric
  * field cannot be compared with, or `null`.
  *
  * Exported for the same reason the sibling walks are: a consumer that needs to
@@ -314,7 +323,7 @@ function refuse(context: string, refusal: NonNumericComparand): never {
 }
 
 /**
- * Refuse every string a declared numeric field cannot be compared with, and
+ * Refuse every comparand a declared numeric field cannot be compared with, and
  * narrow every numeric string to its number — `INVALID_FILTER` / 400, this
  * package's existing filter envelope, in the contract's words. No code is
  * minted.

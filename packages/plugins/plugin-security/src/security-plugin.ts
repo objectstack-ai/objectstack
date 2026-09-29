@@ -4681,7 +4681,13 @@ export class SecurityPlugin implements Plugin {
           }
         }
       }
-      targetContext = await buildContextForUser(this.ql, request.userId);
+      // [#20515] Resolved in the CALLER's organization — the one the explain
+      // right above was checked in. Grants scoped to any other organization do
+      // not apply there, and with no active organization only global grants do.
+      const callerTenantId = typeof callerContext?.tenantId === 'string' && callerContext.tenantId !== ''
+        ? callerContext.tenantId
+        : undefined;
+      targetContext = await buildContextForUser(this.ql, request.userId, Date.now(), callerTenantId);
     }
 
     // [C2 / ADR-0095] The optional `sharing` service backs the record-grained

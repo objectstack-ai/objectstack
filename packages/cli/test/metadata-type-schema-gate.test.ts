@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema, lintUnknownAuthoringKeys, formatUnknownAuthoringKey } from '@objectstack/spec';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -200,18 +201,22 @@ function runCli(command: string, dir: string, args: string[] = []): { exitCode: 
 }
 
 /**
- * A config written as a plain literal — no `defineStack` / `definePage`.
+ * A config written through `defineStack(…, { strict: false })` — no strict
+ * `defineStack` / `definePage`.
  *
- * Load-bearing: those factories parse eagerly, so a config authored through
- * them is rejected before the command's own gate is ever consulted. #5000's
- * repro edited `examples/app-showcase`, where every page goes through
+ * Load-bearing: the strict factories parse eagerly, so a config authored
+ * through them is rejected before the command's own gate is ever consulted.
+ * #5000's repro edited `examples/app-showcase`, where every page goes through
  * `definePage`, so its exit code could not distinguish "the CLI gates" from
- * "the factory threw". A literal isolates the command's own parse.
+ * "the factory threw". Non-strict skips the producer's parse, which isolates
+ * the command's own, and still carries the provenance mark `os validate` /
+ * `os build` require of every default export (#20367 ruling B).
  */
 function withConfig<T>(stack: Record<string, unknown>, body: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), 'os-metadata-gate-'));
   try {
-    writeFileSync(join(dir, 'objectstack.config.mjs'), `export default ${JSON.stringify(stack, null, 2)};\n`);
+    writeFileSync(join(dir, 'objectstack.config.mjs'), defineStackSource(stack, { strict: false }));
+    linkSpec(dir);
     return body(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });

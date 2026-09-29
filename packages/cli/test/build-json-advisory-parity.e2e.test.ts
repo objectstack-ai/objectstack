@@ -78,6 +78,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -130,7 +131,9 @@ const PLANTED_DOC = 'advparity_guide.md';
  *    goes red here instead of passing quietly.
  */
 const CONFIG_PLANTED = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.advparity', name: 'advparity', version: '1.0.0', type: 'app', namespace: 'advparity' },
   requires: ['${PLANTED_TOKEN}'],
   objects: [
@@ -142,7 +145,7 @@ export default {
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
-};
+}, { strict: false });
 `;
 
 const DOC_PLANTED = `---
@@ -159,7 +162,9 @@ Body text.
  * pass against a build that emitted one unconditionally.
  */
 const CONFIG_CLEAN = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.advclean', name: 'advclean', version: '1.0.0', type: 'app', namespace: 'advclean' },
   requires: [],
   objects: [
@@ -171,7 +176,7 @@ export default {
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
-};
+}, { strict: false });
 `;
 
 const DOC_CLEAN = `---
@@ -213,6 +218,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), f.config);
+    linkSpec(dir);
     writeFileSync(join(dir, 'src', 'docs', f.docName), f.doc);
     dirs[name] = dir;
   }

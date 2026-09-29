@@ -148,7 +148,8 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
         ['record-change', { objectName: 'lead', triggerType: 'record-after-create' }, 'record_change'],
         ['schedule', { schedule: '0 9 * * *' }, 'schedule'],
         ['time-relative', { timeRelative: { object: 'task', field: 'due_at' }, schedule: '0 * * * *' }, 'time_relative'],
-        ['api', { triggerType: 'api' }, 'api'],
+        // An `api` flow registers only with its per-flow secret (ADR-0041).
+        ['api', { triggerType: 'api', secret: 'hook-secret' }, 'api'],
     ];
 
     for (const [label, startConfig, triggerKey] of entryPaths) {

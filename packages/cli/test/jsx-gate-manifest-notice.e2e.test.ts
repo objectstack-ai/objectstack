@@ -47,6 +47,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -114,14 +115,16 @@ function stack(body: string | null): string {
       ? `{ id: 'nav_ticket', type: 'object', label: 'Tickets', objectName: 'jxg_ticket' }`
       : `{ id: 'nav_landing', type: 'page', label: 'Landing', pageName: 'jxg_landing' }`;
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^17' } },
   ${pages}
   apps: [{ name: 'jxg_app', label: 'JXG', navigation: [${nav}] }],
   objects: [
     { name: 'jxg_ticket', label: 'Ticket', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } },
   ],
-};
+}, { strict: false });
 `;
 }
 
@@ -132,7 +135,9 @@ export default {
  */
 function packageCarried(top: string): string {
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^17' } },
   pages: ${top},
   packages: [
@@ -147,7 +152,7 @@ export default {
   objects: [
     { name: 'jxg_ticket', label: 'Ticket', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } },
   ],
-};
+}, { strict: false });
 `;
 }
 const TOP_EMPTY = '[]';
@@ -235,6 +240,7 @@ beforeAll(async () => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), f.config);
+    linkSpec(dir);
     if (f.manifest !== undefined) writeFileSync(join(dir, 'sdui.manifest.json'), f.manifest);
     dirs[name] = dir;
   }

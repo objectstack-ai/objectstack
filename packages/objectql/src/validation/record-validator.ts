@@ -55,7 +55,9 @@
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
  *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999;
- *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481)
+ *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481);
+ *                   a string's leading day exists, and a `datetime` string is
+ *                   an ISO 8601 spelling (#20525) — refused, never rolled over
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -838,6 +840,62 @@ function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message
   return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
 }
 
+/**
+ * [#20525] The ISO 8601 spellings a `datetime` STRING is written in, after
+ * trimming — the ones the platform itself writes, each read the same on every
+ * host by the `datetime` storage rule (`@objectstack/core`'s
+ * `temporalStorageForm`):
+ *
+ * - `YYYY-MM-DD` — midnight UTC;
+ * - `YYYY-MM-DDTHH:MM[:SS[.f…]]`, then `Z`, a `±HH:MM` / `±HHMM` offset, or
+ *   nothing — a zone-naive wall clock is read AS UTC (ADR-0074);
+ * - `YYYY-MM-DD HH:MM[:SS[.f…]]`, zone-naive only — read AS UTC the same way.
+ *
+ * Every other spelling is refused. `Date.parse` reads `"2026/07/15 10:00"`,
+ * `"07/15/2026 10:00"` or `"15 July 2026 10:00"` in the SERVER PROCESS's zone
+ * and `"07/08/2026"` month-first, so the stored instant was a property of the
+ * deployment host; it reads `"2026"` as a year, which the storage rule then
+ * stores as 2026 epoch milliseconds (`1970-01-01T00:00:02.026Z`). A space
+ * separator carries no zone because the storage rule hands such a string to
+ * `Date.parse` whole, and its non-ISO reading moves `"0050-01-01 10:00+01:00"`
+ * to 1950. `T` and `Z` are upper case: a zone-naive `"…t10:00"` is not the
+ * form the storage rule reads as UTC.
+ */
+const ISO_DATETIME_WRITE_FORM =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?| \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/;
+
+/**
+ * [#20525] Does the string's leading `YYYY-MM-DD` name a calendar day that
+ * exists — month 01..12, day 01 to that month's length, February 29 only in a
+ * leap year? Arithmetic, never a `Date` round trip: `Date.UTC` reads a year
+ * 0..99 as 1900..1999, and `Date.parse` ROLLS an impossible day over
+ * (`"2026-02-30"` is March 2), which is the defect this answers. A string with
+ * no leading day answers `false`.
+ */
+function namesRealCalendarDay(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const length = month === 2 ? (leap ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+  return day <= length;
+}
+
+/**
+ * [#20525] Is a `date` / `datetime` STRING written in a form its storage rule
+ * stores as written? A real leading calendar day for both kinds, and for a
+ * `datetime` an {@link ISO_DATETIME_WRITE_FORM} spelling. A `date`'s other
+ * spelling question is the #20481 one, asked beside this.
+ */
+function writesAsIsoTemporal(value: string, kind: 'date' | 'datetime'): boolean {
+  const s = value.trim();
+  if (kind === 'datetime' && !ISO_DATETIME_WRITE_FORM.test(s)) return false;
+  return namesRealCalendarDay(s);
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -1243,7 +1301,19 @@ function validateOne(
     // untouched.
     const readsAsDay =
       t !== 'date' || typeof value !== 'string' || !isUninterpretableTemporalComparand('date', value);
-    if (readable && readsAsDay && !isOutsideTemporalYearRange(value, t)) return null;
+    // [#20525] …and a STRING names a calendar day that exists, for a `date`
+    // and for the day part of a `datetime`, and a `datetime` string is one of
+    // the ISO spellings `ISO_DATETIME_WRITE_FORM` names. `Date.parse` rolled
+    // an impossible day over (`"2026-02-30T10:00:00Z"` was stored as March 2
+    // on every backend) and a `date` kept it verbatim (`"2026-02-30"`, a day
+    // that does not exist, on memory and SQLite; a 500 on PostgreSQL); it read
+    // a non-ISO `datetime` in the server process's zone. Refused, never rolled
+    // over and never re-read: the same `invalid_date` wire code as every other
+    // value that is not a valid date, naming the field. A `Date` names a real
+    // instant and is not a string, so it keeps its answer; a number stays
+    // refused by `readable`.
+    const writtenAsIso = typeof value !== 'string' || writesAsIsoTemporal(value, t);
+    if (readable && readsAsDay && writtenAsIso && !isOutsideTemporalYearRange(value, t)) return null;
     // Same wire code, two sentences: "a valid date" vs "a valid datetime".
     return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }

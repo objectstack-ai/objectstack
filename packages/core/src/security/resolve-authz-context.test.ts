@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext } from './resolve-authz-context.js';
+import { hasPlatformAdminStanding, resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext } from './resolve-authz-context.js';
 import { POSTURE_RANK } from './posture-ladder.js';
 import { hashApiKey } from './api-key.js';
 import type { AuthzPosture } from '@objectstack/spec/security';
@@ -1829,5 +1829,239 @@ describe('[#15409] a session organization claim that no membership backs', () =>
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
     // ⛔ Not degraded into the session's drop: the key is REFUSED, not trimmed.
     expect(dropLines()).toHaveLength(0);
+  });
+});
+
+/**
+ * [#20515] A resolution with NO active organization applies only the GLOBAL
+ * grants (`organization_id` null). A grant scoped to an organization applies
+ * only while that organization is the active tenant — §4 (`sys_user_position`)
+ * and §6 (`sys_user_permission_set`) ask the one predicate, so they cannot
+ * disagree.
+ *
+ * The population this was measured on: a member removed from an organization
+ * whose session still names it. The session arm drops the claim (#15409 ruling
+ * B) and re-resolves with no tenant; the old skip condition,
+ * `org && tenantId && org !== tenantId`, was false for every row once
+ * `tenantId` was undefined, so a permission set granted SCOPED to the
+ * organization the member left went on conferring `manage_metadata` with no
+ * organization boundary at all. The door-level half (403 at
+ * `DELETE /packages/:id`) is pinned in `packages/runtime`
+ * (`packages-orgless-grants-capability-gate.test.ts`).
+ */
+describe('[#20515] with no active organization, only global grants apply', () => {
+  const ALPHA = 'org_alpha';
+  const BETA = 'org_beta';
+
+  /** One set and one position per scope: global, alpha, beta. */
+  const grantRows = (userId: string) => ({
+    sys_user_position: [
+      { user_id: userId, position: 'global_position', organization_id: null },
+      { user_id: userId, position: 'alpha_position', organization_id: ALPHA },
+      { user_id: userId, position: 'beta_position', organization_id: BETA },
+    ],
+    sys_user_permission_set: [
+      { user_id: userId, permission_set_id: 'ps_global', organization_id: null },
+      { user_id: userId, permission_set_id: 'ps_alpha', organization_id: ALPHA },
+      { user_id: userId, permission_set_id: 'ps_beta', organization_id: BETA },
+    ],
+    sys_permission_set: [
+      { id: 'ps_global', name: 'global_set', system_permissions: ['global_cap'] },
+      { id: 'ps_alpha', name: 'alpha_set', system_permissions: ['manage_metadata'] },
+      { id: 'ps_beta', name: 'beta_set', system_permissions: ['beta_cap'] },
+    ],
+  });
+
+  /** What §4 and §6 each let through, read off one resolution. */
+  const applied = (g: { positions: string[]; permissions: string[]; systemPermissions: string[] }) => ({
+    positions: g.positions.filter((p) => p.endsWith('_position')).sort(),
+    permissions: [...g.permissions].sort(),
+    systemPermissions: [...g.systemPermissions].sort(),
+  });
+
+  it('no tenant: §4 and §6 both keep the global rows and NOTHING scoped to an organization', async () => {
+    const ql = makeQl({ sys_user: [{ id: 'u1' }], sys_member: [], ...grantRows('u1') });
+    const grants = await resolveUserAuthzGrants(ql, 'u1', {});
+    expect(applied(grants)).toEqual({
+      positions: ['global_position'],
+      permissions: ['global_set'],
+      systemPermissions: ['global_cap'],
+    });
+  });
+
+  it('a tenant: §4 and §6 both keep the global rows plus THAT organization\'s, never another\'s', async () => {
+    const ql = makeQl({ sys_user: [{ id: 'u1' }], sys_member: [], ...grantRows('u1') });
+    expect(applied(await resolveUserAuthzGrants(ql, 'u1', { tenantId: ALPHA }))).toEqual({
+      positions: ['alpha_position', 'global_position'],
+      permissions: ['alpha_set', 'global_set'],
+      systemPermissions: ['global_cap', 'manage_metadata'],
+    });
+    expect(applied(await resolveUserAuthzGrants(ql, 'u1', { tenantId: BETA }))).toEqual({
+      positions: ['beta_position', 'global_position'],
+      permissions: ['beta_set', 'global_set'],
+      systemPermissions: ['beta_cap', 'global_cap'],
+    });
+  });
+
+  /**
+   * §6a — position-bound sets. Under a walled posture the catalog holds one
+   * copy of each built-in position PER ORGANIZATION (`everyone`, `org_member`,
+   * …), and an organization binds its own sets to its own copies. With no
+   * tenant the `sys_position` read is installation-wide, so every
+   * organization's copy of a name the caller holds used to feed its bindings in.
+   * This double ignores the context's tenant exactly as that read does.
+   */
+  describe('§6a: a position row scoped to an organization binds nothing with no tenant', () => {
+    const catalog = () => ({
+      sys_position: [
+        { id: 'pos_member_alpha', name: 'org_member', organization_id: ALPHA },
+        { id: 'pos_member_beta', name: 'org_member', organization_id: BETA },
+        { id: 'pos_everyone_alpha', name: 'everyone', organization_id: ALPHA },
+        { id: 'pos_everyone_global', name: 'everyone', organization_id: null },
+      ],
+      sys_position_permission_set: [
+        { position_id: 'pos_member_alpha', permission_set_id: 'ps_alpha_members' },
+        { position_id: 'pos_everyone_alpha', permission_set_id: 'ps_alpha_everyone' },
+        { position_id: 'pos_everyone_global', permission_set_id: 'ps_global_everyone' },
+      ],
+      sys_permission_set: [
+        { id: 'ps_alpha_members', name: 'alpha_member_tools', system_permissions: ['manage_metadata'] },
+        { id: 'ps_alpha_everyone', name: 'alpha_everyone_extra' },
+        { id: 'ps_global_everyone', name: 'global_everyone_default' },
+      ],
+    });
+    /** Removed from alpha, still an `org_member` of beta — the role name alpha bound its set to. */
+    const exMember = () => makeQl({
+      sys_user: [{ id: 'u_ex' }],
+      sys_member: [{ user_id: 'u_ex', organization_id: BETA, role: 'member' }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+      ...catalog(),
+    });
+
+    it('no tenant: neither alpha\'s org_member binding nor alpha\'s everyone binding applies; the global everyone binding does', async () => {
+      const grants = await resolveUserAuthzGrants(exMember(), 'u_ex', {});
+      expect(grants.positions).toContain('org_member');
+      expect([...grants.permissions].sort()).toEqual(['global_everyone_default']);
+      expect(grants.systemPermissions).not.toContain('manage_metadata');
+    });
+
+    it('in beta: alpha\'s bindings still do not apply; in alpha (a current member there): they do', async () => {
+      const inBeta = await resolveUserAuthzGrants(exMember(), 'u_ex', { tenantId: BETA });
+      expect([...inBeta.permissions].sort()).toEqual(['global_everyone_default']);
+      const alphaMember = makeQl({
+        sys_user: [{ id: 'u_in' }],
+        sys_member: [{ user_id: 'u_in', organization_id: ALPHA, role: 'member' }],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+        ...catalog(),
+      });
+      const inAlpha = await resolveUserAuthzGrants(alphaMember, 'u_in', { tenantId: ALPHA });
+      expect([...inAlpha.permissions].sort()).toEqual(['alpha_everyone_extra', 'alpha_member_tools', 'global_everyone_default']);
+      expect(inAlpha.systemPermissions).toContain('manage_metadata');
+    });
+  });
+
+  describe('through the session arm: the removed member whose claim is dropped', () => {
+    /**
+     * `u_ex` was removed from `org_alpha` and is still a member of `org_beta`;
+     * `u_gone` has no membership left anywhere; both still hold the operator-
+     * authored `manage_metadata` set granted SCOPED to `org_alpha`, which the
+     * removal did not revoke. `u_member` is the control: a current `org_alpha`
+     * member holding the same grant. `u_global_ex` is removed the same way but
+     * holds the set GLOBALLY — a global grant is untouched by this card.
+     */
+    const tables = () => ({
+      sys_user: ['u_ex', 'u_gone', 'u_member', 'u_global_ex'].map((id) => ({ id, email: `${id}@x.com` })),
+      sys_member: [
+        { user_id: 'u_ex', organization_id: BETA, role: 'member' },
+        { user_id: 'u_member', organization_id: ALPHA, role: 'member' },
+        { user_id: 'u_global_ex', organization_id: BETA, role: 'member' },
+      ],
+      sys_user_position: [],
+      sys_user_permission_set: [
+        { user_id: 'u_ex', permission_set_id: 'ps_meta', organization_id: ALPHA },
+        { user_id: 'u_gone', permission_set_id: 'ps_meta', organization_id: ALPHA },
+        { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
+        { user_id: 'u_global_ex', permission_set_id: 'ps_meta', organization_id: null },
+      ],
+      sys_permission_set: [{ id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] }],
+    });
+    const namingAlpha = (userId: string) => async () => ({
+      user: { id: userId, email: `${userId}@x.com` },
+      session: { id: `ses_${userId}`, token: 'tok', userId, activeOrganizationId: ALPHA },
+    });
+
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warnSpy.mockRestore(); });
+
+    for (const userId of ['u_ex', 'u_gone']) {
+      it(`${userId}: the claim is dropped AND the left organization's grant no longer applies`, async () => {
+        const ctx = await resolveAuthzContext({
+          ql: makeQl(tables()), headers: H(), getSession: namingAlpha(userId), tenancyPosture: 'isolated',
+        });
+        expect(ctx.userId).toBe(userId);
+        expect(ctx.tenantId).toBeUndefined();
+        expect(ctx.systemPermissions).not.toContain('manage_metadata');
+        expect(ctx.permissions).not.toContain('alpha_metadata_editors');
+      });
+    }
+
+    it('CONTROL · a current member with the same grant and that organization active keeps it', async () => {
+      const ctx = await resolveAuthzContext({
+        ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_member'), tenancyPosture: 'isolated',
+      });
+      expect(ctx.tenantId).toBe(ALPHA);
+      expect(ctx.systemPermissions).toContain('manage_metadata');
+      expect(ctx.permissions).toContain('alpha_metadata_editors');
+    });
+
+    it('a GLOBAL grant is unchanged: the removed member still holds it with no active organization', async () => {
+      const ctx = await resolveAuthzContext({
+        ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_global_ex'), tenancyPosture: 'isolated',
+      });
+      expect(ctx.tenantId).toBeUndefined();
+      expect(ctx.systemPermissions).toContain('manage_metadata');
+    });
+  });
+
+  describe('platform-admin standing is unchanged — it was only ever derived from an UNSCOPED grant', () => {
+    const POSTURE_ENV = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED', 'OS_PLATFORM_OWNER_EMAIL'] as const;
+    const saved: Record<string, string | undefined> = {};
+    beforeEach(() => {
+      for (const k of POSTURE_ENV) { saved[k] = process.env[k]; delete process.env[k]; }
+    });
+    afterEach(() => {
+      for (const k of POSTURE_ENV) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    });
+
+    /** The row `bootstrapPlatformAdmin` mints: `admin_full_access`, organization null. */
+    const adminTables = (organizationId: string | null) => ({
+      sys_user: [{ id: 'u_admin', email: 'admin@x.com' }],
+      sys_member: [{ user_id: 'u_admin', organization_id: ALPHA, role: 'owner' }],
+      sys_user_position: [],
+      sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_admin', organization_id: organizationId }],
+      sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata'] }],
+    });
+
+    it('the bootstrap-shaped UNSCOPED grant: PLATFORM_ADMIN with no tenant and with one', async () => {
+      const ql = makeQl(adminTables(null));
+      expect(await hasPlatformAdminStanding(ql, 'u_admin')).toBe(true);
+      const orgless = await resolveUserAuthzGrants(ql, 'u_admin', {});
+      expect(orgless.posture).toBe('PLATFORM_ADMIN');
+      expect(orgless.systemPermissions).toContain('manage_metadata');
+      expect((await resolveUserAuthzGrants(ql, 'u_admin', { tenantId: ALPHA })).posture).toBe('PLATFORM_ADMIN');
+    });
+
+    it('an ORG-scoped admin_full_access grant confers no platform standing, with or without that tenant', async () => {
+      const ql = makeQl(adminTables(ALPHA));
+      expect(await hasPlatformAdminStanding(ql, 'u_admin')).toBe(false);
+      expect((await resolveUserAuthzGrants(ql, 'u_admin', {})).posture).not.toBe('PLATFORM_ADMIN');
+      expect((await resolveUserAuthzGrants(ql, 'u_admin', { tenantId: ALPHA })).posture).not.toBe('PLATFORM_ADMIN');
+    });
   });
 });

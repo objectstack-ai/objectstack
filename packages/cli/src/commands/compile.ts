@@ -14,6 +14,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
@@ -252,7 +253,15 @@ export default class Compile extends Command {
     try {
       // 1. Load Configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
+      const loaded = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = loaded;
+      // 1a. [#20367 ruling B] One authoring shape: refuse a default export no
+      //     stack producer built, BEFORE any other judgement — the `STACK_*`
+      //     cross-field refusals run inside `defineStack` only, so an unbuilt
+      //     export would otherwise pass this door unjudged. Throws into the
+      //     catch-all below (`--json`: `error` + `code`, exit 1), the same
+      //     envelope a `defineStack` refusal raised at load reaches.
+      refuseUnbuiltStack(loaded);
 
       if (!flags.json) {
         printKV('Config', path.relative(process.cwd(), absolutePath));
@@ -731,9 +740,10 @@ export default class Compile extends Command {
       // 3d. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and so
       //     drop silently on the way to storage. PRE-parse, since the parse is
       //     what strips them. `defineStack` already warns for configs authored
-      //     through it; this covers the ones that skip it (a plain object
-      //     default-export, `strict: false`) and would otherwise emit an
-      //     artifact with the key quietly gone. Advisory, never fatal.
+      //     through it; this covers the ones that skip it (`strict: false`;
+      //     a plain-object default export no longer gets this far — step 1a
+      //     refuses it) and would otherwise emit an artifact with the key
+      //     quietly gone. Advisory, never fatal.
       //
       //     [#11643] FORMATTED HERE, once, and consumed by BOTH faces — the
       //     text block just below and the `--json` payload at the end of this

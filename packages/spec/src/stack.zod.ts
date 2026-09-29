@@ -13,6 +13,7 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
+import { markStackProvenance, hasStackProvenance } from './stack-provenance';
 import {
   normalizeStackInput,
   MAP_SUPPORTED_FIELDS,
@@ -2378,6 +2379,28 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 }
 
 /**
+ * [ADR-0112 · #20367 ruling B] `composeStacks` refuses an input no stack
+ * producer built — the composition half of the one-authoring-shape rule
+ * (`stack-provenance.ts` states it). The per-stack refusals above run only
+ * inside `defineStack`, so an input that never passed through it arrives
+ * unjudged; composing it would publish those findings nowhere. `issues` carries
+ * one entry per refused input, naming it the way every other composition
+ * refusal does.
+ *
+ * The SAME code `os validate` / `os build` raise for an unmarked default export
+ * (`@objectstack/cli`, `utils/stack-provenance-refusal.ts`): one condition, one
+ * vocabulary, two emitters — the `ENVIRONMENT_NOT_FOUND` precedent in the
+ * ADR-0112 ledger. Module-local like every member above.
+ */
+class StackProvenanceMissingError extends StackRefusalError {
+  readonly code = 'STACK_PROVENANCE_MISSING';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackProvenanceMissingError', message, issues);
+  }
+}
+
+/**
  * [ADR-0112 · #16348] The COMPOSITION half of the refusal family above. `composeStacks`
  * refuses six authored-entity conflicts, every one of them carrying the
  * literal `composeStacks conflict:` message prefix, and until this change
@@ -3582,8 +3605,11 @@ export function defineStack(
   warnUnknownAuthoringKeys(normalized);
 
   if (!strict) {
-    // Non-strict mode: skip validation (advanced use cases only).
-    return mergeActionsIntoObjects(normalized as ObjectStackDefinition);
+    // Non-strict mode: skip validation (advanced use cases only). The output is
+    // still this producer's, so it carries the provenance mark — `strict: false`
+    // is an explicit authoring choice made INSIDE the producer, which is what
+    // the doors check for (`stack-provenance.ts`).
+    return markStackProvenance(mergeActionsIntoObjects(normalized as ObjectStackDefinition), 'defineStack');
   }
 
 
@@ -3671,8 +3697,18 @@ export function defineStack(
   // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
 
-  return mergeActionsIntoObjects(data);
+  // [#20367 ruling B] The mark the author-time doors and `composeStacks` check:
+  // this value went through the judgement above. Non-enumerable, so it reaches
+  // neither the schema nor the compiled artifact (`stack-provenance.ts`).
+  return markStackProvenance(mergeActionsIntoObjects(data), 'defineStack');
 }
+
+/**
+ * [#20367 ruling B] The one published half of stack provenance — see
+ * `stack-provenance.ts`. `os validate` / `os build` read it off the config's
+ * default export and refuse an unmarked one (`STACK_PROVENANCE_MISSING`).
+ */
+export { hasStackProvenance };
 
 
 // ─── composeStacks ──────────────────────────────────────────────────
@@ -5063,7 +5099,30 @@ export function composeStacks(
   stacks: ObjectStackDefinition[],
   options?: ComposeStacksOptions,
 ): ObjectStackDefinition {
-  if (stacks.length === 0) return {} as ObjectStackDefinition;
+  // 0. [#20367 ruling B] Every input must be a stack a producer built. The
+  //    per-stack refusals run only inside `defineStack`, so an input that never
+  //    passed through it is unjudged, and nothing below re-judges it (the
+  //    artifact pass in step 3b re-runs two artifact-scoped rules, not the
+  //    family). FIRST, and before the single-input early return, so a lone
+  //    plain object is refused as well rather than handed straight back.
+  const unbuilt = stacks.flatMap((stack, i) => {
+    if (hasStackProvenance(stack)) return [];
+    return [stack !== null && typeof stack === 'object' ? stackLabel(stack, i) : `stack #${i}`];
+  });
+  if (unbuilt.length > 0) {
+    const count = unbuilt.length;
+    throw new StackProvenanceMissingError(
+      `composeStacks provenance check failed (${count} input${count === 1 ? '' : 's'}): ` +
+        `${unbuilt.join(', ')} ${count === 1 ? 'was' : 'were'} not built by \`defineStack\`. ` +
+        `composeStacks composes only stacks \`defineStack\` (or a nested \`composeStacks\`) returned — ` +
+        `the cross-field refusals run inside \`defineStack\`, so a plain object here would reach the ` +
+        `artifact unjudged. Wrap each input: \`composeStacks([defineStack({ … }), …])\`. A spread ` +
+        `(\`{ ...stack }\`) or JSON copy of a built stack drops the mark too: pass the built stack itself.`,
+      unbuilt,
+    );
+  }
+
+  if (stacks.length === 0) return markStackProvenance({}, 'composeStacks') as ObjectStackDefinition;
   if (stacks.length === 1) return stacks[0];
 
   const opts = ComposeStacksOptionsSchema.parse(options ?? {});
@@ -5250,5 +5309,8 @@ export function composeStacks(
     }
   }
 
-  return artifact as ObjectStackDefinition;
+  // [#20367 ruling B] Built from built inputs only (step 0), so the artifact is
+  // a producer's output too: a nested `composeStacks` or an author-time door
+  // accepts it.
+  return markStackProvenance(artifact, 'composeStacks') as ObjectStackDefinition;
 }

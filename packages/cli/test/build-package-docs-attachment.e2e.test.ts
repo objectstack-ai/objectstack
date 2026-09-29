@@ -34,6 +34,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -83,24 +84,28 @@ const ordersManifest = {
   dependencies: { 'com.example.pkgdocs.core': '^1.0.0' },
 };
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [account, order],
   packages: [
     { manifest: { ...coreManifest, objects: [account] } },
     { manifest: { ...ordersManifest, objects: [order] } },
   ],
-};
+}, { strict: false });
 `;
 
 /** A single-package project with a flat `src/docs/` — the shape that must not move. */
 const CONFIG_FLAT = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.flat', name: 'flat', version: '1.0.0', type: 'app', namespace: 'flat' },
   objects: [
     { name: 'flat_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } },
   ],
-};
+}, { strict: false });
 `;
 
 const MARKER_PKG = 'MARKER-package-doc-18431';
@@ -124,6 +129,7 @@ beforeAll(() => {
   mkdirSync(join(dirs.multi, 'src', 'orders', 'docs'), { recursive: true });
   mkdirSync(join(dirs.multi, 'src', 'docs'), { recursive: true });
   writeFileSync(join(dirs.multi, 'objectstack.config.ts'), CONFIG_MULTI);
+  linkSpec(dirs.multi);
   // Owned by `com.example.pkgdocs.orders` — directory name === the last
   // dot-separated segment of that `id`, and its own namespace `ord` is what
   // the doc name must be prefixed with.
@@ -137,6 +143,7 @@ beforeAll(() => {
   dirs.flat = join(root, 'flat');
   mkdirSync(join(dirs.flat, 'src', 'docs'), { recursive: true });
   writeFileSync(join(dirs.flat, 'objectstack.config.ts'), CONFIG_FLAT);
+  linkSpec(dirs.flat);
   writeFileSync(join(dirs.flat, 'src', 'docs', 'flat_index.md'), `# Flat Index\n\n${MARKER_FLAT}\n`);
 });
 

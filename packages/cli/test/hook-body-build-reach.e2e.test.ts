@@ -52,6 +52,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -105,7 +106,9 @@ const OBJECT = `{
  * only place that is checked.
  */
 const CONFIG_CAPABILITIES_DIRECTIVE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.hbcaps', name: 'hbcaps', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -118,7 +121,7 @@ export default {
       return rows;
     },
   }],
-};
+}, { strict: false });
 `;
 
 /**
@@ -129,7 +132,9 @@ export default {
  * and this is the surface that serves it.
  */
 const CONFIG_EXPLICIT_BODY = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.hbbody', name: 'hbbody', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -138,12 +143,14 @@ export default {
     events: ['beforeInsert'],
     body: { language: 'js', source: 'return ctx;', capabilities: ['api.write', 'log'] },
   }],
-};
+}, { strict: false });
 `;
 
 /** DEFECT 2 fixture: a CommonJS `require()` esbuild rewrites to `__require`. */
 const CONFIG_REQUIRE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.hbreq', name: 'hbreq', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -155,12 +162,14 @@ export default {
       return os.platform();
     },
   }],
-};
+}, { strict: false });
 `;
 
 /** DEFECT 3 fixture: a forbidden pattern on the DEFAULT (warn-and-bundle) path. */
 const CONFIG_FORBIDDEN = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.hbforbid', name: 'hbforbid', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
@@ -172,7 +181,7 @@ export default {
       return ctx;
     },
   }],
-};
+}, { strict: false });
 `;
 
 const dirs: Record<string, string> = {};
@@ -180,6 +189,7 @@ const dirs: Record<string, string> = {};
 function project(key: string, source: string): string {
   const dir = mkdtempSync(join(tmpdir(), `os-hookbody-${key}-`));
   writeFileSync(join(dir, 'objectstack.config.ts'), source);
+  linkSpec(dir);
   dirs[key] = dir;
   return dir;
 }
