@@ -106,15 +106,29 @@ describe('[#20240] isUninterpretableTemporalComparand — a date column\'s numbe
     }
   });
 
-  it('leaves the time rule alone — a wall clock has no year', () => {
+  // [#20480] A wall clock has no year, but a `time` column reads a number or a
+  // `Date` as an INSTANT and keeps its UTC time of day — and the rule keeps one
+  // only when the instant's UTC year has a four-digit spelling. Year 0 does
+  // (`0000-…`), so its time of day is read; year 10000, year -1 and the Date
+  // range's extremes do not, and the rule handed them back unchanged — a
+  // number compared with `HH:MM:SS` text. Those are refused now; this pin
+  // asserted all of them read before.
+  it('[#20480] a time column reads the time of day of every instant with a four-digit UTC year, and refuses the rest', () => {
+    const YEAR_0 = new Set(['[#20264] the first millisecond of year 0', '[#20264] the last millisecond of year 0']);
     for (const [name, ms] of [...OUT_OF_RANGE, ...PAST_THE_DATE_RANGE, ...IN_RANGE]) {
-      expect(isUninterpretableTemporalComparand('time', ms), `number, ${name}`).toBe(false);
-      expect(isUninterpretableTemporalComparand('time', new Date(ms)), `Date, ${name}`).toBe(false);
+      const spelled = temporalStorageForm(ms, 'time');
+      const keeps = typeof spelled === 'string' && /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/.test(spelled);
+      const expected = !(IN_RANGE.some(([n]) => n === name) || YEAR_0.has(name));
+      expect(keeps, `the rule keeps a time of day for ${name}`).toBe(!expected);
+      expect(isUninterpretableTemporalComparand('time', ms), `number, ${name}`).toBe(expected);
+      if (Number.isFinite(new Date(ms).getTime())) {
+        expect(isUninterpretableTemporalComparand('time', new Date(ms)), `Date, ${name}`).toBe(expected);
+      }
     }
   });
 
   it('does not judge NaN, ±Infinity or an Invalid Date — they name no instant and no year', () => {
-    for (const kind of ['date', 'datetime'] as const) {
+    for (const kind of ['date', 'datetime', 'time'] as const) {
       for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, new Date(Number.NaN)]) {
         expect(isUninterpretableTemporalComparand(kind, value), `${kind} ${String(value)}`).toBe(false);
       }
@@ -268,6 +282,58 @@ describe('[#20549] isUninterpretableTemporalComparand — a real calendar day, a
       expect(isUninterpretableTemporalComparand(kind, '{today}'), `${kind} placeholder`).toBe(false);
       expect(isUninterpretableTemporalComparand(kind, 1769940000000), `${kind} epoch-ms number`).toBe(false);
       expect(isUninterpretableTemporalComparand(kind, new Date(Date.UTC(2026, 1, 28))), `${kind} Date`).toBe(false);
+    }
+  });
+});
+
+// [#20480] The `time` half of the one temporal rule. A `time` comparand that
+// is not a bare wall clock is read as an INSTANT by the `datetime` rule and
+// keeps its UTC time of day — only when that instant's UTC year has a
+// four-digit spelling. `+010000-01-01T10:00:00Z` passed this door (`Date.parse`
+// reads it) and came back from the rule unchanged, so the driver compared it
+// as text: `$gt` answered 3 of 3 rows on memory and SQLite, and PostgreSQL
+// answered 500. The same instant spelled with four digits in its own zone
+// (`9999-12-31T23:00:00-02:00`), as a number or as a `Date` answered 0 or 3
+// by driver. Every spelling is refused now; no time of day is read from an
+// extended year.
+describe('[#20480] isUninterpretableTemporalComparand — a time column\'s instant outside the four-digit years', () => {
+  const Y10000_10 = Date.parse('+010000-01-01T10:00:00Z');
+  const YNEG1_10 = Date.parse('-000001-01-01T10:00:00Z');
+
+  it('refuses the card\'s spelling and every other spelling of an instant the rule keeps no time of day for', () => {
+    for (const value of [
+      '+010000-01-01T10:00:00Z',          // the card's comparand
+      '-000001-01-01T10:00:00Z',
+      '9999-12-31T23:00:00-02:00',        // year 10000 in UTC
+    ]) {
+      expect(isUninterpretableTemporalComparand('time', value), value).toBe(true);
+    }
+    for (const value of [Y10000_10, YNEG1_10, new Date(Y10000_10), new Date(YNEG1_10), 8.64e15, -8.64e15, 8.64e15 + 1]) {
+      expect(isUninterpretableTemporalComparand('time', value), String(value)).toBe(true);
+    }
+  });
+
+  it('reads the time of day of the same wall clock in a four-digit year — the 2026 control and the year edges', () => {
+    for (const value of [
+      '2026-01-01T10:00:00Z', '2026-01-01T10:00:00.000Z', '2026-01-01T18:00:00+08:00',
+      '9999-12-31T10:00:00Z', '0001-01-01T10:00:00Z', '0000-06-15T10:00:00.000Z',
+      Date.parse('2026-01-01T10:00:00Z'), new Date(Date.parse('2026-01-01T10:00:00Z')),
+      Date.parse('0000-06-15T10:00:00Z'), new Date(Date.parse('9999-12-31T23:59:59.999Z')),
+    ]) {
+      expect(isUninterpretableTemporalComparand('time', value), String(value)).toBe(false);
+      expect(temporalStorageForm(value, 'time'), `the rule keeps a time of day for ${String(value)}`).toMatch(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/);
+    }
+    for (const value of ['10:00', '10:00:00', '23:59:59.999']) {
+      expect(isUninterpretableTemporalComparand('time', value), value).toBe(false);
+    }
+  });
+
+  it('agrees with the rule: an instant is refused on a time column exactly when the rule hands it back unchanged', () => {
+    for (const value of [
+      '+010000-01-01T10:00:00Z', '9999-12-31T23:00:00-02:00', '2026-01-01T10:00:00Z', '0000-06-15T10:00:00.000Z',
+      Y10000_10, YNEG1_10, Date.parse('2026-01-01T10:00:00Z'), 8.64e15, 8.64e15 + 1, -8.64e15,
+    ]) {
+      expect(isUninterpretableTemporalComparand('time', value), String(value)).toBe(temporalStorageForm(value, 'time') === value);
     }
   });
 });

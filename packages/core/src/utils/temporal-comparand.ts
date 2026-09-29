@@ -93,18 +93,32 @@
  * `temporal-storage-form.ts`'s `isOutsideTemporalYearRange`, the one the
  * record validator asks of a written value too; this predicate only calls it.
  *
+ * [#20480] A `time` column reads an instant by the `datetime` rule and keeps
+ * its UTC time of day, and it can only keep one whose UTC year has a
+ * four-digit spelling: the rule hands `+010000-01-01T10:00:00Z`,
+ * `9999-12-31T23:00:00-02:00` (year 10000 in UTC), `-000001-…` and the number
+ * or `Date` of any of them back unchanged, so the driver compared the raw
+ * value with stored `HH:MM:SS` text — `$gt` answered 3 of 3 rows on memory and
+ * SQLite and a 500 on PostgreSQL for the first, and the others answered 0 or
+ * 3 rows by driver. Such an instant is uninterpretable on a `time` column, in
+ * every spelling, and no time of day is read from it: the same rule as the
+ * supported years of `date` and `datetime`, now covering the third kind.
+ * Year 0 is not in this class — its instant spells `0000-…`, and the rule
+ * keeps its time of day.
+ *
  * ## Two things it deliberately does NOT judge
  *
- * - **Non-string comparands, save the year class above.** A number is epoch
+ * - **Non-string comparands, save the year classes above.** A number is epoch
  *   milliseconds, a `Date` is an instant, `null` is a null test, and the
- *   `time` rule reads every finite one; so do the `date` and `datetime` rules
- *   for a year from 0001 to 9999. The #8690 refusal was scoped to strings by that
+ *   `time` rule reads every finite one whose UTC year has four digits; so do
+ *   the `date` and `datetime` rules for a year from 0001 to 9999. The #8690 refusal was scoped to strings by that
  *   card's own ruling — its triage queued "a non-interpretable bare string", and
  *   the maintainer ruling scoped its two options "to non-empty strings" so the
  *   empty-string cell stayed its own card. That scoped that change; it is not a
  *   standing rule that a non-string is never refused. [#20240] extends the
  *   refusal to the `date` class above by the triage direction on that card,
- *   and [#20264] to `datetime` and the range 0001..9999 by triage's ruling.
+ *   [#20264] to `datetime` and the range 0001..9999 by triage's ruling, and
+ *   [#20480] to a `time` column's instant outside the four-digit years.
  *   `NaN`, ±Infinity and an Invalid Date name no instant and no year, so they
  *   are not that class and stay unjudged, as before; no JSON body can carry
  *   one (JSON spells them `null`).
@@ -117,7 +131,7 @@
  */
 
 import { classifyFilterToken } from '@objectstack/spec/data';
-import { isOutsideTemporalYearRange } from './temporal-storage-form.js';
+import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
 
 /** Which temporal storage rule a declared field takes. */
 export type TemporalComparandKind = 'datetime' | 'date' | 'time';
@@ -236,6 +250,20 @@ function readsAsWallClock(s: string): boolean {
 }
 
 /**
+ * [#20480] Does the `time` rule keep a time of day for this instant — a
+ * finite number, a `Date`, or a string {@link readsAsInstant} admits? It reads
+ * one through the `datetime` rule and keeps the UTC time only when that rule
+ * spells the instant with a four-digit year; any other instant it hands back
+ * unchanged, which is the definition of uninterpretable this module starts
+ * from. Asked of the rule itself rather than of a copy of its year arithmetic,
+ * so the two cannot drift.
+ */
+function keepsTimeOfDay(value: unknown): boolean {
+  const form = temporalStorageForm(value, 'time');
+  return typeof form === 'string' && /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/.test(form);
+}
+
+/**
  * Is `value` a comparand that a `kind` column's storage rule cannot read?
  *
  * `true` for a non-empty, non-placeholder STRING that the kind's rule would
@@ -243,7 +271,9 @@ function readsAsWallClock(s: string): boolean {
  * (an impossible calendar day, a `datetime` spelling outside
  * {@link ISO_DATETIME_WRITE_FORM}), and — on a `date` or `datetime` column — for a number,
  * a `Date` or a string the rule reads whose year falls outside 0001..9999
- * ([#20264], `isOutsideTemporalYearRange`). Everything else — any other number
+ * ([#20264], `isOutsideTemporalYearRange`), and — on a `time` column — for a
+ * finite number, a valid `Date` or an instant string whose UTC year has no
+ * four-digit spelling ([#20480]). Everything else — any other number
  * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
  * string, a `{token}` — answers `false`, each for a reason recorded in the
  * module note or below.
@@ -262,6 +292,11 @@ export function isUninterpretableTemporalComparand(
   if (kind !== 'time' && (typeof value === 'number' || value instanceof Date)) {
     return isOutsideTemporalYearRange(value, kind);
   }
+  // [#20480] NaN, ±Infinity and an Invalid Date name no instant: unjudged, as
+  // on the other two kinds.
+  if (kind === 'time' && (typeof value === 'number' ? Number.isFinite(value) : value instanceof Date && !Number.isNaN(value.getTime()))) {
+    return !keepsTimeOfDay(value);
+  }
   if (typeof value !== 'string') return false;
   const s = value.trim();
   // The empty-string cell is its own card — see the module note.
@@ -270,5 +305,5 @@ export function isUninterpretableTemporalComparand(
   if (classifyFilterToken(value) !== null) return false;
   if (kind === 'datetime') return !readsAsInstant(s) || isOutsideTemporalYearRange(s, kind);
   if (kind === 'date') return !readsAsCalendarDay(s) || isOutsideTemporalYearRange(s, kind);
-  return !(readsAsWallClock(s) || readsAsInstant(s));
+  return !(readsAsWallClock(s) || (readsAsInstant(s) && keepsTimeOfDay(s)));
 }

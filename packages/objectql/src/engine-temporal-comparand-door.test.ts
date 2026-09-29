@@ -504,3 +504,73 @@ describe('[#20549] the comparand door refuses what the write door refuses — a 
     expect(number).toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 });
+
+/**
+ * [#20480] The `time` half of the same rule: an instant on a `time` column is
+ * read by the `datetime` rule and keeps its UTC time of day, and only one whose
+ * UTC year has a four-digit spelling does. Measured on the base, the process in
+ * America/New_York, `engine.find` over three rows `09:00:00` / `10:30:00` /
+ * `12:00:00`:
+ *
+ * | `where` on a `time` field | memory | SQLite | PostgreSQL 16 | now |
+ * |:--|:--|:--|:--|:--|
+ * | `$gt "+010000-01-01T10:00:00Z"` (the card) | 3 of 3 | 3 of 3 | 500 | 400 |
+ * | `$lt "+010000-01-01T10:00:00Z"` | 0 | 0 | 500 | 400 |
+ * | `$gt "9999-12-31T23:00:00-02:00"` (year 10000 in UTC) | 0 | 0 | 500 | 400 |
+ * | `$gt` the number / `Date` of `+010000-01-01T10:00:00Z` | 0 | 3 of 3 | 500 | 400 |
+ * | `$gt` / `$lt "2026-…T10:00:00Z"` (the 2026 control) | 2 / 1 | 2 / 1 | 2 / 1 | unchanged |
+ *
+ * The REST door over SQLite and PostgreSQL is
+ * `packages/rest/src/data-temporal-write-real-day-iso.test.ts`; the drivers'
+ * 2026 control is `memory-temporal-storage-form.test.ts` and
+ * `sql-driver-time-live-dialects.test.ts`.
+ */
+describe('[#20480] a time comparand whose instant has no four-digit UTC year is refused, in every spelling', () => {
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+  const refusalOf = async (p: Promise<unknown>) =>
+    p.then(() => null, (e: any) => e as Error & { code?: string; status?: number });
+  const Y10000_10 = Date.parse('+010000-01-01T10:00:00Z');
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(support_case, 'test');
+    for (const [id, opens_at] of [['a', '09:00:00'], ['b', '10:30:00'], ['c', '12:00:00']]) {
+      await engine.insert('support_case', { id, subject: id, opens_at });
+    }
+    reads.length = 0;
+  });
+
+  it('refuses the card\'s comparand and its class with INVALID_FILTER / 400 at where, the per-aggregation filter and having — before any read — while the 2026 control reaches the driver', async () => {
+    for (const value of ['+010000-01-01T10:00:00Z', '-000001-01-01T10:00:00Z', '9999-12-31T23:00:00-02:00', Y10000_10, new Date(Y10000_10)]) {
+      for (const op of ['$gt', '$lt', '$eq'] as const) {
+        const where = await refusalOf(engine.find('support_case', { where: { opens_at: { [op]: value } } }));
+        expect(where, `where ${op} ${String(value)}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+        expect(where!.message).toContain("'opens_at'");
+      }
+      const agg = await refusalOf(engine.aggregate('support_case', {
+        aggregations: [{ function: 'count', alias: 'n', filter: { opens_at: { $gt: value } } as never }],
+      } as never));
+      expect(agg, `aggregation filter ${String(value)}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      const having = await refusalOf(engine.aggregate('support_case', {
+        groupBy: ['subject'],
+        aggregations: [{ function: 'max', field: 'opens_at', alias: 'last' }],
+        having: { last: { $gt: value } } as never,
+      } as never));
+      expect(having, `having ${String(value)}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+
+    // ── the 2026 CONTROL: the same wall clock in a four-digit year ──────────
+    for (const value of ['2026-01-01T10:00:00Z', '2026-01-01T18:00:00+08:00', Date.parse('2026-01-01T10:00:00Z'), new Date(Date.parse('2026-01-01T10:00:00Z')), '10:00']) {
+      await expect(engine.find('support_case', { where: { opens_at: { $gt: value } } }), String(value)).resolves.toBeDefined();
+    }
+    // Year 0 spells its instant `0000-…`, so its time of day is read too.
+    await expect(engine.find('support_case', { where: { opens_at: { $gt: '0000-06-15T10:00:00.000Z' } } })).resolves.toBeDefined();
+    expect(reads, 'every control reached the driver').toHaveLength(6);
+  });
+});
