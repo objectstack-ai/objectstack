@@ -120,6 +120,27 @@ describe('A — examples/app-crm, flow authored by an admin through PUT /meta/fl
     expect(res.status, `save refused: ${text.slice(0, 600)}`).toBeLessThan(300);
   });
 
+  it('control: the save door\'s advisory channel is live (a try region with no catch draws one)', async () => {
+    const flow = probeFlow(`${NAME}_advisory`) as any;
+    const guard = flow.nodes.find((n: any) => n.id === 'guard');
+    delete guard.config.catch;
+    const res = await stack.apiAs(admin, 'PUT', `/meta/flow/${NAME}_advisory`, flow);
+    const text = await res.text();
+    let body: any = null;
+    try { body = JSON.parse(text); } catch { /* not JSON */ }
+    const advisories = body?.advisories;
+    const flat = JSON.stringify(advisories ?? null).toLowerCase();
+    results.A_save_advisory_control = {
+      status: res.status,
+      advisoriesCount: Array.isArray(advisories) ? advisories.length : 'absent',
+      advisoryRules: Array.isArray(advisories) ? advisories.map((a: any) => a?.rule ?? a?.code ?? a?.id ?? '?') : null,
+      // Same flow, same literals: does any advisory name them?
+      anyAdvisoryMentionsCredential: /credential|secret|authorization|api[-_ ]?key|header|p5-/.test(flat),
+    };
+    expect(res.status).toBeLessThan(300);
+    expect(Array.isArray(advisories) && advisories.length > 0, `no advisory answered: ${text.slice(0, 300)}`).toBe(true);
+  });
+
   it('control: the member is not an author (the save door refuses the member)', async () => {
     const res = await stack.apiAs(member, 'PUT', `/meta/flow/${NAME}_member`, probeFlow(`${NAME}_member`));
     const text = await res.text();
