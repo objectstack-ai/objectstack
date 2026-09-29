@@ -187,7 +187,7 @@
  * - **`$exists` means "has a value"** (`!= null`), never key-presence — cell 2,
  *   the leg of the 07:33Z ruling that was never in conflict with #5298 and had
  *   already shipped in PR #5962 on the surfaces the ruling named. It stands —
- *   and since PR #13529 (#13195) moved the last three key-presence exits, it
+ *   and since commit 9dac1ae01 (PR #13529) moved the last three key-presence exits, it
  *   is enforced here too: enrolled in {@link FILTER_LOGIC_CASES} in BOTH
  *   directions (#13531).
  *
@@ -246,8 +246,8 @@
  * path, its analytics face (a third divergent exit the earlier prose never
  * named; measured in PR #13420), and `driver-mongodb`'s `translateFilter`.
  * The #5499 investment freeze that once excused the lag dissolved on
- * 2026-08-11 (recorded in `./aggregation-conformance.ts`), and PR #13529
- * (#13195) moved all three to has-value — the gap is closed, the stated
+ * 2026-08-11 (recorded in `./aggregation-conformance.ts`), and commit
+ * 9dac1ae01 (PR #13529) moved all three to has-value — the gap is closed, the stated
  * blocker on enrolment is gone with it, and the two `$exists` rows below are
  * enrolled in BOTH directions (#13531).
  *
@@ -522,7 +522,7 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
   },
 
   // [#13531] The value-presence predicate, enrolled in BOTH directions once
-  // PR #13529 (#13195) moved the last three key-presence exits to has-value.
+  // commit 9dac1ae01 (PR #13529) moved the last three key-presence exits to has-value.
   // The stored-null seeding is what makes these rows discriminating: a
   // key-presence reading answers MATCH on rows 3-4 for `$exists: true`
   // precisely because every harness stores `d: null` with the key present —
