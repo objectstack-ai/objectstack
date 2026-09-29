@@ -151,6 +151,11 @@ Most retirements in this release are registered as ADR-0087 conversions under
 conversion exists — since this release `--to` defaults to the highest major the
 installed `@objectstack/spec` has a step for, so the command the refusals
 prescribe no longer answers `✓ Nothing to migrate` (`fb39b38`, #17462).
+"Protocol 18" is the migration registry's next major, not the runtime's:
+17.5.0 still implements protocol 17 (`os migrate meta` prints "this runtime
+implements protocol 17"), and its schemas already refuse every shape those
+steps convert. An app therefore keeps `engines.protocol: '^17'` — see the
+[upgrade checklist](#upgrade-checklist).
 
 #### Scheduled work is off until a deployment turns it on (#18198, #17334, #18420)
 
@@ -688,12 +693,19 @@ rules. Each refusal is `INVALID_FILTER` / `400` at run time and
 A `decision` node that declares no `config.conditions` and branches on its
 out-edges used to take **every** out-edge whose condition held, one after
 another, while its schema and docs called it an exclusive gateway
-(`0283cb9`, #20344). It is now exclusive: the first out-edge whose condition
-holds, in declaration order, runs, and the next records a `skipped` step.
-`mode: 'inclusive'`, accepted and never read before, now takes every true
-branch. When none holds, the `isDefault` edge runs as before. A `mode` beside a
-non-empty `conditions` list, or outside `'exclusive'` / `'inclusive'`, is
-refused at `registerFlow` and by `os validate`.
+(`0283cb9`, #20344). It is now exclusive, and `mode: 'inclusive'` is how a
+decision asks for every true branch:
+
+| an edge-branched `decision` with no `conditions` | 17.4.0 | 17.5.0 |
+|:--|:--|:--|
+| no `mode`, two conditioned out-edges both hold | both successors run, sequentially | the first declared one runs; the second records a `skipped` step |
+| `config: { mode: 'inclusive' }` | accepted, never read | every out-edge whose condition holds runs, sequentially |
+| no condition holds | the `isDefault` edge runs | unchanged |
+| `mode` beside a non-empty `conditions` list, or not `exclusive` / `inclusive` | refused by a direct parse only | refused at `registerFlow` and by `os validate` |
+
+⚠️ **A flow stored in `sys_metadata` is not rewritten and silently takes the
+new meaning**: nothing about a stored row says it was saved before the flip,
+so a decision the Studio designer saved runs first-match from the upgrade on.
 
 **Migration.** `os migrate meta --from 17` writes `mode: 'inclusive'` onto
 every authored decision with no `conditions` and two or more conditioned
@@ -701,10 +713,8 @@ out-edges, so a migrated flow runs as it did. Then review each written key:
 delete it where the conditions partition (`== 'a'` beside `!= 'a'`, a guard
 beside `isDefault: true`), and keep it where the flow relies on more than one
 branch running. `os validate` reports `flow-decision-inclusive-overlap` on
-every decision that keeps it, so the review list is the lint output. ⚠️ **A
-decision stored in `sys_metadata` is not rewritten** — nothing about a stored
-row says it was saved before the flip — so it runs first-match from the
-upgrade on. `os migrate meta --stored` lists every such node under
+every decision that keeps it, so the review list is the lint output. For the
+stored rows, `os migrate meta --stored` lists every such node under
 `decisionModeReview` and writes nothing for it; add
 `config: { mode: 'inclusive' }` to each one that meant every branch.
 
@@ -1651,15 +1661,17 @@ walked](/docs/releases/v17#upgrade-checklists).
 
 ### 17.5.0
 
-⛔ **Nobody has walked 17.4.0 → 17.5.0.** Every line below is derived from a
-change's own **Migration** note in [Breaking changes & migration in
-17.5.0](#breaking-changes--migration-in-1750) — or, for the cube member
-`name`, in [Also shipped in 17.5.0](#also-shipped-in-1750--not-in-its-changelog)
-— and is marked **not exercised**: accurate about what changed, unproven about
-what it costs to cross. A step
-nobody has run, presented beside steps that were, is how a reader finishes a
-checklist and believes they are done — so this list claims nothing it has not
-been given.
+⛔ **Nobody has walked the whole of 17.4.0 → 17.5.0.** Seven lines below were
+run in an upgrade of HotCRM — a 17.4.0 app with a 17.4.0-created SQLite
+database — on 2026-09-29, and each says what was observed. Every other line
+is derived from a change's own **Migration** note in [Breaking changes &
+migration in 17.5.0](#breaking-changes--migration-in-1750) — or, for the cube
+member `name`, in [Also shipped in
+17.5.0](#also-shipped-in-1750--not-in-its-changelog) — and is marked **not
+exercised**: accurate about what changed, unproven about what it costs to
+cross. A step nobody has run, presented beside steps that were, is how a
+reader finishes a checklist and believes they are done — so this list claims
+nothing it has not been given.
 
 **Before you upgrade**
 
@@ -1673,8 +1685,14 @@ been given.
   `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true`; under `isolated`, add
   `organization` to each scheduled flow's start-node `config` first, and drain
   suspended runs. *Not exercised.*
+- **Read the scheduled-work switch with `os doctor`**, which prints its
+  effective value. *Exercised on HotCRM (a 17.4.0 app with a 17.4.0-created
+  SQLite DB), 2026-09-29:* it showed "Package-authored scheduled work OFF (the
+  default)".
 - **Run `os migrate account-issuer`** against each existing database and
-  resolve every collision it reports, then back up. *Not exercised.*
+  resolve every collision it reports, then back up. *Exercised on HotCRM (a
+  17.4.0 app with a 17.4.0-created SQLite DB), 2026-09-29:* on the 17.4.0
+  database the pre-flight reported the column safe to drop.
 - **Give every `api` flow's start node a non-blank `config.secret`**, and sign
   each post with it, or declare a flow that is only started explicitly
   `type: 'autolaunched'`; an `api` flow without one stops registering at boot.
@@ -1682,23 +1700,40 @@ been given.
 
 **Getting onto the release**
 
-- **Move all the `@objectstack/*` pins as one set, regenerate the lockfile, and
-  leave `specVersion` / `engines.protocol` alone** — this is a move inside one
-  major. The full procedure is [Moving the dependency
+- **Move all the `@objectstack/*` pins as one set and regenerate the
+  lockfile.** The full procedure is [Moving the dependency
   pins](/docs/upgrading#moving-the-dependency-pins). Move all eleven
   `@better-auth/*` members to exactly `1.7.3` together, and any `zod` you pin
   yourself to `^4.6.1` or higher. *Not exercised.*
+- **Leave the protocol declarations on 17:** `engines.protocol: '^17'`, and a
+  `specVersion` range such as `^17.0.0` in `objectstack.manifest.json`, which
+  admits 17.5.0. The runtime still implements protocol 17 — `os migrate meta`
+  prints "this runtime implements protocol 17" — and its handshake compares
+  only the major, so `^17` keeps loading across every 17.x release, while a
+  `^18` range is refused `OS_PROTOCOL_INCOMPATIBLE`. The "protocol 18" on the
+  refusals and on `os migrate meta`'s steps is the migration registry's next
+  major, under which this release records its retirements; the 17.5.0 schemas
+  already refuse those shapes, which is why `os migrate meta --from 17` runs
+  its chain to 18. *Not exercised.*
 - **Apply the `sys_account` drop:** `os migrate apply --allow-destructive`, then
   `os migrate account-issuer` again, expecting zero. *Not exercised.*
 - **Do not read `os migrate meta --from 17` answering `Nothing to migrate` as
   completion** of this list. It now defaults `--to` to the highest registered
   major and lists the protocol-18 edits, but everything under *Data*,
-  *Deployment* and *Application code* below is outside its scope. *Not
-  exercised.*
-- **Review the stored edge-branched decisions:** `os migrate meta --stored`
-  lists them under `decisionModeReview` and rewrites none; add
-  `config: { mode: 'inclusive' }` to each one that meant every true branch.
-  *Not exercised.*
+  *Deployment* and *Application code* below is outside its scope. *Exercised
+  on HotCRM (a 17.4.0 app with a 17.4.0-created SQLite DB), 2026-09-29:* it
+  ran and listed 41 refusals. Its output was 874 lines, 240 of them generic
+  protocol-18 notices, so filter the output for the refusals that name your
+  sources.
+- **Review each `mode: 'inclusive'` that `os migrate meta --from 17` offers
+  an edge-branched decision**, and delete it where the branch conditions
+  partition — applied blindly, it makes `os validate` report
+  `flow-decision-inclusive-overlap`. Then run `os migrate meta --stored`,
+  which lists the stored decisions under `decisionModeReview` and rewrites
+  none, and add `config: { mode: 'inclusive' }` to each one that meant every
+  true branch. *Exercised on HotCRM (a 17.4.0 app with a 17.4.0-created
+  SQLite DB), 2026-09-29:* 13 decisions were offered the key, all partitioned,
+  so none needed it; `os migrate meta --stored` reported 0 rows.
 - **Recompile every artifact built by an earlier `os compile`** before serving
   cubes from it — it carries `public: false` on every cube, which now hides
   them. *Not exercised.*
@@ -1717,20 +1752,29 @@ been given.
   `'vertical'` (plus `columns`); list-view `sort` strings → the array form;
   page and `object-*` `filter` records → the `ViewFilterRule` array; a list
   view's `tabs` → one `listViews` entry per tab; delete view `owner` /
-  `hidden`, list-view `type: 'page'` / `pageName`, `page.assignedProfiles` and
-  unfulfillable `undoable: true`. *Not exercised.*
-- **Rewrite the flow shapes:** give every `wait` node a `waitEventConfig`, every
-  `lookup` screen field a `reference`, every decision branch an `expression`
-  and a `label`, every builtin node the keys its executor requires, every
-  `connector_action` node a complete `connectorConfig`, and every evaluated
-  slot a non-blank `source`; move `screen` / `wait` / `approval` / `end` out of
-  region bodies; review each `mode: 'inclusive'` that
-  `os migrate meta --from 17` writes. *Not exercised.*
-- **Rewrite the analytics shapes:** widget `chartConfig` structure → the
-  widget's `dimensions` / `values`; delete cube-join `sql` / `relationship` /
-  `on`; sub-day granularities → `day`; measure aggregates the field type
-  accepts; one measure per metric-family widget; delete `public: false` from
-  every cube meant to be queried. *Not exercised.*
+  `hidden`, list-view `type: 'page'` / `pageName` and unfulfillable
+  `undoable: true`. *Not exercised.*
+- **Delete `page.assignedProfiles`.** *Exercised on HotCRM (a 17.4.0 app with
+  a 17.4.0-created SQLite DB), 2026-09-29:* the key was refused on boot
+  exactly as documented.
+- **Rewrite the flow shapes:** give every `wait` node a `waitEventConfig`,
+  every decision branch an `expression` and a `label`, every builtin node the
+  keys its executor requires, every `connector_action` node a complete
+  `connectorConfig`, and every evaluated slot a non-blank `source`; move
+  `screen` / `wait` / `approval` / `end` out of region bodies. *Not
+  exercised.*
+- **Give every `lookup` screen field a `reference`.** *Exercised on HotCRM (a
+  17.4.0 app with a 17.4.0-created SQLite DB), 2026-09-29:* applied as
+  documented.
+- **Move each dashboard widget's `chartConfig` structure onto the widget:**
+  `chartConfig.type` onto the widget, `xAxis.field` to `dimensions`, and
+  `yAxis[].field` / `series` to `values`. *Exercised on HotCRM (a 17.4.0 app
+  with a 17.4.0-created SQLite DB), 2026-09-29:* 34 sites, applied as
+  documented.
+- **Rewrite the other analytics shapes:** delete cube-join `sql` /
+  `relationship` / `on`; sub-day granularities → `day`; measure aggregates the
+  field type accepts; one measure per metric-family widget; delete
+  `public: false` from every cube meant to be queried. *Not exercised.*
 - **Delete the retired keys:** `currencyConfig.precision`, `scale` on currency
   fields, `connector.connectionTimeoutMs`, `connector.health` / `status` /
   `webhooks`, `object.tenancy.organizationField`, `rowLevelSecurity[].tags`,

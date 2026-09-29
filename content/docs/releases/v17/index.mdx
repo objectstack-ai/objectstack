@@ -93,10 +93,13 @@ marked breaking — which is exactly why a checklist is not a restatement of
 [Breaking changes & migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730).
 
 ⛔ **That run covered one hop, 17.2.0 → 17.3.0. Nobody has walked 17.1.0 →
-17.2.0, 17.3.0 → 17.4.0 or 17.4.0 → 17.5.0.** Every line in the 17.2.0, 17.4.0
-and 17.5.0 lists is derived from a change's own **Migration** note and is
-marked **not exercised**: accurate about what changed, unproven about what it
-costs to cross. The two kinds are kept apart on purpose — a step nobody has run,
+17.2.0 or 17.3.0 → 17.4.0, and 17.4.0 → 17.5.0 has been exercised only in
+part:** seven lines of the 17.5.0 list were run in an upgrade of HotCRM, a
+17.4.0 app with a 17.4.0-created SQLite database, on 2026-09-29, and say what
+was observed. Every other line in the 17.2.0, 17.4.0 and 17.5.0 lists is
+derived from a change's own **Migration** note and is marked **not
+exercised**: accurate about what changed, unproven about what it costs to
+cross. The two kinds are kept apart on purpose — a step nobody has run,
 presented beside steps that were, is how a reader finishes a checklist and
 believes they are done.
 </Callout>
