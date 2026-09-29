@@ -8,7 +8,7 @@ Clause-②: no
 
 **Upgrading with a scanner.** The raised dependency floors (`hono ^4.13.5` in `@objectstack/plugin-hono-server`) cover the `hono` that objectstack loads. A lockfile-preserving upgrade can keep an older `hono` copy under `@modelcontextprotocol/sdk` (reached through `@objectstack/cli` → `@objectstack/mcp`). objectstack never loads that copy: `@objectstack/mcp` imports only the SDK's `server/mcp`, `server/stdio`, `server/webStandardStreamableHttp` and `types` modules, none of which imports `hono`. A scanner still reports it. Run `pnpm update hono` (or your package manager's equivalent) to move it to the patched line.
 
-**Shipped in 17.5.0 without notes.** 17.5.0 was published from a commit later than its version commit, so the changesets below shipped inside 17.5.0 but were not consumed by it. Their notes appear in this release for the first time. Breaking entries come first.
+**Shipped in 17.5.0 without notes.** The changesets below were in the tree 17.5.0 was published from, but its version commit did not consume them, so they shipped inside 17.5.0 without release notes. Their notes appear in this release for the first time. Breaking entries come first.
 
 Breaking:
 
