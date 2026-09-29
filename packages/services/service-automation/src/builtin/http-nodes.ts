@@ -97,9 +97,32 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 type: 'object',
                 required: ['url'],
                 properties: {
-                    url: { type: 'string', description: 'Target URL' },
+                    // #20590 — `url` and `headers` carry the credential steer, in
+                    // step with the `HttpConfigSchema` describes in
+                    // `@objectstack/spec/automation`. This config is stored in the
+                    // flow definition, and every definition read serves it to any
+                    // member who can read flows. Only `signingSecret` is withheld
+                    // (`flow-credential-projection.ts`), so a credential in `url`
+                    // or `headers` is served as authored. Nothing else is withheld,
+                    // because a withheld non-credential breaks the round trip; the
+                    // remedy is to keep the credential out of the definition.
+                    url: {
+                        type: 'string',
+                        description:
+                            'Target URL. Stored in the flow definition, which is served to every member who can read '
+                            + 'flows, so never a secret-bearing URL (a webhook whose path is the secret, a key in the '
+                            + 'query string): call that upstream through a `connector_action` on a declarative connector '
+                            + 'whose `auth.credentialRef` names the secret.',
+                    },
                     method: { type: 'string', description: 'HTTP method (default GET; POST when durable)' },
-                    headers: { type: 'object', description: 'Request headers' },
+                    headers: {
+                        type: 'object',
+                        description:
+                            'Request headers. Stored in the flow definition, which is served to every member who can '
+                            + 'read flows, so never put a credential here (an `Authorization` value, an API key): call an '
+                            + 'authenticated upstream through a `connector_action` on a declarative connector whose '
+                            + '`auth.credentialRef` names the secret.',
+                    },
                     body: { description: 'Request body (JSON-serialised)' },
                     durable: {
                         type: 'boolean',
