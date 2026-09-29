@@ -154,11 +154,15 @@ async function boot(): Promise<ObjectQL> {
   }, SYS);
   await insertSet(e, 'ps_global_ops_lead', 'ops_lead', null, ['probe.global_ops_lead']);
   //  (2) a global user grant to a global set, beside ORG_OTHER's same-named
-  //      copy inserted FIRST — an unordered read meets the copy first.
-  await insertSet(e, 'ps_other_platform_ops', 'platform_ops', ORG_OTHER, ['probe.other_platform_ops']);
-  await insertSet(e, 'ps_global_platform_ops', 'platform_ops', null, ['probe.global_platform_ops']);
+  //      copy. The copy's id SORTS FIRST (`ps_0_…` before `ps_1_…`) and the
+  //      SQL driver's read comes back ordered by id, so an unscoped read meets
+  //      the copy first. With the ids the other way round this pin stays green
+  //      against the unscoped read (measured by its ablation), so the order is
+  //      load-bearing.
+  await insertSet(e, 'ps_0_other_platform_ops', 'platform_ops', ORG_OTHER, ['probe.other_platform_ops']);
+  await insertSet(e, 'ps_1_global_platform_ops', 'platform_ops', null, ['probe.global_platform_ops']);
   await e.insert('sys_user_permission_set', {
-    id: 'ups_global_platform_ops', user_id: USER_GLOBAL, permission_set_id: 'ps_global_platform_ops', organization_id: null,
+    id: 'ups_global_platform_ops', user_id: USER_GLOBAL, permission_set_id: 'ps_1_global_platform_ops', organization_id: null,
   }, SYS);
   return engine;
 }
