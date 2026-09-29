@@ -166,9 +166,10 @@ for (const cell of CELLS) {
       });
 
       it('$lte and the $between maximum on 0050-01-01 include that whole day, and not the next midnight — as the 2026 control does', async () => {
-        for (const [name, bound, want] of QUERIES) {
-          expect(await idsWhere(bound), name).toEqual(want);
-        }
+        // Every reading first, then one comparison, so a red run shows all four cells.
+        const got: Record<string, string[]> = {};
+        for (const [name, bound] of QUERIES) got[name] = await idsWhere(bound);
+        expect(got).toEqual(Object.fromEntries(QUERIES.map(([name, , want]) => [name, want])));
       });
     },
   );
