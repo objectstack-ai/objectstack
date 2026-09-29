@@ -11,7 +11,22 @@ import {
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  validateFlowApiTriggerSecret,
 } from './validate-flow-trigger-readiness.js';
+import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
+
+/**
+ * [#20553] The flow-trigger family as the CLI table runs it: two registry
+ * entries over one file — `validateFlowTriggerReadiness` and, split out because
+ * it is CLI-only until #20611, `validateFlowApiTriggerSecret`. Cases that are
+ * about the WHOLE family's verdict on a stack (the severity map, the clean-stack
+ * floor, the api-secret cases' exhaustive assertions) judge through this.
+ */
+const cliFlowFamily = (stack: Record<string, unknown>) => [
+  ...validateFlowTriggerReadiness(stack),
+  ...validateFlowApiTriggerSecret(stack),
+];
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
   return {
@@ -1035,7 +1050,7 @@ describe('validateFlowTriggerReadiness', () => {
       };
     }
     const judge = (flow: Record<string, unknown>) =>
-      validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
+      cliFlowFamily({ objects: [candidateObject], flows: [flow] });
 
     it('fails a secretless `type: api` flow, naming the flow and the key', () => {
       const findings = judge(apiFlow({ hookId: 'intake' }));
@@ -1143,6 +1158,66 @@ describe('validateFlowTriggerReadiness', () => {
 
     it('the id is the published slug', () => {
       expect(FLOW_API_TRIGGER_SECRET_MISSING).toBe('flow-api-trigger-secret-missing');
+    });
+
+    // [#20611] The id is CLI-only until the runtime publish gate judges the
+    // carried-forward body: a `/meta` save is gated BEFORE `saveMetaItem`
+    // restores the `config.secret` the flow read path withholds (#20552), so a
+    // signed flow's GET → edit → PUT would reach the gate secretless. Each side
+    // of the wall is pinned, and the gate pin carries its own positive control.
+    describe('one rule id on ONE side of the runtime wall — CLI-only until #20611', () => {
+      const secretless = apiFlow({ hookId: 'intake' });
+      const stack = { objects: [candidateObject], flows: [secretless] };
+
+      it('the split is whole: validateFlowTriggerReadiness alone no longer emits the id', () => {
+        expect(validateFlowTriggerReadiness(stack).map((f) => f.rule)).not.toContain(
+          FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        expect(validateFlowApiTriggerSecret(stack).map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+      });
+
+      it('its registry entry gates all three commands on the cli surface only, with a reason', () => {
+        const entry = AUTHORING_RULES.find((r) => r.name === 'validateFlowApiTriggerSecret');
+        expect(entry).toBeDefined();
+        expect(entry!.tier).toBe('gating');
+        expect([...entry!.commands].sort()).toEqual([...AUTHORING_COMMANDS].sort());
+        expect(entry!.surfaces).toEqual(['cli']);
+        expect(entry!.runtimeTypes).toBeUndefined();
+        expect((entry!.surfaceReason ?? '').trim().length).toBeGreaterThan(40);
+        // …while the family's shared entry still crosses the wall.
+        expect(AUTHORING_RULES.find((r) => r.name === 'validateFlowTriggerReadiness')!.surfaces).toContain(
+          'runtime-publish',
+        );
+      });
+
+      it.each([...AUTHORING_COMMANDS])('os %s still refuses a secretless api flow through the table', (command) => {
+        const hits = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter(
+          (f) => f.rule === FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        expect(hits.map((f) => [f.severity, f.path])).toEqual([['error', 'flows[0].nodes[0].config.secret']]);
+      });
+
+      it('the runtime publish gate does not emit it — and still runs the rest of the family', () => {
+        const gated = runRuntimeAuthoringRules({ type: 'flow', item: secretless });
+        expect(gated.rulesRun).toContain('validateFlowTriggerReadiness');
+        expect(gated.rulesRun).not.toContain('validateFlowApiTriggerSecret');
+        expect([...gated.errors, ...gated.advisories].map((f) => f.rule)).not.toContain(
+          FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        // Positive control: the same door still refuses a flow the family
+        // proves dead, so the absence above is the wall, not a gate that ran
+        // nothing.
+        const dead = runRuntimeAuthoringRules({
+          type: 'flow',
+          item: {
+            name: 'declared_dead',
+            type: 'record_change',
+            status: 'active',
+            nodes: [{ id: 'start', type: 'start', config: { objectName: 'app_candidate', triggerType: 'onCreate' } }],
+          },
+        });
+        expect(dead.errors.map((f) => f.rule)).toContain(FLOW_TRIGGER_UNROUTABLE);
+      });
     });
   });
 
@@ -1297,7 +1372,7 @@ describe('validateFlowTriggerReadiness', () => {
 
     for (const [rule, severity, stack] of provoke) {
       it(`${rule} is ${severity}`, () => {
-        const matching = validateFlowTriggerReadiness(stack).filter((f) => f.rule === rule);
+        const matching = cliFlowFamily(stack).filter((f) => f.rule === rule);
         // Non-vacuous first: the fixture really does provoke this id.
         expect(matching.length, `${rule} was not provoked by its own fixture`).toBeGreaterThan(0);
         for (const f of matching) expect(f.severity).toBe(severity);
@@ -1310,7 +1385,7 @@ describe('validateFlowTriggerReadiness', () => {
       // makes a gate read as a bug — and the cross-package sentence is exactly
       // what earns `flow-trigger-unknown-object` its warning.
       for (const [rule, severity, stack] of provoke) {
-        for (const f of validateFlowTriggerReadiness(stack).filter((x) => x.rule === rule)) {
+        for (const f of cliFlowFamily(stack).filter((x) => x.rule === rule)) {
           if (severity === 'warning' && rule === FLOW_TRIGGER_UNKNOWN_OBJECT) {
             expect(f.hint, rule).toMatch(/another installed package/);
           }
@@ -1327,7 +1402,7 @@ describe('validateFlowTriggerReadiness', () => {
       // correct flow fail. Without this, "everything is an error" would pass
       // every assertion above.
       expect(
-        validateFlowTriggerReadiness({
+        cliFlowFamily({
           objects: [candidateObject, { name: 'task', label: 'Task', fields: {} }],
           flows: [
             recordFlow({ status: 'active' }),

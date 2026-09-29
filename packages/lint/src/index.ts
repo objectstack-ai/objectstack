@@ -126,6 +126,7 @@ export type { ManagedApiMethodFinding } from './validate-managed-api-methods.js'
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 export {
   validateFlowTriggerReadiness,
+  validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
