@@ -28,9 +28,9 @@ const CUBE: Cube = {
   title: 'Orders',
   sql: 'orders',
   public: true,
-  measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+  measures: { count: { label: 'Count', type: 'count', sql: '*' } },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
   },
 } as unknown as Cube;
 
