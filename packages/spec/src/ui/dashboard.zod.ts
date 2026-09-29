@@ -683,7 +683,7 @@ export function checkDashboardWidgetMetricMeasureArity(
  * class-wide, so one spelling is one thing to keep right.
  *
  * ⚠️ The version sentence names the **npm release** this ships in, never the
- * protocol major (ADR-0087, 「Amended 2026-09-13 (#18003) — the level half」):
+ * protocol major (ADR-0087, its 2026-09-13 amendment, 「the level half」):
  * the migration entries below are numbered at protocol 18 while
  * `@objectstack/spec` is on the 17.x line, and the two differ by construction
  * while the launch window holds.

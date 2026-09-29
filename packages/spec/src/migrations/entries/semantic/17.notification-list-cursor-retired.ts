@@ -22,7 +22,8 @@ export const entry: SemanticMigration = {
     + 'before the declaration existed',
   reason:
     'One capability, both halves, never half-deleted (maintainer ruling 2026-08-07, '
-    + 'Option A, ruled jointly with #6363). `cursor` was declared on the request and on '
+    + 'Option A, ruled jointly with the repair that made `unreadCount` really count the whole '
+    + 'inbox). `cursor` was declared on the request and on '
     + 'the response and honoured on neither: the dispatcher domain reads `read` / `type` / '
     + '`limit` and nothing else, and no emit site has ever written the response key. It '
     + 'was worse than inert because it had a shipped PRODUCER — the SDK appended it to the '
@@ -30,13 +31,14 @@ export const entry: SemanticMigration = {
     + 'forever, with no error and no 400. Measured over a real boot with 60 unread before '
     + 'the removal: page2 === page1, both parsing green against the response schema, which '
     + 'is why no conformance gate could see it. '
-    + 'This is `data.query.cursor` (#4286, `query-cursor-retired`) one layer up, with the '
+    + 'This is `data.query.cursor` (`query-cursor-retired`) one layer up, with the '
     + 'same verdict for the same reason, down to deleting the SDK producer alongside the '
     + 'key. A first-class inbox cursor, if one is ever designed, will be a '
     + 'response-minted opaque token — a different API — so keeping this one preserved a '
     + 'wrong design rather than a roadmap. '
     + 'The `limit` default goes with it because the FICTION WAS THE MECHANISM, not the '
-    + 'number: no request path parses a query string through this schema (#3899 wired the '
+    + 'number: no request path parses a query string through this schema (the fix for '
+    + 'request bodies never checked against their declared schemas wired the '
     + "catalog's requestSchema to the real entry for BODIES only), so `.default(20)` never "
     + 'stamped anything onto anything, and the server has always applied its own 50. '
     + 'Re-spelling 20 as 50 — the other arm the ruling allowed — would have kept a '
@@ -50,17 +52,21 @@ export const entry: SemanticMigration = {
     + 'bookkeeping go different ways. There IS a tombstone: both schemas are non-strict, '
     + 'so a bare deletion would have made Zod SILENTLY STRIP whatever a caller kept '
     + 'sending — a clean parse and a parameter that never takes effect, which is this '
-    + "issue's own defect re-created one layer down (#3733, ADR-0104). So `cursor` is "
+    + "issue's own defect re-created one layer down (the silent strip measured when a field "
+    + 'key pruned from a non-strict schema still parsed and simply vanished, ADR-0104). So '
+    + '`cursor` is '
     + '`retiredKey()` on both halves, typed `never` for tsc and raising the prescription '
     + 'at any parse, and both keys are registered in RETIRED_KEYS_BY_MAJOR[17]. There is '
     + 'NO D2 conversion: a conversion rewrites an authored source or a stored '
     + '`sys_metadata` row, and these two shapes are HTTP-only — nobody authors a '
     + '`ListNotificationsRequest` and nothing persists one. Request AND response shapes: '
     + 'two semantic TODOs for API callers, no stack conversion — the same disposition '
-    + '`BatchOptions.validateOnly` (#4052) and the `AnalyticsQueryRequest` envelope keys '
+    + '`BatchOptions.validateOnly` (a declared dry-run that wrote for real) and the '
+    + '`AnalyticsQueryRequest` envelope keys '
     + 'already take in this major. The `limit` default is declared separately and '
-    + 'mechanically, in DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` '
-    + 'fingerprints are re-derived on every build. ADR-0049 / ADR-0078, #6361.',
+    + 'mechanically, in DEFAULT_CHANGES_BY_MAJOR[17] (the table that closed the blind spot '
+    + 'where a default or constraint change on an authorable key was recorded by no gate), '
+    + 'whose `from`/`to` fingerprints are re-derived on every build. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No caller sends `cursor` to `GET /api/v1/notifications` and no SDK call site passes '
     + 'it: `client.notifications.list({ cursor })` is a `tsc` error (TS2353, excess '
@@ -71,7 +77,8 @@ export const entry: SemanticMigration = {
     + 'IGNORED, not refused — the domain reads three named query keys and no route '
     + 'validates this query against a schema, so an unknown key has never produced a 400 '
     + 'and does not start doing so here. The declaration stopped promising what the wire '
-    + 'never did; the wire did not change. `unreadCount` is untouched (#6363) and still '
+    + 'never did; the wire did not change. `unreadCount` is untouched (it was the jointly '
+    + 'ruled repair\'s business) and still '
     + 'reports the total across the whole matching inbox rather than the window. A caller '
     + 'that omitted `limit` receives the same 50 rows it always received.',
 };

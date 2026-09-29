@@ -2514,7 +2514,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
   guidance: {
-    // [#9933] Runtime-only overlay key, deliberately NOT declared here: this
+    // [commit d5552ca13] Runtime-only overlay key, deliberately NOT declared here: this
     // is the AUTHORING shape, and column order/widths are per-user state the
     // console grid writes through the `view` metadata API (objectui's
     // `gridNonAuthorKeys` disposition). The overlay-validation face declares
@@ -2935,7 +2935,7 @@ export const ListViewSchema = lazySchema(() =>
     .superRefine(checkListViewCalendarVisualization));
 
 /**
- * [#12868] Form-view select option — {@link SelectOptionSchema} minus the
+ * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
  * per-option `default` key (maintainer-ruled narrowing, 2026-08-28, on the
  * objectui#6263 analysis; disposition 甲).
  *
@@ -2963,7 +2963,7 @@ export const ListViewSchema = lazySchema(() =>
  * alias row must name a key the shape accepts (`alias-integrity.test.ts`) and
  * suggesting a key the schema refuses is the `triggerPhrases` failure shape
  * `shared/strict-object.ts` documents. The census that gates this narrowing
- * (issue #12868, part of the ruling) measured ZERO occurrences of
+ * (recorded in commit c459da6bc, part of the ruling) measured ZERO occurrences of
  * `default`/`isDefault`/`selected` inside form-view options across this tree,
  * the example apps and the published `*.form.ts` corpus, with the instrument's
  * positive control hitting the 40+ enforced object-field usages.
@@ -3176,7 +3176,7 @@ const FormFieldBaseSchema = lazySchema(() => {
   /**
    * Select/multiselect options — only needed when type=select/multiselect/radio/checkboxes.
    *
-   * [#12868] `FormSelectOptionSchema`, not `SelectOptionSchema`: the form-view
+   * [commit c459da6bc] `FormSelectOptionSchema`, not `SelectOptionSchema`: the form-view
    * face refuses the per-option `default` key the object-field face enforces —
    * see the narrowed schema's docblock for the ruling and the census.
    *
@@ -3631,7 +3631,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * runtime forms, `data` in metadata-editing forms.
    *
    * ## `current_user` DOES bind here — client-side, and only under a host that
-   * publishes a scope (objectui#6110 + #6111)
+   * publishes a scope (objectui#6110 + objectui#6111)
    *
    * This block said "no `current_user` at section level" (#6146) for as long as
    * that held, and it held for TWO reasons, both since discharged. The console
@@ -4835,7 +4835,7 @@ export function defineView(config: z.input<typeof ViewSchema>): ViewParsed {
  * recovered from the prefix, so the registry key never collides across objects.
  *
  * The dot-REQUIRED arity of the platform's one item-name grammar
- * (`QUALIFIED_ITEM_NAME_PATTERN`, `shared/identifiers.zod.ts` — #12194): same
+ * (`QUALIFIED_ITEM_NAME_PATTERN`, `shared/identifiers.zod.ts` — commit 311433f6b): same
  * segment source as `MetadataItemNameSchema`, which the metadata publish door
  * enforces with the qualifier optional. Grammar changes belong there, not here.
  */
@@ -5057,7 +5057,7 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
 };
 
 /**
- * [#9933] The per-user column layout the console's grid persists through the
+ * [commit d5552ca13] The per-user column layout the console's grid persists through the
  * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
  * where overlays are validated and deliberately NOT authorable.
  *
@@ -5083,7 +5083,7 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  *    protocol def / authorable-surface entries, and declaring it on the
  *    authoring shape would bless hand-authoring a payload the product writes
  *    on the user's behalf. Author-writability is a DIFFERENT spec change,
- *    explicitly out of #9933's scope; the authoring doors keep rejecting the
+ *    explicitly out of commit d5552ca13's scope; the authoring doors keep rejecting the
  *    key by name (see `VIEW_ITEM_SURFACE.guidance` and `ListViewSchema`'s
  *    `guidance`).
  *
@@ -5115,7 +5115,7 @@ const VIEW_ITEM_SURFACE = {
     // instead of leaving them to guess.
     isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
-    // [#9933] Runtime-only overlay key — same disposition as the two above.
+    // [commit d5552ca13] Runtime-only overlay key — same disposition as the two above.
     columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
     // [#20456] Declared on the wire members with the switcher's other row
     // state; named here so an author who reaches for it as access control is
@@ -5510,7 +5510,7 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
         + 'personalization PUTs.',
       ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry —).'),
-    // [#9933] Runtime-only overlay key — declared HERE (the overlay-validation
+    // [commit d5552ca13] Runtime-only overlay key — declared HERE (the overlay-validation
     // face) and on `viewItemWireFields()`, never on an authoring shape. This is
     // what lets a `columnState`-only personalization patch through the
     // identity precondition (the vocabulary is derived from the members' keys)
@@ -7084,7 +7084,7 @@ export type FormViewParsed = z.infer<typeof FormViewSchema>;
 export type FormSection = z.input<typeof FormSectionSchema>;
 /** Post-parse shape of {@link FormSection} — defaults applied, transforms run (ADR-0122). */
 export type FormSectionParsed = z.infer<typeof FormSectionSchema>;
-/** Authoring shape of {@link FormSelectOptionSchema} — the object-field option minus `default` (#12868). */
+/** Authoring shape of {@link FormSelectOptionSchema} — the object-field option minus `default` (commit c459da6bc). */
 export type FormSelectOption = z.input<typeof FormSelectOptionSchema>;
 /** Post-parse shape of {@link FormSelectOption} — defaults applied, transforms run (ADR-0122). */
 export type FormSelectOptionParsed = z.infer<typeof FormSelectOptionSchema>;

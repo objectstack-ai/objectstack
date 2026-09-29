@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
     + 'matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door '
     + 'never read, so that cluster is removed with the key rather than left as a false '
     + 'affordance. A REQUEST surface, never stored; no source to rewrite. '
-    + 'ADR-0049 / ADR-0078, #4286.',
+    + 'ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No caller sends `windowFunctions` in a query; request-level analytics use '
     + '`aggregations` + `groupBy`, and embedders needing OVER-clause SQL call the SQL '

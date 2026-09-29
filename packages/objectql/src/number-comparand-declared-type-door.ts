@@ -93,13 +93,19 @@
  *   `judgeFilter` (`judgeWhereAdmission` calls the same function).
  * - **The per-aggregation `filter`** ({@link narrowNumberComparands} with its
  *   path rooted at `aggregations[i].filter`), against the object's declared
- *   fields, since that filter narrows the object's raw rows.
+ *   fields, since that filter narrows the object's raw rows — a REAL declared
+ *   field, so its refusal reads "a declared … field", same as `where`'s. But
+ *   the engine evaluates it itself, per source row, never through a driver
+ *   bind, so [#20510] its refusal names no PostgreSQL clause
+ *   ({@link AGGREGATION_FILTER_SITE}).
  * - **`having`** ({@link narrowHavingNumberComparands}). The engine evaluates
  *   it over the aggregated rows, so the column is the aggregated one: judged
  *   when #20127's `aggregatedRowColumnClasses` classes it `numeric` (a `count`
  *   / `sum` / `avg`, and a groupBy or `min` / `max` of a numeric field). Such
  *   a column has no declared `FieldType` of its own; the verdict is handed
- *   `number`, the member of the numeric class it holds.
+ *   `number`, the member of the numeric class it holds. [#20510] Its refusal
+ *   names it "a numeric aggregated column" and, like the per-aggregation
+ *   `filter`, carries no PostgreSQL clause ({@link HAVING_SITE}).
  * - **Not here: RLS / sharing / tenant predicates.** Like every door on this
  *   seam it runs on the CALLER's filter, before the middleware chain composes
  *   those predicates onto the AST: an injected read filter is the platform's
@@ -123,6 +129,7 @@
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
+ * @see https://github.com/objectstack-ai/objectstack/issues/20510 (the site kind and the driver-bound clause)
  */
 
 import {
@@ -148,6 +155,29 @@ export type NonNumericComparand = NumberComparandRefusalSite;
 
 /** What one filter position supplies to the walk: the field meta a KEY names, or `null`. */
 type MetaOf = (key: string) => NumberComparandDoorFieldMeta | null;
+
+/**
+ * [#20510] What the CALLER already knows about the position being walked —
+ * the two facts the spec's words need and this door alone has: whether the
+ * column is a real declared field or an aggregated-row column with none of
+ * its own ({@link NumberComparandRefusalSite.aggregated}), and whether this
+ * position ever reaches a live driver bind
+ * ({@link NumberComparandRefusalSite.boundByDriver}). One per call to
+ * {@link narrowNumberComparands} / {@link narrowHavingNumberComparands} /
+ * {@link findNonNumericComparand} — never per field, so the walk carries it
+ * through unchanged.
+ */
+interface RefusalSiteContext {
+  readonly aggregated: boolean;
+  readonly boundByDriver: boolean;
+}
+
+/** `where`, both spellings: a real declared field, and the driver binds it. */
+const WHERE_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: true };
+/** The per-aggregation `filter`: a real declared field, but the engine evaluates it itself. */
+const AGGREGATION_FILTER_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: false };
+/** `having`: an aggregated-row column, evaluated by the engine, never bound. */
+const HAVING_SITE: RefusalSiteContext = { aggregated: true, boundByDriver: false };
 
 /** The walk's answer: the (possibly narrowed) node, or the first refusal. */
 type Outcome =
@@ -194,6 +224,7 @@ function judgeComparand(
   field: string,
   comparand: unknown,
   path: string,
+  ctx: RefusalSiteContext,
 ): Outcome {
   const verdict = numberComparandDoorVerdict(meta, comparand);
   if (verdict.verdict === 'narrows') return kept(verdict.value);
@@ -207,6 +238,11 @@ function judgeComparand(
       path,
       value: comparand,
       form: verdict.form,
+      // [#20510] Only ever written when true — an unset `aggregated` /
+      // `boundByDriver` reads as the pre-#20510 default (a declared field,
+      // driver-bound), which is exactly what `WHERE_SITE` above says.
+      ...(ctx.aggregated ? { aggregated: true as const } : {}),
+      ...(ctx.boundByDriver ? {} : { boundByDriver: false as const }),
     },
   };
 }
@@ -217,9 +253,10 @@ function judgeFieldSpec(
   field: string,
   spec: unknown,
   path: string,
+  ctx: RefusalSiteContext,
 ): Outcome {
   // Not filter structure → an implicit-equality comparand, judged at this path.
-  if (!isFilterNode(spec)) return judgeComparand(meta, field, spec, path);
+  if (!isFilterNode(spec)) return judgeComparand(meta, field, spec, path, ctx);
   // A field spec with no `$` key is a deep-equality / nested-relation
   // condition; the #5869 gate records why descending into one would invent a
   // contract no backend agrees with.
@@ -230,7 +267,7 @@ function judgeFieldSpec(
   for (const op of ops) {
     const comparand = spec[op];
     if (SCALAR_OPERATORS.has(op)) {
-      const judged = judgeComparand(meta, field, comparand, `${path}.${op}`);
+      const judged = judgeComparand(meta, field, comparand, `${path}.${op}`, ctx);
       if (!judged.ok) return judged;
       if (judged.value !== comparand) (out ??= { ...spec })[op] = judged.value;
       continue;
@@ -240,7 +277,7 @@ function judgeFieldSpec(
     if (!LIST_OPERATORS.has(op) || !Array.isArray(comparand)) continue;
     let members: unknown[] | undefined;
     for (const [index, member] of comparand.entries()) {
-      const judged = judgeComparand(meta, field, member, `${path}.${op}[${index}]`);
+      const judged = judgeComparand(meta, field, member, `${path}.${op}[${index}]`, ctx);
       if (!judged.ok) return judged;
       if (judged.value !== member) (members ??= [...comparand])[index] = judged.value;
     }
@@ -259,7 +296,7 @@ function judgeFieldSpec(
  * fields beneath it ungated — a hole, not a false 400), and a dotted key names
  * a path this door does not judge. Copy-on-write throughout.
  */
-function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: number): Outcome {
+function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: number, ctx: RefusalSiteContext): Outcome {
   if (depth > 32 || !isFilterNode(node)) return kept(node);
   let out: Record<string, unknown> | undefined;
   for (const [key, value] of Object.entries(node)) {
@@ -269,13 +306,13 @@ function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: numbe
       if (!Array.isArray(value)) continue;
       let arms: unknown[] | undefined;
       for (const [index, arm] of value.entries()) {
-        const walked = walkCondition(metaOf, arm, `${here}[${index}]`, depth + 1);
+        const walked = walkCondition(metaOf, arm, `${here}[${index}]`, depth + 1, ctx);
         if (!walked.ok) return walked;
         if (walked.value !== arm) (arms ??= [...value])[index] = walked.value;
       }
       judged = kept(arms ?? value);
     } else if (key === '$not') {
-      judged = walkCondition(metaOf, value, here, depth + 1);
+      judged = walkCondition(metaOf, value, here, depth + 1, ctx);
     } else {
       if (key.startsWith('$') || key.includes('.')) continue;
       const meta = metaOf(key);
@@ -283,7 +320,7 @@ function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: numbe
       // whose return type is unreadable is `deferred`, and everything else is
       // `not-judged` — the spec's verdict, never a list here.
       if (!meta || numberComparandFieldVerdict(meta) !== 'judged') continue;
-      judged = judgeFieldSpec(meta, key, value, here);
+      judged = judgeFieldSpec(meta, key, value, here, ctx);
     }
     if (!judged.ok) return judged;
     if (judged.value !== value) (out ??= { ...node })[key] = judged.value;
@@ -314,7 +351,9 @@ export function findNonNumericComparand(
 ): NonNumericComparand | null {
   const metaOf = declaredMetaOf(schema);
   if (!metaOf) return null;
-  const walked = walkCondition(metaOf, where, path, 0);
+  // [#20510] Every caller of this walk (`where`, the per-aggregation `filter`)
+  // reads a real declared field; only `where` itself ever binds to a driver.
+  const walked = walkCondition(metaOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
   return walked.ok ? null : walked.refusal;
 }
 
@@ -333,7 +372,11 @@ function refuse(context: string, refusal: NonNumericComparand): never {
  * node config).
  *
  * `path` roots the refusal at the position the filter sits in: `where` by
- * default, `aggregations[i].filter` for a per-aggregation filter.
+ * default, `aggregations[i].filter` for a per-aggregation filter — both read
+ * the object's real declared fields, so the refusal names one honestly
+ * (`WHERE_SITE`); only `where` itself ever reaches a live driver bind, so the
+ * not-a-number / boolean / date clauses name PostgreSQL's server error there
+ * alone (#20510).
  */
 export function narrowNumberComparands<W>(
   object: string,
@@ -344,7 +387,7 @@ export function narrowNumberComparands<W>(
 ): W {
   const metaOf = declaredMetaOf(schema);
   if (!metaOf) return where;
-  const walked = walkCondition(metaOf, where, path, 0);
+  const walked = walkCondition(metaOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
   if (!walked.ok) refuse(`${operation}('${object}')`, walked.refusal);
   return walked.value as W;
 }
@@ -355,6 +398,14 @@ export function narrowNumberComparands<W>(
  * `aggregatedRowColumnClasses`, handed in rather than derived again) classes a
  * column `numeric`. Refuses or narrows exactly as {@link narrowNumberComparands}
  * does, rooted at `having`.
+ *
+ * [#20510] The column here — an aggregation alias or a groupBy projection —
+ * has no declared `FieldType` of its own even when it merely carries a real
+ * field's value through: it is the AGGREGATED ROW's column, not the record's
+ * field. The refusal names it "a numeric aggregated column"
+ * ({@link HAVING_SITE}), and — like the per-aggregation `filter` — the engine
+ * evaluates `having` itself, never the driver, so it carries no PostgreSQL
+ * clause either.
  */
 export function narrowHavingNumberComparands<H>(
   object: string,
@@ -366,6 +417,7 @@ export function narrowHavingNumberComparands<H>(
     having,
     'having',
     0,
+    HAVING_SITE,
   );
   if (!walked.ok) refuse(`aggregate('${object}')`, walked.refusal);
   return walked.value as H;

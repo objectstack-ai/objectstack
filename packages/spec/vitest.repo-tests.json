@@ -19,6 +19,7 @@
   "scripts/schema-tree-freshness.test.ts",
   "scripts/sharded-artifacts.test.ts",
   "scripts/solution-blueprint-header-row.test.ts",
+  "scripts/step18-rationale-merge.test.ts",
   "scripts/strictness-ledger-doc.test.ts",
   "scripts/strictness-ledger.test.ts",
   "src/ai/tool-confirmation-prescription-tense.pin.test.ts",

@@ -46,7 +46,7 @@ export const entry: SemanticMigration = {
     + 'been closed strictly once `api` became a registered metadata type, and '
     + 'the surface a published skill had been teaching as working machinery '
     + '(this finding came out of correcting that skill sentence, in a factual '
-    + 'sweep of the automation skill). Bookkeeping: the KEY is tombstoned with '
+    + 'sweep of the API skill). Bookkeeping: the KEY is tombstoned with '
     + 'retiredKey() on the '
     + 'non-strict RestApiEndpointSchema (api/RestApiEndpoint:handlerStatus in '
     + 'RETIRED_KEYS_BY_MAJOR[18]); the DEFS leave whole — api/HandlerStatus '
