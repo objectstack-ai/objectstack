@@ -1112,7 +1112,7 @@ type NormalizedRestServerConfig = {
         enableSearch: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        // [#14366] The PARSED shape, not the authored one: this block is
+        // [commit 53cbad9f7] The PARSED shape, not the authored one: this block is
         // built from `RestApiConfigSchema`'s output, so a `documentation` the
         // caller wrote arrives with its OWN declared inner defaults applied
         // (`.title`). [#20295] `documentation.enabled` and the whole
@@ -1169,7 +1169,7 @@ type NormalizedRestServerConfig = {
      * [commit b3a63d32c] Every key of `RouteGenerationConfigSchema` is a `retiredKey()`
      * tombstone (ADR-0049 enforce-or-remove — nothing here ever read
      * `includeObjects` / `excludeObjects` / `nameTransform` / `overrides`; the
-     * #14369 census). The sub-object is still PARSED, so an authored key is
+     * Commit a3d5724c8 census). The sub-object is still PARSED, so an authored key is
      * refused at construction with its prescription rather than stripped, but
      * nothing is threaded: per-object exposure is the object's own
      * `enable.apiEnabled` / `enable.apiMethods`, enforced by `enforceApiAccess`.
@@ -1210,7 +1210,7 @@ function buildDeclaredSubConfigSchemas() {
 type DeclaredSubConfigSchemas = ReturnType<typeof buildDeclaredSubConfigSchemas>;
 type DeclaredSubConfigName = keyof DeclaredSubConfigSchemas;
 /**
- * [#14366] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
+ * [commit 53cbad9f7] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
  * FROM. Taken off the table's own entry rather than off `RestApiConfigParsed`,
  * so it is the post-`.omit()` shape: the retired `requireAuth` tombstone is
  * absent here exactly as it is absent from the schema this seam runs.
@@ -1450,7 +1450,7 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
  * undefined>`) declaring absence, not failing. Only a THROW or a REJECTION is
  * the outage — which is why this helper, like {@link seamOrUndefined}, invokes
  * `call` synchronously so a non-`async` provider that throws before returning a
- * promise reaches the same answer as one that rejects (#13280).
+ * promise reaches the same answer as one that rejects (commit add6a1b1c).
  *
  * ⚠️ RESIDUE, deliberately not repaired here and filed separately — do not
  * read this helper as covering it. The KERNEL branch of the seam resolves
@@ -2233,7 +2233,7 @@ export class RestServer {
     }
 
     /**
-     * [#13214] Refuse a request whose RESOLVED environment is not one the CALLER
+     * [commit cc837dbfe] Refuse a request whose RESOLVED environment is not one the CALLER
      * holds — the comparison this server did not have.
      *
      * ## The defect this closes, and why the anonymous gate alone did not
@@ -2244,7 +2244,7 @@ export class RestServer {
      * identity resolved at all, so an ANONYMOUS caller received another
      * environment's UI view — object label plus every field's name / label /
      * type / required — and the route doubled as an object-existence oracle for
-     * whatever environment it named. Driven and reported on #13214 (PRs commit 889ec5b42,
+     * whatever environment it named. Driven and reported on commit cc837dbfe (PRs commit 889ec5b42,
      * Commit 3d10755f0).
      *
      * Adding `resolveExecCtx` + `enforceAuth` was measured NOT to be the repair
@@ -2755,7 +2755,7 @@ export class RestServer {
             // environmentId.
             let authService: any;
             let kernel: any;
-            // [#13214] WHICH environment's auth service actually validated this
+            // [commit cc837dbfe] WHICH environment's auth service actually validated this
             // caller — the fact an ownership check needs and the one this method
             // used to compute and drop. Three branches below can answer, and the
             // SECOND of them answers for a DIFFERENT environment than the one the
@@ -3094,7 +3094,7 @@ export class RestServer {
                 // NOT an `ExecutionContext` field — hence the cast, which now
                 // covers this key and `__authEnvironmentId` below.
                 __kernel: kernel,
-                // [#13214] Internal: the environment whose auth service actually
+                // [commit cc837dbfe] Internal: the environment whose auth service actually
                 // validated this caller — the left-hand side of the ownership
                 // comparison at the UI-view seam. ⚠️ Unlike `__kernel` this one IS
                 // an authorization input, at exactly one reader
@@ -4062,7 +4062,7 @@ export class RestServer {
      * walked straight past it and mounted the whole API at `/api//`, and
      * `'v1/beta'` spliced an extra path segment into every route.
      *
-     * [#14366] The parsed output is CONSUMED — `normalizeConfig` builds the
+     * [commit 53cbad9f7] The parsed output is CONSUMED — `normalizeConfig` builds the
      * `api` block from what this returns. It was VALIDATE-ONLY from #11637
      * until then, for two measured reasons that have both since expired:
      *
@@ -4077,7 +4077,7 @@ export class RestServer {
      *
      *  - `api.projectResolution` was `.omit()`ed until #12450 withdrew it.
      *
-     *    ⇒ Re-measured at #14366 on the landed tree, because the discard is
+     *    ⇒ Re-measured at commit 53cbad9f7 on the landed tree, because the discard is
      *    only safe to remove if the key diff is EMPTY: the 14 keys
      *    `normalizeConfig` reads and the 14 `RestApiConfigSchema` declares
      *    after the `.omit()` are the same 14, in both directions. So the
@@ -4089,7 +4089,7 @@ export class RestServer {
      *    `documentation` or `responseFormat` object the caller WRITES now
      *    arrives carrying its own declared inner defaults, where the `??`
      *    chain copied the authored object through untouched. Both keys have
-     *    zero read sites outside this block (the #14369 census), so nothing
+     *    zero read sites outside this block (the commit 53cbad9f7 census), so nothing
      *    observes it today — but it is a real change to this structure's
      *    contents and belongs in the record rather than in a reader's surprise.
      *
@@ -4148,7 +4148,7 @@ export class RestServer {
      * CONSUMED. The asymmetry with `api` is measured, not stylistic: for each
      * of the four, every key `normalizeConfig` reads is one its schema
      * declares (the key diff is empty), and none carries a tombstone, so a
-     * consumed parse cannot strip anything the runtime honours. [#14366] `api`
+     * consumed parse cannot strip anything the runtime honours. [commit 53cbad9f7] `api`
      * went through the same door last, separately measured rather than ridden
      * on the siblings: the asymmetry is gone and all five now build from their
      * parsed output.
@@ -4174,16 +4174,16 @@ export class RestServer {
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
-        // [#11637 / #14366] `api`: parsed AND consumed. #11637 ran the declared
+        // [#11637 / commit 53cbad9f7] `api`: parsed AND consumed. #11637 ran the declared
         // contract here but discarded its output, leaving the block below to be
         // built from a cast over the raw input through a `??` chain that
         // duplicated `RestApiConfigSchema`'s defaults key for key — ELEVEN
         // literals in `packages/rest` restating the eleven top-level
         // `z.default(...)`s in `packages/spec`, with nothing pinning that the
-        // two stayed equal. (Eleven, measured on both sides at #14366; the
+        // two stayed equal. (Eleven, measured on both sides at commit 53cbad9f7; the
         // filing card said twelve, having counted the `config.api ?? {}` that
         // guards the whole object rather than a per-key default.)
-        // #14366 folded the chain onto the parse after re-measuring the key
+        // Commit 53cbad9f7 folded the chain onto the parse after re-measuring the key
         // diff empty in both directions (see `parseDeclaredApiConfig`), so the
         // schema is now the single source of these defaults. The cast is gone
         // with it: the parsed output is already typed.
@@ -5471,7 +5471,7 @@ export class RestServer {
                         // arm Studio's per-type directory drill-down uses, and
                         // it is the arm #13753 repaired.
                         //
-                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
+                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (commit abf9101f1) ──
                         //
                         // The VALUE is redundant, and measured to be. Both sites fold
                         // the identical string through the identical map — here
@@ -5509,7 +5509,7 @@ export class RestServer {
                         // a fan-out per overridable type plus a REST-side
                         // re-aggregation of `total`/`stats`/`scannedTypes`.
                         //
-                        // ⚠️ Commit 96326040f DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // ⚠️ Commit 96326040f DISSOLVED THAT OBSTACLE (commit abf9101f1 recorded
                         // it, #15622 acted on it). `getMetaDiagnostics` does
                         // not spend the organization once: it loops `for (const
                         // t of targetTypes)` calling `getMetaItems({ type: t,
@@ -8160,7 +8160,7 @@ export class RestServer {
                     // `wiredEngineOrLoud` also invokes the provider
                     // SYNCHRONOUSLY, so a host wiring a non-`async` provider —
                     // which the seam's declared type cannot prevent — reaches the
-                    // same answer as one that rejects (#13280) instead of
+                    // same answer as one that rejects (commit add6a1b1c) instead of
                     // escaping past a `.catch` that never came into existence.
                     const ql = await wiredEngineOrLoud(
                         Boolean(this.objectQLProvider),
@@ -8323,7 +8323,7 @@ export class RestServer {
                         // inventing org RESOLUTION here, and this reads
                         // `tenantId` off the execution context `resolveExecCtx`
                         // already resolves, exactly as #8803 did for the audit
-                        // read. [#14907] The CALLEE gates: `getMetaItemLayered`
+                        // read. [commit e1d4f9e3f] The CALLEE gates: `getMetaItemLayered`
                         // resolves `organizationIdForMetaRead` AFTER its canonical
                         // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
                         // the unfolded `:type`, would be the commit 26f3588fb defect. ⛔ And
@@ -8516,7 +8516,7 @@ export class RestServer {
     /**
      * Register UI endpoints
      *
-     * ## [#13214] This registrar's one route is identity- AND ownership-gated
+     * ## [commit cc837dbfe] This registrar's one route is identity- AND ownership-gated
      *
      * It used to be the single route in this server's table that resolved NO
      * identity: it went straight from `resolveProtocol` to `getUiView`, so it
@@ -8553,7 +8553,7 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const routeEnvironmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#13214] THE environment decision for this request, taken
+                    // [commit cc837dbfe] THE environment decision for this request, taken
                     // once through the shared entry point and then reused — so
                     // the identity below, the ownership comparison and the
                     // protocol that answers cannot be about three different
@@ -8579,7 +8579,7 @@ export class RestServer {
                         const viewRequest: TransportScopedMetaRequest<GetUiViewRequest> = {
                             object: req.params.object,
                             type: req.params.type,
-                            // [#13214] `routeEnvironmentId`, NOT the resolved id.
+                            // [commit cc837dbfe] `routeEnvironmentId`, NOT the resolved id.
                             // The gate above changed WHO may reach the producer;
                             // it deliberately did not change WHAT the producer is
                             // told. This key has only ever been present on the
@@ -10150,7 +10150,7 @@ export class RestServer {
                     // `RestServer`'s constructor is the public wiring point —
                     // throws while the expression is still being evaluated, so
                     // there is no promise to attach to and the handler is never
-                    // reached (#13280).
+                    // reached (commit add6a1b1c).
                     //
                     // ⚠️ NOT reachable from the SHIPPED wiring: the provider
                     // `rest-api-plugin.ts` hands over is declared `async`.
@@ -12549,7 +12549,7 @@ export class RestServer {
                 // row is invisible inside the caller's organization scope, so
                 // the result envelope cannot be built. Same class as
                 // RESUME_FAILED — a genuine server-side inconsistency, named
-                // (#13182): read the request back with a system or
+                // (commit 5b3ff63cc): read the request back with a system or
                 // matching-organization context.
                 [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
@@ -13023,7 +13023,7 @@ export class RestServer {
                     // rather than failing. `wiredEngineOrLoud` also invokes the
                     // provider SYNCHRONOUSLY, so a host wiring a non-`async`
                     // provider — which the seam's declared type cannot prevent —
-                    // reaches the same answer as one that rejects (#13280).
+                    // reaches the same answer as one that rejects (commit add6a1b1c).
                     const ql = await wiredEngineOrLoud(
                         Boolean(this.objectQLProvider),
                         () => this.objectQLProvider!(environmentId),

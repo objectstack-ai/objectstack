@@ -595,7 +595,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 // fold happens, not about whether one happens. `getMetaDiagnostics` reads each
 // swept type through `getMetaItems({ type: t, organizationId })`.
 //
-// ⚠️ [commit 96326040f, recorded by #15034] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+// ⚠️ [commit 96326040f, recorded by commit abf9101f1] `getMetaItems` NOW APPLIES THE REGISTRY GATE
 // ITSELF, after folding the request type. This header used to say it applied
 // none and that the scope was therefore the caller's to decide per type; that
 // sentence is FALSE on today's tree. What that dissolved is the obstacle the
@@ -623,7 +623,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 // either half: alone, neither can tell a per-type gate from an unconditional
 // tenant.
 //
-// ── ⛔ WHAT THIS FILE NO LONGER DISCRIMINATES (#15034, MEASURED) ───────────
+// ── ⛔ WHAT THIS FILE NO LONGER DISCRIMINATES (commit abf9101f1, MEASURED) ───────────
 //
 // This header used to end: "Swap `organizationIdForMetaRead` for a raw
 // `ctx?.tenantId` at the call site and that assertion, and only it, turns red."
@@ -634,7 +634,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 //
 // ⇒ What this file DOES still discriminate is the organization being DROPPED:
 // remove the `organizationId` the `?type=` arm passes and the six repair cases
-// above turn red (measured at #15034: 6 failed / 24 passed). Read the two apart before
+// above turn red (measured at commit abf9101f1: 6 failed / 24 passed). Read the two apart before
 // citing this file as a pin on the door-side predicate — it pins that the arm
 // still FOLDS, never that the fold happens at the door.
 
@@ -708,7 +708,7 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
             // than written through the door. Rows like it exist in deployments
             // that ran before that ruling; boot hydration walks past them, so
             // they are dead, and a read door that named the org for every type
-            // would serve them again. ⚠️ [#15034] PREDICTED DIRECTION,
+            // would serve them again. ⚠️ [commit abf9101f1] PREDICTED DIRECTION,
             // CORRECTED: replacing the predicate with `ctx?.tenantId` at the
             // call site no longer moves this count — `getMetaItems`' own gate
             // (commit 96326040f) re-folds it. What still drives it to 2 is a read door

@@ -82,7 +82,7 @@ const OBJECTS = [
   { name: 'local_thing', datasource: 'default', fields: { id: { type: 'text' } } },
 ];
 
-/** An entitled caller — the capability gate (#9901/commit 6ce58a735) is not this file's subject. */
+/** An entitled caller — the capability gate (#9901 / commit 6ce58a735) is not this file's subject. */
 const CREDENTIALED = async () => ({
   userId: 'u_validate_scope',
   systemPermissions: ['manage_platform_settings'],

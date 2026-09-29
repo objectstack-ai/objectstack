@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13214] Does `GET /api/v1/ui/view/:object/:type` cross ENVIRONMENTS?
+ * [commit 3d10755f0] Does `GET /api/v1/ui/view/:object/:type` cross ENVIRONMENTS?
  *
  * ## ⭐ What this file is NOW: the regression pin for the repair it measured
  *

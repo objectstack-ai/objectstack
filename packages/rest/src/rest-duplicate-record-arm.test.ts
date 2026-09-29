@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14389 — `classifyDataError`'s arm for the engine's insert-conflict envelope.
+ * Commit 10220a7bf — `classifyDataError`'s arm for the engine's insert-conflict envelope.
  *
  * ## What was measured
  *

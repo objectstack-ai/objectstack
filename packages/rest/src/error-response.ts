@@ -279,7 +279,7 @@ export function sandboxBusinessMessage(error: any): string | undefined {
 }
 
 /**
- * [#14704] The sentence a declared-code structured arm relays to the caller:
+ * [commit 1c7adc73d] The sentence a declared-code structured arm relays to the caller:
  * {@link sandboxBusinessMessage} first, `error.message` second.
  *
  * ## The defect this retires
@@ -304,7 +304,7 @@ export function sandboxBusinessMessage(error: any): string | undefined {
  * ## Why the bulk door does not change
  *
  * {@link resolveErrorResponse} declines the shared consult outright for a
- * sandbox-origin error (#14541's `isSandboxOrigin` guard), so this read is
+ * sandbox-origin error (commit 6d178a408's `isSandboxOrigin` guard), so this read is
  * unreachable from that door and every bulk / metadata / UI route answers
  * byte-for-byte what it answered before. The repair lands on
  * {@link mapDataError} alone, which is where the defect was.
@@ -780,14 +780,14 @@ export function boundedDeclaredRefusalMessage(error: unknown): string | undefine
 }
 
 /**
- * [#11588 / #7543 / #14541] Did this error come out of a sandboxed body?
+ * [#11588 / #7543 / commit 6d178a408] Did this error come out of a sandboxed body?
  *
  * `SandboxError.innerMessage` is the QuickJS side-channel: `message` carries a
  * `<kind> '<name>' threw: <msg>` DEBUG WRAPPER written for the server log, and
  * the sentence addressed to the caller is `innerMessage`. Every arm in
  * {@link structuredCodeAnswer} ships `error.message`, so a sandboxed producer
  * is a DIFFERENT producer for their purposes and is answered by the unwrap
- * door instead — the rule #14389 already wrote into the `DUPLICATE_RECORD`
+ * door instead — the rule commit 10220a7bf already wrote into the `DUPLICATE_RECORD`
  * arm's `name` gate, stated once here for the arms that need it by POSITION.
  *
  * Deliberately NOT {@link sandboxBusinessMessage}: that one declines a CRASH
@@ -845,7 +845,7 @@ function isSandboxCrash(error: any): boolean {
 }
 
 /**
- * [#14541, contract-review condition 4] A structured arm answering a **5xx**
+ * [commit 6d178a408, contract-review condition 4] A structured arm answering a **5xx**
  * never displaces a status the producer declared in the **4xx** band — asked by
  * BOTH doors, so the answer cannot depend on which one caught the error.
  *
@@ -873,7 +873,7 @@ function fiveXxArmDisplacesDeclared4xx(
 }
 
 /**
- * [#14389 / commit 65846bc46] Is this thrown value the ENGINE's unique-violation
+ * [commit 10220a7bf / commit 65846bc46] Is this thrown value the ENGINE's unique-violation
  * envelope — `@objectstack/objectql`'s `DuplicateRecordError`?
  *
  * Gated on the envelope, name AND code, not on the code alone: a hook that
@@ -901,7 +901,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
 }
 
 /**
- * [#14541] The bespoke structured arms, in ONE place, so BOTH REST error doors
+ * [commit 6d178a408] The bespoke structured arms, in ONE place, so BOTH REST error doors
  * can ask them FIRST.
  *
  * ## The defect this retires
@@ -957,7 +957,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  *
  * ## What the `UNIQUE_VIOLATION` answer restores, per driver
  *
- * Corrected under the #14541 contract review (condition 7), which measured the
+ * Corrected under the commit 6d178a408 contract review (condition 7), which measured the
  * earlier statement backwards.
  *
  * On the **SQL** drivers the bulk doors answered `409 UNIQUE_VIOLATION` with the
@@ -977,13 +977,13 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  *
  * ## One wire spelling on the route — the rows too (commit 65846bc46)
  *
- * The #14541 contract review (condition 2) disclosed a fork this file's "one
+ * The commit 6d178a408 contract review (condition 2) disclosed a fork this file's "one
  * condition, one wire code" framing did not cover: the DOORS answered a
- * `DuplicateRecordError` as `UNIQUE_VIOLATION` (#14389's ruling, the arm
+ * `DuplicateRecordError` as `UNIQUE_VIOLATION` (commit 10220a7bf's ruling, the arm
  * below), while a batch or import ROW did not go through this classification
  * at all — `metadata-protocol`'s `toRowApiError` put the thrown REGISTERED
  * code on the row verbatim and `import-runner`'s row report did the same — so
- * after #14541 a whole-request failure on `POST /data/:object/batch` or
+ * after commit 6d178a408 a whole-request failure on `POST /data/:object/batch` or
  * `POST /data/:object/import` said `UNIQUE_VIOLATION` while a row on the SAME
  * route said `DUPLICATE_RECORD`.
  *
@@ -994,7 +994,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  * the same way ({@link isEngineDuplicateRecordEnvelope}: registered code AND
  * class name, never message text): `toRowApiError` for the rows of
  * `POST /data/:object/batch`, and `toFailedResult` for the import runner's
- * row reports. The single-record door's code did not move (#14389's refusal
+ * row reports. The single-record door's code did not move (commit 10220a7bf's refusal
  * stands), no ledger waiver was added — the duplication is removed, not
  * declared — and the ENGINE's thrown identity is unchanged:
  * `DuplicateRecordError.code` is still `DUPLICATE_RECORD` in-process; only
@@ -1047,7 +1047,7 @@ function structuredCodeAnswer(
             },
         };
     }
-    // [#14389] The engine's insert-conflict envelope → 409 `UNIQUE_VIOLATION`,
+    // [commit 10220a7bf] The engine's insert-conflict envelope → 409 `UNIQUE_VIOLATION`,
     // with the structured `field` restored.
     //
     // Since #14095 `engine.insert` answers a driver's unique violation with the
@@ -1217,7 +1217,7 @@ function structuredCodeAnswer(
     // point of #3770 is that this 404 no longer depends on a driver erroring
     // on a missing table. Must precede the generic 4xx passthrough, which
     // would otherwise ship the internal SCREAMING_CASE code verbatim.
-    // [#14541, corrected under contract-review condition 5] Gated on
+    // [commit 6d178a408, corrected under contract-review condition 5] Gated on
     // `!isSandboxOrigin` because this arm used to sit BELOW the sandbox unwrap
     // door and now sits above it. The clause is that POSITION, written down —
     // and position is its WHOLE justification here. ⛔ Not the sibling arm's
@@ -1253,7 +1253,7 @@ function structuredCodeAnswer(
     // form of the identical mistake), so one condition has one wire shape no
     // matter which layer noticed it. Must precede the generic 4xx passthrough,
     // which would ship the message but drop `field`.
-    // [#14541] `!isSandboxOrigin`: the same clause as the arm above, and here
+    // [commit 6d178a408] `!isSandboxOrigin`: the same clause as the arm above, and here
     // it carries the sentence reason TOO — this arm really does ship
     // `error.message`, which for a sandboxed producer is the QuickJS debug
     // wrapper #11588 exists to keep off this wire. The same declared-5xx status
@@ -1283,7 +1283,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // ⛔ The terminal is not duplicated — it MOVED here from inside the unwrap
     // door below, which is why that door now reads a body that REPORTED.
     if (isSandboxCrash(error)) return UNCLASSIFIED_FAULT();
-    // [#14541] The bespoke structured arms first, exactly as they were inline
+    // [commit 6d178a408] The bespoke structured arms first, exactly as they were inline
     // here — same arms, same order, same position — now stated once so
     // {@link resolveErrorResponse} can ask them before ITS passthrough too.
     //
@@ -2124,7 +2124,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // divergence pin flips with it.
     //
     // Answered through {@link mapDataError} rather than by returning
-    // {@link UNCLASSIFIED_FAULT} here, for the reason the #14541 consult below
+    // {@link UNCLASSIFIED_FAULT} here, for the reason the commit 6d178a408 consult below
     // gives: same terminal, same {@link withDeclaredUserMessage} wrapper,
     // nothing for a future edit to desynchronise. Both doors now read ONE
     // `isSandboxCrash` gate; ⛔ do not grow a second opinion about a crash in
@@ -2138,11 +2138,11 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // unconditional prose-drop (#5437 / #5582 / #5907) is not narrowed by this:
     // the terminal withholds prose too, and what moves for that shape is the
     // status and the declared `code`, both of which shrink to the sanitised
-    // pair. #14541's guard 1 is about a producer-declared 5xx that is NOT a
+    // pair. Commit 6d178a408's guard 1 is about a producer-declared 5xx that is NOT a
     // crash and is untouched — `error-response-structured-arm-door-parity.test.ts`
     // §4 pins both shapes, side by side.
     if (isSandboxCrash(error)) return mapDataError(error, object);
-    // [#14541] The bespoke structured arms are asked BEFORE this door's
+    // [commit 6d178a408] The bespoke structured arms are asked BEFORE this door's
     // declared-status passthrough, because that ordering is the whole defect
     // this card reports: an engine envelope declaring `status: 409` left
     // through the passthrough and never reached the arm that owns its wire
@@ -2194,7 +2194,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
     //
-    // [#14541] The consult above now answers that for every DECLARED-code
+    // [commit 6d178a408] The consult above now answers that for every DECLARED-code
     // producer, so this clause survives for exactly one residue: a SANDBOXED
     // body throwing `OBJECT_NOT_FOUND`, which the consult declines. Measured:
     // without the clause that error takes the 4xx arm below and loses
@@ -2391,11 +2391,11 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
                 : truncateClientMessage(authored);
         // [#9232] Narrowed, same as the three arms above.
         //
-        // [#14725] …and the body names the OBJECT the door was called with,
+        // [commit f5cc78b63] …and the body names the OBJECT the door was called with,
         // the limb {@link classifyDataError}'s generic declared-status
         // passthrough has always ended on. Without it the two copies of one
         // passthrough differed by exactly one key, which is the residue
-        // #14541 left behind: after that card the doors agree for every code
+        // Commit 6d178a408 left behind: after that card the doors agree for every code
         // a BESPOKE arm classifies, and disagree for every code that reaches
         // the GENERIC passthrough. Measured on `main` @ `a12b15e394`, one
         // error object, both doors:
@@ -2407,7 +2407,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         //         409 {"error":"…","code":"DUPLICATE_RECORD"}
         //
         // One refusal, two bodies, decided by which route caught it — the
-        // #14541 shape one arm over. It also closes that card's second
+        // Commit 6d178a408 shape one arm over. It also closes that card's second
         // residue: `recordNotFoundError` (`@objectstack/core`) declares
         // `code`, `status = 404` AND `object`, so its declared status carries
         // it past the `RECORD_NOT_FOUND` arm below into THIS passthrough on

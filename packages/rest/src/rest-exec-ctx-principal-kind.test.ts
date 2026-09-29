@@ -295,7 +295,7 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             // it, so it is an assembled field now and absent for the same reason
             // every other unset field is: this session carries no gate.
             '__kernel',
-            // [#13214] The SECOND post-assembly internal key, added by the
+            // [commit cc837dbfe] The SECOND post-assembly internal key, added by the
             // 2026-08-30 security ruling and named here rather than left to a
             // subset check — this pin exists precisely to make a key ARRIVING
             // as loud as a key going missing, and this one arrived.

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13255] REACHABILITY and CONSEQUENCE of a swallowed execution-context
+ * [commit 43028a8f8] REACHABILITY and CONSEQUENCE of a swallowed execution-context
  * resolution, measured at the PACKAGE-MANAGEMENT door.
  *
  * ## What this file is, and what its sibling already answered
@@ -92,7 +92,7 @@
  *
  * ## What this file does, and no longer does not (commit 6a180e42d)
  *
- * As written for #13255 this file repaired nothing and asserted no verdict —
+ * As written for commit 43028a8f8 this file repaired nothing and asserted no verdict —
  * distinguishing "no context" from "resolution failed" was a behaviour change
  * on a public door and out of that card's scope. Commit 6a180e42d RULED that change for
  * the permission-store half, so the assertions covering it are now regression
@@ -105,7 +105,7 @@
  * half of that sentence — it is repaired, and its assertions are regression
  * pins now rather than measurements of a defect.
  *
- * ## ⭐ [#13280] The SEAM ASYMMETRY is repaired; section 7 pins the repair
+ * ## ⭐ [commit add6a1b1c] The SEAM ASYMMETRY is repaired; section 7 pins the repair
  *
  * Section 7 was filed as a finding of its own: at one and the same provider
  * seam, a REJECTION was absorbed and a SYNCHRONOUS throw lost the whole
@@ -397,7 +397,7 @@ const CLASSES: FaultClass[] = [
     faulted: () => ({ ...healthy(), authServiceProvider: async () => ({ api: { getSession: async () => { throw new Error('session store down'); } } }) }),
     ctx: 'lost', read: DENY, write: DENY,
   },
-  // ⭐ [#13280] `SETTINGS_PROVIDER_SYNC_THROW` USED TO LIVE HERE, and its
+  // ⭐ [commit add6a1b1c] `SETTINGS_PROVIDER_SYNC_THROW` USED TO LIVE HERE, and its
   // removal from this table is the repair, not a gap in it. The row read:
   //
   //     id: 'SETTINGS_PROVIDER_SYNC_THROW',
@@ -541,7 +541,7 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     //   > see it.
     //
     // That class is now in the `loud` cohort above. What remains `quiet` is the
-    // CONTEXT-LOST family (#13255), still unruled and still measured, never
+    // CONTEXT-LOST family (commit 43028a8f8), still unruled and still measured, never
     // asserted away — so this half keeps its original reading and this test
     // stays a regression pin rather than a rubber stamp.
     expect(quiet.filter((s) => s >= 500)).toEqual([]);
@@ -758,10 +758,10 @@ describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a 
 });
 
 // ---------------------------------------------------------------------------
-// 7. ⭐ [#13280] SEAM AGREEMENT — the same provider seam, the same fault, and
+// 7. ⭐ [commit add6a1b1c] SEAM AGREEMENT — the same provider seam, the same fault, and
 //    now the SAME answer whichever way the provider fails.
 //
-//    ⭐ INVERTED IN PLACE, not re-baselined. As written for #13255 this section
+//    ⭐ INVERTED IN PLACE, not re-baselined. As written for commit 43028a8f8 this section
 //    RECORDED a divergence and asserted it, under the heading "sync-throw and
 //    rejection do not agree":
 //
@@ -806,7 +806,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
   });
 
   it('⭐ objectQL — the SECOND divergent seam the card did not measure: both shapes answer 503', async () => {
-    // [#13280] Not in the card's table, found while verifying it: this seam
+    // [commit add6a1b1c] Not in the card's table, found while verifying it: this seam
     // diverged too, 403 (reject) vs 401 (sync throw). It agrees — and ⭐
     // [#13476] MOVED THE AGREED VALUE, 403 → 503. The superseded reading:
     //
@@ -816,7 +816,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     //
     // "Reaches an EMPTY grant set" was the defect: a WIRED engine that failed
     // is not an empty grant set, it is an UNDETERMINED one. Both shapes are now
-    // the outage they are. ⚠️ #13280's property is untouched and is what this
+    // the outage they are. ⚠️ commit add6a1b1c's property is untouched and is what this
     // test still exists for — the two shapes AGREE; only the value they agree
     // on moved, and it moved for both together.
     const { rejecting, syncThrowing } = await bothShapes('objectQLProvider');

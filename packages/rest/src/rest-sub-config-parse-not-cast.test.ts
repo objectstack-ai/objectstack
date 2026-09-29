@@ -40,12 +40,12 @@
  * `normalizeConfig` reads is declared by the sub-object's schema (measured
  * key by key; the diff is empty for all four), so the PARSED output is what
  * the normalized config is built from and the schema's own defaults are the
- * defaults. `api` held #11637's validate-only posture until [#14366] measured
+ * defaults. `api` held #11637's validate-only posture until [commit 53cbad9f7] measured
  * its key diff empty too and folded its `??` chain onto the parse; it keeps
  * the `.omit()`ed `requireAuth` tombstone, and is not this file's subject.
  *
  * [commit b3a63d32c] Ten of the keys these pins originally exercised were RETIRED under
- * ADR-0049 enforce-or-remove (the #14369 liveness census found them normalized
+ * ADR-0049 enforce-or-remove (the commit a3d5724c8 liveness census found them normalized
  * and never read): `crud.patterns` / `objectParamStyle`, `metadata.cacheTtl` /
  * `endpoints.schema`, `batch.operations.upsertMany` / `defaultAtomic`, and all
  * of `routes.*`. Each is now a `retiredKey()` tombstone, so the pins below that

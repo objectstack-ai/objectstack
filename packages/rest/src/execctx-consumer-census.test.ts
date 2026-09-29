@@ -182,7 +182,7 @@ const ENTITLED = {
     isSystem: false,
     tenantId: 'org_census',
     systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
-    // [#13214] The internal key `computeExecCtx` stamps on every context it
+    // [commit cc837dbfe] The internal key `computeExecCtx` stamps on every context it
     // produces, naming the environment whose auth service actually validated
     // the caller. `enforceEnvironmentOwnership` — the new guard on the UI-view
     // site this census now counts — compares it against the environment the
@@ -434,7 +434,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // doc-comment recording that `resolveExecCtx` is memoised per request
         // and so this is not a new org-resolution seam.
         //
-        // [#13214] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
+        // [commit cc837dbfe] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
         // the ONE metadata-touching route in the table that resolved no
         // identity at all — the exception this census surfaced — and the
         // 2026-08-30 ruling closed it. It joins as a BARE site behind the
@@ -467,7 +467,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // silently loses eight sites. [#20237] 15 → 13 and 23 → 21: the list
         // route's app and dashboard sites moved into the shared list gate (§2).
         //
-        // [#13214] The new site is BARE, and that is a decision the next case
+        // [commit cc837dbfe] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
