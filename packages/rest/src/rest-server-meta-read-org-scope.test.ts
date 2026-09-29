@@ -634,7 +634,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 //
 // ⇒ What this file DOES still discriminate is the organization being DROPPED:
 // remove the `organizationId` the `?type=` arm passes and the six repair cases
-// above turn red (measured at commit abf9101f1: 6 failed / 24 passed). Read the two apart before
+// above turn red (measured by commit abf9101f1: 6 failed / 24 passed). Read the two apart before
 // citing this file as a pin on the door-side predicate — it pins that the arm
 // still FOLDS, never that the fold happens at the door.
 

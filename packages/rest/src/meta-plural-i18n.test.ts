@@ -334,12 +334,12 @@ describe('#6349 §3 — the compound-name arity no longer exists', () => {
     /**
      * This section drove `GET /meta/:type/:section/:name` and asserted the
      * plural type spelling translated identically to the singular there. The
-     * arity is retired (commit 7986d973f stage 3), so the translation surface it covered
+     * arity is retired (stage 3, commit 7986d973f), so the translation surface it covered
      * is served by §2's single-item read — which folds the type through the
      * same `canonicalMetaUrlType` and runs the same translator.
      *
      * What is left to pin is the absence, so a re-mounted compound arity cannot
-     * quietly reappear WITHOUT the plural fold (the commit 2443bb4c4 defect: one spelling
+     * quietly reappear WITHOUT the plural fold (the defect commit 2443bb4c4 fixed: one spelling
      * translated, the other not).
      */
     it('mounts no compound `:section` arity to translate', () => {

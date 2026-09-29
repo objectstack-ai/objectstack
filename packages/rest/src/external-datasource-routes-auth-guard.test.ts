@@ -3,7 +3,7 @@
 /**
  * [#9686] The `/api/v1/datasources/:name/external/*` federation family requires
  * an authenticated caller — on every route, read and write alike — and
- * [#9901/commit 6ce58a735] a CAPABILITY above that on every route.
+ * [#9901 / commit 6ce58a735] a CAPABILITY above that on every route.
  *
  * ## What this pins, and why it is driven through the real plugin
  *
@@ -59,7 +59,7 @@
  * [commit 6ce58a735] `POST /external/validate` was the one route the #9901 ruling did
  * not name: no admin twin, no metadata created, so it kept the #9686
  * authentication floor — pinned here as an explicit `capability: null` row so
- * that gating it later had to change the table. That later card is commit 6ce58a735,
+ * that gating it later had to change the table. That later edit is commit 6ce58a735,
  * ruled 2026-08-20 (verbatim: 「同意你的意见。」, accepting option A): validate
  * takes the READ capability, because validation drives the same live
  * remote-schema introspection the read twins gate and reports on it. The row
@@ -105,7 +105,7 @@ type Handler = (req: any, res: any) => any;
  * [commit 6ce58a735] There is no `capability: null` row any more: `POST
  * /external/validate` carried one — spelled as an explicit `null` rather than
  * omitted, so that a later edit gating it had to change this table — and the
- * 2026-08-20 commit 6ce58a735 ruling is that later edit: validate is a read
+ * 2026-08-20 ruling, landed as commit 6ce58a735, is that later edit: validate is a read
  * (validation drives the same live remote introspection the read twins
  * gate), so its row now carries `READ_CAPABILITY` like its two read siblings.
  *
@@ -483,10 +483,10 @@ describe('[#9901] the family requires a capability above authentication', () => 
 
   it('[#10255] POST /external/validate requires the READ capability — the authentication-floor era is over', async () => {
     // This case is the previous pin FLIPPED, deliberately. Until the
-    // 2026-08-20 commit 6ce58a735 ruling it asserted the exact opposite — an
+    // 2026-08-20 ruling (commit 6ce58a735) it asserted the exact opposite — an
     // authenticated caller holding nothing was SERVED here while refused the
     // other four — because #9901's ruling did not name this route. The ruling
-    // that changed it is recorded on commit 6ce58a735 (option A): validation drives
+    // that changed it is recorded in commit 6ce58a735's message (option A): validation drives
     // the same live remote-schema introspection the read twins gate, so
     // validate is a read and answers to the read capability.
     const { table, service } = await bootFederation({

@@ -236,7 +236,7 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  *
  * `environmentId` is the multi-kernel routing key, and it is OUT of the
  * protocol request shape **by explicit maintainer decision** (ruling recorded
- * 2026-08-18 on commit 2a29caa53): `resolveProtocol(environmentId)` selects the target
+ * 2026-08-18, landed as commit 2a29caa53): `resolveProtocol(environmentId)` selects the target
  * kernel *before* the protocol call, and the implementation's parameter types
  * (`@objectstack/metadata-protocol`) never read it off the request — the spec
  * schemas (`protocol.zod.ts`) record the same exclusion schema-side. The doors
@@ -905,7 +905,7 @@ function importJobUndoable(row: any): boolean {
  * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
  * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
  * because a guard on some arms and not others re-opens the drift the single
- * spelling closed. Reachability is MEASURED, not assumed (commit 3ecb7dc1a, landed
+ * spelling closed. Reachability is MEASURED, not assumed (landed as commit
  * `3ecb7dc1a`): mysql2 3.23.1 returns a module constant literally named
  * `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds
  * `new Date(NaN)` for every year in 275760..294276 — years Postgres itself
@@ -1169,7 +1169,7 @@ type NormalizedRestServerConfig = {
      * [commit b3a63d32c] Every key of `RouteGenerationConfigSchema` is a `retiredKey()`
      * tombstone (ADR-0049 enforce-or-remove — nothing here ever read
      * `includeObjects` / `excludeObjects` / `nameTransform` / `overrides`; the
-     * Commit a3d5724c8 census). The sub-object is still PARSED, so an authored key is
+     * liveness census recorded in commit a3d5724c8). The sub-object is still PARSED, so an authored key is
      * refused at construction with its prescription rather than stripped, but
      * nothing is threaded: per-object exposure is the object's own
      * `enable.apiEnabled` / `enable.apiMethods`, enforced by `enforceApiAccess`.
@@ -1371,7 +1371,7 @@ export interface MountedRoute extends RouteEntry {
  * post-identity fault SHOULD discard identity; that is a behaviour change on a
  * public door and is deliberately left unruled here.
  *
- * ⚠️ Absorbing here cannot weaken the commit 6a180e42d loud path, but the reason is
+ * ⚠️ Absorbing here cannot weaken the loud path commit 6a180e42d built, but the reason is
  * no longer "one construction site" — [#13476] added a SECOND one, at the
  * data-engine seam below ({@link wiredEngineOrLoud}). The invariant that
  * matters is narrower and is what this helper actually needs: no branded
@@ -1423,7 +1423,7 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
  * | no engine wired at all (supported shape) | 403 | 403 — unchanged |
  * | the engine cannot be RESOLVED            | **403** | **503** |
  *
- * ⭐ This is COVERAGE of commit 6a180e42d's already-ruled class, not a new trade-off.
+ * ⭐ This is COVERAGE of the already-ruled class commit 6a180e42d landed, not a new trade-off.
  * That ruling (2026-08-30, verbatim 「第一批其余同意」) settled the DIRECTION — a
  * permission-store read that fails must fail LOUD rather than resolve as an
  * authenticated principal holding zero capabilities. `tryFind` implemented it
@@ -2244,8 +2244,8 @@ export class RestServer {
      * identity resolved at all, so an ANONYMOUS caller received another
      * environment's UI view — object label plus every field's name / label /
      * type / required — and the route doubled as an object-existence oracle for
-     * whatever environment it named. Driven and reported on commit cc837dbfe (PRs commit 889ec5b42,
-     * Commit 3d10755f0).
+     * whatever environment it named. Measured in commits 889ec5b42 (identity) and
+     * 3d10755f0 (tenancy).
      *
      * Adding `resolveExecCtx` + `enforceAuth` was measured NOT to be the repair
      * (it was the rejected option B of the 2026-08-30 ruling): it stops the
@@ -4077,7 +4077,7 @@ export class RestServer {
      *
      *  - `api.projectResolution` was `.omit()`ed until #12450 withdrew it.
      *
-     *    ⇒ Re-measured at commit 53cbad9f7 on the landed tree, because the discard is
+     *    ⇒ Re-measured by commit 53cbad9f7 on the landed tree, because the discard is
      *    only safe to remove if the key diff is EMPTY: the 14 keys
      *    `normalizeConfig` reads and the 14 `RestApiConfigSchema` declares
      *    after the `.omit()` are the same 14, in both directions. So the
@@ -4089,7 +4089,7 @@ export class RestServer {
      *    `documentation` or `responseFormat` object the caller WRITES now
      *    arrives carrying its own declared inner defaults, where the `??`
      *    chain copied the authored object through untouched. Both keys have
-     *    zero read sites outside this block (the commit 53cbad9f7 census), so nothing
+     *    zero read sites outside this block (the census commit 53cbad9f7 took), so nothing
      *    observes it today — but it is a real change to this structure's
      *    contents and belongs in the record rather than in a reader's surprise.
      *
@@ -4180,7 +4180,7 @@ export class RestServer {
         // duplicated `RestApiConfigSchema`'s defaults key for key — ELEVEN
         // literals in `packages/rest` restating the eleven top-level
         // `z.default(...)`s in `packages/spec`, with nothing pinning that the
-        // two stayed equal. (Eleven, measured on both sides at commit 53cbad9f7; the
+        // two stayed equal. (Eleven, measured on both sides by commit 53cbad9f7; the
         // filing card said twelve, having counted the `config.api ?? {}` that
         // guards the whole object rather than a per-key default.)
         // Commit 53cbad9f7 folded the chain onto the parse after re-measuring the key
@@ -4525,7 +4525,7 @@ export class RestServer {
                     // NOT overwritten here. `DiscoverySchema` declares the field
                     // under "System Identity", grouped with `name` and
                     // `environment` — the "what server is this" question, settled
-                    // by the #10993 ruling and reaffirmed by commit 376c70f98/commit 98ea3443f.
+                    // by the #10993 ruling, landed by commits 98ea3443f and 376c70f98.
                     //
                     // This line used to read `discovery.version =
                     // this.config.api.version`, which is a different fact
@@ -4539,7 +4539,7 @@ export class RestServer {
                     // It also masked the producer. `getDiscovery()` derives the
                     // value from `OS_RUNTIME_VERSION` (commit 376c70f98) — the same stamp
                     // `/health` and the runtime dispatcher's own `/discovery`
-                    // read (#10993/commit 98ea3443f) — so after #11297 this overwrote a
+                    // read (#10993, commit 98ea3443f) — so after #11297 this overwrote a
                     // value that already AGREED with the other producer, turning
                     // one answer back into two dialects of one field.
                     //
@@ -5064,7 +5064,7 @@ export class RestServer {
                 //    lives where it is observable, in the mount
                 //    `${basePath}/${version}` -> `/api/v1`. The runtime version
                 //    is answered by `{basePath}/discovery` and `/health`, derived
-                //    from `OS_RUNTIME_VERSION` (#10993/commit 376c70f98/#11292). OpenAPI
+                //    from `OS_RUNTIME_VERSION` (#10993, commit 376c70f98, #11292). OpenAPI
                 //    3.1 defines this field as "the version of the OpenAPI
                 //    document (which is distinct from the OpenAPI Specification
                 //    version or the API implementation version)" — the document
@@ -5292,7 +5292,7 @@ export class RestServer {
      * under a switch is a decision, not a tidy-up.
      *
      * [commit 7986d973f] The compound-name twins spelled `/:type/:section/:name` used to
-     * close that list. They are RETIRED (stage 3 of commit 7986d973f): every item is
+     * close that list. They are RETIRED (stage 3, commit 7986d973f): every item is
      * addressed through the single-segment `/:type/:name`, with the name
      * percent-encoded by the caller.
      *
@@ -6226,7 +6226,7 @@ export class RestServer {
                         //
                         // #3984 ruled this shape for exactly that reason ("每个
                         // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
-                        // Commit 83a3b1f2e is why the ruling is written into the code
+                        // commit 83a3b1f2e is why the ruling is written into the code
                         // rather than trusted to memory: eight days after
                         // #3984 landed, the cache-branch condition below still
                         // excluded `doc`/`book` by LITERAL comparison, so
@@ -7310,7 +7310,7 @@ export class RestServer {
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
                     // like the audit door below: this door still spreads the
                     // transport-level `environmentId` (long-standing wire
-                    // shape, deliberately unchanged — the commit 2a29caa53 ruling keeps
+                    // shape, deliberately unchanged — the ruling commit 2a29caa53 landed keeps
                     // it out of the protocol schema, and the implementation
                     // never reads it), so the wrapper is what layers that one
                     // member on. Every OTHER key is compiled against the spec
@@ -8231,7 +8231,7 @@ export class RestServer {
         // after publish, identical for a name that does not exist: a route
         // that structurally could not 404.
         //
-        // ONE arity since commit 7986d973f (stage 3 of commit 7986d973f's maintainer-ruled
+        // ONE arity since commit 7986d973f (stage 3 of the maintainer-ruled
         // retirement of compound-name addressing, 2026-08-25). This route used
         // to be mounted twice — the second registration was
         // `/:type/:section/:name/published`, folding `section` and `name` back
@@ -8326,7 +8326,7 @@ export class RestServer {
                         // read. [commit e1d4f9e3f] The CALLEE gates: `getMetaItemLayered`
                         // resolves `organizationIdForMetaRead` AFTER its canonical
                         // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
-                        // the unfolded `:type`, would be the commit 26f3588fb defect. ⛔ And
+                        // the unfolded `:type`, would be the defect commit 26f3588fb fixed. ⛔ And
                         // the old "fail-open in the safe direction" reading is the
                         // argument the predicate refutes: an org named on a type
                         // the registry does not declare overridable resurrects the
@@ -8488,7 +8488,7 @@ export class RestServer {
         // ── RETIRED: the compound `/:type/:section/:name` arities ──────────
         //
         // `GET` and `PUT /meta/:type/:section/:name` were mounted here until
-        // Commit 7986d973f (stage 3 of commit 7986d973f's maintainer-ruled retirement of
+        // commit 7986d973f (stage 3 of the maintainer-ruled retirement of
         // compound-name addressing, 2026-08-25). Both folded `section` and
         // `name` back into one slash-bearing key (`views/all_leads`) that the
         // protocol layer then treated as a single opaque string — the section

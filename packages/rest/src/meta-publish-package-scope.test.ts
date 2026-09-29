@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Commit 9e04c3e35 — the draft→active promotion door could not state the package its
+// Before commit 9e04c3e35 the draft→active promotion door could not state the package its
 // write belongs to, so #9612's package-closure narrowing never fired for the
 // one door that needed it most.
 //

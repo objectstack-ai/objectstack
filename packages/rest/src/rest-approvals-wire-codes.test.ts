@@ -4,7 +4,7 @@
  * [commit 30b1c636a] The approvals routes' wire codes are REGISTERED vocabulary — pins
  * for the population the card's sweep found.
  *
- * The commit 30b1c636a sweep measured 9 codes reaching the wire from `packages/rest` that
+ * The sweep behind commit 30b1c636a measured 9 codes reaching the wire from `packages/rest` that
  * were in neither `StandardErrorCode` nor `ERROR_CODE_LEDGER`, all in one
  * family and all with the same cause: the approvals route factories spell the
  * terminal 500 catch's code as a TEMPLATE
@@ -29,7 +29,7 @@
  *    (single-occurrence `.replace('-', '_')` included), so a route name the
  *    template would mangle into an invalid code also fails here.
  * [#14573] The file has since become the home for the approvals door's
- * live-emission pins generally, not only the commit 30b1c636a population: the
+ * live-emission pins generally, not only the population commit 30b1c636a registered: the
  * `FORBIDDEN` → 403 case below pins a row that is registered vocabulary and
  * whose emission was — contrary to that card's premise — already observed
  * elsewhere. See its own comment for where, and why it is pinned here too.
@@ -237,7 +237,7 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
     // the three reds the #14573 correction measured, two of them in a file
     // whose declared subject is a DIFFERENT contract — precisely the pin a
     // file-scoped grep cannot see. Same instrument, zero reds for the six ⇒
-    // they were genuinely uncovered, not covered somewhere unobvious. Commit 226e72443
+    // they were genuinely uncovered, not covered somewhere unobvious. The card behind commit 226e72443
     // predicted at least one of the six would turn out already pinned; it did
     // not, and that prediction is now answered by measurement rather than
     // carried forward as a caveat.

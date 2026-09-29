@@ -164,7 +164,7 @@ const EXITS: ObjectSchemaMaskExit[] = [
     {
         name: 'GET /meta/objects/:name?state=draft — uncached branch via the canonical PLURAL spelling',
         run: (testCase) => {
-            // #3984/commit 83a3b1f2e: the plural spelling is canonical, and a gate keyed on
+            // #3984 / commit 83a3b1f2e: the plural spelling is canonical, and a gate keyed on
             // the raw `:type` param is a gate it walks past. Driving one row of
             // the table through it keeps that from being re-learned.
             const { rest } = boot({ testCase, cached: true });

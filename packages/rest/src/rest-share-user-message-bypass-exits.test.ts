@@ -45,7 +45,7 @@
  *
  * ⭐ The second row is the card's OPEN question, measured rather than assumed:
  * the prefix exit had no precedent of its own (the fault terminal has one —
- * Commit 79c46da90 deliberately rides the mark onto fault terminals). The measurement
+ * commit 79c46da90 deliberately rides the mark onto fault terminals). The measurement
  * answers it. `/data` carries the mark for that identical throw, on all five
  * prefixes (§3), so the two doors disagree and the exit is in. Had `/data`
  * omitted it there, the two doors would have AGREED and there would have been

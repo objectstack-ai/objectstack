@@ -20,7 +20,7 @@
  * sampled one of the twins, not both.
  *
  * ⚠️ [commit 7986d973f] The compound `PUT /meta/:type/:section/:name` in that table is
- * RETIRED (commit 7986d973f stage 3). The row is kept because it is the historical
+ * RETIRED (stage 3, commit 7986d973f). The row is kept because it is the historical
  * measurement this file exists to explain; the case that drove it is replaced
  * by a pin that the arity stays unmounted, so a re-mount cannot quietly
  * reintroduce a fourth envelope dialect.

@@ -332,7 +332,7 @@ export function sanitizeRowError(raw: unknown): string {
  * `cause`), and this report used to relay that code verbatim — while the
  * WHOLE-REQUEST failure on the very same `POST /data/:object/import` answered
  * `UNIQUE_VIOLATION` through `mapDataError`. Maintainer ruling (2026-09-03,
- * Commit 65846bc46): one wire spelling on every route. So the engine's envelope is mapped
+ * commit 65846bc46): one wire spelling on every route. So the engine's envelope is mapped
  * to `UNIQUE_VIOLATION` here, by the same predicate the whole-request arm uses
  * ({@link isEngineDuplicateRecordEnvelope}: registered code AND class name),
  * before the producer's own code is read. A field-level finding still wins

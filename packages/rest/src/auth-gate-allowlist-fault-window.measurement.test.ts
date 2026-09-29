@@ -530,7 +530,7 @@ describe('[#15021] §5 can a mounted route capture a CONCRETE remediation path?'
     // mounts (`plugin-auth`'s `/api/v1/auth/*`, `plugin-hono-server`'s
     // `/auth/me/*`) that never enter `computeExecCtx`.
     //
-    // ⚠️ If this goes RED, the reachability qualifier on commit cc238db8b is gone and the
+    // ⚠️ If this goes RED, the reachability qualifier commit cc238db8b pinned is gone and the
     // card's impact sentence has become true: a mounted route now answers a
     // remediation path, and §2 says every such answer is 503 for the duration
     // of a session-backend fault. ⛔ Do not relax this to make a new mount

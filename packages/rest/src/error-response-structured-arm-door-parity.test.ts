@@ -460,7 +460,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             // this case pinned so it was visible rather than implied:
             // `classifyDataError`'s GENERIC declared-status passthrough
             // appended `object` from the door's argument and
-            // `resolveErrorResponse`'s did not. That card added the limb, so
+            // `resolveErrorResponse`'s did not. That commit added the limb, so
             // the verdict this case is labelled with now holds for the BODY
             // too, and the pin says so rather than describing a closed gap.
             expect(single.body).toHaveProperty('object', 'account');
@@ -480,7 +480,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
         });
 
         /**
-         * FLIPPED by commit 1c7adc73d, deliberately and in that card's PR, from
+         * FLIPPED by commit 1c7adc73d, deliberately and in that commit, from
          * `ACCEPTED DIVERGENCE` to `CONVERGED (sentence)`. ⛔ The case is not
          * DELETED: it is the only thing that would notice the divergence coming
          * back, and what changes is its verdict, not its existence.
@@ -597,7 +597,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.object = 'account';
             const bulk = bulkDoor(err, 'account');
             const single = singleDoor(err, 'account');
-            // The single door: what commit cf6e0a193 ruled — a crash is a fault.
+            // The single door: what commit cf6e0a193 decided — a crash is a fault.
             expect(single.status).toBe(500);
             expect(single.body.code).toBe('INTERNAL_ERROR');
             expect(String(single.body.error)).not.toContain('threw:');
@@ -651,7 +651,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * the flip moved. An implementation that degraded every SANDBOX-origin
          * error to the fault terminal would turn both cases above green while
          * deleting the whole sandbox-refusal surface on the bulk door —
-         * Commit cf6e0a193's ruling fences exactly that: *"Ordinary declared refusals (a
+         * the ruling commit cf6e0a193 implemented fences exactly that: *"Ordinary declared refusals (a
          * hook that throws a business error carrying a code, no crash) are
          * **untouched** — only the crash branch moves."*
          *

@@ -280,7 +280,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   //
   // [commit 7986d973f] The ordering constraint this note used to carry is DISCHARGED,
   // not merely unstated: the compound `/:type/:section/:name` arities are
-  // retired (stage 3 of commit 7986d973f), and they were the three-segment catch-all
+  // retired (stage 3, commit 7986d973f), and they were the three-segment catch-all
   // that every literal three-segment sibling had to be registered above. The
   // four-segment `/state/:field` collision with the compound `/published`
   // twin is gone with it. `meta-route-registration-order.test.ts` still pins

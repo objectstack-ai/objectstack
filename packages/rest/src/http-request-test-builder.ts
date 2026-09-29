@@ -32,7 +32,7 @@
  * ## Why each default is the default
  *
  * **`method` and `path` are NOT defaulted — they are read off the route under
- * test.** A constant default here is precisely the hazard commit e10cf3444 names: a
+ * test.** A constant default here is precisely the hazard commit e10cf3444 was written to remove: a
  * `path` that does not match the route under test makes a passing test measure
  * something other than what it names, and `req.path` is live rather than
  * decorative — `RestServer.enforceAuth` feeds it to `isAuthGateAllowlisted`

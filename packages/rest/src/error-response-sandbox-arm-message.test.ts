@@ -21,7 +21,7 @@
  *
  * The bulk door is right because #11588 taught `resolveErrorResponse`'s
  * declared-status passthrough to read `sandboxBusinessMessage`, and because
- * Commit 6d178a408 excludes a sandbox-origin error from the shared consult entirely. The
+ * commit 6d178a408 excludes a sandbox-origin error from the shared consult entirely. The
  * single door reached the arms and shipped the wrapper — #11588's own defect,
  * one door over, with the direction reversed rather than closed.
  *
@@ -63,7 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The classification's own source, read once: §4-derivation and §6 both scan it
- * — one re-derives the arm list from the tree (the commit cf6e0a193 ruling's execution
+ * — one re-derives the arm list from the tree (the ruling commit cf6e0a193 landed: its execution
  * constraint), the other guards the sentence rule. Same package, so the read
  * does not escape it (AGENTS.md → cross-package test inputs).
  */
@@ -233,7 +233,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
     });
 
     /**
-     * FLIPPED by commit cf6e0a193, deliberately and in that card's PR, from
+     * FLIPPED by commit cf6e0a193, deliberately and in that commit, from
      * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline commit 1c7adc73d used
      * on its own §4 one file over. ⛔ The section is not DELETED: it is the only
      * thing that would notice the divergence coming back, and what changes is
@@ -256,7 +256,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
      *
      *  - **the flip**, per arm and by NAME over {@link ARMS} — the list the
      *    ruling required be RE-DERIVED from the tree rather than copied from
-     *    Commit 1c7adc73d, and `§4-derivation` below is the guard that keeps it derived;
+     *    the list commit 1c7adc73d enumerated, and `§4-derivation` below is the guard that keeps it derived;
      *  - **the positive control STAYS** and is still a control: the same crash
      *    carrying NO declared code reaches the same sanitised 500, so a green
      *    flip leg cannot be read as "the terminal swallowed everything";
@@ -337,7 +337,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
 
         /**
          * The ruling's own execution constraint: *"the seat re-derives the arm
-         * list from the tree, not from commit 1c7adc73d's list."* Re-deriving once is a
+         * list from the tree, not from [commit 1c7adc73d]'s list."* Re-deriving once is a
          * reading that rots; this leg is the same re-derivation asked
          * mechanically, so the next arm added to the shared classification is
          * either covered above or excused here BY NAME.

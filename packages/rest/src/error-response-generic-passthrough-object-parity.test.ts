@@ -121,8 +121,8 @@ const singleDoor = (error: unknown, object?: string): Wire => mapDataError(error
  *
  * ⚠️ "Three siblings" is itself easy to over-read, so the measured limit: §3
  * keys on `RECORD_LOCKED`, one of §1's OWN codes, so an arm for that code
- * migrates §3 along with §1. Only §2 and commit 6d178a408's §4 are independent of the
- * codes below. Commit 6d178a408 §5's "every arm in the SHARED classification has a §1
+ * migrates §3 along with §1. Only §2 and the door-parity file's §4 are independent of the
+ * codes below. The door-parity file's §5 "every arm in the SHARED classification has a §1
  * parity case" reddens when an arm ARRIVES, but goes green again as soon as its
  * author adds the parity case it asks for — it does not hold THIS file's §1 to
  * the passthrough.
@@ -140,7 +140,7 @@ describe('#14725 — the generic declared-status passthrough carries `object` on
             // The card's own measurement. `DUPLICATE_RECORD` HAS a bespoke arm
             // keyed on `DuplicateRecordError`'s class/`name`; a bare property
             // write does not carry it, which is exactly the shape the card
-            // measured on the commit 6d178a408 branch.
+            // measured on the branch that landed as commit 6d178a408.
             { code: 'DUPLICATE_RECORD', status: 409, message: 'A record with this value already exists' },
             { code: 'RECORD_LOCKED', status: 409, message: 'This record is frozen' },
             // A 4xx from the other end of the band, so the pin is not a

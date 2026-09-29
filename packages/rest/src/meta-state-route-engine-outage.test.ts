@@ -73,7 +73,7 @@
  *   | no provider wired at all                  | 404 NOT_FOUND ⭐ PIN        |
  *   | provider RESOLVES `undefined` (absence)   | 404 NOT_FOUND ⭐ PIN        |
  *   | provider REJECTS (wired, failed to build) | 503 SERVICE_UNAVAILABLE ⭐  |
- *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c)    | 503 SERVICE_UNAVAILABLE    |
+ *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c) | 503 SERVICE_UNAVAILABLE    |
  *
  * ⭐ The NEGATIVE CONTROL (§3) is the half that keeps this a restoration rather
  * than a behaviour change: on a HEALTHY engine, an object that genuinely does

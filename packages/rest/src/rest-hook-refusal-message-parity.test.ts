@@ -482,7 +482,7 @@ describe('[#11588] #5437/#5582 and #5423 are exactly where they were', () => {
 // door while `mapDataError` sanitised the same error to a `500`. #11588 stated
 // why it stopped there — "making the two agree means moving the STATUS the
 // passthrough decided, which is a contract question and not this card's" — and
-// Commit cf6e0a193 widened the population without being able to take that question
+// commit cf6e0a193 widened the population without being able to take that question
 // either, recording it a second time as an ACCEPTED DIVERGENCE one file over
 // (`error-response-structured-arm-door-parity.test.ts` §4).
 //
@@ -512,7 +512,7 @@ describe('[#11588 → #17273] the crash-with-a-declared-4xx divergence, now CLOS
         expect(viaRoute.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(String(viaRoute.body.error)).not.toContain('threw:');
 
-        // The `/data` door, unmoved since #7543/commit cf6e0a193 — the control that says
+        // The `/data` door, unmoved since #7543 / commit cf6e0a193 — the control that says
         // the flip above is the route door meeting it, not both doors sliding.
         const viaData = mapDataError(withCrash());
         expect(viaData.status).toBe(500);
@@ -523,7 +523,7 @@ describe('[#11588 → #17273] the crash-with-a-declared-4xx divergence, now CLOS
 
     it('#17273 negative control: the same declared 4xx WITHOUT a crash keeps the passthrough, both status and sentence', () => {
         // One `innerMessage` apart from the case above. A refusal is not a
-        // crash, and commit cf6e0a193's ruling fences it explicitly — if this goes green
+        // crash, and the ruling commit cf6e0a193 implemented fences it explicitly — if this goes green
         // by answering 500, the fix above deleted the refusal surface instead
         // of moving the crash.
         const refusal = throughRouteDoor(sandboxRefusal('x', { status: 409 }));

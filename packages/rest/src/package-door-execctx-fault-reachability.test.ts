@@ -92,9 +92,9 @@
  *
  * ## What this file does, and no longer does not (commit 6a180e42d)
  *
- * As written for commit 43028a8f8 this file repaired nothing and asserted no verdict —
+ * As first written (commit 43028a8f8) this file repaired nothing and asserted no verdict —
  * distinguishing "no context" from "resolution failed" was a behaviour change
- * on a public door and out of that card's scope. Commit 6a180e42d RULED that change for
+ * on a public door and out of that measurement's scope. Commit 6a180e42d landed that ruled change for
  * the permission-store half, so the assertions covering it are now regression
  * pins on the repaired behaviour rather than measurements of a defect.
  *
@@ -541,7 +541,7 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     //   > see it.
     //
     // That class is now in the `loud` cohort above. What remains `quiet` is the
-    // CONTEXT-LOST family (commit 43028a8f8), still unruled and still measured, never
+    // CONTEXT-LOST family (first measured by commit 43028a8f8), still unruled and still measured, never
     // asserted away — so this half keeps its original reading and this test
     // stays a regression pin rather than a rubber stamp.
     expect(quiet.filter((s) => s >= 500)).toEqual([]);
@@ -761,7 +761,7 @@ describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a 
 // 7. ⭐ [commit add6a1b1c] SEAM AGREEMENT — the same provider seam, the same fault, and
 //    now the SAME answer whichever way the provider fails.
 //
-//    ⭐ INVERTED IN PLACE, not re-baselined. As written for commit 43028a8f8 this section
+//    ⭐ INVERTED IN PLACE, not re-baselined. As first written in commit 43028a8f8 this section
 //    RECORDED a divergence and asserted it, under the heading "sync-throw and
 //    rejection do not agree":
 //
@@ -816,7 +816,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     //
     // "Reaches an EMPTY grant set" was the defect: a WIRED engine that failed
     // is not an empty grant set, it is an UNDETERMINED one. Both shapes are now
-    // the outage they are. ⚠️ commit add6a1b1c's property is untouched and is what this
+    // the outage they are. ⚠️ The property commit add6a1b1c established is untouched and is what this
     // test still exists for — the two shapes AGREE; only the value they agree
     // on moved, and it moved for both together.
     const { rejecting, syncThrowing } = await bothShapes('objectQLProvider');

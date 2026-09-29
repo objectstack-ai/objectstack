@@ -323,7 +323,7 @@ describe('[#12710] §4 both doors carry the same producer mark for the same thro
       const flat = dataDoor(c.error());
       // POSITIVE CONTROL — without this the analytics assertion below could pass
       // for the wrong reason (two doors agreeing the mark does not belong on
-      // this terminal). Commit 79c46da90 rules that it does; `/data` is where that ruling
+      // this terminal). The ruling commit 79c46da90 landed says it does; `/data` is where that ruling
       // already lives.
       expect(
         flat.body.userMessage,

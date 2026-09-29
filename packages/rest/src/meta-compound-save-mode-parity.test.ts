@@ -23,7 +23,7 @@
  * The caller asked for a staging buffer and got a publish, with a `200` and no
  * signal at the call site.
  *
- * Commit 7986d973f's maintainer ruling (2026-08-25) retired compound metadata item names
+ * The maintainer ruling of 2026-08-25 (completed by commit 7986d973f) retired compound metadata item names
  * outright. Stage 1 (commit 311433f6b) declared the item-name grammar and refuses every
  * slash-bearing name at the publish door; stage 3 (commit 7986d973f) un-mounts the arity.
  * So the divergence is not fixed — the door it needed is GONE.

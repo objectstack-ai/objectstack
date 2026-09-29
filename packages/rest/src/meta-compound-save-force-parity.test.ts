@@ -16,7 +16,7 @@
  * do, got the identical refusal back, with nothing saying the parameter had
  * been ignored. #11095 closed it by threading the parameter.
  *
- * Commit 7986d973f's maintainer ruling (2026-08-25) then retired compound metadata item
+ * The maintainer ruling of 2026-08-25 (completed by commit 7986d973f) then retired compound metadata item
  * names outright. Stage 1 (commit 311433f6b) declared the item-name grammar and refuses
  * every slash-bearing name at the publish door — BEFORE the destructive gate
  * this file was written about — and stage 3 (commit 7986d973f) un-mounts the arity.

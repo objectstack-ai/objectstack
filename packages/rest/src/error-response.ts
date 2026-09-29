@@ -957,7 +957,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  *
  * ## What the `UNIQUE_VIOLATION` answer restores, per driver
  *
- * Corrected under the commit 6d178a408 contract review (condition 7), which measured the
+ * Corrected under the contract review of commit 6d178a408 (condition 7), which measured the
  * earlier statement backwards.
  *
  * On the **SQL** drivers the bulk doors answered `409 UNIQUE_VIOLATION` with the
@@ -977,9 +977,9 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  *
  * ## One wire spelling on the route — the rows too (commit 65846bc46)
  *
- * The commit 6d178a408 contract review (condition 2) disclosed a fork this file's "one
+ * The contract review of commit 6d178a408 (condition 2) disclosed a fork this file's "one
  * condition, one wire code" framing did not cover: the DOORS answered a
- * `DuplicateRecordError` as `UNIQUE_VIOLATION` (commit 10220a7bf's ruling, the arm
+ * `DuplicateRecordError` as `UNIQUE_VIOLATION` (the ruling commit 10220a7bf implemented, the arm
  * below), while a batch or import ROW did not go through this classification
  * at all — `metadata-protocol`'s `toRowApiError` put the thrown REGISTERED
  * code on the row verbatim and `import-runner`'s row report did the same — so
@@ -994,7 +994,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  * the same way ({@link isEngineDuplicateRecordEnvelope}: registered code AND
  * class name, never message text): `toRowApiError` for the rows of
  * `POST /data/:object/batch`, and `toFailedResult` for the import runner's
- * row reports. The single-record door's code did not move (commit 10220a7bf's refusal
+ * row reports. The single-record door's code did not move (the refusal commit 10220a7bf built
  * stands), no ledger waiver was added — the duplication is removed, not
  * declared — and the ENGINE's thrown identity is unchanged:
  * `DuplicateRecordError.code` is still `DUPLICATE_RECORD` in-process; only
@@ -1482,8 +1482,8 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         //
         // The `code` rides along on {@link declaresServerFault}, the criterion
         // `@objectstack/types` already owns for "this producer DECLARED a
-        // server fault" (`status >= 500` *and* a non-empty string `code`; PR
-        // Commit 64cd01082, pinned by `error-leak.test.ts`, read by the analytics route
+        // server fault" (`status >= 500` *and* a non-empty string `code`;
+        // commit 64cd01082, pinned by `error-leak.test.ts`, read by the analytics route
         // here and by `runtime`'s dispatcher). Inside this branch its status
         // half is already true, so what it adds is the `code` half — and it
         // adds it as a TESTED predicate rather than a fourth open-coded
@@ -2113,7 +2113,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // answers, decided by which route caught it — and the one this door gave
     // put the runner's `TypeError: …` text on the wire at a business status.
     //
-    // The ruling that decides it is commit cf6e0a193's, quoted on {@link isSandboxCrash}
+    // The ruling that decides it is the one commit cf6e0a193 implemented, quoted on {@link isSandboxCrash}
     // and NOT restated here: *"A declared code is the author's statement about
     // the failure mode they **handled**. A crash … is not that mode, so it is
     // classified as a fault"*, against *"an internal stack-shaped sentence at a
@@ -2124,7 +2124,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // divergence pin flips with it.
     //
     // Answered through {@link mapDataError} rather than by returning
-    // {@link UNCLASSIFIED_FAULT} here, for the reason the commit 6d178a408 consult below
+    // {@link UNCLASSIFIED_FAULT} here, for the reason the consult commit 6d178a408 added below
     // gives: same terminal, same {@link withDeclaredUserMessage} wrapper,
     // nothing for a future edit to desynchronise. Both doors now read ONE
     // `isSandboxCrash` gate; ⛔ do not grow a second opinion about a crash in
@@ -2138,7 +2138,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // unconditional prose-drop (#5437 / #5582 / #5907) is not narrowed by this:
     // the terminal withholds prose too, and what moves for that shape is the
     // status and the declared `code`, both of which shrink to the sanitised
-    // pair. Commit 6d178a408's guard 1 is about a producer-declared 5xx that is NOT a
+    // pair. Guard 1 of commit 6d178a408's consult is about a producer-declared 5xx that is NOT a
     // crash and is untouched — `error-response-structured-arm-door-parity.test.ts`
     // §4 pins both shapes, side by side.
     if (isSandboxCrash(error)) return mapDataError(error, object);
@@ -2277,7 +2277,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // {@link thrownCodeFields}. This arm's old gate was bare truthiness, so
         // it also admitted a non-string `code`; that limb is gone with the
         // narrowing, and the flat arms now ask one question (five of them since
-        // Commit cad8b42f0 brought the sandbox unwrap door into the vocabulary).
+        // commit cad8b42f0 brought the sandbox unwrap door into the vocabulary).
         // [commit 79c46da90] Both passthrough arms ride a producer-declared `userMessage`
         // onto the body, the same rule as the exported `mapDataError` wrapper —
         // see {@link withDeclaredUserMessage}. On the 5xx arm the PROSE is
@@ -2395,7 +2395,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // the limb {@link classifyDataError}'s generic declared-status
         // passthrough has always ended on. Without it the two copies of one
         // passthrough differed by exactly one key, which is the residue
-        // Commit 6d178a408 left behind: after that card the doors agree for every code
+        // commit 6d178a408 left behind: after that commit the doors agree for every code
         // a BESPOKE arm classifies, and disagree for every code that reaches
         // the GENERIC passthrough. Measured on `main` @ `a12b15e394`, one
         // error object, both doors:
@@ -2407,7 +2407,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         //         409 {"error":"…","code":"DUPLICATE_RECORD"}
         //
         // One refusal, two bodies, decided by which route caught it — the
-        // Commit 6d178a408 shape one arm over. It also closes that card's second
+        // shape commit 6d178a408 fixed, one arm over. It also closes that commit's second
         // residue: `recordNotFoundError` (`@objectstack/core`) declares
         // `code`, `status = 404` AND `object`, so its declared status carries
         // it past the `RECORD_NOT_FOUND` arm below into THIS passthrough on

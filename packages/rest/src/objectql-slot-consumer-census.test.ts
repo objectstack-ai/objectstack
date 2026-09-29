@@ -40,7 +40,7 @@
  *   | no provider wired at all                  | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
  *   | provider RESOLVES `undefined` (absence)   | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
  *   | provider REJECTS (wired, failed to build) | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
- *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c)    | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
+ *   | provider THROWS SYNCHRONOUSLY (commit add6a1b1c) | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
  *
  * ⇒ this consumer never re-collapsed: a rejection and a resolved `undefined`
  * always reached two different answers, which is the whole of the decidable

@@ -30,7 +30,7 @@
  *   1. §1-§2 — the seam, reproduced INDEPENDENTLY of commit 4801296e7 (its own harness,
  *      its own instrument), plus the exact argument object the seam hands the
  *      producer.
- *   2. §3-§4 — ⭐ the half commit 889ec5b42 marks UNMEASURED: does `getUiView` apply
+ *   2. §3-§4 — ⭐ the half left UNMEASURED until commit 889ec5b42: does `getUiView` apply
  *      authorization of its own? Driven against the REAL
  *      `ObjectStackProtocolImplementation`, not read off a grep.
  *   3. §5 — `isAuthGateAllowlisted` does not name a `/ui` path, verified by
@@ -85,7 +85,7 @@ type Handler = (req: any, res: any) => any;
 
 // ---------------------------------------------------------------------------
 // Harness — same shape as `execctx-consumer-census.test.ts`, rebuilt here so
-// this file's readings do not inherit that file's fixtures (commit 889ec5b42 asks for an
+// this file's readings do not inherit that file's fixtures (commit 889ec5b42 is an
 // INDEPENDENT reproduction, not a citation).
 // ---------------------------------------------------------------------------
 
@@ -371,7 +371,7 @@ describe('[#13214] §2 the argument object — the producer cannot gate on what 
 });
 
 // ---------------------------------------------------------------------------
-// 3. ⭐ The question commit 889ec5b42 marks UNMEASURED — does the producer gate?
+// 3. ⭐ The question left UNMEASURED until commit 889ec5b42 — does the producer gate?
 // ---------------------------------------------------------------------------
 
 describe('[#13214] §3 downstream — the REAL `getUiView`, driven', () => {
@@ -401,7 +401,7 @@ describe('[#13214] §3 downstream — the REAL `getUiView`, driven', () => {
     }, 120_000);
 
     it('the producer applies NO authorization of its own — called directly, an identity in the argument changes nothing', async () => {
-        // ⚠️ This is commit 889ec5b42's originally-UNMEASURED half and the answer has not
+        // ⚠️ This is the originally-UNMEASURED half commit 889ec5b42 measured, and the answer has not
         // changed: the repair is at the seam, and the producer still gates
         // nothing. Measured where it can still be measured — §2 and §4 supply
         // the other half (the seam tells it nothing, and the instance is not

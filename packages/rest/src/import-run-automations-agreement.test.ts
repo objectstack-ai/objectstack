@@ -86,7 +86,7 @@ describe('runAutomations — declared default agrees with the server (#6704)', (
   }
 
   it('validating before sending cannot change the outcome', async () => {
-    // The concrete harm commit c3f491626 names: a client that parses its request through
+    // The concrete harm commit c3f491626 removed: a client that parses its request through
     // the published schema and sends the PARSED object used to get the opposite
     // behaviour from one that sent the same body unvalidated. Drive both paths
     // through the server and require one answer.
