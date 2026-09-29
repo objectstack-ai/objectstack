@@ -227,7 +227,8 @@ describe('a declaration this runtime cannot serve is refused, never ignored', ()
         });
         const error = expectRefusal(
             rejectionOf(applyInputMapping(endpoint, { price: '3' })),
-            'inputMapping[1].transform', 'convertToInt', 'showcase_inquiries', '#5040',
+            'inputMapping[1].transform', 'convertToInt', 'showcase_inquiries',
+            'rejected at publish rather than parsed and ignored',
         );
         // The prescription, not just the verdict: an author has to be told what
         // to do instead, or the refusal is only half a signal.
