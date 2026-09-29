@@ -566,7 +566,7 @@ describe('[#15348] §5 — the posture and the membership are both re-read per c
 });
 
 // ---------------------------------------------------------------------------
-// §6 [#17114] — the fold onto `classifyAdmissionTenancyPosture`, measured at
+// §6 [commit 4af758d47] — the fold onto `classifyAdmissionTenancyPosture`, measured at
 // the two edges a fold can get wrong.
 //
 // §1 and §4 already pin the discrimination itself on the registry's own
