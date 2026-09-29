@@ -135,6 +135,8 @@ export const en: TranslationData = {
         // Diagnostics
         nav_sessions: { label: 'Sessions' },
         nav_audit_logs: { label: 'Audit Logs' },
+        // The console's Audit Log page, beside the object view (#20142).
+        nav_audit_log_browser: { label: 'Audit Log Browser' },
         nav_notifications: { label: 'Notifications' },
 
         // Integrations — every entry here is contributed at RUNTIME by the
@@ -191,6 +193,7 @@ export const en: TranslationData = {
         nav_api_console: { label: 'API Console' },
         nav_flow_runs: { label: 'Flow Runs' },
         nav_public_forms: { label: 'Public Forms' },
+        nav_integrations: { label: 'Integrations & APIs' },
         group_integration: { label: 'Integration' },
         nav_email_templates: { label: 'Email Templates' },
       },
