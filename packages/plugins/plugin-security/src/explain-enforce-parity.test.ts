@@ -182,7 +182,7 @@ async function expectParity(
   switch (position) {
     case 'principal.permissionSets':
       expect(enforce.kind, where).toBe('sets');
-      if (enforce.kind === 'sets') expect([...d.principal.permissionSets].sort(), where).toEqual([...enforce.names].sort());
+      if (enforce.kind === 'sets') expect([...(d.principal.permissionSets ?? [])].sort(), where).toEqual([...enforce.names].sort());
       return;
     case 'record.visible': {
       const reached = enforce.kind === 'admitted' || (enforce.kind === 'rows' && enforce.ids.includes(String(ctx.recordId)));
