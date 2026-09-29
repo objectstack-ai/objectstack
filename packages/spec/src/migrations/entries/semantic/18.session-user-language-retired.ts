@@ -14,16 +14,17 @@ export const entry: SemanticMigration = {
     + 'session endpoint wrote it, no client read it (objectui measured zero readers at its '
     + 'pinned sha), so a reader trusting the published contract received a constant that was '
     + 'not the user\'s language. Meanwhile the user\'s real preference landed as the '
-    + 'first-class column `sys_user.locale` (#13881), which the session type could not see — '
+    + 'first-class column `sys_user.locale` (ruled 2026-09-01 once measured demand for a '
+    + 'per-user notification locale arrived), which the session type could not see — '
     + 'three spellings of one concept on the published surface, none of them right. The '
-    + 'maintainer ruled option D (2026-09-03, #14788): retire the dead key under ADR-0049 '
+    + 'maintainer ruled option D (2026-09-03): retire the dead key under ADR-0049 '
     + 'enforce-or-remove and make `GET /auth/me/localization` the ONE read face, with its '
     + '`locale` projecting the user column first. This is a RESPONSE surface — the server '
     + 'mints a `SessionUser` and nobody authors or persists one — so there is no source for '
     + 'the chain to rewrite; the schema tombstones the key via retiredKey() and consumers '
     + 'move their read to the endpoint. No replacement field joins the session contract '
     + 'until a session endpoint really produces one (no dual-spelling window, 不渐进). '
-    + 'ADR-0049, ADR-0087, #14788.',
+    + 'ADR-0049, ADR-0087.',
   acceptanceCriteria:
     'No client reads `user.language` off a `SessionResponse` / `UserProfileResponse`; a '
     + 'client that seeded its UI language from it now reads `locale` off '

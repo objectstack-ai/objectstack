@@ -21,8 +21,8 @@ export const entry: SemanticMigration = {
     + 'every installed row after it. A client that sized a buffer to the declared 50 should '
     + 'size it to the installed set instead',
   reason:
-    'One capability, both halves, never half-deleted (director seat, decision batch #126 '
-    + 'item 1, maintainer 「同意」 2026-09-13, route 2 of three; routes 1 — build paging — '
+    'One capability, both halves, never half-deleted (maintainer ruling 2026-09-13, '
+    + 'route 2 of three; routes 1 — build paging — '
     + 'and 3 — refuse unknown names — were considered and refused). `limit` and `cursor` '
     + 'were declared on the request and honoured on neither: the serving door filters on '
     + '`status`, `type` and `enabled` and then returns every remaining row, and no emit site has ever '
@@ -42,9 +42,10 @@ export const entry: SemanticMigration = {
     + 'have joined by reuse. It does not — no REST list door in the tree paginates, the one '
     + 'encode/decode cursor pair in the repo belongs to the storage-adapter list contract '
     + 'and is imported by no door, and the travel of this platform is the other way: '
-    + '`data.query.cursor` (#4286) and `api/ListNotificationsRequest:cursor` (#6361) were '
+    + '`data.query.cursor` and `api/ListNotificationsRequest:cursor` were '
     + 'both retired before this one, for the same reason. '
-    + 'Route 2, and the bookkeeping splits exactly as #6361 did. There IS a tombstone: the '
+    + 'Route 2, and the bookkeeping splits exactly as the notifications `cursor` retirement '
+    + 'did. There IS a tombstone: the '
     + 'schema is non-strict, so a bare deletion would have made Zod SILENTLY STRIP whatever '
     + "a generated client kept sending — a clean parse and a parameter that never takes "
     + "effect, which is this issue's own defect re-created one layer down (ADR-0104). So "
@@ -60,7 +61,7 @@ export const entry: SemanticMigration = {
     + '`version` (by-id) and `keepData` (uninstall) are query parameters the doors already '
     + 'executed and no request schema declared, and they are now declared where they are '
     + 'executed. No accept set moves — the doors served them before and serve them '
-    + 'identically now. ADR-0049 / ADR-0087, #17667.',
+    + 'identically now. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No caller sends `limit` or `cursor` to `GET /api/v1/packages`: writing either on a '
     + '`ListInstalledPackagesRequest` is a `tsc` error (the input type is `never`), which '
