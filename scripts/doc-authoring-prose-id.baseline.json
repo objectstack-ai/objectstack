@@ -14,9 +14,6 @@
   "#5397": 1,
   "#5673": 1
  },
- "packages/cli/src/commands/i18n/extract.ts": {
-  "#11671": 1
- },
  "packages/cli/src/commands/meta/resync.ts": {
   "#2705": 1,
   "#8692": 1
@@ -50,7 +47,6 @@
   "#3366": 1
  },
  "packages/cli/src/utils/i18n-extract.ts": {
-  "#11671": 1,
   "#12069": 1,
   "#8765": 1
  },
