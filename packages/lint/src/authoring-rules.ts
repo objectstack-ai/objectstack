@@ -138,6 +138,7 @@ import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
+import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
@@ -1461,6 +1462,33 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         rule: f.rule,
         where: f.where,
         path: f.where,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
+  // A credential typed as a LITERAL into a flow position every flow reader is
+  // served — an `http` node's `headers` or `url` query, a node's
+  // `connectorConfig.input` — named at every authoring door, with the
+  // declarative connector's `credentialRef` as the route (the triage ruling on
+  // #20590, direction A). Nothing is withheld and nothing is refused: the
+  // predicate is a heuristic, so the tier is `advisory`, and
+  // `authoring-rule-wiring.test.ts` holds the source to it. The fourth door is the one a Studio / REST / MCP
+  // author of a flow has, so the entry is on it for `flow`, exactly where
+  // `lintFlowPatterns`' advisories already surface.
+  {
+    name: 'lintFlowCredentialLiterals',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-flow-credential-literals.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) =>
+      lintFlowCredentialLiterals(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
         message: f.message,
         hint: f.hint,
       })),

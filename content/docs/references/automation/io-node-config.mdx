@@ -79,7 +79,7 @@ const result = HttpConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Target URL |
 | **method** | `string` | optional | HTTP method (default GET; POST when durable) |
-| **headers** | `Record<string, string>` | optional | Request headers |
+| **headers** | `Record<string, string>` | optional | Request headers. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: declare a connector whose `auth` is `bearer` or `api-key` (a header), with `auth.credentialRef` naming the secret, and call it from a `connector_action` node. |
 | **body** | `any` | optional | Request body (JSON-serialised) |
 | **durable** | `boolean` | optional | Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response |
 | **timeoutMs** | `number` | optional | Per-request timeout (ms) |

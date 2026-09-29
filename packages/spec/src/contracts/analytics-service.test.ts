@@ -88,6 +88,33 @@ describe('Analytics Service Contract', () => {
     expect(offEnum.name).toBe('count');
   });
 
+  // `object` — the dataset's base object, declared on the answer itself and not
+  // on a drill-through side type: a `queryDataset` implementation returns it on
+  // a dimension-less, zero-row answer against the plain `AnalyticsResult`, and
+  // the member is a string (a non-string is refused at compile time).
+  it('carries the dataset base object as `object` on a dimension-less, zero-row dataset answer', async () => {
+    const service: IAnalyticsService = {
+      query: async () => ({ rows: [], fields: [] }),
+      getMeta: async () => [],
+      queryDataset: async (dataset) => ({ rows: [], fields: [{ name: 'count', type: 'number' }], object: dataset.object }),
+    };
+
+    const answer = await service.queryDataset!(
+      { name: 'projects', label: 'Projects', object: 'project', dimensions: [], measures: [{ name: 'count', aggregate: 'count' }] },
+      { measures: ['count'] },
+    );
+    expect(answer.object).toBe('project');
+    expect(answer.rows).toEqual([]);
+
+    const offType: AnalyticsResult = {
+      rows: [],
+      fields: [],
+      // @ts-expect-error — `object` is the base object's machine name, a string
+      object: 42,
+    };
+    expect(offType.rows).toEqual([]);
+  });
+
   it('should generate SQL without executing', async () => {
     const service: IAnalyticsService = {
       query: async () => ({ rows: [], fields: [] }),

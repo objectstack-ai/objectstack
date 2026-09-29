@@ -132,6 +132,21 @@ export interface AnalyticsResult {
         dimensions: string[];
         rows: Record<string, unknown>[];
     }>;
+    /**
+     * The base object of the dataset the answer was computed from: the
+     * dataset's own `object` (`DatasetSchema.object`, its FROM), by machine
+     * name. A consumer keys two things on it — refreshing when that object's
+     * records change, and drilling a clicked value into those records.
+     *
+     * The contract, for `queryDataset`: EVERY dataset answer must carry it,
+     * whatever dimensions are selected and whether or not rows came back — a
+     * dimension-less KPI answer and a zero-row answer included. It names the
+     * answer's subject, so it does not depend on the selection having a
+     * drillable dimension.
+     *
+     * Absent on a `query` (cube) answer, which has no dataset behind it.
+     */
+    object?: string;
 }
 
 /**

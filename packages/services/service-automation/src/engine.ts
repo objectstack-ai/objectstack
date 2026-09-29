@@ -3371,6 +3371,10 @@ export class AutomationEngine implements IAutomationService {
         // A trigger may be registered *after* its flows (e.g. AutomationServicePlugin
         // pulls flows at start(); a trigger plugin wires up on kernel:ready, which
         // fires later). Activate any already-registered flow that maps to this type.
+        // [ADR-0126 §7.2] A flow that may not run is skipped by
+        // `activateFlowTrigger`'s own enablement gate, so the flows the ledger
+        // hydration left unbound stay unbound here — ⛔ no second check in this
+        // loop: the gate is shared so no arming path can go without it.
         for (const name of this.flows.keys()) {
             if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
@@ -3584,11 +3588,34 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Bind a flow to its matching registered trigger (idempotent). No-op when
-     * the flow has no trigger binding or no trigger is registered for its type
-     * yet — {@link registerTrigger} re-attempts activation when one arrives.
+     * the flow may not run ({@link isFlowEnabled}), when it has no trigger
+     * binding, or when no trigger is registered for its type yet —
+     * {@link registerTrigger} re-attempts activation when one arrives.
      */
     private activateFlowTrigger(flowName: string): void {
         if (this.boundFlowTriggers.has(flowName)) return;
+        // [ADR-0126 §7.2] THE enablement gate for arming — here, at the one
+        // point every arming path crosses, and not in its callers. A flow
+        // either disable dimension switches off (the activation ledger, or an
+        // `obsolete` / `invalid` status) is never handed to a trigger, whichever
+        // path asks: {@link registerFlow} (boot pull, publish, hot reload),
+        // {@link registerTrigger}, the enable half of {@link toggleFlow}, and
+        // any path added later.
+        //
+        // Why it cannot live in the callers: `registerTrigger` runs when a
+        // trigger plugin registers at `kernel:ready`, AFTER `start()` pulled
+        // the flows and {@link hydrateFlowActivations} unbound the switched-off
+        // ones. While only `registerFlow` asked, that later registration
+        // re-armed every one of them on every cold boot — `/_status` reported a
+        // disabled flow `bound: true`, and each matching event fired a run
+        // `execute()` then refused.
+        //
+        // Silent on purpose: an unarmed disabled flow is the state the switch
+        // exists to produce, the host's hydration line already named it, and
+        // `getFlowRuntimeStates()` reports it `enabled: false`. Ahead of the
+        // scheduled-work policy gate below for the same reason — a flow that
+        // may not run has no policy refusal to record.
+        if (!this.isFlowEnabled(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
         // [#17396] The deployment gate, read HERE rather than only inside the
@@ -3661,18 +3688,44 @@ export class AutomationEngine implements IAutomationService {
             // landed; the only other trace is the passive run-history row.
             // That stderr also survives the CLI's boot-quiet stdout window is
             // stream mechanics, not the verdict.
+            //
+            // [ADR-0126 §7.2] The line states only what happened. Two kinds of
+            // `execute()` answer are not a failed run:
+            //   - `FLOW_DISABLED`: the flow was switched off after the trigger
+            //     took the event — an event in flight at the switch-off, or a
+            //     trigger whose `stop()` failed. The refusal IS the switch
+            //     working, so it is said at `info`, never as an `error` that
+            //     reads as a production failure. The enablement gate above
+            //     keeps a disabled flow from being armed at all, so this is the
+            //     residue, not the steady state.
+            //   - every other never-dispatched exit (a `code` or a missing
+            //     flow, and no `status`): no node ran, so the line claims no
+            //     run-history row. Only a run that dispatched and failed
+            //     carries `status: 'failed'` — the verdict that exit also wrote
+            //     to the run history.
             trigger.start(resolved.binding, (ctx: AutomationContext) =>
                 this.execute(flowName, ctx).then((result) => {
-                    if (!result.success) {
-                        this.logger.error(
-                            `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
-                                `no caller holds this result and nothing retries the run; the terminal failure ` +
-                                `is recorded in the flow's run history, and the run's failure envelope is in ` +
-                                `this record's meta.`,
-                            undefined,
-                            { error: result.error ?? 'unknown error' },
+                    if (result.success) return;
+                    if (result.code === 'FLOW_DISABLED') {
+                        this.logger.info(
+                            `Trigger '${resolved.triggerType}' fired flow '${flowName}', which is disabled — the ` +
+                                `run was refused before it started, nothing ran, and no run-history row records ` +
+                                `it. The refusal is in this record's meta.`,
+                            { error: result.error },
                         );
+                        return;
                     }
+                    this.logger.error(
+                        `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
+                            `no caller holds this result and nothing retries the run; ` +
+                            (result.status === 'failed'
+                                ? `the terminal failure is recorded in the flow's run history, and the run's ` +
+                                  `failure envelope is in this record's meta.`
+                                : `it was refused before it dispatched, and the refusal envelope is in this ` +
+                                  `record's meta.`),
+                        undefined,
+                        { error: result.error ?? 'unknown error' },
+                    );
                 }),
             );
             this.boundFlowTriggers.set(flowName, resolved.triggerType);
@@ -4263,14 +4316,15 @@ export class AutomationEngine implements IAutomationService {
         }
 
         // Re-bind in case the definition changed its trigger, then (re)activate.
-        // [ADR-0126 §7.2] A ledger-disabled flow is NOT re-armed here, which is
-        // what makes the unbind survive a republish and a restart: the boot
-        // pull re-registers every flow, so a hydrated ledger row has to be
-        // able to keep a trigger unbound through exactly this path.
+        // [ADR-0126 §7.2] A disabled flow — ledger or status — is NOT re-armed
+        // here, which is what makes the unbind survive a republish and a
+        // restart: the boot pull re-registers every flow, so a hydrated ledger
+        // row has to be able to keep a trigger unbound through exactly this
+        // path. The refusal is `activateFlowTrigger`'s own enablement gate,
+        // the one every arming path shares — ⛔ not re-asked here, where a
+        // caller-side check once stood alone and `registerTrigger` had none.
         this.deactivateFlowTrigger(name);
-        if (this.isFlowEnabled(name)) {
-            this.activateFlowTrigger(name);
-        }
+        this.activateFlowTrigger(name);
 
         // #12206 (Option A) — hand the caller the canonicalized flow this
         // registration stored: the same object `this.flows` now holds and
@@ -4657,6 +4711,9 @@ export class AutomationEngine implements IAutomationService {
         // A disabled flow should stop receiving trigger events; a re-enabled one
         // should resume. execute() also guards disabled flows, but unbinding
         // avoids firing the trigger (and its event-source subscription) at all.
+        // Re-enabling moves only the LEDGER bit: a flow whose `status` still
+        // disables it stays unarmed, by `activateFlowTrigger`'s enablement gate
+        // — armed, it would only fire runs `execute()` refuses.
         if (enabled) {
             this.activateFlowTrigger(name);
         } else {
