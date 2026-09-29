@@ -151,7 +151,7 @@ export interface ThrownHttpError {
   message: string;
   /**
    * The producer's user-facing refusal text, verbatim — present exactly when
-   * the throw carried a non-empty string `userMessage` (#9934).
+   * the throw carried a non-empty string `userMessage` (commit 79c46da90).
    *
    * This is the producer-side opt-in the objectui#5210 ruling asked for
    * (maintainer, 2026-08-19, option 1): an application hook's refusal has no
@@ -255,7 +255,7 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
 
 /**
  * The user-facing refusal text a thrown error DECLARED, or `undefined` when it
- * declared none (#9934). See {@link ThrownHttpError.userMessage} for what the
+ * declared none (commit 79c46da90). See {@link ThrownHttpError.userMessage} for what the
  * declaration means and why it is a text-carrying field rather than a flag.
  *
  * The ONE read every boundary applies — the REST classification door, the
@@ -312,11 +312,11 @@ export function declaredUserMessage(error: unknown): string | undefined {
  * heuristic misses — the ceiling `sendThrownError`'s note records. The 5xx
  * sanitisation REGIME is the condition, not one of its two outcomes.
  *
- * ⭐ #12281 — the prose axis of the same 2026-08-27 ruling — is the
- * `'declared'` limb of this same function: the dispatcher door withholds the
- * message of EVERY declared 5xx, aligning to `/data`. It is a separate card
- * with its own measurement-first step, so nothing here applies it; this
- * function is the shape it will read rather than a second copy it would have
+ * ⭐ Commit 0783d7b80 — the prose axis of the same 2026-08-27 ruling — reads
+ * the `'declared'` limb of this same function: the dispatcher door withholds
+ * the message of EVERY declared 5xx, aligning to `/data`. It landed separately,
+ * after its own measurement-first step, so nothing here applies it; this
+ * function is the shape it reads rather than a second copy it would have had
  * to grow.
  */
 export type ServerFaultProvenance = 'declared' | 'undeclared';

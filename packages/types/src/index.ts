@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 export * from './degraded-boot.js';
-// [#11343/#12751] The one verified-email predicate the walled owner-elevation
+// [commit c0714eb5d / #12751] The one verified-email predicate the walled owner-elevation
 // gate (plugin-security) and the owner-verification boot diagnostic
 // (plugin-auth) both read — see the module doc for why it must be one.
 export * from './email-verified.js';
@@ -48,7 +48,7 @@ export * from './relation-sub-object.js';
 // Four hand-written vocabularies used to answer it and disagreed about MySQL,
 // which is why every MySQL conflict came back 500 instead of 409.
 export * from './unique-violation.js';
-// [#4728/#4825, moved here by #13279] The one "which driver failures may be
+// [#4728/#4825, moved here by commit 6a180e42d] The one "which driver failures may be
 // silenced?" vocabulary — `isMissingTableError` (a READ failed because the
 // table was never provisioned) and `isSchemaAlreadyExistsError` (a DDL failure
 // that was just the table already being there). It was `@objectstack/metadata`'s

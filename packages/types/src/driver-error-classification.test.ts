@@ -4,7 +4,7 @@
  * #4728 / #4825 — the classifications that decide whether a driver failure may
  * be silenced.
  *
- * [#13279] Moved here with the module it tests, from
+ * [commit 6a180e42d] Moved here with the module it tests, from
  * `packages/metadata/src/utils/schema-sync-errors.test.ts`. Unchanged except
  * for the import path: `@objectstack/core`'s authorization resolver now asks
  * `isMissingTableError`, so the predicate lives in the package both sides
