@@ -265,7 +265,7 @@ describe('requiresFeature lowering', () => {
     expect(bare).not.toHaveProperty('requiresFeature');
   });
 
-  // #5970 gave `visible` a boolean arm, so the lowering now meets two literals
+  // Commit 97e7e3caa gave `visible` a boolean arm, so the lowering now meets two literals
   // it never could before. Boolean algebra decides both, in opposite directions.
   it('treats `visible: true` as the explicit default — lowers to the gate alone', () => {
     const result = ActionSchema.parse({
@@ -301,7 +301,7 @@ describe('requiresFeature lowering', () => {
   });
 });
 
-// ── #5970 — `visible` / `disabled` speak ONE shape ────────────────────────────
+// ── commit 97e7e3caa — `visible` / `disabled` speak ONE shape ─────────────────
 // Ruled 2026-08-06: both keys are `boolean | string(CEL) | {dialect, source}`.
 // Before this, `visible` had no boolean arm while `disabled` did, so the very
 // common `visible: true` was a spec-side parse error that objectui's `ActionDef`
@@ -351,7 +351,7 @@ describe('ActionSchema — visible/disabled unified condition shape', () => {
       });
 
       // The widening must not shrink the rejection surface by one shape. Each
-      // of these was rejected before #5970 and is asserted to still be.
+      // of these was rejected before commit 97e7e3caa and is asserted to still be.
       it.each([
         ['an empty CEL string', ''],
         ['a number', 1],

@@ -26,7 +26,9 @@ export const entry: SemanticMigration = {
     + 'before, and so are null and Date values, and every equality (==, !=, in) against a stored '
     + 'list',
   reason:
-    'Stage 2e of #19886, the mirror of stage 2d with the list on the record\'s side, measured '
+    'The mirror, with the list on the record\'s side, of the earlier refusal of an ordering '
+    + 'operator against an array comparand (one of the same-class leaks that followed the '
+    + '2026-09-24 ruling refusing an array under $ne), measured '
     + 'through the real plugin-security on driver-sql and driver-memory. record.tags > "a", with '
     + 'tags a json column holding ["m"], lowered to { tags: { $gt: "a" } }, and the write-check '
     + 'evaluator compared the list\'s JavaScript string form ("m" > "a"), so the check admitted and '

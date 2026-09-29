@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17987] Record-click navigation on the STANDALONE element faces — the spec
+ * [commit e233db9db] Record-click navigation on the STANDALONE element faces — the spec
  * half of the objectui#8652 maintainer ruling (four options were put; the reply
  * was verbatim `B`: declare `navigation` on the platform element schemas).
  *

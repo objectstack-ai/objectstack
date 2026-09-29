@@ -107,7 +107,7 @@ describe('#7496 bullet 1 — relative paths only', () => {
     expect(msg, 'names the reason the rule exists').toContain('open');
     expect(msg, 'cites the ruling so the refusal is traceable').toContain('ruled 2026-08-11');
     // The negative twin: traceable by DATE, never by a tracker id a refused
-    // author cannot resolve (#13156's strip).
+    // author cannot resolve (commit fd289be45's strip).
     expect(msg).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     expect(msg, 'prescribes the fix, not just the refusal').toContain('/thanks');
     expect(msg, 'points the deliberate external link at the surface that IS declared for it')

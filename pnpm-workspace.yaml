@@ -104,6 +104,10 @@ patchedDependencies:
 #     is exactly the point: the next 7.x advisory will now catch it. jsdom's
 #     8.9.0 is a different major and stays outside, unaffected. Kept as
 #     defense-in-depth on the same reasoning as form-data above.
+#     2026-09-29: GHSA-3wwx-pv8p-q78v (5.9) flags BOTH remaining copies —
+#     7.29.0 (fixed 7.29.1) and jsdom's 8.9.0 (fixed 8.10.2) — so the 7.x
+#     target lifts to ^7.29.1 and the 8.x line gets its own selector; see the
+#     OSV 2026-09-29 note at the foot of the overrides block.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
 #     takeover, patched only in >=1.7.0-beta.4. The pin sat on the 1.7.0-rc.1
 #     PRE-RELEASE while stable 1.7.x shipped the rc.2 REWRITE (no
@@ -192,7 +196,8 @@ overrides:
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
-  'undici@>=7.23.0 <8.0.0': '^7.29.0'
+  'undici@>=7.23.0 <8.0.0': '^7.29.1'
+  'undici@>=8.1.0 <9.0.0': '^8.10.2'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
   # at the MAJOR boundary, so a future advisory lift moves only the TARGET.
@@ -448,3 +453,44 @@ overrides:
   #     container's egress proxy, so the severity and the fixed version above
   #     are read off the scanner's own output line and nothing else.
   'devalue@<6.0.0': '^5.9.2'
+  # OSV 2026-09-29 (#20561, scan run 36510180397) — seven Medium findings,
+  # every one naming a fixed version, so this is the "take the fix" path
+  # osv-scanner.toml's header prescribes and NOT an exemption; that ledger
+  # stays at ZERO entries. Advisory ranges below are read from the OSV
+  # offline npm database the scanner itself downloads; nodemailer (the one
+  # DIRECT dependency flagged) is taken in plugin-email's declared range and
+  # needs no pin here.
+  #   ip-address GHSA-2vr4-cq9g-pvrc (6.9; NAT64 local-use 64:ff9b:1::/48
+  #     classified as global, affected >=10.2.0) and GHSA-rpw4-54j3-4h4q
+  #     (6.3; isLinkLocal() checks fe80::/64 instead of fe80::/10, affected
+  #     from 0) — both fixed in 10.5.1. Flagged at TWO resolved copies:
+  #     10.4.0 <- express-rate-limit@8.6.1 (^10.2.0) <- @modelcontextprotocol/sdk,
+  #     and 10.5.0 <- socks@2.8.9 (^10.1.1) <- mongodb. Both declared ranges
+  #     already admit 10.5.1, so this is a dedupe onto the patched line rather
+  #     than a forced upgrade past what a dependent supports (the dompurify /
+  #     nanoid shape above); both copies sat below it purely through lockfile
+  #     inertia, the mechanism the devalue note records. Transitive-only: no
+  #     workspace manifest declares ip-address, so there is no published
+  #     declared range for check-override-consistency's manifest rule to hold
+  #     in lockstep with the target (it has none to cross-check, and says
+  #     nothing about this entry). GHSA-rpw4's range starts at 0, so
+  #     the selector's floor is the package floor and only the upper bound is
+  #     stated (the dompurify shape); the bound sits at the 11.0.0 major
+  #     boundary per this block's header rule, never `<10.5.1`.
+  #   undici GHSA-3wwx-pv8p-q78v (5.9; a malformed permessage-deflate frame
+  #     past the size limit crashes the process from the WebSocket client) —
+  #     three affected lines, >=6.25.0 <6.28.1, >=7.28.0 <7.29.1 and
+  #     >=8.1.0 <8.10.2.
+  #     Two are live here, one copy each: 7.29.0 <- @ai-sdk/provider-utils
+  #     (^7.28.0), and 8.9.0 <- jsdom@30.0.1 (^8.9.0). The 7.x copy is already
+  #     inside the existing `>=7.23.0 <8.0.0` selector, so that entry is a
+  #     TARGET-ONLY lift to ^7.29.1 — exactly the edit its major-boundary
+  #     bound exists to allow. The 8.x copy sat OUTSIDE every selector (the
+  #     undici note at the head of this file recorded it as a different,
+  #     unaffected major), so it gets its own entry, floored at the
+  #     advisory's 8.1.0 and bounded at the 9.0.0 major boundary. Both
+  #     dependents' ranges admit their fixed version, so both are dedupes
+  #     onto the patched line. No 6.x copy resolves anywhere, so no 6.x pin is
+  #     written. Transitive-only and dev-only: nothing publishable declares
+  #     undici, and both paths reach the tree through devDependencies.
+  'ip-address@<11.0.0': '^10.5.1'

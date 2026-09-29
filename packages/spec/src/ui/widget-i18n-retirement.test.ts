@@ -109,7 +109,7 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     // layout surface whole — a survivor list entry follows its subject out.)
     'NotificationTypeSchema',
     'SharingConfigSchema',
-    // (`ThemeSchema` stood here until #10485 retired the theme surface whole.)
+    // (`ThemeSchema` stood here until commit 35ad101bc retired the theme surface whole.)
     'PageSchema',
     'PageComponentSchema',
   ] as const;

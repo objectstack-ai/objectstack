@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Pins for the page-component type vocabulary claim (#12950) — the
+ * Pins for the page-component type vocabulary claim (commit 225e7690f) — the
  * `vocabulary-derivation.test.ts` discipline applied to the namespace claim:
  * every set here is DERIVED in the source module, so these tests assert the
  * derivation still holds and the ledger still earns its rows. The failure mode
@@ -98,7 +98,7 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
   });
 
   /**
-   * #12950's own readiness verdict, pinned: `global:search` and
+   * Commit 225e7690f's own readiness verdict, pinned: `global:search` and
    * `global:notifications` STAY declared — the 2026-08-26 ruling retires a
    * member only when no data source covers the horizon, and both are backed by
    * shipped platform data sources (the cross-object search protocol behind

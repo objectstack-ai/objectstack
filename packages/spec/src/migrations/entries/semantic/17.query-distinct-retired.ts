@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
     + 'something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with '
     + 'the key). The count suppression is deleted in the same change — `total` is truthful '
     + 'for those queries again. A REQUEST surface, never stored; nothing to rewrite. '
-    + 'ADR-0049 / ADR-0078, #4286.',
+    + 'ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No caller sends `distinct` and no SDK call site uses `QueryBuilder.distinct()`; '
     + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '

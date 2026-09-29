@@ -48,7 +48,7 @@ import { FieldType } from '../data/field.zod';
 //     error for a blank screen. Localizing means declaring a real action and
 //     naming it in `bulkActions`: THAT path runs through the i18n resolver
 //     (`toBulkActionDef`'s `localize`).
-//   - `params[]` is STRICT (#18177, maintainer ruling batch #146 item 4,
+//   - `params[]` is STRICT (commit adabccf5f, maintainer ruling batch #146 item 4,
 //     letter A). It used to be `.passthrough()`, mirroring the
 //     `[key: string]: unknown` catch-all on objectui's `BulkActionParam` — and
 //     that made its accept a NULL READING: measured against installed spec
@@ -166,7 +166,7 @@ const BULK_PARAM_WIDGET_CONFIG_KEYS = [
  * (merged over the def's static `patch`); for an aggregate `custom` def they
  * ride along as the action's params.
  *
- * STRICT since #18177 — see the module header. An unknown key is refused by
+ * STRICT since commit adabccf5f — see the module header. An unknown key is refused by
  * name, carrying either the rename or the prescription that fixes it, exactly
  * as on `ActionParamSchema`. The sentence this replaced said strictness "would
  * lie" at this level; the measurement said the opposite — the OPEN shape was
@@ -259,7 +259,7 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
 
   /**
    * Cascade binding — the ONE key this close DECLARES rather than refuses
-   * (#18177, ruling batch #146 item 4 letter A).
+   * (commit adabccf5f, ruling batch #146 item 4 letter A).
    *
    * Shape and description mirror the single-record twin. ⚠️ That twin is
    * `FieldSchema.dependsOn` (`data/field.zod.ts`), NOT `ActionParamSchema`,

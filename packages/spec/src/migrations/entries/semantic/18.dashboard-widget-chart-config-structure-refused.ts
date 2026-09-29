@@ -33,7 +33,7 @@ export const entry: SemanticMigration = {
     + 'and a per-series mark type (the combo chart a widget could author through '
     + '`series[].type`) has no authoring channel on this face at all.',
   reason:
-    'Maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」, on options '
+    'Maintainer ruling of 2026-09-12 on the dataset-bound chart config, taking options '
     + 'C+D together: the protocol states the ownership split AND refuses the structural keys by '
     + 'name, because stating it without refusing them leaves the declared-but-inert shape '
     + 'ADR-0049 exists to end, and refusing them without stating it leaves an author with no '
