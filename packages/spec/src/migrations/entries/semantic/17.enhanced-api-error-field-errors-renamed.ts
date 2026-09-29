@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     'was reading a field no server sent (ADR-0078\'s silently-inert declaration, on the ' +
     'error envelope). This is a RESPONSE surface: no stack, example or template carries ' +
     'the key, so there is no source for the chain to rewrite — the schema tombstones it ' +
-    'via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977.',
+    'via retiredKey() and consumers move their read themselves. ADR-0114 D4 (the ' +
+    'field-level error code catalog).',
   acceptanceCriteria:
     'No consumer reads `error.fieldErrors`; per-field validation detail is read from ' +
     '`error.fields`, and constructing an EnhancedApiError with `fieldErrors` fails to parse ' +

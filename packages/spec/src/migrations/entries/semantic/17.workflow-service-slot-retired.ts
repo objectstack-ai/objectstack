@@ -17,13 +17,14 @@ export const entry: SemanticMigration = {
     + 'repository ever registered or resolved it (ADR-0115 Evidence 5 — the only touches '
     + 'were plugin-dev\'s retired stub probe and the generic discovery walk), no '
     + 'implementation of any WorkflowProtocol method ever existed, and no host ever '
-    + 'mounted `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among '
+    + 'mounted `/api/v1/workflow` (DEFAULT_DISPATCHER_ROUTES, before it was retired as a '
+    + 'stale list, named it among '
     + 'routes that never existed). Every part of it was ADR-0078\'s silently-inert '
     + 'declaration: a CoreServiceName nothing filled, a contract nothing implemented, a '
     + 'protocol nothing served, a discovery route field no builder could truthfully '
     + 'populate. These are TS/API surfaces and a discovery RESPONSE field — never stored '
     + 'in stack metadata, so there is no source for the chain to rewrite; consumers of the '
-    + 'deleted types move their imports themselves. ADR-0049 / ADR-0078, #4451.',
+    + 'deleted types move their imports themselves. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No import of IWorkflowService, WorkflowProtocol or the Get/WorkflowState/Config/'
     + 'Transition types resolves; no code calls getService(\'workflow\') or reads '

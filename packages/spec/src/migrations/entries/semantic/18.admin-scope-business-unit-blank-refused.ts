@@ -22,7 +22,8 @@ export const entry: SemanticMigration = {
     + 'replacement that can be DERIVED from what was written: a blank names no unit, so the root the '
     + 'author meant is not recoverable, and the platform must not pick one.',
   reason:
-    'Maintainer ruling A on #19461 (decision batch #217 item 1, 2026-09-23 「217 同意」). '
+    'Maintainer ruling A, 2026-09-23: an empty or whitespace-only `businessUnit` is refused '
+    + 'at parse, and stored scopes are not rewritten. '
     + '`AdminScopeSchema` declared `businessUnit` as a bare string with no minimum, so '
     + '`{ businessUnit: \'\' }` and `{ businessUnit: \'   \' }` parsed green — measured against the '
     + 'published spec 17.4.0 and re-measured on `main` before the change. This narrows a published '

@@ -9,7 +9,8 @@ export const entry: SemanticMigration = {
     "explicit `auth: { audience: { posture: 'open' | 'email_domain', selfRegistrationPermissionSet: '<set>' } }` " +
     '(deployments that intend open self-registration only)',
   reason:
-    'The default audience posture flipped in #11739: an UNDECLARED `audience` now means ' +
+    'The default audience posture flipped when one declared posture replaced the emergent ' +
+    'self-registration default: an UNDECLARED `audience` now means ' +
     '`invite_only` — email/password self-registration (and social-provider JIT sign-up) is ' +
     'refused with 403 SELF_REGISTRATION_CLOSED unless the address holds a pending invitation. ' +
     'Previously the emergent default was open self-registration with no email verification. ' +

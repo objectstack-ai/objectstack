@@ -1,20 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os migrate meta` — the guidance it prints for the ADR-0087 semantic entries
- * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`, `driver-*`,
- * `kernel-*`, `system-*`, `datasource-*`, `filter-*`, `action-*`, `data-*`,
- * `element-*`, `field-*`, `export-*`, `api-*`, `dataset-*`, `hook-*`,
- * `metadata-*`, `rest-*`, `analytics-*`, `view-*`, `package-*`, `object-*`,
- * `sharing-*`, `audit-*`, `flow-*`, `http-*`, `inline-*`, `actor-*`, `hot-*`,
- * `external-*`, `query-*`, `delete-*`, `etl-*`, `storage-*`, `apimethod-*`,
- * `dashboard-*`, `notification-*`, `record-*`, `runtime-*`, `rls-*`, `scim-*`,
- * `stack-*`, `evaluated-*`, `aggregation-*`, `authoring-*`, `automation-*`,
- * `cache-*`, `tenant-*`, `client-*`, `spec-*`, `cli-*`, `identity-*`,
- * `import-*`, `tool-*`, `advanced-*`, `cloud-*`, `startup-*`, `sys-*`,
- * `declarative-*`, `sort-*`, `address-*`, `packages-*`, `platform-*`,
- * `session-*`, `strategy-*`) states each lesson in words and carries no
- * tracker number.
+ * `os migrate meta` — the guidance it prints for EVERY ADR-0087 semantic entry
+ * states each lesson in words and carries no tracker number.
  *
  * ## What this pins
  *
@@ -24,27 +12,27 @@
  * author is shown, so it carries no tracker number: a number sends the reader
  * to a page that can be deleted (some cited pages already had been), and the
  * lesson the entry exists to teach then sits behind a dead link instead of in
- * the sentence being read. The covered families were rewritten, one staged
- * family at a time, to say what each cited ruling, measurement or fix decided;
- * ADR ids stay, because an ADR lives in this repository. The whole printed
+ * the sentence being read. The entries were rewritten, one staged family at a
+ * time, to say what each cited ruling, measurement or fix decided; ADR ids
+ * stay, because an ADR lives in this repository. The whole printed
  * block is held, so `surface` is held as well as the three prose fields.
  *
  * The chain reports every semantic entry of every hop it crosses, whatever the
  * stack authors, so the fixture only has to be a real stack the command loads;
  * it keeps the lookup and the virtual `formula` field the `engine-*` entries
  * are about. The CLI replays the chain from the support floor to the highest
- * major carrying a covered entry. Each covered block is then located VERBATIM
- * in what the terminal printed, and that printed block must hold no `#`
- * followed by four or five digits. The file keeps the name it was given when
- * `engine-*` was the only covered family.
+ * major carrying a semantic entry. Each block is then located VERBATIM in what
+ * the terminal printed, and that printed block must hold no `#` followed by
+ * four or five digits. The file keeps the name it was given when `engine-*`
+ * was the only covered family; the staged rewrites have since reached every
+ * family, so the pin holds the whole directory rather than a prefix list.
  *
  * ## Why it cannot pass by reading nothing
  *
- * - The covered set is derived from the registry by id prefix, so an entry
- *   added later to a covered family is held to the same line on arrival — and
- *   the derived set must still contain every entry the rewrites covered, and
- *   every covered prefix must still select at least one entry, so an emptied
- *   prefix cannot turn every assertion below into a loop over nothing.
+ * - The covered set is every semantic entry in the registry, so an entry added
+ *   later — in any family, a new family included — is held to the same line on
+ *   arrival; and the set must still contain every entry the rewrites covered,
+ *   so it cannot turn every assertion below into a loop over nothing.
  * - Each block is asserted PRESENT in stdout before it is asserted clean, so a
  *   renderer change that stopped printing the prose fails here instead of
  *   passing on an absent string.
@@ -82,26 +70,10 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 /** A tracker id as author-shown prose must not carry it: `#` and four or five digits. */
 const TRACKER_ID = /#\d{4,5}\b/;
 
-/** The families this pin holds, selected by entry-id prefix. */
-const COVERED_PREFIXES = [
-  'engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-',
-  'datasource-', 'filter-', 'action-', 'data-', 'element-',
-  'field-', 'export-', 'api-', 'dataset-', 'hook-', 'metadata-',
-  'rest-', 'analytics-', 'view-', 'package-', 'object-', 'sharing-',
-  'audit-', 'flow-', 'http-', 'inline-',
-  'actor-', 'hot-', 'external-', 'query-', 'delete-', 'etl-', 'storage-',
-  'apimethod-', 'dashboard-', 'notification-', 'record-', 'runtime-', 'rls-',
-  'scim-',
-  'stack-', 'evaluated-', 'aggregation-', 'authoring-', 'automation-', 'cache-',
-  'tenant-', 'client-', 'spec-', 'cli-', 'identity-', 'import-', 'tool-',
-  'advanced-', 'cloud-', 'startup-', 'sys-', 'declarative-', 'sort-', 'address-',
-  'packages-', 'platform-', 'session-', 'strategy-',
-];
-
 /**
  * The entries rewritten when each family was brought to this line — the
- * anti-vacuity floor. A covered entry that carried no tracker id to begin with
- * is held by its prefix and needs no row here.
+ * anti-vacuity floor. An entry that carried no tracker id to begin with needs no
+ * row here: the whole directory is held.
  */
 const REWRITTEN = [
   'action-bulk-dispatch-contract-undeclared',
@@ -111,8 +83,11 @@ const REWRITTEN = [
   'action-session-roles-to-positions',
   'actor-user-roles-to-positions',
   'address-location-value-unknown-keys-refused',
+  'admin-export-wildcard-removed',
+  'admin-scope-business-unit-blank-refused',
   'advanced-plugin-lifecycle-config-retired',
   'aggregation-node-distinct-retired',
+  'ai-conversation-analytics-duration-unit-in-key',
   'analytics-authorable-unknown-keys-refused',
   'analytics-date-range-array-two-bounds-required',
   'analytics-query-request-envelope-retired',
@@ -122,16 +97,29 @@ const REWRITTEN = [
   'api-runtime-config-durations-unit-in-key',
   'api-runtime-create-withdrawn',
   'apimethod-enum-shrink',
+  'approval-escalation-enabled-default-flip',
+  'assembled-package-body-plugins-envelope',
+  'audience-posture-default-invite-only',
   'audit-log-action-enum-retired',
   'audit-log-action-restore-retired',
+  'auth-config-unadvertised-reserved-features',
   'authoring-schemas-strict-unknown-keys',
   'automation-flow-list-route-retired',
   'automation-runs-cursor-retired',
+  'autonumber-default-unique-organization',
+  'batch-row-result-schema-shape',
+  'branded-identifier-schemas-retired',
   'cache-warmup-scheduled-strategy-retired',
+  'cbp-master-detail-required-forced',
+  'cel-predicate-one-value-comparand-refused',
+  'change-management-duration-keys-retired',
+  'change-management-family-retired',
   'cli-command-contribution-retired',
   'client-delete-result-success',
   'client-meta-reset-result-reset',
   'cloud-subpath-retired',
+  'cluster-driver-dangling-values-removed',
+  'connector-inline-authentication-publish-refused',
   'dashboard-header-modal-target-page-only',
   'dashboard-widget-chart-config-structure-refused',
   'dashboard-widget-compareto-offset',
@@ -156,6 +144,7 @@ const REWRITTEN = [
   'datasource-credentialsref-mongo-url-no-user-refused',
   'declarative-apis-endpoints-live',
   'delete-by-id-before-hook-repoint-retired',
+  'device-request-response-interval-unit-in-key',
   'driver-aggregate-undeclared-key-aliases-removed',
   'driver-capabilities-inert-bits-removed',
   'driver-options-timeout-to-timeout-ms',
@@ -171,8 +160,12 @@ const REWRITTEN = [
   'engine-find-formula-filter-refused',
   'engine-find-formula-order-by-refused',
   'engine-update-upsert-retired',
+  'enhanced-api-error-field-errors-renamed',
+  'epoch-instant-keys-renamed',
+  'esignature-config-deadline-keys-retired',
   'etl-pipeline-layer-retired',
   'evaluated-expression-slots-source-required',
+  'event-name-schema-retired',
   'export-axis-opt-in',
   'export-field-meta-constraints-retired',
   'export-job-family-retired',
@@ -209,7 +202,10 @@ const REWRITTEN = [
   'http-server-runtime-vocabulary-retired',
   'identity-api-key-schema-retired',
   'import-run-automations-declared-default-corrected',
+  'incident-response-deadline-keys-retired',
+  'incident-response-family-retired',
   'inline-grid-column-currency-scale-refused',
+  'job-retry-policy-constraints-tightened',
   'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
   'kernel-context-preview-mode-retired',
   'kernel-event-bus-retention-unit-in-key',
@@ -219,6 +215,8 @@ const REWRITTEN = [
   'kernel-plugin-security-durations-unit-in-key',
   'kernel-runtime-config-timeout-unit-in-key',
   'kernel-startup-orchestrator-durations-unit-in-key',
+  'logging-durations-unit-in-key',
+  'memory-persistence-placeholder-refused',
   'metadata-customization-protocol-retired',
   'metadata-endpoints-switch-radius-repartitioned',
   'metadata-manager-config-cache-ttl-unit-in-key',
@@ -229,6 +227,7 @@ const REWRITTEN = [
   'object-grid-data-view-data-converged',
   'object-grid-default-filters-rule-array',
   'object-index-unknown-keys-refused',
+  'observability-cel-predicates-retired',
   'package-api-contracts-unmounted-entries-retired',
   'package-install-request-unknown-keys-refused',
   'package-rollback-response-retired',
@@ -245,6 +244,7 @@ const REWRITTEN = [
   'plugin-runtime-family-retired',
   'plugin-security-scan-result-surface-retired',
   'plugin-security-scanner-retired',
+  'position-permissions-column-retired',
   'query-array-string-agg-retired',
   'query-cursor-retired',
   'query-distinct-retired',
@@ -261,7 +261,10 @@ const REWRITTEN = [
   'rls-predicate-cross-class-field-comparison-refused',
   'rls-predicate-stored-list-ordering-refused',
   'runtime-httpserver-wrapper-retired',
+  'schedule-flow-acting-organization-required',
   'scim-provider-object-retired',
+  'screen-field-lookup-reference-required',
+  'send-template-input-org-retired',
   'session-payload-positions-security-axis',
   'session-user-language-retired',
   'sharing-execution-context-retired',
@@ -270,9 +273,12 @@ const REWRITTEN = [
   'spec-type-alias-input-suffix-retired',
   'stack-themes-carrier-retired',
   'stack-top-level-unknown-keys-refused',
+  'standard-error-code-batch-members-retired',
+  'standard-error-code-concurrent-limit-exceeded-retired',
   'startup-orchestrator-retired',
   'storage-service-list-retired',
   'strategy-context-aggregation-method-narrowed',
+  'structured-region-body-pause-and-end-refused',
   'sys-account-issuer-retired',
   'system-cache-durations-unit-in-key',
   'system-collaboration-durations-unit-in-key',
@@ -286,7 +292,13 @@ const REWRITTEN = [
   'system-worker-queue-rate-limit-duration-unit-in-key',
   'tenant-schema-cache-ttl-unit-in-key',
   'tenant-timeouts-unit-in-key',
+  'time-update-interval-sub-day-retired',
   'tool-requires-confirmation-retired',
+  'training-deadline-keys-retired',
+  'training-family-retired',
+  'translation-per-app-settings-platform-only',
+  'turso-config-transport-mismatch-refused',
+  'ui-bulk-action-param-unknown-keys-refused',
   'ui-cloud-connection-widgets-unknown-keys-refused',
   'ui-form-field-length-malformed-refused',
   'ui-form-field-precision-scale-integer-refused',
@@ -301,12 +313,16 @@ const REWRITTEN = [
   'ui-record-blocks-unknown-keys-refused',
   'ui-reference-rail-unknown-keys-refused',
   'ui-widget-i18n-family-retired',
+  'ups-delegated-from-column-retired',
   'view-filter-rule-absent-value-refused',
   'view-filter-rule-scalar-operator-array-refused',
   'view-filter-rule-value-shaped-by-operator',
   'view-management-protocol-retired',
   'view-overlay-options-bag-judged',
   'view-pagination-page-size-default-50',
+  'wait-node-event-config-required',
+  'websocket-durations-unit-in-key',
+  'workflow-service-slot-retired',
 ];
 
 interface FamilyEntry {
@@ -318,10 +334,9 @@ interface FamilyEntry {
   acceptanceCriteria: string;
 }
 
+/** Every semantic entry of every major: the pin holds the whole directory. */
 const FAMILY: FamilyEntry[] = Object.entries(MIGRATIONS_BY_MAJOR).flatMap(([major, step]) =>
-  step.semantic
-    .filter((s) => COVERED_PREFIXES.some((prefix) => s.id.startsWith(prefix)))
-    .map((s) => ({ ...s, toMajor: Number(major) })),
+  step.semantic.map((s) => ({ ...s, toMajor: Number(major) })),
 );
 
 /** The block the command prints for one semantic TODO, exactly as `meta.ts` lays it out. */
@@ -378,7 +393,7 @@ afterAll(() => {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-describe('os migrate meta — the guidance of the covered families carries no tracker number', () => {
+describe('os migrate meta — the guidance of every semantic entry carries no tracker number', () => {
   it('the detector fires on a tracker id and stays dark on every other number shape', () => {
     expect(TRACKER_ID.test(`see #${'9'.repeat(4)}`)).toBe(true);
     expect(TRACKER_ID.test(`see #${'9'.repeat(5)}`)).toBe(true);
@@ -387,11 +402,8 @@ describe('os migrate meta — the guidance of the covered families carries no tr
     expect(TRACKER_ID.test('ADR-0112')).toBe(false);
   });
 
-  it('selects every covered family, including every entry the rewrites covered', () => {
+  it('holds every semantic entry, including every entry the rewrites covered', () => {
     const ids = FAMILY.map((e) => e.id);
-    for (const prefix of COVERED_PREFIXES) {
-      expect(ids.some((id) => id.startsWith(prefix)), `no entry selected for ${prefix}`).toBe(true);
-    }
     for (const id of REWRITTEN) expect(ids, `family lost ${id}`).toContain(id);
   });
 
