@@ -18,6 +18,7 @@
  * |---|---|
  * | `$gte` / `$gt` / `$lt` | that day's `00:00:00.000` — already correct as written |
  * | `$lte`, a `$between` max, a `dateRange` end | the WHOLE day → compile `< nextUtcCalendarDay(day)` |
+ * | the same, on `9999-12-31` | the WHOLE day → compile NO upper bound ({@link UNBOUNDED_ABOVE}) |
  *
  * Half-open, never an inclusive `23:59:59.999`: the latter re-opens the gap at
  * whatever sub-millisecond precision a dialect keeps (Postgres stores
@@ -25,11 +26,39 @@
  * already emit. On a `date` column `< nextDay` is order-equivalent to
  * `<= day` under plain `YYYY-MM-DD` text ordering, which is what lets emitters
  * that cannot see the column type apply it unconditionally.
+ *
+ * The last row is the one day with no next day to stop before. The supported
+ * years are 0001..9999 (the comparand and write doors refuse the rest), so
+ * every supported value is at most the last millisecond of `9999-12-31`, and
+ * the whole-day bound of that day bounds nothing: `$lte '9999-12-31'` holds for
+ * every value there is, and a `$between` whose maximum is that day keeps only
+ * its minimum. The day after it has no bare-day spelling: `'10000-01-01'` sorts
+ * below `'2026-…'` as text, so a SQLite column compared against it answered no
+ * rows, and `null` would compile the day's midnight and miss the rest of it.
+ * So the helper answers {@link UNBOUNDED_ABOVE}, and each emitter compiles no
+ * upper bound for it — for a lone `$lte`, "the value is not null", the one
+ * condition the comparison it replaces carried beyond its bound.
  */
 
 /**
+ * The answer {@link nextUtcCalendarDay} gives for `9999-12-31`, the last day of
+ * the supported years: that day's whole-day bound is past every supported
+ * value, so an emitter compiles NO upper bound for it (see the module note).
+ *
+ * A symbol, so no caller can compile it as a bound by accident: TypeScript
+ * refuses it in a template literal, in a relational comparison and where a
+ * `string` is expected, and it is distinct from `null` ("not a calendar day").
+ * Registered with `Symbol.for`, so two bundled copies of this module answer the
+ * same value — `@objectstack/spec` and `@objectstack/spec/data` are separate
+ * entry points, and a caller may import the helper from one and this constant
+ * from the other.
+ */
+export const UNBOUNDED_ABOVE: unique symbol = Symbol.for('objectstack.calendarDay.unboundedAbove');
+
+/**
  * The calendar day after a bare `YYYY-MM-DD` string — the exclusive upper bound
- * of that day.
+ * of that day — or {@link UNBOUNDED_ABOVE} for `9999-12-31`, the last day of
+ * the supported years, whose whole-day bound bounds nothing.
  *
  * Returns `null` for anything that is not a valid bare calendar day. That
  * refusal is load-bearing in two directions:
@@ -39,7 +68,7 @@
  *     rolled over, so a caller falls back to the untranslated comparand instead
  *     of silently querying a date the author never wrote.
  */
-export function nextUtcCalendarDay(value: unknown): string | null {
+export function nextUtcCalendarDay(value: unknown): string | typeof UNBOUNDED_ABOVE | null {
   if (typeof value !== 'string') return null;
   const day = value.trim();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
@@ -50,7 +79,14 @@ export function nextUtcCalendarDay(value: unknown): string | null {
   // into March, so the round-trip is what proves the input was a real calendar
   // day — in every year the four digits spell, 0001..0099 included.
   if (fmtUtcDay(start) !== day) return null;
-  return fmtUtcDay(utcMidnight(y, mo - 1, d + 1));
+  const next = fmtUtcDay(utcMidnight(y, mo - 1, d + 1));
+  // The one real day whose successor has no `YYYY-MM-DD` spelling is
+  // 9999-12-31: `fmtUtcDay` pads a year to four digits and never truncates, so
+  // it spells the day after as the five-digit `'10000-01-01'`. The shape ends
+  // where the supported years end (the doors refuse a year above 9999 —
+  // `@objectstack/core`'s `isOutsideTemporalYearRange` is that range's one
+  // statement), so this reads the shape, not a second copy of the range.
+  return /^\d{4}-/.test(next) ? next : UNBOUNDED_ABOVE;
 }
 
 /**
