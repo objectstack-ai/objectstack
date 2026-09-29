@@ -1104,3 +1104,74 @@ describe('#20590 round 1 — a node moved across regions keeps its credential', 
         expect(allStrings(await protocol.getMetaItems({ type: 'flow' }))).not.toContain(SIGNING);
     });
 });
+
+// ---------------------------------------------------------------------------
+// #20590 patch round 2 — only a NODE can stand where the moved node stood
+// ---------------------------------------------------------------------------
+//
+// The by-id lookup must count the elements that stand where the owner stood —
+// the elements of an array under the same key as the owner's container — and
+// nothing else. A flow keeps node ids and edge ids in separate spaces, so an
+// edge may share a moved node's id and still be a valid flow; counted as a
+// second match, it blocked the relocation and dropped the credential at save.
+
+describe('#20590 round 2 — the relocation counts nodes, not every object carrying the id', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', regionFlowStandIn));
+    afterEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    /** {@link movedOutOfLoop} plus a top-level EDGE whose id is the moved node's. */
+    function movedWithEdgeTwin(served: any) {
+        const moved: any = movedOutOfLoop(served);
+        return { ...moved, edges: [...moved.edges, { id: 'per_row', source: 'begin', target: 'per_row' }] };
+    }
+
+    it('(e) a moved node plus an edge sharing its id: the credential is kept', () => {
+        const stored = storedMovesFlow();
+        const incoming = movedWithEdgeTwin(redactMetadataItem('flow', stored));
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(out.nodes[4].id).toBe('per_row');
+        expect(out.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(e) through the save door: the edge twin is a valid flow, and the row at rest keeps the moved node\'s secret', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'moves', organization_id: null, package_id: null, state: 'active' };
+        const body = storedMovesFlow();
+        rows.set(keyOf(where), { id: 'r_moves', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'moves' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'moves', item: movedWithEdgeTwin(editable) });
+
+        const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'moves' && r.state === 'active')!.metadata);
+        expect(at.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(at.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(allStrings(await protocol.getMetaItem({ type: 'flow', name: 'moves' }))).not.toContain(SIGNING);
+    });
+
+    it('(f) two NODES sharing the moved node\'s id in different regions: nothing is grafted', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const [quiet, loud] = fan.config.branches;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [...each.config.body.nodes, call], edges: [] } } },
+                { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, { ...NOOP('call') }] }, loud] } },
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        const moved = out.nodes[1].config.body.nodes.find((n: any) => n.id === 'call');
+        expect(moved.type).toBe('http');
+        expect(moved.config.signingSecret).toBeUndefined();
+        expect(out.nodes[2].config.branches[0].nodes.find((n: any) => n.id === 'call').config).toEqual({});
+        // The unambiguous ones are unaffected.
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+    });
+});
