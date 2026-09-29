@@ -14,6 +14,11 @@
  *   will not compile) ⇒ explain refuses with the same envelope;
  * - enforcement refuses otherwise (a 403) ⇒ explain refuses with
  *   `INVALID_FILTER` / 400, or its verdict at that position is a denial;
+ * - enforcement fails with an error that carries NO envelope (a dependency's
+ *   own error, thrown as raised) ⇒ explain fails the same way, with no
+ *   envelope, or its verdict at that position is a denial. No envelope is its
+ *   own value, compared as absence: `code` and `status` are absent, never a
+ *   spelled-out placeholder;
  * - enforcement answers ⇒ explain answers too, and its verdict at that
  *   position is enforcement's: the same row set for the object-level
  *   `allowed` / `readFilter`, the same row for `record.visible`, the same
@@ -90,7 +95,12 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 
 // ── the two faces ─────────────────────────────────────────────────────────
 
-type Envelope = { code: string; status: number };
+/**
+ * An error's ADR-0112 envelope. Both halves are optional because a failure can
+ * carry neither: {@link envelopeOf} then answers `undefined`, and the refusal
+ * has no `code` and no `status` at all.
+ */
+type Envelope = { code?: string; status?: number };
 const INVALID: Envelope = { code: 'INVALID_FILTER', status: 400 };
 const DENIED: Envelope = { code: 'PERMISSION_DENIED', status: 403 };
 
@@ -113,10 +123,18 @@ type Position =
   | 'record.visible'
   | 'principal.permissionSets';
 
-const envelopeOf = (e: unknown): Envelope => {
-  const x = e as { code?: string; status?: number; statusCode?: number };
-  return { code: String(x?.code), status: Number(x?.statusCode ?? x?.status) };
+/** The envelope an error carries, or `undefined` when it carries none. */
+const envelopeOf = (e: unknown): Envelope | undefined => {
+  const x = e as { code?: unknown; status?: unknown; statusCode?: unknown } | null | undefined;
+  const code = x?.code == null ? undefined : String(x.code);
+  const rawStatus = x?.statusCode ?? x?.status;
+  const status = rawStatus == null || Number.isNaN(Number(rawStatus)) ? undefined : Number(rawStatus);
+  if (code === undefined && status === undefined) return undefined;
+  return { ...(code !== undefined ? { code } : {}), ...(status !== undefined ? { status } : {}) };
 };
+
+/** An envelope with both halves spelled, so absence compares as absence. */
+const envelopeKeysOf = (x: Envelope) => ({ code: x.code, status: x.status });
 
 const explained = (p: Promise<ExplainDecision>): Promise<Explained> =>
   p.then(
@@ -168,7 +186,10 @@ async function expectParity(
       return;
     }
     if (explain.kind === 'refused') {
-      expect({ code: explain.code, status: explain.status }, where).toEqual(INVALID);
+      // No envelope is its own value: a failure that carries none is matched
+      // only by explain failing without one; anything else by the refusal.
+      const noEnvelope = enforce.code === undefined && enforce.status === undefined;
+      expect(envelopeKeysOf(explain), where).toStrictEqual(envelopeKeysOf(noEnvelope ? {} : INVALID));
       return;
     }
     const d = explain.decision;
@@ -837,8 +858,9 @@ const TABLE: Row[] = [
   // #20002: a dependency enforcement shares with explain throws.
   {
     card: '#20002', shape: 'the sharing read filter throws, the caller\'s own row, read', position: 'record.visible',
-    // The find fails with the service's own error, which carries no envelope.
-    enforced: { kind: 'refused', code: 'undefined', status: Number.NaN },
+    // The find fails with the sharing service's own error, which carries no
+    // envelope: no code, no status.
+    enforced: { kind: 'refused', code: undefined },
     run: withSharing({ faultReadFilter: true }, async (r) => ({
       explain: await r.explain(SHARING_OWN, 'read', 'l_own'), enforce: await r.find(SHARING_OWN, 'l_own'), recordId: 'l_own',
     })),
@@ -880,7 +902,12 @@ describe('security.explain answers what enforcement does — the enumeration', (
       try {
         if (row.enforced === 'rows' || row.enforced === 'admitted') expect(enforce.kind, `${row.shape}: enforcement`).toBe(row.enforced);
         else if (row.enforced.kind === 'sets') expect(enforce.kind, `${row.shape}: enforcement`).toBe('sets');
-        else expect(enforce, `${row.shape}: enforcement`).toEqual(row.enforced);
+        else if (row.enforced.kind === 'refused') {
+          expect(enforce.kind, `${row.shape}: enforcement`).toBe('refused');
+          if (enforce.kind === 'refused') {
+            expect(envelopeKeysOf(enforce), `${row.shape}: enforcement's envelope`).toStrictEqual(envelopeKeysOf(row.enforced));
+          }
+        } else expect(enforce, `${row.shape}: enforcement`).toEqual(row.enforced);
         if (row.explainKind) expect(explain.kind, `${row.shape}: explain answered ${describeExplained(explain)}`).toBe(row.explainKind);
         const parity = expectParity(`${row.card} · ${row.shape}`, row.position, explain, enforce, { recordId, readAs });
         if (row.divergence) await expect(parity, `${row.shape}: the measured divergence no longer holds`).rejects.toThrow();
