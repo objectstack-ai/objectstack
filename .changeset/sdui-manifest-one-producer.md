@@ -13,8 +13,8 @@ browser-dumped copy into `dist/`, but the release build replaced `dist/` before 
 none reached a tarball (17.0.0, 17.3.0 and 17.4.0 each list 0 matches). That browser dump is
 retired. It was byte-identical to the tracked file over the same built tree.
 
-For now the file is only present in the tarball. This package's `exports` map exposes
-`./package.json` and nothing else, so resolving `@objectstack/console/dist/sdui.manifest.json`
-through `exports` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Anything that resolves through
-`exports` cannot read the file yet. That includes the CLI's JSX-page manifest fallback, which
-catches the error and keeps parse-level validation, as before.
+The file is not an `exports` entry. This package's `exports` map exposes `./package.json`
+and nothing else, so resolving `@objectstack/console/dist/sdui.manifest.json` through
+`exports` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Read it the way the CLI's JSX-page
+manifest fallback does: resolve `@objectstack/console/package.json` and join
+`dist/sdui.manifest.json` to its directory.
