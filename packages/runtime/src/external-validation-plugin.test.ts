@@ -28,7 +28,7 @@ const sampleDiffs: SchemaDiffEntry[] = [
   { kind: 'type_mismatch', remoteName: 'fact_orders', column: 'amount', expected: 'number', actual: 'text', severity: 'error' },
 ];
 
-/** [#11166] The row `validateEach` produces when the remote could not be read. */
+/** [commit 735f5c709] The row `validateEach` produces when the remote could not be read. */
 const unreachableDiffs: SchemaDiffEntry[] = [
   { kind: 'unreachable', remoteName: 'fact_orders', actual: 'connect ECONNREFUSED 10.0.0.5:5432', severity: 'error' },
 ];
@@ -87,7 +87,7 @@ describe('ExternalValidationPlugin (ADR-0015 Gate 2)', () => {
   });
 
   /**
-   * [#11166] An `unreachable` row is not a schema mismatch: validation was
+   * [commit 735f5c709] An `unreachable` row is not a schema mismatch: validation was
    * indeterminate (the remote could not be read), so the default
    * `onMismatch: 'fail'` must NOT abort boot for it — a transient outage
    * during startup used to be a refusal to start. Loud logging instead,
@@ -151,7 +151,7 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
   afterEach(() => vi.useRealTimers());
 
   /**
-   * [#10961] The fake answers the SCOPED spelling, because that is what the
+   * [commit 222d06fc1] The fake answers the SCOPED spelling, because that is what the
    * checker now calls: a timer armed for one datasource asks the service about
    * that datasource, instead of sweeping the farm and filtering the report.
    * The rows below live behind that scoping so the fixture cannot hand back a
@@ -188,7 +188,7 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
   });
 
   /**
-   * [#11166] A briefly-unreachable remote used to raise `external.schema.drift`
+   * [commit 735f5c709] A briefly-unreachable remote used to raise `external.schema.drift`
    * events whose diffs claimed `missing_table` on every tick it stayed down.
    * The event is still emitted (audit/notification consumers see the outage)
    * but under the distinct `unreachable` kind — and the operator-facing

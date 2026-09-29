@@ -126,7 +126,7 @@ function orphanArtifact() {
 }
 
 /**
- * [#10629] The `OS_SKIP_SCHEMA_SYNC` case's expected read failures: WITHHELD,
+ * [commit 13a6cb4ad] The `OS_SKIP_SCHEMA_SYNC` case's expected read failures: WITHHELD,
  *          and ASSERTED.
  *
  * With boot schema sync skipped, nothing creates `sys_metadata` — that IS what
@@ -170,7 +170,7 @@ async function boot(bundle: Record<string, unknown>, capture?: ExpectedReadRefus
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  // [#10629] Scoped before the driver runs a statement when the caller asked
+  // [commit 13a6cb4ad] Scoped before the driver runs a statement when the caller asked
   // for a capture; the default boot passes none and stays fully loud.
   const driver = await makeDefaultDriver();
   capture?.captureDriver(driver);
@@ -243,7 +243,7 @@ describe('#7737 federated boot binding — declared external objects are bound w
       await driver.execute("INSERT INTO remote_invoices (id, amount) VALUES ('i1', 100)");
       expect((await engine.find('fed_customer')).map((r) => r.name)).toEqual(['Ada']);
       expect((await engine.find('fed_invoice')).map((r) => r.id)).toEqual(['i1']);
-      // [#10629] The capture is a PIN, not a mute: if boot stops reading
+      // [commit 13a6cb4ad] The capture is a PIN, not a mute: if boot stops reading
       // `sys_metadata`, or the table starts existing under this flag, the log
       // goes quiet AND this goes red.
       expect(noise.silentChannels()).toEqual([]);

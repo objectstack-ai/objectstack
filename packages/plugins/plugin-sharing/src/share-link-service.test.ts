@@ -669,7 +669,7 @@ describe('[#13856] declared redactFields survive publicSharing opt-out', () => {
 // `publicSharing` block was absent or `enabled !== true`, and nothing in
 // `resolveToken()` read `policy.enabled` — the opt-in was checked at MINT only
 // (`createLink` → 422 `SHARING_NOT_ENABLED`). So the platform held this shape:
-// the predicate INSIDE the block (`eligibility`, #13608) was re-evaluated on
+// the predicate INSIDE the block (`eligibility`, commit fc9ba76a5) was re-evaluated on
 // every redemption, while turning the WHOLE block off did not stop a single
 // link already handed out. An author who wanted anonymous serving to stop had
 // to narrow the predicate rather than switch the feature off. Measured before
@@ -680,7 +680,7 @@ describe('[#13856] declared redactFields survive publicSharing opt-out', () => {
 //
 // Quoted verbatim in the reversal register above. In one line each: (1) the
 // switch is a standing policy, re-read at every redemption; (2) retroactive on
-// deploy, as #13608 was; (3) how a link was minted — system context, the
+// deploy, as commit fc9ba76a5 was; (3) how a link was minted — system context, the
 // `permissive` bypass, ledger row 37 — buys it nothing at redemption; (4)
 // switch OFF ⇒ nothing inside the block is evaluated; switch ON ⇒ the sibling
 // keys keep their redemption-time behaviour.
@@ -692,7 +692,7 @@ describe('[#13856] declared redactFields survive publicSharing opt-out', () => {
 // read the service issued was the token lookup (no record probe — read off a
 // recording engine); and the usage counters did not move. The HTTP-seam
 // shape, the server-side log line and the real-driver readings live beside
-// the #13608 pins in `share-link-eligibility.test.ts`.
+// the commit fc9ba76a5 pins in `share-link-eligibility.test.ts`.
 describe('[#14033] publicSharing.enabled is a standing policy — held again at redemption', () => {
   /** Every `find` the service issues, so "no record read" is a measurement rather than an assumption. */
   function recordingService(engine: any, opts: Record<string, unknown> = {}) {

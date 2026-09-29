@@ -11,7 +11,9 @@ import type { SemanticMigration } from '../../types.js';
 // what only the author can judge. It also names the CHAIN through the same
 // protocol step: `connector-health-and-trigger-durations-unit-in-key` used to
 // rename `health.circuitBreaker.monitoringWindow` to `monitoringWindowMs`, and
-// that half was absorbed here — the renamed key is itself removed.
+// that half was absorbed here — the renamed key is itself removed. (Its trigger
+// half was absorbed later by `connector-triggers-removed`, and the conversion
+// left the table.)
 export const entry: SemanticMigration = {
   id: 'connector-resilience-keys-retired',
   surface: 'connector.health (healthCheck / circuitBreaker), connector.status and connector.webhooks — '
@@ -38,8 +40,10 @@ export const entry: SemanticMigration = {
     + 'counterpart there. The chain: in this same protocol step, '
     + '`connector-health-and-trigger-durations-unit-in-key` no longer renames '
     + '`health.circuitBreaker.monitoringWindow` to `monitoringWindowMs` — the whole block that '
-    + 'key lived in is removed, so an author holding either spelling ends with no key at all; '
-    + 'that conversion\'s `triggers[].interval` to `intervalSeconds` rename is unaffected.',
+    + 'key lived in is removed, so an author holding either spelling ends with no key at all. '
+    + 'That conversion\'s other half, `triggers[].interval` to `intervalSeconds`, was absorbed '
+    + 'the same way by the removal of the whole `triggers` array (`connector-triggers-removed`), '
+    + 'so the rename itself is no longer in the step.',
   acceptanceCriteria: 'No connector and no stack connector entry carries `health`, `status` or '
     + '`webhooks`; the parse refuses each with its prescription (a stored `status: \'inactive\'` '
     + 'default is accepted and stripped as inert residue), and no code imports ConnectorHealth, '

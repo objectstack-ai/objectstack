@@ -8,7 +8,9 @@ export const entry: SemanticMigration = {
     + 'unit (ai/conversation.zod.ts)',
   replacement: 'durationSeconds — rename the key; the value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B (2026-09-02, extended on 2026-09-05 to runtime-emitted durations): '
+    + 'the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying '
+    + 'value, never only in the describe prose, and no existing offender is grandfathered. '
     + 'It stands alone because it is the only offender in ai/ and the only one on its file. '
     + 'What makes the bare name worth a registry row rather than a quiet edit is the company '
     + 'it kept: every other number on ConversationAnalytics is a COUNT — totalMessages, '
@@ -22,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'runtime and handed to a consumer, never authored by hand and never stored as a '
     + 'sys_metadata row, so the conversion chain has no seam that would ever see one — the '
     + 'same disposition every runtime-emitted measurement in this stack has taken. '
-    + '#15680, #14478, ADR-0087.',
+    + 'ADR-0087.',
   acceptanceCriteria:
     'Every producer that BUILDS a ConversationAnalytics spells durationSeconds, and every '
     + 'consumer that reads a session length reads durationSeconds. Authoring duration fails '

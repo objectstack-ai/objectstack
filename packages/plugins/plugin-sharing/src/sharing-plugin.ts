@@ -26,7 +26,7 @@ import type {
   IMetadataService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
-// [#6206] The share-link routes' context is the FULL authorization envelope —
+// [commit 8e13ca876] The share-link routes' context is the FULL authorization envelope —
 // it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
 // the route-local `ShareLinkExecutionContext`.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -38,7 +38,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#12260] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
-// mechanism for a second producer, and #12493 landed this middleware's key
+// mechanism for a second producer, and commit aa5994e17 landed this middleware's key
 // (`record_write_denied`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
@@ -538,7 +538,7 @@ export class SharingServicePlugin implements Plugin {
    * arm: an embedding with no `plugin-auth` is a SUPPORTED composition and its
    * behaviour here is exactly what it was. Loud arm:
    * `verifiedContextFromRequest`'s `catch` already re-raises this brand rather
-   * than laundering it into a 401 (#13279), and the routes' own `catch` answers
+   * than laundering it into a 401 (commit 6a180e42d), and the routes' own `catch` answers
    * `err.status` — so the outage reaches the wire as a 503.
    *
    * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
@@ -892,7 +892,7 @@ export class SharingServicePlugin implements Plugin {
             // `x-user-id` headers. An unresolvable request → anonymous (the
             // authed routes then 401).
             //
-            // [#6206 / #6430 — maintainer ruling A, 2026-08-07] The envelope is
+            // [commit 8e13ca876 / #6430 — maintainer ruling A, 2026-08-07] The envelope is
             // handed on WHOLE. This assembly used to name four fields
             // (`userId`/`tenantId`/`positions`/`permissions`) and the resulting
             // object was passed straight into `engine.find` as the [Finding-2]
@@ -949,7 +949,7 @@ export class SharingServicePlugin implements Plugin {
                 // `runtime/src/security/resolve-execution-context.ts`.
                 return { ...authz, isSystem: false };
               } catch (err) {
-                // [#13279] Degrading an outage to `{}` answers 401 — the same
+                // [commit 6a180e42d] Degrading an outage to `{}` answers 401 — the same
                 // answer a genuine anonymous caller gets. Re-raised so the
                 // outage is not laundered into an authentication verdict.
                 if (isAuthzStoreUnavailableError(err)) throw err;
@@ -1352,7 +1352,7 @@ export function buildSharingMiddleware(
       // through so a bulk DELETE scopes to owned rows alone (no share widening),
       // while a bulk UPDATE keeps the edit-share widening (ADR-0111 D3).
       //
-      // [#8792, maintainer ruling 2026-08-15] ⛔ This merge carries NO
+      // [commit 83c661d97, maintainer ruling 2026-08-15] ⛔ This merge carries NO
       // `markFilterSubtreeProvenance` and NO `vouchCallerWhereBeforeRewrite`,
       // and that is RULED, not an oversight. #8220 declares the mark for
       // READ-scope merge boundaries; write-scope refusal semantics stay
@@ -1383,7 +1383,7 @@ export function buildSharingMiddleware(
       // a real report of an author unable to diagnose a bulk-write refusal on
       // their own predicate. That makes the extension a pulled feature with a
       // consumer attached, and it returns as a decision — with write-scope
-      // refusal semantics to specify and pin at a real driver, and #8836's
+      // refusal semantics to specify and pin at a real driver, and commit 1850ebbb0's
       // request-scoped invariant to carry (no filter object that can be
       // vouched `'author'` may outlive the request that vouched it).
       let writeFilter = await service.buildWriteFilter(ctx.object, exec ?? {}, verb);
@@ -1395,7 +1395,7 @@ export function buildSharingMiddleware(
           onBehalfOf: undefined,
           __writeScope: exec.__delegatorWriteScope,
         }, verb);
-        // [#8792] Unmarked deliberately too — same ruling, same reasons as
+        // [commit 83c661d97] Unmarked deliberately too — same ruling, same reasons as
         // above, not repeated here. Its read-path twin (the delegator's
         // `buildReadFilter`) IS marked `'policy'`; that difference is the ruled
         // read/write boundary, not drift between two copies of one pattern.

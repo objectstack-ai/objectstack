@@ -24,7 +24,7 @@
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
  * when an unsupported URL was treated as a file path. The SAME refusal now
- * covers an unknown `OS_DATABASE_DRIVER` value (#6265): that env var used to be
+ * covers an unknown `OS_DATABASE_DRIVER` value (commit cfb549db8): that env var used to be
  * a bare `as` cast, so a typo — or `mysql` before this stack could dispatch it
  * — fell through the driver chain's trailing `else` into SQLite without a word.
  *
@@ -42,7 +42,7 @@
  * comes through here — refused it as an unsupported scheme.
  *
  * NOTE: `mysql://` is the same family with none of the optional-package weight
- * (#6265). The CLI has classified it as `mysql` since forever
+ * (commit cfb549db8). The CLI has classified it as `mysql` since forever
  * (`inferDriverTypeFromUrl`), the SHARED factory has always been able to build
  * it (`kind === 'mysql'` → SqlDriver on `mysql2`), and only this file was
  * missing the arm — so one `OS_DATABASE_URL=mysql://…` booted under `os start`
@@ -96,16 +96,16 @@ export function resolveObjectStackHome(): string {
 
 /**
  * The driver kinds a standalone boot can dispatch — the ONE list, and the only
- * one (#6265), now shared with the CLI rather than merely singular here (#6345).
+ * one (commit cfb549db8), now shared with the CLI rather than merely singular here (commit e2798fab7).
  *
  * Three consumers read it and every one of them used to carry its own answer:
  * the `databaseDriver` config key (a zod enum that rejected loudly), the
  * `OS_DATABASE_DRIVER` env var (a bare `as` cast that validated nothing, so an
  * unknown value fell through the dispatch chain's trailing `else` into SQLite),
- * and the `ResolvedDriverKind` union (a hand-written third copy). #6265 made
+ * and the `ResolvedDriverKind` union (a hand-written third copy). Commit cfb549db8 made
  * them one declaration.
  *
- * What #6265 could not fix from inside this file is that the CLI had a FOURTH
+ * What commit cfb549db8 could not fix from inside this file is that the CLI had a FOURTH
  * answer. This enum listed canonical spellings only, while
  * `packages/cli/src/utils/storage-driver.ts` accepted `pg`, `mysql2`, `mongo`,
  * `libsql`, `wasm`, `sql`, `mingo`, … — measured on `main`, **10 of 21 spellings
@@ -121,7 +121,7 @@ export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
 
 /**
  * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
- * {@link StandaloneDatabaseDriverSchema} (#6345).
+ * {@link StandaloneDatabaseDriverSchema} (commit e2798fab7).
  *
  * `databaseDriver` and `OS_DATABASE_DRIVER` are two spellings of one decision,
  * so accepting `pg` from the environment and refusing it from a programmatic
@@ -318,7 +318,7 @@ type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (/^memory:\/\//i.test(dbUrl)) return 'memory';
     if (/^(postgres(ql)?|pg):\/\//i.test(dbUrl)) return 'postgres';
-    // MySQL / MariaDB (#6265). Character-for-character the regex the CLI uses
+    // MySQL / MariaDB (commit cfb549db8). Character-for-character the regex the CLI uses
     // (`utils/storage-driver.ts` `inferDriverTypeFromUrl`), for the same reason
     // the turso arm below copies its spellings: the two functions answer the
     // same question about the same `OS_DATABASE_URL`, so any divergence IS the
@@ -354,7 +354,7 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
 /**
  * The explicit driver selection for this boot, or `undefined` when none was made.
  *
- * Two sources, ONE vocabulary (#6265). `cfg.databaseDriver` has always been
+ * Two sources, ONE vocabulary (commit cfb549db8). `cfg.databaseDriver` has always been
  * parsed by {@link StandaloneDatabaseDriverSchema}; `OS_DATABASE_DRIVER` was
  * `process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind` — an assertion,
  * which checks nothing at runtime. An unknown value therefore reached the
@@ -380,8 +380,8 @@ function resolveExplicitDriver(
     if (cfg.databaseDriver) return cfg.databaseDriver;
     const raw = process.env.OS_DATABASE_DRIVER?.trim();
     if (!raw) return undefined;
-    // #6345: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
-    // this file's canonical list. Lower-casing stays for the reason #6265 gave —
+    // Commit e2798fab7: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
+    // this file's canonical list. Lower-casing stays for the reason commit cfb549db8 gave —
     // the CLI's reader of this same variable lower-cases — and is now redundant
     // with `resolveDatabaseDriverId`'s own normalization rather than the only
     // normalization there is.
@@ -392,7 +392,7 @@ function resolveExplicitDriver(
 
 /**
  * Refuse a driver whose database lives somewhere this process cannot guess when
- * nothing named where that is (#6345 fork 2).
+ * nothing named where that is (fork 2 of commit e2798fab7).
  *
  * The URL ladder always produces SOMETHING — its last rung is the unified
  * default file — so before this check a `postgres`/`mysql`/`mongodb`/`turso`
@@ -502,7 +502,7 @@ function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSche
  * connection. Reading a source you cannot dispatch is worse than not reading it.
  *
  * Throws on a selection this stack cannot dispatch — an unknown URL scheme
- * (`detectDriverFromUrl`) or, since #6265, an unknown `OS_DATABASE_DRIVER` value
+ * (`detectDriverFromUrl`) or, since commit cfb549db8, an unknown `OS_DATABASE_DRIVER` value
  * ({@link resolveExplicitDriver}). Both refusals happen HERE rather than at boot
  * so `os migrate`'s pre-boot probe reads the same verdict the boot would.
  */
@@ -517,7 +517,7 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
     const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
-    // Fork 2 (#6345) — refuse before deriving a sqlite filename from a URL the
+    // Fork 2 (commit e2798fab7) — refuse before deriving a sqlite filename from a URL the
     // selected driver was never going to open.
     assertUrlNamedForRemoteDriver(driver, resolution.source);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
@@ -609,7 +609,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverId = 'postgres';
         driverConfig = { url: dbUrl };
     } else if (dbDriver === 'mysql') {
-        // MySQL / MariaDB (#6265). Nothing special: the shared factory's `mysql`
+        // MySQL / MariaDB (commit cfb549db8). Nothing special: the shared factory's `mysql`
         // arm builds a SqlDriver on the `mysql2` client from exactly this
         // config (`MysqlConfigSchema.url` — "passed to mysql2 as-is"), and the
         // CLI's own `mysql` branch produces the same `{ driverId: 'mysql',
@@ -662,7 +662,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverConfig = { filename };
     } else {
         // Unreachable by construction — and making it unreachable is half the
-        // fix (#6265). This used to be a bare `else` meaning "sqlite", so every
+        // fix (commit cfb549db8). This used to be a bare `else` meaning "sqlite", so every
         // kind without an arm above became SQLite in silence: an unvalidated
         // `OS_DATABASE_DRIVER` value landed here, and so would the NEXT kind
         // added to the enum without a dispatch arm. `dbDriver` is now narrowed

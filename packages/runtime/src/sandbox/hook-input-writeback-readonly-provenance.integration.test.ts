@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14760] A caller-supplied `readonly` field that no hook body ever names must
+ * [commit ee32e1cb8] A caller-supplied `readonly` field that no hook body ever names must
  * NOT survive `stripReadonlyFields` just because a sandboxed body ran.
  *
  * ## What was measured broken
  *
- * #14758 narrowed the sandbox write-back to the keys the body wrote. Its leg 2
+ * Commit 84199cb87 narrowed the sandbox write-back to the keys the body wrote. Its leg 2
  * — "did the body write THROUGH this object-valued key?" — compared the HOST
  * entry snapshot against the VM's exit dump. The dump is JSON; the snapshot was
  * not. So a host `Date` was compared against its own ISO projection, could not
@@ -376,8 +376,8 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     //
     // ⚠️ That fault is a REFUSAL, not a silent no-op: a `body` hook's default
     // `onError` is `abort`, so the caller's whole write is rejected and the row
-    // is untouched. Loud beats silent — and #17219 supplied the second half the
-    // refusal was missing. Measured here before that card, through this very
+    // is untouched. Loud beats silent — and commit 706ad0fcc supplied the second half the
+    // refusal was missing. Measured here before that commit, through this very
     // harness, at both doors:
     //
     //   direct  SandboxError: hook 'guard_task_body' threw:
@@ -391,7 +391,7 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     // that can tell "the platform took this away" from "nobody sent it".
     //
     // ⛔ Still no `ctx.submitted` on the sandbox face: that face is assembled
-    // key by key and the shape was measured and refused in PR #17195. The
+    // key by key and the shape was measured and refused in commit d2c1d1980. The
     // supported source for a derived column is `ctx.previous`, which is what
     // the message now says.
     const { engine, driver } = await boot(WRITES_THROUGH_SOURCE);
@@ -445,7 +445,7 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
  *  - the SECOND harm — a carried key is re-asserted FROM THE DUMP, so an
  *    untouched host `Date` used to be replaced by its ISO string and an object
  *    used to lose its `undefined` member even where nothing was readonly;
- *  - the FAIL-OPEN, which #14758 chose deliberately and this card does not
+ *  - the FAIL-OPEN, which commit 84199cb87 chose deliberately and this card does not
  *    reverse. `safeJsonStringify` lets a cyclic or bigint-bearing value cross
  *    into the VM in degraded form, so such a key IS in the exit dump and DOES
  *    reach the comparison — where a plain round-trip of the host value throws.
@@ -490,7 +490,7 @@ describe('#14760 — write-back fidelity and the preserved fail-open', () => {
     const fn = bind("ctx.input.touched_by = 'hook';");
     // `safeJsonStringify` drops the back-edge on the way in, so the VM sees
     // `{ tag: 'cyclic' }` and dumps it — but a plain round-trip of the HOST
-    // value throws, which is exactly the case #14758's fail-open exists for.
+    // value throws, which is exactly the case commit 84199cb87's fail-open exists for.
     const cyclic: Record<string, unknown> = { tag: 'cyclic' };
     cyclic.self = cyclic;
     const engineCtx = { input: { status: 'done', meta: cyclic } } as any;
@@ -499,7 +499,7 @@ describe('#14760 — write-back fidelity and the preserved fail-open', () => {
 
     expect(engineCtx.input.touched_by).toBe('hook');
     // Carried: the host key now holds the dump's degraded copy, byte for byte
-    // the pre-#14760 behaviour for a value JSON cannot represent.
+    // the behaviour before commit ee32e1cb8 for a value JSON cannot represent.
     expect(Object.is(engineCtx.input.meta, cyclic)).toBe(false);
     expect(engineCtx.input.meta).toEqual({ tag: 'cyclic' });
   });

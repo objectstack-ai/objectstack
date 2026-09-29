@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6206 / #6430 ruling A] What the share-link routes hand to ENFORCEMENT.
+ * [commit 8e13ca876 / #6430 ruling A] What the share-link routes hand to ENFORCEMENT.
  *
  * ## The defect
  *

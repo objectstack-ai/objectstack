@@ -337,10 +337,10 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
      */
     let crudScope: FilterCondition | null = null;
     /**
-     * [#10983] Every read below that the driver refuses reaches this engine's
+     * [commit 6a4e929f5] Every read below that the driver refuses reaches this engine's
      * `find()`, so its `catch` logs an `ERROR Find operation failed` frame
      * BEFORE rethrowing (`engine.ts`) — a green-test noise instance of the
-     * same defect class #10629/#10630 closed, just without a table to key on
+     * same defect class commits 13a6cb4ad / dd8172ee2 closed, just without a table to key on
      * (the refusal never reaches `backendStatementFault`; see
      * `expected-read-refusal-noise.ts`'s second predicate for why and how).
      * Withheld and COUNTED here, never muted — `silentChannels()` and
@@ -387,7 +387,7 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
     });
 
     afterAll(() => {
-      // [#10983] The pin, not the mute: every declared object's channel fired
+      // [commit 6a4e929f5] The pin, not the mute: every declared object's channel fired
       // at least once, AND the count is exactly what this describe block's
       // five `it`s produce — six `ql.find()` calls refused (the sixth test
       // below drives the driver directly, bypassing this engine on purpose,

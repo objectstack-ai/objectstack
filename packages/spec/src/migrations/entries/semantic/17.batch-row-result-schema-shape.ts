@@ -20,14 +20,18 @@ export const entry: SemanticMigration = {
     + 'validated and read `undefined` at runtime — the declared-but-not-delivered shape this '
     + 'registry exists to close, on the response envelope (ADR-0119 D4 deferred the '
     + 'reconciliation off a bug fix; this is that tracked change, shipped in the 17 major '
-    + 'window). The ADR-0119/#4620 rollback marking is structured in the same move: the '
+    + 'window). The ADR-0119 rollback marking, which the fix making `deleteManyData` and '
+    + '`updateManyData` honour `atomic` carried to those two endpoints, is structured in the '
+    + 'same move: the '
     + '`ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered '
     + '`ApiError.code` values (message keeps the human-readable cause and causal row index), '
     + 'so "attempted and undone" vs "never ran" is machine-readable instead of a regex '
     + 'convention. A RESPONSE surface — nothing stored in stack metadata carries a batch '
     + 'row, so there is no source for the chain to rewrite; consumers of the legacy keys '
     + 'move their reads themselves. Off-contract readers only: the legacy keys were never '
-    + 'in the schema or the SDK types, so a typed consumer needs no change. #4793.',
+    + 'in the schema or the SDK types, so a typed consumer needs no change. Ruled 2026-08-03: '
+    + 'the implementation moves to the schema\'s shape as a hard cut in the 17 major, with no '
+    + 'dual-emit transition.',
   acceptanceCriteria:
     'No consumer reads `row.error` or `row.record` on a batch result row; failures are read '
     + 'from `row.errors` (message via `errors[0].message`, rollback state via '

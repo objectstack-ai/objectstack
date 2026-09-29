@@ -198,7 +198,7 @@ describe('[#5792] /notifications conforms to the schemas the catalog declares', 
         });
 
         it('[#6361] the declaration no longer states a `limit` default the route never applies', async () => {
-            // FLIPPED by #6361 (maintainer ruling 2026-08-07, Option A). This pin
+            // FLIPPED by commit 90bbf2510 (maintainer ruling 2026-08-07, Option A). This pin
             // used to record the DEFECT: `limit` was `z.number().default(20)` while
             // the route forwarded `undefined` and the provider applied its own 50,
             // so the declared default had never once been in effect.

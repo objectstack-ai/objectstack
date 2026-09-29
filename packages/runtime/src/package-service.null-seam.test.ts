@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10965 — the `service-package` seam guard, on a REAL booted driver.
+ * Commit ab47f6974 — the `service-package` seam guard, on a REAL booted driver.
  *
  * The card established the conflation by reading and named the boot path as
  * unverified: *"Whether the DevPlugin zero-install stack (a real
@@ -37,7 +37,7 @@
  * ⚠️ **What the double does NOT model.** It is not evidence about
  * `@objectstack/driver-memory`'s behaviour. That the real driver logs
  * `Raw execution not supported in InMemory driver` and returns `null` was
- * measured on a real boot while triaging #10965, and it stays pinned on a real
+ * measured on a real boot in the triage behind commit ab47f6974, and it stays pinned on a real
  * booted driver by `packages/cli/src/commands/migrate/duplicates.null-seam.test.ts`
  * (#10677), which reaches it through the datasource factory rather than by
  * importing it. Nothing about that fact is re-asserted here, and this file would

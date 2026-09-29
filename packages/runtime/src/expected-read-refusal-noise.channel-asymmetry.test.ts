@@ -19,7 +19,7 @@
 //     `ObjectLogger.write` returns early unless
 //     `LEVEL_ORDER[frame] >= LEVEL_ORDER[config.level]`.
 //
-// ⚠️ [#13273] The frame this probe provokes is a MISSING TABLE, and `engine.ts`
+// ⚠️ [commit 3a86a65e7] The frame this probe provokes is a MISSING TABLE, and `engine.ts`
 // now classifies that class onto `debug` rather than `error` (its own
 // `reportFindFailure`). Two mechanical consequences for this instrument, both
 // measured rather than reasoned:
@@ -96,7 +96,7 @@ interface Readout {
   readonly driverPassThrough: number;
   /**
    * Process-stream lines carrying the engine's `Find operation failed`, from
-   * `stderr` and `stdout` together — [#13273] the frame's level decides which
+   * `stderr` and `stdout` together — [commit 3a86a65e7] the frame's level decides which
    * of the two it lands on, and this file measures whether a reader saw it at
    * all, not which pipe carried it.
    */
@@ -211,9 +211,9 @@ describe('#11569 expected-read-refusal-noise: the two channels are not equally l
   it(
     'engine pass-through: the SAME unrecognised read is loud at `debug` — the instrument produces a positive',
     async () => {
-      // [#13273] `debug` is the level that admits THIS frame: the probe reads a
+      // [commit 3a86a65e7] `debug` is the level that admits THIS frame: the probe reads a
       // table that does not exist, and `engine.ts` classifies that class onto
-      // `debug`. Before #13273 the same control was run at `error`. The claim
+      // `debug`. Before commit 3a86a65e7 the same control was run at `error`. The claim
       // under test is unchanged — "the engine channel is only as loud as the
       // kernel's own level" — only the rank it is compared against moved.
       const seen = await probeRead('debug', UNDECLARED_TABLE, [DECLARED_TABLE]);
@@ -232,7 +232,7 @@ describe('#11569 expected-read-refusal-noise: the two channels are not equally l
   it(
     'engine pass-through: the condition is the LEVEL THRESHOLD, not the word `silent` — `fatal` drops it too',
     async () => {
-      // `ObjectLogger.isEnabled` compares rank: this frame ([#13273] `debug`,
+      // `ObjectLogger.isEnabled` compares rank: this frame ([commit 3a86a65e7] `debug`,
       // rank 0) is admitted only while the configured level is `debug`.
       // `fatal` (4) and `silent` (5) both refuse it — as do `info` and `warn`
       // — so a fixture that floats its kernel to `fatal` is just as blind as

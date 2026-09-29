@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#10961] The BACKGROUND drift check does the work it was ARMED for.
+ * [commit 222d06fc1] The BACKGROUND drift check does the work it was ARMED for.
  *
  * ## The defect this file measures
  *

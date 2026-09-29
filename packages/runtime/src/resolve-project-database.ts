@@ -110,7 +110,7 @@ export interface ResolveProjectDatabaseUrlOptions {
      * Explicit driver selection (`--database-driver` / config). Only `memory`
      * changes URL resolution (no file default is imposed for an explicitly
      * in-memory boot); other values select engines, not URLs, and their
-     * vocabulary is #6345's seam — deliberately not judged here.
+     * vocabulary is the shared table's seam (commit e2798fab7) — deliberately not judged here.
      */
     explicitDriver?: string;
     /** Environment to read (`process.env` by default; tests inject their own). */
@@ -180,7 +180,7 @@ function resolveDatabaseStateDir(opts: {
  * through to the unified default, which is what those projects got before
  * this tier existed. (Driver-id spellings resolve through the spec's ONE
  * alias table, `resolveDriverId` — including `turso`/`libsql`, which became
- * rows in it in #6345 and no longer need a local special-case here.)
+ * rows in it in commit e2798fab7 and no longer need a local special-case here.)
  */
 function readConfigDeclaredDefault(opts: {
     artifactPath?: string;
@@ -237,7 +237,7 @@ function readConfigDeclaredDefault(opts: {
 /** Express a declared datasource's connection as a database URL, or `undefined`. */
 function datasourceUrlOf(ds: { driver?: unknown; config?: unknown }, projectRoot?: string): string | undefined {
     const config = (ds.config ?? {}) as { filename?: unknown; url?: unknown };
-    // Since #6345 `turso`/`libsql` are rows in the shared table like every other
+    // Since commit e2798fab7 `turso`/`libsql` are rows in the shared table like every other
     // builtin, so the local special-case they needed while turso had no config
     // contract is gone — one lookup answers for all of them.
     const canonical = resolveDriverId(ds.driver);
@@ -289,7 +289,7 @@ export function resolveProjectDatabaseUrl(
     // An explicitly in-memory boot gets no file default imposed on it. Only
     // `memory` is judged here; unknown driver values are refused downstream
     // (`resolveExplicitDriver`) with the full legal-values list.
-    // Resolved through the shared table (#6345): `OS_DATABASE_DRIVER=mingo` is an
+    // Resolved through the shared table (commit e2798fab7): `OS_DATABASE_DRIVER=mingo` is an
     // accepted spelling of `memory` on both hosts, so it must reach this rung
     // too — a raw string compare would have imposed the unified default FILE on
     // a boot that explicitly asked for the in-memory engine.

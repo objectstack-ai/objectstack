@@ -376,7 +376,7 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
     // two different rules and #5673 deliberately moved only the first — #4828's
     // "never CLAIM production on a guess" is untouched, and this case is the
     // guard against a later simplification collapsing them back into one.
-    // [#6287] `preview` dropped out of this list when it gained a declared fold
+    // [commit 84c86fb45] `preview` dropped out of this list when it gained a declared fold
     // (`sandbox`) — it is an `EnvironmentTypeSchema` member, so it is no longer
     // an example of a spelling this repo does not recognise. The rule and its
     // remaining examples are untouched.

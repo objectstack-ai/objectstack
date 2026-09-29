@@ -111,7 +111,7 @@ describe('checkApiExposure (#1889)', () => {
       expect(checkApiExposure(createOnly, 'import', { writeMode: 'update' }).allowed).toBe(false);
     });
 
-    // [#6259] Was spelled `'batch'`, which reached this rule only through the
+    // [commit 6968885ef] Was spelled `'batch'`, which reached this rule only through the
     // `batch: 'bulk'` alias row — a spelling no producer sends (`callData` lost
     // its `batch` arm in #5856; REST gates `/batch` on `'bulk'`). With the row
     // gone `'batch'` is an unknown operation and falls to the ungated
@@ -126,7 +126,7 @@ describe('checkApiExposure (#1889)', () => {
       expect(checkApiExposure(createOnly, 'bulk', { bulkChild: 'create' }).allowed).toBe(false);
     });
 
-    // [#6259] The absence pin's runtime half: `batch` is no longer a spelling
+    // [commit 6968885ef] The absence pin's runtime half: `batch` is no longer a spelling
     // this gate understands. It is NOT denied — an unmapped action respects
     // `apiEnabled` only — which is exactly why the row could not be left in
     // place as "harmless": it silently bought a bulk∧child judgement for a
@@ -138,7 +138,7 @@ describe('checkApiExposure (#1889)', () => {
       expect(checkApiExposure({ apiEnabled: false }, 'batch').status).toBe(404);
     });
 
-    // [#6259] The prose half of the same finding: this function's `@param`
+    // [commit 6968885ef] The prose half of the same finding: this function's `@param`
     // listed `batch` among the runtime data actions its only caller sends.
     it('the `@param action` TSDoc does not advertise `batch` as a live action', () => {
       const source = fs.readFileSync(

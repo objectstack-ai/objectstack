@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #6265 — two halves of one defect family in `standalone-stack.ts`, pinned
+// Commit cfb549db8 — two halves of one defect family in `standalone-stack.ts`, pinned
 // together because they close the same hole from opposite sides: a driver
 // selection this stack could not dispatch.
 //
@@ -254,7 +254,7 @@ describe('the existing schemes are untouched (positive controls, #6265)', () => 
     expect(resolveStandaloneDatabase({ databaseUrl: url }).driver).toBe(kind);
   });
 
-  // #6220's e2e pins this exit path from the CLI end — the new mysql arm must
+  // Commit 83df2fd73's e2e pins this exit path from the CLI end — the new mysql arm must
   // not have turned the trailing throw into a catch-all.
   it('an unknown scheme still throws, and the message now lists mysql://', () => {
     expect(() => resolveStandaloneDatabase({ databaseUrl: 'wat://nope' }))

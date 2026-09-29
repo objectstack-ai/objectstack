@@ -36,8 +36,6 @@
     "ConnectorRetryStrategySchema (const)",
     "ConnectorSchema (const)",
     "ConnectorState (type)",
-    "ConnectorTrigger (type)",
-    "ConnectorTriggerSchema (const)",
     "ConnectorType (type)",
     "ConnectorTypeSchema (const)",
     "ConnectorUpstreamUnavailableError (class)",

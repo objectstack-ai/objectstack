@@ -65,7 +65,7 @@ const declaredMarkReadKeys = () => new Set(Object.keys((MarkNotificationsReadRes
 const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsReadResponseSchema as any).shape));
 
 // ═══════════════════════════════════════════════════════════════════════════
-// [#10380 → #10629 → #13325] The authz resolver's expected read failures:
+// [commits dd8172ee2 → 13a6cb4ad → 2e0b7b18f] The authz resolver's expected read failures:
 //          WITHHELD from the shared log, and ASSERTED instead
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -75,7 +75,7 @@ const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsR
 // one by design — the resolver is fail-closed and must always resolve — but on
 // the way out the driver and the engine each log it.
 //
-// ⚠️ [#13273] WHICH ENGINE CHANNEL — and why this file stopped rolling its own
+// ⚠️ [commit 3a86a65e7] WHICH ENGINE CHANNEL — and why this file stopped rolling its own
 // capture. `ObjectQL.reportFindFailure` now picks the level from the CAUSE: a
 // read whose table was never provisioned — i.e. every read this block is
 // declared over — is logged at `debug`, carrying a
@@ -88,11 +88,11 @@ const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsR
 // which satisfied that arm's own predicate. Dead suppression that read as live
 // protection, and the file stayed green throughout because everything it
 // asserted was fed by the DRIVER channel. It now uses the shared
-// `captureExpectedReadRefusals` (#10629), which wraps BOTH channels, so which
+// `captureExpectedReadRefusals` (commit 13a6cb4ad), which wraps BOTH channels, so which
 // channel a frame arrives on is the ENGINE's classification and never this
 // fixture's problem.
 //
-// Counts RE-MEASURED on this tree (#13325), not transcribed:
+// Counts RE-MEASURED on this tree (commit 2e0b7b18f), not transcribed:
 //
 //   pnpm --filter @objectstack/runtime exec vitest run \
 //     src/notification-schema-conformance.integration.test.ts
@@ -108,7 +108,7 @@ const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsR
 //
 // Turbo interleaves package logs without attribution, so in the `Test Core`
 // shard log those are indistinguishable from a real failure — they were lifted
-// verbatim into a p1 flake signature (#10293) and cost a full dispatch cycle
+// verbatim into a p1 flake signature (a vitest teardown race, fixed by commit 92a69d813) and cost a full dispatch cycle
 // aimed at the wrong mechanism.
 //
 // ⛔ Not a mute. A capture that only silences would make this file blind: if
@@ -278,7 +278,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   let baseUrl: string;
   let messaging: MessagingService;
   /**
-   * [#10629] The expected-noise capture, asserted in `afterAll`. The SHARED
+   * [commit 13a6cb4ad] The expected-noise capture, asserted in `afterAll`. The SHARED
    * one — see the block above for what the per-fixture copy this replaced
    * could no longer do.
    */
@@ -286,7 +286,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
-    // [#10380] The driver is named rather than inlined so its logger can be
+    // [commit dd8172ee2] The driver is named rather than inlined so its logger can be
     // scoped before it ever runs a statement.
     const driver = new SqliteWasmDriver({ filename: ':memory:' });
     noise.captureDriver(driver);
@@ -299,7 +299,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
     await kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
     await kernel.bootstrap();
 
-    // [#10380] The engine only exists once the kernel has bootstrapped; the
+    // [commit dd8172ee2] The engine only exists once the kernel has bootstrapped; the
     // reads this scopes all happen later, per request.
     noise.captureEngine(kernel.getService<unknown>('objectql'));
 
@@ -326,7 +326,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   }, 60_000);
 
   afterAll(async () => {
-    // ── [#18070] The #10380 / #13325 pin, turned around. It used to assert
+    // ── [#18070] The commits dd8172ee2 / 2e0b7b18f pin, turned around. It used to assert
     // that the five resolver reads were still being REFUSED here — the symptom
     // pinned, not the defect closed. They are provisioned now, so the
     // assertion is that they SUCCEED, and `[]` means an empty table rather
@@ -481,19 +481,19 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   //     parse and the KEY assertion (⊆, not =) cannot see it either.
   //
   // Both were pinned here as the measured behaviour of `origin/main`, on the
-  // note that whichever way #6361 / #6363 were ruled, these assertions are the
+  // note that whichever way the two cards were ruled (landed as commits 90bbf2510 / 17d095413), these assertions are the
   // ones that must flip. BOTH have now been ruled (2026-08-07, Option A, and
   // ruled JOINTLY — one capability's two halves are never half-deleted), and
   // both assertions have flipped:
   //
-  //   * #6363 made the declaration true — `unreadCount` really is the total;
-  //   * #6361 removed the declaration instead — `cursor` is gone from the
+  //   * commit 17d095413 made the declaration true — `unreadCount` really is the total;
+  //   * commit 90bbf2510 removed the declaration instead — `cursor` is gone from the
   //     request half, the response half and the SDK producer, because there was
   //     no implementation to make it true ABOUT. Opposite repairs, same rule:
   //     declared must equal enforced.
   //
   // The two directions are why the pair is worth keeping side by side. Note the
-  // #6361 assertion below now pins something subtler than the #6363 one: the
+  // `cursor` assertion below (commit 90bbf2510) now pins something subtler than the `unreadCount` one (commit 17d095413): the
   // WIRE did not change (an unknown `?cursor=` was ignored before and is
   // ignored now), so what it proves is that the CONTRACT stopped promising the
   // thing the wire never delivered. A test that only checked "page2 === page1"
@@ -515,7 +515,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
       // The LIST is still windowed — that half never changed.
       expect(windowed.notifications).toHaveLength(1);
       // The BADGE is not: declared 'Total number of unread notifications', and
-      // now delivered as one. Before #6363 this read `1` — the window's size,
+      // now delivered as one. Before commit 17d095413 this read `1` — the window's size,
       // which is what a user with more unread than the page size was told
       // forever. The parse was green either way; only this assertion can tell.
       expect(windowed.unreadCount).toBe(all.unreadCount);

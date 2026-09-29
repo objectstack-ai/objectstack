@@ -90,7 +90,7 @@ export async function handleShareLinksRequest(
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
     const m = method.toUpperCase();
     const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
-    // [#6551 / #6206 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
+    // [#6551 / commit 8e13ca876 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
     // passed through WHOLE to every adjudicating service call below.
     //
     // `createLink` / `listLinks` / `revokeLink` are ENFORCEMENT paths — the
@@ -105,7 +105,7 @@ export async function handleShareLinksRequest(
     // two-field `{ userId, tenantId }` — structural subtyping keeps that
     // compiling, so the narrowing was invisible to tsc and every
     // `group`-posture caller was refused links on records they read fine
-    // elsewhere (the #6206 defect, on the dispatcher face). The routes' own
+    // elsewhere (the defect commit 8e13ca876 fixed, on the dispatcher face). The routes' own
     // 401 gate below reads only `ec?.userId` — an authentication decision
     // needs no authorization envelope.
     const ec = context.executionContext;

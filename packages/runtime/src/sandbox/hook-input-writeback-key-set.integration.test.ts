@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14758] The sandbox write-back carries back the keys the BODY wrote — so
+ * [commit 84199cb87] The sandbox write-back carries back the keys the BODY wrote — so
  * #14099's per-row divergence refusal is true for shipped hook bodies too, in
  * either row order.
  *

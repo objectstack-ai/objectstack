@@ -3,7 +3,7 @@
 /**
  * The artifact→enforcer seam: bind the install-time GRANTED permission set an
  * environment artifact carries to the plugins that artifact materializes
- * (ADR-0025 §3.5 step 2 / F4, #11333 option A phase 1).
+ * (ADR-0025 §3.5 step 2 / F4; option A phase 1, landed in commit ea4d16420).
  *
  * ## What this is the consumer half of
  *

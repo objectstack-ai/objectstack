@@ -239,7 +239,7 @@ describe('[#7867] an error that names its own HTTP status keeps it across the bo
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * [#9934] `userMessage` — the fourth allowlisted property: the producer-side
+ * [commit 79c46da90] `userMessage` — the fourth allowlisted property: the producer-side
  * user-facing marking (objectui#5210 ruling). A sandboxed BODY is the authoring
  * surface the marking exists for, so the author's opt-in must survive the VM
  * flattening the throw to a string — in both directions, like the other three.

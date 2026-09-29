@@ -107,7 +107,7 @@ export type CodeStampShape =
      */
     | 'codehelper'
     /**
-     * [#13233] The SAME code-carrying helper, stamping through an OBJECT
+     * [commit 3800e4293] The SAME code-carrying helper, stamping through an OBJECT
      * LITERAL instead of an assignment: `return { severity, code, message }`
      * (shorthand) or `{ code: errCode }` (longhand).
      *
@@ -187,14 +187,14 @@ export type CodeStampShape =
 export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 /**
- * [#16649] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
+ * [commit 44c917a47] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
  * before any HTTP boundary exists — the CLI rethrows it and aborts — and until
  * #16404 the ledger ratified that class as not owed a row
  * (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 on "host boot
  * matching is not wire vocabulary"). #16404 deleted the exemption (the ledger
  * is the published face, door or no door), which left the verdict meaning only
  * "a registration this tree still owes" — #16449 discharged nine of those,
- * #16649's first half the remaining fourteen, and the second half widened
+ * commit 613bfbd3d the remaining fourteen, and commit 44c917a47 widened
  * `check-dispatcher-error-vocabulary`'s face refusal from `packages/spec/src/`
  * to every published package's `src/`, which is what makes the verdict
  * unwritable: a row carrying it inside that face is now a
@@ -308,7 +308,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `check:dispatcher-error-vocabulary` refuses any verdict there but
     // `foreign-vocabulary` / `runtime-pinned`. ──
     //
-    // ── [#16649] Fourth cycle, the rest of that class: the fourteen
+    // ── [commit 613bfbd3d] Fourth cycle, the rest of that class: the fourteen
     // `boot-refusal` rows that remained after #16449 — the nine
     // `@objectstack/core` refusals (the three ADR-0130 D4 artifact-package
     // refusals, the four `MigrationJournalRefusal` codes,
@@ -321,7 +321,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (`stale-row`), the reachability each row recorded now carried on its
     // ledger row.
     //
-    // ── [#16649, second half] The class is now closed MECHANICALLY rather than
+    // ── [commit 44c917a47, second half] The class is now closed MECHANICALLY rather than
     // by having been emptied once. `check-dispatcher-error-vocabulary`'s face
     // refusal, which #16449 could only afford over `packages/spec/src/`, covers
     // every published package's `src/` — the whole of this scan's population on
@@ -483,7 +483,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `invisible`: each refusal IS served to the client, in the vendor's flat
     // `{ message, code }` shape. That this endpoint's bodies are the vendor's
     // wire rather than this repo's envelope is not inferred here — it is the
-    // 2026-08-21 maintainer ruling (#10554), carried in `check-route-envelope`
+    // 2026-08-21 maintainer ruling (landed in commit 6abc4df03), carried in `check-route-envelope`
     // as the `vendorWire` entry for this same file.
     //
     // ⛔ `pending-registration` would be FALSE for all four. That verdict says
@@ -694,9 +694,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
-    // ── pending registration [#14921]: a metadata-tree refusal that reaches a
+    // ── pending registration [commit c1d274de7]: a metadata-tree refusal that reaches a
     // ── dispatcher-door read ───────────────────────────────────────────────
-    // Not a widened scan and not a demotion: this producer is NEW. #14921 made
+    // Not a widened scan and not a demotion: this producer is NEW. Commit c1d274de7 made
     // `FilesystemLoader.list()` (and the shared `loadMany()` walk behind it)
     // refuse a metadata name derived from more than one file, where before it
     // reported the name twice and served the first by extension precedence.
@@ -731,7 +731,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + 'that batch\'s input, and the registration is what ratchets it out again.',
     },
 
-    // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
+    // ── [commit 3800e4293] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
     // the object-literal stamp position, and they are one genre from end to
@@ -1221,7 +1221,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
 ];
 
 /**
- * [#13233] Why a helper's codes cannot be read from source, and whether that
+ * [commit 3800e4293] Why a helper's codes cannot be read from source, and whether that
  * matters. A DIFFERENT question from {@link CodeVerdict}, so a different
  * vocabulary — a site row answers "does this code reach a wire and is it
  * registered", and none of its members can answer "we never learn the value".
@@ -1257,7 +1257,7 @@ export type UnresolvedHelperVerdict =
     | 'restamped-elsewhere';
 
 /**
- * [#13233] A code-carrying helper this scan can SEE but cannot READ: the stamp
+ * [commit 3800e4293] A code-carrying helper this scan can SEE but cannot READ: the stamp
  * resolves to a parameter, and no in-file call site passes a value that reduces
  * to a literal.
  *
@@ -1276,7 +1276,7 @@ export type UnresolvedHelperVerdict =
  * So the helper is classified here instead, with a door, a verdict and its
  * evidence, and the gate reconciles this list in BOTH directions: an entry the
  * scan no longer reports goes stale and REDS, exactly like a site row. ⭐ That
- * is what makes it a widening rather than an exemption — before #13233 none of
+ * is what makes it a widening rather than an exemption — before commit 3800e4293 none of
  * these helpers produced a site OR an unresolved, because no shape reached
  * them; now every one is recorded, evidenced, and ratcheted.
  *

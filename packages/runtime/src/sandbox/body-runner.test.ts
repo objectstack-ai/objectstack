@@ -212,7 +212,7 @@ describe('hookBodyRunnerFactory', () => {
     });
   });
 
-  // [#6316] `ctx.user` is seeded from `engineCtx.user` and from nothing else.
+  // [commit 448ac9565] `ctx.user` is seeded from `engineCtx.user` and from nothing else.
   // `buildSandboxContext` used to spell `engineCtx?.user ?? engineCtx?.session?.user`;
   // the second limb was unreachable, because `HookContext['session']` declares
   // no `user` key and its sole producer — `buildSession()` in objectql, called
@@ -524,7 +524,7 @@ describe('actionBodyRunnerFactory', () => {
     });
   });
 
-  // [#6316] The action face of the same removal. `ActionSession` declares
+  // [commit 448ac9565] The action face of the same removal. `ActionSession` declares
   // `userId` / `organizationId` / `positions` / `roles` and no `user`, and its
   // sole producer `buildActionSession()` writes exactly those four — for both
   // action ctx assembly sites (MCP `run_action` in `action-execution.ts`, REST

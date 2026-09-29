@@ -171,90 +171,222 @@ function elementWithIdentity(
  * reorders a flow's `nodes` sends the same start node back at another index,
  * and grafting by position would put its credential on whichever node now sits
  * where it used to. So an array hop is resolved ONCE, against the stored body,
- * into the element's `id`, and every body — served and incoming — is then
- * walked by that identity, never by the index.
+ * into an identity, and every body — served and incoming — is then walked by
+ * that identity, never by the index. Two kinds of identity:
  *
- * An array hop whose stored element carries no string `id`, or shares it with
- * a sibling, resolves to nothing: the path is skipped, exactly as every array
- * hop was skipped before identity resolution existed.
+ *  - **the element's own `id`** (`{ elementId }`) — a flow node;
+ *  - **for an element with no `id`, the identified element below it on the
+ *    same path** (`{ anchor }`, #20590). A `parallel` block's branch carries no
+ *    `id`, and a credential inside one sits at
+ *    `nodes.<i>.config.branches.<b>.nodes.<j>.config.signingSecret`. The branch
+ *    is the one element of `branches` whose own walk down the rest of the
+ *    path reaches node `<j>`'s `id` — and a flow's node ids are one space
+ *    across every region (`FlowSchema`), so at most one branch does. `anchor`
+ *    is that walk: the hops from inside the element down to, and including,
+ *    the first identified element beneath it.
+ *
+ * An array hop that reaches neither — an element with no `id` and no
+ * identified element below it on the path, or an `id` shared with a sibling —
+ * resolves to nothing, and the path is skipped.
  */
-type PathHop = { readonly key: string } | { readonly elementId: string };
+type PathHop =
+    | { readonly key: string }
+    | { readonly elementId: string }
+    | { readonly anchor: readonly PathHop[] };
 
 /**
  * Resolve every CONTAINER hop of `segments` (all but the last, which names the
  * redacted key itself) against `stored`. `undefined` when the stored body does
- * not reach that far — which the caller reads as "nothing at rest to carry".
+ * not reach that far, or an array hop has no identity — which the caller reads
+ * as "nothing at rest to carry".
  */
 function resolveHops(stored: unknown, segments: readonly string[]): PathHop[] | undefined {
-    const hops: PathHop[] = [];
+    // First pass: key hops and `id` hops; `null` marks an element with no `id`.
+    const found: Array<PathHop | null> = [];
     let node: unknown = stored;
     for (let i = 0; i < segments.length - 1; i += 1) {
         const segment = segments[i] as string;
         if (Array.isArray(node)) {
             if (!/^(0|[1-9][0-9]*)$/.test(segment)) return undefined;
             const element = node[Number(segment)];
+            if (!isPlainRecord(element)) return undefined;
             const elementId = identityOf(element);
-            if (elementId === undefined || !elementWithIdentity(node, elementId)) return undefined;
-            hops.push({ elementId });
+            if (elementId !== undefined && !elementWithIdentity(node, elementId)) return undefined;
+            found.push(elementId === undefined ? null : { elementId });
             node = element;
             continue;
         }
         if (!isPlainRecord(node)) return undefined;
-        hops.push({ key: segment });
+        found.push({ key: segment });
         node = node[segment];
+    }
+    // Second pass, from the end: anchor each id-less element on the first
+    // identified element below it. The anchor may itself cross an id-less
+    // element (a branch inside a branch), whose own anchor is already built.
+    const hops: PathHop[] = new Array(found.length);
+    let nextIdentified = -1;
+    for (let i = found.length - 1; i >= 0; i -= 1) {
+        const hop = found[i];
+        if (hop === null) {
+            if (nextIdentified < 0) return undefined;
+            hops[i] = { anchor: hops.slice(i + 1, nextIdentified + 1) };
+            continue;
+        }
+        hops[i] = hop as PathHop;
+        if ('elementId' in (hop as PathHop)) nextIdentified = i;
     }
     return hops;
 }
 
 /**
- * Walk to the plain object that OWNS the redacted key, hop by hop.
- *
- * `undefined` when any hop along the way is absent, is the wrong kind of
- * container, or (for an array hop) holds no single element with that identity
- * — which the caller must read as "this body does not speak to that path at
- * all", never as "the value is absent". The distinction is the whole guard: a
- * PUT body carrying no `config` key is an author removing the container, and
- * grafting `config.password` back onto it would MINT a config that holds
- * nothing but a credential.
+ * Resolve ONE hop against `node`: the segment it stands for in THIS body (a
+ * key, or the element's index here) and the value it leads to. `undefined`
+ * when this body does not speak to the hop — the wrong kind of container, or
+ * an array hop no single element answers (none does, or two do and cannot be
+ * told apart: guessing would graft a credential onto whichever came first).
  */
-function containerAt(root: unknown, hops: readonly PathHop[]): Record<string, unknown> | undefined {
-    let node: unknown = root;
-    for (const hop of hops) {
-        if ('key' in hop) {
-            if (!isPlainRecord(node)) return undefined;
-            node = node[hop.key];
-            continue;
-        }
-        if (!Array.isArray(node)) return undefined;
-        const found = elementWithIdentity(node, hop.elementId);
-        if (!found) return undefined;
-        node = found.element;
+function stepInto(node: unknown, hop: PathHop): { segment: string; next: unknown } | undefined {
+    if ('key' in hop) {
+        return isPlainRecord(node) ? { segment: hop.key, next: node[hop.key] } : undefined;
     }
-    return isPlainRecord(node) ? node : undefined;
+    if (!Array.isArray(node)) return undefined;
+    let index: number | undefined;
+    for (let i = 0; i < node.length; i += 1) {
+        const hit = 'elementId' in hop
+            ? identityOf(node[i]) === hop.elementId
+            : isPlainRecord(node[i]) && containerAt(node[i], hop.anchor) !== undefined;
+        if (!hit) continue;
+        if (index !== undefined) return undefined;
+        index = i;
+    }
+    return index === undefined ? undefined : { segment: String(index), next: node[index] };
 }
 
 /**
- * Copy-on-write set of `value` under `key` at the end of `hops`, returning a
- * new root and copying only the containers along the path — an array hop
- * copies the array and replaces the one element it names.
+ * Walk `hops` in `root`: the plain object that OWNS the redacted key, and the
+ * concrete segments (a key, or an array index in THIS body) that reach it.
  *
- * Called only after {@link containerAt} found the container in `root`, so
- * every hop resolves. The incoming request body belongs to the caller
- * (`saveMetaItem` hands the same object to the audit trail and the registry
- * write-through), so the carry-forward must not mutate it in place.
+ * `undefined` when any hop along the way is absent, is the wrong kind of
+ * container, or (for an array hop) is answered by no single element — which
+ * the caller must read as "this body does not speak to that path at all",
+ * never as "the value is absent". The distinction is the whole guard: a PUT
+ * body carrying no `config` key is an author removing the container, and
+ * grafting `config.password` back onto it would MINT a config that holds
+ * nothing but a credential.
  */
-function withValueAt(root: unknown, hops: readonly PathHop[], key: string, value: unknown): unknown {
-    if (hops.length === 0) return { ...(root as Record<string, unknown>), [key]: value };
-    const [hop, ...rest] = hops as [PathHop, ...PathHop[]];
-    if ('key' in hop) {
-        const record = root as Record<string, unknown>;
-        return { ...record, [hop.key]: withValueAt(record[hop.key], rest, key, value) };
+function locate(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+    const at: string[] = [];
+    let node: unknown = root;
+    for (const hop of hops) {
+        const step = stepInto(node, hop);
+        if (!step) return undefined;
+        at.push(step.segment);
+        node = step.next;
     }
-    const array = root as unknown[];
-    const found = elementWithIdentity(array, hop.elementId) as { index: number; element: Record<string, unknown> };
-    const next = array.slice();
-    next[found.index] = withValueAt(found.element, rest, key, value);
-    return next;
+    return isPlainRecord(node) ? { at, container: node } : undefined;
+}
+
+/** {@link locate}, container only. */
+function containerAt(root: unknown, hops: readonly PathHop[]): Record<string, unknown> | undefined {
+    return locate(root, hops)?.container;
+}
+
+/** The value `at` names in `root`; every segment resolves (it came from a walk of `root`). */
+function valueAt(root: unknown, at: readonly string[]): unknown {
+    let node: unknown = root;
+    for (const segment of at) node = Array.isArray(node) ? node[Number(segment)] : (node as Record<string, unknown>)[segment];
+    return node;
+}
+
+/**
+ * [#20590 round 1] Where the redacted key's container sits in `root` when the
+ * STORED path to it no longer resolves there — because the element that owns
+ * it MOVED, keeping its identity: a flow node taken out of a `loop` body, or
+ * put into a `parallel` branch, keeps its `id`, its kind and the withheld form,
+ * and only the regions around it change. Skipping the graft there would drop
+ * the stored credential at save, silently.
+ *
+ * The owner is the path's deepest identified element (its last `elementId`
+ * hop). It is looked for by that `id` across the WHOLE body — but only among
+ * the elements that stand where the owner stood: the elements of an array
+ * held under the SAME key as the owner's own array in the stored path (for a
+ * flow node that key is `nodes`, so a node at the top level or in any region
+ * counts, and an edge or a config value that happens to carry the same `id`
+ * does not — a flow keeps node ids and edge ids in separate spaces, #20590
+ * round 2). The key is read from the stored hops, never named here. It is used
+ * only when exactly ONE such element carries that `id` — none, and the author
+ * removed it; two or more, and they cannot be told apart, so nothing is
+ * chosen. Uniqueness across the whole body is what keeps this safe for a type
+ * whose ids are not one space the way a flow's node ids are. From the owner,
+ * the rest of the path is walked as usual (the key hops down to the container,
+ * so an owner whose `config` the author removed still grafts nothing).
+ *
+ * An owner whose array is not held under a key — an array directly inside
+ * another array — has no key to scope by, and is not relocated.
+ *
+ * A path with no identified element — every datasource path, whose redactor
+ * never crosses an array — has no owner to find, and is unaffected.
+ */
+function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; container: Record<string, unknown> } | undefined {
+    let owner = -1;
+    for (let i = hops.length - 1; i >= 0; i -= 1) {
+        if ('elementId' in (hops[i] as PathHop)) {
+            owner = i;
+            break;
+        }
+    }
+    if (owner < 1) return undefined;
+    const id = (hops[owner] as { elementId: string }).elementId;
+    // The key the owner's array is held under in the stored path.
+    const parent = hops[owner - 1] as PathHop;
+    if (!('key' in parent)) return undefined;
+    const arrayKey = parent.key;
+
+    const matches: string[][] = [];
+    const visit = (node: unknown, at: string[]): void => {
+        if (Array.isArray(node)) {
+            node.forEach((value, index) => visit(value, [...at, String(index)]));
+            return;
+        }
+        if (!isPlainRecord(node)) return;
+        for (const [key, value] of Object.entries(node)) {
+            if (!value || typeof value !== 'object') continue;
+            if (key === arrayKey && Array.isArray(value)) {
+                value.forEach((element, index) => {
+                    if (isPlainRecord(element) && element.id === id) matches.push([...at, key, String(index)]);
+                });
+            }
+            visit(value, [...at, key]);
+        }
+    };
+    visit(root, []);
+    if (matches.length !== 1) return undefined;
+
+    const ownerAt = matches[0] as string[];
+    const rest = locate(valueAt(root, ownerAt), hops.slice(owner + 1));
+    return rest ? { at: [...ownerAt, ...rest.at], container: rest.container } : undefined;
+}
+
+/**
+ * Copy-on-write set of `value` under `key` in the container `at` names,
+ * returning a new root and copying only the containers along the way — an
+ * array segment copies the array and replaces the one element it names.
+ *
+ * `at` came from a walk of `root`, so every segment resolves. The incoming
+ * request body belongs to the caller (`saveMetaItem` hands the same object to
+ * the audit trail and the registry write-through), so the carry-forward must
+ * not mutate it in place.
+ */
+function withValueAt(root: unknown, at: readonly string[], key: string, value: unknown): unknown {
+    if (at.length === 0) return { ...(root as Record<string, unknown>), [key]: value };
+    const [head, ...rest] = at as [string, ...string[]];
+    if (Array.isArray(root)) {
+        const next = root.slice();
+        next[Number(head)] = withValueAt(root[Number(head)], rest, key, value);
+        return next;
+    }
+    const record = root as Record<string, unknown>;
+    return { ...record, [head]: withValueAt(record[head], rest, key, value) };
 }
 
 /** Structural equality for the values a redactor hides (scalars in practice; general by construction). */
@@ -295,8 +427,29 @@ function sameValue(a: unknown, b: unknown): boolean {
  * A path through an ARRAY (a flow's start node, `nodes.<i>.config.secret`,
  * #20552) is walked by the stored element's `id`, not by its index, so a body
  * that reorders the array still carries the value onto the element it came
- * from — see {@link resolveHops}. An element with no `id`, or an `id` shared
- * with a sibling, is never carried into.
+ * from — see {@link resolveHops}. An element with no `id` is walked by the
+ * identified element below it on the same path (a `parallel` branch, by the
+ * node inside it that holds the credential, #20590); one with neither, or an
+ * `id` shared with a sibling, is never carried into.
+ *
+ * ⛔ A carried value never lands where the read would SERVE it (#20590). The
+ * array hop follows an identity, while a redactor chooses what to withhold by
+ * whatever rule it has — a flow's by the node's KIND — and the two can
+ * disagree: an edit that keeps a node's `id` and changes its kind would have
+ * the stored credential grafted onto a node the next read serves whole. So
+ * the type's redactor is run over the grafted body, and a carried value whose
+ * path it no longer withholds is dropped rather than persisted. Changing the
+ * kind of the node that held a credential is the author's word about that
+ * credential: it is gone, and a kind that needs one asks for it again (an
+ * `api` flow's start node without a secret is refused at registration).
+ *
+ * A node MOVED across regions — out of a loop body, into a parallel branch —
+ * keeps its identity while the stored path around it stops resolving. Its
+ * container is then found by the owning element's `id` across the whole
+ * incoming body, exactly one match or none ({@link relocateById}), and the
+ * same position check decides whether the value lands: a moved node whose
+ * kind still holds the credential keeps it; one moved AND changed in kind
+ * does not.
  *
  * ⚠️ The first case is genuinely INDISTINGUISHABLE, not merely treated as
  * equal: an author who hand-deletes `:password` from a URL sends exactly the
@@ -305,7 +458,10 @@ function sameValue(a: unknown, b: unknown): boolean {
  * deliberate choice of the safe side — preserving a credential an operator may
  * still depend on, over silently destroying one. The same ambiguity exists in
  * `restoreRedactedConfig`, and clearing a credential on purpose has an
- * unambiguous door: change it, or delete the row.
+ * unambiguous door: change it, or delete the row — or, where the type's
+ * redactor serves one value as written because it holds no credential, send
+ * that value (a flow's empty string, #20590): it differs from the absent key
+ * that was served, so it is the author's word and it wins.
  *
  * @param type     request-shaped metadata type (plural or singular).
  * @param incoming the body about to be persisted.
@@ -324,7 +480,7 @@ export function carryForwardRedactedValues<T>(type: string, incoming: T, stored:
     const served = redactor(stored as Record<string, unknown>);
     if (served.redactedKeys.length === 0) return incoming;
 
-    let out = incoming as unknown as Record<string, unknown>;
+    const grafts: Array<{ at: string[]; key: string; value: unknown }> = [];
     for (const path of served.redactedKeys) {
         // Dotted, item-relative — the registry's documented contract for
         // `redactedKeys` (`config.password`; an array hop is an index into the
@@ -339,13 +495,36 @@ export function carryForwardRedactedValues<T>(type: string, incoming: T, stored:
         const storedValue = storedParent?.[key];
         if (storedValue === undefined) continue;
 
-        const incomingParent = containerAt(out, hops);
-        if (!incomingParent) continue;
+        // Where the container sits in the incoming body: along the stored
+        // path, or — the node that owns it having MOVED — at the one element
+        // anywhere in the body that carries the owner's id (#20590 round 1).
+        const target = locate(incoming, hops) ?? relocateById(incoming, hops);
+        if (!target) continue;
 
         const servedParent = containerAt(served.item, hops);
-        if (!sameValue(incomingParent[key], servedParent?.[key])) continue;
+        if (!sameValue(target.container[key], servedParent?.[key])) continue;
 
-        out = withValueAt(out, hops, key, storedValue) as Record<string, unknown>;
+        grafts.push({ at: target.at, key, value: storedValue });
     }
-    return out as unknown as T;
+
+    // Two stored paths landing on ONE incoming position cannot be told apart;
+    // neither is carried rather than one silently overwriting the other.
+    const landing = (graft: { at: readonly string[]; key: string }) => [...graft.at, graft.key].join('.');
+    const counts = new Map<string, number>();
+    for (const graft of grafts) counts.set(landing(graft), (counts.get(landing(graft)) ?? 0) + 1);
+
+    // [#20590] Keep only what the read would withhold where it now lands. A
+    // graft sets a leaf and moves no container, so each pass re-grafts the
+    // survivors onto the untouched incoming body; the set only shrinks, so
+    // this settles in at most one pass per graft.
+    let kept = grafts.filter((graft) => counts.get(landing(graft)) === 1);
+    for (;;) {
+        let out: unknown = incoming;
+        for (const graft of kept) out = withValueAt(out, graft.at, graft.key, graft.value);
+        if (kept.length === 0) return out as T;
+        const withheld = new Set(redactor(out as Record<string, unknown>).redactedKeys);
+        const next = kept.filter((graft) => withheld.has(landing(graft)));
+        if (next.length === kept.length) return out as T;
+        kept = next;
+    }
 }

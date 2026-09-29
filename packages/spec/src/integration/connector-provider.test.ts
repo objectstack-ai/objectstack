@@ -147,13 +147,23 @@ describe('ADR-0097 connector schema evolution', () => {
             ).toThrow(/must not author `actions`/);
         });
 
-        it('rejects authored `triggers` on a provider-bound instance (§5)', () => {
-            expect(() =>
-                DeclarativeConnectorEntrySchema.parse({
-                    ...validInstance,
-                    triggers: [{ key: 't', label: 'T', type: 'polling' }],
-                }),
-            ).toThrow(/must not author `triggers`/);
+        // This used to pin a provider-bound refusal of `triggers` reasoned "the
+        // provider derives them from the upstream at boot" — untrue: no provider
+        // ever derived a trigger. `triggers` is now a retiredKey() tombstone on
+        // every carrier (ADR-0049), so a provider-bound instance meets the same
+        // retirement prescription a descriptor does, and never the old reason.
+        // The full pin set lives in `connector-triggers-retirement.test.ts`.
+        it('refuses authored `triggers` on a provider-bound instance with the retirement prescription, not a derivation claim', () => {
+            const result = DeclarativeConnectorEntrySchema.safeParse({
+                ...validInstance,
+                triggers: [{ key: 't', label: 'T', type: 'webhook' }],
+            });
+            expect(result.success).toBe(false);
+            const issue = result.error!.issues.find((i) => i.path.join('.') === 'triggers');
+            expect(issue, 'the refusal must name `triggers`').toBeDefined();
+            expect(issue!.code).toBe('invalid_type');
+            expect(issue!.message).toMatch(/^`connector\.triggers` was removed in @objectstack\/spec 17 \(ADR-0049/);
+            for (const i of result.error!.issues) expect(i.message).not.toContain('derives them from the upstream');
         });
     });
 });

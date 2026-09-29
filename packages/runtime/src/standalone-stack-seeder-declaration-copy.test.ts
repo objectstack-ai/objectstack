@@ -26,7 +26,7 @@
 //   4. which copy wins in the persisted `sys_*` row.
 //
 // ⛔ This file changes NO production behaviour and asserts no repair. It is a
-// divergence pin in the style of PR #14398's
+// divergence pin in the style of commit 317132495's
 // `standalone-stack-security-registrar.test.ts`: one real boot, both copies
 // read at the same moment, key by key, beside the row that survived.
 //
@@ -85,8 +85,8 @@ import '@objectstack/service-datasource';
 
 /**
  * The probe artifact. `engines.protocol` sits one minor below the runtime spec
- * so the door's ADR-0087 forward-conversion window is open — the same lever PR
- * #14398's probe uses, and the reason the two copies can differ at all.
+ * so the door's ADR-0087 forward-conversion window is open — the same lever
+ * commit 317132495's probe uses, and the reason the two copies can differ at all.
  *
  * Each declaration isolates one axis of triage's question:
  *
@@ -97,7 +97,7 @@ import '@objectstack/service-datasource';
  * - `capabilities[0]` — no `scope`, so the door's schema default is observable
  *   (triage question 3).
  * - `sharingRules[0]` `share_legacy_deals` — BOTH legacy spellings at once
- *   (`sharedWith.type: 'role'`, `accessLevel: 'full'`), the PR #14398 probe
+ *   (`sharedWith.type: 'role'`, `accessLevel: 'full'`), the commit 317132495 probe
  *   bytes.
  * - `sharingRules[1]` `share_legacy_level` — the legacy `accessLevel` ALONE,
  *   over a recipient type the seeder accepts, so the `accessLevel` axis is not

@@ -21,7 +21,8 @@ export const entry: SemanticMigration = {
     + 'A value that was recording intent as documentation belongs in `description`, '
     + 'which remains declared',
   reason:
-    'Maintainer ruling 2026-08-20 (#9885), ADR-0049 enforce-or-remove: REMOVE. The '
+    'Maintainer ruling 2026-08-20 on the finding that nothing writes or reads this column, '
+    + 'ADR-0049 enforce-or-remove: REMOVE. The '
     + 'object-scoped census (all sys_position-naming files, with same-object positive '
     + 'controls resolving `active` / `delegatable` / `is_default` / `name` to real '
     + 'readers) measured the column at zero on both sides: the only row writers — the '

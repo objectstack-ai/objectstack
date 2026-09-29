@@ -726,3 +726,452 @@ describe('#20552 — first save of a registry-only (code-authored) flow keeps it
         expect(startNodeOf(JSON.parse(overlayRow(rows, 'active')!.metadata)).config.secret).toBe(ROTATED);
     });
 });
+
+// ---------------------------------------------------------------------------
+// #20590 position 3 — the carry-forward never lands a credential where the
+// projection does not withhold it
+// ---------------------------------------------------------------------------
+//
+// The two halves pick positions by different rules. The read side withholds by
+// the element's KIND (a flow's start node); the write side follows an array hop
+// by the stored element's IDENTITY (`id`). An ordinary round trip that keeps a
+// node's id and changes its kind therefore used to graft the stored credential
+// onto a node the next read serves whole. The save door runs the carry-forward
+// after every authoring gate, so no node-config check stood in the way there.
+
+/** The served body of the seeded flow, relocated: the old start node's kind changed, a new start node added. */
+function relocate(served: any) {
+    const [finish, begin] = served.nodes;
+    return {
+        ...served,
+        nodes: [
+            finish,
+            { ...begin, type: 'assignment', label: 'Was the start node', config: {} },
+            { id: 'begin_v2', type: 'start', label: 'On Webhook', config: { triggerType: 'api', hookId: 'intake' } },
+        ],
+        edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }],
+    };
+}
+
+describe('#20590 — a relocating round trip never carries a credential into a served position', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('carryForwardRedactedValues drops a carried value the projection would not withhold at its new position', () => {
+        const stored = storedInboundFlow();
+        const incoming = relocate(redactMetadataItem('flow', stored));
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        // What the next read serves from the persisted body.
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(FLOW_SECRET);
+        expect(allStrings(out)).not.toContain(FLOW_SECRET);
+    });
+
+    it('the save door: the next served read of a relocated flow carries no credential', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: relocate(editable) });
+
+        const next: any = await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' });
+        expect(next.item.nodes.map((n: any) => n.id)).toEqual(['finish', 'begin', 'begin_v2']);
+        expect(allStrings(next)).not.toContain(FLOW_SECRET);
+        const list: any = await protocol.getMetaItems({ type: 'flow' });
+        expect(allStrings(list)).not.toContain(FLOW_SECRET);
+        // Nothing was grafted at rest either: the relocated node holds no credential.
+        expect(allStrings(storedFlowBody(rows))).not.toContain(FLOW_SECRET);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20590 position 1 — a credential inside a REGION, and the removal door
+// ---------------------------------------------------------------------------
+//
+// The real `flow` projection (service-automation `flow-credential-projection.ts`)
+// withholds an `http` node's `config.signingSecret` and a start node's
+// `config.secret` at every depth, and serves the cleared form (`''`) as
+// written. This stand-in emits the SAME path shapes that projection is pinned to
+// emit in `flow-credential-positions.test.ts`
+// (`nodes.<i>.config.body.nodes.<j>.config.signingSecret`,
+// `nodes.<i>.config.branches.<b>.nodes.<j>.config.signingSecret`), so what is
+// exercised here is this package's half: the inverse walks those paths.
+
+const SIGNING = 'stored-signing-secret-20590';
+const ROTATED_SIGNING = 'rotated-signing-secret-20590';
+const STAND_IN_KEYS: Record<string, string> = { start: 'secret', http: 'signingSecret' };
+const STAND_IN_REGIONS: Record<string, Array<[string, 'one' | 'many']>> = {
+    loop: [['body', 'one']],
+    parallel: [['branches', 'many']],
+    try_catch: [['try', 'one'], ['catch', 'one']],
+};
+
+const regionFlowStandIn = (item: Record<string, unknown>) => {
+    const redactedKeys: string[] = [];
+    const walkNodes = (nodes: any[], path: string): any[] => nodes.map((node, i) => {
+        if (!node || typeof node !== 'object' || !node.config || typeof node.config !== 'object') return node;
+        const at = `${path}.${i}`;
+        const config = { ...node.config };
+        const key = STAND_IN_KEYS[node.type];
+        if (key && key in config && config[key] !== '') {
+            delete config[key];
+            redactedKeys.push(`${at}.config.${key}`);
+        }
+        for (const [slot, arity] of STAND_IN_REGIONS[node.type] ?? []) {
+            const value = config[slot];
+            if (arity === 'one' && value?.nodes) config[slot] = { ...value, nodes: walkNodes(value.nodes, `${at}.config.${slot}.nodes`) };
+            if (arity === 'many' && Array.isArray(value)) {
+                config[slot] = value.map((r: any, b: number) => (r?.nodes ? { ...r, nodes: walkNodes(r.nodes, `${at}.config.${slot}.${b}.nodes`) } : r));
+            }
+        }
+        return { ...node, config };
+    });
+    if (!Array.isArray(item.nodes)) return { item, redactedKeys };
+    const nodes = walkNodes(item.nodes as any[], 'nodes');
+    return redactedKeys.length === 0 ? { item, redactedKeys } : { item: { ...item, nodes }, redactedKeys: redactedKeys.sort() };
+};
+
+/** A flow whose outbound callouts sit inside a loop body and a parallel branch — the branch deliberately not first. */
+function storedCalloutFlow() {
+    return {
+        name: 'callouts',
+        label: 'Callouts',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'begin', type: 'start', label: 'Start', config: {} },
+            {
+                id: 'each', type: 'loop', label: 'Each',
+                config: {
+                    collection: '{rows}',
+                    body: { nodes: [{ id: 'per_row', type: 'http', label: 'Per row', config: { url: 'https://a', durable: true, signingSecret: SIGNING } }], edges: [] },
+                },
+            },
+            {
+                id: 'fan', type: 'parallel', label: 'Fan',
+                config: {
+                    branches: [
+                        { name: 'quiet', nodes: [{ id: 'note', type: 'assignment', label: 'Note', config: {} }] },
+                        { name: 'loud', nodes: [{ id: 'push', type: 'http', label: 'Push', config: { url: 'https://b', durable: true, signingSecret: SIGNING } }] },
+                    ],
+                },
+            },
+        ],
+        edges: [],
+    };
+}
+
+const calloutOf = (flow: any, id: string): any => {
+    let hit: any;
+    const visit = (nodes: any[]) => nodes.forEach((n) => {
+        if (n?.id === id) hit = n;
+        const c = n?.config ?? {};
+        if (c.body?.nodes) visit(c.body.nodes);
+        if (Array.isArray(c.branches)) c.branches.forEach((b: any) => visit(b?.nodes ?? []));
+        for (const k of ['try', 'catch']) if (c[k]?.nodes) visit(c[k].nodes);
+    });
+    visit(flow.nodes);
+    return hit;
+};
+
+describe('#20590 — the inverse carries a credential back into a region', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', regionFlowStandIn));
+    afterEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('keeps both nested signing secrets on a round trip that also REORDERS the parallel branches', () => {
+        const stored = storedCalloutFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        expect(allStrings(served)).not.toContain(SIGNING);
+
+        const fan = served.nodes[2];
+        const incoming = {
+            ...served,
+            label: 'Edited',
+            nodes: [served.nodes[0], served.nodes[1], { ...fan, config: { ...fan.config, branches: [fan.config.branches[1], fan.config.branches[0]] } }],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'push').config.signingSecret).toBe(SIGNING);
+        // The branch the credential came from, not the one now at its old index.
+        expect(out.nodes[2].config.branches[0].name).toBe('loud');
+        expect(calloutOf(out, 'note').config).toEqual({});
+        expect(out.label).toBe('Edited');
+        // Copy-on-write: the caller's body is untouched.
+        expect(allStrings(incoming)).not.toContain(SIGNING);
+    });
+
+    it('carries nothing into a branch that cannot be told apart from another', () => {
+        const stored = storedCalloutFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const fan = served.nodes[2];
+        const twinBranches = { ...fan, config: { ...fan.config, branches: [fan.config.branches[1], structuredClone(fan.config.branches[1])] } };
+        const out: any = carryForwardRedactedValues('flow', { ...served, nodes: [served.nodes[0], served.nodes[1], twinBranches] }, stored);
+        expect(out.nodes[2].config.branches.every((b: any) => b.nodes[0].config.signingSecret === undefined)).toBe(true);
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+    });
+
+    it('the removal door: the empty string clears a signing secret, an absent key keeps it, a value replaces it', () => {
+        const stored = storedCalloutFlow();
+        const served: any = redactMetadataItem('flow', stored);
+
+        const cleared = structuredClone(served);
+        calloutOf(cleared, 'push').config.signingSecret = '';
+        const clearedOut: any = carryForwardRedactedValues('flow', cleared, stored);
+        expect(calloutOf(clearedOut, 'push').config.signingSecret).toBe('');
+        expect(calloutOf(clearedOut, 'per_row').config.signingSecret).toBe(SIGNING);
+        // …and the cleared form is served as written, so the next round trip keeps it cleared.
+        const reread: any = redactMetadataItem('flow', clearedOut);
+        expect(calloutOf(reread, 'push').config.signingSecret).toBe('');
+        expect(calloutOf(carryForwardRedactedValues('flow', reread, clearedOut), 'push').config.signingSecret).toBe('');
+
+        const rotated = structuredClone(served);
+        calloutOf(rotated, 'push').config.signingSecret = ROTATED_SIGNING;
+        expect(calloutOf(carryForwardRedactedValues('flow', rotated, stored), 'push').config.signingSecret).toBe(ROTATED_SIGNING);
+
+        // Absent is never "remove": the served form saved straight back keeps both.
+        const kept: any = carryForwardRedactedValues('flow', served, stored);
+        expect(calloutOf(kept, 'push').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(kept, 'per_row').config.signingSecret).toBe(SIGNING);
+    });
+
+    it('a callout left in place inside a rebuilt region keeps its secret; one whose kind changed in place does not carry it', () => {
+        const stored = storedCalloutFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const perRow = served.nodes[1].config.body.nodes[0];
+        // `push` becomes an assignment in place; `per_row` stays an http node.
+        const fan = served.nodes[2];
+        const incoming = {
+            ...served,
+            nodes: [
+                served.nodes[0],
+                { ...served.nodes[1], config: { ...served.nodes[1].config, body: { nodes: [perRow], edges: [] } } },
+                { ...fan, config: { ...fan.config, branches: [fan.config.branches[0], { ...fan.config.branches[1], nodes: [{ ...fan.config.branches[1].nodes[0], type: 'assignment', config: {} }] }] } },
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'push').type).toBe('assignment');
+        expect(calloutOf(out, 'push').config.signingSecret).toBeUndefined();
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('the save door round trip: the stored row keeps both nested secrets, and no served read carries them', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'callouts', organization_id: null, package_id: null, state: 'active' };
+        const body = storedCalloutFlow();
+        rows.set(keyOf(where), { id: 'r_callouts', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'callouts' })).item;
+        expect(allStrings(served)).not.toContain(SIGNING);
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'callouts', item: { ...editable, label: 'Edited' } });
+
+        const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'callouts' && r.state === 'active')!.metadata);
+        expect(at.label).toBe('Edited');
+        expect(calloutOf(at, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(at, 'push').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(await protocol.getMetaItems({ type: 'flow' }))).not.toContain(SIGNING);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20590 patch round 1 — a node MOVED across regions keeps its credential
+// ---------------------------------------------------------------------------
+//
+// The stored path names the credential's container through the regions the
+// node sat in at rest. An author who moves that node — out of a loop body, into
+// a parallel branch — keeping its id, its kind and the withheld form, sends a
+// body in which that path no longer resolves. Skipping the graft there dropped
+// the stored secret at save, silently, and the next durable callout went out
+// unsigned. The node is found by its id across the whole incoming body instead
+// (exactly one match), and the position check still decides whether it lands.
+
+/** {@link storedCalloutFlow} plus a top-level callout, so a node can move INTO a region too. */
+function storedMovesFlow() {
+    const flow: any = storedCalloutFlow();
+    flow.name = 'moves';
+    flow.nodes.push({ id: 'call', type: 'http', label: 'Call', config: { url: 'https://c', durable: true, signingSecret: SIGNING } });
+    return flow;
+}
+
+const NOOP = (id: string) => ({ id, type: 'assignment', label: id, config: {} });
+
+/** The served body with `per_row` moved from the loop body to the top level (the body keeps a stand-in node). */
+function movedOutOfLoop(served: any) {
+    const [begin, each, fan, call] = served.nodes;
+    const perRow = each.config.body.nodes[0];
+    return {
+        ...served,
+        nodes: [begin, { ...each, config: { ...each.config, body: { nodes: [NOOP('body_noop')], edges: [] } } }, fan, call, perRow],
+    };
+}
+
+describe('#20590 round 1 — a node moved across regions keeps its credential', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', regionFlowStandIn));
+    afterEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('(a) an http node moved out of a loop body to the top level: the secret is kept at rest and not served', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const incoming = movedOutOfLoop(served);
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.nodes[4].id).toBe('per_row');
+        expect(out.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'push').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'call').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+        expect(allStrings(incoming)).not.toContain(SIGNING);
+    });
+
+    it('(b) an http node moved from the top level into a parallel branch: the secret is kept at rest and not served', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const quiet = fan.config.branches[0];
+        const incoming = {
+            ...served,
+            nodes: [begin, each, { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, call] }, fan.config.branches[1]] } }],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.nodes[2].config.branches[0].nodes[1].id).toBe('call');
+        expect(out.nodes[2].config.branches[0].nodes[1].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(c) a node moved into a region AND changed in kind: the value is dropped — the position check still wins', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [...each.config.body.nodes, { ...call, type: 'assignment', config: {} }], edges: [] } } },
+                fan,
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(calloutOf(out, 'call').type).toBe('assignment');
+        expect(calloutOf(out, 'call').config.signingSecret).toBeUndefined();
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(d) an id duplicated across two regions: nothing is grafted onto either copy', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const perRow = each.config.body.nodes[0];
+        const [quiet, loud] = fan.config.branches;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [NOOP('body_noop')], edges: [] } } },
+                { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, perRow] }, { ...loud, nodes: [...loud.nodes, structuredClone(perRow)] }] } },
+                call,
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        const copies = out.nodes[2].config.branches.flatMap((b: any) => b.nodes.filter((n: any) => n.id === 'per_row'));
+        expect(copies).toHaveLength(2);
+        expect(copies.every((n: any) => n.config.signingSecret === undefined)).toBe(true);
+        // The unambiguous ones are unaffected.
+        expect(calloutOf(out, 'call').config.signingSecret).toBe(SIGNING);
+    });
+
+    it('(a) through the save door: the row at rest keeps the moved node\'s secret, and no served read carries it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'moves', organization_id: null, package_id: null, state: 'active' };
+        const body = storedMovesFlow();
+        rows.set(keyOf(where), { id: 'r_moves', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'moves' })).item;
+        expect(allStrings(served)).not.toContain(SIGNING);
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'moves', item: movedOutOfLoop(editable) });
+
+        const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'moves' && r.state === 'active')!.metadata);
+        expect(at.nodes.map((n: any) => n.id)).toEqual(['begin', 'each', 'fan', 'call', 'per_row']);
+        expect(at.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(at, 'body_noop').config).toEqual({});
+        expect(allStrings(await protocol.getMetaItem({ type: 'flow', name: 'moves' }))).not.toContain(SIGNING);
+        expect(allStrings(await protocol.getMetaItems({ type: 'flow' }))).not.toContain(SIGNING);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20590 patch round 2 — only a NODE can stand where the moved node stood
+// ---------------------------------------------------------------------------
+//
+// The by-id lookup must count the elements that stand where the owner stood —
+// the elements of an array under the same key as the owner's container — and
+// nothing else. A flow keeps node ids and edge ids in separate spaces, so an
+// edge may share a moved node's id and still be a valid flow; counted as a
+// second match, it blocked the relocation and dropped the credential at save.
+
+describe('#20590 round 2 — the relocation counts nodes, not every object carrying the id', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', regionFlowStandIn));
+    afterEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    /** {@link movedOutOfLoop} plus a top-level EDGE whose id is the moved node's. */
+    function movedWithEdgeTwin(served: any) {
+        const moved: any = movedOutOfLoop(served);
+        return { ...moved, edges: [...moved.edges, { id: 'per_row', source: 'begin', target: 'per_row' }] };
+    }
+
+    it('(e) a moved node plus an edge sharing its id: the credential is kept', () => {
+        const stored = storedMovesFlow();
+        const incoming = movedWithEdgeTwin(redactMetadataItem('flow', stored));
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(out.nodes[4].id).toBe('per_row');
+        expect(out.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(e) through the save door: the edge twin is a valid flow, and the row at rest keeps the moved node\'s secret', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'moves', organization_id: null, package_id: null, state: 'active' };
+        const body = storedMovesFlow();
+        rows.set(keyOf(where), { id: 'r_moves', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'moves' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'moves', item: movedWithEdgeTwin(editable) });
+
+        const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'moves' && r.state === 'active')!.metadata);
+        expect(at.edges.map((e: any) => e.id)).toEqual(['per_row']);
+        expect(at.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(allStrings(await protocol.getMetaItem({ type: 'flow', name: 'moves' }))).not.toContain(SIGNING);
+    });
+
+    it('(f) two NODES sharing the moved node\'s id in different regions: nothing is grafted', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const [quiet, loud] = fan.config.branches;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [...each.config.body.nodes, call], edges: [] } } },
+                { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, { ...NOOP('call') }] }, loud] } },
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        const moved = out.nodes[1].config.body.nodes.find((n: any) => n.id === 'call');
+        expect(moved.type).toBe('http');
+        expect(moved.config.signingSecret).toBeUndefined();
+        expect(out.nodes[2].config.branches[0].nodes.find((n: any) => n.id === 'call').config).toEqual({});
+        // The unambiguous ones are unaffected.
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+    });
+});

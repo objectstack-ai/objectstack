@@ -21,7 +21,8 @@ export const entry: SemanticMigration = {
     + 'it re-declares fresh, through the enforce route of ADR-0049 — the engine first, the '
     + 'vocabulary second',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #15513 (ruled A: retire the '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on the families\' remaining keys '
+    + 'and defs (ruled A: retire the '
     + 'three compliance-shaped families whole via RETIRED_DEFS_BY_MAJOR, the '
     + 'integration/ErrorMappingConfig precedent; not roadmapped). Five defs and roughly '
     + 'twenty-five declared keys sat on the exported surface and in the generated reference '
@@ -34,7 +35,8 @@ export const entry: SemanticMigration = {
     + 'and `TrainingPlan.sendReminders` were boolean capability claims of exactly the shape '
     + 'ADR-0049 names: an author could write them, parse clean, and get no behaviour and no '
     + 'diagnostic. Tagging the family `[EXPERIMENTAL — not enforced]` was the fallback the '
-    + 'ruling did not take (a human-only signal). The #14477 deadline-key tombstones (five '
+    + 'ruling did not take (a human-only signal). The deadline-key tombstones of the 2026-09-02 '
+    + 'per-family ruling (five '
     + 'sites, `RETIRED_KEYS_BY_MAJOR[18]`, D3 `training-deadline-keys-retired`) leave with '
     + 'their defs\' source; their registry entries stay as history. Why D3 semantic and not a '
     + 'D2 conversion: the chain walks a normalized STACK and `applyConversionsToStoredItem` '

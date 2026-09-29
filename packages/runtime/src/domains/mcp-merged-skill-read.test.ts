@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /**
- * [#8726 — the HTTP half of #8328] `buildMcpBridge.listSkills` must read the
+ * [commit e783e163d — the HTTP half of #8328] `buildMcpBridge.listSkills` must read the
  * protocol layer's MERGED listing, not `IMetadataService.list('skill')`.
  *
  * ── The defect ────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ import { HttpDispatcher } from '../http-dispatcher.js';
  * flip never reached MCP prompts and step 3 of #8328's reproduction answered
  * `{"prompts":[]}`.
  *
- * #8328's stdio half (PR #8724, `packages/mcp`) fixed the long-lived server.
+ * #8328's stdio half (commit ff4ba6a06, `packages/mcp`) fixed the long-lived server.
  * This is the per-request HTTP surface the reproduction actually runs through.
  *
  * ── Why the fakes are shaped the way they are ─────────────────────────────

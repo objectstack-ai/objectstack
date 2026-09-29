@@ -4,14 +4,14 @@
  * [#13623] The DENIAL door carries the producer's `userMessage` — the second
  * door that dropped it, and the one whose refusals users most need to read.
  *
- * ## Why this is a second door and not the one #13241 repaired
+ * ## Why this is a second door and not the one commit a21d2a9cf repaired
  *
  * `HttpDispatcher.dispatch`'s foot catch is **not a pure rethrow**. It
  * recognises `isPermissionDeniedError` — `name === 'PermissionDeniedError'`
  * **or** `code === 'PERMISSION_DENIED'` **or** a message starting
  * `[Security] Access denied` — and answers it itself, from
  * `packages/runtime/src/http-dispatcher.ts`. Such a throw therefore never
- * reaches `dispatcher-plugin`'s `errorResponseBase`, which is the exit #13241
+ * reaches `dispatcher-plugin`'s `errorResponseBase`, which is the exit commit a21d2a9cf
  * taught to carry the mark. Same field, same contract, different door.
  *
  * `ApiErrorSchema.userMessage` has declared the slot all along, and
@@ -21,7 +21,7 @@
  *
  * ## Why THIS door matters more than its size suggests
  *
- * #9934 made the mark **status-agnostic** precisely so a 403 could carry it,
+ * Commit 79c46da90 made the mark **status-agnostic** precisely so a 403 could carry it,
  * and a 403 is the refusal class most likely to carry deliberately-authored
  * text: *"You do not have access to this report; ask an admin for the Reporting
  * role"* is exactly the sentence a producer marks. The one door that swallowed
@@ -41,7 +41,7 @@
  *
  * That same ruling is also why the change is owed: it makes REST's shape the
  * contract for BOTH transports, and REST's shape has carried the mark on this
- * identical denial since #9934 (`mapDataError` = `withDeclaredUserMessage` over
+ * identical denial since commit 79c46da90 (`mapDataError` = `withDeclaredUserMessage` over
  * `classifyDataError`, pinned in
  * `packages/rest/src/rest-user-facing-refusal-marking.test.ts`). The
  * dispatcher's 403 was the one that differed. `§6` pins the parity.

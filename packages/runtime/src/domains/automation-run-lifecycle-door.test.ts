@@ -243,9 +243,9 @@ describe('#13953 — the run-lifecycle doors require the platform operator', () 
 
         it('leaves the legacy execution door alone — `POST /automation/trigger/:name` for a flow named `runs`', async () => {
             // The gate excludes `parts[0] === 'trigger'`, exactly as the toggle
-            // (#10243) and clone (#12156) arms do, and BOTH route arms repeat
+            // (commit 266436a7f) and clone (#12156) arms do, and BOTH route arms repeat
             // the exclusion so gate and route cannot drift. Over-blocking an
-            // execution door is the one thing the #10243 ruling did not do.
+            // execution door is the one thing the ruling commit 266436a7f landed did not do.
             const h = makeDispatcher();
             const { response } = await h.dispatcher.handleAutomation(
                 'trigger/runs/run_7/cancel', 'POST', undefined, USER_CTX(), undefined,

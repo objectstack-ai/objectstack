@@ -318,7 +318,7 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
 }
 
 /**
- * [#8726] The protocol layer's overlay-aware merged read, as this package can
+ * [commit e783e163d] The protocol layer's overlay-aware merged read, as this package can
  * name it.
  *
  * ⚠️ **Deliberately `Pick`ed from the DECLARED contract rather than restated.**
@@ -344,7 +344,7 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
 export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
 
 /**
- * [#8726] Read this environment's `skill` rows through the merged listing.
+ * [commit e783e163d] Read this environment's `skill` rows through the merged listing.
  *
  * ── The defect this closes ────────────────────────────────────────────────
  *
@@ -361,7 +361,7 @@ export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
  *
  * ── Absent vs. degraded vs. failed — three outcomes, deliberately ─────────
  *
- * 1. **No merged read on this host** → the pre-#8726 registry listing,
+ * 1. **No merged read on this host** → the registry listing before commit e783e163d,
  *    unchanged, including its `?? []` for a host with no metadata service at
  *    all. Structural absence is not degradation: a host that assembles this
  *    runtime without the metadata protocol has no merged read to offer, so
@@ -412,7 +412,7 @@ async function readMergedSkillRows(
 }
 
 /**
- * [#8726] Report #6504's completeness verdict for the skill prompt surface.
+ * [commit e783e163d] Report #6504's completeness verdict for the skill prompt surface.
  *
  * This read never had a diagnosed wrapper at all — unlike the stdio bridge,
  * where #6504 had already landed one — so a known-partial skill surface
@@ -644,7 +644,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // ExecutionContext filtering, exactly like `describeObject` (the MCP
         // route itself is authenticated).
         //
-        // [#8726] Through the protocol layer's MERGED listing — the second half
+        // [commit e783e163d] Through the protocol layer's MERGED listing — the second half
         // of #8328, whose own reproduction runs through THIS endpoint. See
         // {@link readMergedSkillRows}.
         listSkills: async () => {
