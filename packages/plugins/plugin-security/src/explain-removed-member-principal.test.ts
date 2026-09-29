@@ -14,8 +14,8 @@
  * check. A member removed from `org_alpha` whose session still names it was
  * explained holding `org_alpha`'s grants, which enforcement no longer applies.
  *
- * Measured over this file's rig on `main` at c96beb27, before the fix
- * (better-sqlite3, `isolated`):
+ * Measured over this file's rig with the pre-fix resolution put back (this
+ * fix's ablation), identically on both drivers and under both walled postures:
  *
  * | principal | explain `permissionSets` | explain `object_crud` | enforcement's sets | enforcement's read |
  * |---|---|---|---|---|
