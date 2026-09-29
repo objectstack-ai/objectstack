@@ -25,7 +25,7 @@ import { enMessages, zhCNMessages, jaJPMessages, esESMessages } from './messages
  * ## The provenance companions are READ here, not merely recorded
  *
  * `os i18n extract --source-hashes` writes `<locale>.source-hashes.generated.ts`
- * beside these bundles (maintainer ruling #12069 Option A, #11671). A record
+ * beside these bundles (maintainer ruling #12069 Option A, commit 09b4f4e4e). A record
  * says: "this locale's leaf at that path is still a byte copy of THAT source
  * revision". Recording alone changes nothing a user sees — the substitution is
  * what {@link withSourceFallback} does, and until it was wired here this set

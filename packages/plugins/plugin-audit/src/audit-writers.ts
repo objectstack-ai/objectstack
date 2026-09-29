@@ -20,8 +20,8 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
-// [#8707 / #10101] The platform-row organization resolver, imported rather
-// than owned. It started life in THIS file (#8707, honouring #8287's ruling)
+// [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
+// than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
 // recorded on cloud#1395: ONE shared resolver for all three platform-row
 // writers (audit, approvals, automation runs) — a per-writer copy of the
@@ -190,7 +190,7 @@ const SKIP_OBJECTS = new Set<string>([
  * #5038's bulk equivalents) had to answer "yes, a hook covers this object" for
  * every one of these tables and buy a row read for a handler that returns on
  * its first line. The knowledge existed; the contract had nowhere to put it
- * until #5928 / PR #6575 added `excludeObjects`.
+ * until #5928 / commit 69787f07b added `excludeObjects`.
  *
  * Why the negative face and not `object: [...]` with the complement: the object
  * universe is OPEN. `/meta` PUT registers new objects into a running engine and
@@ -223,7 +223,7 @@ const NOISE_FIELDS = new Set<string>([
 ]);
 
 /**
- * [#8144 / #8707 / #10101] `createFieldPresenceProbe` and
+ * [#8144 / commit 1408fe385 / #10101] `createFieldPresenceProbe` and
  * `resolveRecordOrganizationField` were defined HERE until #10101 promoted
  * them to `@objectstack/metadata-core` (the cloud#1395 ruling: one shared
  * platform-row organization resolver for audit, approvals and automation
@@ -786,7 +786,7 @@ function renderMilestoneSummary(
  * puts a CLOSED vocabulary there — SQLSTATE (`42P01`, `23505`), mysql2's
  * symbolic names (`ER_NO_SUCH_TABLE`), SQLite's `SQLITE_*` — and ADR-0112 does
  * the same for the engine's own refusals (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
- * the cause measured on #14927). None of them varies per row.
+ * the cause commit ab489388b records). None of them varies per row.
  *
  * So the key is bounded by two sets fixed at BOOT — the declared object
  * registry and the driver's code vocabulary — and by nothing that grows with
@@ -1030,7 +1030,7 @@ export function installAuditWriters(
     return def;
   };
 
-  // [#8707 / #10101] The object's own organization COLUMN and value, through
+  // [commit 1408fe385 / #10101] The object's own organization COLUMN and value, through
   // the SHARED platform-row resolver (`@objectstack/metadata-core`) — one
   // memoized instance per installation, the same instance shape the approval
   // writer and the automation-run recorder hold. See
@@ -1347,7 +1347,7 @@ export function installAuditWriters(
     // a strict sys_user lookup); the service principal lands on `actor`.
     const actorLabel: string | null =
       userId ?? (typeof sess.actor === 'string' && sess.actor.trim() ? sess.actor.trim() : null);
-    // [#8707, honouring #8287's ruling] The audited RECORD'S OWN organization
+    // [commit 1408fe385, honouring #8287's ruling] The audited RECORD'S OWN organization
     // wins; the acting session's active organization is the fallback. ⛔ Do not
     // flip this back to `sess.organizationId ?? recordOrgId`.
     //
@@ -1399,7 +1399,7 @@ export function installAuditWriters(
     // `readonly: true` (so `validateRecord` skips them) and this whole path is
     // wrapped in swallow-and-report.
     //
-    // It survived a careful review of exactly these lines because #8707
+    // It survived a careful review of exactly these lines because commit 1408fe385
     // reordered the two arms without evaluating either one: reordering two
     // expressions does not tell you whether they resolve. The pins in
     // `audit-writers.test.ts` (#9516 block) are what check this comment against
@@ -1689,7 +1689,7 @@ export function installAuditWriters(
    * the declaration whether or not a creation happened. On insert only, a
    * caller barred from *creating* an attachment on a `files: false` object
    * could *move* an existing one onto it. `attachment-access-hooks.ts`
-   * authorizes the re-point (#10091: the new `parent_object`/`parent_id`
+   * authorizes the re-point (commit da891e0ef: the new `parent_object`/`parent_id`
    * must be editable) — access, again, not capability.
    */
   const enforceFilesCapability = async (ctx: HookContext) => {

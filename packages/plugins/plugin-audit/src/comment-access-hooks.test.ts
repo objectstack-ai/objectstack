@@ -261,7 +261,7 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
     ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE' });
   });
 
-  // [#9798] The UNSCOPED multi-write block that used to sit here called the
+  // [commit c7655d472] The UNSCOPED multi-write block that used to sit here called the
   // handlers DIRECTLY with a whole-operation context of this file's own
   // construction — a shape the engine's per-row dispatch (#5038/#5574) never
   // produced on either verb, so it stayed green for a behaviour the wired
@@ -401,8 +401,8 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
     await beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'c1' }, { ...DELEGATED_ENVELOPE }));
 
     const forwarded = canEdit.mock.calls[0]![2] as unknown as Record<string, unknown>;
-    // Every principal field survives — the #6523 contract's unit is the envelope
-    // and #6206 forbids rebuilding a subset of it.
+    // Every principal field survives — the unit of commit aa4b90d9a's contract is the envelope
+    // and the full-envelope ruling forbids rebuilding a subset of it.
     expect(forwarded).toEqual({
       userId: 'human_1',
       tenantId: 'org_1',
@@ -534,7 +534,7 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// #4630's unscoped multi-write refusals through the WIRED engine (#9798)
+// #4630's unscoped multi-write refusals through the WIRED engine (commit c7655d472)
 //
 // A real `ObjectQL` + in-memory driver + this module's installer — the exact
 // path `ql.delete('sys_comment', …)` / `ql.update('sys_comment', …)` take in
