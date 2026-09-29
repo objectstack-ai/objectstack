@@ -412,7 +412,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     + 'composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) '
     + 'and names both source stacks on a collision.',
   ),
-  // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
+  // `themes` was REMOVED in 17.1 (commit 35ad101bc, ADR-0049 enforce-or-remove — ruled
   // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
   // artifact ingest and stopped there: no framework package ever read the
   // stored items, `theme` was never a registered metadata type, no first-party
@@ -630,7 +630,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    *
    * BOTH shapes therefore reach this schema twice: once as authored, once
    * lowered. All four combinations (map/array × bare/declared) are accepted —
-   * the map's two lowered forms since #4343 and #4976, the array's since #6238.
+   * the map's two lowered forms since #4343 and #4976, the array's since commit c8d6f6e08.
    * `packages/cli`'s `lower-callables.test.ts` pins every cell against what the
    * lowering actually emits, rather than against a belief about it.
    */
@@ -1020,7 +1020,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   reports: 'concat',
   datasets: 'concat',
   actions: 'concat',
-  // `themes` left this table with the key (#10485) — the total-record type is
+  // `themes` left this table with the key (commit 35ad101bc) — the total-record type is
   // what forces this comment to move in lockstep with the schema.
   flows: 'concat',
   jobs: 'concat',
@@ -1230,7 +1230,7 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  *
  * NO `strictObject` spelling appears here, and none is needed. This schema is
  * `ManifestSchema.extend(...)`, and `.extend()` carries the base's unknown-key
- * posture: #14192 closed `ManifestSchema`, so an assembled body is closed too,
+ * posture: commit 4d0d9445a closed `ManifestSchema`, so an assembled body is closed too,
  * BY INHERITANCE — an undeclared key on one is REFUSED, by name and with the
  * declared spelling offered for a near miss. ⛔ Do not read the absence of the
  * `strictObject` spelling as a declined posture; it is an inherited one.
@@ -3034,7 +3034,7 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * and before this the second merge doubled every bound action in the composed
  * object (three copies for two declarations under `objectConflict: 'override'`
  * / `'merge'`). Identity, deliberately not equality: an author writing one
- * action in both positions produces two distinct objects, which #14686's
+ * action in both positions produces two distinct objects, which commit 279431e7a's
  * same-key refusal (run before this merge) rejects and which this merge must
  * not quietly fold.
  *
@@ -3191,7 +3191,7 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
     // surviving objects through as-is — ran this merge a second time over that
     // echo and doubled every bound action. A hand-written twin (one action
     // authored in both positions) is two objects after the strict parse, and
-    // #14686's same-key refusal has already run ahead of this merge to refuse
+    // commit 279431e7a's same-key refusal has already run ahead of this merge to refuse
     // it; an equality skip here would have swallowed it instead.
     const fresh = (actionsByObject.get(obj.name) ?? []).filter((action) => !base.includes(action));
     const merged = fresh.length > 0 ? [...base, ...fresh] : base;
@@ -4507,7 +4507,7 @@ function mergeObjects(
 }
 
 /**
- * Cross-stack duplicate action keys over the COMPOSED action set (#14662).
+ * Cross-stack duplicate action keys over the COMPOSED action set (commit 35dffeace).
  *
  * `defineStack` refuses two declarations that resolve to one scope-qualified
  * runtime key within ONE stack ({@link collectDuplicateActionKeyErrors}), and
@@ -5067,7 +5067,7 @@ function collectArtifactCrossReferenceErrors(
  * stacks declaring *different* values throw an error naming both stacks
  * (#5005; `i18n` joined them in #5051).
  * **Actions** concatenate like every other collection, and the composed set is
- * then checked the way `defineStack` checks one stack (#14662): two input
+ * then checked the way `defineStack` checks one stack (commit 35dffeace): two input
  * stacks whose declarations resolve to one scope-qualified runtime key
  * (`objectName:name`, or `global:name` for an object-less action) throw, and
  * the error names both stacks by manifest id and where each declaration sits.
@@ -5290,7 +5290,7 @@ export function composeStacks(
     if (single.declared) composed[key] = single.value;
   }
 
-  // 6. Cross-stack action key collisions (#14662) — the check `defineStack`
+  // 6. Cross-stack action key collisions (commit 35dffeace) — the check `defineStack`
   //    runs within one stack, over what composition actually carries. AFTER
   //    every collection is composed, and BEFORE `mergeActionsIntoObjects`
   //    copies each bound standalone action into its object: that copy is the

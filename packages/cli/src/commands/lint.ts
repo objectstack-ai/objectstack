@@ -945,7 +945,27 @@ export default class Lint extends Command {
     const conversionNotices: ConversionNotice[] = [];
 
     try {
-      const { config, absolutePath } = await loadConfig(configPath);
+      const loaded = await loadConfig(configPath);
+      const { config, absolutePath } = loaded;
+      // [#20583] The ADR-0087 D2 conversions the stack PRODUCER applied — the
+      // fold `os validate` / `os build` make at their step 1b, one command over.
+      // `defineStack` converts at load (either mode), so the `config` this
+      // command received is already canonical and the pass below has nothing
+      // of the default export left to convert: without this fold `conversions`
+      // read `[]` on every `defineStack` config carrying a retiring spelling,
+      // and the notice reached stderr alone. Read by `loadConfig` off the
+      // default export before its named-export merge (`stackConversionsOf`,
+      // beside the provenance mark). ⛔ Folded, never recomputed.
+      //
+      // ⛔ NOT the one-authoring-shape rule: there is no `refuseUnbuiltStack`
+      // here, and none is implied. An unbuilt default export carries no record,
+      // so `stackConversionsOf` answers `[]` for it and the pass below converts
+      // it exactly as before — this command accepts what it accepted, and only
+      // the conversions it reports grow. The two sources do not overlap: the
+      // producer's output is canonical wherever it converted, so the pass finds
+      // only what no producer saw — an unbuilt export, or a key `loadConfig`
+      // merged from a NAMED export after the producer ran.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printInfo(`Config: ${chalk.white(absolutePath)}`);
@@ -953,6 +973,7 @@ export default class Lint extends Command {
 
       // The ADR-0087 D2 conversion layer runs here, inside `normalizeStackInput`
       // — it always did. Passing the sink is what makes the rewrites SAYABLE.
+      // After the fold above, what it can still find is what no producer saw.
       const normalized = normalizeStackInput(config as Record<string, unknown>, {
         onConversionNotice: (n) => conversionNotices.push(n),
       });

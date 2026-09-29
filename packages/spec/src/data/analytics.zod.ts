@@ -401,10 +401,10 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
  * showcase example authors through) and `defineStack({ analyticsCubes })` /
  * artifact ingest, both of which parse `StackSchema` → `analyticsCubes[]`.
  *
- * [#10194] This docblock used to say the ADR-0010 protection envelope is
+ * [commit 2306a765c] This docblock used to say the ADR-0010 protection envelope is
  * deliberately NOT declared here, on the premise that `analytics_cube`
  * resolves no `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s
- * it). #10194 retired that premise: `analytics_cube` is now bound in
+ * it). Commit 2306a765c retired that premise: `analytics_cube` is now bound in
  * `UNREGISTERED_KIND_SCHEMAS`, so `PUT /meta/analytics_cube/:name` parses a
  * body through THIS schema — and the `getMetaItemLayered` → `saveMetaItem`
  * round-trip carries the `applyProtection` stamp. The shape is `.strict()`,
@@ -482,7 +482,7 @@ export const CubeSchema = lazySchema(() => strictObject(
     ),
 
     // ADR-0010 — runtime protection envelope (internal — set by loader).
-    // [#10194] See the docblock above for why this spread became load-bearing
+    // [commit 2306a765c] See the docblock above for why this spread became load-bearing
     // the day the `/meta` write door started parsing bodies with this schema.
     ...MetadataProtectionFields,
   },

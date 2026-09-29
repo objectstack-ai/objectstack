@@ -31,6 +31,16 @@
  * pass cannot both report one conversion. And `os validate --strict` exits 1 on
  * both faces for the retiring spelling, 0 for the control.
  *
+ * ## `os lint --json` — the same rows, plus the plain case (#20583)
+ *
+ * `os lint` reads the same `LoadedConfig.stackConversions` and folds it the
+ * same way, so it carries every row above, plus the plain case the card
+ * measured: one `defineStack` default export, no named export, which answered
+ * `conversions: []` with the notice on stderr alone. ⛔ Only the reporting
+ * moves on this door: it does not take the one-authoring-shape rule, so an
+ * unbuilt default export still lints and still converts through the command's
+ * own pass (`lint-conversion-notices.e2e.test.ts` pins that half).
+ *
  * `page-header-subtitle-alias` is the live conversion driven here (`description`
  * on a `page:header` component, canonical `subtitle`). The day it retires from
  * the load path the non-empty rows go red; re-point the fixture at a live entry
@@ -130,6 +140,8 @@ const stackBody = (ns: string, headerKey: 'description' | 'subtitle' | null) => 
 const IMPORT = `import { composeStacks, defineStack } from '@objectstack/spec';\n\n`;
 
 const FIXTURES: Record<string, string> = {
+  // The plain case: one `defineStack` default export, no named export.
+  plain: IMPORT + `export default defineStack(${stackBody('pln', 'description')});\n`,
   // The record, across `loadConfig`'s named-export spread.
   recordAcrossSpread:
     IMPORT +
@@ -206,6 +218,52 @@ for (const command of ['validate', 'build'] as const) {
     }, 180_000);
   });
 }
+
+describe("os lint --json — the producer's conversion record reaches `conversions` (#20583)", () => {
+  // `os lint` folds the same record at the same point — right after
+  // `loadConfig` — and keeps its own pass for what no producer saw. It does NOT
+  // take the one-authoring-shape rule: an unbuilt default export still lints
+  // and still converts through the pass (`lint-conversion-notices.e2e.test.ts`
+  // pins that half on a plain object-literal export).
+  const lint = (label: string) => runCli(['lint', '--json'], dirs[label]);
+  const producerLine = "conversion 'page-header-subtitle-alias'";
+
+  it('the plain case: one `defineStack` default export carrying the retiring spelling', async () => {
+    const run = await lint('plain');
+    const p = payloadOf(run, 'lint plain') as Payload & { passed?: boolean };
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expect(p.passed).toBe(true);
+    expectExactly(p, [THE_NOTICE], 'lint plain');
+    // The producer's stderr line stays, and stays ONE: the payload now carries
+    // the notice, and the door adds no second stderr line for it.
+    expect(run.stderr.split(producerLine).length - 1, 'one stderr line for the one conversion').toBe(1);
+  }, 180_000);
+
+  it('defineStack + a named export: the record is read off the default before the named-export spread', async () => {
+    const run = await lint('recordAcrossSpread');
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expectExactly(payloadOf(run, 'lint recordAcrossSpread'), [THE_NOTICE], 'lint recordAcrossSpread');
+  }, 180_000);
+
+  it('composeStacks: the composed stack carries the record of the input that applied the conversion', async () => {
+    const run = await lint('composed');
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expectExactly(payloadOf(run, 'lint composed'), [THE_NOTICE], 'lint composed');
+  }, 180_000);
+
+  it("a key merged from a named export: the command's own pass still converts it — once", async () => {
+    const run = await lint('namedExportPass');
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expectExactly(payloadOf(run, 'lint namedExportPass'), [THE_NOTICE], 'lint namedExportPass');
+    expect(run.stderr).not.toContain(producerLine);
+  }, 180_000);
+
+  it('control: the canonical spelling converts nothing — `[]`', async () => {
+    const run = await lint('canonical');
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expectExactly(payloadOf(run, 'lint canonical'), [], 'lint canonical');
+  }, 180_000);
+});
 
 describe('os validate --strict — a conversion the producer applied fails it, on both faces', () => {
   it('the retiring spelling: exit 1 on the text face and under --json', async () => {

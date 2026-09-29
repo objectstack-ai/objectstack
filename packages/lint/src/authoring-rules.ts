@@ -117,7 +117,10 @@ import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
 import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
-import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
+import {
+  validateFlowApiTriggerSecret,
+  validateFlowTriggerReadiness,
+} from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle } from './validate-record-title.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
@@ -1107,7 +1110,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // predicate cannot route at all, a `record-*` triggerType outside the
   // closed token grammar `triggerTypeToHookEvents` maps, and (#6637) a
   // `type: 'record_change'` flow whose triggerType the engine's binding resolver
-  // routes nowhere, silently demoting it to a manual flow. None of those verdicts
+  // routes nowhere, silently demoting it to a manual flow. #20553 made it five: an
+  // `api`-bound flow with no usable `config.secret`, which the engine's own
+  // `registerFlow` refuses (ADR-0041) — on its OWN entry below
+  // (`validateFlowApiTriggerSecret`), because it is CLI-only for now. None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
@@ -1136,6 +1142,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
     run: (stack) => validateFlowTriggerReadiness(stack),
+  },
+  // #20553 — `flow-api-trigger-secret-missing`, split out of the entry above as
+  // its own exported rule (the `validateSecurityRoleWord` precedent: one rule id
+  // sits on ONE side of the runtime wall). Same family, same `error`, all three
+  // commands — but NOT the runtime publish gate yet, and #20611 is the card that
+  // moves it across. The flow read path withholds `config.secret` from every
+  // served definition (#20552) and `saveMetaItem` restores the stored secret only
+  // just before the put, AFTER this table has judged the body the caller sent —
+  // so on the gate, a signed flow's ordinary GET → edit → PUT reads as
+  // secretless. Measured on `825c33ff9f`: with this id on the gate, the two
+  // round-trip pins in `protocol.metadata-redaction.test.ts` fail; off it, 26/26.
+  // The `/meta` door therefore keeps its pre-rule behaviour (it stores a
+  // secretless flow, and the engine refuses it at registration) until the gate
+  // judges the carried-forward body — then this entry becomes `CLI_AND_RUNTIME`
+  // with `runtimeTypes: ['flow']`, like the one above.
+  {
+    name: 'validateFlowApiTriggerSecret',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Not yet runtime-safe: the publish gate judges a /meta save BEFORE saveMetaItem restores the ' +
+      'inbound-hook secret the flow read path withholds, so a signed api flow\'s ordinary GET, edit, PUT ' +
+      'round trip reaches this rule secretless and would be refused. It crosses when the gate judges the ' +
+      'carried-forward body (the seam follow-up named in the comment above); until then the engine\'s ' +
+      'registerFlow refusal is what a secretless flow saved through /meta meets.',
+    run: (stack) => validateFlowApiTriggerSecret(stack),
   },
   // ADR-0090 D3 fallout — an approval `{ type: 'role' }` resolves against the
   // better-auth org-membership tier, not positions, so a position name authored
