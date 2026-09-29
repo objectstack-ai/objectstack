@@ -27,8 +27,9 @@ export const entry: SemanticMigration = {
     + 'removed. The bare form (a manifest as the whole body) is unchanged: it was already '
     + 'closed, and it still carries no install options.',
   reason:
-    'One rule for the whole install contract (decision batch #227 item 3, letter A; ruling '
-    + 'record 5856869656). The manifest and the bare form already refused an unknown key by '
+    'One rule for the whole install contract (the maintainer\'s ruling of 2026-09-27, option A: '
+    + 'the wrapped form refuses an unknown top-level key by name). The manifest and the bare form '
+    + 'already refused an unknown key by '
     + 'name; the wrapped top level was the one position still declared strip mode, so '
     + '`{ manifest, enabledOnInstall: false }` — a misspelled `enableOnInstall` — parsed green '
     + 'with the key DROPPED, and the install door, which answers exactly what this declaration '

@@ -18,13 +18,14 @@ export const entry: SemanticMigration = {
     + 'only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the '
     + 'pre-generated @objectstack/spec contract enriched with the live server URL and the '
     + 'registered objects — a webhook declared here never appeared in any served document '
-    + '(ADR-0049; the #3197 connector-webhook shape one layer up). There is no behaviour '
+    + '(ADR-0049; the declared-but-unconsumed shape an earlier audit found in the connector '
+    + 'webhook and event enums one layer up). There is no behaviour '
     + 'to preserve and nothing stored to rewrite: `RestServerConfig` is plugin TS '
     + 'configuration (REST plugin constructor / `plugin-hono-server` `restConfig`), never '
     + "a `sys_metadata` shape — the stack tree's `api` block declares only its four "
     + 'scoping/auth knobs. The three schemas are removed with the key (zero import-level '
     + 'consumers in objectstack / cloud / objectui); the key itself is tombstoned because '
-    + 'the schema is not `.strict()` and a plain delete would strip it silently. #4579.',
+    + 'the schema is not `.strict()` and a plain delete would strip it silently.',
   acceptanceCriteria:
     'No `RestServerConfig` value passed to the REST plugin (or `plugin-hono-server` '
     + '`restConfig`) carries `openApi31` — a config that includes it now fails the parse '

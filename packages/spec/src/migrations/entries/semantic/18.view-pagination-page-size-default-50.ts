@@ -16,13 +16,14 @@ export const entry: SemanticMigration = {
     + 'per page on a view, write it: `pagination: { pageSize: 25 }`',
   reason:
     'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
-    + 'refuse: the maintainer set the platform display page size to 50 (「9853 默认页大小改为50」, '
-    + 'objectui#9853), and the declared default of `PaginationConfigSchema.pageSize` moved '
+    + 'refuse: the maintainer\'s ruling of 2026-09-24 set the platform display page size to 50, '
+    + 'declared once in the protocol, and the declared default of `PaginationConfigSchema.pageSize` moved '
     + 'from 25 to 50. A `pagination` block that omits `pageSize` now parses to 50 — 50 rows '
     + 'per page on a paged view, and a fetch ceiling of 50 on a view with no pager (kanban, '
     + 'gallery, timeline). A view with no `pagination` block at all parses with none on either '
     + 'side; its page size reaches it through the renderer, which is ruled to read the spec '
-    + 'default rather than keep its own number (objectui#9853 ruling C′ item 1). Not losslessly '
+    + 'default rather than keep its own number (an earlier ruling on the grid\'s page size, which '
+    + 'the page-size ruling restated). Not losslessly '
     + 'convertible because the question is intent, not text: a mechanical pass that wrote '
     + '`pageSize: 25` into every silent view would preserve the old number and defeat the '
     + 'ruling, and one that wrote 50 would add nothing the default does not already do. Only '

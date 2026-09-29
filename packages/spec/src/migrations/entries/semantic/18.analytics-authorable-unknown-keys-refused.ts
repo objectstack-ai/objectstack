@@ -18,16 +18,20 @@ export const entry: SemanticMigration = {
     + 'query gets the `where` prescription). A key that names no supported capability is simply '
     + 'removed',
   reason:
-    'The #4001 strictness campaign\'s data/ batch D. These shapes parsed `.strip` — an '
+    'The unknown-key strictness campaign (the sweep that ended silent stripping of undeclared '
+    + 'keys as the default, one schema family at a time), its data/ batch. These shapes parsed '
+    + '`.strip` — an '
     + 'undeclared key on an authored cube was silently dropped, so a join authored with a '
     + 'typo\'d `relationship` registered with the `many_to_one` default (a different join than '
     + 'the author declared) and a metric\'s misspelled key vanished under a successful parse. '
-    + 'The subtle half: `/analytics/query`\'s top level has been strict since #3878, but '
+    + 'The subtle half: `/analytics/query`\'s top level has been strict since the degraded '
+    + 'shim\'s envelope dialect was retired (one URL, one request body), but '
     + 'top-level strictness does not recurse — `timeDimensions: [{ dimension, granuarity: '
     + '\'day\' }]` rode through the strict wrapper with the typo stripped, bucketing the whole '
     + 'range as one group under an ordinary 200. Undeclared keys on all eight sites are now '
     + 'refused at parse time with a prescriptive message. (One of the eight — the nested metric '
-    + '`filters[]` item — was itself removed later in this major: #10414, `metric-filters-removed`.)',
+    + '`filters[]` item — was itself removed later in this major, because nothing ever read it: '
+    + '`metric-filters-removed`.)',
   acceptanceCriteria:
     'Every cube in `defineStack({ analyticsCubes })` / `defineCube` parses with only declared '
     + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '

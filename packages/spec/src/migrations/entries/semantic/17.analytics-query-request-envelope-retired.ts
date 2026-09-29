@@ -8,7 +8,9 @@ export const entry: SemanticMigration = {
   replacement: 'bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)',
   reason:
     'The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded ' +
-    'analytics shim (#3891), never stored in stack metadata — there is no source for the ' +
+    'analytics shim (the fallback that answered /analytics/query when no analytics service ' +
+    'was installed, and dropped the caller\'s identity and its `where` filter at the door), ' +
+    'never stored in stack metadata — there is no source for the ' +
     'chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the ' +
     'query.* fields to the body top level themselves.',
   acceptanceCriteria:

@@ -311,7 +311,7 @@ export interface HookApi {
  * public declarations reference STRUCTURALLY, re-exported so they are nameable
  * from the entry that publishes them.
  *
- * The governing text is the maintainer ruling of 2026-08-23 on #11350, recorded
+ * The governing text is the maintainer ruling of 2026-08-23 (commit ece4dad31), recorded
  * in `packages/spec/scripts/check-entry-nameability.ts` and chartered
  * 2026-08-25 on #11709: a type that appears structurally in an entry's public
  * declarations must be nameable from that same entry.

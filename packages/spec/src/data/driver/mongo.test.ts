@@ -98,7 +98,7 @@ describe('MongoConfigSchema', () => {
 });
 
 describe('MongoDriverSpec', () => {
-  // `mongodb` since #6345: the canonical driver id was renamed to the spelling
+  // `mongodb` since commit e2798fab7: the canonical driver id was renamed to the spelling
   // both boot hosts and `@objectstack/driver-mongodb` already used, so driver
   // selection and config-contract selection are one string. `mongo` stays an
   // accepted ALIAS — pinned in `config-registry.test.ts`.

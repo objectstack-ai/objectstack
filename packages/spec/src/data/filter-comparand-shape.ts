@@ -159,7 +159,7 @@
  *
  * ## Refused BY RULING, 2026-09-20: a BLANK `$between` ENDPOINT (#19071)
  *
- * The runtime twin of the schema door's 2026-09-17 rule (#18012). That ruling
+ * The runtime twin of the schema door's 2026-09-17 rule (commit 176b03582). That ruling
  * wrote "BOTH are required NON-BLANK: an empty string, null and undefined are
  * refused, and the refusal names the blank side" into the PUBLISHED endpoint
  * contract (`RANGE_ENDPOINT_DESCRIPTION`, `./filter.zod.ts`) and enforced it at
@@ -206,7 +206,7 @@
  * `{ $between: [{ $field: 'a' }, 'M'] }` unchanged — one published sentence
  * with two truth values, decided by which door a caller came through, and the
  * door that passed it is the one an embedder reaches by handing a lowered
- * filter straight to a driver. Measured again under #19377 before the change;
+ * filter straight to a driver. Measured again for commit a60c913de before the change;
  * closed here the way #19071 closed the blank spelling one endpoint over.
  *
  * The scope is the `$between` ENDPOINT position and nothing wider:
@@ -641,7 +641,7 @@ function blankRangeBoundError(
 
 /**
  * A `$between` bound that is a `{ $field }` REFERENCE — refused BY RULING,
- * 2026-08-11 (#7596), implemented at this door under #19377; see the module
+ * 2026-08-11 (#7596), implemented at this door by commit a60c913de; see the module
  * note's fourth "Refused BY RULING" section.
  *
  * Its own message rather than an arm of any of the three above: those
@@ -902,7 +902,7 @@ function assertFieldListComparands(
         );
       }
       // Then the `{ $field }` REFERENCE carve-out (2026-08-11 ruling, #7596,
-      // reaching this door under #19377) — LAST, so every pair that already
+      // reaching this door by commit a60c913de) — LAST, so every pair that already
       // carried a refusal keeps the message it had, and only a pair this door
       // accepts today can reach it. Shape, not value: `{ $field: 42 }` is the
       // shape the author wrote and is named as such, one step before the TYPE

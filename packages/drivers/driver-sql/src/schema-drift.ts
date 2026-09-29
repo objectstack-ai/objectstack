@@ -264,6 +264,39 @@ export type DriftOp =
        * row report, old index left in place.
        */
       tightenNullSafeOnly?: boolean;
+    }
+  /**
+   * REPORT ONLY. Metadata declares an index that can never be built, because
+   * a key column is one no declaration will ever materialize: the name is not
+   * a field of the object (a misspelling the Studio save door admits), or it
+   * is a virtual `formula` field, which is computed on read and has no column.
+   * `SqlDriver.syncDeclaredIndexes` skips the whole index and says so at
+   * `error`. For a UNIQUE index, the constraint it declares is NOT enforced
+   * while the object keeps working normally, which is the AGENTS.md
+   * durability-degradation shape.
+   *
+   * ⛔ There is NO reconciler arm, and none can exist: there is no column to
+   * build the index over. The remedy is a metadata edit (name stored fields in
+   * `indexes[].fields`, or drop the index), so `applyMigrationEntries` reports
+   * the entry as skipped, on every dialect. The op sits in
+   * {@link INDEX_DRIFT_OPS} so that skip takes the index path and never
+   * triggers a SQLite table rebuild.
+   *
+   * This op exists so that `os migrate plan` can show the skip. Before it,
+   * {@link expectedIndexes} dropped such an index from the expected set, and
+   * the plan reported nothing at all.
+   *
+   * `missingColumns` lists only the key columns that will never materialize.
+   * A declared column that is merely not added YET is pending additive work,
+   * not this finding.
+   */
+  | {
+      type: 'unbuildable_index';
+      table: string;
+      column?: string;
+      indexName: string;
+      unique: boolean;
+      missingColumns: string[];
     };
 
 /**
@@ -337,11 +370,12 @@ export const INDEX_DRIFT_OPS: ReadonlySet<DriftOp['type']> = new Set([
   'create_index',
   'drop_index',
   'recreate_index',
+  'unbuildable_index',
 ]);
 
 export type IndexDriftOp = Extract<
   DriftOp,
-  { type: 'replace_unique_index' | 'create_index' | 'drop_index' | 'recreate_index' }
+  { type: 'replace_unique_index' | 'create_index' | 'drop_index' | 'recreate_index' | 'unbuildable_index' }
 >;
 /** Ops that act on a single column — the only ones with a guaranteed `column`. */
 export type ColumnDriftOp = Exclude<DriftOp, IndexDriftOp>;
@@ -1845,10 +1879,13 @@ export function normalizeDeclaredIndex(
  * `true` taken verbatim, `'organization'` scoped through
  * {@link normalizeDeclaredIndex} (ADR-0120 D1).
  *
- * Indexes referencing a column that was never materialized (a virtual `formula`
- * field, a column an earlier sync skipped) are dropped from the expected set —
- * the sync skips creating them, so reporting them as drift would be a finding
- * `os migrate apply` could never clear.
+ * Indexes referencing a column that is not physically present are left out
+ * of the expected set. The sync cannot create them, so a `create_index` for
+ * one would name a remedy that `os migrate apply` can never perform. That does
+ * NOT make them silent. An index whose missing column will never materialize
+ * (a misspelt name, a virtual `formula` field) is reported by
+ * {@link diffUnbuildableIndexes} as a report-only `unbuildable_index` entry,
+ * and the sync logs its skip at `error`.
  */
 export function expectedIndexes(args: {
   table: string;
@@ -1857,13 +1894,131 @@ export function expectedIndexes(args: {
   declaredIndexes?: DeclaredIndexInput[];
   physicalColumns: Set<string>;
 }): ExpectedIndex[] {
-  const { table, fields, tenantField, declaredIndexes, physicalColumns } = args;
+  const { physicalColumns } = args;
+  return declaredIndexSet(args).filter((i) => i.columns.every((c) => physicalColumns.has(c)));
+}
+
+/**
+ * Field-level `unique` plus the object's `indexes[]`, both normalized: the one
+ * composition that {@link expectedIndexes} and {@link diffUnbuildableIndexes}
+ * split between them. It is shared so the two can never disagree about which
+ * indexes metadata asks for.
+ */
+function declaredIndexSet(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+}): ExpectedIndex[] {
+  const { table, fields, tenantField, declaredIndexes } = args;
   const out = uniqueIndexesFromFields(table, fields, tenantField);
   for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
     const norm = normalizeDeclaredIndex(table, idx, tenantField);
     if (norm) out.push(norm);
   }
-  return out.filter((i) => i.columns.every((c) => physicalColumns.has(c)));
+  return out;
+}
+
+/**
+ * Why a declared index key column has no physical column, in words an
+ * operator can act on. The fields are the object's own when they are known.
+ * Without them, as on the drift-op apply path, the column is only named.
+ *
+ * Shared by the sync's `error` line (`SqlDriver.syncDeclaredIndexes`) and the
+ * `unbuildable_index` drift message, so the two cannot give different reasons
+ * for the same column.
+ */
+export function describeMissingIndexColumns(missing: string[], fields?: Record<string, any>): string {
+  return missing
+    .map((column) => {
+      if (!fields) return `'${column}'`;
+      const field = fields[column];
+      if (field == null) return `'${column}' (not a field of the object)`;
+      if (!fieldHasColumn(field)) return `'${column}' (a formula field: computed on read, never stored)`;
+      return `'${column}' (a declared field whose column the table does not have)`;
+    })
+    .join(', ');
+}
+
+/**
+ * Will metadata ever put a physical column under this name? Builtins and the
+ * tenant column always exist. Otherwise it must be a declared field that
+ * materializes a column ({@link fieldHasColumn}: not a virtual `formula`).
+ */
+function columnEverMaterializes(column: string, fields: Record<string, any>, tenantField: string | null): boolean {
+  if (BUILTIN_COLUMNS.has(column) || column === tenantField) return true;
+  const field = fields?.[column];
+  return field != null && fieldHasColumn(field);
+}
+
+/**
+ * Report every declared index that can never be built, as a report-only
+ * `unbuildable_index` drift entry: the half of the declared set that
+ * {@link expectedIndexes} leaves out and could otherwise stay unseen.
+ *
+ * An index qualifies when at least one key column is missing from the table
+ * AND will never materialize: the name is not a field of the object (a
+ * misspelling), or it is a virtual `formula` field. The sync skips such an
+ * index on every run, so the declaration and the database stay apart for good,
+ * and the only remedy is a metadata edit.
+ *
+ * ⛔ A column that is merely not added YET is left out on purpose. A declared,
+ * column-materializing field that the table lacks is pending additive work
+ * (`os migrate plan`'s `add_columns`). The index is created in the same sync
+ * that adds the column, so reporting it here would be a false finding.
+ *
+ * Classified like the other report-only ops (`manual_column_type_change`):
+ * `needs_confirm`, so `os migrate apply` reports it skipped and the
+ * artifact-pinned boot warns about it without refusing to start. A UNIQUE
+ * index is `severity: 'error'`: the constraint it declares is not enforced.
+ * A plain index is `warning`, the same split as `recreate_index`.
+ */
+export function diffUnbuildableIndexes(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+  physicalColumns: Set<string>;
+}): ManagedDriftEntry[] {
+  const { table, fields, tenantField, physicalColumns } = args;
+  const out: ManagedDriftEntry[] = [];
+  const seen = new Set<string>();
+  for (const idx of declaredIndexSet(args)) {
+    if (seen.has(idx.name)) continue;
+    const missing = idx.columns.filter(
+      (c) => !physicalColumns.has(c) && !columnEverMaterializes(c, fields, tenantField),
+    );
+    if (missing.length === 0) continue;
+    seen.add(idx.name);
+    const signature = indexSignature(idx.columns, idx.unique, idx.nullSafeColumns);
+    out.push({
+      kind: 'index_mismatch',
+      remoteName: table,
+      table,
+      column: missing[0],
+      expected: signature,
+      actual: '(absent)',
+      severity: idx.unique ? 'error' : 'warning',
+      category: 'needs_confirm',
+      op: {
+        type: 'unbuildable_index',
+        table,
+        column: missing[0],
+        indexName: idx.name,
+        unique: idx.unique,
+        missingColumns: missing,
+      },
+      message:
+        `${table}: metadata declares index '${idx.name}' ${signature}, but it can never be built: no column for ` +
+        `${describeMissingIndexColumns(missing, fields)}. ` +
+        (idx.unique
+          ? 'The uniqueness it declares is NOT enforced, and duplicate rows are accepted. '
+          : 'The index does not exist. ') +
+        `"os migrate apply" cannot create it and reports it skipped. Fix the metadata: every column in the ` +
+        `index's fields must be a stored field of the object, or remove the index.`,
+    });
+  }
+  return out;
 }
 
 /**

@@ -650,7 +650,7 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
- * The endpoint contract shared by both of `$between`'s bounds (#6571).
+ * The endpoint contract shared by both of `$between`'s bounds (commit 2f3e79351).
  *
  * Module-private on purpose, exactly like {@link ORDERING_COMPARAND_DESCRIPTION}:
  * it is documentation attached to a slot, not an authorable surface of its own,
@@ -704,7 +704,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * writes the two bounds separately (`{ $gte: { $field: 'a' }, $lte: { $field: 'b' } }`),
  * which every face already answers.
  *
- * ## Why `string` is in BOTH endpoint unions (#6571)
+ * ## Why `string` is in BOTH endpoint unions (commit 2f3e79351)
  *
  * This is the same contradiction {@link ComparisonOperatorSchema} carried until
  * #5685, in the one slot where it bites hardest. Until this was written down
@@ -740,7 +740,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * reach for with the resolver's own output in hand, and the old declaration
  * told them that output was invalid.
  *
- * ## Why a BARE string, and not an ISO-shaped refinement (#6571 rider ①)
+ * ## Why a BARE string, and not an ISO-shaped refinement (commit 2f3e79351, rider ①)
  *
  * Identical to {@link ComparisonOperatorSchema}'s finding, and re-measured for
  * the tuple: this schema is field-**agnostic** (it never sees which column the
@@ -763,7 +763,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * nothing, at every backend.
  */
 /**
- * [#18012] The author-facing refusal for a BLANK `$between` endpoint — the
+ * [commit 176b03582] The author-facing refusal for a BLANK `$between` endpoint — the
  * empty string and `undefined`, at either bound. Ruled 2026-09-17 (decision
  * batch #146 item 5, letter A): both endpoints present and non-empty.
  *
@@ -799,7 +799,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
 
 /**
  * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out — and,
- * since the 2026-09-17 ruling (#18012), the BLANK endpoint likewise.
+ * since the 2026-09-17 ruling (commit 176b03582), the BLANK endpoint likewise.
  *
  * ## Why the union's `error` carries three of the four refusals
  *
@@ -818,7 +818,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
  *
  * `null`, `undefined` and `{ $field }` never passed the union; for all three
  * the ruling adds only a POINTED SENTENCE. `''` is a string and the union
- * ACCEPTS it, so the empty-string arm is the one place where #18012 changes
+ * ACCEPTS it, so the empty-string arm is the one place where commit 176b03582 changes
  * what parses. It rides an ELEMENT-level `superRefine` — not the tuple-level
  * one the paragraph above rules out — which runs exactly when this endpoint
  * passed the union, i.e. precisely when there is an `''` to report.
@@ -836,7 +836,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
       // mechanism the `{ $field }` shape uses one line down.
       issue.input === null
         ? nullListComparandMemberMessage(`$between endpoint at index ${index}`)
-        // [#18012] `undefined` never passed it either — an absent bound is the
+        // [commit 176b03582] `undefined` never passed it either — an absent bound is the
         // same replace-only substitution, pointed at the side that is missing.
         : issue.input === undefined
           ? blankRangeBoundMessage(index)
@@ -844,7 +844,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
             ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
             : undefined,
   }).superRefine((endpoint, ctx) => {
-    // [#18012] The empty string is the one blank spelling the union accepts.
+    // [commit 176b03582] The empty string is the one blank spelling the union accepts.
     // ⛔ Not a trim and not a whitespace rule: the ruling is the empty string,
     // and widening it here would narrow a published face further than ruled.
     if (endpoint !== '') return;
@@ -971,7 +971,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * driver-conformance ledger is empty. Read the open set from a run of that gate
  * rather than from this paragraph.
  *
- * ### A JSON-stored column changes what `$contains` ASKS (#17590, maintainer ruling via the director seat, 2026-09-12)
+ * ### A JSON-stored column changes what `$contains` ASKS (commit e04a0aff2, maintainer ruling via the director seat, 2026-09-12)
  *
  * **On a `multiple: true` field or a `JSON_COLUMN_TYPES` member, `$contains: v`
  * is a MEMBERSHIP test — `v` is a member of the stored array — answered
@@ -1018,11 +1018,11 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *   `$contains: 'red'`, the same over-match the SQL family just lost) and
  *   answers NOTHING at all for a `multiple: true` NUMBER, while its reference
  *   matcher answers no array at all. That whole axis — every non-equality arm
- *   over a stored array, in both directions — is measured and owned by #17286,
- *   which recorded the semantics as undecided; this ruling is the decision it
+ *   over a stored array, in both directions — was measured on a tracking card
+ *   that recorded the semantics as undecided; this ruling is the decision it
  *   was missing. ⚠️ So an application whose tests run on the in-memory double
  *   and whose production runs SQL still gets two answers from one filter here.
- *   Read the open set from that card, ⛔ not from this paragraph.
+ *   That card is gone: measure `driver-memory` for the open set, ⛔ not this text.
  *
  * The comparand stays a STRING on every column ({@link CONTAINS_DESCRIPTION}),
  * so a member that is stored as a JSON number or boolean is named by its text:
@@ -1634,7 +1634,7 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $in: setMembershipSchema('$in').optional().describe(SET_MEMBER_DESCRIPTION),
   $nin: setMembershipSchema('$nin').optional().describe(SET_MEMBER_DESCRIPTION),
   // Range. `string` is in BOTH endpoint unions for the reason
-  // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
+  // {@link RangeOperatorSchema} gives at length (commit 2f3e79351): the date-macro resolver
   // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
   // this package's own `temporal-conformance.ts` corpus spells that shape.
   // `FieldReferenceSchema` is NOT in them, for the reason the same docblock
@@ -2182,7 +2182,7 @@ export type Filter<T = any> = {
         $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
-        // Range (#6571). The TYPED half of what {@link RangeOperatorSchema}
+        // Range (commit 2f3e79351). The TYPED half of what {@link RangeOperatorSchema}
         // declares, and the exact mirror of the ordering guard above — a range
         // IS its two ordering bounds, so the two must agree slot for slot:
         //   - a `Date` field also takes the ISO STRINGS the date-macro resolver

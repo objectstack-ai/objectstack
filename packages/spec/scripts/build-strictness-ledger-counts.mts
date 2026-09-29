@@ -2,8 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Writes `docs/audits/2026-07-unknown-key-strictness-ledger.counts.md` — every
- * number the #4001 strictness ledger publishes (#5107).
+ * Writes `docs/audits/2026-07-unknown-key-strictness-ledger.counts/<dir>.md` —
+ * every number the #4001 strictness ledger publishes (#5107), one shard per
+ * directory of `packages/spec/src` with object sites (#20361).
  *
  * The ledger's prose merged cleanly all through the campaign; its NUMBERS were
  * the whole conflict surface, and they merged in the worst way available — two
@@ -16,6 +17,14 @@
  * and recomputation is enforced by the pre-commit half of that driver rather than
  * remembered. Regeneration is WHOLESALE — this script never patches a number in
  * place, and neither should you.
+ *
+ * The single file carried cross-directory totals — the global section and the
+ * posture total row — that every schema-touching PR rewrote, and the driver that
+ * defers the path runs only in a LOCAL merge: GitHub's server-side merge runs
+ * none, so two PRs adding sites in different directories conflicted there
+ * (#20361). So each directory is its own shard, a shard whose bytes did not
+ * change is not rewritten, the totals are printed below and committed nowhere,
+ * and the retired single file is deleted if a merge carried it back.
  *
  * The verdicts stay hand-written in the ledger. This script reads them (a
  * subtotal is arithmetic over a judgement) and never writes to that file.
@@ -31,22 +40,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 
-import { COUNTS_PATH, loadLedger } from './lib/strictness-ledger-doc';
+import { writeTextShardDir } from './lib/sharded-artifacts';
+import { COUNTS_DIR, LEGACY_COUNTS_PATH, formatGlobalCounts, loadLedger } from './lib/strictness-ledger-doc';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
 const REPO = path.resolve(SPEC, '../..');
 const SRC = path.join(SPEC, 'src');
 
-const { countsPath, rendered, problems, model } = loadLedger(REPO, SRC);
+const { countsDir, legacyCountsPath, shards, problems, model } = loadLedger(REPO, SRC);
 
-fs.writeFileSync(countsPath, rendered);
+const { written, removed } = writeTextShardDir(countsDir, shards);
+const legacyRemoved = fs.existsSync(legacyCountsPath);
+if (legacyRemoved) fs.rmSync(legacyCountsPath);
 
-console.log(`✓ wrote ${COUNTS_PATH}`);
+console.log(`✓ wrote ${COUNTS_DIR}/ — ${shards.size} shard(s), one per source directory with sites.`);
 console.log(
-  `  ${model.global.sites} site(s) across ${model.global.dirs} triaged director(ies); ` +
-    `${model.global.strip} strip site(s) in ${model.global.openFiles} file(s).`,
+  `  ${written.length} shard(s) rewritten${written.length ? ` (${written.join(', ')})` : ''}, ` +
+    `${removed.length} pruned${removed.length ? ` (${removed.join(', ')})` : ''}` +
+    (legacyRemoved ? `, and the retired ${path.basename(LEGACY_COUNTS_PATH)} deleted` : '') +
+    '.',
 );
+console.log('  totals, summed here and committed nowhere:');
+for (const line of formatGlobalCounts(model)) console.log(`    ${line}`);
 
 if (problems.length) {
   // Written anyway, on purpose: the post-merge regeneration this whole scheme

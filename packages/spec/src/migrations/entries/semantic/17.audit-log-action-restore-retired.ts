@@ -24,10 +24,11 @@ export const entry: SemanticMigration = {
     + '`sys_audit_log` on this value was reading an empty result set on every deployment, '
     + 'and still is — what changed is that the contract no longer promises otherwise. If '
     + 'you were counting on a restore trail, the capability itself is the missing piece '
-    + '(#1883, #3146), not this enum row',
+    + '(an undelete / purge permission lifecycle and a soft-delete recycle bin, neither built '
+    + 'yet), not this enum row',
   reason:
     'The same maintainer ruling as `audit-log-action-enum-retired`, carried to the one '
-    + "value #7675's own survey did not name (#8315, triage 2026-08-13). 原则记录:空 "
+    + "value that ruling's own survey did not name (triage 2026-08-13). 原则记录:空 "
     + 'widget + 永远查不到东西的过滤器是可见产品缺陷;审计面宁窄勿谎. '
     + '`restore` is the least ambiguous member of the family: the record-level writer '
     + "could not have produced it even by accident, because `actionFor()` in "
@@ -37,7 +38,8 @@ export const entry: SemanticMigration = {
     + 'asserted the opposite, so a declaration-reading audit scored the action as '
     + 'covered: the `writes_only` list view offered it as a filter value, and the module '
     + 'docblock of auth-event-audit.ts named it among the actions the writer emits. The '
-    + 'comment is the ADR-0049 declared-≠-enforced shape in its purest form (#8011) — a '
+    + 'comment is the ADR-0049 declared-≠-enforced shape in its purest form (the shape a '
+    + 'credential-storage audit had to settle by re-measuring two "hashed at rest" comments) — a '
     + 'sentence next to a mechanism, contradicted by the type signature of that very '
     + 'mechanism, with nothing in CI able to tell. Both declarations are corrected in one '
     + 'change, and the invariant behind the comment (every declared action has a writer) '
@@ -50,16 +52,16 @@ export const entry: SemanticMigration = {
     + 'field is `readonly: true`, so nobody authors an audit row and nobody authors this '
     + 'enum. '
     + '⚠️ This is a statement about the WRITER, not a product stance against undelete. '
-    + 'Soft delete/restore is parked, not rejected (#1883 pm:on-hold, #3146 '
-    + 'status:parked). If that capability lands, this value returns WITH its writer — the '
+    + 'Soft delete/restore is parked, not rejected: the undelete / purge lifecycle and the '
+    + 'recycle bin are both held open, not declined. If that capability lands, this value '
+    + 'returns WITH its writer — the '
     + 'emission point, its tests, and the view that surfaces it — never as a bare enum '
     + 'row again. '
     + '⚠️ Historical ROWS are deliberately untouched, exactly as for the sibling entry: '
     + 'the enum is not enforced on this object at all (`validateRecord` skips `readonly` '
     + 'fields), so any stored row keeps parsing and reading back, and no backfill is '
     + 'required or wanted. Deleting audit history to satisfy a schema narrowing would be '
-    + 'the one genuinely destructive reading of this change. ADR-0049 / ADR-0087, #8315, '
-    + '#7675, #8147.',
+    + 'the one genuinely destructive reading of this change. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No consumer filters `sys_audit_log` on `action = "restore"` expecting rows: it was '
     + 'empty on every deployment before this change and behaves identically after it. '

@@ -24,14 +24,14 @@ export const entry: SemanticMigration = {
     + 'platform later serves a package upgrade, dependency-resolution or upload route, its entry '
     + 'arrives in the same change that mounts it.',
   reason:
-    'Maintainer ruling 2026-09-23 on #19116 (director seat, decision batch #217 item 4, letter A, '
-    + '「217 同意」). The contract map is the declaration SDKs, codegen and AI clients are entitled to '
+    'Maintainer ruling of 2026-09-23 (option A: retire the three contract-map entries that name paths '
+    + 'nothing mounts). The contract map is the declaration SDKs, codegen and AI clients are entitled to '
     + 'trust, and three of its seven entries named paths the composed runtime mounts nowhere: the '
     + 'package dispatcher has no branch for a single-segment POST under /packages and '
     + '`@objectstack/rest` mounts only /packages/publish there, so all three answered handled=false '
     + 'while the four surviving entries answer 200/201 (measured on one HttpDispatcher over a real '
-    + 'SchemaRegistry, #18604) — and the generated reference page printed '
-    + 'all three as live endpoints. Unlike `installPackage` (#18058, rebound onto the serving '
+    + 'SchemaRegistry) — and the generated reference page printed '
+    + 'all three as live endpoints. Unlike `installPackage` (rebound by an earlier fix onto the serving '
     + 'POST /api/v1/packages), no serving door existed to rebind them onto, and mounting three '
     + 'capabilities with zero measured pull was ruled out (ADR-0049 enforce-or-remove). Zero '
     + 'consumers measured at the retiring PR\'s base: across this repository the three paths occur '
