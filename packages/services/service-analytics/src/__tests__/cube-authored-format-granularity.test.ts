@@ -321,4 +321,70 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
     await service.query({ cube: 'orders', measures: ['done_rate'], dimensions: ['shipped_at'] });
     expect(sqls).toHaveLength(1);
   });
+
+  it('DECLARED NARROWING, joined cube: a cross-object measure grouped by a declared-default dimension gets the refusal a stated granularity gets', async () => {
+    // The engine path's other refusals are reached by the same re-route: on a
+    // cube that declares `joins`, a member resolving through one (here a
+    // measure over `account.balance`) is refused by
+    // `ObjectQLStrategy.planCrossObject`, where the raw-SQL path joins it.
+    const joined: Cube = CubeSchema.parse({
+      ...authored,
+      measures: {
+        ...authored.measures,
+        account_balance: { label: 'Account balance', type: 'sum', sql: 'account.balance' },
+      },
+      joins: { account: { name: 'crm_account' } },
+    });
+    const aggregated: string[] = [];
+    const sqls: string[] = [];
+    const service = new AnalyticsService({
+      logger: silentLogger,
+      cubes: [joined],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+      executeRawSql: async (_o, sql) => {
+        sqls.push(sql);
+        return [];
+      },
+      executeAggregate: async (object) => {
+        aggregated.push(object);
+        return [];
+      },
+    });
+    const envelope = (e: any) => ({
+      code: e?.code,
+      status: e?.status,
+      message: e?.message,
+      member: e?.member,
+      param: e?.param,
+      cube: e?.cube,
+      keys: e instanceof Error ? Object.keys(e).sort() : undefined,
+    });
+
+    const byDefault = await service
+      .query({ cube: 'orders', measures: ['account_balance'], dimensions: ['placed_at'] })
+      .catch((e: unknown) => e);
+    const byHand = await service
+      .query({
+        cube: 'orders',
+        measures: ['account_balance'],
+        dimensions: ['placed_at'],
+        timeDimensions: [{ dimension: 'placed_at', granularity: 'month' }],
+      })
+      .catch((e: unknown) => e);
+
+    expect({ code: envelope(byDefault).code, status: envelope(byDefault).status }).toEqual({
+      code: 'INVALID_FIELD',
+      status: 400,
+    });
+    // Not a new refusal: byte-equal to the one stating the granularity by hand already got.
+    expect(envelope(byDefault)).toEqual(envelope(byHand));
+    expect(aggregated).toEqual([]);
+    expect(sqls).toEqual([]);
+
+    // Control: the same cross-object measure grouped by a dimension that
+    // declares no single default is still answered, joined, on the raw-SQL path.
+    await service.query({ cube: 'orders', measures: ['account_balance'], dimensions: ['shipped_at'] });
+    expect(sqls).toHaveLength(1);
+    expect(sqls[0]).toMatch(/JOIN/);
+  });
 });

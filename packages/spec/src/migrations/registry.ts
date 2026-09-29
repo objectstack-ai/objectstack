@@ -6416,8 +6416,9 @@ const step18: MigrationStep = {
         + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
         + '`os compile` from this release or later.',
     },
-    // An inert key made real, and the one request class that goes from answered to
-    // refused because of it — the shape of
+    // An inert key made real, and the request class that goes from answered to
+    // refused because of it: the engine aggregate path's whole refusal set, which a
+    // newly bucketed query reaches by leaving the raw-SQL path. The shape of
     // `analytics-cube-public-default-visible-enforced`. There is no D2 conversion:
     // no spelling moves, and whether a one-interval list means "bucket by this by
     // default" or "the one interval I happened to list" is the author's intent,
@@ -6434,8 +6435,9 @@ const step18: MigrationStep = {
       replacement:
         'nothing, when that one interval is the bucket the dimension should be grouped at by default. '
         + 'When it is not, list every interval the dimension serves (two or more state no default) or '
-        + 'omit the key. A dashboard or report that charts a custom-SQL measure over such a dimension '
-        + 'either stops grouping by it or groups by a dimension that declares no single interval',
+        + 'omit the key. A dashboard or report whose query the engine aggregate path cannot evaluate '
+        + '(a custom-SQL measure, or a member of a cube with `joins` that resolves through one) either '
+        + 'stops grouping by such a dimension or groups by one that declares no single interval',
       reason:
         'An inert key made real. A cube time dimension\'s `granularities` was read only for a cube the '
         + 'dataset compiler minted, where a one-interval list is the dataset\'s default bucket. A cube '
@@ -6447,11 +6449,20 @@ const step18: MigrationStep = {
         + 'A granularity the query states still wins, one the list does not name is not refused, and a '
         + 'list of two or more states no default. Two holdings change on upgrade. A query grouping by '
         + 'such a dimension answers one row per bucket where it answered one row per timestamp. And a '
-        + 'bucketed query is served by the engine aggregate path, which refuses a custom-SQL measure — a '
-        + '`number`, `string` or `boolean` measure whose `sql` is an expression — with 400 '
-        + '`INVALID_FIELD`, the same refusal, byte for byte, that the same query already got with that '
-        + 'granularity stated by hand; so such a measure grouped by such a dimension goes from answered '
-        + 'to refused. The protocol-18 conversion `cube-sub-day-granularities-removed` strips the retired '
+        + 'bucketed query leaves the raw-SQL path, which declines every bucketed query, for the engine '
+        + 'aggregate path, which answers 400 `INVALID_FIELD` for every member it cannot evaluate — the '
+        + 'same refusal, byte for byte, that the same query already got with that granularity stated by '
+        + 'hand. Those members are: a custom-SQL measure (a `number`, `string` or `boolean` measure '
+        + 'whose `sql` is an expression); and, on a cube whose members resolve through its `joins`, a '
+        + 'measure or a `where` field over a joined object, a `timeDimensions` entry over a joined object '
+        + '(bucketed or a window, so grouping by a one-interval time dimension over a joined object is '
+        + 'refused too), a dimension that traverses more than one relationship, and an `avg` or '
+        + '`count_distinct` measure beside any dimension over a joined object. The raw-SQL path serves '
+        + 'every one of these, so each such query grouped by such a dimension goes from answered to '
+        + 'refused. On a host whose `queryCapabilities` offers raw SQL with no engine aggregate bridge '
+        + '(a hand override: the analytics plugin wires both), no strategy remains for a bucketed '
+        + 'query, so every newly bucketed query, a plain count included, goes from answered to "No '
+        + 'strategy can handle query". The protocol-18 conversion `cube-sub-day-granularities-removed` strips the retired '
         + 'sub-day intervals from every authored and stored cube, so a dimension that offered one '
         + 'sub-day interval and one coarser interval now holds a one-interval list: a default bucket its '
         + 'author never wrote.',
@@ -6460,8 +6471,12 @@ const step18: MigrationStep = {
         + 'bucket at that interval by default: a query that groups by it on `/analytics/query` answers '
         + 'one row per bucket, and `/analytics/sql` shows the bucketed statement. Every time dimension '
         + 'that should have no default lists two or more intervals or omits the key. No dashboard or '
-        + 'report groups a custom-SQL measure by a one-interval dimension — or each one that did now '
-        + 'groups by a dimension without a single interval.',
+        + 'report groups by a one-interval dimension a query the engine aggregate path refuses — a '
+        + 'custom-SQL measure; a measure, `where` field or `timeDimensions` entry over a joined object; '
+        + 'a dimension that traverses more than one relationship; an `avg` or `count_distinct` measure '
+        + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
+        + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
+        + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
