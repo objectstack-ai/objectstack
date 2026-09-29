@@ -77,22 +77,44 @@ const SERVED =
  * The route, in the MESSAGE and not only in the hint: `os validate` and `os lint`
  * print `where: message` on their text faces and leave the hint to `--json`, so
  * a route stated only in the hint never reaches the author who reads the terminal.
+ *
+ * Routed BY SHAPE, to a variant `ConnectorInstanceAuthSchema` really has
+ * (`none` / `bearer` / `api-key` / `basic`): a header credential goes to
+ * `bearer` or a header `api-key`, a query-string key to `api-key` with
+ * `paramName`. ⛔ No variant carries a secret in a url PATH, so no text here
+ * may promise that `credentialRef` can hold one — an author cannot follow it.
+ * (This rule does not judge url paths; it judges query parameters only.)
  */
-const STEER_HTTP = "; route the credential through a declarative connector's `auth.credentialRef` instead.";
+const STEER_HEADER =
+  "; move it to a declarative connector whose `auth` is `bearer` or `api-key` (a header), with " +
+  '`auth.credentialRef` naming the secret, called from a `connector_action` node.';
+const STEER_QUERY =
+  "; move it to a declarative connector whose `auth` is `api-key` with `paramName` (the query parameter), " +
+  'with `auth.credentialRef` naming the secret, called from a `connector_action` node.';
 const STEER_INPUT = "; drop it from `input` — the connector authenticates through its own `auth.credentialRef`.";
 
-/** The connector route, stated once. */
-const CONNECTOR_ROUTE =
-  'Move the credential to a declarative connector: a `connectors:` entry with a `provider` ' +
-  "(`'rest'` for a plain HTTP API) and `auth: { type: 'bearer' | 'api-key' | 'basic', credentialRef }`, " +
-  'called from a `connector_action` node. `credentialRef` names a secrets-layer reference that is ' +
-  'resolved at boot (an environment variable in the open tier), so the secret never lands in metadata.';
+/** Where `credentialRef` resolves — stated once, in every hint. */
+const RESOLVES =
+  ' `credentialRef` names a secrets-layer reference that is resolved at boot (an environment variable in ' +
+  'the open tier), so the secret never lands in metadata.';
 
-const CONNECTOR_INPUT_ROUTE =
-  "The connector authenticates through its own declaration: give its `connectors:` entry `auth: { type: 'bearer' | " +
-  "'api-key' | 'basic', credentialRef }` and drop the credential from `input`. `credentialRef` names a " +
-  'secrets-layer reference that is resolved at boot (an environment variable in the open tier), so the ' +
-  'secret never lands in metadata.';
+const HEADER_ROUTE =
+  "Declare a `connectors:` entry with a `provider` (`'rest'` for a plain HTTP API) and " +
+  "`auth: { type: 'bearer', credentialRef }` for a bearer token, or " +
+  "`auth: { type: 'api-key', headerName, credentialRef }` for a key in a named header (a Basic pair is " +
+  "`auth: { type: 'basic', username, credentialRef }`), and call it from a `connector_action` node." +
+  RESOLVES;
+
+const QUERY_ROUTE =
+  "Declare a `connectors:` entry with a `provider` (`'rest'` for a plain HTTP API) and " +
+  "`auth: { type: 'api-key', paramName, credentialRef }`, which sends the key as that query parameter, and " +
+  'call it from a `connector_action` node.' +
+  RESOLVES;
+
+const INPUT_ROUTE =
+  'The connector authenticates through its own declaration: give its `connectors:` entry ' +
+  "`auth: { type: 'bearer' | 'api-key' | 'basic', credentialRef }` and drop the credential from `input`." +
+  RESOLVES;
 
 const NOT_A_GATE =
   ' A `{variable}` template is not a literal and draws nothing. This is an advisory: nothing is ' +
@@ -160,18 +182,13 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
         if (isRec(headers)) {
           for (const [name, value] of Object.entries(headers)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_HTTP, CONNECTOR_ROUTE);
+            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_HEADER, HEADER_ROUTE);
           }
         }
         if (typeof url === 'string') {
           for (const [name, value] of queryParameters(url)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(
-              `${path}.config.url`,
-              `the url's query parameter '${name}'`,
-              STEER_HTTP,
-              `${CONNECTOR_ROUTE} An \`api-key\` credential can travel as a query parameter (\`paramName\`).`,
-            );
+            report(`${path}.config.url`, `the url's query parameter '${name}'`, STEER_QUERY, QUERY_ROUTE);
           }
         }
       }
@@ -191,7 +208,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
             return;
           }
           if (isCredentialShapedLiteral(name, value)) {
-            report(at, `connector input '${label}'`, STEER_INPUT, CONNECTOR_INPUT_ROUTE);
+            report(at, `connector input '${label}'`, STEER_INPUT, INPUT_ROUTE);
           }
         };
         walk(connectorConfig.input, '', `${path}.connectorConfig.input`, '', 0);

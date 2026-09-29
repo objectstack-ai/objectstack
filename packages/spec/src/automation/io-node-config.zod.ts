@@ -358,15 +358,16 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
    *
    * An open map, so it is served as authored: a flow definition is readable by
    * every member who can read flows, and nothing here is withheld. An outbound
-   * credential therefore never goes in this map — it goes through a declarative
-   * connector's `auth.credentialRef` (ADR-0097 §3), called from a
+   * header credential therefore never goes in this map — it goes to a
+   * declarative connector whose `auth` is `bearer` or a header `api-key`, with
+   * `auth.credentialRef` naming the secret (ADR-0097 §3), called from a
    * `connector_action` node. `@objectstack/lint`'s `flow-credential-literal`
    * advisory names a literal that reads as one.
    */
   headers: z.record(z.string(), z.string()).optional().describe(
     'Request headers. The flow definition, this map included, is served to every member who can read flows, so '
-      + 'never put a credential here: route an outbound credential through a declarative connector\'s '
-      + '`auth.credentialRef` and call it from a `connector_action` node.',
+      + 'never put a credential here: declare a connector whose `auth` is `bearer` or `api-key` (a header), with '
+      + '`auth.credentialRef` naming the secret, and call it from a `connector_action` node.',
   ),
   /** Request body — JSON-serialised before sending. */
   body: z.unknown().optional().describe('Request body (JSON-serialised)'),

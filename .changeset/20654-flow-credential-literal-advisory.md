@@ -13,6 +13,6 @@ Clause-②: no
 
 **What it does not do.** It never refuses: every finding is a `warning`, and a save, validate, build or lint that passed before still passes (`--strict` promotes it, as it promotes every warning). It never echoes the value it names. Nothing is withheld on any read.
 
-**Fix.** Declare a `connectors:` entry with a `provider` and `auth: { type: 'bearer' | 'api-key' | 'basic', credentialRef }`, and call it from a `connector_action` node; for a connector node, drop the credential from `input`, because the connector authenticates through its own `credentialRef`.
+**Fix, by where the credential sits.** Declare a `connectors:` entry with a `provider` and call it from a `connector_action` node. A header credential goes to `auth: { type: 'bearer', credentialRef }`, or to `auth: { type: 'api-key', headerName, credentialRef }` for a key in a named header. A key in the url's query string goes to `auth: { type: 'api-key', paramName, credentialRef }`. On a connector node, drop the credential from `input`: the connector authenticates through its own `auth.credentialRef`.
 
 `@objectstack/lint` exports the rule `lintFlowCredentialLiterals`, its id `FLOW_CREDENTIAL_LITERAL`, and the one predicate it asks, `isCredentialShapedLiteral(name, value)`. In `@objectstack/spec`, only the descriptions of `HttpConfigSchema.headers` and a flow node's `connectorConfig.input` change; no shape changes.

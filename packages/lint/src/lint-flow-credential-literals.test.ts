@@ -203,13 +203,15 @@ describe('flow-credential-literal — the pin set', () => {
     expect(header.message).toContain('every member who can read flows');
     // The route rides the MESSAGE: the CLI text faces print `where: message`
     // and leave the hint to `--json`.
-    expect(header.message).toContain("declarative connector's `auth.credentialRef`");
-    expect(header.hint).toContain('credentialRef');
+    // Routed by shape, to an auth variant the connector schema really has.
+    expect(header.message).toContain('`bearer` or `api-key` (a header), with `auth.credentialRef`');
+    expect(header.hint).toContain("type: 'api-key', headerName, credentialRef");
     expect(header.hint).toContain('connector_action');
 
     const url = byPath.get('flows[2].nodes[1].config.url')!;
     expect(url.message).toContain("query parameter 'api_key'");
-    expect(url.hint).toContain('paramName');
+    expect(url.message).toContain('`api-key` with `paramName`');
+    expect(url.hint).toContain("type: 'api-key', paramName, credentialRef");
 
     const input = byPath.get('flows[2].nodes[3].connectorConfig.input.auth.clientSecret')!;
     expect(input.message).toContain("connector input 'auth.clientSecret'");
@@ -218,6 +220,10 @@ describe('flow-credential-literal — the pin set', () => {
 
     const nested = byPath.get('flows[2].nodes[2].config.try.nodes[0].config.headers.Authorization')!;
     expect(nested.where).toBe(`flow 'probe_open_map' · try_catch "Guard" › try · node 'call_nested' (http)`);
+
+    // No auth variant carries a secret in a url PATH, so no route may promise
+    // one: the text never sends an author to a webhook-url shape.
+    for (const f of findings) expect(`${f.message} ${f.hint}`).not.toMatch(/webhook/i);
 
     // The finding travels into CI logs, the gate's server log and the save
     // response: none of it may copy the credential it asks the author to move.
