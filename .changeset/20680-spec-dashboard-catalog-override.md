@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 fix(spec): `translateDashboard` lets an explicit override beat the packaged catalog when it is handed the packaged base (#20680)

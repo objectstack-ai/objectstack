@@ -1,5 +1,5 @@
 ---
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 fix(metadata-protocol): `getPackagedDashboardBase(name)` answers the dashboard a code package ships, before any overlay (#20680)
