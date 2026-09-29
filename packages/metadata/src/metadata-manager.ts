@@ -42,7 +42,7 @@ import type {
   MetadataDependency,
   MetadataTypeRegistryEntryParsed,
 } from '@objectstack/spec/kernel';
-import { getMetadataTypeActions } from '@objectstack/spec/kernel';
+import { getMetadataTypeActions, getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import {
   MetadataEventType,
   MetadataEventSchema,
@@ -2124,18 +2124,39 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get the published version of any metadata item (for runtime serving).
    * Returns publishedDefinition if exists, else current definition.
+   *
+   * [#20552] SERVED, and so redacted: this is the body both
+   * `GET /meta/:type/:name/published` doors answer with when no runtime overlay
+   * exists (the REST server's and the dispatcher's), and it was the one
+   * metadata exit that handed a stored body out without the per-type
+   * credential redaction every protocol read exit applies — a code-published
+   * `api` flow served its inbound-hook secret here to any reader of the door.
+   * The type's registered redactor (`@objectstack/spec/kernel`) is applied to
+   * whichever body is returned; a type with none is returned as-is. The item
+   * itself is never mutated — a redactor returns a new object.
+   *
+   * ⛔ Not caught: a throwing redactor fails the read rather than serving the
+   * material it exists to withhold (the metadata protocol's
+   * `redactMetadataItem` takes the same position).
    */
   async getPublished(type: string, name: string): Promise<unknown | undefined> {
     const item = await this.get(type, name);
     if (!item) return undefined;
 
     const meta = item as any;
-    if (meta.publishedDefinition !== undefined) {
-      return meta.publishedDefinition;
-    }
-
     // Fall back to current definition (metadata field or the item itself)
-    return meta.metadata ?? item;
+    const body = meta.publishedDefinition !== undefined ? meta.publishedDefinition : (meta.metadata ?? item);
+    return this.redactServedBody(type, body);
+  }
+
+  /** [#20552] The per-type read-path redaction, applied to one served body. */
+  private redactServedBody(type: string, body: unknown): unknown {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+    // Keyed on the singular type name (Prime Directive #3); a plural spelling folds first.
+    const redactor = getMetadataTypeRedactor(canonicalMetadataServiceType(type));
+    if (!redactor) return body;
+    const result = redactor(body as Record<string, unknown>);
+    return result.redactedKeys.length > 0 ? result.item : body;
   }
 
   // ==========================================

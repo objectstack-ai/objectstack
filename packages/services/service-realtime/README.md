@@ -43,13 +43,19 @@ const realtime = kernel.getService<IRealtimeService>('realtime');
 
 const subId = await realtime.subscribe('records', (event) => {
   console.log(event.type, event.payload);
-}, { object: 'account', eventTypes: ['record.created'] });
+}, { object: 'account', eventTypes: ['data.record.created'] });
 
+// The shape the ObjectQL engine publishes for an insert: the envelope's
+// `payload` is the spec's `DataEvent`, and the row itself is `payload.after`.
+const timestamp = new Date().toISOString();
 await realtime.publish({
-  type: 'record.created',
+  type: 'data.record.created',
   object: 'account',
-  payload: { id: 'acc-1', name: 'Acme' },
-  timestamp: new Date().toISOString(),
+  payload: {
+    id: crypto.randomUUID(), type: 'data.record.created', object: 'account',
+    recordId: 'acc-1', after: { id: 'acc-1', name: 'Acme' }, timestamp,
+  },
+  timestamp,
 });
 
 await realtime.unsubscribe(subId);
@@ -70,7 +76,7 @@ Delivery is a **pure fan-out with no per-recipient authorization seam**:
 
 - subscriptions carry **no principal** — there is nothing to check a row against;
 - `matchesSubscription` filters only by object name + event type;
-- the ObjectQL engine publishes `record.created` / `record.updated` events with the
+- the ObjectQL engine publishes `data.record.created` / `data.record.updated` events with the
   **full record body** (the `after` row) — rows and fields a subscriber's own `find`
   would hide under RLS/FLS/tenant scoping.
 

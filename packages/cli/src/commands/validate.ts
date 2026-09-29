@@ -205,9 +205,13 @@ export default class Validate extends Command {
     // authority to settle, so the shape is mirrored, not merged.
     //
     // No `conversionsSoFar()` wrapper: `warningsSoFar()` exists because five
-    // producers had to be concatenated in ONE stated order, and this list has
-    // exactly one producer. Reading the binding directly already is the "a list
-    // cannot drift from itself" idiom the wrapper was built to buy.
+    // producers had to be concatenated in ONE stated order. This list has two
+    // fillers, and both push into this ONE array in the order the run reaches
+    // them — step 1b folds the record the stack producer left on the default
+    // export (`loaded.stackConversions`), step 2's own pass appends what it
+    // converts on the merged stack — so reading the binding directly already
+    // is the "a list cannot drift from itself" idiom the wrapper was built to
+    // buy.
     const conversionNotices: ConversionNotice[] = [];
 
     try {
@@ -222,6 +226,16 @@ export default class Validate extends Command {
       //     catch-all below (`--json`: `error` + `code`, exit 1), the same
       //     envelope a `defineStack` refusal raised at load reaches.
       refuseUnbuiltStack(loaded);
+      // 1b. The ADR-0087 D2 conversions the PRODUCER applied. `defineStack`
+      //     converts at load (either mode), so the stack this door received is
+      //     already canonical and step 2's pass below has nothing of it left to
+      //     convert: without this fold `conversions` read `[]` and `--strict`
+      //     passed on every `defineStack` config carrying a retiring spelling.
+      //     Read by `loadConfig` off the default export before its named-export
+      //     merge (`stackConversionsOf`, beside the provenance mark). ⛔ Folded,
+      //     never recomputed: a second conversion pass here would disagree with
+      //     what was loaded. After 1a, so a refused export reports none.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printKV('Config', absolutePath);
@@ -232,7 +246,9 @@ export default class Validate extends Command {
       //    The ADR-0087 D2 conversion layer runs here (inside normalizeStackInput);
       //    surface each applied conversion as a non-blocking deprecation notice so
       //    the author knows the source still carries an old-shape key that will
-      //    retire from the load path in a future major.
+      //    retire from the load path in a future major. What it can still find
+      //    after step 1b is what the producer never saw: a key `loadConfig`
+      //    merged onto the stack from a NAMED export of the config module.
       if (!flags.json) printStep('Validating against ObjectStack Protocol...');
       // The sink is declared above the `try` (see its note there); the CALL that
       // fills it stays right here, at the step that owns it.

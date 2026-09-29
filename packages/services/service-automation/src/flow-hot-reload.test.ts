@@ -98,7 +98,8 @@ function fakeProtocolService(initial: unknown[]) {
     let flows = initial;
     return {
         service: {
-            async getMetaItems(q: { type: string }) {
+            // [#20552] The engine reads the protocol's EXECUTION face.
+            async getMetaItemsForExecution(q: { type: string }) {
                 return { items: q.type === 'flow' ? flows : [] };
             },
         },

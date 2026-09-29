@@ -15,6 +15,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
+import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
@@ -616,6 +617,13 @@ export class AutomationServicePlugin implements Plugin {
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
 
+        // [#20552] Every metadata read exit withholds the inbound hook's secret
+        // from a served flow from here on — the `flow` entry of the per-type
+        // redactor registry, registered in `init()` as that registry asks.
+        // What the engine binds is untouched: it reads the protocol's
+        // EXECUTION view (see `readMetaItemsFromProtocol`) and its own flow map.
+        registerFlowCredentialRedactor();
+
         // Register the sys_automation_run object so suspended-run state migrates
         // like other sys_* tables (ADR-0019). Best-effort: a host without the
         // manifest service still runs in-memory. Skipped when persistence is off.
@@ -1104,9 +1112,11 @@ export class AutomationServicePlugin implements Plugin {
         // record-triggered flows silently never bound on a cold start, so their
         // automations never fired.
         //
-        // The canonical flattened flow view — the one `GET /meta/flow` serves —
-        // is `protocol.getMetaItems({ type: 'flow' })`; it surfaces inline app
-        // flows on-demand from the registry. Bind from THAT at kernel:ready,
+        // The canonical flattened flow view — the list `GET /meta/flow` serves,
+        // read through the protocol's EXECUTION face
+        // (`getMetaItemsForExecution({ type: 'flow' })`, #20552: the served face
+        // withholds the inbound-hook secret) — surfaces inline app flows
+        // on-demand from the registry. Bind from THAT at kernel:ready,
         // once every plugin has finished init()/start() (so the app — hence its
         // flows — is registered). registerFlow is idempotent with the boot pull.
         ctx.hook('kernel:ready', async () => {
@@ -1299,8 +1309,9 @@ export class AutomationServicePlugin implements Plugin {
      *  - the ObjectQL registry `registerApp` writes connector metadata into. It
      *    is authoritative at boot and for everything a plugin package
      *    contributes, and it is never refreshed for connectors afterwards.
-     *  - `protocol.getMetaItems({ type: 'connector' })` — the same flattened
-     *    `/meta` view the flow re-sync reads. It IS that registry read plus the
+     *  - `protocol.getMetaItemsForExecution({ type: 'connector' })` — the same
+     *    flattened `/meta` view the flow re-sync reads, without the serving
+     *    decorations (#20552). It IS that registry read plus the
      *    `sys_metadata` overlay rows layered over it, which is what a **Studio
      *    package publish** promotes to active: the named production trigger.
      *    Only consulted `post` = true (after boot). At boot the registry has
@@ -1893,8 +1904,11 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * Read the protocol's flattened flow view — `getMetaItems({ type: 'flow' })`,
-     * the same source `GET /meta/flow` serves and #2560's cold-boot bind uses.
+     * Read the protocol's flattened flow view — `getMetaItemsForExecution({ type:
+     * 'flow' })`, the same list `GET /meta/flow` serves (#2560's cold-boot bind
+     * uses it), minus the serving decorations: the served face withholds each
+     * flow's inbound-hook secret, which this engine must arm the hook with
+     * (#20552).
      * Returns the list of flow docs, or `null` when the protocol is unavailable
      * or the read failed. Callers MUST treat `null` as "couldn't read", NOT as
      * "zero flows" — tearing flows down on a failed read would unbind live
@@ -1942,28 +1956,43 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         type: string,
     ): Promise<unknown[] | null> {
-        let protocol: { getMetaItems?(q: { type: string }): Promise<unknown> } | undefined;
+        let protocol: { getMetaItemsForExecution?(q: { type: string }): Promise<unknown> } | undefined;
         try {
             protocol = ctx.getService('protocol');
         } catch {
             return null; // no protocol service (bare engine / tests) — nothing to sync
         }
-        if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
+        // [#20552] The EXECUTION read, never the served `getMetaItems`: the
+        // served view withholds each type's credentials (a flow's inbound-hook
+        // secret among them), and this engine executes what it reads — a flow
+        // bound from the served view would be registered without the secret
+        // its hook verifies against, and refused. Same items, same merge; only
+        // the serving decorations are absent (`getMetaItemsForExecution`).
+        if (!protocol || typeof protocol.getMetaItemsForExecution !== 'function') {
+            if (protocol) {
+                ctx.logger.warn(
+                    `[Automation] the protocol service offers no getMetaItemsForExecution — ${type} definitions ` +
+                        `are not read from it. Only the protocol's execution read carries what the engine runs; ` +
+                        `its served read withholds credentials.`,
+                );
+            }
+            return null;
+        }
 
         let raw: unknown;
         try {
-            raw = await protocol.getMetaItems({ type });
+            raw = await protocol.getMetaItemsForExecution({ type });
         } catch (err) {
             // #5048 — structured `meta`, not string interpolation (same reason as
             // the register seams below; see ./thrown-cause-diagnostics.ts).
             ctx.logger.warn(
-                `[Automation] ${type} read from protocol failed: getMetaItems('${type}')`,
+                `[Automation] ${type} read from protocol failed: getMetaItemsForExecution('${type}')`,
                 describeThrownForLog(err),
             );
             return null;
         }
 
-        // getMetaItems hands back a bare array or an `{ items: [...] }` envelope,
+        // The read hands back a bare array or an `{ items: [...] }` envelope,
         // and each entry is either the doc itself or an `{ item: <doc> }` wrapper.
         const list = Array.isArray(raw) ? raw : (((raw as { items?: unknown[] })?.items) ?? []);
         return list.map((entry) => {
@@ -1987,8 +2016,9 @@ export class AutomationServicePlugin implements Plugin {
      *      trigger (record-change automations never fired) until the next
      *      restart, even though #2560 fixed the cold-boot bind.
      *
-     * Reads `protocol.getMetaItems({ type: 'flow' })` — the SAME source #2560's
-     * cold-boot bind and `GET /meta/flow` use. It does NOT read the ObjectQL
+     * Reads `protocol.getMetaItemsForExecution({ type: 'flow' })` — the SAME
+     * list #2560's cold-boot bind uses and `GET /meta/flow` serves, without the
+     * serving decorations (#20552). It does NOT read the ObjectQL
      * schema registry (a boot-time cache the reload never refreshes) and — the
      * bug this fixes — no longer reads `metadata.list('flow')`, which returns 0
      * in a real running server (it does not surface inline app flows), so the old

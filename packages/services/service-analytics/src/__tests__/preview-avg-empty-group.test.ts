@@ -297,9 +297,9 @@ describe('#16219 — the empty-operand answer is READ from the policy, not resta
       name: 'e', sql: 'expense',
       dimensions: {},
       measures: {
-        avg_amount: { name: 'avg_amount', type: 'avg', sql: 'amount' },
-        sum_amount: { name: 'sum_amount', type: 'sum', sql: 'amount' },
-        rows: { name: 'rows', type: 'count', sql: '*' },
+        avg_amount: { type: 'avg', sql: 'amount' },
+        sum_amount: { type: 'sum', sql: 'amount' },
+        rows: { type: 'count', sql: '*' },
       },
     } as unknown as Cube;
     // This is the branch the card named — reachable only where NO row carries a
@@ -316,8 +316,8 @@ describe('#16219 — the empty-operand answer is READ from the policy, not resta
   it('a field ABSENT from every row averages null, exactly like a null-valued one', () => {
     const CUBE = {
       name: 'e', sql: 'expense',
-      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
-      measures: { avg_amount: { name: 'avg_amount', type: 'avg', sql: 'amount' } },
+      dimensions: { category: { type: 'string', sql: 'category' } },
+      measures: { avg_amount: { type: 'avg', sql: 'amount' } },
     } as unknown as Cube;
     // `undefined` (key never written) and `null` are one population to `AVG`:
     // neither is a value. Before the fix these two rows answered 0 by different
@@ -333,8 +333,8 @@ describe('#16219 — the empty-operand answer is READ from the policy, not resta
   it('⛔ values PRESENT but not numbers stay `0` — that is #16099, not this card', () => {
     const CUBE = {
       name: 'e', sql: 'expense',
-      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
-      measures: { avg_spent_on: { name: 'avg_spent_on', type: 'avg', sql: 'spent_on' } },
+      dimensions: { category: { type: 'string', sql: 'category' } },
+      measures: { avg_spent_on: { type: 'avg', sql: 'spent_on' } },
     } as unknown as Cube;
     // The boundary this fix is drawn on. "No numeric operand" is two different
     // situations and only one of them is averaging NOTHING: a group whose rows
@@ -355,8 +355,8 @@ describe('#16219 — the empty-operand answer is READ from the policy, not resta
   it('a single numeric operand still averages to itself', () => {
     const CUBE = {
       name: 'e', sql: 'expense',
-      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
-      measures: { avg_amount: { name: 'avg_amount', type: 'avg', sql: 'amount' } },
+      dimensions: { category: { type: 'string', sql: 'category' } },
+      measures: { avg_amount: { type: 'avg', sql: 'amount' } },
     } as unknown as Cube;
     const r = evaluateAnalyticsQueryOverRows(
       { measures: ['avg_amount'], dimensions: ['category'] },

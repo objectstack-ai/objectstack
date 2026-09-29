@@ -43,7 +43,7 @@ export * from './time-relative-trigger.zod';
 export * from './flow-trigger-kind';
 // The acting-organization declaration a time-triggered flow carries, and the
 // one refusal sentence the schedule trigger and the time-relative sweep both
-// say it with (#16659). ⛔ `FlowSchema` does NOT emit that sentence: the key is
+// say it with (commit ecdfc9411). ⛔ `FlowSchema` does NOT emit that sentence: the key is
 // enforced at BIND, not at parse, because the start node's `config` is an open
 // record and a parse-time requirement would make every package-shipped
 // scheduled flow unparseable. Named beside `flow-trigger-kind` because the two

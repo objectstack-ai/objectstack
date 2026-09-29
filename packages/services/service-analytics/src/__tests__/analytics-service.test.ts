@@ -17,14 +17,13 @@ const ordersCube: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-    total_amount: { name: 'total_amount', label: 'Total Amount', type: 'sum', sql: 'amount' },
-    avg_amount: { name: 'avg_amount', label: 'Avg Amount', type: 'avg', sql: 'amount' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    total_amount: { label: 'Total Amount', type: 'sum', sql: 'amount' },
+    avg_amount: { label: 'Avg Amount', type: 'avg', sql: 'amount' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
     created_at: {
-      name: 'created_at',
       label: 'Created At',
       type: 'time',
       sql: 'created_at',
@@ -177,18 +176,16 @@ describe('NativeSQLStrategy', () => {
       sql: 'opportunity',
       public: true,
       measures: {
-        count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+        count: { label: 'Count', type: 'count', sql: '*' },
         account_revenue: {
-          name: 'account_revenue',
           label: 'Account Revenue (Sum)',
           type: 'sum',
           sql: 'account.annual_revenue',
         },
       },
       dimensions: {
-        stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        stage: { label: 'Stage', type: 'string', sql: 'stage' },
         account_industry: {
-          name: 'account_industry',
           label: 'Industry',
           type: 'string',
           sql: 'account.industry',
@@ -228,12 +225,12 @@ describe('NativeSQLStrategy', () => {
       sql: 'opportunity',
       public: true,
       measures: {
-        amount_sum: { name: 'amount_sum', label: 'Amount (Sum)', type: 'sum', sql: 'amount' },
+        amount_sum: { label: 'Amount (Sum)', type: 'sum', sql: 'amount' },
       },
       dimensions: {
         // Frontend will send `account.industry`; cube key uses underscore.
         account_industry: {
-          name: 'account_industry', label: 'Industry', type: 'string', sql: 'account.industry',
+          label: 'Industry', type: 'string', sql: 'account.industry',
         },
       },
     };

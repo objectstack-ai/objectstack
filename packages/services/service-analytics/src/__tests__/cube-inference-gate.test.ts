@@ -38,7 +38,7 @@ const authoredCube: Cube = {
     name: 'authored_cube',
     title: 'Authored',
     sql: 'some_physical_table',
-    measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+    measures: { count: { label: 'Count', type: 'count', sql: '*' } },
     dimensions: {},
     public: true,
 };

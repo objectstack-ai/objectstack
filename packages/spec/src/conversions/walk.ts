@@ -517,7 +517,7 @@ const VIEW_CONTAINER_SLOTS = [
  * is copied only when a descendant actually changed: {@link mapCollection}'s
  * contract, one level further in.
  *
- * **Why this is centralized (#13031).** `ViewMetadataSchema` accepts three body
+ * **Why this is centralized (commit b799ac553).** `ViewMetadataSchema` accepts three body
  * shapes and all three land in `sys_metadata` rows, but every view-family
  * conversion was written against the container alone — so for a stored ViewItem
  * record or a flattened overlay the whole chain was a no-op, while

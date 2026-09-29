@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import type { Plugin } from 'esbuild';
-import { hasStackProvenance } from '@objectstack/spec';
+import { hasStackProvenance, stackConversionsOf, type ConversionNotice } from '@objectstack/spec';
 import { printErrorToStderr, printWarningToStderr } from './format.js';
 
 export interface LoadedConfig {
@@ -57,6 +57,22 @@ export interface LoadedConfig {
    * `refuseUnbuiltStack`); every other command reads the config as before.
    */
   stackProvenance: boolean;
+
+  /**
+   * The ADR-0087 D2 conversions the stack producer applied while building the
+   * DEFAULT export — `stackConversionsOf` (`@objectstack/spec`) read off
+   * `mod.default` itself, beside {@link stackProvenance} and for the same
+   * reason: the record rides beside the mark, non-enumerable, so the
+   * named-export merge below drops it just as it drops the mark.
+   *
+   * `defineStack` converts at load, so `config` is already canonical and a
+   * command re-running the conversion pass over it finds nothing the producer
+   * converted. This is the only place those conversions can be read from:
+   * `os validate` / `os build` fold it into their `conversions` field and the
+   * `--strict` gate. `[]` for an unbuilt export and for a source that needed
+   * no conversion.
+   */
+  stackConversions: readonly ConversionNotice[];
 }
 
 /**
@@ -456,6 +472,9 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
   // is non-enumerable by design). `mod` stands in for a missing default, and a
   // module namespace never carries the mark.
   const stackProvenance = hasStackProvenance(baseConfig);
+  // The producer's conversion record rides beside the mark and is dropped by
+  // the same spread, so it is read here too, off the same value.
+  const stackConversions = stackConversionsOf(baseConfig);
 
   // Preserve named exports (e.g. the `onEnable` runtime hook and `functions`)
   // alongside the default-exported stack. Module-namespace named exports are
@@ -509,6 +528,7 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     namedExports,
     shadowedNamedExports,
     stackProvenance,
+    stackConversions,
   };
 }
 

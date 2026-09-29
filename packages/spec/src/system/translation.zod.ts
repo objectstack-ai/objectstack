@@ -1038,7 +1038,7 @@ const appTranslationDataShape = () => ({
      * | `placeholder` | `element:record_picker`, `element:text_input` |
      * | `emptyText` | `element:record_picker` |
      *
-     * `submitLabel` LEFT this face in @objectstack/spec 17 (#10926, ADR-0049):
+     * `submitLabel` LEFT this face in @objectstack/spec 17 (commit d173125fb, ADR-0049):
      * its only declarer, `element:form`, retired whole (#9249), which under
      * this table's own measured-not-mirrored rule left the key with no
      * declared component to translate. The maintainer ruled retire over
@@ -1069,7 +1069,7 @@ const appTranslationDataShape = () => ({
      *   declared `content: I18nLabelSchema` (`ui/component.zod.ts`), so it is
      *   localizable at its own authoring site, and adding it to this face would
      *   be the face widening the `submitLabel` retirement declined for the
-     *   identical shape (#10926). The inline locale map is the ruled route for
+     *   identical shape (commit d173125fb). The inline locale map is the ruled route for
      *   page prose, not a workaround. That such maps are invisible to
      *   `os i18n extract` and `check:i18n-coverage` is real, and is its own
      *   question about the extractor (#14749) rather than a second key here.

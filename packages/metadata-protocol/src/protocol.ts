@@ -7299,7 +7299,7 @@ export class ObjectStackProtocolImplementation implements
      * was carried, which is the silent deletion this method exists to prevent.
      * The read is skipped entirely — no extra query, for any save — when the
      * type has no registered redactor, which is every type but `datasource`
-     * today.
+     * (built in) and `flow` (registered by the automation plugin, #20552).
      */
     private async carryForwardRedactedCredentials(args: {
         type: string;
@@ -7320,9 +7320,51 @@ export class ObjectStackProtocolImplementation implements
                 packageId: args.packageId,
             });
         }
-        const body = stored?.body;
+        // [#20552] NO overlay row at either state: the body the read served is
+        // the CODE layer, so that is what the incoming body is compared with.
+        // Without this a code-authored item — an inbound flow whose secret is a
+        // literal in the app's source, the shipped reference shape — had its
+        // FIRST save persist an overlay row with the credential dropped, and
+        // an overlay wins every later merge.
+        const body = stored?.body ?? await this.readCodeLayerForCarryForward(args.type, args.ref.name, args.packageId);
         if (!body) return args.item;
         return carryForwardRedactedValues(args.type, args.item, body);
+    }
+
+    /**
+     * [#20552] The body a read served for an item with NO overlay row — the
+     * CODE layer, resolved in the order `getMetaItemLayered` resolves its `code`
+     * layer: the MetadataService item, else the loaded artifact's item, else the
+     * SchemaRegistry item (with the plural/singular retry). The artifact lookup
+     * comes before the plain registry key because an overlay hydrated into that
+     * key can shadow it (see {@link lookupArtifactItem}); here there is no
+     * overlay row, so a hydrated copy would be stale.
+     *
+     * Type-agnostic, like the carry-forward it feeds: a code-defined datasource
+     * gets the same first-save protection as a code-authored flow.
+     *
+     * ⛔ No `try`/`catch` — the carry-forward's own rule. A MetadataService read
+     * that throws fails the save, and one that reports itself degraded with
+     * nothing found anywhere fails it as the same 503 the read doors answer:
+     * the alternative is persisting a body whose credential this save could not
+     * confirm was carried.
+     */
+    private async readCodeLayerForCarryForward(
+        type: string,
+        name: string,
+        packageId: string | null,
+    ): Promise<unknown> {
+        const pkg = packageId ?? undefined;
+        const fromService = await this.readItemFromMetadataService(type, name, pkg);
+        if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
+        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? this.engine.registry.getItem(type, name, pkg);
+        if (item === undefined) {
+            const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
+            if (alt) item = this.engine.registry.getItem(alt, name, pkg);
+        }
+        if (item !== undefined && item !== null) return item;
+        if (fromService.degraded) this.throwMetadataServiceUnavailable(fromService.errors);
+        return undefined;
     }
 
     /**
@@ -7415,8 +7457,53 @@ export class ObjectStackProtocolImplementation implements
         // the plural spelling, that branch minted a PLURAL registry entry — and
         // once `listItems('actions')` was non-empty, the singular fallback that
         // had been supplying the 11 code-authored actions stopped running. One
-        // overlay row shadowed the entire code-authored listing.
-        request = canonicalizeMetaRequestType(request);
+        // overlay row shadowed the entire code-authored listing. Folded HERE, at
+        // each face's boundary, so the shared body only ever sees the canonical
+        // key.
+        return this.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served');
+    }
+
+    /**
+     * [#20552] The flattened list {@link getMetaItems} reads — the same
+     * sources, the same merge, the same protection envelope — handed back
+     * WITHOUT the serving decorations: no `_diagnostics`, and no per-type
+     * credential redaction (`decorateMetadataItems` →
+     * `redactMetadataItem`).
+     *
+     * It exists for exactly one kind of caller: an in-process engine that
+     * EXECUTES the definitions it reads. The automation engine arms a flow's
+     * inbound hook with the HMAC secret on the flow's start node, and it
+     * (re)binds flows from this view at `kernel:ready` and on every
+     * `metadata:reloaded`. Once `flow` carries a registered redactor, the
+     * served view no longer holds that secret — so a binder reading
+     * {@link getMetaItems} would register every `api` flow without its
+     * credential, the engine would refuse it, and a Studio-published or
+     * rotated secret would never reach the hook. Redaction is a SERVING act
+     * (`spec/kernel/metadata-type-redaction.ts`): a raw-record consumer keeps
+     * reading the stored body, as the datasource connect path always has.
+     *
+     * ⛔ Never call this from a door that answers a caller — HTTP, MCP, an
+     * export, a log line. Every such exit serves {@link getMetaItems}, whose
+     * redaction is the whole reason this method has to exist separately.
+     */
+    async getMetaItemsForExecution(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
+        // The same #4432 fold {@link getMetaItems} applies, for the same reason.
+        return this.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'execution');
+    }
+
+    /**
+     * The one body behind {@link getMetaItems} and
+     * {@link getMetaItemsForExecution}. `audience` decides ONLY whether the
+     * serving decorations are applied at the very end; every source, merge and
+     * filter above that line is shared, so the list the engine executes and
+     * the list a caller is served cannot disagree about which items exist.
+     *
+     * `request` arrives already folded by the calling face (#4432).
+     */
+    private async readFlattenedMetaItems(
+        request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean },
+        audience: 'served' | 'execution',
+    ) {
         const { packageId } = request;
         // ── [#14683] The registry read gate, resolved ONCE, HERE ──────────────────
         //
@@ -8001,28 +8088,28 @@ export class ObjectStackProtocolImplementation implements
             });
         }
 
+        const governed = (items as any[]).map((it) => {
+            // ADR-0048 — scope the artifact lookup to THIS item's owning
+            // package so a same-name collision grafts each item's own
+            // protection envelope, not the first-registered package's.
+            // (`requested` packageId, when the whole list is scoped,
+            // takes priority; else the item's own `_packageId`.)
+            const a = this.lookupArtifactItem(
+                request.type,
+                (it as any)?.name,
+                packageId ?? ((it as any)?._packageId as string | undefined),
+            );
+            // [#4513] Same governance as the single-item read — the list
+            // is the other exit a client reads field metadata from, and
+            // an overlay row wins over the (already-governed) registry
+            // entry in the merge above, so it carries the same lie.
+            return this.governServedObject(request.type, mergeArtifactProtection(it, a)) as any;
+        });
         return {
             type: request.type,
-            items: decorateMetadataItems(
-                request.type,
-                (items as any[]).map((it) => {
-                    // ADR-0048 — scope the artifact lookup to THIS item's owning
-                    // package so a same-name collision grafts each item's own
-                    // protection envelope, not the first-registered package's.
-                    // (`requested` packageId, when the whole list is scoped,
-                    // takes priority; else the item's own `_packageId`.)
-                    const a = this.lookupArtifactItem(
-                        request.type,
-                        (it as any)?.name,
-                        packageId ?? ((it as any)?._packageId as string | undefined),
-                    );
-                    // [#4513] Same governance as the single-item read — the list
-                    // is the other exit a client reads field metadata from, and
-                    // an overlay row wins over the (already-governed) registry
-                    // entry in the merge above, so it carries the same lie.
-                    return this.governServedObject(request.type, mergeArtifactProtection(it, a)) as any;
-                }),
-            ),
+            // [#20552] Served: diagnostics + per-type credential redaction.
+            // Execution: the stored bodies — see `getMetaItemsForExecution`.
+            items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
         };
     }
 

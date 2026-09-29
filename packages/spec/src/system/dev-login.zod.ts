@@ -7,7 +7,7 @@ import { strictObject } from '../shared/strict-object';
 
 /**
  * ONE first-run credential an application contributes to the development boot
- * banner (#17556 — suggestion 1 of #17081).
+ * banner (#17556 — commit 24d622b94, suggestion 1 of its parent card).
  *
  * ## Why an app has to be the one to say this
  *

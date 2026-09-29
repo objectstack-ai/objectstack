@@ -82,7 +82,7 @@ const CUBE: Cube = {
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
     ['id', 'amount', 'budget', 'stage', 'owner', 'starts_on', 'ends_on', 'organization_id'].map(
-      (n) => [n, { name: n, label: n, type: 'string', sql: n }],
+      (n) => [n, { label: n, type: 'string', sql: n }],
     ),
   ),
   public: true,

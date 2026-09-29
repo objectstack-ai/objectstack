@@ -2795,8 +2795,10 @@ export class AnalyticsService implements IAnalyticsService {
       return m.slice(0, dot) === cubeName ? m.slice(dot + 1) : m;
     };
 
-    // Always provide a default `count` measure
-    measures.count = { name: 'count', label: 'Count', type: 'count', sql: '*' };
+    // Always provide a default `count` measure. Every member minted below is
+    // filed under its KEY with no inner `name` — the record key IS the member's
+    // name (#20300 retired the inner copy, ADR-0049 enforce-or-remove).
+    measures.count = { label: 'Count', type: 'count', sql: '*' };
 
     for (const m of query.measures || []) {
       // [#5918] MEASURES no longer take the blanket strip #5739 left them with.
@@ -2819,7 +2821,7 @@ export class AnalyticsService implements IAnalyticsService {
     for (const d of query.dimensions || []) {
       const key = stripCubeQualifier(d);
       if (dimensions[key]) continue;
-      dimensions[key] = { name: key, label: key, type: 'string', sql: key };
+      dimensions[key] = { label: key, type: 'string', sql: key };
     }
 
     // The `where`'s field keys seed dimensions too. LOWER FIRST, then read keys:
@@ -2867,7 +2869,7 @@ export class AnalyticsService implements IAnalyticsService {
         // so the cube AND the compiled SQL now match on either spelling.
         const minted = stripCubeQualifier(key);
         if (dimensions[minted] || measures[minted]) continue;
-        dimensions[minted] = { name: minted, label: minted, type: 'string', sql: minted };
+        dimensions[minted] = { label: minted, type: 'string', sql: minted };
       }
     }
 
@@ -2875,7 +2877,7 @@ export class AnalyticsService implements IAnalyticsService {
       const key = stripCubeQualifier(td.dimension);
       if (dimensions[key]) continue;
       dimensions[key] = {
-        name: key, label: key, type: 'time', sql: key,
+        label: key, type: 'time', sql: key,
         granularities: ['day', 'week', 'month', 'quarter', 'year'],
       };
     }
@@ -3053,9 +3055,11 @@ function mintableMeasureKey(member: string, cubeName: string): string {
  * Anything else is treated as a `sum(<key>)` — best-effort default for an
  * unknown numeric measure.
  */
-export function inferMeasure(key: string): { name: string; label: string; type: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'; sql: string } {
+export function inferMeasure(key: string): { label: string; type: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'; sql: string } {
+  // No inner `name`: the caller files the result under `key`, and the record
+  // key IS the measure's name (#20300 retired the inner copy).
   if (key === 'count') {
-    return { name: 'count', label: 'Count', type: 'count', sql: '*' };
+    return { label: 'Count', type: 'count', sql: '*' };
   }
   const suffixes: Array<[string, 'sum' | 'avg' | 'min' | 'max' | 'count_distinct']> = [
     ['_count_distinct', 'count_distinct'],
@@ -3068,10 +3072,10 @@ export function inferMeasure(key: string): { name: string; label: string; type: 
   for (const [suffix, type] of suffixes) {
     if (key.endsWith(suffix)) {
       const field = key.slice(0, -suffix.length) || '*';
-      return { name: key, label: key, type, sql: field };
+      return { label: key, type, sql: field };
     }
   }
-  return { name: key, label: key, type: 'sum', sql: key };
+  return { label: key, type: 'sum', sql: key };
 }
 
 /**

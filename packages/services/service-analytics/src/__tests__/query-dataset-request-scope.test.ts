@@ -51,10 +51,10 @@ const OPEN_SUMMARY: Cube = {
   title: 'Open summary',
   sql: 'open_obj',
   measures: {
-    authored_total: { name: 'authored_total', label: 'Authored total', type: 'count', sql: '*' },
+    authored_total: { label: 'Authored total', type: 'count', sql: '*' },
   },
   dimensions: {
-    region: { name: 'region', label: 'Region', type: 'string', sql: 'region' },
+    region: { label: 'Region', type: 'string', sql: 'region' },
   },
 };
 
@@ -63,10 +63,10 @@ const HIDDEN_SUMMARY: Cube = {
   title: 'Hidden summary',
   sql: 'open_obj',
   measures: {
-    hidden_total: { name: 'hidden_total', label: 'Hidden total', type: 'count', sql: '*' },
+    hidden_total: { label: 'Hidden total', type: 'count', sql: '*' },
   },
   dimensions: {
-    region: { name: 'region', label: 'Region', type: 'string', sql: 'region' },
+    region: { label: 'Region', type: 'string', sql: 'region' },
   },
   public: false,
 };

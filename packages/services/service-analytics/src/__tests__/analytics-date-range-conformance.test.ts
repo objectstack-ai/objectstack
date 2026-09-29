@@ -203,8 +203,8 @@ describe('#16322 — this package\'s analytics faces conform to the shared dateR
 const PREVIEW_CUBE = {
     name: 'events',
     sql: 'events',
-    dimensions: { id: { name: 'id', type: 'string', sql: 'id' } },
-    measures: { count: { name: 'count', type: 'count', sql: '*' } },
+    dimensions: { id: { type: 'string', sql: 'id' } },
+    measures: { count: { type: 'count', sql: '*' } },
 } as unknown as Cube;
 
 /** Row ids the evaluator keeps for `dateRange`, grouped by `id` so rows ARE ids. */
