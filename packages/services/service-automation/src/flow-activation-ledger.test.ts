@@ -26,6 +26,7 @@ import { AutomationEngine } from './engine.js';
 import type { FlowTrigger, FlowTriggerBinding, FlowActivationRow } from './engine.js';
 import { InMemoryFlowActivationStore, ObjectStoreFlowActivationStore } from './flow-activation-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
+import { registerMapNode } from './builtin/map-node.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
@@ -390,13 +391,13 @@ describe('ADR-0126 §7.3 — disabling a flow is refused while packaged flows ca
         await expect(engine.toggleFlow('shared_step', false)).resolves.toBeUndefined();
     });
 
-    it('ENABLE is never guarded — arming a flow cannot break a caller', async () => {
+    it('enabling a CALLEE is never guarded by its callers — arming a subflow cannot break the flows that call it', async () => {
         const { engine } = engineWithLedger();
         engine.registerFlow('shared_step', packagedFlow('shared_step'));
         engine.registerFlow('vendor_process', callerFlow('vendor_process', 'shared_step', 'subflow'));
 
-        // Disabled out-of-band (a previous boot), then re-enabled with the
-        // caller still present: §7.3 attaches the guard to DISABLE only.
+        // Enabled with its caller still present: the caller side of the
+        // enable direction is the next describe block's subject.
         await expect(engine.toggleFlow('shared_step', true)).resolves.toBeUndefined();
     });
 
@@ -405,6 +406,229 @@ describe('ADR-0126 §7.3 — disabling a flow is refused while packaged flows ca
         engine.registerFlow('recursive', callerFlow('recursive', 'recursive', 'subflow'));
 
         await expect(engine.toggleFlow('recursive', false)).resolves.toBeUndefined();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §7.3, the enable direction — a caller is not re-armed onto a disabled child
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ADR-0126 §7.3 (enable direction) — re-enabling a packaged caller is refused while a packaged subflow it calls is disabled', () => {
+    const ON_CREATE = { objectName: 'lead', triggerType: 'record-after-create' };
+    const nodeCtx = { logger: createTestLogger(), getService: () => undefined } as any;
+
+    /** An engine that can RUN a caller, so "the sequence completes" is a run, not a flag. */
+    function runnableEngine() {
+        const env = engineWithLedger();
+        registerSubflowNode(env.engine, nodeCtx);
+        registerMapNode(env.engine, nodeCtx);
+        return env;
+    }
+
+    /** A packaged, record-triggered caller invoking each of `targets` through `nodeType`. */
+    function caller(name: string, targets: string[], nodeType: 'subflow' | 'map' = 'subflow') {
+        const calls = targets.map((target, i) => ({
+            id: `call_${i}`,
+            type: nodeType,
+            label: `Call ${target}`,
+            config: { flowName: target, ...(nodeType === 'map' ? { collection: [1] } : {}) },
+        }));
+        const chain = ['start', ...calls.map((c) => c.id), 'end'];
+        return {
+            ...packagedFlow(name, ON_CREATE),
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start', config: ON_CREATE },
+                ...calls,
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: chain.slice(1).map((target, i) => ({ id: `e${i}`, source: chain[i], target })),
+        };
+    }
+
+    /**
+     * Enable `name` and hand back the refusal, asserting the envelope every
+     * refusal pin shares: ADR-0112 code AND status, and the flow it refused.
+     */
+    async function refusedEnable(engine: AutomationEngine, name: string): Promise<any> {
+        const thrown = await engine.toggleFlow(name, true).then(() => undefined, (e: unknown) => e);
+        expect(thrown, `enabling '${name}' was accepted`).toBeDefined();
+        expect((thrown as any).code).toBe('RESOURCE_CONFLICT');
+        expect((thrown as any).status).toBe(409);
+        expect((thrown as any).message).toContain(`Flow '${name}' cannot be enabled`);
+        return thrown;
+    }
+
+    /**
+     * The state the refusal exists for: a caller switched off while the
+     * subflow it calls is switched off too. The callee is switched off BEFORE
+     * the caller exists (a package upgrade that adds the caller), which is how
+     * the pair gets there without the disable-direction guard.
+     */
+    async function bothSwitchedOff(engine: AutomationEngine, nodeType: 'subflow' | 'map') {
+        engine.registerFlow('shared_step', packagedFlow('shared_step'));
+        await engine.toggleFlow('shared_step', false);
+        engine.registerFlow('vendor_process', caller('vendor_process', ['shared_step'], nodeType));
+        await engine.toggleFlow('vendor_process', false);
+    }
+
+    for (const nodeType of ['subflow', 'map'] as const) {
+        it(`the ${nodeType} pair: re-enabling the caller first is refused naming the subflow, and the sequence completes callee-first`, async () => {
+            const { engine, store, triggers } = runnableEngine();
+            await bothSwitchedOff(engine, nodeType);
+
+            const thrown = await refusedEnable(engine, 'vendor_process');
+            expect(thrown.message).toContain("'shared_step' (switched off in the activation ledger)");
+            // The mirrored remedy, completable for a ledger-disabled child.
+            expect(thrown.message).toContain("Enable 'shared_step' first, then enable this flow");
+
+            // Refused means nothing moved: the row still reads off, the
+            // trigger stays unbound, and a run is still refused at execute().
+            expect(await store.list()).toContainEqual({ name: 'vendor_process', packageId: 'crm', active: false });
+            expect(triggers.record_change.isBound('vendor_process')).toBe(false);
+            expect((await engine.execute('vendor_process')).code).toBe('FLOW_DISABLED');
+
+            // The remedy, followed: the subflow first, then the caller.
+            await expect(engine.toggleFlow('shared_step', true)).resolves.toBeUndefined();
+            await expect(engine.toggleFlow('vendor_process', true)).resolves.toBeUndefined();
+
+            expect(triggers.record_change.isBound('vendor_process')).toBe(true);
+            // A real run through the caller's `${nodeType}` node into the re-armed child.
+            expect((await engine.execute('vendor_process')).success).toBe(true);
+        });
+    }
+
+    it('names EVERY disabled subflow the caller calls', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('step_a', packagedFlow('step_a'));
+        engine.registerFlow('step_b', packagedFlow('step_b'));
+        await engine.toggleFlow('step_a', false);
+        await engine.toggleFlow('step_b', false);
+        engine.registerFlow('vendor_process', caller('vendor_process', ['step_a', 'step_b']));
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await refusedEnable(engine, 'vendor_process');
+
+        expect(thrown.message).toContain('2 packaged subflows it calls are disabled');
+        expect(thrown.message).toContain("Enable 'step_a' and 'step_b' first");
+    });
+
+    it('a STATUS-disabled subflow gets a remedy through its definition — this switch never moves a status', async () => {
+        const { engine, triggers } = runnableEngine();
+        engine.registerFlow('shared_step', { ...packagedFlow('shared_step'), status: 'obsolete' });
+        engine.registerFlow('vendor_process', caller('vendor_process', ['shared_step']));
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await refusedEnable(engine, 'vendor_process');
+
+        expect(thrown.message).toContain("'shared_step' (its definition's status is 'obsolete')");
+        expect(thrown.message).toContain("Publish 'shared_step' with status 'active'");
+        // ⛔ Never the toggle for this child: `toggleFlow('shared_step', true)`
+        // lands and leaves it exactly as disabled as it was, so prescribing it
+        // would be a remedy the administrator can follow and still be refused.
+        expect(thrown.message).not.toContain("Enable 'shared_step'");
+        expect((await engine.toggleFlow('shared_step', true).then(() => engine.execute('shared_step'))).code).toBe('FLOW_DISABLED');
+        await expect(engine.toggleFlow('vendor_process', true)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+
+        // The remedy, followed: the definition republished active.
+        engine.registerFlow('shared_step', { ...packagedFlow('shared_step'), status: 'active' });
+        await expect(engine.toggleFlow('vendor_process', true)).resolves.toBeUndefined();
+        expect(triggers.record_change.isBound('vendor_process')).toBe(true);
+        expect((await engine.execute('vendor_process')).success).toBe(true);
+    });
+
+    it('a subflow disabled BOTH ways is named with both reasons and both steps, and the steps complete', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('shared_step', packagedFlow('shared_step'));
+        await engine.toggleFlow('shared_step', false);
+        engine.registerFlow('shared_step', { ...packagedFlow('shared_step'), status: 'invalid' });
+        engine.registerFlow('vendor_process', caller('vendor_process', ['shared_step']));
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await refusedEnable(engine, 'vendor_process');
+
+        expect(thrown.message).toContain(
+            "'shared_step' (switched off in the activation ledger, and its definition's status is 'invalid')",
+        );
+        expect(thrown.message).toMatch(/Publish 'shared_step' with status 'active' .* and enable 'shared_step' first/);
+
+        engine.registerFlow('shared_step', { ...packagedFlow('shared_step'), status: 'active' });
+        await engine.toggleFlow('shared_step', true);
+        await expect(engine.toggleFlow('vendor_process', true)).resolves.toBeUndefined();
+        expect((await engine.execute('vendor_process')).success).toBe(true);
+    });
+
+    it('a CYCLE of switched-off flows does not guard itself — every order would be refused, so none is prescribed', async () => {
+        const { engine } = runnableEngine();
+        // Switched off while independent; a package upgrade then makes them
+        // call each other.
+        engine.registerFlow('ping', packagedFlow('ping'));
+        engine.registerFlow('pong', packagedFlow('pong'));
+        await engine.toggleFlow('ping', false);
+        await engine.toggleFlow('pong', false);
+        engine.registerFlow('ping', caller('ping', ['pong']));
+        engine.registerFlow('pong', caller('pong', ['ping']));
+
+        // Refusing 'ping' for 'pong' while refusing 'pong' for 'ping' would
+        // be a remedy no sequence can complete.
+        await expect(engine.toggleFlow('ping', true)).resolves.toBeUndefined();
+        await expect(engine.toggleFlow('pong', true)).resolves.toBeUndefined();
+    });
+
+    it('a flow calling ITSELF does not guard its own re-enable', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('recursive', packagedFlow('recursive'));
+        await engine.toggleFlow('recursive', false);
+        engine.registerFlow('recursive', caller('recursive', ['recursive']));
+
+        await expect(engine.toggleFlow('recursive', true)).resolves.toBeUndefined();
+    });
+
+    it('a chain back through an ENABLED flow is no cycle — the disabled subflow is still named, and enabling it first completes', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('head', packagedFlow('head'));
+        engine.registerFlow('middle', packagedFlow('middle'));
+        await engine.toggleFlow('head', false);
+        await engine.toggleFlow('middle', false);
+        engine.registerFlow('head', caller('head', ['middle']));
+        engine.registerFlow('middle', caller('middle', ['tail']));
+        // `tail` stays enabled, so `middle` can be re-enabled first.
+        engine.registerFlow('tail', caller('tail', ['head']));
+
+        const thrown = await refusedEnable(engine, 'head');
+        expect(thrown.message).toContain("Enable 'middle' first");
+
+        await expect(engine.toggleFlow('middle', true)).resolves.toBeUndefined();
+        await expect(engine.toggleFlow('head', true)).resolves.toBeUndefined();
+    });
+
+    it('a NON-packaged caller is not guarded — a tenant\'s own flow is theirs to arm', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('shared_step', packagedFlow('shared_step'));
+        await engine.toggleFlow('shared_step', false);
+        engine.registerFlow('my_own_process', { ...caller('my_own_process', ['shared_step']), _packageId: undefined });
+        await engine.toggleFlow('my_own_process', false);
+
+        await expect(engine.toggleFlow('my_own_process', true)).resolves.toBeUndefined();
+    });
+
+    it('a NON-packaged subflow does not guard a packaged caller', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('my_step', { ...packagedFlow('my_step'), _packageId: undefined });
+        await engine.toggleFlow('my_step', false);
+        engine.registerFlow('vendor_process', caller('vendor_process', ['my_step']));
+        await engine.toggleFlow('vendor_process', false);
+
+        await expect(engine.toggleFlow('vendor_process', true)).resolves.toBeUndefined();
+    });
+
+    it('enabling a caller that is ALREADY enabled is not refused — nothing is re-armed', async () => {
+        const { engine, store } = runnableEngine();
+        engine.registerFlow('shared_step', packagedFlow('shared_step'));
+        await engine.toggleFlow('shared_step', false);
+        engine.registerFlow('vendor_process', caller('vendor_process', ['shared_step']));
+
+        await expect(engine.toggleFlow('vendor_process', true)).resolves.toBeUndefined();
+        expect(await store.list()).toContainEqual({ name: 'vendor_process', packageId: 'crm', active: true });
     });
 });
 
