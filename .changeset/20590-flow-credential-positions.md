@@ -26,7 +26,8 @@ old kind; a start node that needs a secret asks for one again at registration.
 
 **Moving a node.** A node moved into or out of a `loop` body, a `parallel` branch or a
 `try_catch` region keeps its stored credential across the round trip, as long as its
-`id` and kind are unchanged and no other node in the definition carries the same `id`.
+`id` and kind are unchanged and it is the only node, at the top level or in any region,
+that carries that `id`. An edge or a config value with the same `id` does not count.
 
 **The `/meta` list read on a dispatcher host.** When the metadata protocol's list read
 fails, the list answers that failure (`503 SERVICE_UNAVAILABLE` for a store outage, or

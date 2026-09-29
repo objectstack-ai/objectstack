@@ -307,13 +307,22 @@ function valueAt(root: unknown, at: readonly string[]): unknown {
  * the stored credential at save, silently.
  *
  * The owner is the path's deepest identified element (its last `elementId`
- * hop). It is looked for by that `id` across the WHOLE body, and used only
- * when exactly ONE plain object anywhere in it carries that `id` — none, and
- * the author removed it; two or more, and they cannot be told apart, so
- * nothing is chosen. Whole-body uniqueness is what keeps this safe for a type
+ * hop). It is looked for by that `id` across the WHOLE body — but only among
+ * the elements that stand where the owner stood: the elements of an array
+ * held under the SAME key as the owner's own array in the stored path (for a
+ * flow node that key is `nodes`, so a node at the top level or in any region
+ * counts, and an edge or a config value that happens to carry the same `id`
+ * does not — a flow keeps node ids and edge ids in separate spaces, #20590
+ * round 2). The key is read from the stored hops, never named here. It is used
+ * only when exactly ONE such element carries that `id` — none, and the author
+ * removed it; two or more, and they cannot be told apart, so nothing is
+ * chosen. Uniqueness across the whole body is what keeps this safe for a type
  * whose ids are not one space the way a flow's node ids are. From the owner,
  * the rest of the path is walked as usual (the key hops down to the container,
  * so an owner whose `config` the author removed still grafts nothing).
+ *
+ * An owner whose array is not held under a key — an array directly inside
+ * another array — has no key to scope by, and is not relocated.
  *
  * A path with no identified element — every datasource path, whose redactor
  * never crosses an array — has no owner to find, and is unaffected.
@@ -326,8 +335,12 @@ function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; 
             break;
         }
     }
-    if (owner < 0) return undefined;
+    if (owner < 1) return undefined;
     const id = (hops[owner] as { elementId: string }).elementId;
+    // The key the owner's array is held under in the stored path.
+    const parent = hops[owner - 1] as PathHop;
+    if (!('key' in parent)) return undefined;
+    const arrayKey = parent.key;
 
     const matches: string[][] = [];
     const visit = (node: unknown, at: string[]): void => {
@@ -336,9 +349,14 @@ function relocateById(root: unknown, hops: readonly PathHop[]): { at: string[]; 
             return;
         }
         if (!isPlainRecord(node)) return;
-        if (node.id === id) matches.push(at);
         for (const [key, value] of Object.entries(node)) {
-            if (value && typeof value === 'object') visit(value, [...at, key]);
+            if (!value || typeof value !== 'object') continue;
+            if (key === arrayKey && Array.isArray(value)) {
+                value.forEach((element, index) => {
+                    if (isPlainRecord(element) && element.id === id) matches.push([...at, key, String(index)]);
+                });
+            }
+            visit(value, [...at, key]);
         }
     };
     visit(root, []);
