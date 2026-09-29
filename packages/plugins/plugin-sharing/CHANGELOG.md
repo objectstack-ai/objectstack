@@ -1,5 +1,719 @@
 # @objectstack/plugin-sharing
 
+## 17.5.0
+
+### Minor Changes
+
+- 9347c1f: A row-level or sharing-rule predicate comparing a field against a list with `!=` / `==` is refused at the CEL lowering instead of lowering to a filter that widens on driver-mongodb, and driver-mongodb refuses `$ne` with an array comparand (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/driver-mongodb`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing` and `@objectstack/lint` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-list-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS reads on MongoDB and RLS write checks.** A policy written `record.status != ['closed', 'archived']` (or `!(record.status == [...])`, or `!=` against a `current_user` membership set) lowered to `{ status: { $ne: [...] } }` (or `$not` around a bare-array equality). The RLS `using` clause is composed into the query after the engine's comparand-shape check, and driver-mongodb passed the shape to the server, where it selects every scalar row: the read returned the rows the policy was written to hide. A `check` written `!=` against a membership set admitted every write.
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses `==` / `!=` whose comparand is a list (`unsupported`): a list literal, or a `current_user` variable that resolves to an array. The authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports the literal; a resolved array is refused per request.
+  - `@objectstack/plugin-security`: the RLS compiler drops such a policy and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403). A CEL-authored `check` gets this 403; the `INVALID_FILTER` / 400 of `matchesFilterCondition` remains for a filter passed to it directly.
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is skipped at bootstrap and never seeded.
+  - `@objectstack/lint`: the list-literal form is reported (`rls-predicate-unenforceable`, `sharing-rule-unlowerable-condition`). The RLS reference pass probes each kernel-resolved `current_user` key with its runtime type.
+  - `@objectstack/driver-mongodb`: `translateFilter` refuses `$ne` with an array comparand at any depth, with `INVALID_FILTER` / 400, as driver-sql and driver-memory already do.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  **What to change.** "One of these values" is `record.status in ['open', 'pending']`; "none of these values" is `!(record.status in ['closed', 'archived'])`. In a raw filter, use `$in` / `$nin`. `in`, scalar `==` / `!=`, `null` and field-to-field comparisons are unchanged.
+  
+  <!-- adr-0087: registered cel-predicate-list-comparand-refused -->
+- 4d7e740: A row-level or sharing-rule predicate whose comparison is handed something other than one value is refused at the CEL lowering or at the write-check evaluator, instead of admitting writes and reads it was written to refuse (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing`, `@objectstack/lint` and `@objectstack/objectql` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-one-value-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS write checks and reads.** Each shape below was measured through the real plugin-security on driver-sql and driver-memory:
+  
+  - `!(record.status in [['closed', 'archived']])` (a list nested in an `in` list) admitted and stored every write the `check` was written to refuse, and a `using` read returned every row on driver-memory.
+  - `current_user.org_user_ids != 'x'` and `current_user.org_user_ids > 'a'` (a membership set on a comparison with no field) folded to "no restriction": every write admitted, every row read, on every driver.
+  - `record.status > ['m']` compared the list as the string `'m'` on the write check, while the analytics read scope bound the whole list as one SQL parameter. `record.reviewer_id > current_user` compared the whole caller object as a string and admitted and stored every write; in this release the RLS compiler's comparand faces (#20212) already drop that policy, and this change refuses it at the lowering for every caller of the compiler.
+  - `record.status != record.tags`, its negation `!(record.status == record.tags)`, and the mirror `record.tags != record.status`, with `tags` a `json` field or a `multiple` lookup, admitted and stored every write.
+  
+  What changes:
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses, with `unsupported`, a list comparand under every comparison (the ordering operators now included, and on the constant-fold branch, whichever side), the `current_user` root or a key resolving to an object under an ordering operator, and an `in` list whose member is itself a list. The authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports each literal form; a resolved value is refused per request. `matchesFilterCondition` refuses, with `INVALID_FILTER` / 400, an array under `$gt` / `$gte` / `$lt` / `$lte`, an array member of `$in` / `$nin`, and a `{ $field }` comparison (`$eq`, `$ne` or an ordering operator) whose column holds a list or an object on the record being judged, on either side. The message withholds the field, the operator and the value.
+  - `@objectstack/plugin-security`: the RLS compiler drops a policy the compiler refuses and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403, and `getReadFilter` hands the analytics read scope the deny scope). A `check` comparing a field with a list-holding column is refused 400 and stores nothing.
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is skipped at bootstrap and never seeded.
+  - `@objectstack/lint`: the literal forms are reported as `rls-predicate-unenforceable`, and an ordering comparison against a membership set through the reference pass.
+  - `@objectstack/objectql`: a `having` comparison against a `{ $field }` column whose aggregated row holds a list is refused 400 where the row carries the list itself (driver-memory); driver-sql rows carry the stored JSON text and compare as before.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  The stage 2a changeset's sentence that `{ $field }` references evaluate as before no longer holds for a column holding a list or an object: that comparison is now refused.
+  
+  **What to change.** "One of these values" is `record.status in ['open', 'pending']`, and "none of these values" is `!(record.status in ['closed', 'archived'])`, with the list flat. An ordering takes one bound (`record.status > 'm'`); a range is two comparisons joined by `&&`. Compare against one key of the caller (`record.reviewer_id > current_user.id`). A field compared with a `json` or `multiple` field has no pushdown form: compare with a single-valued column, or move the condition into a validation rule or hook. In a raw filter, use `$in` / `$nin` with flat lists and one bound per ordering operator.
+  
+  Not changed: a field compared with a `json` or `multiple` field still lowers and is not reported at authoring time, because the lowering sees the predicate's text and not the object's field types; driver-memory still answers a `{ $field }` comparison on a read without evaluating the reference.
+  
+  <!-- adr-0087: registered cel-predicate-one-value-comparand-refused -->
+- 560b724: A row-level or sharing-rule predicate comparing with `!=` / `==` against the bare `current_user` root is refused at the CEL lowering instead of lowering against the whole caller context object (#19959).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing` and `@objectstack/lint` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-variable-root-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS write checks.** A policy written `record.owner_id != current_user` (or `== current_user`, or `!(record.owner_id == current_user)`) named the variable root alone, which resolved to the whole caller context, and lowered to `{ owner_id: { $ne: <that object> } }` (or the bare object, or `$not` around it). A strict compare never equals an object, so a `check` so written admitted and stored every insert and by-id update it was written to refuse, a USING-only such policy admitted every insert, and explain reported the read as narrowed with the caller's membership sets echoed in its `readFilter`. A constant comparison such as `current_user != 'guest'` folded to no restriction.
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses `==` / `!=` whose operand is the bare variable root (`unsupported`), in both of its modes, so the authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports it before any request. A variable that resolves to an object is refused per request; a `Date` still passes.
+  - `@objectstack/plugin-security`: the RLS compiler drops such a policy and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403, explain answers `denies`).
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is still skipped at bootstrap, now with reason `unsupported` instead of `unresolved-variable`.
+  - `@objectstack/lint`: the shape is reported as `rls-predicate-unenforceable` on either RLS clause, where it was silent, and as `sharing-rule-unlowerable-condition` on a sharing condition, where it was `sharing-rule-runtime-variable-condition`.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  **What to change.** Compare against the key the predicate means: `record.owner_id != current_user` becomes `record.owner_id != current_user.id` (or `current_user.organization_id`, `current_user.email`); a membership test is `record.owner_id in current_user.org_user_ids`. Scalar keys, `in`, `null`, literals and field-to-field comparisons are unchanged.
+  
+  <!-- adr-0087: registered cel-predicate-variable-root-comparand-refused -->
+
+### Patch Changes
+
+- 7851fa3: docs(plugin-sharing): the `grantsRefused` subtype comment states the NARROWING, not a spec lag (#15712)
+  
+  Two comments in this package described a spec/plugin lag that #14969 ended.
+  `@objectstack/spec` now declares `grantsRefused?: number` on
+  `SharingRuleEvaluationResult` itself, so "the six declared fields are unchanged"
+  and "the contract lives in `@objectstack/spec` and is another lane's to move"
+  read as if the spec were still behind. A reader reconciling the two would
+  conclude the spec is missing a key it has.
+  
+  No code moves. `SharingRuleReconcilePassResult extends SharingRuleEvaluationResult
+  { grantsRefused: number }` is a legal covariant narrowing before and after, and
+  that narrowing is now what the prose says: the spec declares the key OPTIONAL on
+  purpose — an `ISharingRuleService` implementation that does not count refusals
+  leaves it ABSENT, and absent is not `0` — while this implementation always counts
+  them and therefore requires it. The load-bearing paragraph is kept verbatim:
+  `grantsRefused > 0` is NOT "the pass failed", it is the pass reporting that it met
+  a record it cannot grant on and CONTINUED.
+  
+  What reaches a consumer: doc comments, and only through the published
+  `dist/index.d.ts` / `dist/index.d.mts`, where the JSDoc on the exported
+  `SharingRuleReconcilePassResult` ships (705,069 to 705,528 bytes). The
+  declaration-only projection of that file, comments stripped, is byte-identical
+  before and after — no exported symbol added or removed, no key changed — and the
+  JavaScript outputs (`dist/index.js`, `dist/index.mjs`) are untouched, because the
+  compiler strips comments from them.
+- 97f4f8c: `plugin-sharing` recognises the engine's organization refusal through objectql's own published recognizer instead of a locally re-spelled literal, and the `PROVENANCE_WAIVERS` row that excused that local spelling is retired with it (#16160).
+  
+  Clause-②: no
+  
+  The waiver carried its own expiry in its `reason`: *removed together with the stamp site when objectql publishes a recognizer*. It does, so both halves land here — `check:error-code-provenance` reconciles a waiver in three directions at once (the `registeredUnder` key still lists the code, the waived package still does not, and the scan still finds a site for the pair), so removing either half alone reddens the gate on the other.
+  
+  - **`ENGINE_ORGANIZATION_REFUSAL_CODE` is gone.** It was a `constdef` stamp site in `plugin-sharing/src/sharing-rule-service.ts` for a code this package only ever RECOGNISES — `@objectstack/objectql` is the emitter and already carries the row. The per-grant catch now asks `isSystemWriteOrganizationRequiredError(err)`, and the `warn` that reports an absorbed refusal names `SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE`. Both are imported from `@objectstack/objectql`, which exports them for exactly this: a consumer performs the `code` compare without authoring the string, so it acquires no stamp site of its own and cannot drift from what the engine throws.
+  - **Nothing about the absorbed set moves.** The catch stays as narrow as it was — one engine refusal absorbed, everything else rethrown unchanged — and `plugin-sharing` still emits this code nowhere: the surviving mention is a structured log field on the refusal it just absorbed, not a refusal envelope of its own.
+  - **No error-code membership moves.** `ERROR_CODE_LEDGER` and `StandardErrorCode` are untouched; `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` stays registered under `@objectstack/objectql` exactly as before. The only ledger change is one `PROVENANCE_WAIVERS` element, 10 waivers → 9, and the gate's site census 339 → 338 with `listed` unchanged at 322.
+- 4be0868: `sys_sharing_rule.recipient_id` now declares `dependsOn: ['recipient_type', 'object_name']` — every sibling field its `recipient-picker` widget actually reads.
+  
+  The picker reads two siblings, not one: `recipient_type` picks the mode (a record picker over `sys_user` / `sys_team` / `sys_business_unit` / `sys_position`), and for the `field` recipient kind (#15072) it reads `object_name` to offer that object's user-valued columns. The declaration named only the first. The neighbouring `criteria_json` field already declares `dependsOn: ['object_name']` for its own `filter-condition` widget, so the key is live and correctly used a few lines up — the omission was an omission.
+  
+  Nothing was broken at runtime: the form renderer hands widgets the WHOLE watched record as `dependentValues` rather than a `dependsOn`-scoped slice, which masked the under-declaration. A renderer that ever scoped it — which is exactly what this key asks for — would drop the object name and degrade the `field` recipient mode to a plain text input **in silence**, with no error anywhere. This is the declaration catching up with what is read, so the scoping change can never be the one that breaks it.
+  
+  The same commit corrects the `recipient_id` docblock: the picker no longer "has no mapping for that kind and degrades to its text input" — the pinned console (`.objectui-sha` 87af769e, which includes objectui#10049 / commit 23b99585) offers the shared object's user-valued columns for the `field` kind, using a "holds users" predicate that is a clause-for-clause copy of this plugin's own `fieldHoldsUsers`.
+  
+  Authors and stored rows are unaffected: no key is added, removed or renamed, no value is newly accepted or refused, and no wire byte moves.
+- 71629a1: refactor(core): one `classifyAdmissionTenancyPosture`, so six admission seams cannot each get the classification wrong (#16013)
+  
+  Six admission doors each hand-wrote the same try/catch on the `tenancy` read that
+  feeds `resolveAuthzContext`: the registry's branded "never registered" rejection
+  (`isServiceNotRegisteredError`, #13905) resolves quietly to `undefined` — the
+  supported no-tenancy composition, where no posture-conditional refusal runs at
+  all — and every other rejection becomes `AuthzStoreUnavailableError('tenancy', err)`
+  (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because the posture is an authorization
+  INPUT and admission was therefore never DECIDED. That is #13906 decision 1
+  option A, and it is the part nobody may get wrong: a quiet `catch` at any one of
+  the six re-opens the defect, where a failure reads as "this check does not apply"
+  and an ex-member's org-stamped API key is admitted.
+  
+  Nothing is broken today — every copy was correct — so this removes a standing
+  hazard rather than fixing a defect. **No admission verdict changes**, on any
+  wiring: the classification is byte-for-byte the decision the six copies made,
+  now made once.
+  
+  - **`@objectstack/core` gains `classifyAdmissionTenancyPosture`** (and the
+    `TenancyServiceResolver` type), exported from the package index beside
+    `effectiveTenancyPosture`. It takes a THUNK and owns the classification only.
+    The thunk is not a style choice: the REJECTION is what gets classified, so the
+    resolution has to happen inside the helper's `try` — a caller that awaited the
+    service first would need a `catch` of its own, which is the thing being
+    deleted.
+  - **The RESOLUTION deliberately did not move.** `rest-server.ts` branches on
+    kernel-vs-provider, and asking twice would let a provider bound to the local
+    kernel answer for a request that resolved to another environment; four seams
+    read `ctx.getKernel()`; `service-storage` reads an already-normalised gate
+    registry; and each seam's reason why a MISSING async accessor must stay quiet
+    is its own argument (the storage door's is its declared degrade-to-ungated
+    contract, the others' is the `KernelBase`/`LiteKernel` host shape). A helper
+    that also owned how the service is reached would be wrong for one of them or
+    grow a flag per seam — the copies again, with an extra step. Every one of
+    those reasons stays written at its seam.
+  - **Folded**: `packages/rest/src/rest-server.ts` (both wirings),
+    `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
+    `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+    `packages/services/service-datasource/src/admin-routes.ts`,
+    `packages/services/service-settings/src/settings-service-plugin.ts`,
+    `packages/services/service-storage/src/storage-service-plugin.ts`.
+  - **Pinned where the decision now lives**:
+    `packages/core/src/security/admission-tenancy-posture.test.ts` drives both
+    rejections at the production seam — a real `ObjectKernel` that never
+    registered `tenancy`, and one whose `tenancy` factory throws — each beside the
+    brand predicate's own answer on that same rejection, so "the outage throws" is
+    distinguishable from a helper that throws at everything. It also holds the
+    constraint mechanically: the helper's source may not name an accessor, a
+    kernel or a plugin context, and it takes exactly one parameter.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [63b6818]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [6d2571f]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [17005cc]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [9be2b59]
+- Updated dependencies [922c755]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [ef67b47]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [cd5fdaa]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [627382b]
+- Updated dependencies [a675ad4]
+- Updated dependencies [0b31d90]
+- Updated dependencies [e75cc3c]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [1f05ea4]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [4fef271]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [875e9ad]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [74fb2f7]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [c736eaa]
+- Updated dependencies [4d0bd23]
+- Updated dependencies [4045781]
+- Updated dependencies [ecf56e7]
+- Updated dependencies [0e658fb]
+- Updated dependencies [9529989]
+- Updated dependencies [236cec1]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [eec56c3]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [8cbc3c0]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [5dba7f3]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [afc3b64]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [2bbb462]
+- Updated dependencies [90ff10a]
+- Updated dependencies [3bd221d]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [8490127]
+- Updated dependencies [6aa3188]
+- Updated dependencies [a34c27c]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [ae0c90c]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [a9fb83e]
+- Updated dependencies [0b866bf]
+- Updated dependencies [c839986]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [009da14]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [aa04ea2]
+- Updated dependencies [172b4cf]
+- Updated dependencies [4463966]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [b373596]
+- Updated dependencies [7465eeb]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [d624002]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [a08e059]
+- Updated dependencies [fe677ae]
+- Updated dependencies [fc646cf]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [949e99b]
+- Updated dependencies [16c5a33]
+- Updated dependencies [16c5a33]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [16c5a33]
+- Updated dependencies [437bb0d]
+- Updated dependencies [49144fc]
+- Updated dependencies [e2c4e12]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [cfe2387]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [e5cf27d]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [615c468]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [89f87f2]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [a78f731]
+- Updated dependencies [3062e50]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [c74de10]
+- Updated dependencies [db74b16]
+- Updated dependencies [2b24b8b]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [c5d6b2b]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [2f122b6]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [4a1df19]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [9801da1]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [9bf5e67]
+- Updated dependencies [8255a51]
+- Updated dependencies [b2b6a06]
+- Updated dependencies [8538edf]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [6427e2c]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [f6ceddc]
+- Updated dependencies [92ea760]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [72eeabd]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [a016f08]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [9cc5010]
+- Updated dependencies [6e3462d]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [6af2901]
+- Updated dependencies [96451ec]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [576d5df]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [029d8a4]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/metadata-core@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/objectql@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes
