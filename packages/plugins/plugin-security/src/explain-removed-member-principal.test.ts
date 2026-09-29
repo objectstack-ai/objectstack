@@ -33,7 +33,13 @@
  *
  * - Walled (`isolated`, `group`): the removed member's explanation lists no
  *   `org_alpha`-scoped set and its grant-driven verdict is enforcement's
- *   refusal. A current member's explanation is unchanged.
+ *   refusal. A current member's explanation matches enforcement's answer for
+ *   them. [#20604] That keep-pin said "unchanged" until the explained context
+ *   was given the organization the member is resolved in, which changes a
+ *   current member's explanation wherever the organization decides; what it
+ *   keeps is the parity, and the enumeration in
+ *   `explain-enforce-parity.test.ts` holds the tenant-object and
+ *   organization-authored-set rows.
  * - `single`: there is no wall, enforcement keeps the claim, and so does the
  *   explanation. That is the posture condition of the same check, which is how
  *   this file tells "the check enforcement runs" from a rule of the explainer's
@@ -53,9 +59,10 @@
  *
  * The probe object is platform-global (`tenancy: { enabled: false }`,
  * ADR-0066), so Layer 0 contributes nothing on either face and the verdict
- * compared is the one the grants decide. The explained context carries no organization of its own, which on
- * a tenant object under `isolated` is a separate explain-versus-enforce
- * position this card does not change.
+ * compared is the one the grants decide. [#20604] The explained context now
+ * carries the organization the user is resolved in, as enforcement's does; the
+ * positions that turns on (a tenant object under `isolated`, a permission set
+ * an organization authored) are rows of `explain-enforce-parity.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -82,7 +89,7 @@ const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
 /** An `org_alpha` member holding `manage_users` there: the caller who explains. */
 const USER_ADMIN = 'usr_alpha_admin';
-/** A current `org_alpha` member: the keep-pin. */
+/** A current `org_alpha` member: the keep-pin (their explanation matches enforcement). */
 const USER_MEMBER = 'usr_alpha_member';
 /** Removed from `org_alpha`, still a member of `org_beta`; the grant scoped to `org_alpha` was left behind. */
 const USER_REMOVED = 'usr_alpha_removed';
@@ -293,19 +300,20 @@ describe.each(DRIVERS)('[#20580] %s', (_driver, makeDriver) => {
       expect(d.allowed).toBe(false);
     });
 
-    it('KEEP · a current member\'s explanation is unchanged: the org_alpha-scoped set is listed, as enforcement resolves it', async () => {
+    it('KEEP · a current member\'s explanation matches enforcement: the permission sets it lists are the ones enforcement resolves', async () => {
       const d = await r.rig().explain(USER_MEMBER);
       const enforcement = await r.rig().enforce(USER_MEMBER);
+      expect(enforcement.tenantId).toBe(ALPHA);
       expect(d.principal.permissionSets).toContain(PROBE_SET);
       expect(sorted(d.principal.permissionSets)).toEqual(sorted(enforcement.sets));
     });
 
-    it('KEEP · a current member\'s verdict is granted on both faces', async () => {
+    it('KEEP · a current member\'s verdict matches enforcement: their own read is admitted, and so is the explanation', async () => {
       const d = await r.rig().explain(USER_MEMBER);
       const enforcement = await r.rig().enforce(USER_MEMBER);
       expect(enforcement.read).toEqual({ admitted: 1 });
       expect(crudOf(d)).toBe('grants');
-      expect(d.allowed).toBe(true);
+      expect(d.allowed).toBe('admitted' in enforcement.read);
     });
   });
 

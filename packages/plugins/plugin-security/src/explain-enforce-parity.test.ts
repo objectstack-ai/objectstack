@@ -49,6 +49,21 @@
  * here. The next divergence then fails a row instead of becoming another card.
  * It is a test, not a gate.
  *
+ * ## Measured divergences
+ *
+ * Two disagreements this table measured are findings of this card, reported
+ * and not fixed here. Their rows carry the finding's name and assert the
+ * disagreement itself, so they turn red the day either face moves, and the row
+ * then joins the invariant:
+ *
+ * - `NATIVE_SCOPING_UNDER_SINGLE` (explain's side): under `single` the engine
+ *   still scopes a tenant object's read to the context's organization, which
+ *   explain's tenant layer does not report.
+ * - `CLAIM_KEPT_UNDER_A_WALL` (enforcement's side): with `org-scoping` and no
+ *   `tenancy` service, admission reads no posture and never drops a removed
+ *   member's organization claim, while this plugin walls Layer 0 at
+ *   `isolated`. Explain vets the claim under the posture the plugin walls with.
+ *
  * `@objectstack/core` and `@objectstack/plugin-sharing` resolve through their
  * built `dist/` here, as this package's other suites read them.
  */
@@ -202,7 +217,7 @@ const RLS_CALLER = { userId: 'usr_member', positions: ['qa_pos'], permissions: [
  * the only thing between the caller and a row), one permission set holding one
  * `operation: 'all'` policy, and rows `r1` / `r2`.
  */
-async function bootRls(predicate: string) {
+async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
   const OBJ = `qa_parity_deal_${next()}`;
   const engine = new ObjectQL();
   engine.registerDriver(
@@ -238,7 +253,9 @@ async function bootRls(predicate: string) {
 
   const set = PermissionSetSchema.parse({
     name: 'qa_deal_guard',
-    objects: { [OBJ]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    objects: opts.grantCrud === false
+      ? {}
+      : { [OBJ]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
     rowLevelSecurity: [{ name: 'deal_guard', object: OBJ, operation: 'all', using: predicate }],
   });
   const services: Record<string, unknown> = {
@@ -575,6 +592,14 @@ interface Row {
   position: Position;
   /** Enforcement's own answer, asserted too: a row cannot go green by both faces drifting. */
   enforced: Enforced | 'rows' | 'admitted';
+  /** Where the invariant leaves explain two answers, the one it must give. */
+  explainKind?: Explained['kind'];
+  /**
+   * A divergence this table MEASURES and does not fix: the finding it was
+   * reported as. The row asserts the disagreement, so it turns red the day
+   * either face moves — and the row then joins the invariant.
+   */
+  divergence?: string;
   run: RowRun;
 }
 
@@ -588,8 +613,8 @@ interface RowFaces {
   readAs?: (filter: unknown) => Promise<string[]>;
 }
 
-const withRls = (predicate: string, f: (rig: RlsRig) => Promise<RowFaces>): RowRun => async () => {
-  const rig = await bootRls(predicate);
+const withRls = (predicate: string, f: (rig: RlsRig) => Promise<RowFaces>, opts: { grantCrud?: boolean } = {}): RowRun => async () => {
+  const rig = await bootRls(predicate, opts);
   try { return { ...(await f(rig)), teardown: rig.teardown }; } catch (e) { await rig.teardown(); throw e; }
 };
 const withSharing = (
@@ -691,14 +716,18 @@ function principalRows(
   source: PostureSource,
   label: string,
   expectFor: Record<'removed' | 'member', Partial<Record<'LEDGER' | 'PROBE' | 'NOTES', Enforced | 'rows'>>>,
+  /** `who` → the row keys (`sets`, `allowed:<OBJ>`, `readFilter:<OBJ>`, `record:<id>`) that diverge, and why. */
+  divergent: Partial<Record<'removed' | 'member', Record<string, string>>> = {},
 ): Row[] {
   const rows: Row[] = [];
   const users = { removed: USER_REMOVED, member: USER_MEMBER } as const;
   for (const who of ['removed', 'member'] as const) {
     const userId = users[who];
+    const divergence = (key: string) => divergent[who]?.[key];
     rows.push({
       card, shape: `${label}: the ${who} user's permission sets`, position: 'principal.permissionSets',
       enforced: { kind: 'sets', names: [] },
+      divergence: divergence('sets'),
       run: withPrincipal(source, async (r) => ({ explain: await r.explain(userId, 'PROBE'), enforce: await r.sets(userId) })),
     });
     for (const object of ['LEDGER', 'PROBE', 'NOTES'] as const) {
@@ -707,12 +736,14 @@ function principalRows(
       rows.push({
         card, shape: `${label}: the ${who} user, object-level read of ${object}`, position: 'object.allowed',
         enforced,
+        divergence: divergence(`allowed:${object}`),
         run: withPrincipal(source, async (r) => ({ explain: await r.explain(userId, object), enforce: await r.find(userId, object) })),
       });
       if (enforced === 'rows') {
         rows.push({
           card, shape: `${label}: the ${who} user, ${object} read filter`, position: 'object.readFilter',
           enforced,
+          divergence: divergence(`readFilter:${object}`),
           run: withPrincipal(source, async (r) => ({
             explain: await r.explain(userId, object),
             enforce: await r.find(userId, object),
@@ -726,6 +757,7 @@ function principalRows(
         rows.push({
           card, shape: `${label}: the ${who} user, LEDGER record ${recordId}`, position: 'record.visible',
           enforced: expectFor[who].LEDGER!,
+          divergence: divergence(`record:${recordId}`),
           run: withPrincipal(source, async (r) => ({
             explain: await r.explain(userId, 'LEDGER', recordId), enforce: await r.find(userId, 'LEDGER'), recordId,
           })),
@@ -736,6 +768,26 @@ function principalRows(
   return rows;
 }
 
+/**
+ * Under `single` there is no tenant wall, yet the engine still scopes a tenant
+ * object's read to the context's organization (driver-native tenant scoping,
+ * any posture). Explain's tenant layer contributes nothing under `single`, so
+ * it reports the other organization's row readable. Explain's side; a finding
+ * of this card, not fixed here.
+ */
+const NATIVE_SCOPING_UNDER_SINGLE =
+  'under `single`, the engine scopes the read to the context organization; explain reports the other organization\'s row';
+/**
+ * With `org-scoping` and no `tenancy` service, admission hands the resolver no
+ * posture, so a removed member's organization claim is never dropped, while
+ * this plugin probes `org-scoping` and walls Layer 0 at `isolated`. Explain
+ * vets the claim under the posture this plugin walls with. Enforcement's side
+ * (a claim never dropped under a walled Layer 0); a finding of this card, not
+ * fixed here.
+ */
+const CLAIM_KEPT_UNDER_A_WALL =
+  'with no `tenancy` service, admission keeps a removed member\'s claim while Layer 0 walls at `isolated`';
+
 const TABLE: Row[] = [
   // #20604 position 1, and #20431's record-grained twin, over both orderings of one cross-class pair.
   ...rlsRows('#20604 P1 · #20431', 'cross-class `status != amount`', CROSS_CLASS, true),
@@ -744,6 +796,13 @@ const TABLE: Row[] = [
   // #20604 position 2.
   ...missingRecordRows('#20604 P2', 'cross-class `status != amount`', CROSS_CLASS, true),
   ...missingRecordRows('control', 'same-class `status != title`', SAME_CLASS, false),
+  // #20604 position 1's boundary: a request the CRUD gate denies is denied there, by both faces.
+  {
+    card: '#20604 P1 boundary', shape: 'cross-class `status != amount`, no CRUD grant: object-level read', position: 'object.allowed',
+    enforced: REFUSED_DENIED,
+    explainKind: 'decision',
+    run: withRls(CROSS_CLASS, async (r) => ({ explain: await r.explain('read'), enforce: await r.find() }), { grantCrud: false }),
+  },
   // #19986: the record read verdict asks the sharing read filter with the caller's read depth.
   {
     card: '#19986', shape: 'private OWD, an `org` reader, a row owned by someone else, read', position: 'record.visible',
@@ -796,22 +855,36 @@ const TABLE: Row[] = [
   ...principalRows('#20580 control · #20604 P3', { tenancy: 'single' }, '`single`', {
     removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+  }, {
+    removed: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
+    member: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
   }),
+  // The posture-source asymmetry: the member's rows hold; the removed member's are enforcement's finding.
   ...principalRows('#20604 A4', { orgScopingOnly: true }, '`org-scoping` with no `tenancy` service', {
     removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+  }, {
+    removed: Object.fromEntries(
+      ['sets', 'allowed:LEDGER', 'readFilter:LEDGER', 'record:l_alpha', 'allowed:PROBE', 'readFilter:PROBE',
+        'allowed:NOTES', 'readFilter:NOTES'].map((k) => [k, CLAIM_KEPT_UNDER_A_WALL]),
+    ),
   }),
 ];
 
 describe('security.explain answers what enforcement does — the enumeration', () => {
   for (const row of TABLE) {
-    it(`${row.card} · ${row.shape} · ${row.position}`, async () => {
+    const title = `${row.card} · ${row.shape} · ${row.position}` +
+      (row.divergence ? ` · MEASURED DIVERGENCE, reported and not fixed here: ${row.divergence}` : '');
+    it(title, async () => {
       const { explain, enforce, recordId, readAs, teardown } = await row.run();
       try {
         if (row.enforced === 'rows' || row.enforced === 'admitted') expect(enforce.kind, `${row.shape}: enforcement`).toBe(row.enforced);
         else if (row.enforced.kind === 'sets') expect(enforce.kind, `${row.shape}: enforcement`).toBe('sets');
         else expect(enforce, `${row.shape}: enforcement`).toEqual(row.enforced);
-        await expectParity(`${row.card} · ${row.shape}`, row.position, explain, enforce, { recordId, readAs });
+        if (row.explainKind) expect(explain.kind, `${row.shape}: explain answered ${describeExplained(explain)}`).toBe(row.explainKind);
+        const parity = expectParity(`${row.card} · ${row.shape}`, row.position, explain, enforce, { recordId, readAs });
+        if (row.divergence) await expect(parity, `${row.shape}: the measured divergence no longer holds`).rejects.toThrow();
+        else await parity;
       } finally {
         await teardown();
       }

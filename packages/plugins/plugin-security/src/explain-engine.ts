@@ -48,6 +48,7 @@ import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
+import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
@@ -574,7 +575,8 @@ async function collectGrantProvenance(
  * function passes on what it is handed and vets nothing itself.
  * Omitted, the context is the user with NO active organization. The returned
  * context still carries no `tenantId` of its own; a caller that needs one sets
- * it, as {@link resolveDelegatorContext} does.
+ * it, as {@link resolveDelegatorContext} does, and as the explain API does
+ * (#20604) with the organization it resolved the user in.
  */
 export async function buildContextForUser(
   ql: any,
@@ -864,29 +866,45 @@ function describeOwd(schema: any): { model: string; declared: boolean; effect: '
  * ObjectQL registry is the declaration the find's driver compiles against. A
  * schema that cannot be read hands over no columns, and the matcher then judges
  * values only, as it did before — a missing schema never manufactures a refusal.
+ *
+ * [#20604] What the declaration says about each column is
+ * {@link declaredComparisonColumns}, the reading the RLS write check hands the
+ * same matcher, so the two judges of one policy cannot read one declaration
+ * two ways.
  */
 function declaredColumnsOf(schema: any): MatchesFilterOptions | undefined {
-  const fields = schema?.fields;
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return undefined;
-  return { fields };
+  return declaredComparisonColumns(schema);
+}
+
+/**
+ * The members of a composed row filter that can each be one policy's compiled
+ * filter: a `$or` of policies (Layer 1 with several applicable policies), and
+ * the `$and` that puts the tenant wall, or a delegator's filter, beside it.
+ * A node `compiledPolicyNameOf` recognises is a member however it is shaped.
+ */
+function policyMembersOf(node: unknown): unknown[] {
+  if (node === null || typeof node !== 'object' || compiledPolicyNameOf(node) !== undefined) return [node];
+  const keys = Object.keys(node as Record<string, unknown>);
+  const list = keys.length === 1 && (keys[0] === '$and' || keys[0] === '$or')
+    ? (node as Record<string, unknown>)[keys[0]]
+    : undefined;
+  return Array.isArray(list) ? list.flatMap(policyMembersOf) : [node];
 }
 
 /**
  * [#20431] The names of the policies in a compiled business-RLS filter that
  * carry a refused field-to-field comparison — the attribution the RLS write
- * check logs for the same refusal. The composed filter is one policy's filter or
- * `{ $or: [...] }` of them, and `compiledPolicyNameOf` recognises each by
- * identity.
+ * check logs for the same refusal. The composed filter is one policy's filter,
+ * `{ $or: [...] }` of them, or (the object-level pass, #20604) either one
+ * `$and`-composed beside the tenant wall or a delegator's filter;
+ * `compiledPolicyNameOf` recognises each policy by identity
+ * ({@link policyMembersOf}).
  */
 function refusedPolicyNamesOf(
   filter: Record<string, unknown>,
   fields: NonNullable<MatchesFilterOptions['fields']>,
 ): string[] {
-  const members =
-    compiledPolicyNameOf(filter) === undefined && Array.isArray((filter as { $or?: unknown }).$or)
-      ? ((filter as { $or: unknown[] }).$or)
-      : [filter];
-  const names = members
+  const names = policyMembersOf(filter)
     .filter((m) => findCrossFieldClassRefusal(m as Record<string, unknown>, fields) !== null)
     .map((m) => compiledPolicyNameOf(m) ?? '(unnamed)');
   return [...new Set(names)];
@@ -923,11 +941,69 @@ function crossFieldRefusalForExplain(
   const err = new Error(
     `${subject} cannot be evaluated: ${refusal.diagnostic}. Enforcement refuses every request this filter ` +
       'scopes instead of judging a record (the find answers INVALID_FILTER / 400), so explain answers with the ' +
-      'same refusal and reports no record verdict. Compare a field only with a field of the same class, or fix ' +
+      'same refusal and reports no verdict. Compare a field only with a field of the same class, or fix ' +
       'the declaration of the one that is declared with the wrong type.',
   );
   const { code, status } = cause as { code?: string; status?: number };
   return Object.assign(err, { code, status, cause });
+}
+
+/**
+ * [#20431] The record matcher, handed the object's declared columns, with its
+ * refusal answered the way explain answers it: a field-to-field comparison of
+ * no shared comparison class becomes {@link crossFieldRefusalForExplain}, and
+ * any other refusal of the matcher's propagates as the matcher raised it.
+ */
+function matchUnderDeclaredColumns(
+  record: Record<string, unknown>,
+  filter: unknown,
+  object: string,
+  declaredColumns: MatchesFilterOptions | undefined,
+): boolean {
+  try {
+    return matchesFilterCondition(record, filter as any, declaredColumns);
+  } catch (e) {
+    const refusal = crossFieldClassRefusalCarriedBy(e);
+    if (refusal && declaredColumns?.fields) {
+      throw crossFieldRefusalForExplain(e, refusal, object, filter, declaredColumns.fields);
+    }
+    throw e;
+  }
+}
+
+/**
+ * [#20604] Refuse, as enforcement does, a composed row filter the find cannot
+ * run — before any verdict is computed from it.
+ *
+ * The object-level pass used to publish the composed filter as a fact: `rls`
+ * `narrows`, the predicate as `readFilter`, `allowed: true`. For a filter
+ * comparing two columns of no shared comparison class, enforcement runs no
+ * such request: driver-sql refuses to compile the read, so the find answers
+ * `INVALID_FILTER` / 400 whatever the rows, a by-id write whose pre-image read
+ * is that filter fails closed (403), and an insert whose check judges it is
+ * refused (400). Measured on the real stack: the report said `allowed: true`
+ * for every operation, for both orderings of one pair, and a record id no row
+ * carries was reported `visible: false` with no decider, because the record
+ * matcher never ran.
+ *
+ * The judgement is the record matcher's own, not a second rule: the matcher
+ * judges the declared columns before it reads a record ("refused for every
+ * record or for none"), so it is asked with no row, and its refusal is
+ * answered by {@link matchUnderDeclaredColumns}, exactly as the record-grained
+ * pass answers it. ⛔ No second refusal dialect: the envelope, the message and
+ * the `cause` are the record-grained pass's. It is asked only when the spec's
+ * classification finds a refused comparison, so no filter the find runs is
+ * evaluated here. No declared columns → no judgement, as before.
+ */
+function refuseWhatTheMatcherRefuses(
+  filter: unknown,
+  object: string,
+  declaredColumns: MatchesFilterOptions | undefined,
+): void {
+  const fields = declaredColumns?.fields;
+  if (!fields || filter === null || typeof filter !== 'object') return;
+  if (findCrossFieldClassRefusal(filter as Record<string, unknown>, fields) === null) return;
+  matchUnderDeclaredColumns({}, filter, object, declaredColumns);
 }
 
 /**
@@ -1001,15 +1077,7 @@ async function applyRecordAttribution(
   const matches = (filter: unknown): boolean | undefined => {
     if (!recordExists) return undefined;
     if (filter == null) return true;
-    try {
-      return matchesFilterCondition(record as Record<string, unknown>, filter as any, declaredColumns);
-    } catch (e) {
-      const refusal = crossFieldClassRefusalCarriedBy(e);
-      if (refusal && declaredColumns?.fields) {
-        throw crossFieldRefusalForExplain(e, refusal, object, filter, declaredColumns.fields);
-      }
-      throw e;
-    }
+    return matchUnderDeclaredColumns(record as Record<string, unknown>, filter, object, declaredColumns);
   };
 
   // The composition enforcement runs before the query: when it throws, neither
@@ -1455,6 +1523,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   }
   let schema: any = null;
   try { schema = deps.ql?.getSchema?.(object) ?? null; } catch { schema = null; }
+  const declaredColumns = declaredColumnsOf(schema);
 
   // ── 2. required_permissions AND-gate ──────────────────────────────────
   const required = deps.requiredCaps(secMeta.requiredPermissions, dataOp);
@@ -1708,6 +1777,15 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     }
   }
   const filterParts = [agentFilter, delegatorFilter].filter(Boolean) as Record<string, unknown>[];
+  // [#20604] A composed filter the find cannot run is refused here, as
+  // enforcement refuses it, and never published as the filter a read runs
+  // under. Before the record-grained pass, so a record id no row carries is
+  // refused too, as its find is. Only for a request that reaches the filter:
+  // one the capability or CRUD gate denies is refused there first, by
+  // enforcement and by this report alike.
+  if (!capsDeny && crudAllowed) {
+    for (const part of filterParts) refuseWhatTheMatcherRefuses(part, object, declaredColumns);
+  }
   let readFilter: Record<string, unknown> | null | undefined =
     filterParts.length === 0 ? undefined : filterParts.length === 1 ? filterParts[0] : { $and: filterParts };
   const denyAll = filterParts.some(isDenyAll);
@@ -1739,7 +1817,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   if (input.recordId) {
     const out = await applyRecordAttribution({
       deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
-      vamaEffective, vamaSets, declaredColumns: declaredColumnsOf(schema),
+      vamaEffective, vamaSets, declaredColumns,
     });
     recordVerdict = out.record;
     posture = out.posture;

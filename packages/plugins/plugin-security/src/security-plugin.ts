@@ -36,6 +36,7 @@ import {
   intersectDelegatedScope,
   d10NarrowingStatement,
 } from './explain-engine.js';
+import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
@@ -4732,6 +4733,16 @@ export class SecurityPlugin implements Plugin {
       if (explainedTenantId !== callerTenantId) {
         explained = await buildContextForUser(this.ql, request.userId, nowMs, explainedTenantId);
       }
+      // [#20604] ...and the organization the user is resolved in is the one
+      // their requests run in: enforcement's context for them carries it as
+      // `tenantId`, which the tenant wall, the organization-scoped
+      // permission-set catalogue and the engine all read. `buildContextForUser`
+      // returns none of its own, so it is set here from the SAME vetted value,
+      // as `resolveDelegatorContext` sets a delegator's. Without it a current
+      // member was explained with NO organization: denied a tenant object
+      // their own find reads under `isolated`, and without a permission set
+      // their organization authored.
+      if (explainedTenantId !== undefined) explained.tenantId = explainedTenantId;
       targetContext = explained;
     }
 
@@ -8835,6 +8846,11 @@ export class SecurityPlugin implements Plugin {
    * a schema that cannot be loaded must not manufacture refusals (the field
    * guard's rule in `rls-compiler.ts`, `RlsFieldGuard`). A field without a string `type` is
    * left out, so it is never judged.
+   *
+   * [#20604] What the declaration says about each column is
+   * {@link declaredComparisonColumns}, the one reading `security/explain`
+   * hands the same matcher, so the two judges of one policy read one
+   * declaration one way.
    */
   private async writeCheckFieldOptions(object: string): Promise<MatchesFilterOptions | undefined> {
     let obj: any;
@@ -8844,16 +8860,7 @@ export class SecurityPlugin implements Plugin {
     } catch {
       return undefined;
     }
-    if (!obj || !obj.fields || typeof obj.fields !== 'object') return undefined;
-    const fields: Record<string, { type: string; multiple?: boolean }> = {};
-    const entries: Array<[string, any]> = Array.isArray(obj.fields)
-      ? (obj.fields as any[]).filter((f) => f?.name).map((f) => [String(f.name), f])
-      : Object.entries(obj.fields as Record<string, any>);
-    for (const [name, decl] of entries) {
-      if (!decl || typeof decl !== 'object' || typeof decl.type !== 'string') continue;
-      fields[name] = { type: decl.type, multiple: decl.multiple === true };
-    }
-    return { fields };
+    return declaredComparisonColumns(obj);
   }
 
   private async loadObjectFieldNames(
