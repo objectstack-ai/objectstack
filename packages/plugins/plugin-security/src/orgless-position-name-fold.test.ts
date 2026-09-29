@@ -271,12 +271,23 @@ describe('[#20555] with no active organization, another organization\'s set name
     expect(orgless.loaderRows.filter((row) => row.organization_id !== null)).toEqual([]);
   }, 120_000);
 
-  it('the authored sets\' capabilities and object map reach neither the resolved sets nor the effective map', async () => {
+  // Three pins, one fact each, so the ablation shows each one fail on its own
+  // rather than all three behind the first failed assertion.
+  it('the authored sets are not among the resolved sets', async () => {
     const r = await rig();
     const orgless = await resolve(r, USER_HOME);
-    expect(orgless.setNames).not.toContain('org_member');
-    expect(orgless.setNames).not.toContain('everyone');
+    expect(orgless.setNames.filter((n) => n === 'org_member' || n === 'everyone')).toEqual([]);
+  }, 120_000);
+
+  it('their systemPermissions do not reach the principal', async () => {
+    const r = await rig();
+    const orgless = await resolve(r, USER_HOME);
     expect([...orgless.capabilities].filter((c) => c === 'manage_metadata' || c.startsWith('probe.'))).toEqual([]);
+  }, 120_000);
+
+  it('their object map does not reach the effective map', async () => {
+    const r = await rig();
+    const orgless = await resolve(r, USER_HOME);
     expect(orgless.ledger).toBeNull();
   }, 120_000);
 
@@ -285,7 +296,12 @@ describe('[#20555] with no active organization, another organization\'s set name
     const orgless = await resolve(r, USER_GLOBAL);
     expect(orgless.permissions).toContain('platform_ops');
     expect(orgless.byName.get('platform_ops')?.systemPermissions).toEqual(['probe.global_platform_ops']);
-    expect(orgless.capabilities.has('probe.other_platform_ops')).toBe(false);
+  }, 120_000);
+
+  it('…and the same-named copy\'s systemPermissions do not reach that principal', async () => {
+    const r = await rig();
+    const orgless = await resolve(r, USER_GLOBAL);
+    expect([...orgless.capabilities].filter((c) => c.startsWith('probe.other_'))).toEqual([]);
   }, 120_000);
 });
 
@@ -295,9 +311,6 @@ describe('[#20555] what the rule keeps', () => {
     const orgless = await resolve(r, USER_GLOBAL);
     expect(orgless.positions).toContain('ops_lead');
     expect(orgless.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
-    // …while the colliding names stay unresolved for this principal too.
-    expect(orgless.setNames).not.toContain('org_member');
-    expect(orgless.setNames).not.toContain('everyone');
   }, 120_000);
 
   it('the global grants resolve identically with the principal\'s own organization active', async () => {
