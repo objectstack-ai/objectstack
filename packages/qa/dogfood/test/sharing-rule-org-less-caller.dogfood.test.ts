@@ -32,12 +32,23 @@
 // PRECONDITION tests below assert each link rather than assuming it.
 //
 // The user shape is ordinary, not contrived: a permission-set grant
-// (`sys_user_permission_set`) is independent of organization MEMBERSHIP, and
-// `resolveUserAuthzGrants` keeps an org-scoped grant when the caller has no
-// active org to compare it against (`!(org && tenantId && org !== tenantId)`).
-// A multi-org deployment (whose membership reconciler binds nobody — ADR-0093
+// (`sys_user_permission_set`) is independent of organization MEMBERSHIP. A
+// multi-org deployment (whose membership reconciler binds nobody — ADR-0093
 // D1 `no-target-org`), an `invite-only` deployment, a user removed from their
-// organization, or an SSO JIT user pending placement all produce it.
+// organization, or an SSO JIT user pending placement all produce a caller with
+// no active organization.
+//
+// [#20515] What such a caller HOLDS changed underneath this file. When #8158
+// was filed, `resolveUserAuthzGrants` kept an ORGANIZATION-scoped grant for a
+// caller with no active organization (`!(org && tenantId && org !== tenantId)`
+// read "no tenant" as "every organization"), so an org-scoped `manage_sharing`
+// reached `adminOrgScope`. It no longer does: with no active organization only
+// GLOBAL grants apply. So the two faces are pinned separately below —
+//   - the EXPOSED persona holds `manage_sharing` through a GLOBAL grant, the one
+//     way an org-less caller still holds it, and keeps pinning `adminOrgScope`
+//     (#8158's defence in depth: capability held, no organization to use it in);
+//   - the ORG-SCOPED persona holds the very grant #8158 was filed with, scoped
+//     to tenant A, and is now refused at the ADR-0111 D6 capability gate.
 //
 // ## Anti-vacuity
 //
@@ -63,6 +74,7 @@ const RULE_B = 'rule_8158_tenant_b';
 const PASSWORD = 'Member-Pass-123';
 const ORG_LESS_EMAIL = 'orgless-8158@verify.test';
 const ORG_BOUND_EMAIL = 'orgbound-8158@verify.test';
+const ORG_SCOPED_ORG_LESS_EMAIL = 'orgscoped-orgless-8158@verify.test';
 
 interface RuleRow {
   id: string;
@@ -76,11 +88,14 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   let ql: any;
   /** The harness admin: platform authority, and (by harness design) org-less. */
   let platform: string;
-  /** The exposed persona: org-scoped `manage_sharing`, no membership, no active org. */
+  /** The exposed persona: GLOBAL `manage_sharing`, no membership, no active org. */
   let orgLess: string;
-  /** The control persona: the SAME grant, plus a membership in tenant A. */
+  /** [#20515] The #8158 grant as filed — scoped to tenant A — with no membership and no active org. */
+  let orgScopedOrgLess: string;
+  /** The control persona: the same set scoped to tenant A, plus a membership in tenant A. */
   let orgBound: string;
   let orgLessUserId = '';
+  let orgScopedOrgLessUserId = '';
   let orgBoundUserId = '';
 
   const ruleRow = (organizationId: string, name: string) => ({
@@ -126,13 +141,23 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // Real sign-ups: better-auth's own path, through every database hook.
     await stack.signUp(ORG_LESS_EMAIL, PASSWORD);
     await stack.signUp(ORG_BOUND_EMAIL, PASSWORD);
+    await stack.signUp(ORG_SCOPED_ORG_LESS_EMAIL, PASSWORD);
     const uid = async (email: string): Promise<string> =>
       (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
     orgLessUserId = await uid(ORG_LESS_EMAIL);
     orgBoundUserId = await uid(ORG_BOUND_EMAIL);
+    orgScopedOrgLessUserId = await uid(ORG_SCOPED_ORG_LESS_EMAIL);
 
-    // The identical grant for both, scoped to tenant A.
-    for (const userId of [orgLessUserId, orgBoundUserId]) {
+    // [#20515] The exposed persona holds the set GLOBALLY (no organization):
+    // with no active organization only global grants apply, so this is the one
+    // spelling under which it still carries `manage_sharing` and still reaches
+    // `adminOrgScope`.
+    await ql.insert('sys_user_permission_set', {
+      user_id: orgLessUserId, permission_set_id: psId, organization_id: null,
+    }, { context: SYS });
+    // The #8158 grant as filed — scoped to tenant A — for the control (which
+    // has tenant A active) and for the org-scoped persona (which has none).
+    for (const userId of [orgBoundUserId, orgScopedOrgLessUserId]) {
       await ql.insert('sys_user_permission_set', {
         user_id: userId, permission_set_id: psId, organization_id: ORG_A,
       }, { context: SYS });
@@ -148,6 +173,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // with the membership state above already in place.
     orgLess = await stack.signIn(ORG_LESS_EMAIL, PASSWORD);
     orgBound = await stack.signIn(ORG_BOUND_EMAIL, PASSWORD);
+    orgScopedOrgLess = await stack.signIn(ORG_SCOPED_ORG_LESS_EMAIL, PASSWORD);
   }, 180_000);
 
   afterAll(async () => {
@@ -206,6 +232,8 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   // ── the measurement ──────────────────────────────────────────────────
 
   it('THE REPORTED CASE: listing is refused 403, not answered with every tenant’s rules', async () => {
+    // The exposed persona holds `manage_sharing` GLOBALLY (#20515 — see the
+    // header), so this is `adminOrgScope` refusing, as the next case proves.
     const res = await stack.apiAs(orgLess, 'GET', RULES);
     const payload = res.status === 200
       ? ((await res.json()) as { data: RuleRow[] }).data.map((r) => `${r.name}@${r.organization_id}`)
@@ -272,6 +300,37 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     expect(await ql.findOne('sys_sharing_rule', {
       where: { name: 'rule_8158_minted_by_orgless' }, context: SYS,
     })).toBeFalsy();
+  });
+
+  // ── [#20515] the #8158 grant as filed: ORG-scoped, no active organization ───
+
+  it('PRECONDITION: the org-scoped persona holds no membership, and its SESSION carries no active organization', async () => {
+    const members = await ql.find('sys_member', { where: { user_id: orgScopedOrgLessUserId }, context: SYS });
+    expect(Array.isArray(members) ? members : members?.records ?? []).toHaveLength(0);
+    const sessions = await ql.find('sys_session', { where: { user_id: orgScopedOrgLessUserId }, context: SYS });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
+    expect(rows.length, 'the sign-in really did mint a session row').toBeGreaterThan(0);
+    for (const s of rows) {
+      expect(s.active_organization_id ?? s.activeOrganizationId ?? null).toBeFalsy();
+    }
+  });
+
+  it('an ORG-scoped manage_sharing grant with no active organization is refused 403 at the CAPABILITY gate', async () => {
+    // With no active organization only global grants apply, so the tenant-A
+    // grant confers nothing here: the ADR-0111 D6 gate refuses before
+    // `adminOrgScope` is ever asked — and no tenant's rule is read.
+    const res = await stack.apiAs(orgScopedOrgLess, 'GET', RULES);
+    const body = (await res.json()) as { code?: string; error?: string; data?: RuleRow[] };
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('PERMISSION_DENIED');
+    expect(body.error ?? '').toMatch(/requires the manage_sharing capability/);
+    expect(body.data).toBeUndefined();
+  });
+
+  it('the org-scoped persona is refused the other tenant’s rule by name as well', async () => {
+    const res = await stack.apiAs(orgScopedOrgLess, 'GET', `${RULES}/${RULE_B}`);
+    expect(res.status, await res.text()).toBe(403);
   });
 
   // ── the control: the SAME grant, with an organization, still works ───

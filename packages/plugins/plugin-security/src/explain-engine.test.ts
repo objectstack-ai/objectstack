@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { resolveUserAuthzGrants, resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
-import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
+import { explainAccess, buildContextForUser, resolveDelegatorContext, type ExplainEngineDeps } from './explain-engine';
 import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -770,7 +770,11 @@ describe('buildContextForUser', () => {
       sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
       sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
     });
-    const ctx = await buildContextForUser(qlScoped, 'u2');
+    // [#20515] Explained IN org1: a grant scoped to an organization applies
+    // only while that organization is the one resolved in, so the set has to
+    // resolve before "it resolves, and still confers no platform standing" is
+    // a statement about anything.
+    const ctx = await buildContextForUser(qlScoped, 'u2', NOW, 'org1');
     expect(ctx.hasPlatformAdminGrant).toBe(false);
     // The name is still resolved into permissions (it grants object CRUD), but it
     // no longer confers platform_admin posture — the drift this closes.
@@ -935,6 +939,8 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
   const PARITY_CASES: Array<{
     name: string;
     tables: Rows;
+    /** [#20515] The organization BOTH sides resolve in; omitted = no active organization. */
+    tenantId?: string;
     expected: {
       positions: string[];
       permissions: string[];
@@ -1009,6 +1015,9 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
     },
     {
       name: 'org-scoped admin_full_access does NOT derive platform_admin',
+      // [#20515] Resolved IN org1, where the scoped set applies — with no active
+      // organization it would not resolve at all, and the case would pin nothing.
+      tenantId: 'org1',
       tables: {
         sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
@@ -1026,6 +1035,9 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       // [ADR-0095 D3] The org-admin rung comes from the CAPABILITY grant
       // `auto-org-admin-grant` writes, never from the better-auth role.
       name: 'organization_admin capability grant derives TENANT_ADMIN',
+      // [#20515] The auto-grant is scoped to its organization, so it confers the
+      // rung while that organization is the one resolved in.
+      tenantId: 'org1',
       tables: {
         sys_member: [{ user_id: 'u2', organization_id: 'org1', role: 'admin' }],
         sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOrg', organization_id: 'org1' }],
@@ -1071,10 +1083,10 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
     },
   ];
 
-  for (const { name, tables, expected } of PARITY_CASES) {
+  for (const { name, tables, tenantId, expected } of PARITY_CASES) {
     it(`agrees with the enforcement resolver — ${name}`, async () => {
-      const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW });
-      const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW);
+      const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW, tenantId });
+      const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW, tenantId);
 
       // (a) The two agree, field for field, on the whole aggregation surface.
       expect(ctx.positions).toEqual(grants.positions);
@@ -1577,5 +1589,91 @@ describe('[#18253] explain refuses an object that does not exist', () => {
     });
     expect(d.allowed).toBe(false);
     expect(d.layers.find((l) => l.layer === 'object_crud')!.verdict).toBe('denies');
+  });
+});
+
+// ─── [#20515] the explainer resolves IN an organization, as enforcement does ──
+//
+// The resolver applies an organization-scoped grant only while that
+// organization is the active tenant; with none, only global grants. The
+// explainer used to reach every organization's grants by passing NO tenant —
+// the very resolution that let a member removed from an organization keep that
+// organization's `manage_metadata`. There is no "every organization" option to
+// ask for instead: each caller names the organization it resolves in.
+describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an organization', () => {
+  const ALPHA = 'org_alpha';
+  const BETA = 'org_beta';
+  const tables = (): Rows => ({
+    sys_user: [{ id: 'u_x', email: 'u_x@example.com' }],
+    sys_member: [{ user_id: 'u_x', organization_id: BETA, role: 'member' }],
+    sys_user_permission_set: [
+      { user_id: 'u_x', permission_set_id: 'ps_alpha', organization_id: ALPHA },
+      { user_id: 'u_x', permission_set_id: 'ps_beta', organization_id: BETA },
+      { user_id: 'u_x', permission_set_id: 'ps_global' },
+    ],
+    sys_permission_set: [
+      { id: 'ps_alpha', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] },
+      { id: 'ps_beta', name: 'beta_readers' },
+      { id: 'ps_global', name: 'global_readers' },
+    ],
+  });
+
+  it('with no organization it explains what enforcement answers with none: the global grants only', async () => {
+    const ctx = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW);
+    expect([...ctx.permissions].sort()).toEqual(['global_readers']);
+    expect(ctx.systemPermissions).not.toContain('manage_metadata');
+    // …and it is the enforcement resolver's own answer for that state.
+    const enforced = await resolveUserAuthzGrants(makeGrantQl(tables()), 'u_x', { nowMs: NOW });
+    expect(ctx.permissions).toEqual(enforced.permissions);
+  });
+
+  it('in an organization it explains that organization\'s grants beside the global ones, never another\'s', async () => {
+    const inAlpha = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW, ALPHA);
+    expect([...inAlpha.permissions].sort()).toEqual(['alpha_metadata_editors', 'global_readers']);
+    expect(inAlpha.systemPermissions).toContain('manage_metadata');
+    const inBeta = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW, BETA);
+    expect([...inBeta.permissions].sort()).toEqual(['beta_readers', 'global_readers']);
+    expect(inBeta.systemPermissions).not.toContain('manage_metadata');
+  });
+
+  /**
+   * The delegator leg is an ENFORCEMENT input (the D10 intersection), not only
+   * an explanation: `SecurityPlugin` resolves it through this function on every
+   * on-behalf-of request. Resolved with no tenant it would hold only the
+   * delegator's global grants — never what the delegator holds in the
+   * organization the request runs in.
+   */
+  describe('resolveDelegatorContext: the delegator is resolved in the live principal\'s organization', () => {
+    const delegatorQl = () => {
+      const t = tables();
+      return {
+        ...makeGrantQl(t),
+        async findOne(object: string, opts: EngineFindOneQueryInput) {
+          assertEngineFindOnePredicate(object, opts);
+          const id = (opts as any)?.where?.id;
+          return (t[object] ?? []).find((r) => r.id === id) ?? null;
+        },
+      };
+    };
+
+    it('live principal in org_alpha → the delegator\'s org_alpha grant applies, its org_beta grant does not', async () => {
+      const res = await resolveDelegatorContext(
+        delegatorQl(),
+        { userId: 'agent_1', tenantId: ALPHA, onBehalfOf: { userId: 'u_x' } },
+        NOW,
+      );
+      expect(res.kind).toBe('resolved');
+      const ctx = (res as { kind: 'resolved'; context: any }).context;
+      expect([...ctx.permissions].sort()).toEqual(['alpha_metadata_editors', 'global_readers']);
+      expect(ctx.tenantId).toBe(ALPHA);
+    });
+
+    it('live principal with no organization → the delegator\'s global grants only', async () => {
+      const res = await resolveDelegatorContext(delegatorQl(), { userId: 'agent_1', onBehalfOf: { userId: 'u_x' } }, NOW);
+      expect(res.kind).toBe('resolved');
+      const ctx = (res as { kind: 'resolved'; context: any }).context;
+      expect([...ctx.permissions].sort()).toEqual(['global_readers']);
+      expect(ctx.systemPermissions).not.toContain('manage_metadata');
+    });
   });
 });
