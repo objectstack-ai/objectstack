@@ -257,6 +257,24 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.",
       }];
     }
+    if (mode === 'local' && hasSyncUrl) {
+      // #20586. Only a FORCED local mode reaches here: with no `mode`, a
+      // `syncUrl` selects a replica. The url is a `file:` url or `:memory:`
+      // (every other one met a refusal above), so the url is fine; what the
+      // runtime would ignore is the MODE, because the driver syncs whenever
+      // `syncUrl` is set — so the issue sits on `mode`, as #20437's does.
+      // Unreachable through this mirror, which strips `mode` (see above); kept
+      // byte-identical to the spec contract's arm.
+      return [{
+        path: 'mode',
+        message:
+          "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to "
+          + 'replicate from: the database would still be synced with that remote as an embedded replica, '
+          + 'so the declared local mode would be ignored — the turso driver refuses this configuration '
+          + 'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: '
+          + "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).",
+      }];
+    }
     return [];
   }
 
