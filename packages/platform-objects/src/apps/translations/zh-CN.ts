@@ -84,7 +84,6 @@ export const zhCN: TranslationData = {
         // `审批委派` matches sys_approval_delegation's object label; `(外出)`
         // renders the entry's own "(OOO)" qualifier.
         nav_approval_delegations: { label: '审批委派（外出）' },
-        nav_ai_approvals: { label: 'AI 审批' },
 
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },

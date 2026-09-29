@@ -115,9 +115,6 @@ export const en: TranslationData = {
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
         nav_approval_delegations: { label: 'Delegations (OOO)' },
-        // Contributed by this package into plugin-approvals' slot, gated on the
-        // `ai` service (#20142) — the console's AI pending-action queue.
-        nav_ai_approvals: { label: 'AI Approvals' },
 
         // Configuration
         nav_settings_hub: { label: 'All Settings' },

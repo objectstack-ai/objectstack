@@ -417,31 +417,10 @@ describe('@objectstack/platform-objects', () => {
 
     it('does not contribute slots owned by capability plugins', () => {
       // group_integrations → @objectstack/plugin-webhooks (K2.a)
-      const integrations = SETUP_NAV_CONTRIBUTIONS.find((c) => c.group === 'group_integrations');
-      expect(integrations).toBeUndefined();
-    });
-
-    it('contributes exactly one entry into group_approvals, and it is not the approvals engine\'s', () => {
-      // group_approvals → @objectstack/plugin-approvals (K2.b): the engine's
-      // entries (its inbox component and its `sys_approval_*` tables) are that
-      // plugin's to ship, and none of them may come back here.
-      //
-      // #20142 adds ONE entry to the slot from this package: the console's AI
-      // pending-action queue. Its capability (`ai`) is provided by no package
-      // of this repository, so there is no in-repo owner to contribute it; it
-      // is gated on that service instead, and stripped server-side wherever
-      // the service is absent. The allowance is the literal id list below,
-      // so any further entry here still turns this red.
-      const items = SETUP_NAV_CONTRIBUTIONS
-        .filter((c) => c.group === 'group_approvals')
-        .flatMap((c) => c.items as Array<{
-          id?: string; objectName?: string; componentRef?: string; requiresService?: string;
-        }>);
-      expect(items.map((i) => i.id)).toEqual(['nav_ai_approvals']);
-      for (const item of items) {
-        expect(item.objectName ?? '').not.toMatch(/^sys_approval_/);
-        expect(item.componentRef ?? '').not.toMatch(/^approvals:/);
-        expect(item.requiresService).toBe('ai');
+      // group_approvals    → @objectstack/plugin-approvals (K2.b)
+      for (const ownedSlot of ['group_integrations', 'group_approvals']) {
+        const contrib = SETUP_NAV_CONTRIBUTIONS.find((c) => c.group === ownedSlot);
+        expect(contrib).toBeUndefined();
       }
     });
 

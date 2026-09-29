@@ -77,7 +77,6 @@ export const esES: TranslationData = {
         nav_approval_requests: { label: 'Solicitudes' },
         nav_approval_actions: { label: 'Historial de Acciones' },
         nav_approval_delegations: { label: 'Delegaciones (ausencia)' },
-        nav_ai_approvals: { label: 'Aprobaciones de IA' },
 
         nav_settings_hub: { label: 'Todos los Ajustes' },
         nav_settings_localization: { label: 'Localización' },

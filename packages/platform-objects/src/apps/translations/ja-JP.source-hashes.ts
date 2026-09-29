@@ -102,7 +102,6 @@ export const jaJPSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_approval_requests.label': 'aafd0f7c6a376f55',
   'apps.setup.navigation.nav_approval_actions.label': 'd2ebad7acfd50978',
   'apps.setup.navigation.nav_approval_delegations.label': 'fc0d41741659c462',
-  'apps.setup.navigation.nav_ai_approvals.label': '0de8ec9f51fc2dac',
   'apps.setup.navigation.nav_settings_hub.label': 'a3ac65c7c7f461bf',
   'apps.setup.navigation.nav_settings_localization.label': 'beedfaf00452c829',
   'apps.setup.navigation.nav_settings_company.label': '9d7f685e11eaade9',

@@ -11,7 +11,7 @@
 // the registration half (`orphanedPageComponentRefs-10520.test.tsx`); this file
 // pins the half this repo owns — the ref the entry names.
 //
-// Why here and not beside the other two entries of #20142 in
+// Why here and not beside #20142's Studio entry in
 // `@objectstack/platform-objects`: the page reads `sys_audit_log`, which this
 // plugin owns (ADR-0029 K2), so its entry lives and dies with this plugin the
 // way `nav_audit_logs` does — and needs no item gate for the same reason.

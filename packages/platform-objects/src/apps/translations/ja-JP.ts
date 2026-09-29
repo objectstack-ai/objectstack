@@ -77,7 +77,6 @@ export const jaJP: TranslationData = {
         nav_approval_requests: { label: 'リクエスト' },
         nav_approval_actions: { label: 'アクション履歴' },
         nav_approval_delegations: { label: '委任 (不在時)' },
-        nav_ai_approvals: { label: 'AI 承認' },
 
         nav_settings_hub: { label: 'すべての設定' },
         nav_settings_localization: { label: 'ローカリゼーション' },
