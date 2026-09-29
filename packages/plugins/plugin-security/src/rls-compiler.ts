@@ -85,7 +85,7 @@ interface RLSUserContext {
    * `rlsMembership` bag, because a wall an app could redefine would not be a
    * wall.
    *
-   * ⚠️ Reserving a key obliges someone to FILL it. Until #16518 nobody did:
+   * ⚠️ Reserving a key obliges someone to FILL it. Until commit 470746ae4 nobody did:
    * `packages/spec` declared the key's SHAPE (`accessible_org_ids?: string[]`)
    * and named core as its resolver, an app was refused from supplying it, and
    * this interface did not carry it — so every predicate naming it dropped out
@@ -543,7 +543,7 @@ export class RLSCompiler {
       organization_id: executionContext?.tenantId,
       positions: executionContext?.positions,
       org_user_ids: (executionContext as any)?.org_user_ids,
-      // [ADR-0105 D2 / #16518] The caller's union org scope, copied from the
+      // [ADR-0105 D2 / commit 470746ae4] The caller's union org scope, copied from the
       // execution context exactly as `org_user_ids` is. Both are core-resolved
       // membership sets the runtime pre-resolves so this compiler never has to
       // issue a subquery; the ONLY reason this line was missing is that nobody

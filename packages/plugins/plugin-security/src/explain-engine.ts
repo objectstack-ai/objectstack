@@ -382,7 +382,7 @@ function untilOfGrantRow(r: any): string | undefined {
 }
 
 /**
- * [#8714] One entry of the shared "held but not resolving, because X"
+ * [commit 42b05af89] One entry of the shared "held but not resolving, because X"
  * vocabulary (the internal counterpart of the spec contract's
  * `contributors[].state`): a grant row the principal HOLDS that the resolver
  * fail-closed DROPPED, with the closed reason enumeration naming why —
@@ -399,7 +399,7 @@ export interface DroppedGrant {
 }
 
 /**
- * [#6352 / ADR-0091 D2/D3 / #8714] The explain-ONLY provenance pass: the
+ * [#6352 / ADR-0091 D2/D3 / commit 42b05af89] The explain-ONLY provenance pass: the
  * annotations the panel prints that the authorization resolver, correctly,
  * throws away.
  *
@@ -414,7 +414,7 @@ export interface DroppedGrant {
  *    "held until … — expired" instead of silently omitting a grant the admin
  *    knows they granted. This is "why did access DISAPPEAR", and only a dropped
  *    row can answer it.
- *  - **deactivated** (#8714) — a row whose CATALOGUE entry
+ *  - **deactivated** (commit 42b05af89) — a row whose CATALOGUE entry
  *    (`sys_permission_set.active` / `sys_position.active`) is switched off
  *    (ADR-0049 / #8613), so the grant stopped resolving for everyone holding
  *    it. Deactivation is an incident-response control with no date on the
@@ -472,7 +472,7 @@ async function collectGrantProvenance(
         droppedGrants.push({ kind: 'position', name: p, state: 'expired', until: untilOfGrantRow(r) });
       }
     }
-    // [#8714 / ADR-0049] A held position whose `sys_position` catalogue row is
+    // [commit 42b05af89 / ADR-0049] A held position whose `sys_position` catalogue row is
     // explicitly deactivated was dropped by the resolver (step 6a) — report it
     // instead of letting it vanish. A name with no row has no flag to read and
     // is untouched, matching the resolver.
@@ -501,7 +501,7 @@ async function collectGrantProvenance(
     const activeRows = grantRows.filter((g: any) => isGrantActive(g, nowMs));
     const ids = Array.from(new Set([...expiredRows, ...activeRows].map(idOf).filter(Boolean)));
     if (ids.length > 0) {
-      // [#8714] The existing by-id `sys_permission_set` read now serves both
+      // [commit 42b05af89] The existing by-id `sys_permission_set` read now serves both
       // reasons: names for the expired rows, and the ADR-0049 `active` flag for
       // the held ones — one read, no second query shape.
       const sets = await ql.find('sys_permission_set', { where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX });
@@ -1429,7 +1429,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     if ((context?.permissions ?? []).includes(name)) return 'direct grant';
     return 'resolved';
   };
-  // [ADR-0091 D2 / ADR-0049 / #8714] Held-but-dropped grant rows (populated by
+  // [ADR-0091 D2 / ADR-0049 / commit 42b05af89] Held-but-dropped grant rows (populated by
   // buildContextForUser when explaining by userId): present, but contributing
   // nothing, each carrying the closed reason enumeration (`expired` |
   // `deactivated`) — reported so "why did access disappear" is self-answering
@@ -1480,7 +1480,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
           : { kind: 'position' as const, name: p };
       }),
       ...setNames.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
-      // [#8714] One shared "held but not resolving, because X" vocabulary for
+      // [commit 42b05af89] One shared "held but not resolving, because X" vocabulary for
       // every dropped row — the state member IS the reason, closed enum.
       ...droppedGrants.map((g) => ({
         kind: g.kind,

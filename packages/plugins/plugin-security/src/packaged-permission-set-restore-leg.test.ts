@@ -3,7 +3,7 @@
 /**
  * THE RESTORE LEG — the fourth write point of `createPermissionSetWriteThrough`
  * under the 2026-08-24 "lock the base, clone to customize" ruling: guarded
- * since #12020, with the refusal on the DURABILITY channel, plus the
+ * since commit 9cfc1f7e9, with the refusal on the DURABILITY channel, plus the
  * reachability fence.
  *
  * The lock (`packaged-permission-set-lock.ts`) refuses a save that targets a
@@ -41,10 +41,10 @@
  *     refusal is REPORTED on the durability channel with the lock's own error
  *     — never thrown.
  *
- *     This case is the INVERSION #11725's MEASURED RESIDUAL demanded of the
- *     follow-up (#12020): it used to pin the re-authoring of a packaged body
+ *     This case is the INVERSION commit 1e79aa4f8's MEASURED RESIDUAL demanded of the
+ *     follow-up (commit 9cfc1f7e9): it used to pin the re-authoring of a packaged body
  *     through this leg with no lock consulted. The deliberate red for the
- *     inversion is recorded on #12020's PR: with the leg's lock consultation
+ *     inversion was measured for commit 9cfc1f7e9: with the leg's lock consultation
  *     removed, this case fails on `saves.length` — so it does not pass with
  *     the lock absent.
  *
@@ -297,8 +297,8 @@ describe('[#11725] the restore leg of the permission-set write-through', () => {
   });
 
   it('LOCK AT THE RESTORE LEG: the same set through RESTORE keeps the engine un-trash but the re-author is REFUSED — reported on the durability channel, never thrown', async () => {
-    // ⭐ The INVERSION of #11725's MEASURED RESIDUAL, demanded by that case's
-    // own comment and delivered by #12020. It used to assert: no refusal, one
+    // ⭐ The INVERSION of commit 1e79aa4f8's MEASURED RESIDUAL, demanded by that case's
+    // own comment and delivered by commit 9cfc1f7e9. It used to assert: no refusal, one
     // save, the packaged body in the overlay store. Now the lock is consulted
     // before the leg's one guarded write, and every half inverts.
     //

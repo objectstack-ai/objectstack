@@ -7,10 +7,10 @@ import { SecurityPlugin } from './security-plugin.js';
  * The suggestion key columns carry their REFERENCED columns' bounds, and the
  * composite key stays expressible on MySQL.
  *
- * ## What used to be here, and where it went (#12147)
+ * ## What used to be here, and where it went (commit 945e91a13)
  *
  * This file carried route A's rule — "every text-family column a declared index
- * keys on declares a `maxLength`" (#11374) — enumerated over the objects this
+ * keys on declares a `maxLength`" (commit 3954fb7df) — enumerated over the objects this
  * plugin registers, with a vacuity control and an `UNBOUNDABLE` allowlist. That
  * is now `scripts/check-keyed-text-bounds.mjs`, a source scan over EVERY
  * `*.object.ts` in the repository. The rationale for the move, and why a

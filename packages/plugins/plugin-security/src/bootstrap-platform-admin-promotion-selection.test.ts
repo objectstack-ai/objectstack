@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #16682 — WHICH user the `single`-posture bootstrap promotes, and why.
+ * Commit 9b9581b11 — WHICH user the `single`-posture bootstrap promotes, and why.
  *
  * ## The defect, re-measured on this branch's base before anything changed
  *
@@ -199,7 +199,7 @@ async function seedUser(
   email: string,
   createdAt: string,
   withAccount: boolean,
-  // [#16682, maintainer ruling batch #100] Absent means UNVERIFIED, which is
+  // [commit 9b9581b11, maintainer ruling batch #100] Absent means UNVERIFIED, which is
   // what `isEmailVerifiedUserRow` reads an absent column as — so every fixture
   // that does not say otherwise is a row the declared-owner leg must REFUSE.
   emailVerified = false,

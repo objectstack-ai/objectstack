@@ -35,7 +35,7 @@
  * it. `start()` binds `ctx.logger` above both of its early bail-outs (#10706),
  * so this holds on a degraded boot too.
  *
- * ⚠️ There is no `@ts-expect-error` compile-time pin here, and [#13176] changed
+ * ⚠️ There is no `@ts-expect-error` compile-time pin here, and [commit a68c61267] changed
  * the REASON rather than the state. Until then `tsconfig.json`'s `**\/*.test.ts`
  * exclusion was this package's only word on the subject and no tsc program read
  * this file at all, so a directive here would have evaluated NEVER — not a weak

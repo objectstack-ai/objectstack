@@ -1015,7 +1015,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'inviter_id == current_user.id',
         positions: [MEMBERSHIP_ROLE_DELEGATED_ADMIN],
       },
-      // [#8839] COMMENT MODERATION — the one object whose delete authority is
+      // [commit c25b2d52a] COMMENT MODERATION — the one object whose delete authority is
       // NOT the `created_by` floor above, because a tighter authority already
       // owns it and the floor was pre-empting it.
       //
@@ -1035,7 +1035,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // editor moderating someone else's comment holds `org_member` and is not
       // the comment's `created_by`, so the floor answered `PERMISSION_DENIED`
       // before the moderation rule was ever consulted. Net effect measured in
-      // #8839: moderation was dead in EVERY org-bound deployment, and the only
+      // commit c25b2d52a: moderation was dead in EVERY org-bound deployment, and the only
       // fixture that proved the capability
       // (`qa/dogfood/test/comments-permission-matrix.dogfood.test.ts` case (d))
       // was green solely because it booted org-less — #8023's disarm shape, so
@@ -1070,7 +1070,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // their collection empty and their behaviour byte-identical.
       //
       // `delete` only — not `all`. `update` is the other half of plugin-audit's
-      // rule, and it is deliberately left under the floor: #8839 ruled on the
+      // rule, and it is deliberately left under the floor: commit c25b2d52a's ruling is on the
       // delete limb, which is the one it measured. Widening the edit limb is a
       // separate decision on the same manual floor; do not fold it in here
       // because the gate happens to share a code path.

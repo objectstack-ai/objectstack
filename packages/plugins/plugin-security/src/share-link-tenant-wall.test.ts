@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6206 / #6430 ruling A] The `group`-posture repro: minting a share link for
+ * [commit 8e13ca876 / #6430 ruling A] The `group`-posture repro: minting a share link for
  * a record the caller can read.
  *
  * ## Why this file lives in plugin-SECURITY
