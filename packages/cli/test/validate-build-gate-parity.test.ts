@@ -121,7 +121,7 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // project `sdui.manifest.json` that exists but cannot be read, parsed or
   // carries no `components` map is refused (exit 1) when there is a
   // `kind:'html'` page to check. Not a registry rule: the manifest is a file
-  // in the working directory, not part of the stack a rule is handed.
+  // beside the config (#20166), not part of the stack a rule is handed.
   'resolveJsxGateManifest',
   // [#20331, #20393] The boot registrar's divergent view-container `name`
   // refusal (`viewContainerNameRefusal`, @objectstack/objectql), judged at

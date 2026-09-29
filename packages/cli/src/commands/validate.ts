@@ -446,7 +446,10 @@ export default class Validate extends Command {
       //    this to a failure under `--strict` would break every such project.
       //    A project manifest that exists but cannot be used is REFUSED
       //    instead (thrown, already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
+      //    [#20166] The project's manifest is the one beside the config this
+      //    run was given — the directory the capability preflight below reads
+      //    too — never the invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>, dirname(absolutePath));
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);

@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { dirname } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
@@ -997,7 +998,9 @@ export default class Lint extends Command {
       // reaches that function without a manifest and must not score a notice
       // about the filesystem. A project manifest that exists but cannot be
       // used is refused instead (already reported on stderr; exit 1).
-      const jsxGate = resolveJsxGateManifest(normalized as Record<string, unknown>);
+      // [#20166] Read beside the config this run was given, never in the
+      // invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(normalized as Record<string, unknown>, dirname(absolutePath));
       const issues = lintConfig(normalized, { sduiManifest: jsxGate.sduiManifest });
       issues.push(...jsxGate.notices.map(authoringFindingToLintIssue));
 
