@@ -276,10 +276,10 @@ describe('#5520 — the gate: a dimension over a missing field is a 400, not a d
             name: 'account_cube',
             title: 'Accounts',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
-                legacy: { name: 'legacy', label: 'Legacy', type: 'string', sql: 'dropped_column' },
+                industry: { label: 'Industry', type: 'string', sql: 'industry' },
+                legacy: { label: 'Legacy', type: 'string', sql: 'dropped_column' },
             },
             public: true,
         };
@@ -346,9 +346,9 @@ describe('#5520 — the dataset face: refused before SQL exists, so nothing can 
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                bogus_dim: { name: 'bogus_dim', label: 'x', type: 'string', sql: 'bogus_dim' },
+                bogus_dim: { label: 'x', type: 'string', sql: 'bogus_dim' },
             },
             public: true,
         };
@@ -421,9 +421,9 @@ describe('#5520 — what the gate must NOT do', () => {
             name: 'renamed_cube',
             title: 'Renamed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
+                assessed: { label: 'Assessed', type: 'time', sql: 'assessed_at' },
             },
             public: true,
         };
@@ -453,9 +453,9 @@ describe('#5520 — what the gate must NOT do', () => {
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account WHERE active = 1',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                anything: { name: 'anything', label: 'x', type: 'string', sql: 'anything' },
+                anything: { label: 'x', type: 'string', sql: 'anything' },
             },
             public: true,
         };
@@ -476,7 +476,7 @@ describe('#5520 — what the gate must NOT do', () => {
             name: 'joined_cube',
             title: 'Joined',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
             public: true,
         };
@@ -495,10 +495,9 @@ describe('#5520 — what the gate must NOT do', () => {
             name: 'computed_cube',
             title: 'Computed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
                 bucket: {
-                    name: 'bucket',
                     label: 'Bucket',
                     type: 'string',
                     sql: "CASE WHEN annual_revenue > 0 THEN 'yes' ELSE 'no' END",
@@ -532,9 +531,9 @@ describe('#5520 — what the gate must NOT do', () => {
             name: 'external_cube',
             title: 'External',
             sql: 'remote_table',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                ghost: { name: 'ghost', label: 'x', type: 'string', sql: 'ghost' },
+                ghost: { label: 'x', type: 'string', sql: 'ghost' },
             },
             public: true,
         };

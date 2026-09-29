@@ -277,8 +277,8 @@ describe('#16218 — a group where NO row carries a value answers 0, never null'
       name: 'e', sql: 'expense',
       dimensions: {},
       measures: {
-        rows: { name: 'rows', type: 'count', sql: '*' },
-        payers: { name: 'payers', type: 'count', sql: 'payer' },
+        rows: { type: 'count', sql: '*' },
+        payers: { type: 'count', sql: 'payer' },
       },
     } as unknown as Cube;
     const r = evaluateAnalyticsQueryOverRows({ measures: ['rows', 'payers'], dimensions: [] }, CUBE, []);
@@ -288,8 +288,8 @@ describe('#16218 — a group where NO row carries a value answers 0, never null'
   it('a field ABSENT from every row counts 0, exactly like a null-valued one', () => {
     const CUBE = {
       name: 'e', sql: 'expense',
-      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
-      measures: { payers: { name: 'payers', type: 'count', sql: 'payer' } },
+      dimensions: { category: { type: 'string', sql: 'category' } },
+      measures: { payers: { type: 'count', sql: 'payer' } },
     } as unknown as Cube;
     // `undefined` (key never written) and `null` are one population to
     // `COUNT(col)`: neither is a value.

@@ -119,9 +119,10 @@ export class CubeRegistry {
     objectName: string,
     fields: Array<{ name: string; type: string; label?: string }>,
   ): Cube {
+    // Members carry no inner `name`: the record key IS the member's name
+    // (#20300 retired the inner copy, ADR-0049 enforce-or-remove).
     const measures: Record<string, any> = {
       count: {
-        name: 'count',
         label: 'Count',
         type: 'count',
         sql: '*',
@@ -135,7 +136,6 @@ export class CubeRegistry {
       // All fields become dimensions
       const dimType = this.fieldTypeToDimensionType(field.type);
       dimensions[field.name] = {
-        name: field.name,
         label,
         type: dimType,
         sql: field.name,
@@ -147,13 +147,11 @@ export class CubeRegistry {
       // Numeric fields also become aggregation measures
       if (field.type === 'number' || field.type === 'currency' || field.type === 'percent') {
         measures[`${field.name}_sum`] = {
-          name: `${field.name}_sum`,
           label: `${label} (Sum)`,
           type: 'sum',
           sql: field.name,
         };
         measures[`${field.name}_avg`] = {
-          name: `${field.name}_avg`,
           label: `${label} (Avg)`,
           type: 'avg',
           sql: field.name,

@@ -1,5 +1,1105 @@
 # @objectstack/formula
 
+## 17.5.0
+
+### Minor Changes
+
+- ce57857: feat(spec)!: every engine-evaluated expression slot requires a non-blank `source` — the #15430 rule generalised from the flow-node ledger to the other 36 declaring positions (#15811, decision batch #122 item 2)
+  
+  <!-- adr-0087: registered evaluated-expression-slots-source-required -->
+  
+  **BREAKING** accept-set narrowing on 36 published metadata slots. Each of them
+  composed `ExpressionInputSchema` and now composes `EvaluatedExpressionInputSchema`,
+  so an envelope carrying only `ast` (`{ dialect: 'cel', ast: … }` with no `source`)
+  and a `source` that is blank after trimming — through the envelope key or through
+  the bare-string shorthand — are refused at the door instead of parsing and then
+  faulting at run time. The prescription is registered under protocol major 18 as
+  the semantic migration `evaluated-expression-slots-source-required`.
+  
+  **⚠️ Graded `minor`, not `major`, and the ruling said `major`.** Decision batch
+  #122 item 3 ordered a 「`major` changeset」. This repo's launch-window convention
+  ships breaking changes as `minor` while the fixed group versions in lockstep, and
+  `scripts/check-changeset-no-major.mjs` enforces it: a `major` marker here would
+  promote all ~70 packages to a whole-stack major release, which is a release act.
+  The convention's own written carriers for breaking-ness are used instead and both
+  are present — this **BREAKING** banner and the ADR-0087 disposition above. The
+  ruling's substance (a breaking narrowing, carried by an ADR-0087 semantic
+  migration entry) is delivered; only the marker differs, and it differs because a
+  repo gate forbids the marker.
+  
+  **What is NOT narrowed.** `ExpressionSchema` / `ExpressionInputSchema` remain the
+  persistence contract (`source` OR `ast`), by item 2 of the same ruling, and so
+  does `PredicateInputSchema`, which is a plain alias of the latter. A slot that
+  only PERSISTS an envelope is untouched; the narrowing is at the slots an engine
+  EVALUATES. An `ast` carried BESIDE a string `source` stays admitted everywhere.
+  
+  **The population was re-derived, not inherited.** By identity — a negative
+  lookaround on identifier characters, so `CronExpressionInputSchema` and
+  `TemplateExpressionInputSchema` cannot leak in as substrings — over
+  `packages/spec/src`, non-test: 34 declaring source lines, two of which are
+  file-local alias consts (`ui/action.zod.ts` `ActionConditionInputSchema`,
+  `system/settings-manifest.zod.ts` `SettingsVisibilityInputSchema`) that mount two
+  slots each, giving **36 declaring positions**. Three of them reach the schema as a
+  union member rather than head-of-declaration (`RecordAlertProps.visible`,
+  `ServiceLevelIndicator.successCriteria`, `TraceSamplingConfig.composite[].condition`).
+  
+  On **two of those three the sibling arm is untouched**: `RecordAlertProps.visible`
+  still takes a boolean literal, and `ServiceLevelIndicator.successCriteria` still
+  takes its structured `{ threshold, operator, percentile? }` object — including one
+  that happens to carry a `dialect` key.
+  
+  ⚠️ **On the third, `TraceSamplingConfig.composite[].condition`, the sibling arm
+  narrows too, and deliberately.** Its structured-filter arm is a bare
+  `z.record(z.string(), z.unknown())`, which accepted `{ dialect: 'cel', ast }` as an
+  ordinary filter — so swapping the expression arm changed nothing at all there. That
+  arm now declines any object carrying a `dialect` key, and six shapes the base
+  accepted THROUGH THAT ARM ALONE (measured: the base's `ExpressionInputSchema`
+  refused every one of them) are refused at this slot:
+  
+  | authored `condition` | base | now |
+  |---|---|---|
+  | `{ dialect: 'cel' }` | accepted | refused |
+  | `{ dialect: 'js', source: 'x' }` | accepted | refused |
+  | `{ dialect: 'nope', source: 'x' }` | accepted | refused |
+  | `{ dialect: 'cel', source: 5 }` | accepted | refused |
+  | `{ dialect: 'cel', source: 'x', meta: { rationale: 5 } }` | accepted | refused |
+  | `{ dialect: 'zzz', foo: 1 }` | accepted | refused |
+  
+  FROM → TO at that slot: if the value really is a **structured filter**, drop the
+  `dialect` key (`{ dialect: 'cel', service: 'api' }` → `{ service: 'api' }`); if it is
+  an **expression**, give it a dialect this platform evaluates and a non-blank `source`
+  (`{ dialect: 'js', source: 'x' }` → `{ dialect: 'cel', source: 'x' }`). A structured
+  filter that carries no `dialect` key — `{}`, `{ service: 'api' }`,
+  `{ attributes: { 'http.route': '/v1/orders' } }` — is accepted exactly as before.
+  
+  **Why an authoring-time refusal and not a run-time one.** Measured at the
+  chokepoint, `celEngine.evaluate` never silently succeeds on either shape — it
+  returns a `parse` fault — so what happened next was decided entirely by the
+  slot's fail policy, and the two halves of that population fail in opposite
+  directions: fail-CLOSED slots (`ObjectFieldGroup.visibleWhen`,
+  `RowCrudActionOverride.visibleWhen`, `BulkActionDef.visible`, the two
+  settings-manifest `visible` slots) hid a group, a row button, or silently excluded
+  every selected record from a bulk run and reported them as *skipped*; fail-SOFT
+  slots left a gate that had stopped gating. Nothing in between said a word: the
+  authoring lint `validateVisibilityPredicates` measured 0 findings on an `ast`-only
+  envelope and 0 on a blank `source`, against two control legs that each measured 1.
+  
+  **`@objectstack/formula` gains `printCelAst(ast)`** — the inverse of
+  `parseCelToAst`, and the lossless half of the migration: an `ast`-only CEL
+  envelope is printed back to surface syntax mechanically, with no judgment asked of
+  the author. It is lossless about MEANING, not bytes (the printer re-renders from
+  the parse tree, so `'x'` comes back as `"x"`), and it answers `null` — never a
+  guess — for anything it cannot round-trip through the platform's own bounded
+  parser. That `null`, and every blank `source`, are what the semantic migration
+  entry's structured TODO covers.
+  
+  **The published TypeScript interface `RowCrudPredicates` narrows with it**
+  (`Expression | ExpressionInput` → `EvaluatedExpression | EvaluatedExpressionInput`),
+  because it mirrors the two `RowCrudActionOverride` slots and a type that still
+  promised an `ast`-only envelope would advertise what the schema now refuses.
+  
+  **So do the four expression constructors — `expression()`, `cel`, `tmpl`, `cron`
+  (and therefore the `F` / `P` aliases) — which now return `EvaluatedExpression`
+  instead of `Expression`.** Each one assigns a `string` to `source`
+  unconditionally, so the wider return type described none of them; it was slop
+  that cost nothing until an evaluated slot began requiring `source`, at which
+  point ``visibleWhen: P`…` `` — the spelling the spec's own docblock teaches —
+  stopped type-checking, and `@objectstack/platform-objects` failed its DTS build
+  on exactly that. `EvaluatedExpression` is assignable to `Expression`, so every
+  persistence-contract slot keeps accepting these values unchanged; what the
+  narrower return type adds is that an evaluated slot accepts them too. An author
+  who genuinely has no `source` was never calling these constructors — an
+  `ast`-only envelope is an object literal, and an evaluated slot refuses it on
+  purpose.
+- 9be2b59: `EvalContext` no longer declares `api?: { exists, count, lookup }` — the kernel query API behind `os.exists` / `os.count` / `os.lookup`, which `buildScope()` never bound (#18318).
+  
+  **BREAKING** for a TypeScript consumer: an `EvalContext` literal that carries `api` stops compiling. The level stays `minor` because the launch window refuses `major` outright — while it is open, breaking-ness is carried by this banner and by the ADR-0087 disposition at the foot of this changeset, not by the bump.
+  
+  The member's docblock said it was "implemented opportunistically by call sites that have a query engine", and no call site ever could: `ctx.api` was read **zero** times in this package — control in the same sweep, `ctx.user`, three reads in `stdlib.ts` — so the three functions reached no evaluation scope however completely a caller populated the member. An author who wrote a predicate to the declaration got `runtime: found no matching overload for 'dyn.lookup(string, dyn)'` instead, and because an unevaluable predicate refuses the write it guards, a validation rule authored that way locked **every** write on its object. The harm came from the declaration existing, not from the implementation missing, so it is removed rather than implemented — with the reason written at the deletion site, and with no shim, alias or reserved spelling left behind.
+  
+  **Your fix — delete the `api: { … }` property.** There is no replacement key and nothing to re-point: every implementation ever passed there was discarded before evaluation, so removing the property changes no result your predicates produce. TypeScript is where you will hear about it: an `EvalContext` literal carrying `api` now fails to compile, which is the whole of the break. Reading a related record's field from inside a predicate remains unexpressible in any spelling — that capability is tracked as its own card, relationship traversal (`record.crm_account.type`), and deliberately not as `os.lookup` queries; no schedule is implied by this removal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/formula/src/types.ts#EvalContext) `EvalContext` is a published runtime TypeScript interface with no metadata surface — no Zod schema, no `packages/spec` declaration, no stored representation — so `objectstack migrate meta` has nothing to rewrite and the ledger has no channel to carry. The compiler at the consumer's own call site reaches every affected caller instead. Nothing is re-pointed either: `buildScope()` never read `ctx.api`, so the whole remedy is deleting a property that was already inert. -->
+  
+  Clause-②: yes
+- 627382b: Add `current_user.can(object, verb)` — the permission predicate — to the CEL engine, together with the data it is answered from.
+  
+  `Clause-②: yes` — a new callable name widens the authorable surface. Purely additive: nothing is removed, renamed or narrowed, and every expression that evaluated before evaluates the same way.
+  
+  **What you can write now**
+  
+  ```cel
+  current_user.can('crm_lead', 'edit')
+  ```
+  
+  `can` is registered **receiver-only**, so it is called ON the acting subject (`current_user`, or its `user` / `ctx.user` / `os.user` aliases — the same object). A bare `can(object, verb)` is deliberately not registered and keeps faulting: a permission question with no subject has no meaning.
+  
+  The verb vocabulary is the closed table `OBJECT_PERMISSION_VERBS` in `@objectstack/spec/security` — `read`, `create`, `edit`/`update`/`write`, `delete`/`remove`, `export`, `transfer`, `import`. A verb outside it is refused loudly rather than answered `false`. The answer folds the super-user bits exactly as the enforcement door does, so a predicate and the server's 403 cannot disagree.
+  
+  **What a call site must pass**
+  
+  `EvalContext` gains `permissions` — a pure data map, object name → `EffectiveObjectPermission`, which is the `objects` map of the published `/auth/me/permissions` response, unchanged. Build it through the new `toEvalPermissions(response.objects)`, which refuses a payload that is not that shape.
+  
+  ```ts
+  import { toEvalPermissions } from '@objectstack/formula';
+  
+  const permissions = toEvalPermissions(mePermissions.objects);
+  ExpressionEngine.evaluate(predicate, { user, record, permissions });
+  ```
+  
+  **With no permission data in the context, `can` THROWS** (`ok: false`, `kind: 'runtime'`) and names the missing input. It never answers `true` (which would reveal what the subject may not see) and never answers a silent `false` (which would hide a gated element from everyone, indistinguishable from a real denial). An *empty* map is a real answer and evaluates to `false`, as does an object the map does not mention.
+  
+  **Also new, all additive**: `EvalPermissions` and `PermissionBinding` types, `registerPermissionPredicate()`, and an optional fourth argument on `registerStdLib()` carrying the binding. Existing three-argument calls are unaffected.
+- e75cc3c: `ExprSchemaHint` gains `roots` — an authoring surface naming the binding roots it mounts beyond the platform baseline, so `validateExpression` can accept them without standing down on everything else (#18554).
+  
+  A page component's `visibleWhen` binds three roots at runtime, and `ExprSchemaHint` could express neither of the two shapes it needs: `scope: 'record'` refused `page.selectedProjectId != ''` — the worked example `packages/spec/src/ui/page.zod.ts`'s own `visibleWhen` describe ends with, under a sentence naming the contract-bound roots as `record`, `current_user` and page state as `page.<var>` — and prescribed `record.page`, which names nothing on any layer; `scope: 'flattened'` accepted that example and accepted a bare `status == 'done'` with it, which is the shorthand the narrowing exists to catch. Downstream the refusal is not cosmetic: an editor that lints a page block on the `record` face disables Save for the author who wrote the platform's own documented spelling.
+  
+  ```ts
+  validateExpression('predicate', "page.selectedProjectId != ''", {
+    scope: 'record',
+    roots: ['page'],      // what this surface mounts beyond the baseline
+  });                     // -> ok; `status == 'done'` at the same site is still an error
+  ```
+  
+  - **It only ever adds.** A root listed in `roots` is declared alongside `SCOPE_ROOTS`, never instead of it, so passing the key can turn a refusal into an acceptance and never the reverse — a caller adopting it cannot silently lose a check it has today, and a call site that does not pass it gets the verdict and the prescription it got before, byte for byte.
+  - **Declaring a root is not becoming permissive.** The bare-field shorthand, an undeclared root, and a typo of a declared root are all still hard errors at a surface that declares `page`. Trading a false refusal for a silent acceptance is the worse of the two directions, so the surface says *which* roots it binds rather than asking the validator to stop checking.
+  - **A mistyped root is sent to the root, not to `record.<typo>`.** When a surface has declared its roots, a namespace reference within edit distance of one of them (`pge.selectedProjectId`) is named as an unbound root and pointed at `page`. Every other shape — a bare value reference, a known field used as a JSON namespace, any site with no declared roots — keeps the existing `record.<name>` prescription, which is the right fix for the case it was written for.
+  - **`introspectScope` advertises what the validator accepts.** Declared roots join the roots it hands an author, from the same declaration, so a root that is accepted is never one an author has no way to discover.
+  - **Not a closed-set mechanism.** A surface that must *refuse* a baseline root it never mounts still says so with `collectCelRootIdentifiers`, which reads the AST and is independent of this key. The two directions stay two mechanisms.
+  
+  Clause-②: yes (widening)
+- 1f05ea4: A validation rule can read one hop through a lookup — `record.account.type` on an opportunity resolves the owning account's field instead of faulting (#18682)
+  
+  Clause-②: yes (widening)
+  
+  A validation predicate could only read the record it guards. A `lookup` /
+  `master_detail` field carries an **id**, so the natural cross-object rule —
+  "a partner account may not carry an opportunity over 10000" — faulted with
+  `runtime: No such key: type`, and because a broken validation is fail-closed it
+  rejected every write on the object. The capability mainstream platforms provide
+  as a matter of course could not be authored at all.
+  
+  ### What you can write now
+  
+  ```ts
+  validations: [{
+    name: 'partner_cap',
+    type: 'script',
+    message: 'Partner accounts are capped at 10000.',
+    condition: "record.account.type == 'partner' && record.amount > 10000",
+  }]
+  ```
+  
+  One hop, through any reference-typed field (`lookup`, `master_detail`, `user`,
+  `tree`). The engine reads the related row before evaluating and binds it in
+  place of the id, so `record.<reference field>.<field>` resolves.
+  
+  ### It is data pinned BEFORE evaluation, not a query from inside CEL
+  
+  There is no `os.lookup(...)` / `os.exists` / `os.count` — those stay removed.
+  The engine statically analyses the predicate, learns exactly which reference
+  fields it reads through and which related fields it names, and loads those
+  **before** evaluation. Every registered function stays pure once `now` is
+  pinned, so `objectstack build` artifacts stay byte-stable.
+  
+  The cost is bounded by construction: one hop, only the fields a rule actually
+  names, one batched read per reference field per write, and nothing at all when
+  no rule traverses.
+  
+  ### Read authority — system, bounded by the projection
+  
+  The related row is read under **system authority**. A validation rule's output
+  is a pass/fail the *system* enforces, not data handed to the caller — which is
+  why RLS predicates are excluded from this capability altogether. Reading as the
+  acting user instead made the rule unauthorable for exactly the persona it exists
+  to constrain: a member with CRUD on the child and no read on the parent faulted
+  on every write.
+  
+  What bounds the elevation is the **projection**: only the
+  columns the predicate names, intersected with the related object's declared
+  fields. A column the related object does not declare never enters the query, and
+  is refused as the authoring fault it is — distinct from a column that exists and
+  is empty, which evaluates as `null`.
+  
+  A related object no organization wall scopes — no tenant column (`sys_user`
+  behind a `user` field), `tenancy.enabled: false`, or `external` — is bounded by
+  row as well: for any caller that is not system (a user, a public-form
+  submitter, a caller with no principal), only a row the caller's own read of that
+  object returns. A reference to any other row refuses the write as not readable,
+  whatever that row holds. Under a walled posture (`group` or `isolated`), such a
+  caller with no active organization gets no related read at all: a rule reading
+  through a stored reference refuses the write as not found.
+  
+  ⚠️ **The accepted cost, stated plainly.** A caller can *infer* a related value
+  they cannot see by observing which writes are refused. The value itself never
+  appears — the refusal names the field and the rule, never the value — and the
+  channel is deliberately no wider than "this rule refused this write".
+  
+  ### Two shapes are refused, with a prescription
+  
+  Both fault at evaluation today, so neither removes anything that works:
+  
+  | Shape | Why | Write instead |
+  | --- | --- | --- |
+  | `record.account.type == 'x' && record.account == 'acc_1'` | reading through the relationship resolves `record.account` to the related RECORD, so the id comparison would stop matching — silently | `record.account.id == 'acc_1'` for the value comparison |
+  | `record.account.owner.email` | a second hop is not loaded | denormalise onto `account`'s object, or read it in a hook |
+  
+  A field that is **not** reference-typed is untouched: `record.address.city` on
+  an object-valued field traverses today and keeps traversing.
+  
+  ### `@objectstack/plugin-security` gains `canWriteObject`
+  
+  The WRITE admission — the sibling of the existing `canReadObject`, running the
+  middleware's own arms in the middleware's own order: system bypass; then, before
+  anything resolves, the ADR-0103 engine-owned write guard and the ADR-0090 D12
+  delegated-administration gate, each called as the middleware's own primitive;
+  then no resolved permission sets, unresolvable posture, the ADR-0066 D3
+  `requiredPermissions` capability AND-gate for both principals, the CRUD grant,
+  the ADR-0090 D10 delegator check, and — when the caller's payload is supplied —
+  the field-level security WRITE gate over it (`getFieldPermissions`, folded
+  through the D3 field-capability contract, intersected with the delegator's mask
+  under D10, then the forbidden-write detection); and last, the ADR-0123 D2
+  no-active-organization wall, the same verdict the middleware's step 3.7 throws
+  on. It exists for doors that must ask
+  "could this caller perform this write" without running the engine middleware —
+  the write preview is the first.
+  
+  ⭐ What it answers, POSITIVELY — by naming what it RUNS, never a category of the
+  write decision: the ADR-0103 engine-owned affordance gate, the ADR-0090 D12
+  delegated-admin gate, the fail-closed postures (#3545's unresolvable posture and
+  the D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
+  principals, the `allowCreate`/`allowEdit` CRUD grant, the D10 delegator's
+  independent grant, the step 2.5 FLS write gate over the keys the payload
+  names, and the ADR-0123 D2 organization wall. It says nothing about any refusal
+  not in that list. `@objectstack/plugin-security`'s
+  `can-write-object-admission.test.ts` pins the method's answer equal to the
+  registered middleware's on its equivalence block's cases, and pins one D12
+  UPDATE case as a direction: the method `false`, the middleware `true`.
+  
+  ⛔ `true` never means the write will succeed, and ⛔ what follows is not an
+  enumeration of the distance to success: the middleware refuses both before and
+  after `next()` for reasons this method is never asked. Nearest to hand are the
+  remaining pre-resolution gates that run beside the two named above — the
+  package-managed and system-row write gates, which judge a row's PROVENANCE; the
+  curated-capability-name and audience-anchor binding refusals, which judge a
+  payload VALUE; and the ADR-0056 public-form grant, which no caller can present
+  to this method and which has no extracted primitive to call; the row-level and
+  post-image refusals — the `using` pre-image, the ADR-0055 controlled-by-parent
+  master edit, the RLS `check` post-image and the Layer 0 tenant post-image, none
+  of which this method can judge because it is asked about no ROW; the
+  payload-VALUE refusals the same caller passes by simply not sending the value —
+  the masked echo and the `owner_id` forge, which therefore widen the caller class
+  by nothing; the anti-filter-oracle guard on the caller's own predicate, which
+  this method is handed none of; the post-`next()` assertion that the insert
+  `check` seam really ran, which judges an executed write; and, outside the
+  middleware entirely, `readonlyWhen`, the static `readonly` strip and the
+  validation rules themselves.
+  
+  ### Scope
+  
+  Object validation rules (`script` / `cross_field`) — and the system-authority
+  read is confined to that one seam. The field-level
+  `requiredWhen` / `readonlyWhen` / option `visibleWhen` predicates fail **open**
+  and are deliberately not covered here; RLS predicates are out too. Depth is one
+  hop. The cleanup UPDATE a `set_null` delete issues on a referencing record
+  resolves no relationship, so a rule there is evaluated as before this release —
+  against the bare id, where reading through it faults and refuses the cleanup,
+  and with it the delete.
+- 9347c1f: A row-level or sharing-rule predicate comparing a field against a list with `!=` / `==` is refused at the CEL lowering instead of lowering to a filter that widens on driver-mongodb, and driver-mongodb refuses `$ne` with an array comparand (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/driver-mongodb`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing` and `@objectstack/lint` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-list-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS reads on MongoDB and RLS write checks.** A policy written `record.status != ['closed', 'archived']` (or `!(record.status == [...])`, or `!=` against a `current_user` membership set) lowered to `{ status: { $ne: [...] } }` (or `$not` around a bare-array equality). The RLS `using` clause is composed into the query after the engine's comparand-shape check, and driver-mongodb passed the shape to the server, where it selects every scalar row: the read returned the rows the policy was written to hide. A `check` written `!=` against a membership set admitted every write.
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses `==` / `!=` whose comparand is a list (`unsupported`): a list literal, or a `current_user` variable that resolves to an array. The authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports the literal; a resolved array is refused per request.
+  - `@objectstack/plugin-security`: the RLS compiler drops such a policy and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403). A CEL-authored `check` gets this 403; the `INVALID_FILTER` / 400 of `matchesFilterCondition` remains for a filter passed to it directly.
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is skipped at bootstrap and never seeded.
+  - `@objectstack/lint`: the list-literal form is reported (`rls-predicate-unenforceable`, `sharing-rule-unlowerable-condition`). The RLS reference pass probes each kernel-resolved `current_user` key with its runtime type.
+  - `@objectstack/driver-mongodb`: `translateFilter` refuses `$ne` with an array comparand at any depth, with `INVALID_FILTER` / 400, as driver-sql and driver-memory already do.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  **What to change.** "One of these values" is `record.status in ['open', 'pending']`; "none of these values" is `!(record.status in ['closed', 'archived'])`. In a raw filter, use `$in` / `$nin`. `in`, scalar `==` / `!=`, `null` and field-to-field comparisons are unchanged.
+  
+  <!-- adr-0087: registered cel-predicate-list-comparand-refused -->
+- c164186: `matchesFilterCondition` refuses an array comparand under `$ne` and in the equality position (`{ field: [...] }`, `$eq: [...]`) with `INVALID_FILTER` / 400, before any record is judged (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula` and `@objectstack/plugin-security` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `rls-predicate-array-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for row-level write checks.** This evaluator is what `@objectstack/plugin-security` runs against the post-image of an insert or update to enforce a row-level `check`. It compared strictly, and no stored value ever equals an array, so:
+  
+  - a `check` written `record.status != ['closed', 'archived']`, or `!=` against a `current_user` membership array, lowered to `{ status: { $ne: [...] } }` and matched **every** post-image;
+  - a `check` written `!(record.status == ['closed', 'archived'])` lowered to `{ $not: { status: [...] } }` and did the same.
+  
+  Every write such a policy was written to refuse was admitted and stored. The positive `record.status == ['open', 'pending']` already refused every write (403).
+  
+  The message withholds the field, the operator and the value, because the filter is usually an access policy the caller did not write, and the comparand may be a resolved membership set.
+  
+  **What to change.** A `check` or `using` predicate that means "one of these values" or "none of these values" is spelled with `in`: `record.status in ['open', 'pending']`, or `!(record.status in ['closed', 'archived'])`. Those, scalar `!=` / `==`, `null`, `Date` comparands and `{ $field }` references evaluate exactly as before.
+  
+  <!-- adr-0087: registered rls-predicate-array-comparand-refused -->
+- 4d7e740: A row-level or sharing-rule predicate whose comparison is handed something other than one value is refused at the CEL lowering or at the write-check evaluator, instead of admitting writes and reads it was written to refuse (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing`, `@objectstack/lint` and `@objectstack/objectql` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-one-value-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS write checks and reads.** Each shape below was measured through the real plugin-security on driver-sql and driver-memory:
+  
+  - `!(record.status in [['closed', 'archived']])` (a list nested in an `in` list) admitted and stored every write the `check` was written to refuse, and a `using` read returned every row on driver-memory.
+  - `current_user.org_user_ids != 'x'` and `current_user.org_user_ids > 'a'` (a membership set on a comparison with no field) folded to "no restriction": every write admitted, every row read, on every driver.
+  - `record.status > ['m']` compared the list as the string `'m'` on the write check, while the analytics read scope bound the whole list as one SQL parameter. `record.reviewer_id > current_user` compared the whole caller object as a string and admitted and stored every write; in this release the RLS compiler's comparand faces (#20212) already drop that policy, and this change refuses it at the lowering for every caller of the compiler.
+  - `record.status != record.tags`, its negation `!(record.status == record.tags)`, and the mirror `record.tags != record.status`, with `tags` a `json` field or a `multiple` lookup, admitted and stored every write.
+  
+  What changes:
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses, with `unsupported`, a list comparand under every comparison (the ordering operators now included, and on the constant-fold branch, whichever side), the `current_user` root or a key resolving to an object under an ordering operator, and an `in` list whose member is itself a list. The authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports each literal form; a resolved value is refused per request. `matchesFilterCondition` refuses, with `INVALID_FILTER` / 400, an array under `$gt` / `$gte` / `$lt` / `$lte`, an array member of `$in` / `$nin`, and a `{ $field }` comparison (`$eq`, `$ne` or an ordering operator) whose column holds a list or an object on the record being judged, on either side. The message withholds the field, the operator and the value.
+  - `@objectstack/plugin-security`: the RLS compiler drops a policy the compiler refuses and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403, and `getReadFilter` hands the analytics read scope the deny scope). A `check` comparing a field with a list-holding column is refused 400 and stores nothing.
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is skipped at bootstrap and never seeded.
+  - `@objectstack/lint`: the literal forms are reported as `rls-predicate-unenforceable`, and an ordering comparison against a membership set through the reference pass.
+  - `@objectstack/objectql`: a `having` comparison against a `{ $field }` column whose aggregated row holds a list is refused 400 where the row carries the list itself (driver-memory); driver-sql rows carry the stored JSON text and compare as before.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  The stage 2a changeset's sentence that `{ $field }` references evaluate as before no longer holds for a column holding a list or an object: that comparison is now refused.
+  
+  **What to change.** "One of these values" is `record.status in ['open', 'pending']`, and "none of these values" is `!(record.status in ['closed', 'archived'])`, with the list flat. An ordering takes one bound (`record.status > 'm'`); a range is two comparisons joined by `&&`. Compare against one key of the caller (`record.reviewer_id > current_user.id`). A field compared with a `json` or `multiple` field has no pushdown form: compare with a single-valued column, or move the condition into a validation rule or hook. In a raw filter, use `$in` / `$nin` with flat lists and one bound per ordering operator.
+  
+  Not changed: a field compared with a `json` or `multiple` field still lowers and is not reported at authoring time, because the lowering sees the predicate's text and not the object's field types; driver-memory still answers a `{ $field }` comparison on a read without evaluating the reference.
+  
+  <!-- adr-0087: registered cel-predicate-one-value-comparand-refused -->
+- de091b5: A row-level write check that orders a field against a bound (`>`, `>=`, `<`, `<=`) is refused with `INVALID_FILTER` / 400 when that field holds a list or an object on the record being written, instead of comparing the list's string form and admitting the write (#19886).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula` and `@objectstack/plugin-security` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `rls-predicate-stored-list-ordering-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS write checks.** Measured through the real plugin-security on driver-sql and driver-memory: `record.tags > 'a'`, with `tags` a `json` field holding `['m']`, compared `'m' > 'a'` and admitted and stored the write. `record.meta < 'a'` with `meta` holding `{ a: 1 }` compared `'[object Object]' < 'a'` and did the same, and so did a `multiple` lookup. `using` stands in as the check for a policy that declares no `check`, so the same predicate in `using` was enforced the same way on writes. No shipped row-level or sharing-rule predicate orders a field at all.
+  
+  What changes:
+  
+  - `@objectstack/formula`: `matchesFilterCondition` refuses `$gt` / `$gte` / `$lt` / `$lte` and `$between` on a field whose value on the record is a list or a plain object, whatever the comparand, with the same `INVALID_FILTER` / 400 and the same message as the stage 2d refusals. The refusal is per record: a record whose `json` field holds one scalar is compared as before. `null` and `Date` values are unchanged, and so is every equality against a stored list (`$eq`, `$ne`, implicit equality, `$in`, `$nin`). `$between` is not produced by the CEL lowering, so it reaches this only through a filter passed to `matchesFilterCondition` directly.
+  - `@objectstack/plugin-security`: a check insert or by-id update whose post-image holds a list or an object in an ordered field is refused 400 and stores nothing. That includes a by-id update that edits another field of a row whose stored `json` column holds a list, because the post-image merges the stored row.
+  - `@objectstack/spec`: the migration registry carries the entry. The stage 2a entry `rls-predicate-array-comparand-refused` now ends "Scalar != and ==, null, Date comparands, and { $field } references between single-valued columns evaluate exactly as before", which is true since stage 2d.
+  
+  Three moves, named:
+  
+  1. **The write check now matches driver-sql's read.** driver-sql refuses every ordering comparison, and `$between`, on a column it stores as JSON text, by declared type (400, #7398). The in-process check now refuses the same predicate on the same row (400).
+  2. **driver-memory's read parts from the write check.** driver-memory, a test driver, compares a stored list element by element on a read and keeps returning those rows (`record.tags > 'a'` reads a row holding `['m']`), while the check now refuses writing it. This is declared on #15104, as for stage 2d's `{ $field }` half.
+  3. **A list written into a scalar field under an ordering check now answers 400.** `status: ['m']` into a `text` field under `record.status > 'a'`, or `amount: [500]` into a `number` field under `record.amount > 10`, was admitted, and driver-sql stored it as the text `'["m"]'` / `'[500]'`. It is now refused before anything is stored.
+  
+  **The explain answer.** `security/explain` evaluates the business RLS predicate in-process on the fetched record, so it now answers `INVALID_FILTER` / 400 where the record holds a list or an object under an ordering predicate (this stage). It already answered 400 for a `{ $field }` comparison against a list-holding column (stage 2d). For both, per operation:
+  
+  | explain operation | driver | the enforced operation answers | same as explain's 400? |
+  |---|---|---|---|
+  | `read` | driver-sql | 400 `INVALID_FILTER` (the driver's refusal) | yes |
+  | `update` | driver-memory | 400 `INVALID_FILTER` (the post-image check) | yes |
+  | `update` | driver-sql | 403 `PERMISSION_DENIED`: the pre-image gate fails closed on the driver's 400 | no — both deny |
+  | `read` | driver-memory | the rows its element-wise read admits | no — the test driver's read |
+  
+  Explain itself is unchanged.
+  
+  **What to change.** Order a single-valued column (`record.priority > 2`), or test membership in the list with `in` (`record.status in ['open', 'pending']`). A `json` or `multiple` field has no ordering.
+  
+  <!-- adr-0087: registered rls-predicate-stored-list-ordering-refused -->
+- 560b724: A row-level or sharing-rule predicate comparing with `!=` / `==` against the bare `current_user` root is refused at the CEL lowering instead of lowering against the whole caller context object (#19959).
+  
+  **BREAKING** — an accept-set narrowing, shipped by `@objectstack/formula`, `@objectstack/plugin-security`, `@objectstack/plugin-sharing` and `@objectstack/lint` as `minor` under the repo's launch-window convention for accept-set narrowings. The hand-migration prescription is registered under protocol major 18 as `cel-predicate-variable-root-comparand-refused`.
+  
+  Clause-②: no (narrowing)
+  
+  **Security fix for RLS write checks.** A policy written `record.owner_id != current_user` (or `== current_user`, or `!(record.owner_id == current_user)`) named the variable root alone, which resolved to the whole caller context, and lowered to `{ owner_id: { $ne: <that object> } }` (or the bare object, or `$not` around it). A strict compare never equals an object, so a `check` so written admitted and stored every insert and by-id update it was written to refuse, a USING-only such policy admitted every insert, and explain reported the read as narrowed with the caller's membership sets echoed in its `readFilter`. A constant comparison such as `current_user != 'guest'` folded to no restriction.
+  
+  - `@objectstack/formula`: `compileCelToFilter` refuses `==` / `!=` whose operand is the bare variable root (`unsupported`), in both of its modes, so the authoring shape check (`isPushdownableCel`, `isSupportedRlsExpression`) reports it before any request. A variable that resolves to an object is refused per request; a `Date` still passes.
+  - `@objectstack/plugin-security`: the RLS compiler drops such a policy and fails closed when no other policy applies (`RLS_DENY_FILTER`: reads return no rows, `check` writes are refused 403, explain answers `denies`).
+  - `@objectstack/plugin-sharing`: a declared sharing rule with such a `condition` is still skipped at bootstrap, now with reason `unsupported` instead of `unresolved-variable`.
+  - `@objectstack/lint`: the shape is reported as `rls-predicate-unenforceable` on either RLS clause, where it was silent, and as `sharing-rule-unlowerable-condition` on a sharing condition, where it was `sharing-rule-runtime-variable-condition`.
+  - `@objectstack/spec`: the migration registry carries the entry.
+  
+  **What to change.** Compare against the key the predicate means: `record.owner_id != current_user` becomes `record.owner_id != current_user.id` (or `current_user.organization_id`, `current_user.email`); a membership test is `record.owner_id in current_user.org_user_ids`. Scalar keys, `in`, `null`, literals and field-to-field comparisons are unchanged.
+  
+  <!-- adr-0087: registered cel-predicate-variable-root-comparand-refused -->
+- 93cfc3f: `$like` / `$ilike`: `_` matches exactly one Unicode code point on every face, so an emoji or any other character outside the Basic Multilingual Plane is one `_`, as SQL `LIKE` and SQLite `GLOB` count it (#20143).
+  
+  The SQLite faces (`driver-sql` on better-sqlite3, `driver-sqlite-wasm`, `driver-turso` local and remote) already answered by code points. The JavaScript faces did not: they compiled the spec's `likePatternToRegexSource` with no regular-expression flags, so `_` read one UTF-16 code unit, which is half of an emoji. The same REST filter returned a different row set depending on which driver backed the object. Measured at `e7f69dbb` over values holding `😀` (U+1F600) and `𝒜` (U+1D49C), 48 answer cells on the JS faces differed from the SQLite faces; after this change, none do.
+  
+  - **`@objectstack/spec`**: a new export, `likePatternToRegExp(pattern, foldAscii?)`, compiles the translation with the `u` flag, the one compilation in which `_` is one code point. `matchesLikePattern` evaluates it. `likePatternToRegexSource` is unchanged and still exported; its source means one code point per `_` only under `u`. The `$like` description now says that a character is one Unicode code point.
+  - **`@objectstack/formula`**: `matchesFilterCondition` answers `$like` / `$ilike` by code points, through the spec's `matchesLikePattern`. Its own CEL `size()` already counted code points.
+  - **`@objectstack/driver-memory`**: all three `$like` doors (the `$like` filter and the AST `like` / `ilike` node through mingo, and the reference matcher) answer by code points.
+  
+  The answer set moves in both directions on those three faces, only for values holding a character outside the BMP:
+  
+  | pattern | a stored `😀` | `a😀b` | `a😀😀b` |
+  |---|---|---|---|
+  | `_` | now matches | — | — |
+  | `__` | no longer matches | — | — |
+  | `a_b` | — | now matches | — |
+  | `a__b` | — | no longer matches | now matches |
+  
+  `$ilike` moves the same way. No pattern is newly refused and no refusal is lifted. Values made only of characters inside the BMP answer exactly as before.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes is removed or renamed: no spec key, no export and no config field moves, and no stored metadata representation changes, so `objectstack migrate meta` has nothing to rewrite. What moves is the row set a `$like` / `$ilike` query returns on the JavaScript faces, and only for stored values holding a character outside the BMP, where it now equals what every SQLite face already returned. -->
+- 862b6ce: Expression refusals now carry a stable `code` and typed `params` beside their English `message`, so a localized author surface can render its own words: `validateExpression` (every entry in `errors[]` and `warnings[]`), `collectCelRootIdentifiers` (its `ok: false` arm), `predicateSlotRefusal` and `structuralConditionRefusal` (#20291)
+  
+  Clause-②: yes
+  
+  Until now the only thing a refusal said was an English sentence, and a designer running in another locale could only show it verbatim, beside its own translated headings. Each refusal now also names its code — one of a closed, kebab-case set — and the values its sentence interpolates, so a consumer keys a catalogue row to the code and fills it from the params. The `message` is the same sentence, byte for byte; nothing is removed or renamed, so no existing reader changes.
+  
+  - `@objectstack/formula` exports `EXPRESSION_REFUSAL_CODES` (the closed set as a frozen list) and the types `ExpressionRefusalCode`, `ExpressionRefusalParams` (code → params), `ExpressionRefusal`, `ExprValidationCode`, `CelRootsRefusalCode`, `CelFieldRole`, `ExpressionSourceKind` and `CelRootIdentifiersResult`. `ExprValidationError` gains `code` and `params`.
+  - `@objectstack/spec/automation` exports `FLOW_SLOT_REFUSAL_CODES` (the closed set of both flow-slot refusal producers, as a frozen list) and the types `FlowSlotRefusalCode`, `FlowSlotRefusalParams` (code → params), `PredicateSlotRefusalCode`, `PredicateSlotRefusal`, `PredicateSlotValueKind`, `StructuralConditionRefusalCode`, `StructuralConditionRefusal` and `StructuralConditionValueKind`. `predicateSlotRefusal` returns `PredicateSlotRefusal` and `structuralConditionRefusal` returns `StructuralConditionRefusal`; each is its previous `{ message, source }` plus `code` and `params`.
+  - Narrowing on `code` narrows `params`. A code never changes once published: a reworded message keeps its code, and a new refusal gets a new one.
+  - A `detail` param is the CEL or template engine's own diagnostic, in English, passed through as the message carries it.
+  - These are authoring diagnostics returned as values, not ADR-0112 request error codes, which is why they are kebab-case.
+  - The `validate_expression` MCP tool forwards `validateExpression`'s `errors` and `warnings` as they are, so each entry in its answer now also carries `code` and `params`.
+- aeb0557: fix(security)!: the RLS write check refuses a field-to-field comparison the read refuses — one comparison class, one answer per policy (#20355)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered rls-predicate-cross-class-field-comparison-refused -->
+  
+  **BREAKING** — an accept-set narrowing on the row-level write check, shipped as `minor`
+  under the launch-window convention (`check-changeset-no-major` refuses `major` until GA;
+  breaking-ness is carried by this banner and the ADR-0087 disposition above, not by the
+  level). The hand-migration prescription is registered under protocol major 18 as
+  `rls-predicate-cross-class-field-comparison-refused`, one ADR-0087 D3 entry for the whole
+  family: the authoring arm `os validate` gained in #20347 and this write-check arm.
+  
+  **What changed.** A row-level policy that compares two fields of no shared comparison
+  class — `record.status != record.amount` (text and a number), `record.status !=
+  record.photo` (text and a file field), `record.status != record.is_open` (text and a
+  formula field), `record.status != record.meta` (text and a json field) — already had
+  every read it scopes refused with `INVALID_FILTER` / 400 on the SQL drivers, because
+  driver-sql compiles a column-to-column comparison only within one class. The write
+  check did not know the rule: it compared the two raw values in-process, so an insert
+  or update the policy's `check` judges (or its `using`, standing in as the check) was
+  admitted and stored whenever that comparison happened to hold. Measured through
+  plugin-security and ObjectQL on SQLite, sqlite-wasm and PostgreSQL. The write check
+  now refuses the comparison too, with the read's envelope, `INVALID_FILTER` / 400, for
+  every insert (single or array), by-id update and predicate update it judges, and
+  nothing is stored. The same-class comparisons it always compared are compared as
+  before. The 400 names no column of the policy; the server log names the policy and
+  both columns. A comparison against a json or `multiple` field is refused by its
+  declared type now, where it used to be judged by the value each record held.
+  
+  **`@objectstack/formula`.** `matchesFilterCondition(record, filter, options?)` takes an
+  optional third argument: `options.fields`, the object's declared columns (`type` and
+  `multiple` per field name). Given it, every `{ $field }` comparison between two
+  declared columns is judged by `crossFieldComparisonVerdict` from
+  `@objectstack/spec/data` before any record is read, and one the platform defines no
+  answer for throws `INVALID_FILTER` / 400. Without it the evaluator behaves exactly as
+  before. Two new exports go with it: `findCrossFieldClassRefusal(filter, fields)`, the
+  pure judgement, and `crossFieldClassRefusalCarriedBy(error)`, which reads the refused
+  comparison off the error for a server-side log.
+  
+  **`@objectstack/driver-sql`.** `crossFieldComparisonClass` reads the same export
+  (`crossFieldColumnVerdict`) instead of keeping its own copy of the classification, and
+  layers above it only its internal type aliases. Every read answers as before.
+  
+  **`@objectstack/lint`.** The `rls-predicate-unenforceable` finding for such a
+  comparison now states the write answer the runtime gives: the in-process write check
+  refuses it by the same classification and stores nothing.
+  
+  **If a policy of yours is refused.** The platform defines no comparison between those
+  two columns on any path, so the policy never protected a read either. Compare a field
+  only with a field of the same class — a number with a number, text with text, a
+  boolean with a boolean, a date with a date, a datetime with a datetime, a time of day
+  with a time of day — or, if the two columns do hold comparable values, correct the
+  declaration of the one declared with the wrong type. `os validate` names every such
+  comparison.
+- fb38607: feat(drivers,formula,objectql): the engine's filter faces answer the staged `$empty` operator (#20444)
+  
+  Clause-②: yes (widening)
+  
+  `$empty: true | false` is declared by `@objectstack/spec` (`FieldOperatorsSchema`) with a per-type meaning: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. `$empty: false` is the exact complement. Until now every face in this list refused it (`INVALID_FILTER` / 400), except `matchesFilterCondition`, which answered `false` for every record. **A driver or evaluator called directly now answers it:**
+  
+  - **By the field's declared type**, through the spec's one expansion (`expandEmptyOperator`): `driver-sql`'s filter compiler (and so `driver-sqlite-wasm` and `driver-turso`'s local transport, which inherit it), `driver-turso`'s remote transport, `driver-memory`'s query path (`find` / `count` / `update` / `delete`) and `driver-mongodb`'s `translateFilter` (its `find`, its aggregate `$match`). The declaration is the one each driver already receives — `initObjects` / `registerObjectMetadata` / `registerExternalObject` on the SQL family, `syncSchema` on the others. On SQL a multi-value field's empty list is tested as stored JSON per dialect (SQLite `json_array_length` behind a `json_valid` guard, PostgreSQL a `jsonb` comparison, MySQL `JSON_LENGTH`), never as an equality comparand.
+  - **By value** — null, a missing value, `''` and `[]` are empty (`isEmptyFilterValue`) — on the faces that read no field declaration: `@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`), `driver-memory`'s reference matcher, and `@objectstack/objectql`'s `having` and per-aggregation `filter`. In `having`, a `count` or `sum` holding `0` is not empty.
+  
+  **Refused, never guessed** (`INVALID_FILTER` / 400): `$empty` on a field whose declaration the driver does not hold (a table built outside its registration, a builtin column such as `id`, a field with no `type`, or `translateFilter` / `RemoteTransport` used standalone without a declaration), a multi-value field on a SQL dialect the driver does not model, and a flag that is not a boolean. `driver-memory`'s analytics (cube) face refuses `$empty` as an operator it cannot compile, as it does `$null`.
+  
+  New optional API: `translateFilter(where, temporalKind?, valueShape?)` in `@objectstack/driver-mongodb` takes a declared-value-shape resolver (type `ValueShapeResolver`), and `buildAggregationPipeline` a `valueShape` option; `RemoteTransport.setDeclaredValueShapeResolver` in `@objectstack/driver-turso`, which `TursoDriver` wires. `@objectstack/spec`'s shared `FILTER_LOGIC_CASES` table gains seven `$empty` cases: a backend that runs it answers `$empty` or goes red, and its harness must declare the fixture's columns.
+  
+  `$empty` stays staged: it is not in `FILTER_OPERATORS`, so the engine's front door still refuses it until the flip card adds it, and the view operators `is_empty` / `is_not_empty` still lower to `$null`.
+- 5505646: fix(formula): the strict declaredness env declares `SCOPE_ROOTS` as `dyn`, so a bare reference behind a root name is no longer masked (#16412)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every view, form, flow and formula parses byte-identically to before. `objectstack migrate meta` therefore has nothing to rewrite, and this changeset carries no rewrite instructions. What narrows is the ACCEPT SET of published CHECKERS at build time: `validateExpression` and two `@objectstack/lint` rules now report a bare field reference they previously left unjudged, which is the same verdict each of them already returns for that identifier when it is written first in the same predicate. The sources that newly report are already broken at RUN time and were before this change: a bare identifier in a record-scoped site resolves to nothing, the expression evaluates to null and a visibility predicate falls open, which is #1928's class. The remedy is per-source and the diagnostic already names it in full, naming the identifier and the namespace it belongs under; there is no authored artifact and no stored representation for a migration to act on. -->
+  
+  **BREAKING** in the accept-set sense — an accept-set narrowing on published
+  CHECKERS, in the same sense as a route that starts refusing a request it should
+  always have refused — landing in the launch window as `minor` on both packages (during the window the bump level is
+  not the carrier of breaking-ness; this paragraph and the disposition above
+  are). Nothing that was already reported stops being reported, and no source
+  that is correct starts being reported.
+  
+  `firstUndeclaredReference` asks cel-js's checker for the first undeclared
+  identifier in a source. That checker returns exactly ONE error, and the helper
+  acts only on `Unknown variable: X`, so whenever the first error is of another
+  class every undeclared reference behind it in the same source went unjudged and
+  the helper answered `null` — which is also the value that means "every
+  reference is rooted". Four published call sites read that answer, and none of
+  them can tell the two readings apart.
+  
+  The widest way to reach that state was a disagreement between two environments
+  in this package about the same names. The strict env declared every
+  `SCOPE_ROOTS` member (`data`, `config`, `record`, `result`, `item`, `event`,
+  `input`, `user`, …) as `map`, while the permissive env that `celEngine.compile`
+  type-checks in leaves them `dyn`. `map` has no `==`, `<` or `+` overload, so an
+  ordinary comparison on one of those names compiled clean and then faulted `no
+  such overload` in the strict env only — taking the single error slot and
+  silencing everything behind it. An author reaches it by naming an object field
+  or a flow variable after a namespace root and reading it bare, which on a
+  metadata-editing form is not even a coincidence: that layer binds the row under
+  edit as `data`.
+  
+  The strict env now declares those roots `dyn`, which is what the list's own
+  doc-comment already claimed it was for — member access, arithmetic and
+  comparison on a root all deferring to runtime — and which `map` delivered only
+  the first of. The two environments agree about these names, so the class cannot
+  arise rather than being compensated for downstream.
+  
+  What starts reporting, measured on each published surface:
+  
+  - `@objectstack/formula` `validateExpression` with `scope: 'record'` — a bare
+    reference behind a root name is the hard error it always was for the same
+    identifier written first (`ok` was `true` with zero errors; it is now `false`).
+  - `@objectstack/formula` `validateExpression` with `scope: 'flattened'` — the
+    did-you-mean warning reaches a misspelled field behind a root name.
+  - `@objectstack/lint` `visibility-bare-identifier` — a bare identifier behind a
+    root name in a `visibleWhen` predicate is a finding. Per that rule's own
+    message the console otherwise falls open and the element renders
+    unconditionally.
+  - `@objectstack/lint` flow-variable shadowing — a shadowed field read behind a
+    root name is warned. That rule's documented blind spot is now name-local, as
+    its wording always claimed: the colliding name itself is still not reported.
+  
+  ⚠️ One published answer also WIDENS, and it is not a reporting surface.
+  `inferExpressionType` (`@objectstack/formula`, re-exported from the package
+  root; read by `@objectstack/mcp` as `validate_expression.inferredType`) infers a
+  formula's coarse value type through `inferCelType`, which shares this same
+  strict environment. While the roots were `map` there was no `==`, `<` or `+`
+  overload for them, so an expression using a namespace root as a DIRECT OPERAND
+  did not type-check at all and the answer was `'unknown'`. With the roots `dyn`
+  those expressions type-check and the answer is the truthful CEL type:
+  `result + 1` and `record ? 1 : 2` → `'number'`, `record == "x"` → `'boolean'`,
+  `data == "x" ? "a" : "b"` → `'text'`, uniformly for every name on the list. No
+  answer changes from one concrete type to another and nothing narrows to
+  `'unknown'` — `size(record)` and `"a" in record` still answer, and a root that
+  is only the base of a member access (`record.amount > 100`) never consulted this
+  declaration. A consumer that keys off a concrete type therefore sees strictly
+  more expressions classified, never a different classification; for the
+  motivating consumer that means a formula written as `data == "x" ? "a" : "b"` is
+  now correctly seen as text rather than as unprovable. Pinned on both sides in
+  `validate.test.ts`.
+  
+  ⛔ Two first-error classes are NOT closed by this, and both stay pinned. A CEL
+  TYPE name (`type`, `string`, `int`, …) is declared by CEL itself, so no
+  declaration this package makes can reach it; measured on the strict env, the
+  message for `type == 'grid'` is byte-identical under a `map` and a `dyn` root
+  declaration. And `has()` handed a non-select argument still faults its own
+  class, which `@objectstack/lint`'s visibility rule masks at its own call site
+  (#16118) and which nothing else masks.
+  
+  The narrowing this helper is built on is unchanged: it still acts only on
+  `Unknown variable`, so `type(record.x) == string`, comprehension macros, guard
+  idioms, optional chaining and stdlib calls report nothing, and a widening of
+  that regex onto the overload message remains refused.
+
+### Patch Changes
+
+- de62769: `SCOPE_ROOTS`'s docblock says it is a **baseline**, not a per-surface accept set, and points at where the per-surface verdict actually lives
+  
+  The exported `SCOPE_ROOTS` constant carried a docblock that made **a false statement about itself**. Its opening line read *"Namespace roots that a `record`-scoped CEL site may legitimately reference"* — which, read alone, is exactly the per-surface accept-set reading. Ninety lines below, the companion block asserted *"This list is a 'never faults' BASELINE, not a per-surface contract — **the doc-comment above says so**"*. The doc-comment above did not say so; it said close to the opposite.
+  
+  **This is not a docs nit, and the evidence is a card.** The accept-set reading is what a downstream seat took away, and it generated a cross-repo card filed against this package (this one) about a lint/runtime disagreement that is not a disagreement at all: the baseline declares a root, the per-surface gate refuses it, and both are correct.
+  
+  - **The opening line now states the contract it actually is**: the roots the strict check env declares, so that naming one is never itself a fault — and explicitly ⛔ *not* a claim that any surface **binds** the root.
+  - **It points at the per-surface authority by name**: `@objectstack/lint`'s `fieldRuleRootIssue`, judged against that surface's own closed `FIELD_RULE_BOUND_ROOTS` (`record` / `previous` / `parent`). A reader asking "may THIS surface reference this root?" is now sent one hop to the symbol that answers it, instead of reading the answer off this list.
+  - **It names `data` as the standing example** of a root this list declares and the field-rule surface does not bind — the two answers doing their separate jobs, ⛔ not something to repair by editing this list.
+  - **The self-reference is now true.** The companion block cites `SCOPE_ROOTS`'s own doc-comment, which now opens by saying exactly what the citation claims it says.
+  
+  ⛔ **Zero behaviour change.** `SCOPE_ROOTS` keeps all **27** members, byte for byte — no member is added, removed or reordered, and ⛔ `app` is not added (objectstack#16420 closed `not_planned` on that and this does not reopen it). Narrowing was refuted by measurement rather than by preference: six `*.form.ts` metadata-form modules in this repo carry live `data.` predicates. The diff is comment lines only.
+  
+  **This publishes, which is why it is `patch` rather than `skip-changeset`.** `@objectstack/formula`'s `files[]` ships `dist`, and this TSDoc is emitted into the built declarations — measured on the built artifact at three readings: the new text's distinctive phrase present at 1 in both `dist/index.d.ts` and `dist/index.d.mts`, an untouched neighbouring sentence from the same docblock present at 1 as the lit control, and a fabricated phrase at 0 as the dark control. The companion block is a plain `/* */` comment attached to no declaration and reads 0 in `dist` — it is the half that does not ship, and the half that does is the half that was wrong.
+- 7465eeb: fix(formula,objectql): the two refusals a traversing validation rule on an optional lookup meets now name the repairs that work — a `conditional` wrapper or `required: true` (#20007)
+  
+  Clause-②: no
+  
+  An author who wants to refuse a write when an OPTIONAL lookup is set and its related record is secret writes `record.line != null && record.line.kind == 'secret'`. Two refusals then sent them in a circle:
+  
+  1. That expression reads `line` both through the relationship and as a plain value, which cannot be served, and is refused. The refusal said to "compare the id explicitly" and write `record.line.id` for the value comparison.
+  2. `record.line.id != null && record.line.kind == 'secret'` reads through `line` too, so an order with no line is refused before the rule is evaluated, as "no single related record". That refusal said to "guard the rule on the reference being set" and named no spelling for the guard.
+  
+  Which writes are refused is unchanged, and so are the error, the `rule_violation` field error and its `constraint` (`reason: 'unevaluable'` and the fault). `@objectstack/lint` passes the formula refusal through unchanged, so it shows the new text too. Only the prescriptions change. Both now name the two spellings measured to work for an optional reference, and the guard is worded exactly as in the delete-cleanup refusal:
+  
+  ```text
+  … To compare the id, write `record.line.id` for the value comparison, and keep
+  `record.line.<related field>` for the traversal. `record.line.id` is not a null guard: it
+  reads through `line` too, and a rule that reads through an empty `line` rejects the write
+  instead of being skipped. If the plain value tests for empty, take that test out of this
+  expression. To skip the rule while `line` is empty, guard it on `line` being set: make it
+  the `then` of a `conditional` rule whose `when` is `record.line != null`. To refuse an
+  empty `line`, make `line` required (`required: true`).
+  ```
+  
+  ```text
+  … A predicate resolves ONE hop through a single reference. To skip the rule while `line`
+  is empty, guard it on `line` being set: make it the `then` of a `conditional` rule whose
+  `when` is `record.line != null` — `record.line.id != null` inside the rule is no guard, as
+  it reads through `line` too. To refuse an empty `line`, make `line` required
+  (`required: true`). For a multi-value reference, test it with a macro (`exists`, `size`)
+  instead of reading through it.
+  ```
+  
+  The repair as an author writes it, measured end to end on insert and update. It accepts an order with no line or a public line, and refuses a secret line with the rule's own message:
+  
+  ```ts
+  validations: [{
+    name: 'no_secret_line_when_set', type: 'conditional',
+    message: 'Only checked while the order names a line.',
+    when: 'record.line != null',
+    then: { name: 'no_secret_line', type: 'script', message: 'An order may not carry a secret line.',
+            condition: "record.line.kind == 'secret'" },
+  }]
+  ```
+  
+  With `required: true` on `line` instead, an order with no line is refused at the field (`required`), and the rule still judges one with a line.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [75237a9]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [6d2571f]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [172b4cf]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [8255a51]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [b8ec127]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

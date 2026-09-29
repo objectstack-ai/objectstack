@@ -96,7 +96,7 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    ['id', 'owner'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
+    ['id', 'owner'].map((n) => [n, { label: n, type: 'string', sql: n }]),
   ),
   public: true,
 } as unknown as Cube;
@@ -343,8 +343,8 @@ describe('[#13926] `applyReadScope` guards the JOINED object\'s scope too', () =
     name: 'sales',
     title: 'Sales',
     sql: 'opportunity',
-    measures: { revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' } },
-    dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' } },
+    measures: { revenue: { label: 'Revenue', type: 'sum', sql: 'amount' } },
+    dimensions: { region: { label: 'Region', type: 'string', sql: 'account.region' } },
     public: true,
   };
 

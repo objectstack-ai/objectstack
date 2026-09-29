@@ -28,21 +28,21 @@ const cube: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-    total: { name: 'total', label: 'Total', type: 'sum', sql: 'amount' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    total: { label: 'Total', type: 'sum', sql: 'amount' },
     // The three custom-expression types. `sql` IS the computation.
     margin: {
-      name: 'margin', label: 'Margin', type: 'number',
+      label: 'Margin', type: 'number',
       sql: 'SUM(revenue) / NULLIF(SUM(cost), 0)',
     },
     top_status: {
-      name: 'top_status', label: 'Top status', type: 'string',
+      label: 'Top status', type: 'string',
       sql: "MAX(CASE WHEN paid THEN 'paid' ELSE 'open' END)",
     },
-    any_paid: { name: 'any_paid', label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
+    any_paid: { label: 'Any paid', type: 'boolean', sql: 'MAX(paid)' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
   },
 } as never;
 
@@ -92,11 +92,11 @@ describe('an expression containing a dot is not mistaken for a join path', () =>
       ...cube.measures,
       // A dot inside a function call — an expression, not `relation.column`.
       acct_total: {
-        name: 'acct_total', label: 'Account total', type: 'number',
+        label: 'Account total', type: 'number',
         sql: 'SUM(account.amount) / 2',
       },
       // A genuine relationship path, which MUST still be qualified and joined.
-      acct_amount: { name: 'acct_amount', label: 'Account amount', type: 'sum', sql: 'account.amount' },
+      acct_amount: { label: 'Account amount', type: 'sum', sql: 'account.amount' },
     },
   } as never;
   const dottedCtx = { ...(ctx as object), getCube: () => dotted } as never;
@@ -131,7 +131,7 @@ describe('the questions COUNT(*) used to answer now fail loudly', () => {
   it('throws for an unrecognised metric type', async () => {
     const bad = {
       ...cube,
-      measures: { weird: { name: 'weird', label: 'Weird', type: 'median', sql: 'amount' } },
+      measures: { weird: { label: 'Weird', type: 'median', sql: 'amount' } },
     } as never;
     const badCtx = { ...(ctx as object), getCube: () => bad } as never;
     await expect(new NativeSQLStrategy().generateSql({ cube: 'orders', measures: ['weird'] }, badCtx))
@@ -141,7 +141,7 @@ describe('the questions COUNT(*) used to answer now fail loudly', () => {
   it('the unrecognised-type error lists both vocabularies', async () => {
     const bad = {
       ...cube,
-      measures: { weird: { name: 'weird', label: 'Weird', type: 'median', sql: 'amount' } },
+      measures: { weird: { label: 'Weird', type: 'median', sql: 'amount' } },
     } as never;
     const badCtx = { ...(ctx as object), getCube: () => bad } as never;
     const err = await new NativeSQLStrategy()

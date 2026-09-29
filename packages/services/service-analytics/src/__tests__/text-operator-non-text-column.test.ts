@@ -68,11 +68,11 @@ const CUBE: Cube = {
   name: 'texts',
   title: 'Texts',
   sql: 'rows',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
-    score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    name: { label: 'Name', type: 'string', sql: 'name' },
+    score: { label: 'Score', type: 'number', sql: 'score' },
   },
   public: true,
 } as unknown as Cube;

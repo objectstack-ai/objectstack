@@ -152,7 +152,7 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    ['id', 'status'].map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
+    ['id', 'status'].map((n) => [n, { label: n, type: 'string', sql: n }]),
   ),
   public: true,
 } as unknown as Cube;

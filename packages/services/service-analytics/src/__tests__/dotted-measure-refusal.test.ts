@@ -355,7 +355,7 @@ describe('[#5918] the warm registry gets the same answer as the cold one', () =>
       name: 'crm_account',
       title: 'Accounts',
       sql: 'crm_account',
-      measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+      measures: { count: { label: 'Count', type: 'count', sql: '*' } },
       dimensions: {},
       public: true,
     };
@@ -413,9 +413,9 @@ describe('[#5918] the surfaces the ruling leaves alone', () => {
       title: 'Accounts',
       sql: 'crm_account',
       measures: {
-        count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+        count: { label: 'Count', type: 'count', sql: '*' },
         'owner.amount_sum': {
-          name: 'owner.amount_sum', label: 'Owner amount', type: 'sum', sql: 'owner.amount',
+          label: 'Owner amount', type: 'sum', sql: 'owner.amount',
         },
       },
       dimensions: {},

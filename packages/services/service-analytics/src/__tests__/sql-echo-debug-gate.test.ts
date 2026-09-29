@@ -57,10 +57,10 @@ const usersCube: Cube = {
   title: 'Users',
   sql: 'sys_user',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+    count: { label: 'Count', type: 'count', sql: '*' },
   },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
   },
   public: true,
 };

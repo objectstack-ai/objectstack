@@ -112,10 +112,10 @@ describe('MemoryAnalyticsService — dateRange window (#4042)', () => {
     title: 'Tasks',
     sql: 'task',
     measures: {
-      count: { name: 'count', label: 'Count', type: 'count', sql: 'id' },
+      count: { label: 'Count', type: 'count', sql: 'id' },
     },
     dimensions: {
-      created_at: { name: 'created_at', label: 'Created', type: 'time', sql: 'created_at' },
+      created_at: { label: 'Created', type: 'time', sql: 'created_at' },
     },
   } as unknown as Cube;
 

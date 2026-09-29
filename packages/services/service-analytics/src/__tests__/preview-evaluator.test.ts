@@ -91,12 +91,12 @@ describe('evaluateAnalyticsQueryOverRows', () => {
     name: 'expense_ds',
     sql: 'expense',
     dimensions: {
-      category: { name: 'category', type: 'string', sql: 'category' },
-      spent_on: { name: 'spent_on', type: 'time', sql: 'spent_on', granularities: ['month'] },
+      category: { type: 'string', sql: 'category' },
+      spent_on: { type: 'time', sql: 'spent_on', granularities: ['month'] },
     },
     measures: {
-      count: { name: 'count', type: 'count', sql: '*' },
-      total_amount: { name: 'total_amount', type: 'sum', sql: 'amount' },
+      count: { type: 'count', sql: '*' },
+      total_amount: { type: 'sum', sql: 'amount' },
     },
   } as unknown as Cube;
 
