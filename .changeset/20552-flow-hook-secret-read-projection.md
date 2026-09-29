@@ -1,13 +1,18 @@
 ---
 '@objectstack/service-automation': patch
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 '@objectstack/metadata': patch
 '@objectstack/runtime': patch
 ---
 
 fix(security): a flow's inbound-hook secret is withheld from every served flow definition, and a read → edit → republish round trip keeps it (#20552)
 
-Clause-②: no
+Clause-②: yes (widening)
+
+**The widening.** `@objectstack/metadata-protocol` gains one public method,
+`ObjectStackProtocolImplementation.getMetaItemsForExecution`. It returns the stored
+bodies without the serving decorations, for in-process binders that execute what they
+read. No door that answers a caller may use it.
 
 An `api` flow's start node carries its inbound hook's HMAC secret (`config.secret`,
 ADR-0041), the one credential that hook has. Every read that served the flow's
