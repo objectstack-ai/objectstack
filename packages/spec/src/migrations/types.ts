@@ -49,6 +49,28 @@ export interface SemanticMigration {
   reason: string;
   /** How the consumer proves the hand-migration correct (their own verify loop). */
   acceptanceCriteria: string;
+  /**
+   * Ids of the D2 conversions whose APPLIED edits this entry judges: the
+   * mechanical rewrites the chain replay makes, for which this entry states the
+   * judgment the consumer still owes (keep the written value, delete it, or
+   * narrow the source instead). Each id names a conversion that this entry's
+   * step or an earlier one replays (`MigrationStep.conversionIds`), and
+   * `migrations.test.ts` refuses one that does not.
+   *
+   * The join key is the same name on both sides: an id here is the
+   * `conversionId` of every {@link MigrationApplication} that conversion
+   * produces, and the chain copies this field onto the entry's
+   * {@link MigrationTodo} like every other field. So a printer of a chain
+   * result can show the entry beside each applied edit it judges, for review.
+   * The link moves nothing out of the chain result: the entry is reported as a
+   * TODO of its hop whether or not any edit it names was applied.
+   *
+   * Omit it when the entry judges no mechanical edit. Add an id only after
+   * reading the entry and confirming that it judges that conversion's output;
+   * ⛔ never derive one from the entry's prose naming the id, since prose also
+   * names incidental analogues.
+   */
+  conversionIds?: readonly string[];
 }
 
 /**
