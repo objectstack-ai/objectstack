@@ -5,15 +5,14 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
+import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import {
-  ObjectStackDefinitionSchema,
   applyMetaMigrations,
   composeSpecChanges,
-  normalizeStackInput,
   MigrationFloorError,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
-} from '@objectstack/spec';
+} from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
 import { FILE_REFERENCES_MIGRATION_ID, VALUE_SHAPES_MIGRATION_ID } from '@objectstack/spec/system';
