@@ -26,7 +26,9 @@ export const entry: SemanticMigration = {
     + 'rebuilt from source (`os build` / `composeStacks(…, { manifest: \'preserve\' })` no '
     + 'longer folds them into a body), and a hand-written `packages[]` entry drops them.',
   reason:
-    'A classification error, not a new special case (#15219; epic #14122 / #14512). '
+    'A classification error, not a new special case (maintainer ruling A, 2026-09-04: both '
+    + 'keys are artifact envelope keys, top level only, never inside `packages[]` — decided '
+    + 'while one artifact was being taught to carry several co-owning packages). '
     + '`plugins` and `devPlugins` were the only members of the assembled-body key set whose '
     + 'values are runtime ASSEMBLY instructions rather than serialisable metadata: `plugins` '
     + 'holds what a host hands to `kernel.use()` — live plugin instances, manifests or package '

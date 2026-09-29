@@ -7,7 +7,8 @@ export const entry: SemanticMigration = {
   surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
   replacement: 'maxRetries <= 10, and backoffMultiplier >= 1',
   reason:
-    'The converged RetryPolicy (#4661) keeps the automation side\'s bounds, which the job '
+    'The RetryPolicy converged onto one declaration from its automation and system copies '
+    + 'keeps the automation side\'s bounds, which the job '
     + 'side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. '
     + 'Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a '
     + 'retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay '

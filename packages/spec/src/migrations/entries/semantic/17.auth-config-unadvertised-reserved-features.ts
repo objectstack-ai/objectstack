@@ -11,14 +11,16 @@ export const entry: SemanticMigration = {
     + 'client: no login UI anywhere renders a passkey or magic-link affordance off them, so '
     + 'the payload advertised two sign-in methods a user could never reach, and a deployer '
     + 'setting `plugins.passkeys` / `plugins.magicLink` flipped a switch with no observable '
-    + 'effect (ADR-0049 enforce-or-remove; maintainer ruling 2026-08-11 on #7481 chose remove '
-    + 'over keep-as-reserved). The two are not equally empty: nothing at all is wired behind '
+    + 'effect (ADR-0049 enforce-or-remove; the maintainer ruling of 2026-08-11 chose remove '
+    + 'over keep-as-reserved, so that a deployer cannot flip a flag that does nothing '
+    + 'anywhere). The two are not equally empty: nothing at all is wired behind '
     + '`passkeys`, whereas `magicLink`\'s better-auth endpoints are live and only their '
     + 'advertisement was withdrawn. This is a RESPONSE surface — nobody authors or persists '
     + 'an `AuthFeaturesConfig` — so there is no source for the chain to rewrite; the schema '
     + 'tombstones both keys via retiredKey() and consumers drop their read. The withdrawal is '
     + 'conditional: both return to the payload in the change that ships the login UI '
-    + '(objectui#4179). ADR-0049, #7481.',
+    + '(flag-gated passkey and magic-link entry points, which objectui defers until the '
+    + 'maintainer schedules them). ADR-0049.',
   acceptanceCriteria:
     'No client reads `features.passkeys` or `features.magicLink` off `/api/v1/auth/config`; '
     + 'a client that gated UI on either now treats the capability as absent rather than '

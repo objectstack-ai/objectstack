@@ -14,7 +14,8 @@ export const entry: SemanticMigration = {
     + 'or rollback step, or compares an estimate with what happened, so there is no live '
     + 'mechanism to declare a duration to',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on the unread deadline keys '
+    + '(ruled A: retire per '
     + 'family). Three minute-shaped keys, at three nested sites, sat in the exported '
     + 'change-management schemas and in the generated reference docs — an author could write '
     + '`estimatedMinutes: 15` on a rollback step and reasonably expect it to feed a schedule — '

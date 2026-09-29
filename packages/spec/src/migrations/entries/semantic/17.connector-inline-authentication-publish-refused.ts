@@ -14,9 +14,11 @@ export const entry: SemanticMigration = {
     'still carries resolved secrets inline.',
   reason:
     'A published connector row lands whole in `sys_metadata`, so an inline `token` / `key` ' +
-    '/ `password` / `clientSecret` is cleartext at rest, readable through the data API ' +
-    '(#7990). No mechanical rewrite exists: whether the entry should become a `none` ' +
-    'descriptor or a provider-bound instance with a `credentialRef` — and which secret ' +
+    '/ `password` / `clientSecret` is cleartext at rest, readable through the data API (the ' +
+    'class a credential-persistence survey measured: any authored artefact whose schema ' +
+    'permits an inline credential lands it there). No mechanical rewrite exists: whether ' +
+    'the entry should become a `none` descriptor or a provider-bound instance with a ' +
+    '`credentialRef` — and which secret ' +
     'store receives the credential — is a judgment about the connector, not a rename.',
   acceptanceCriteria:
     'Every authored connector entry parses through `DeclarativeConnectorEntrySchema`; no ' +

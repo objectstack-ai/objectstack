@@ -16,7 +16,8 @@ export const entry: SemanticMigration = {
     + 'mechanical replacement that preserves a sub-day bucket, because no backend ever produced '
     + 'one',
   reason:
-    'ADR-0049 enforce-or-remove (#17296, the card #17206\'s changeset promised). The rest of the '
+    'ADR-0049 enforce-or-remove — the spec-side narrowing promised by the fix that made '
+    + 'driver-memory\'s analytics face bucket by its declared granularity. The rest of the '
     + 'contract never carried these three: `DateGranularity` (`data/query.zod.ts`) — the '
     + 'vocabulary a `groupBy` entry and every driver\'s bucket expression are typed by — declares '
     + 'five, `@objectstack/core`\'s `BUCKET_GRANULARITIES` labels the same five, and '

@@ -34,7 +34,8 @@ export const entry: SemanticMigration = {
     + 'comparisons, flat in lists, and field-to-field comparisons between single-valued columns '
     + 'lower and evaluate exactly as before',
   reason:
-    'Ruling A on #19886 refused a list under != and in the equality slot; stage 2d closes the '
+    'Ruling A of 2026-09-24 refused a list under != and in the equality slot, holding both to '
+    + 'the declared comparand — a literal or a `{ $field }` reference; stage 2d closes the '
     + 'same fault one position over, measured through the real plugin-security on driver-sql and '
     + 'driver-memory. !(record.status in [["closed", "archived"]]) lowered to a negated $in whose '
     + 'only member was a list, which the strictly comparing write-check evaluator matched on no '

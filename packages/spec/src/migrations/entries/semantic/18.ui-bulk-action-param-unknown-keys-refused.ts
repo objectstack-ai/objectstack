@@ -48,7 +48,7 @@ export const entry: SemanticMigration = {
     + 'that spread reddened 7 of 12 cases in the consuming repo, so retiring it was measured off '
     + 'the table. (2) the widget-config family rode the same spread and really was honoured by '
     + 'whichever widget read it — those keys are refused now rather than forwarded, which is the '
-    + 'accepted cost of closing the shape (maintainer ruling, decision batch #146 item 4, letter '
+    + 'accepted cost of closing the shape (maintainer ruling, letter '
     + 'A, 2026-09-17: 「Breaking for authored metadata」, one-shot, no grace window and no dual '
     + 'spelling). ⛔ Do not read their rejection as "the renderer ignores them", and ⛔ do not '
     + 'answer it by declaring the key on the object\'s FIELD: the bulk surface has no '
