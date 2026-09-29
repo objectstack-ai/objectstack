@@ -165,23 +165,40 @@ export function propsName(type: string): string {
 /**
  * Generate the human-facing PUBLIC block list (the curated "清单") from a
  * manifest — a Markdown table. Derived, never hand-maintained (ADR-0046).
+ *
+ * The html tier's intrinsic elements (`tier: 'html'`, objectui#10735) are
+ * listed in a section of their own, under their own count: they are in the
+ * manifest because a `kind:'html'` page may author them, not because they are
+ * curated blocks, and a single table would read them as the latter.
  */
 export function generateBlockList(manifest: Manifest): string {
-  const rows = Object.values(manifest.components)
-    .sort((a, b) => a.type.localeCompare(b.type))
-    .map((c) => {
-      const req = c.inputs.filter((i) => i.required).map((i) => i.name);
-      const binds = c.inputs.filter((i) => i.binding).map((i) => `${i.name}:${i.binding}`);
-      return `| \`${c.type}\` | ${c.namespace ?? '—'} | ${c.isContainer ? '✓' : ''} | ${req.join(', ') || '—'} | ${binds.join(', ') || '—'} |`;
-    });
+  const sorted = Object.values(manifest.components).sort((a, b) => a.type.localeCompare(b.type));
+  const curated = sorted.filter((c) => c.tier !== 'html');
+  const htmlTier = sorted.filter((c) => c.tier === 'html');
+  const row = (c: ManifestComponent): string => {
+    const req = c.inputs.filter((i) => i.required).map((i) => i.name);
+    const binds = c.inputs.filter((i) => i.binding).map((i) => `${i.name}:${i.binding}`);
+    return `| \`${c.type}\` | ${c.namespace ?? '—'} | ${c.isContainer ? '✓' : ''} | ${req.join(', ') || '—'} | ${binds.join(', ') || '—'} |`;
+  };
+  const header = ['| block | plugin | container | required props | bindings |', '|---|---|---|---|---|'];
   return [
-    `# SDUI public blocks (${Object.keys(manifest.components).length})`,
+    `# SDUI public blocks (${curated.length})`,
     '',
     '> Auto-generated from the registry `tier:\'public\'` set (ADR-0080). Do not edit by hand.',
     '',
-    '| block | plugin | container | required props | bindings |',
-    '|---|---|---|---|---|',
-    ...rows,
+    ...header,
+    ...curated.map(row),
+    ...(htmlTier.length
+      ? [
+          '',
+          `## html tier intrinsic elements (${htmlTier.length})`,
+          '',
+          "> The intrinsic HTML tags a `kind:'html'` page may author (ADR-0081 §2), declared by the registry's `HTML_TIER_INTRINSICS` roster and marked `tier: 'html'` in the manifest. Not part of the curated vocabulary above.",
+          '',
+          ...header,
+          ...htmlTier.map(row),
+        ]
+      : []),
     '',
   ].join('\n');
 }
