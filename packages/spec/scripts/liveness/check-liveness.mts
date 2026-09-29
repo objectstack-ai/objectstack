@@ -234,20 +234,25 @@ import {
   type ContainerCoverage,
 } from './drill.mts';
 import {
+  LEGACY_STATE_COUNTS_FILE,
   README_ORPHAN_ROW_GUIDANCE,
   README_TABLE_GUIDANCE,
-  STATE_COUNTS_FILE,
+  STATE_COUNTS_DIR,
   STATE_COUNTS_GUIDANCE,
   STATE_COUNTS_PATH,
   STATE_COUNTS_TOTALS_GUIDANCE,
   STATUS_COLUMNS,
   foldStateCounts,
+  formatStateCountsTotal,
   parseStateTable,
   reconcileReadmeTable,
   reconcileStateCountTotals,
   reconcileStateCounts,
-  renderStateCounts,
+  renderStateCountShards,
+  sumStateCounts,
+  type StateCountsTotal,
 } from './readme-table.mts';
+import { readTextShardDir } from '../lib/sharded-artifacts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -722,8 +727,9 @@ const report: any = {
   readmeHeadingErrors: [] as string[], // "N governed types" disagrees with the rows / with GOVERNED
   readmeMalformedRows: [] as string[], // a table line the row parser could not read — never silently skipped
   readmeRowCount: 0, // rows the parser found, printed every run so the number is visible rather than believed
-  countsArtifactErrors: [] as string[], // state-counts.md is missing, or its bytes are not what the gate measures (#7377)
-  countsRowSetErrors: [] as string[], // the README's row set and the artifact's disagree
+  countsArtifactErrors: [] as string[], // a state-counts/ shard is missing, stale or stray, or the retired single file is back (#7377, #20361)
+  countsRowSetErrors: [] as string[], // the README's row set and the shards' disagree
+  countsTotal: null as StateCountsTotal | null, // the table's total, summed at read time — no file commits it (#20361)
   countsHandEdited: [] as string[], // a count column is back in the README — a hand-maintained number in the merge path
   countsTotalErrors: [] as string[], // the four columns and the walk's own `classified` disagree — the fold dropped a status (#13083)
   unknownStatus: [] as string[], // a ledger `status` outside STATUS_COLUMNS — counted by the walk, dropped by the fold (#13083)
@@ -1217,6 +1223,14 @@ report.deferredChildKeys = coverage.deferredChildKeys;
 // reason: a gate that fails is worth exactly as much as the proof that it fails,
 // and this table is complete on a green tree.
 const readmeFile = join(ledgerRoot, 'README.md');
+// The rows every shard is rendered from, and the table's total, which is summed
+// HERE — at read time — because no file commits it any more (#20361): a
+// committed total was the one line every liveness PR rewrote.
+const countRows = foldStateCounts(
+  GOVERNED,
+  Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
+);
+report.countsTotal = sumStateCounts(countRows);
 if (!existsSync(readmeFile)) {
   report.readmeHeadingErrors.push(`${readmeFile} does not exist — the ledger index is gone`);
 } else {
@@ -1230,21 +1244,16 @@ if (!existsSync(readmeFile)) {
   report.readmeMalformedRows = readme.malformed;
   report.readmeRowCount = stateTable.rows.length;
 
-  // ── the count columns, now a generated artifact (#7377) ──
+  // ── the count columns, now a generated artifact (#7377), one shard per type (#20361) ──
   // Read from `ledgerRoot` for the same reason the table above is: it is what
   // lets the self-test point the REAL gate at a copy with one number skewed and
   // read the exit code. An artifact the gate could only ever find in its own
   // green state is an artifact whose check is unproven.
-  const countsFile = join(ledgerRoot, STATE_COUNTS_FILE);
   const counts = reconcileStateCounts({
     table: stateTable,
-    rendered: renderStateCounts(
-      foldStateCounts(
-        GOVERNED,
-        Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
-      ),
-    ),
-    onDisk: existsSync(countsFile) ? readFileSync(countsFile, 'utf8') : null,
+    rendered: renderStateCountShards(countRows),
+    onDisk: readTextShardDir(join(ledgerRoot, STATE_COUNTS_DIR)),
+    legacyOnDisk: existsSync(join(ledgerRoot, LEGACY_STATE_COUNTS_FILE)),
   });
   report.countsArtifactErrors = counts.artifactErrors;
   report.countsRowSetErrors = counts.rowSetErrors;
@@ -1650,7 +1659,7 @@ if (asJson) {
     console.log(
       '\n   This is the shape UNCLASSIFIED above cannot catch, and it is worse than\n' +
       '   UNCLASSIFIED because it looks DONE: the row has a verdict, the forward pass is\n' +
-      `   satisfied, the walk counts it — and then ${STATE_COUNTS_FILE} drops it, because\n` +
+      `   satisfied, the walk counts it — and then ${STATE_COUNTS_DIR}/ drops it, because\n` +
       `   the fold reads ${STATUS_COLUMNS.join(' / ')} and nothing else. The published\n` +
       '   total comes out short by exactly these rows, and every other check in this gate\n' +
       '   compares that total against itself and agrees (#13083).\n\n' +
@@ -1771,7 +1780,7 @@ if (asJson) {
   }
   if (report.countsRowSetErrors.length) {
     console.log(
-      `\n✗ ${report.countsRowSetErrors.length} row(s) where README.md and ${STATE_COUNTS_FILE} disagree:`,
+      `\n✗ ${report.countsRowSetErrors.length} row(s) where README.md and ${STATE_COUNTS_DIR}/ disagree:`,
     );
     report.countsRowSetErrors.forEach((s: string) => console.log(`    ${s}`));
     console.log(
@@ -1798,7 +1807,7 @@ if (asJson) {
   }
   if (report.countsTotalErrors.length) {
     console.log(
-      `\n✗ ${report.countsTotalErrors.length} governed type(s) where ${STATE_COUNTS_FILE}'s columns ` +
+      `\n✗ ${report.countsTotalErrors.length} governed type(s) where the ${STATE_COUNTS_DIR}/ shard's columns ` +
       "do not add up to the walk's own count:",
     );
     report.countsTotalErrors.forEach((s: string) => console.log(`    ${s}`));
@@ -1942,8 +1951,11 @@ if (asJson) {
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     console.log(
-      `✓ ${STATE_COUNTS_PATH} is current — the same ${report.readmeRowCount} row(s), ` +
-      'no count column left in the README.',
+      `✓ ${STATE_COUNTS_PATH} is current — one shard per governed type, the same ` +
+      `${report.readmeRowCount} row(s) as the README, no count column left in the README.`,
+    );
+    console.log(
+      `  total across the shards, summed at read time and committed nowhere: ${formatStateCountsTotal(report.countsTotal)}.`,
     );
     if (report.undrilledChildKeys) {
       console.log(

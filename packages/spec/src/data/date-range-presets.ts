@@ -68,7 +68,7 @@ export function isDateRangePresetName(value: unknown): value is DateRangePreset 
  * The `{date-macro}` window each preset resolves to — `[start, end]`, in the
  * WRAPPED spelling a filter author writes.
  *
- * ## The convention, binding on every entry (#17014)
+ * ## The convention, binding on every entry (commit 80aef8032)
  *
  * **`start` names the FIRST calendar day the window contains; `end` names its
  * LAST. Inclusive — never the day the window stops before.**

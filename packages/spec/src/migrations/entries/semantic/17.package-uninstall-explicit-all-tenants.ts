@@ -8,7 +8,8 @@ export const entry: SemanticMigration = {
   replacement: 'explicit `allTenants: true` for a cross-tenant uninstall, or an `organizationId` to scope it',
   reason:
     'An uninstall that named no organization matched EVERY organization\'s rows — measured '
-    + 'at 5 of 5 deleted, including a foreign org\'s (#7705, #7780). That width was never '
+    + 'at 5 of 5 deleted, including a foreign org\'s, while uninstall\'s orphaned-row defect was '
+    + 'being repaired. That width was never '
     + 'chosen; it fell out of a missing argument, and the two transports of the same route '
     + 'disagreed because of it. In protocol 17 the call is REFUSED instead: neither '
     + '`organizationId` nor `allTenants: true` answers 400 `TENANT_SCOPE_REQUIRED` and '
@@ -19,7 +20,7 @@ export const entry: SemanticMigration = {
     + 'at the call site — which is the whole reason the parameter had to become explicit '
     + 'rather than conventional. Nothing in authored metadata spells this: it is a runtime '
     + 'call-site contract, so it is one semantic TODO for operators and API callers rather '
-    + 'than a stack conversion — the same disposition `rest-requireauth-default-flip` (#12) '
+    + 'than a stack conversion — the same disposition `rest-requireauth-default-flip` (protocol 12) '
     + 'takes for its own default flip.',
   acceptanceCriteria:
     'Every caller of `deletePackage` states its tenant scope. A caller that intends an '
@@ -31,5 +32,5 @@ export const entry: SemanticMigration = {
     + 'that script was relying on the cross-tenant reading and must now say so on purpose. '
     + 'The org-scoped path is unchanged — an uninstall carrying an `organizationId` still '
     + 'removes that org\'s rows AND the environment-wide (`organization_id IS NULL`) rows, '
-    + 'exactly as #7705 left it.',
+    + 'exactly as the orphaned-row repair left it.',
 };

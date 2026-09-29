@@ -14,7 +14,7 @@
  * conformance suite — every boolean case `AGGREGATION_CASES` requires a
  * backend to ANSWER (#11152) must be a pair this table accepts, so the two
  * tables in this package cannot contradict each other on the boolean axis
- * (#16685) — the cross-pin reaches exactly as far as the `flag` cases.
+ * (commit ed7243d52) — the cross-pin reaches exactly as far as the `flag` cases.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -140,7 +140,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     // `AGGREGATION_ROWS.flag` is the boolean aggregand (declared `type:
     // 'boolean'` by every harness); each case over it is a pair #11152 pins
     // on six backends. A table refusing one of them would refuse a pair the
-    // spec elsewhere REQUIRES an answer to (#16685).
+    // spec elsewhere REQUIRES an answer to (commit ed7243d52).
     const booleanCases = AGGREGATION_CASES.filter((c) => c.field === 'flag');
     expect(sorted(new Set(booleanCases.map((c) => c.function)))).toEqual(sorted(AggregationFunction.options));
     for (const c of booleanCases) {

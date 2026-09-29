@@ -214,6 +214,89 @@ export function writeShards(
   return { written, removed };
 }
 
+// ─── Text-shard directories (#20361) ──────────────────────────────────
+
+/**
+ * Read a generator-owned directory of TEXT shards — the two count artifacts
+ * (`liveness/state-counts/`, the strictness ledger's `….counts/`) that were
+ * single markdown files with a committed total row until #20361 — as
+ * `file name -> bytes`, or `null` when the directory does not exist.
+ *
+ * Unlike `readShards` above there is no parse and no `.json` rule: those
+ * shards are compared as BYTES against a fresh render, so the reader's only job
+ * is to hand back everything that is there. A subdirectory is keyed with a
+ * trailing `/` and no bytes, so it can only surface as a stray — nothing in a
+ * generator-owned directory is skipped silently.
+ */
+export function readTextShardDir(dir: string): Map<string, string> | null {
+  if (!fs.existsSync(dir)) return null;
+  const out = new Map<string, string>();
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isFile()) out.set(entry.name, fs.readFileSync(path.join(dir, entry.name), 'utf-8'));
+    else out.set(`${entry.name}/`, '');
+  }
+  return out;
+}
+
+/**
+ * Write every text shard whose bytes changed, and prune everything else in the
+ * directory. An unchanged shard is not rewritten, so a regeneration touches
+ * exactly the shards whose numbers moved — the locality the layout is for — and
+ * the returned lists say which, so a generator can print them.
+ */
+export function writeTextShardDir(
+  dir: string,
+  shards: ReadonlyMap<string, string>,
+): { written: string[]; removed: string[] } {
+  fs.mkdirSync(dir, { recursive: true });
+  const written: string[] = [];
+  for (const [name, text] of shards) {
+    const file = path.join(dir, name);
+    if (fs.existsSync(file) && fs.readFileSync(file, 'utf-8') === text) continue;
+    fs.writeFileSync(file, text);
+    written.push(name);
+  }
+  const removed: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (shards.has(entry.name)) continue;
+    fs.rmSync(path.join(dir, entry.name), { recursive: true, force: true });
+    removed.push(entry.isFile() ? entry.name : `${entry.name}/`);
+  }
+  return { written, removed };
+}
+
+/**
+ * Reconcile a directory of text shards against a fresh render — the freshness
+ * leg both count gates share (#20361). Each finding names one path, so a stale
+ * shard sends the reader to the one file that moved rather than to a directory.
+ *
+ * `onDisk === null` is the missing directory. A shard present but not rendered
+ * is STRAY: in a generator-owned directory it is either a unit that stopped
+ * existing (a type left the governed list, a source directory was deleted) or a
+ * hand-written file, and either way it publishes numbers nothing re-renders.
+ */
+export function reconcileTextShardDir({
+  displayDir,
+  rendered,
+  onDisk,
+}: {
+  /** The directory as a failure message should name it, trailing slash included. */
+  displayDir: string;
+  rendered: ReadonlyMap<string, string>;
+  onDisk: ReadonlyMap<string, string> | null;
+}): { missingDir: boolean; missing: string[]; stale: Array<{ name: string; onDisk: string; expected: string }>; stray: string[] } {
+  if (onDisk === null) return { missingDir: true, missing: [], stale: [], stray: [] };
+  const missing: string[] = [];
+  const stale: Array<{ name: string; onDisk: string; expected: string }> = [];
+  for (const [name, text] of rendered) {
+    const current = onDisk.get(name);
+    if (current === undefined) missing.push(`${displayDir}${name}`);
+    else if (current !== text) stale.push({ name: `${displayDir}${name}`, onDisk: current, expected: text });
+  }
+  const stray = [...onDisk.keys()].filter((name) => !rendered.has(name)).sort().map((name) => `${displayDir}${name}`);
+  return { missingDir: false, missing, stale, stray };
+}
+
 // ─── Per-artifact shapes ──────────────────────────────────────────────
 
 /** One category's slice of the authorable-key ratchet. */

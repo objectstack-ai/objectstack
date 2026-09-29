@@ -26,7 +26,11 @@
 // So the numbers moved into a generated artifact carrying `merge=os-regen`, and
 // this gate proves two things instead of one:
 //
-//   A. the generated artifact is FRESH — it equals what the AST says right now;
+//   A. the generated artifact is FRESH — every shard equals what the AST says
+//      right now, none is missing or stray, and the retired single file is gone
+//      (#20361: one shard per source directory, and the cross-directory totals
+//      are summed here, at read time, instead of committed where two PRs both
+//      rewrite them);
 //   B. the hand-written prose is CONSISTENT with it — every row names a real file
 //      with real sites, and every file with sites has a row.
 //
@@ -61,14 +65,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 
+import { readTextShardDir, reconcileTextShardDir } from './lib/sharded-artifacts';
 import { analyzeSites, countSites, countStripSites, listSchemaFiles } from './lib/strictness-ledger';
 import {
   BUCKETS,
-  COUNTS_PATH,
+  COUNTS_DIR,
   GEN_COMMAND,
   LEDGER_PATH,
+  LEGACY_COUNTS_PATH,
   VERDICTS,
   bucketize,
+  formatGlobalCounts,
   loadLedger,
   parseClassCell,
 } from './lib/strictness-ledger-doc';
@@ -79,7 +86,7 @@ const REPO = path.resolve(SPEC, '../..');
 const SRC = path.join(SPEC, 'src');
 const LIST = process.argv.includes('--list');
 
-const { parsed, model, problems, rendered, countsPath, ledgerText } = loadLedger(REPO, SRC);
+const { parsed, model, problems, shards, countsDir, legacyCountsPath, ledgerText } = loadLedger(REPO, SRC);
 
 if (LIST) {
   for (const t of model.triaged) {
@@ -113,22 +120,39 @@ function firstDifferences(actual: string, expected: string, limit = 6): string {
   return out.length ? `    first difference(s) (- on disk, + expected):\n${out.join('\n')}\n` : '';
 }
 
-if (!fs.existsSync(countsPath)) {
-  errors.push(`${COUNTS_PATH} is MISSING.\n    → ${GEN_COMMAND}`);
-} else {
-  const onDisk = fs.readFileSync(countsPath, 'utf-8');
-  if (onDisk !== rendered) {
-    errors.push(
-      `${COUNTS_PATH} is STALE — it does not match what the AST says right now.\n` +
-        `    → ${GEN_COMMAND}\n` +
-        `    Then READ the diff: a count that moved means a schema was added, removed or\n` +
-        `    re-postured under a \`Class\` verdict nobody re-examined. Confirm the verdict in\n` +
-        `    ${LEDGER_PATH} still covers it — that re-read is what\n` +
-        `    the old hand-written counts bought, and it is the half of them worth keeping.\n` +
-        `    ⛔ Never hand-patch a number in the artifact. Regeneration is wholesale.\n` +
-        firstDifferences(onDisk, rendered),
-    );
-  }
+const freshness = reconcileTextShardDir({
+  displayDir: `${COUNTS_DIR}/`,
+  rendered: shards,
+  onDisk: readTextShardDir(countsDir),
+});
+if (freshness.missingDir) errors.push(`${COUNTS_DIR}/ is MISSING.\n    → ${GEN_COMMAND}`);
+for (const p of freshness.missing) {
+  errors.push(`${p} is MISSING — a directory with sites whose counts nothing publishes.\n    → ${GEN_COMMAND}`);
+}
+for (const { name, onDisk, expected } of freshness.stale) {
+  errors.push(
+    `${name} is STALE — it does not match what the AST says right now.\n` +
+      `    → ${GEN_COMMAND}\n` +
+      `    Then READ the diff: a count that moved means a schema was added, removed or\n` +
+      `    re-postured under a \`Class\` verdict nobody re-examined. Confirm the verdict in\n` +
+      `    ${LEDGER_PATH} still covers it — that re-read is what\n` +
+      `    the old hand-written counts bought, and it is the half of them worth keeping.\n` +
+      `    ⛔ Never hand-patch a number in a shard, and never commit a total. Regeneration is wholesale.\n` +
+      firstDifferences(onDisk, expected),
+  );
+}
+for (const p of freshness.stray) {
+  errors.push(
+    `${p} is STRAY — no directory with sites renders it (the directory was deleted or emptied,\n` +
+      `    or the file was written by hand). The shard directory is generator-owned.\n    → ${GEN_COMMAND}`,
+  );
+}
+if (fs.existsSync(legacyCountsPath)) {
+  errors.push(
+    `${LEGACY_COUNTS_PATH} is RETIRED — the counts are one shard per source directory under\n` +
+      `    ${COUNTS_DIR}/, and this file's committed totals are the lines every schema PR rewrote.\n` +
+      `    A branch cut before the split keeps it through a merge; delete it.\n    → ${GEN_COMMAND}`,
+  );
 }
 
 /* ── B. the hand-written prose is consistent with the code ─────────────────── */
@@ -290,7 +314,7 @@ if (errors.length) {
   console.error(`\n✗ strictness ledger: ${errors.length} drift(s)\n`);
   for (const e of errors) console.error(`  ${e}\n`);
   console.error(`  The ledger is ${LEDGER_PATH} (prose — hand-written).`);
-  console.error(`  The counts are ${COUNTS_PATH} (generated — ${GEN_COMMAND}).\n`);
+  console.error(`  The counts are ${COUNTS_DIR}/ (generated — ${GEN_COMMAND}).\n`);
   process.exit(1);
 }
 
@@ -305,6 +329,8 @@ console.log(
     `no closed file still carries one, every Class cell resolves.`,
 );
 console.log(
-  `✓ ${COUNTS_PATH} is current — ${model.global.sites} site(s) measured, ` +
-    `${model.global.buckets.authorable} authorable strip site(s) left.`,
+  `✓ ${COUNTS_DIR}/ is current — ${shards.size} shard(s), one per source directory with sites, ` +
+    `${model.global.sites} triaged site(s) measured, ${model.global.buckets.authorable} authorable strip site(s) left.`,
 );
+console.log('  totals across the shards, summed at read time and committed nowhere:');
+for (const line of formatGlobalCounts(model)) console.log(`    ${line}`);

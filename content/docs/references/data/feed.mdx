@@ -15,10 +15,10 @@ enums here configure the record activity component (`RecordActivityProps` in
 `FeedItemType` is not backend-free: it has no backend *import*, yet it is the
 TARGET of the map UI consumers apply to the `sys_activity.type` column — a
 backend *coupling* — and that column's vocabulary is OPEN and
-author-extensible (maintainer ruling 2026-08-24, #11507). `FeedItemType` is
+author-extensible (maintainer ruling 2026-08-24, commit 88b9d749a). `FeedItemType` is
 therefore the built-in guidance half of that map, never the value domain of
 an authoring surface: `RecordActivityProps.types` accepts contributed kinds
-beyond it (#11658), and consumers must map unknown `sys_activity.type` values
+beyond it (commit 1a6a19c31), and consumers must map unknown `sys_activity.type` values
 to a fallback rather than drop them. `SYS_ACTIVITY_BUILTIN_TYPES` below is
 the published built-in vocabulary of the `sys_activity.type` column,
 co-located with `FeedItemType` because UI consumers map one onto the other.

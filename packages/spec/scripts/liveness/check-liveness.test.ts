@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -646,13 +646,15 @@ describe('check:liveness — the README state table (#7257)', () => {
   });
 });
 
-// The generated count artifact (#7377). Same argument as the block above and the
-// same mechanism: on a green tree the artifact is current and the README carries
-// no numbers, so `pnpm check:liveness` passing says nothing about whether these
-// legs can fire. `--ledger-root` points the REAL gate at a copy — which `cpSync`
-// carries `state-counts.md` into alongside README.md — so a case can delete the
-// artifact, skew one number, or put a column back and read the real exit code.
-describe('check:liveness — the generated count artifact (#7377)', () => {
+// The generated count artifact (#7377), one shard per governed type (#20361).
+// Same argument as the block above and the same mechanism: on a green tree the
+// shards are current and the README carries no numbers, so `pnpm check:liveness`
+// passing says nothing about whether these legs can fire. `--ledger-root` points
+// the REAL gate at a copy — which `cpSync` carries the `state-counts/` directory
+// into alongside README.md — so a case can delete the shards, skew one number,
+// bring the retired single file back or put a column back, and read the real
+// exit code.
+describe('check:liveness — the generated count artifact (#7377, sharded #20361)', () => {
   let tmp: string;
 
   beforeAll(() => {
@@ -669,7 +671,7 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
   }
 
   it('FAILS when the artifact is gone — the numbers are published by nothing', () => {
-    const root = withCopy('missing', (r) => rmSync(path.join(r, 'state-counts.md')));
+    const root = withCopy('missing', (r) => rmSync(path.join(r, 'state-counts'), { recursive: true }));
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
@@ -681,9 +683,9 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
   // The leg that replaces what the hand-edit used to buy. It must name the line
   // that moved: "the file is stale" sends the next reader to diff 30 rows, and
   // the point of the failure is the ONE row whose Note may no longer hold.
-  it('FAILS on a single skewed count, and names the line', () => {
+  it('FAILS on a single skewed count, and names the shard and the line', () => {
     const root = withCopy('skewed', (r) => {
-      const f = path.join(r, 'state-counts.md');
+      const f = path.join(r, 'state-counts', 'view.md');
       const md = readFileSync(f, 'utf8');
       const before = md.match(/^\| `view` \| (\d+) \|/m);
       expect(before, 'the view row moved — repoint this case').not.toBeNull();
@@ -692,11 +694,24 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain('is STALE');
+    expect(output).toContain('state-counts/view.md is STALE');
     expect(output).toContain('first difference at line');
     expect(output).toContain('`view`');
     // The half of the hand-edit worth keeping — regenerate AND re-read the Note.
     expect(output).toContain('READ the diff');
+  });
+
+  // The transition hazard (#20361). A branch cut before the split meets the
+  // deletion as a modify/delete on its next base merge; a resolution that keeps
+  // the file would publish a stale table and a stale TOTAL beside the shards,
+  // re-rendered by nothing. It must be red, and the repair must be named.
+  it('FAILS when the retired single-file artifact comes back beside the shards', () => {
+    const root = withCopy('legacy', (r) => writeFileSync(path.join(r, 'state-counts.md'), '| **total** | **1** |\n'));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('state-counts.md is RETIRED');
+    expect(output).toContain('gen:liveness-counts');
   });
 
   // The leg neither of the others can see: a re-added column leaves the artifact
@@ -727,18 +742,45 @@ describe('check:liveness — the generated count artifact (#7377)', () => {
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toContain('where README.md and state-counts.md disagree');
-    expect(output).toContain('qa — counted in state-counts.md, no row in the README table');
+    expect(output).toContain('where README.md and state-counts/ disagree');
+    expect(output).toContain('qa — counted in state-counts/qa.md, no row in the README table');
   });
 
-  // The control for all four: the same copy, unedited, is green and says so.
+  // The control for all five: the same copy, unedited, is green and says so.
   // Without it every "exit 1" above is also satisfied by the copy being unusable.
-  it('is green against a verbatim copy, and says the artifact is current', () => {
+  //
+  // It is also the PARITY pin the split owes (#20361). The total is no longer
+  // committed anywhere, so the one place it is published is this line — and it
+  // must be the sum of the shards actually on disk, read back here row by row,
+  // not a second copy of the gate's own arithmetic.
+  it('is green against a verbatim copy, says the shards are current, and prints their sum', () => {
     const root = path.join(tmp, 'verbatim');
     cpSync(LEDGERS, root, { recursive: true });
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
-    expect(output).toMatch(/state-counts\.md is current — the same \d+ row\(s\), no count column left/);
+    expect(output).toMatch(/state-counts\/ is current — one shard per governed type, the same \d+ row\(s\) as the README/);
+
+    const printed = output.match(/summed at read time and committed nowhere: (.+) = (\d+) classified\./);
+    expect(printed, output).not.toBeNull();
+    const byColumn = Object.fromEntries(
+      printed![1].split(' · ').map((part) => {
+        const [n, c] = part.split(' ');
+        return [c, Number(n)];
+      }),
+    );
+
+    const onDisk = readdirSync(path.join(root, 'state-counts'));
+    expect(onDisk.length).toBeGreaterThan(0);
+    const summed = new Array(STATUS_COLUMNS.length + 1).fill(0);
+    for (const name of onDisk) {
+      const rows = readFileSync(path.join(root, 'state-counts', name), 'utf8')
+        .split('\n')
+        .filter((l) => /^\| `[a-z_]+` \|/.test(l));
+      expect(rows, name).toHaveLength(1);
+      rows[0].split('|').slice(2, -1).forEach((c, i) => (summed[i] += Number(c.trim())));
+    }
+    expect(STATUS_COLUMNS.map((c) => byColumn[c])).toEqual(summed.slice(0, STATUS_COLUMNS.length));
+    expect(Number(printed![2])).toBe(summed[STATUS_COLUMNS.length]);
   });
 });
 
@@ -834,7 +876,7 @@ describe('check:liveness — the manifest is inside the governed universe (#1072
 
 // A ledger `status` was free text: any truthy string was classified and counted,
 // then dropped by `foldStateCounts`, which reads four names and nothing else. The
-// gate stayed GREEN over an understated total, because `state-counts.md` computes
+// gate stayed GREEN over an understated total, because the count artifact computes
 // its `classified` column as the sum of those four columns and the freshness leg
 // compares it against a re-render of the same fold — every reconciliation in the
 // gate comparing that number against itself.
@@ -1297,30 +1339,31 @@ interface Carrier {
   eligible: number;
 }
 
-/** Move one unit between two status columns of a copied `state-counts.md`. */
+/**
+ * Move one unit between two status columns of a copied `state-counts/<type>.md`
+ * shard. Its own row only: no file commits a total any more (#20361), so there
+ * is no second line to keep in step.
+ */
 function moveCount(root: string, type: string, from: string, to: string): void {
   const fromCol = STATUS_COLUMNS.indexOf(from as (typeof STATUS_COLUMNS)[number]);
   const toCol = STATUS_COLUMNS.indexOf(to as (typeof STATUS_COLUMNS)[number]);
   expect(fromCol, `unknown status "${from}"`).toBeGreaterThanOrEqual(0);
   expect(toCol, `unknown status "${to}"`).toBeGreaterThanOrEqual(0);
 
-  const countsFile = path.join(root, 'state-counts.md');
+  const countsFile = path.join(root, 'state-counts', `${type}.md`);
   let text = readFileSync(countsFile, 'utf8');
   // The generated count artifact is checked on every run, so a sample that
   // moves a verdict and leaves the counts behind goes red for the WRONG reason
   // and masks the verdict this block is reading.
-  const shift = (rowRe: RegExp, wrap: (n: number) => string): void => {
-    const m = rowRe.exec(text);
-    expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
-    const nums = m![1].split('|').map((c) => Number(c.trim().replaceAll('*', '')));
-    expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
-    nums[fromCol] -= 1;
-    nums[toCol] += 1;
-    const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.map(wrap).join(' | ')} |`;
-    text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
-  };
-  shift(new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm'), (n) => String(n));
-  shift(/^\| \*\*total\*\* \| (.+) \|$/m, (n) => `**${n}**`);
+  const rowRe = new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm');
+  const m = rowRe.exec(text);
+  expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
+  const nums = m![1].split('|').map((c) => Number(c.trim()));
+  expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
+  nums[fromCol] -= 1;
+  nums[toCol] += 1;
+  const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.join(' | ')} |`;
+  text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
   writeFileSync(countsFile, text);
 }
 
@@ -1439,10 +1482,12 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
     const red = sampleWith('apart-live', 'live');
     const green = sampleWith('apart-dead', 'dead');
 
-    const differing = readdirSync(green).filter(
-      (f) => readFileSync(path.join(green, f), 'utf8') !== readFileSync(path.join(red, f), 'utf8'),
-    );
-    expect(differing.sort()).toEqual([`${carrier.type}.json`, 'state-counts.md'].sort());
+    // Recursive: the counts are a directory of shards now (#20361), and a
+    // top-level listing would read that directory as a file.
+    const differing = (readdirSync(green, { recursive: true }) as string[])
+      .filter((f) => statSync(path.join(green, f)).isFile())
+      .filter((f) => readFileSync(path.join(green, f), 'utf8') !== readFileSync(path.join(red, f), 'utf8'));
+    expect(differing.sort()).toEqual([`${carrier.type}.json`, path.join('state-counts', `${carrier.type}.md`)].sort());
 
     const redLedger = JSON.parse(readFileSync(path.join(red, `${carrier.type}.json`), 'utf8'));
     const greenLedger = JSON.parse(readFileSync(path.join(green, `${carrier.type}.json`), 'utf8'));

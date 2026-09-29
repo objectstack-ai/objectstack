@@ -24,9 +24,10 @@ export const entry: SemanticMigration = {
     + '\'2026-01-20\']` for the single day a bare ISO string used to mean on SQL, '
     + '`[\'2026-01-01\', \'2026-01-31\']`, or `[\'{7_days_ago}\', \'{today}\']` in date-macro tokens',
   reason:
-    'Maintainer ruling on #16041 (decision batch #57, option A — contract first, 2026-09-06): '
-    + 'the protocol is the baseline, so the vocabulary is declared once in the schema and the '
-    + 'drivers align to it (#16322) instead of each guessing. The arm was a bare `z.string()` '
+    'Maintainer ruling of 2026-09-06 on the analytics date-range string (option A — contract '
+    + 'first): the protocol is the baseline, so the vocabulary is declared once in the schema and '
+    + 'the drivers align to it, in a driver change of their own, instead of each guessing. The '
+    + 'arm was a bare `z.string()` '
     + 'whose only documented example, `"Last 7 days"`, no driver could parse: driver-memory '
     + 'recognised exactly `today` and a case-sensitive `last N <unit>` and fell every other '
     + 'string through to a `[range, range]` pseudo-window that — measured through mingo on '
@@ -35,7 +36,8 @@ export const entry: SemanticMigration = {
     + 'as a single ISO day. A dashboard asking for one week silently got all of history on one '
     + 'backend and one day on the other, with no error on either. The string arm is now '
     + '`z.enum(DATE_RANGE_PRESETS)` — derived from `data/date-range-presets.ts`, the vocabulary\'s '
-    + 'single source of truth since #4614, so the two cannot drift — and any other string is '
+    + 'single source of truth since the dashboard date filter\'s three copies of the list were '
+    + 'folded into it, so the two cannot drift — and any other string is '
     + 'refused at parse time with one prescriptive issue at the field\'s own path; the runtime '
     + 'door answers the ADR-0112 envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` '
     + '(`api/error-code-ledger.zod.ts`). ⚠️ No D2 conversion and no stored-metadata rewrite: '
