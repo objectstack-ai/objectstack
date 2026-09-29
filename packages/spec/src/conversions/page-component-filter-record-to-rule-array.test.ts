@@ -9,11 +9,10 @@
  * record carrying `$and` / `$or` / `$not` through UNCHANGED; never flatten.
  * This file pins:
  *
- *  §1  every ruled shape converts to the exact rule array, at every door kind;
+ *  §1  every ruled shape converts to the exact rule array, at every door kind,
+ *      whether the block queries an object or carries its rows inline;
  *  §2  a combinator — record key or AST group — is left byte-identical, and so
- *      is every other shape with no lossless rule spelling, and every filter of
- *      a component whose rows are inline (the renderer's in-memory matcher reads
- *      the record form and excludes every row for a rule array);
+ *      is every other shape with no lossless rule spelling;
  *  §3  an already-converged rule array is the identity, and a second replay is
  *      a no-op;
  *  §4  LOSSLESS is a measured property, not a claim: for every operator the
@@ -209,6 +208,84 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
     const nested = (((slot.properties as Dict).items as Dict[])[0]!.children as Dict[])[0]!;
     expect((nested.properties as Dict).filter).toEqual([{ field: 'a', operator: 'equals', value: 1 }]);
   });
+
+  describe('a component whose rows are INLINE converts like any other', () => {
+    // Measured at the objectui pin `dd3f7e1be356`: object-map / -tree /
+    // -calendar / -gantt hand `filter` to an in-memory ValueDataSource when
+    // their rows are inline, and its `find` lowers a rule array through the
+    // grid's own sink before matching — the same rows as the stored form, where
+    // the fix's parent (no lowering) matched none. So the node's row source
+    // moves no verdict, and the binding, composed into that same `filter`,
+    // converts with it.
+    const INLINE: ReadonlyArray<readonly [string, string, Dict]> = [
+      ['object-map', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-tree', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-gantt', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+      ['object-calendar', '`staticData`', { staticData: [{ stage: 'open' }] }],
+      ['object-map', 'an EMPTY `staticData` (still the value rung)', { staticData: [] }],
+      ['object-kanban', 'a bare `data` array', { data: [{ stage: 'open' }] }],
+    ];
+
+    it.each(INLINE)('%s with %s', (type, _shape, inline) => {
+      const before = pageWith({
+        type,
+        dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
+        properties: { objectName: 'deal', ...inline, filter: { stage: 'open' } },
+      });
+      const { stack, notices, todos } = convert(before);
+      const component = componentOf(stack);
+      expect((component.properties as Dict).filter).toEqual([
+        { field: 'stage', operator: 'equals', value: 'open' },
+      ]);
+      expect((component.dataSource as Dict).filter).toEqual([
+        { field: 'owner_id', operator: 'equals', value: 'u1' },
+      ]);
+      // The rows themselves ride along untouched.
+      for (const [key, value] of Object.entries(inline)) {
+        expect((component.properties as Dict)[key]).toEqual(value);
+      }
+      expect(notices.map((n) => n.path)).toEqual([
+        'pages[0].regions[0].components[0].dataSource.filter',
+        'pages[0].regions[0].components[0].properties.filter',
+      ]);
+      // Nothing left as stored, so nothing reported.
+      expect(todos).toEqual([]);
+    });
+
+    it('`defaultFilters` on an inline-row grid converts too', () => {
+      const { value, notices, todos } = (() => {
+        const { stack, notices: n, todos: t } = convert(pageWith({
+          type: 'object-grid',
+          properties: { data: { provider: 'value', items: [] }, defaultFilters: { stage: 'open' } },
+        }));
+        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n, todos: t };
+      })();
+      expect(value).toEqual([{ field: 'stage', operator: 'equals', value: 'open' }]);
+      expect(notices.map((n) => n.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
+      expect(todos).toEqual([]);
+    });
+
+    it('control: the same filter on an object-bound block of the same type converts', () => {
+      for (const data of [undefined, { provider: 'object', object: 'deal' }]) {
+        const { stack, notices, todos } = convert(
+          pageWith({
+            type: 'object-map',
+            dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
+            properties: { objectName: 'deal', ...(data ? { data } : {}), filter: { stage: 'open' } },
+          }),
+        );
+        const component = componentOf(stack);
+        expect((component.properties as Dict).filter).toEqual([
+          { field: 'stage', operator: 'equals', value: 'open' },
+        ]);
+        expect((component.dataSource as Dict).filter).toEqual([
+          { field: 'owner_id', operator: 'equals', value: 'u1' },
+        ]);
+        expect(notices).toHaveLength(2);
+        expect(todos).toEqual([]);
+      }
+    });
+  });
 });
 
 describe('§2 what has no lossless rule spelling is left byte-identical', () => {
@@ -292,83 +369,6 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
     expect(notices).toEqual([]);
     // Not this entry's door, so not this entry's TODO either.
     expect(todos).toEqual([]);
-  });
-
-  describe('a component whose rows are INLINE keeps every filter as stored', () => {
-    // Measured at the objectui pin `f8a9d0fb`: object-map / -tree / -calendar /
-    // -gantt hand `filter` UNLOWERED to an in-memory ValueDataSource when their
-    // rows are inline, and ValueDataSource matches the record form but excludes
-    // EVERY row for a rule array. So there the rewrite is not lossless — and the
-    // binding is composed into that same `filter`, so it stays as stored too.
-    const INLINE: ReadonlyArray<readonly [string, string, Dict, string]> = [
-      ['object-map', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
-      ['object-tree', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
-      ['object-gantt', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
-      ['object-calendar', '`staticData`', { staticData: [{ stage: 'open' }] }, '(`staticData`)'],
-      ['object-map', 'an EMPTY `staticData` (still the value rung)', { staticData: [] }, '(`staticData`)'],
-      ['object-kanban', 'a bare `data` array', { data: [{ stage: 'open' }] }, '(a `data` array)'],
-    ];
-
-    it.each(INLINE)('%s with %s', (type, _shape, inline, named) => {
-      const before = pageWith({
-        type,
-        dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
-        properties: { objectName: 'deal', ...inline, filter: { stage: 'open' } },
-      });
-      const { stack, notices, todos } = convert(before);
-      const component = componentOf(stack);
-      expect((component.properties as Dict).filter).toEqual({ stage: 'open' });
-      expect((component.dataSource as Dict).filter).toEqual({ owner_id: 'u1' });
-      expect(notices).toEqual([]);
-      // Both filters would have converted on an object-bound block; here each
-      // is left as stored and reported, naming the inline shape.
-      expect(todos.map((t) => t.path)).toEqual([
-        'pages[0].regions[0].components[0].dataSource.filter',
-        'pages[0].regions[0].components[0].properties.filter',
-      ]);
-      for (const todo of todos) {
-        expect(todo.reason).toContain(`sits on a block whose rows are inline ${named}`);
-        // A renderer limit at the objectui pin, said as one — not a protocol fact.
-        expect(todo.reason).toContain('the objectui renderer this release pins cannot match a rule array');
-        expect(todo.reason).toContain(`the \`${type}\` block`);
-      }
-      const frozen = structuredClone(before);
-      expect(collectConversionNotices(frozen, { includeRetired: true }).stack).toBe(frozen);
-    });
-
-    it('`defaultFilters` on an inline-row grid stays as stored too', () => {
-      const { value, notices, todos } = (() => {
-        const { stack, notices: n, todos: t } = convert(pageWith({
-          type: 'object-grid',
-          properties: { data: { provider: 'value', items: [] }, defaultFilters: { stage: 'open' } },
-        }));
-        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n, todos: t };
-      })();
-      expect(value).toEqual({ stage: 'open' });
-      expect(notices).toEqual([]);
-      expect(todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
-    });
-
-    it('control: the same filter on an object-bound block of the same type converts', () => {
-      for (const data of [undefined, { provider: 'object', object: 'deal' }]) {
-        const { stack, notices, todos } = convert(
-          pageWith({
-            type: 'object-map',
-            dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
-            properties: { objectName: 'deal', ...(data ? { data } : {}), filter: { stage: 'open' } },
-          }),
-        );
-        const component = componentOf(stack);
-        expect((component.properties as Dict).filter).toEqual([
-          { field: 'stage', operator: 'equals', value: 'open' },
-        ]);
-        expect((component.dataSource as Dict).filter).toEqual([
-          { field: 'owner_id', operator: 'equals', value: 'u1' },
-        ]);
-        expect(notices).toHaveLength(2);
-        expect(todos).toEqual([]);
-      }
-    });
   });
 
   it('`defaultFilters` is converted on the grid only', () => {
@@ -481,6 +481,29 @@ describe('§5 what it writes, the doors accept', () => {
       expect(refused.error!.issues.some((i) => i.path[0] === 'filter')).toBe(true);
     },
   );
+
+  // The block doors on an inline-row node: what the rewrite writes there is
+  // what the door takes, so moving these rows off the TODO list refuses nothing.
+  it.each([
+    ['object-map', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+    ['object-tree', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+    ['object-gantt', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
+    ['object-calendar', { staticData: [{ stage: 'open' }] }],
+    ['object-kanban', { data: [{ stage: 'open' }] }],
+  ] as const)('an inline-row `%s`: its block door accepts the conversion, and refuses the source', (type, inline) => {
+    const source = { stage: 'open', amount: { $gt: 100 } };
+    const { stack } = convert(pageWith({ type, properties: { objectName: 'deal', ...inline, filter: source } }));
+    const converted = componentOf(stack).properties as Dict;
+    const door = ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as {
+      safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[] }> } };
+    };
+    const atFilter = (v: unknown): number =>
+      door.safeParse(v).error?.issues.filter((i) => i.path[0] === 'filter').length ?? 0;
+    expect(Array.isArray(converted.filter)).toBe(true);
+    expect(atFilter(converted)).toBe(0);
+    // Control: the door really judges this key — the unconverted source is refused there.
+    expect(atFilter({ objectName: 'deal', ...inline, filter: source })).toBeGreaterThan(0);
+  });
 });
 
 describe('§6 the reach is the family, read off the schema', () => {
@@ -599,22 +622,28 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     expect(todo!.message).toContain(todo!.reason);
   });
 
-  it('the inline-row branch: a filter that WOULD convert, left as stored because of the node', () => {
-    const { value, todos } = (() => {
+  it('an inline-row node is no decline branch: a filter that maps converts there, and reports no TODO', () => {
+    const { value, notices, todos } = (() => {
       const r = convert(pageWith({ type: 'object-map', properties: { staticData: [], filter: { a: 1 } } }));
-      return { value: (componentOf(r.stack).properties as Dict).filter, todos: r.todos };
+      return { value: (componentOf(r.stack).properties as Dict).filter, notices: r.notices, todos: r.todos };
     })();
-    expect(value).toEqual({ a: 1 });
-    expect(todos).toHaveLength(1);
-    expect(todos[0]!.reason).toContain('sits on a block whose rows are inline (`staticData`)');
+    expect(value).toEqual([{ field: 'a', operator: 'equals', value: 1 }]);
+    expect(notices).toHaveLength(1);
+    expect(todos).toEqual([]);
   });
 
-  it('on an inline-row node the filter\'s own blocker wins — a combinator is still named', () => {
-    const { todos } = convert(
+  it('on an inline-row node a combinator is still a TODO, in the very words an object-bound block gets', () => {
+    const inline = convert(
       pageWith({ type: 'object-map', properties: { staticData: [], filter: { $or: [{ a: 1 }] } } }),
     );
-    expect(todos).toHaveLength(1);
-    expect(todos[0]!.reason).toContain('carries the combinator `$or`');
+    const bound = convert(
+      pageWith({ type: 'object-map', properties: { objectName: 'deal', filter: { $or: [{ a: 1 }] } } }),
+    );
+    expect((componentOf(inline.stack).properties as Dict).filter).toEqual({ $or: [{ a: 1 }] });
+    expect(inline.todos).toHaveLength(1);
+    expect(inline.todos[0]!.reason).toContain('carries the combinator `$or`');
+    // Nothing about the rows' source is said, because nothing about it decides.
+    expect(inline.todos[0]!.reason).toBe(bound.todos[0]!.reason);
   });
 
   it('names the block by its type, and by its `id` when it has one', () => {
@@ -674,13 +703,13 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     expect(todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].properties.filter']);
   });
 
-  it('the fixture: its two stored-as-is sites are its two TODOs', () => {
+  it('the fixture: its one stored-as-is site is its one TODO — the inline-row map converts', () => {
     const entry = ALL_CONVERSIONS.find((c) => c.id === ID)!;
-    const { todos } = convert(entry.fixture.before);
+    const { notices, todos } = convert(entry.fixture.before);
     expect(todos.map((t) => [t.path, t.reason.slice(0, 40)])).toEqual([
       ['pages[0].regions[0].components[1].properties.filter', 'On the `object-kanban` block, this filte'],
-      ['pages[0].regions[0].components[2].properties.filter', 'On the `object-map` block, this filter s'],
     ]);
+    expect(notices.map((n) => n.path)).toContain('pages[0].regions[0].components[2].properties.filter');
   });
 
   it('reporting writes nothing: every decline yields the same stack with or without a sink', () => {

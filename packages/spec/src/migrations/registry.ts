@@ -5664,8 +5664,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
       + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
       + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
-      + 'a page selects — as it does every filter of a component whose rows are inline, which '
-      + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+      + 'a page selects. It is retired from the load path, so authors are still refused at '
       + 'the door and taught the array; the stored-row seams and this chain replay it.',
   },
   {

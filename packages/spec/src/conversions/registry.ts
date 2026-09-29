@@ -11382,50 +11382,6 @@ function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
   return mapping;
 }
 
-/**
- * Does this component render INLINE rows — rows carried on the node — rather
- * than query an object? Then none of its filters is rewritten.
- *
- * Measured at the `.objectui-sha` pin `f8a9d0fb`: `object-map`
- * (`ObjectMap.tsx:831-833`), `object-tree` (`ObjectTree.tsx:835-837`),
- * `object-calendar` (`ObjectCalendar.tsx:645-647`) and `object-gantt`
- * (`resolveDataSource.ts:70`, then `ObjectGantt.tsx:865`) hand `schema.filter`
- * UNLOWERED to an in-memory `ValueDataSource` when their rows are inline, and
- * `ValueDataSource.find` (`ValueDataSource.ts:1093-1105`) reads an OBJECT
- * `$filter` in the record dialect but an ARRAY one as an AST, whose matcher
- * refuses a rule object (`:564-597`, `:70-73`) and so excludes EVERY row. A
- * converted filter there would take a block from its filtered rows to none —
- * the silent selection change the ruling excluded. The binding goes with its
- * component: `ElementDataSourceGate` composes `dataSource.filter` into that
- * same `schema.filter` (`plugin-map/src/index.tsx:38-41`, `filter: true`).
- *
- * Read by SHAPE, on every component type, rather than by the four types
- * measured: the other inline-row renderers at the pin ignore `filter` for
- * inline rows (`object-grid`, `object-kanban`) or issue no query at all
- * (`object-timeline`), so leaving their filter as stored changes nothing they
- * select, and a type list would go stale the day a fifth renderer starts
- * filtering its own rows. The three shapes are the record-source ladder's
- * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
- * `data` the spec declares on the kanban, calendar and timeline blocks:
- * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
- *
- * Answers with the shape it found, spelled for the TODO that names why the
- * node's filters were left as stored, or `undefined` for an object-bound node.
- *
- * ⚠️ A fact about the RENDERER AT THE PIN, not about the protocol — and the TODO
- * says so in those terms. objectui#10767 taught the inline-row matcher the rule
- * array upstream, but the `.objectui-sha` pin this decline was measured at does
- * not carry it, so the decline stands. Retiring it is owed once the pin moves
- * past that fix, as its own change — never assumed from the upstream merge.
- */
-function rendersInlineRows(properties: unknown): string | undefined {
-  if (!isDict(properties)) return undefined;
-  const { data, staticData } = properties;
-  if (Array.isArray(data)) return 'a `data` array';
-  if (isDict(data) && data.provider === 'value') return "`data: { provider: 'value' }`";
-  return staticData ? '`staticData`' : undefined;
-}
-
 /** How a TODO names the page component a filter sits on: its type, and its `id` when it has one. */
 function describeBlock(component: Dict): string {
   const type = typeof component.type === 'string' ? `the \`${component.type}\` block` : 'this component';
@@ -11462,10 +11418,7 @@ function describeBlock(component: Dict): string {
  * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
  * an array or object comparand in equality position, and any rule the door
  * would refuse. All-or-nothing per filter: converting part of an AND-list
- * widens it. And every filter of a component that renders INLINE rows
- * ({@link rendersInlineRows}): the pin's in-memory `ValueDataSource` matches
- * the record form and excludes every row for a rule array, so there the
- * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
+ * widens it. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
  * does not validate), and its door's schema refuses the form — but WHERE that
@@ -11498,6 +11451,16 @@ function describeBlock(component: Dict): string {
  * The `filter` of any other component type is not this entry's surface and is
  * never touched.
  *
+ * Where a component's rows come from does not move the verdict. A block whose
+ * rows ride on the node (`data: { provider: 'value' }`, a `data` array,
+ * `staticData`) is rewritten exactly as a block that queries an object:
+ * measured at the `.objectui-sha` pin `dd3f7e1be356`, the renderers that match
+ * inline rows in memory (`object-map`, `object-tree`, `object-calendar`,
+ * `object-gantt`, through `ValueDataSource.find`) lower a rule array through
+ * the grid's own sink before matching, and select the same rows for it as for
+ * the stored form — every mapped operator, against a control where the
+ * lowering is absent and the rule array selects none.
+ *
  * ## Why `retiredFromLoadPath`
  *
  * The ruling is `Clause-②: no` — no accept-set change. Replayed on the
@@ -11520,16 +11483,12 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     'a record-form or single-level AST filter at a converged rule-array door becomes the '
     + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
-    + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
-    + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
-    + 'array, `staticData`) is left exactly as stored — reported as a TODO, which `os migrate meta '
+    + 'filter carrying `$and` / `$or` / `$not` or any part with no lossless rule spelling is '
+    + 'left exactly as stored — reported as a TODO, which `os migrate meta '
     + '--stored` lists — and is not the form its door declares (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
   apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
-      // Inline rows: every filter of this node stays as stored, the binding's
-      // included. Its children are separate nodes and are judged on their own.
-      const inline = rendersInlineRows(component.properties);
       const block = describeBlock(component);
 
       const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
@@ -11540,26 +11499,17 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         // on its own): neither converted nor reported.
         if (!mapping) return holder;
         const at = `${basePath}.${key}`;
-        // The filter's own blocker first — it would decline on an object-bound
-        // block too, and it is what names the combinator — then the node's.
-        let declined: string;
         if ('declined' in mapping) {
-          declined = mapping.declined;
-        } else if (inline) {
-          declined = `sits on a block whose rows are inline (${inline}), and the objectui renderer `
-            + 'this release pins cannot match a rule array against inline rows — it would exclude '
-            + 'every row — so no rewrite here is lossless yet';
-        } else {
-          emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
-          return { ...holder, [key]: mapping.rules };
+          context?.reportTodo?.({
+            path: at,
+            from: JSON.stringify(value),
+            reason: `On ${block}, this filter ${mapping.declined}. Left as stored, it keeps loading unchanged, `
+              + 'but it is not the rule-array form its door declares — rewrite it by hand.',
+          });
+          return holder;
         }
-        context?.reportTodo?.({
-          path: at,
-          from: JSON.stringify(value),
-          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged, `
-            + 'but it is not the rule-array form its door declares — rewrite it by hand.',
-        });
-        return holder;
+        emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+        return { ...holder, [key]: mapping.rules };
       };
 
       let next = component;
@@ -11618,9 +11568,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                     filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
                   },
                 },
-                // Inline rows: a mappable filter, left byte-identical, because
-                // the renderer matches it against those rows in the record
-                // dialect and would exclude every row for a rule array.
+                // Inline rows convert like any other block: the renderer
+                // lowers the rule array before matching those rows.
                 {
                   type: 'object-map',
                   properties: {
@@ -11701,7 +11650,7 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
-                    filter: { stage: 'open' },
+                    filter: [{ field: 'stage', operator: 'equals', value: 'open' }],
                   },
                 },
                 {
@@ -11733,8 +11682,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
       ],
     },
     // One per converted door: the binding, the grid filter, the grid
-    // defaultFilters, the nested element:number.
-    expectedNotices: 4,
+    // defaultFilters, the inline-row map's filter, the nested element:number.
+    expectedNotices: 5,
   },
 };
 
