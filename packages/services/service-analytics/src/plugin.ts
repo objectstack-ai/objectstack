@@ -33,7 +33,7 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `string` where the contract declares a six-value enum, and nothing compiled
  * the two against each other.
  *
- * Three of these members could not be named from a contract until #12248
+ * Three of these members could not be named from a contract until commit 8425c17cc
  * landed the #11833 ruling: `resolveEffectiveDatasource` and
  * `getDriverForObject` (fork 1, declared OPTIONAL exactly so seams like this
  * one keep degrading), and `getObject`'s structured `ServiceObject` return
@@ -66,7 +66,7 @@ type DataEngineLike =
  * `temporalFilterValue` / `temporalFilterColumnSql` are first-class contract
  * members since ADR-0053 D-A2, no longer a duck-typed local invention.
  *
- * Since #12248 declared `IDataEngine.getDriverForObject?`, this is the
+ * Since commit 8425c17cc declared `IDataEngine.getDriverForObject?`, this is the
  * RETURN-side narrowing that member's own docblock prescribes, applied at the
  * two call sites below — not a re-declaration of the member. `Pick<IDataDriver,
  * …>` admits the full contract value, so the engine keeps handing back whatever
@@ -104,7 +104,7 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * Both sides now declare the same six-value enum: `IDataEngine.aggregate`'s
  * `aggregations[].function`, and — since #12776 — the analytics strategy
  * contract (`StrategyContext.executeAggregate`) plus the two consumer-local
- * config mirrors this package keeps in lockstep with it (#12940). So this
+ * config mirrors this package keeps in lockstep with it (commit aa16721b6). So this
  * parse is DEFENCE IN DEPTH behind a compile-time check, not the only check
  * (#11833).
  *
@@ -113,7 +113,7 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * through a cube object that never met `CubeSchema`'s parse (the path
  * `aggregate-bridge-function-vocabulary.test.ts` drives end to end), still
  * reaches this seam carrying a method the engine does not declare. What the
- * refusal buys is in `plugin.ts`'s forward below and in #12209: the engine is
+ * refusal buys is in `plugin.ts`'s forward below and in commit 017130a09: the engine is
  * never handed a `function` no driver declares.
  *
  * Parsing with the spec's OWN enum keeps a single vocabulary — no local
@@ -170,7 +170,7 @@ export interface AnalyticsServicePluginOptions {
      *   measure-scoped filter this plugin lowers onto the aggregation
      *   silently never reaches storage.
      * - `method` is the spec's OWN six-value `AggregationFunction`, not
-     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   `string`: #12776 narrowed the contract, commit aa16721b6 brought this mirror
      *   back into line. This is the declaration a custom-bridge author types
      *   their handler against, so it is where the compile-time vocabulary
      *   #12776 bought for strategy authors reaches them too.
@@ -371,7 +371,7 @@ export class AnalyticsServicePlugin implements Plugin {
             // correct signal, and the one the deleted structural type hid by
             // declaring `function: string` on both sides.
             //
-            // Since #12776 (contract) and #12940 (this plugin's own config
+            // Since #12776 (contract) and commit aa16721b6 (this plugin's own config
             // mirror above), BOTH ends declare the enum, so the rename is
             // enum-to-enum and the parse below is defence in depth behind a
             // compile-time check rather than the only check — see
@@ -389,7 +389,7 @@ export class AnalyticsServicePlugin implements Plugin {
             // method — a custom-SQL measure (`AggregationMetricType`
             // `number`/`string`/`boolean`) — is already refused upstream with a
             // caller-blaming 400 by `ObjectQLStrategy.resolveMeasureAggregation`
-            // (#12209). Anything still arriving here is host drift, which that
+            // (commit 017130a09). Anything still arriving here is host drift, which that
             // refusal's docblock assigns to the undeclared-500 tier — so this
             // throws rather than re-blaming the caller, and it answers loudly
             // instead of letting the engine answer `null` per bucket under the
@@ -557,7 +557,7 @@ export class AnalyticsServicePlugin implements Plugin {
      * has since ADR-0021 D-C), so serving nothing is the same outcome the
      * object-level bridge produces.
      *
-     * [#17130] It needs no NEW error code — and the clause that used to follow,
+     * [commit 54b3d1d4a] It needs no NEW error code — and the clause that used to follow,
      * "and no new envelope here", was the finding. An envelope is not a second
      * outcome, it is what stops the outcome being decided by wording:
      * `queryDataset`'s catch re-throws whatever declares `code` + `status` and
@@ -629,7 +629,7 @@ export class AnalyticsServicePlugin implements Plugin {
             'A security service is wired on this deployment, so analytics must not fall ' +
             'open and serve rows with no row-level policy applied.',
           );
-          // [#17130] Declared, not bare. `resolveReadScopes` replaces this
+          // [commit 54b3d1d4a] Declared, not bare. `resolveReadScopes` replaces this
           // error with its own on the dataset path, but this provider is read
           // by four consumers and a bare refusal is the one kind
           // `queryDataset`'s catch classifies by WORDING — three of the six

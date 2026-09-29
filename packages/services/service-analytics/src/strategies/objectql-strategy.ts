@@ -37,13 +37,13 @@ import {
   type MeasureRecombine,
   type RecombinableMethod,
 } from './cross-object-rebucket.js';
-// [#12209] The custom-SQL half of the `AggregationMetricType` partition, ONE
+// [commit 017130a09] The custom-SQL half of the `AggregationMetricType` partition, ONE
 // source shared with `NativeSQLStrategy` and pinned against the spec enum by
 // `metric-type-coverage.test.ts` — a second literal set here would drift.
 import { EXPRESSION_METRIC_TYPES } from './native-sql-strategy.js';
 
 /**
- * [#10861 / #11461] Where a member in the cross-object envelope's inventory
+ * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
  * came from.
  *
  * THREE producers put predicates in front of `engine.aggregate` on this path:
@@ -726,7 +726,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the members inside were unreadable from the outside and the envelope check
    * could not reject what it could not see.
    *
-   * ## Three producers, one inventory (#10861, #11461)
+   * ## Three producers, one inventory (#10861, commit 399ecad58)
    *
    * The caller's `where` is not the only thing that reaches `engine.aggregate`
    * as a predicate. Since PR #10758 the compiled dataset's own definition-level
@@ -741,7 +741,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * which driver will serve the dataset and would refuse a dataset that is
    * perfectly legal on a native-SQL deployment.
    *
-   * [#11461] #10413 phase 2 then added a THIRD producer with the same reach and
+   * [commit 399ecad58] #10413 phase 2 then added a THIRD producer with the same reach and
    * none of the coverage: a compiled measure's own `filter`, lowered onto that
    * measure's `aggregations[].filter` entry (#10576). This view enumerated two
    * origins, so the third was invisible to the envelope check and the arm of
@@ -784,7 +784,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * last write wins on a duplicate key. Two things follow, in that order of
    * importance. A member named by the request too keeps the CALLER's provenance,
    * because if it is in the request that is the actionable place to fix it. And
-   * every shape that was refused before #11461 keeps the exact message it had:
+   * every shape refused before commit 399ecad58 keeps the exact message it had:
    * the new origin can only ever win a key no older producer names.
    *
    * Time-dimension WINDOWS are deliberately absent (they live in
@@ -801,14 +801,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): Record<string, FilterMemberOrigin> {
     // Read from the SAME channel both doors lower the scope from, so the view
     // and the predicate cannot disagree about what the engine will receive.
-    // [#11461] The whole scope now, not just `.filter` — the per-measure filters
+    // [commit 399ecad58] The whole scope now, not just `.filter` — the per-measure filters
     // travel the identical channel to the identical engine call.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
     const leaves = (node: ReturnType<typeof normalizeAnalyticsFilterTree>, origin: FilterMemberOrigin) =>
       collectFilterLeaves(node).map(
         (f) => [this.resolveFieldName(cube, f.member, 'any'), origin] as const,
       );
-    // [#11461] Keyed by measure so the refusal can name the measure to go and
+    // [commit 399ecad58] Keyed by measure so the refusal can name the measure to go and
     // edit; `query.measures` is the iteration order both aggregation loops use,
     // so the view covers exactly the filters that will be lowered.
     const measureLeaves = (query.measures ?? []).flatMap((m) => {
@@ -842,7 +842,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * (needs a real join to evaluate), a cross-object leaf in the DATASET's own
    * definition-level `filter` (#10861 — same join it does not have, arriving
    * from the producer PR #10758 added), a cross-object leaf in ONE MEASURE's own
-   * `filter` (#11461 — the same join again, arriving from the producer #10413
+   * `filter` (commit 399ecad58 — the same join again, arriving from the producer #10413
    * phase 2 added), a MULTI-HOP dimension (`a.b.c`), or a non-recombinable
    * measure (`avg`/`count_distinct`, whose sub-bucket values cannot be merged).
    * A loud error beats the silent mis-bucket #3654 kills.
@@ -854,7 +854,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * [#5716] All six refusals below are `invalidMemberError` — `INVALID_FIELD` /
    * 400, naming the member — and the four that predate #10861 keep their
    * MESSAGES unchanged (they are good diagnostics, and #5923's tests read
-   * them); so does #10861's own, which #11461 left untouched beside it. Each is decided by two facts and nothing else: a member that will
+   * them); so does #10861's own, which commit 399ecad58 left untouched beside it. Each is decided by two facts and nothing else: a member that will
    * reach the engine's predicate, and whether that member resolves across a
    * join. Neither is an internal invariant — a cube where the member exists and
    * a driver that could serve it are both perfectly ordinary, which is exactly
@@ -863,7 +863,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * because the fix is always to change or drop ONE named member, and because
    * four of them fire on `/analytics/query` where no dataset exists.
    *
-   * [#10861, #11461] The fifth and sixth are the exceptions that prove the rule
+   * [#10861, commit 399ecad58] The fifth and sixth are the exceptions that prove the rule
    * and are written to it: they can only fire where a dataset DOES exist, and
    * they are the two refusals here whose member no request key named — so each
    * carries `cube` and no `param`, and says in its own words which document to
@@ -962,7 +962,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       );
     }
 
-    // [#11461] The THIRD producer, and the same physical verdict a third time:
+    // [commit 399ecad58] The THIRD producer, and the same physical verdict a third time:
     // a leaf of one compiled MEASURE's own `filter`, lowered onto that measure's
     // `aggregations[].filter` entry (#10413 phase 2 / #10576). Checked last, so
     // every shape refused before this card is refused with the message it
@@ -1460,7 +1460,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       | { sql: string; type: string }
       | undefined;
     if (direct) {
-      // [#12209] A custom-SQL measure (`AggregationMetricType`
+      // [commit 017130a09] A custom-SQL measure (`AggregationMetricType`
       // `number`/`string`/`boolean`) is REFUSED here rather than forwarded. Its
       // `sql` IS the whole computation (a ratio, a `CASE`, a window function),
       // and the engine aggregate AST has no place to carry a raw SQL
@@ -1777,7 +1777,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * a vocabulary word against a timestamp — which is precisely how the two
    * backends came to answer one bad input with opposite wrong answers.
    *
-   * [#17124] An oddly-sized array is REFUSED with the same envelope, by the one
+   * [commit 86c505286] An oddly-sized array is REFUSED with the same envelope, by the one
    * `explicitDateRangeWindow` every face in this package now calls. ⛔ The
    * per-face fallback this replaced — take the first two entries, a one-entry
    * array degenerating to a point — was one of THREE readings of the same

@@ -108,7 +108,7 @@ export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_
  * two sets partition `AggregationMetricType`, so a new member fails a test
  * instead of picking a default.
  *
- * [#12209] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
+ * [commit 017130a09] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
  * this same set — the engine aggregate AST cannot carry a raw SQL expression,
  * so the ObjectQL path REFUSES exactly what this strategy emits verbatim. One
  * set, two strategies, so the partition cannot fork per path.
@@ -513,7 +513,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
             : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
           const range = resolved
             ? ([resolved.start, resolved.end] as [string, string])
-            // [#17124] An oddly-sized array is REFUSED, by the one
+            // [commit 86c505286] An oddly-sized array is REFUSED, by the one
             // `explicitDateRangeWindow` every face in this package calls. ⛔ What
             // this replaced was a silent `if (range.length === 2)` DROP: a
             // one-element array emitted no time clause at all, so the query read

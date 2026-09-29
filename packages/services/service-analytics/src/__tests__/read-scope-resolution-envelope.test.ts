@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17130] The row-scope RESOLUTION refusals declare themselves —
+ * [commit 54b3d1d4a] The row-scope RESOLUTION refusals declare themselves —
  * `READ_SCOPE_COMPILE_FAILED` / 500 — so no wording can turn one into an empty
  * chart.
  *
@@ -22,7 +22,7 @@
  * the caller — a fail-closed gate rendered as a confident empty chart, with one
  * `warn` and no exception.
  *
- * PR #17125's refusal propagates today only because its text happens to match
+ * Commit 5d12b16e7's refusal propagates today only because its text happens to match
  * none of the six. ⛔ A coincidence, not a construction — and the fix is the
  * DECLARATION, not a luckier string: every message below is byte-unchanged.
  *
@@ -158,7 +158,7 @@ describe('[#17130] the row-scope resolution refusals declare an ADR-0112 envelop
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
     expect(err.status).toBe(500);
-    // ⛔ The message is the site's, untouched — #17130 fixes the declaration.
+    // ⛔ The message is the site's, untouched — commit 54b3d1d4a fixed the declaration.
     expect(err.message).toBe('[Analytics] read-scope resolution failed for "x"; query denied (fail-closed).');
   });
 

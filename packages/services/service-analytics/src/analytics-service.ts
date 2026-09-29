@@ -41,7 +41,7 @@ import {
   assertObjectsReadable,
   type ObjectReadAdmissionProvider,
 } from './read-admission.js';
-// [#17130] The ROW-scope half's refusal envelope — the sibling of the
+// [commit 54b3d1d4a] The ROW-scope half's refusal envelope — the sibling of the
 // object-level `readAdmissionDeniedError` above, and the reason a fail-closed
 // row-scope denial can no longer be re-judged by its wording.
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
@@ -235,7 +235,7 @@ function isMissingColumnOfRelation(message: string): boolean {
  * object "O"`, where the "relation" is inside "relationship" and the missing
  * thing is a RELATIONSHIP, not a table. The anchor is the same pattern the
  * sibling {@link missingSourceRelation} already uses for postgres (and the same
- * shape as `packages/types/src/driver-error-classification.ts` — #13279
+ * shape as `packages/types/src/driver-error-classification.ts` — commit 6a180e42d
  * moved it there from `metadata/src/utils/schema-sync-errors.ts`), so "is
  * something missing" and "what is missing" can no longer disagree on this
  * limb.
@@ -255,7 +255,7 @@ function isMissingColumnOfRelation(message: string): boolean {
  * exclude it — only asking the more specific question FIRST can. That makes the
  * ORDER the fix, not the pattern.
  *
- * [#17130] EXPORTED — module-internal still (it is absent from `index.ts`, and
+ * [commit 54b3d1d4a] EXPORTED — module-internal still (it is absent from `index.ts`, and
  * this package's `exports` map publishes only that entry, so no consumer can
  * reach it), but reachable from `refusal-wording-collision.test.ts`. That guard
  * asserts no BARE refusal this package raises can be mistaken for a driver
@@ -556,7 +556,7 @@ export interface AnalyticsServiceConfig {
      *   forward this field or a measure-scoped filter `ObjectQLStrategy`
      *   lowers never reaches storage.
      * - `method` is the spec's OWN six-value `AggregationFunction`, not
-     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   `string`: #12776 narrowed the contract, commit aa16721b6 brought this mirror
      *   back into line. Widening it here again would not be a local matter —
      *   a bridge author types their handler against THIS declaration, so what
      *   they would get is a vocabulary the contract no longer has.
@@ -1507,7 +1507,7 @@ export class AnalyticsService implements IAnalyticsService {
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
    *
-   * [#17130] And the rejection DECLARES itself. This throw lands inside
+   * [commit 54b3d1d4a] And the rejection DECLARES itself. This throw lands inside
    * {@link AnalyticsService.queryDataset}'s catch, whose first question is
    * `hasDeclaredErrorEnvelope` and whose second is {@link isMissingSourceError}
    * — six substrings over driver phrasing, three of which are what a registry
@@ -1535,7 +1535,7 @@ export class AnalyticsService implements IAnalyticsService {
           `rejecting query (fail-closed, ADR-0021 D-C)`,
           e instanceof Error ? e : new Error(String(e)),
         );
-        // ⛔ The message is unchanged, deliberately: #17130's fix is the
+        // ⛔ The message is unchanged, deliberately: commit 54b3d1d4a's fix is the
         // DECLARATION, not a luckier string. Rewording to dodge the sniffer
         // would leave the next author to rediscover the mine.
         throw readScopeUnresolvedError(
