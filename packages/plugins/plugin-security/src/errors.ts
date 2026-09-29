@@ -181,8 +181,8 @@ export class DetailRecordNotFoundError extends Error {
  *     (a `master_detail` with no `required`; `required` + `readonly`;
  *     `required` + `system`) — there this gate is the only refusal there is,
  *     and its 422 is what stops an unreadable orphan detail row being minted.
- *     #8772 *proposes* a publish-time lint that would refuse those shapes, but
- *     it is open and unruled — nothing refuses them at publish today, so an app
+ *     The 2026-08-16 ruling (commit 8abada3ba) orders a publish-time lint ramp, but
+ *     it has not landed — nothing refuses them at publish today, so an app
  *     can newly declare one and land here (#8959). This is the answer those
  *     shapes get for as long as they stay declarable, not merely until some
  *     legacy app is republished.
@@ -375,7 +375,7 @@ export const PERMISSION_SET_NAME_CONFLICT_CODE = 'UNIQUE_VIOLATION';
 export const PERMISSION_SET_NAME_CONFLICT_STATUS = 409;
 
 /**
- * [#19307] The data door's duplicate-name refusal on `sys_permission_set`:
+ * [commit 8f6d83147] The data door's duplicate-name refusal on `sys_permission_set`:
  * a set with this machine name already exists in the caller's organization, so
  * the insert is refused.
  *

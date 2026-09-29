@@ -25,7 +25,7 @@ import {
   TURSO_DRIVER_INSTALL_COMMAND,
   UnsupportedDriverError,
 } from './storage-driver.js';
-// #6268: the OTHER host's bindings, imported under their own names so the
+// Commit 68f5eccb1: the OTHER host's bindings, imported under their own names so the
 // identity assertions below compare two real module paths rather than one alias
 // of the same import. `@objectstack/runtime` resolves to the BUILT package here,
 // exactly as it does for `storage-driver.ts` itself — which is what makes the
@@ -121,7 +121,7 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(r!.trackName).toBe('MongoDBDriver');
   });
 
-  // VERDICT FLIPPED by #6345 fork 2 (maintainer ruling, 2026-08-09). This pin
+  // VERDICT FLIPPED by commit e2798fab7's fork 2 (maintainer ruling, 2026-08-09). This pin
   // used to assert `config: { url: 'mongodb://localhost:27017/objectstack' }` for
   // a mongodb selection with no URL — a DSN the CLI invented, naming a host the
   // operator never did. It is the same defect as postgres's `url: undefined`
@@ -183,10 +183,10 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(resolveStorageDefinition('', { isDev: false })).toBeNull();
   });
 
-  // VERDICT FLIPPED by #6345 fork 1. `'nonsense'` used to share the `''` answer —
+  // VERDICT FLIPPED by commit e2798fab7's fork 1. `'nonsense'` used to share the `''` answer —
   // null in prod, and in DEV the trailing SQLite default, i.e.
   // `os dev --database-driver sqlite3` silently booted SQLite while `os migrate`
-  // refused the same value by name (#6344 killed the silent fallback on that
+  // refused the same value by name (commit cfb549db8 killed the silent fallback on that
   // side only). The two are not the same input: `''` means "nobody chose", while
   // a non-empty value can only have come from an operator naming a driver, since
   // URL inference yields a canonical id or `''`. So the two answers separate.
@@ -488,7 +488,7 @@ describe('#7314 — the shared libSQL config builder against the real TursoDrive
   });
 });
 
-// #6268 — the loader has ONE owner (`@objectstack/runtime`), and this file's
+// Commit 68f5eccb1 — the loader has ONE owner (`@objectstack/runtime`), and this file's
 // exports are that owner's declarations rather than hand-aligned copies.
 //
 // The property under test is CLASS IDENTITY, not wording. `serve.ts:1136` decides
@@ -564,7 +564,7 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
   // The one thing the convergence deliberately did NOT move: the dynamic
   // import's specifier, whose RESOLUTION ROOT is the module that evaluates it.
   // `@objectstack/driver-turso` is an optional PEER of `@objectstack/cli` and,
-  // since #12943, of `@objectstack/runtime` too — an optional peer names the
+  // since commit 090f2302e, of `@objectstack/runtime` too — an optional peer names the
   // relationship and installs nothing, so the package still sits in whichever
   // tree the operator installed it into. Had the CLI taken the runtime's default
   // thunk, an operator who ran the exact install command this error prints would
@@ -575,7 +575,7 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
   // runtime half USED to be pinned from the other side by
   // `standalone-stack.libsql.test.ts`, where a `libsql://` boot with no injected
   // thunk took the missing-package arm because nothing linked the package under
-  // the runtime. #12943's optional peer makes pnpm link it there too, so that
+  // the runtime. Commit 090f2302e's optional peer makes pnpm link it there too, so that
   // case now STAGES the absence rather than relying on the layout to supply it.
   // The pair still asserts that the two roots are distinct; what neither can
   // assert any more is that one of them is empty.

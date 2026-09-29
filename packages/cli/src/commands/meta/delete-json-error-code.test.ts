@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13347] The ADR-0112 carriers survive the whole way to a `--format json`
+ * [commit 098a08ffa] The ADR-0112 carriers survive the whole way to a `--format json`
  * failure envelope — and are ABSENT when the failure never carried them.
  *
  * ## Why this file drives the real command and the real SDK

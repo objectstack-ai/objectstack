@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16607] An RLS `check` clause that reads a membership-resolver key must
+ * [commit 1d73d45c1] An RLS `check` clause that reads a membership-resolver key must
  * resolve on a BARE insert — the write path stages `rlsMembership` itself.
  *
  * MEASURED on 17.3.0 (the card's table, `--database-driver memory` and the
@@ -305,7 +305,7 @@ async function makeStack(resolver: Resolver | null): Promise<Stack> {
     try {
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
-          // [#16608] The engine's own half of the write gate, which this
+          // [commit a016f08b8] The engine's own half of the write gate, which this
           // executor stands in for: the insert-side RLS `check` is INSTALLED on
           // the operation context by the middleware and run by `ObjectQL.insert`
           // once the `beforeInsert` chain has produced the row that will be

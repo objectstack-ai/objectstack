@@ -221,7 +221,7 @@ describe('sys_api_key is not org-walled (#8287)', () => {
   });
 
   /**
-   * [#8778] The stamp-only divergence must not move this object's Layer 0
+   * [commit 7901b2dd2] The stamp-only divergence must not move this object's Layer 0
    * inputs. `security-plugin.ts` derives them from exactly two reads — the
    * registered field set (`objectHasOrgIdField`) and
    * `tenancy.enabled === false || systemFields.tenant === false`

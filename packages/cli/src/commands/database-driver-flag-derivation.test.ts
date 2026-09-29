@@ -24,7 +24,7 @@
  * Deriving the flag from the CONFIG-CONTRACT face (`DRIVER_ID_ALIASES` /
  * `resolveDriverId`) instead of the SELECTION face would offer `sqlite3`,
  * `better-sqlite3`, `mariadb` and `inmemory` — spellings neither boot host has
- * ever accepted as a selection (#6345 fixes the selection face as the union of
+ * ever accepted as a selection (commit e2798fab7 fixes the selection face as the union of
  * what the two hosts accepted the day the ruling was written). The last case here
  * drives oclif's real parser to prove they are still refused at parse time.
  */

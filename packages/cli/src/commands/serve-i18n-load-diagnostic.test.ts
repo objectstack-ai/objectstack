@@ -145,7 +145,7 @@ function installShapedPackage(
  * A REAL failure of each kind, straight out of `createHostImporter`.
  *
  * The `undeclared` leg supplies a rejecting `fallbackImport` on purpose. That
- * fallback is a caller-supplied seam by contract (#10943), so injecting one
+ * fallback is a caller-supplied seam by contract (commit 46d34ab7c), so injecting one
  * makes the case hermetic: without it the branch would depend on whether
  * `@objectstack/service-i18n` happens to be reachable from whatever package
  * this test file runs inside, and a workspace that hoisted it would turn this

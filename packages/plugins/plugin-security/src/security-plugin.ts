@@ -346,7 +346,7 @@ interface RlsFilterOptions {
    * a row record sharing does not enforce on keeps the floor as its only
    * row-level write gate.
    *
-   * [#8865] TWO call sites set it, and that is the point rather than a
+   * [commit 498f4e884] TWO call sites set it, and that is the point rather than a
    * duplication: the by-id write pre-image gate (step 2.7) asks about the row
    * being written, and ADR-0055's master gate
    * ({@link SecurityPlugin.assertControlledByParentWrite}, step 2.8, leg 1) asks
@@ -361,7 +361,7 @@ interface RlsFilterOptions {
    */
   dropPlatformOwnershipFloor?: boolean;
   /**
-   * [#8757] The caller VOUCHES that ADR-0055's master gate
+   * [commit 6feac910b] The caller VOUCHES that ADR-0055's master gate
    * ({@link SecurityPlugin.assertControlledByParentWrite}, step 2.8) runs on
    * this exact operation, for this exact principal, after this filter is
    * enforced — so a `controlled_by_parent` object's platform ownership floor
@@ -401,7 +401,7 @@ interface RlsFilterOptions {
  * {@link SecurityPlugin.resolveCbpRelation} and cached.
  */
 /**
- * [#11082] How many `controlled_by_parent` hops the master-set derivation and
+ * [ADR-0055 amendment] How many `controlled_by_parent` hops the master-set derivation and
  * the master-write gate will walk before they fail CLOSED.
  *
  * ⚠️ This is a COST ceiling, not a semantic rule, and it is deliberately not a
@@ -418,14 +418,14 @@ interface RlsFilterOptions {
  * (`showcase_invoice_line` → `showcase_invoice`, `showcase_expense_line` →
  * `showcase_expense_report`, `crm_opportunity_line_item` → `crm_opportunity`)
  * — in each case the master's own model is `public_read_write` or `private`,
- * never derived. The consumer that motivated #11082 needs **two**
+ * never derived. The consumer that motivated the ADR-0055 amendment needs **two**
  * (`crm_quote_line_item` → `crm_quote` → `crm_account`). 8 is four times the
  * deepest chain any consumer has asked for, so it cannot be reached by
  * authoring that means anything, and it still caps the walk at 8 queries.
  *
  * AT THE BOUND: the read derivation returns the EMPTY master set and the write
  * gate DENIES, each logging the chain it refused. ⛔ Never "no restriction" —
- * that is precisely the failure #11082 fixed, and a bound that widened on
+ * that is precisely the failure the ADR-0055 amendment closed, and a bound that widened on
  * overflow would reintroduce it at depth 9 instead of depth 2.
  */
 const CBP_MAX_CHAIN_DEPTH = 8;
@@ -449,7 +449,7 @@ interface CbpRelation {
    * the stand-down site for what a bare hand-over would mint.
    *
    * ⛔ [#9137] Do not widen this predicate to `true` for `readonly`/`system`, or
-   * to drop the `master_detail`+`required` condition, until #8772's ramp
+   * to drop the `master_detail`+`required` condition, until the ramp commit 8abada3ba records
    * completes (#9138 builder-force + #9139 lint-at-v18). See the freeze note at
    * the stand-down site (below, in {@link SecurityPlugin.assertControlledByParentWrite})
    * for why.
@@ -2038,7 +2038,7 @@ export class SecurityPlugin implements Plugin {
       // `update`/`delete` on a package row are handled downstream by the
       // ADR-0094 write-through, which TRANSLATES them into a metadata write.
       // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
-      // and since ADR-0094 D5-R (#6483 / PR #6608 rolled `permission` back to
+      // and since ADR-0094 D5-R (commit ee58392e1 rolled `permission` back to
       // `allowOrgOverride: false`) a CODE-DECLARED set is refused there with
       // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
       // overlay" direction this comment used to state is RETIRED.
@@ -2388,7 +2388,7 @@ export class SecurityPlugin implements Plugin {
       // stamps the server-DERIVED `__referentialFieldClear` marker on its
       // context (#3023). The marker cannot be forged from a request —
       // `assembleExecutionContext` builds an inbound envelope from a CLOSED
-      // field set and no `__` operation-private key is in it (#6216 / #7284).
+      // field set and no `__` operation-private key is in it (commit f586f1a89 / #7284).
       //
       // What it fixes: a role holding full delete rights on A and NO grant at
       // all on B could delete an A only while B was EMPTY. The moment a real row
@@ -2649,7 +2649,7 @@ export class SecurityPlugin implements Plugin {
             permissionSets,
             !!delegatorSets,
           );
-          // [#8757] The COVERAGE VOUCH for ADR-0055 details. This gate and the
+          // [commit 6feac910b] The COVERAGE VOUCH for ADR-0055 details. This gate and the
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
           // `permissionSets.length > 0 && userId && this.ql` triple, the same
@@ -3075,7 +3075,7 @@ export class SecurityPlugin implements Plugin {
       // exact composition, and the ownership-floor exception, live on
       // `writeCheckPolicies`.
       //
-      // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
+      // ── [commit a016f08b8] WHICH IMAGE, on an INSERT ──────────────────────
       //
       // Both verbs judge THE ROW THAT WILL EXIST. `update` has a pre-image to
       // merge the change set onto here, though only the change set AS SENT
@@ -3762,7 +3762,7 @@ export class SecurityPlugin implements Plugin {
 
       await next();
 
-      // [#16608] FAIL CLOSED on a seam that was never run. `honoured` is set by
+      // [commit a016f08b8] FAIL CLOSED on a seam that was never run. `honoured` is set by
       // the engine immediately before it calls the judgement, so an unset flag
       // means one thing only: the write went past without its stored-row
       // `check` being evaluated at all — an engine that does not implement the
@@ -4231,7 +4231,7 @@ export class SecurityPlugin implements Plugin {
           // Feature-detected; protocols predating registerAuthoringGate keep
           // the legacy (CLI-lint-only) behavior.
           registerObjectPostureGate(protocol);
-          // [#11843 — maintainer ruling 2026-08-25, option B] The packaged-
+          // [commit 5619aace3 — maintainer ruling 2026-08-25, option B] The packaged-
           // permission-set lock's METADATA-door registration: the same
           // classifier and error classes the data door runs
           // (`packaged-permission-set-lock.ts`), now consulted on the
@@ -4459,7 +4459,7 @@ export class SecurityPlugin implements Plugin {
     //    postures the bootstrap writes no grant — standing is config-derived
     //    at request time (`resolve-authz-context.ts` §6b-config) — so no
     //    `sys_user` write can change its answer and the replay never fires.
-    //    The #11343 UPDATE arm (`email_verified` / `email`) retired with the
+    //    Commit c0714eb5d's UPDATE arm (`email_verified` / `email`) retired with the
     //    walled elevation it existed to re-attempt.
     //
     // The trigger set is `shouldReplayBootstrapFor` — the SAME predicate its
@@ -6450,8 +6450,8 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0094 D5-R] `update`/`delete` on a package-managed row are not
     // refused HERE: the write-through middleware (which runs after this gate
     // + the delegated-admin gate + the CRUD checks) translates them into a
-    // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since #6483 /
-    // PR #6608 rolled `permission` back to `allowOrgOverride: false`, a
+    // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since commit
+    // ee58392e1 rolled `permission` back to `allowOrgOverride: false`, a
     // CODE-DECLARED (artifact-backed) set is refused there with 403
     // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
     // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset
@@ -6720,7 +6720,7 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#8757] Does this object declare that its access — writes included — derives
+   * [commit 6feac910b] Does this object declare that its access — writes included — derives
    * from a master record (ADR-0055 `controlled_by_parent`)?
    *
    * ## One read point, deliberately, and this is the whole reason it exists
@@ -7038,7 +7038,7 @@ export class SecurityPlugin implements Plugin {
       // check (`computeWriteCheckFilter`) asks too, so the floor a defaulted
       // check composes is the floor this pre-image composed.
       //
-      // [#8757] An ADR-0055 `controlled_by_parent` detail does not inherit the
+      // [commit 6feac910b] An ADR-0055 `controlled_by_parent` detail does not inherit the
       // platform's wildcard write ownership floor either — for a DIFFERENT
       // reason from the OWD above, and under one extra condition.
       //
@@ -7259,7 +7259,7 @@ export class SecurityPlugin implements Plugin {
     // `group` union, or the fail-closed deny sentinel an org-less session
     // otherwise hits), the org filter is NOT appended for a session whose
     // account is the VERIFIED declared platform owner (`OS_PLATFORM_OWNER_EMAIL`
-    // under the #11343 verified-email predicate — the same match the elevation
+    // under commit c0714eb5d's verified-email predicate — the same match the elevation
     // gate makes; see `isVerifiedPlatformOwnerSession` for the fail-closed
     // ladder). Everyone else's wall is byte-identical to before: the probe
     // answers `false` on env-unset before touching any row, and it is not even
@@ -7344,7 +7344,7 @@ export class SecurityPlugin implements Plugin {
    *     with the platform-admin standing surface — it was extracted as the
    *     elevation gate's twin, and since the #11663 re-anchor retired that
    *     gate its opposite number is the per-request derivation at
-   *     `resolve-authz-context.ts` §6b-config) AND the #11343 verified-email
+   *     `resolve-authz-context.ts` §6b-config) AND commit c0714eb5d's verified-email
    *     allow-list (`isEmailVerifiedUserRow` — absent-means-unverified).
    *     Missing row / unreadable store ⇒ `false`.
    *
@@ -7435,7 +7435,7 @@ export class SecurityPlugin implements Plugin {
       { keepOwnershipFloor: !floorReplaced },
     );
     if (withCheck.length === 0) return null;
-    // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
+    // [ADR-0105 D11 / commit 1d73d45c1] Stage the app-resolved membership sets on THIS
     // context before the `check` clause compiles — the same staging the read
     // side performs before Layer 1 compiles (`computeLayeredRlsFilter`). A
     // bare insert performs no read, so without this line the `check` twin of
@@ -7507,7 +7507,7 @@ export class SecurityPlugin implements Plugin {
    * `check` compiles). A predicate must resolve the same variables whichever
    * clause it sits in; with the write-side call missing, a `check` reading a
    * resolver key resolved only when the request happened to read first
-   * (#16607).
+   * (commit 1d73d45c1).
    */
   private async stageRlsMembership(context: any): Promise<void> {
     if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;
@@ -7801,7 +7801,7 @@ export class SecurityPlugin implements Plugin {
    * (defense-in-depth; spec validation should prevent authoring it). Returns null
    * when the object is not controlled_by_parent.
    *
-   * [#11082] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
+   * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
    * master set from the two halves above and nothing else, which made a master
    * that is ITSELF `controlled_by_parent` resolve to "no restriction" on both:
    * its RLS half is `null` (a derived object authors no policy — that is the
@@ -7839,7 +7839,7 @@ export class SecurityPlugin implements Plugin {
     object: string,
     context: any,
     /**
-     * [#11082] The `controlled_by_parent` objects already being resolved on
+     * [ADR-0055 amendment] The `controlled_by_parent` objects already being resolved on
      * this branch of the walk, outermost first. Empty at every real call site
      * — the four are the CRUD middleware (caller and D10 delegator) and
      * `getReadFilter` — and grown by one on each recursive hop.
@@ -7854,7 +7854,7 @@ export class SecurityPlugin implements Plugin {
     const rel = this.resolveCbpRelation(object);
     if (!rel) return { ...RLS_DENY_FILTER };
 
-    // [#11082] Chain guards, BEFORE any store work. Both answer with the empty
+    // [ADR-0055 amendment] Chain guards, BEFORE any store work. Both answer with the empty
     // master set — the same shape the #5386 sharing-resolution failure answers
     // with, and the same posture: a chain this derivation cannot resolve denies,
     // because the alternative ("no restriction") is the defect being fixed.
@@ -7891,7 +7891,7 @@ export class SecurityPlugin implements Plugin {
       );
       return { [rel.fk]: { $in: [] } };
     }
-    // [#11082] The THIRD half — the master's OWN `controlled_by_parent`
+    // [ADR-0055 amendment] The THIRD half — the master's OWN `controlled_by_parent`
     // derivation, resolved through this very method so the recursion cannot
     // drift from the top-level answer. `null` for a master that is not derived
     // (the single-level case, unchanged), and internally fail-closed at every
@@ -7948,7 +7948,7 @@ export class SecurityPlugin implements Plugin {
    * details under masters they could neither read nor edit. The sharing gate is
    * therefore asked UNCONDITIONALLY, not only when half 1 produced a filter.
    *
-   * [#8865] Half 1 composes the master's write RLS with the SAME ownership
+   * [commit 498f4e884] Half 1 composes the master's write RLS with the SAME ownership
    * authority the by-id write pre-image gate does — `resolveSharingWriteVerdict`
    * on the master row, and the platform ownership floor comes off on `allow`
    * (maintainer ruling 2026-08-15, direction 1). Before that, the floor stood
@@ -7960,7 +7960,7 @@ export class SecurityPlugin implements Plugin {
    * `sys_record_share`, `modifyAllRecords`) now reaches the master's children,
    * which is exactly the set that already reaches the master itself.
    *
-   * [#11082] The gate WALKS THE CHAIN. Its three legs used to run once, on the
+   * [ADR-0055 amendment] The gate WALKS THE CHAIN. Its three legs used to run once, on the
    * immediate master, and every one of them passes vacuously when that master is
    * itself `controlled_by_parent`: it authors no write RLS, and the sharing leg
    * asks `canEdit`, which answers `abstain` for it — `effectiveSharingModel`
@@ -7975,7 +7975,7 @@ export class SecurityPlugin implements Plugin {
    *
    * v1 scope: single-id writes. Bulk writes flow through the AST and are already
    * scoped by the controlled-by-parent READ filter (to readable masters) — which
-   * since #11082 is itself chain-composed, so the two faces still agree.
+   * since the ADR-0055 amendment is itself chain-composed, so the two faces still agree.
    *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
@@ -8024,7 +8024,7 @@ export class SecurityPlugin implements Plugin {
     // declaration / missing row / null master FK) are not verdicts at all and
     // throw their own errors below — see `./errors.ts` for the ruling and the
     // reasoning behind each code.
-    // [#11082] Split into a FACTORY plus the `never`-returning thrower it backs.
+    // [commit 61713314e] Split into a FACTORY plus the `never`-returning thrower it backs.
     // Both spell the same sentence, from one place. The factory exists because
     // TypeScript's control-flow analysis does not narrow through a `const` arrow
     // that returns `never` — the same reason the `!rel` branch below throws
@@ -8090,8 +8090,8 @@ export class SecurityPlugin implements Plugin {
       //
       // [#8959, re-measured 2026-09-01] "Confined" is now a PARTIAL publish-time
       // bound: of the three shapes above, ONE is fenced at authoring time and
-      // two are not. #8772 was RULED (2026-08-16, comment 5306089973) and the
-      // ramp it ordered has two code legs, of which exactly one has landed.
+      // two are not. The 2026-08-16 ruling (recorded in commit 8abada3ba) ordered a
+      // ramp with two code legs, of which exactly one has landed.
       // Direction 2 (#9138) IS merged: `ObjectSchema.create()` now runs
       // `forceCbpMasterDetailRequired` (`packages/spec/src/data/object.zod.ts`)
       // — under `controlled_by_parent`, a `master_detail` reference with
@@ -8129,12 +8129,12 @@ export class SecurityPlugin implements Plugin {
       // before trusting it — it goes stale when #9139 lands, or when the
       // builder force grows to cover the two flagged shapes.
       //
-      // ⛔ [#9137] FREEZE NOTE — maintainer ruling on #8772, Direction 4,
+      // ⛔ [#9137] FREEZE NOTE — maintainer ruling (commit 8abada3ba), Direction 4,
       // "immediately": until the two legs above both land, this `if` is the
       // SOLE ENFORCEMENT POINT for the same three authorable
       // `controlled_by_parent` master-reference shapes — `master_detail` with no
       // `required`; `required: true` + `readonly`; `required: true` + `system`.
-      // They are the last three rows of #8772's five-shape measurement table,
+      // They are the last three of the five measured shapes behind that ruling,
       // and exactly the three shapes `record-validator.ts` skips before its
       // required check ever runs: `validateRecord()` opens BOTH of its field
       // loops with `if (def.system || def.readonly) continue;` — the
@@ -8175,7 +8175,7 @@ export class SecurityPlugin implements Plugin {
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
 
-    // [#11082] Walk the `controlled_by_parent` chain, one hop at a time, and run
+    // [ADR-0055 amendment] Walk the `controlled_by_parent` chain, one hop at a time, and run
     // the SAME three master-edit legs on every hop.
     //
     // The three legs below used to run exactly once, on the immediate master.
@@ -8258,9 +8258,9 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#5386 / #8865 / #8679] The three legs that decide whether ONE principal may
+   * [#5386 / commit 498f4e884 / #8679] The three legs that decide whether ONE principal may
    * EDIT ONE master row — extracted verbatim from
-   * {@link SecurityPlugin.assertControlledByParentWrite} so that [#11082]'s
+   * {@link SecurityPlugin.assertControlledByParentWrite} so that the ADR-0055 amendment's
    * chain walk can run them on every hop instead of only the first.
    *
    * ⚠️ Extraction, not a rewrite: the parameter is the `CbpRelation` itself, so
@@ -8285,7 +8285,7 @@ export class SecurityPlugin implements Plugin {
     if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
       denyMasterEdit(`no edit permission on master '${rel.master}'`, masterId);
     }
-    // [#8865] The master's own write RLS — composed with the SAME ownership
+    // [commit 498f4e884] The master's own write RLS — composed with the SAME ownership
     // authority the by-id write pre-image gate (step 2.7) composes with, which
     // is the whole of this card.
     //
@@ -8317,7 +8317,7 @@ export class SecurityPlugin implements Plugin {
     //    below: this gate's question is EDIT access to the master, never the
     //    detail's own verb;
     //  • `masterGateCoversThisWrite` is deliberately NOT set. That knob is
-    //    #8757's, and it hands a `controlled_by_parent` object's floor to THIS
+    //    commit 6feac910b's, and it hands a `controlled_by_parent` object's floor to THIS
     //    gate; setting it here would hand a nested master's floor to a gate that
     //    is already running, on a path no measurement covers. A master that is
     //    itself a detail keeps its floor exactly as it does today.
@@ -8331,7 +8331,7 @@ export class SecurityPlugin implements Plugin {
     // step 2.8's guard has already established `permissionSets.length > 0`, and
     // a link naming a non-existent delegator throws before either call.) Reading
     // `context` instead would drop the floor for the delegator's pass and keep
-    // it for the agent's — the half-state #8757 recorded as a residual rather
+    // it for the agent's — the half-state commit 6feac910b left as a residual rather
     // than resolve by a guess. The delegated write keeps BOTH floors, exactly as
     // before this change.
     const delegatedWrite = !!opCtx?.context?.onBehalfOf?.userId;

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#8757] ONE row-write authority for a `controlled_by_parent` detail — and the
+// [commit 6feac910b] ONE row-write authority for a `controlled_by_parent` detail — and the
 // COVERAGE PRECONDITION that licenses removing the other one.
 //
 // ## What was measured on 17.0.0 GA (the card)
@@ -136,7 +136,7 @@ const ORPHAN_SCHEMA = {
 };
 
 /**
- * [#8865] A MASTER on which record sharing ABSTAINS — `private`, but with no
+ * [commit 498f4e884] A MASTER on which record sharing ABSTAINS — `private`, but with no
  * owner field, so `checkEdit` returns `abstain` at its `hasOwnerField` gate
  * before the `modifyAllRecords` branch is ever reached.
  *
@@ -265,7 +265,7 @@ const ADMIN_SET: PermissionSet = PermissionSetSchema.parse({
 });
 
 /**
- * [#8865] An APP-AUTHORED write policy on the MASTER, carried by a set that
+ * [commit 498f4e884] An APP-AUTHORED write policy on the MASTER, carried by a set that
  * grants nothing else. Nothing the platform ships spells it, so it is the
  * provenance control: dropping the PLATFORM floor must leave this policy
  * compiling and refusing exactly as before (ADR-0049 — a declared security
@@ -324,7 +324,7 @@ function fixtureRows(): Record<string, Row[]> {
     crm_orphan_detail: [
       { id: 'orph_admin', status: 'sent', created_by: ADMIN, organization_id: ORG },
     ],
-    // [#8865] The owner-less master, one per principal so each case can be run
+    // [commit 498f4e884] The owner-less master, one per principal so each case can be run
     // against a master the principal did NOT create — the only state in which
     // the floor has anything to say. The pair mirrors the campaign fixture
     // exactly but for the missing owner column, which is what turns the sharing
@@ -342,7 +342,7 @@ function fixtureRows(): Record<string, Row[]> {
 }
 
 /**
- * [#8865] An `edit`-level record share — one of the three wideners the platform
+ * [commit 498f4e884] An `edit`-level record share — one of the three wideners the platform
  * declares, and the one that is neither ownership nor a superuser bit. Seeding
  * it is how a case varies the SHARING VERDICT and nothing else.
  */
@@ -427,7 +427,7 @@ interface Outcome {
  */
 async function boot(seed: { shares?: Row[] } = {}) {
   const rows = fixtureRows();
-  // [#8865] The ONLY fixture axis a case may vary: which record shares exist.
+  // [commit 498f4e884] The ONLY fixture axis a case may vary: which record shares exist.
   // Everything else is fixed, so a verdict that moves moved because the declared
   // widener moved.
   if (seed.shares) rows.sys_record_share = seed.shares;
@@ -670,13 +670,13 @@ describe('[#8757] §2 the card\'s three measured refusals become the master gate
     const h = await boot();
     const admin = h.ctxFor(ADMIN, 'admin_set');
     // The card's sharpest line — `admin_set` updating `mem_mkt`, a child it did
-    // not create, under a master it does not own. #8757 took the DETAIL's floor
+    // not create, under a master it does not own. Commit 6feac910b took the DETAIL's floor
     // off, and this assertion then pinned the REFUSAL that survived one gate
     // later: the master gate's write-RLS leg (leg 1) still ran
     // `computeRlsFilter(master, 'update')` with the MASTER's platform ownership
     // floor standing, while the by-id path dropped it on a sharing `allow`.
     // That was the #8679 divergence surviving in the sibling leg, filed as
-    // #8865, and it is what this assertion said until #8865 landed.
+    // the card commit 498f4e884 closed, and it is what this assertion said until then.
     //
     // Maintainer ruling 2026-08-15 (direction 1): leg 1 adopts step 2.7's
     // composition — `resolveSharingWriteVerdict('update', master, masterId, …)`,
@@ -772,7 +772,7 @@ describe('[#8757] §4 NON-REGRESSION — everything the floor is still the only 
 // ---------------------------------------------------------------------------
 
 /**
- * [#8865] §5 ONE ownership composition, both paths — and the bounds that make
+ * [commit 498f4e884] §5 ONE ownership composition, both paths — and the bounds that make
  * the flip above attributable to it.
  *
  * ## What this section is for

@@ -253,7 +253,7 @@ function duplicateNameIssues(stack: any, pathPrefix = ''): LintIssue[] {
     // of the same name collide for real — and are reported, as they must be.
     // It is spelled as the imported constant rather than a bare `'global'`
     // literal so this reader cannot part from the engine's writer in silence
-    // the day the constant moves — the same divergence #14667 removed from the
+    // the day the constant moves — the same divergence commit dc7c226b9 removed from the
     // plugin's own copy.
     //
     // Only `objectName` is read. `object`/`entity` are rejected outright by
@@ -583,7 +583,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     }
   }
 
-  // ── Hook/action bodies that cannot be lowered to metadata (#13651) ──
+  // ── Hook/action bodies that cannot be lowered to metadata (commit ada3834ad) ──
   // `os build` catches every extraction refusal, warns, and bundles the closure
   // at exit 0 — so an app can stop being shippable as pure metadata with nothing
   // red anywhere. This rule is the "no" to that recorded array. It runs the SAME
@@ -908,10 +908,10 @@ export default class Lint extends Command {
       printStep('Loading configuration...');
     }
 
-    // [#12297] The ADR-0087 D2 conversion notices this command raises.
+    // [commit 9fd45a952] The ADR-0087 D2 conversion notices this command raises.
     //
     // ⛔ This is the #3782 PARITY class, NOT the "computed, then dropped"
-    // family (#11643 / #11391 / #11772 / #12047 / #12125). Nothing was computed
+    // family (#11643 / #11391 / #11772 / #12047 / commit 79cf692b0). Nothing was computed
     // and discarded here: `normalizeStackInput` was called with no options
     // object at all, so no sink existed and the notices were never PRODUCED —
     // in either face. `os lint` is the third of the three authoring commands
@@ -927,7 +927,7 @@ export default class Lint extends Command {
     //
     // Declared above the `try` so the catch-all exit can read it, under the
     // maintainer's 2026-08-25 ruling (#11772/#12047, applied to this field by
-    // #12125): every failure exit carries the lists the run has ALREADY
+    // commit 79cf692b0): every failure exit carries the lists the run has ALREADY
     // COMPUTED, so the field means the same thing on every exit. The CALL that
     // fills it stays below, at the step that owns it — a throw in `loadConfig`,
     // above it, reports `[]` honestly.
@@ -935,7 +935,7 @@ export default class Lint extends Command {
     // ⛔ NOT FOLDED INTO `issues`. Whether an auto-converted key should become
     // a `LintIssue` — or, on the sibling commands, whether `warnings` and
     // `conversions` should become one field — is an open question raised on
-    // #12125, left unsettled by the ruling there and explicitly withheld by
+    // the card behind commit 79cf692b0, left unsettled by its ruling and explicitly withheld by
     // that card's implementer. This change had no authority to settle it, so it
     // mirrors the shipped sibling shape rather than merging: `issues` keeps
     // meaning "something to fix", the notice keeps its structured
@@ -1066,7 +1066,7 @@ export default class Lint extends Command {
           ...(hiddenPlatform > 0 ? { hiddenPlatform } : {}),
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
-          // [#12297] The notices computed at `normalizeStackInput` above. Its
+          // [commit 9fd45a952] The notices computed at `normalizeStackInput` above. Its
           // own key, unconditionally present — the same `conversions` key
           // `os validate --json` and `os build --json` publish, carrying the
           // same structured notice objects, so one consumer reads all three
@@ -1167,11 +1167,11 @@ export default class Lint extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        // [#12297] Whatever the run had reached before the throw, under the
+        // [commit 9fd45a952] Whatever the run had reached before the throw, under the
         // same 2026-08-25 ruling: `[]` for a throw in `loadConfig` — the
         // normalize step never ran — and the notices in hand for any later one.
         // Wiring the producer without this exit would ship a fresh instance of
-        // the #12125 defect one command over, on the day it was closed.
+        // the defect commit 79cf692b0 fixed, one command over, on the day it was closed.
         await emitJson(
           { error: error.message, ...errorCodeFields(error), conversions: conversionNotices },
           0,

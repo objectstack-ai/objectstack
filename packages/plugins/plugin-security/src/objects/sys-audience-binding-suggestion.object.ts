@@ -41,7 +41,7 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       description: 'UUID of the suggestion row.',
     }),
 
-    // [#11374 route A] Both key columns below declare a bound derived by
+    // [commit f64668d3c, route A] Both key columns below declare a bound derived by
     // referenced-column transitivity, and the producer is named per column so
     // the derivation is vetoable in review rather than taken on trust. The pair
     // is the object's declared unique key `(package_id, permission_set_name,

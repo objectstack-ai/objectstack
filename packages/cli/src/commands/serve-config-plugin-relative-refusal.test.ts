@@ -2,7 +2,7 @@
 
 /**
  * A RELATIVE `plugins: [...]` entry is refused at load, naming the two
- * spellings that work (#10944).
+ * spellings that work (commit e598b1cbc).
  *
  * ## The defect, measured before the fix
  *
@@ -31,7 +31,7 @@
  *
  * ## Why refusal and not app-root resolution
  *
- * Ruled at triage on #10944. Refusing expands no accepted set — the spelling
+ * Ruled at triage, landed as commit e598b1cbc. Refusing expands no accepted set — the spelling
  * has never loaded an app's file — and converts a diagnostic about the CLI's
  * internals into an answer the author can act on. Resolving relative entries
  * against the served app's root is a capability addition with no measured pull
@@ -145,7 +145,7 @@ describe('os serve → a relative `plugins: [...]` entry is refused (#10944)', (
     // …and it does not claim an import was attempted, because none was.
     expect(message).not.toContain('Failed to import plugin');
     // Option A stays a maintainer decision; the message must not pre-announce
-    // it (triage on #10944 is explicit about this).
+    // it (the triage ruling behind commit e598b1cbc is explicit about this).
     expect(message).not.toMatch(/coming soon|will be supported|in a future release/i);
   });
 

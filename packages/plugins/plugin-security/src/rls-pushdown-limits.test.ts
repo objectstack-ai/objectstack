@@ -53,7 +53,7 @@ function compilerWithLogger() {
   return { compiler, logger };
 }
 
-// [#13176] `ReturnType<typeof vi.spyOn>` instantiates that generic's own type
+// [commit a68c61267] `ReturnType<typeof vi.spyOn>` instantiates that generic's own type
 // parameters, so `mock.calls` came back untyped and every callback over it was
 // an implicit `any` — invisible while no tsc program read this file. Naming the
 // spied signature types the call records instead of annotating each callback.

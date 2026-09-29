@@ -2,7 +2,7 @@
 
 /**
  * [#15989] The ADR-0104 file-family COLUMN step, as a further step of
- * `os migrate files-to-references --apply` — the ruling on #15041, step 2.
+ * `os migrate files-to-references --apply` — sequencing step 2 of ADR-0104's 2026-09-05 addendum.
  *
  * The backfill converts the VALUES; this converts the COLUMNS and the encoding
  * of what they hold, and then records `sys_migration.columns_moved_at` so the

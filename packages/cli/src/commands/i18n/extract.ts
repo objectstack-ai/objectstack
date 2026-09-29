@@ -224,7 +224,7 @@ export default class I18nExtract extends Command {
     }),
     'source-hashes': Flags.boolean({
       description:
-        'Also write <locale>.source-hashes.generated.ts — the provenance companion that lets a stale fill be told from a translation (#11671). Off by default: it is a format addition, so a bundle set opts in by documenting the flag in its extract config.',
+        'Also write <locale>.source-hashes.generated.ts — the provenance companion that records which source revision each generated leaf is still a copy of, so a stale fill can be told from a translation. Off by default: it is a format addition, so a bundle set opts in by documenting the flag in its extract config.',
       default: false,
       allowNo: true,
     }),

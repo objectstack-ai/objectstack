@@ -184,7 +184,7 @@ export default class Validate extends Command {
       // [#20113] APPENDED for the same reason, one member later again.
       ...jsxGateNotices,
     ];
-    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
     // notices were computed at step 2 (below) and reached the terminal SUCCESS
     // payload alone, so all five failure exits dropped a list already in hand.
@@ -332,8 +332,8 @@ export default class Validate extends Command {
             // called the strongest instance: the hoist exists so the finding
             // SURVIVES a schema error, and this payload discarded it anyway.
             warnings: warningsSoFar(),
-            // [#12125] Filled by `normalizeStackInput` two statements above this
-            // exit — the tightest instance of this card, and the one it measured.
+            // [commit 79cf692b0] Filled by `normalizeStackInput` two statements above this
+            // exit — the tightest instance of that defect, and the one the commit measured.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -479,7 +479,7 @@ export default class Validate extends Command {
             // the pre-parse `unknownKeyWarnings` — computed long before this
             // gate — and keeps the member ORDER identical to every other exit.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -643,7 +643,7 @@ export default class Validate extends Command {
             // `warnings` beside the two lists computed before this gate. The
             // two classes being separate is the whole point of the split.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -681,7 +681,7 @@ export default class Validate extends Command {
             // capability hints, and the pre-parse key findings were all in
             // hand and none of them reached the payload.
             warnings: warningsSoFar(),
-            // [#12125] Computed at step 2, above this gate.
+            // [commit 79cf692b0] Computed at step 2, above this gate.
             conversions: conversionNotices,
             duration: timer.elapsed(),
           });
@@ -810,9 +810,9 @@ export default class Validate extends Command {
             // `manifest.engines.protocol` in #13860, and the published key
             // name lagged one release behind it. A key spelled `specVersion*`
             // invites the inference that `manifest.specVersion` is writable;
-            // `ManifestSchema` is not `.strict()` and drops unknown keys with
-            // nothing said (#14192), so acting on that inference produces a
-            // manifest that looks fine and whose line never took effect. The
+            // `ManifestSchema` was not `.strict()` and dropped unknown keys with
+            // nothing said until commit 4d0d9445a, so acting on that inference produced a
+            // manifest that looked fine and whose line never took effect. The
             // rename is one stroke, no alias, no dual-key window; its value
             // shape is unchanged.
             protocolVersionGap: protocolGap,
@@ -912,7 +912,7 @@ export default class Validate extends Command {
           // is a FILE, say, which makes `readdirSync` raise ENOTDIR) carries
           // the three lists already in hand.
           warnings: warningsSoFar(),
-          // [#12125] Same reading, one field over: `[]` for a throw at load —
+          // [commit 79cf692b0] Same reading, one field over: `[]` for a throw at load —
           // step 2 had not run — and the notices in hand for any later throw.
           conversions: conversionNotices,
           duration: timer.elapsed(),

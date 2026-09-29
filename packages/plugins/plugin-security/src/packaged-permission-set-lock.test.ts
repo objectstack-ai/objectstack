@@ -30,7 +30,7 @@
  *     and the package-declared base is untouched by it;
  *  5. fail-closed on ambiguity: a provenance read that cannot ANSWER refuses,
  *     never accepts;
- *  6. ⭐ what the clone ACTION SENDS (#11703) — pin 3 drives the door with a
+ *  6. ⭐ what the clone ACTION SENDS (commit 5cb62d88b) — pin 3 drives the door with a
  *     hand-written payload, so it could not see that the ACTION ITSELF listed
  *     only two of the row's six definition facets. Pin 6 reads the payload out
  *     of the action definition, so editing that params list is what moves it.
@@ -38,7 +38,7 @@
  * (Pin 4 — the detection reading for overlays that already exist — lives in its
  * own suite at the bottom of this file, because it reads rather than writes.)
  *
- * ## ⭐ The fail-open this must not inherit (#11518)
+ * ## ⭐ The fail-open this must not inherit (repaired by commit e1d773eb7)
  *
  * `buildExistingByName`'s UNSCOPED page cap (`limit: names.length`,
  * `seed-name-lookup.ts`) truncated as soon as one name could carry more than one
@@ -47,7 +47,7 @@
  * the save this ruling exists to refuse would be accepted. A silent fork
  * produced by the code written to stop silent forks.
  *
- * #11518 has since repaired the cap itself — an overflowing page is now detected
+ * Commit e1d773eb7 has since repaired the cap itself — an overflowing page is now detected
  * and degrades to the per-item read rather than answering — so the controls
  * below no longer guard against THAT truncation reaching this verdict. They are
  * kept, and they still pass, because what they actually pin is structural and
@@ -62,7 +62,7 @@
  * an in-memory array with no page, no cap and no `$in`. Two controls prove the
  * immunity structurally rather than asserting it:
  *
- *  - CONTROL A builds the exact multi-row shape #11518 truncates on, in a
+ *  - CONTROL A builds the exact multi-row shape that truncated before commit e1d773eb7, in a
  *    double whose `find` HONOURS `limit` (the projection suite's double ignores
  *    it, so the trap cannot even be expressed there), shows the truncation is
  *    live, and pins that the refusal still fires;
@@ -91,8 +91,8 @@ import {
  * In-memory ql over `sys_permission_set` + `sys_metadata`.
  *
  * ⚠️ `find` HONOURS `limit`. The sibling double in
- * `permission-set-projection.test.ts` does not, which is why #11518's
- * truncation cannot be reproduced there at all — a page cap that the double
+ * `permission-set-projection.test.ts` does not, which is why the page-cap
+ * truncation commit e1d773eb7 repaired cannot be reproduced there — a page cap that the double
  * ignores is a page cap that no test in that file can ever measure.
  */
 function makeQl(declared: any[] | null = null) {
@@ -120,7 +120,7 @@ function makeQl(declared: any[] | null = null) {
     permRows,
     metaRows,
     /**
-     * Break precisely the read #11518 is about: a name-keyed page over
+     * Break precisely the read commit e1d773eb7 is about: a name-keyed page over
      * `sys_permission_set`. Reads by `id` (target resolution) keep working, so
      * the middleware still reaches the provenance question — which is the only
      * way to observe what that question answers when the paged table is
@@ -138,7 +138,7 @@ function makeQl(declared: any[] | null = null) {
       const rows = tableFor(object);
       if (!rows) return [];
       const hit = rows.filter((r) => matches(r, q?.where));
-      // The cap a real driver applies — and the one #11518 turns into a false
+      // The cap a real driver applies — and the one commit e1d773eb7 stopped turning into a false
       // "absent". Modelled, not ignored.
       return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
     },
@@ -516,7 +516,7 @@ describe('pin 3 — the clone path yields an org-owned set with no upgrade linka
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PIN 6 — what the CLONE ACTION SENDS: every copied facet, by identity (#11703)
+// PIN 6 — what the CLONE ACTION SENDS: every copied facet, by identity (commit 5cb62d88b)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -527,7 +527,7 @@ describe('pin 3 — the clone path yields an org-owned set with no upgrade linka
  * on its `params`, so cloning a set carrying system permissions, row-level
  * security or tab permissions produced a clone with NONE of them — no error, a
  * success toast, and the loss discoverable only by diffing the two records
- * (#11703). Fail-closed (fewer grants), and therefore quiet.
+ * (commit 5cb62d88b). Fail-closed (fewer grants), and therefore quiet.
  *
  * It matters more since the ruling one commit above this one: the save door now
  * refuses an in-place edit of a package-declared set AND its refusal names the
@@ -597,7 +597,7 @@ const richSet = (over: Record<string, any> = {}) => ({
     showcase_project: { allowRead: true },
   },
   fields: { 'showcase_project.budget': { readable: true, editable: false } },
-  // The three facets #11703 dropped, each non-empty and each named below.
+  // The three facets dropped before commit 5cb62d88b, each non-empty and each named below.
   systemPermissions: ['setup.access', 'ops.export_data'],
   rowLevelSecurity: [
     {
@@ -690,7 +690,7 @@ describe('pin 6 — the clone action SENDS every facet it copies, and says what 
     expect(body.description).toBe(richSet().description);
     expect(body.objects, 'object permissions').toEqual(richSet().objects);
     expect(body.fields, 'field permissions').toEqual(richSet().fields);
-    // ⭐ The three #11703 dropped. `[]` / `{}` here is the defect itself.
+    // ⭐ The three dropped before commit 5cb62d88b. `[]` / `{}` here is the defect itself.
     expect(body.systemPermissions, 'system permissions — [] here IS the #11703 silent drop').toEqual(
       ['setup.access', 'ops.export_data'],
     );
@@ -752,7 +752,7 @@ describe('pin 6 — the clone action SENDS every facet it copies, and says what 
     expect(clone.admin_scope ?? null, 'and the column stays empty on the clone').toBeNull();
 
     // ⭐ The exclusion has to READ as a decision to the admin standing in the
-    // dialog — otherwise it is the same silent drop #11703 reports, merely
+    // dialog — otherwise it is the same silent drop commit 5cb62d88b fixed, merely
     // ruled. The dialog's own explanatory line carries it.
     const description = String(cloneAction().description ?? '');
     expect(description, 'the clone dialog states the exclusion').toMatch(/delegated-admin scope/i);
@@ -806,7 +806,7 @@ describe('pin 5 — provenance that cannot be DETERMINED refuses the save', () =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ⭐ CONTROLS — the provenance read cannot inherit #11518's fail-open
+// ⭐ CONTROLS — the provenance read cannot inherit the fail-open commit e1d773eb7 repaired
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('control A — #11518 shape: a name carrying MORE THAN ONE row still refuses', () => {
@@ -823,7 +823,7 @@ describe('control A — #11518 shape: a name carrying MORE THAN ONE row still re
     const names = ['ehr_quality_inspector'];
     const capped = await ql.find('sys_permission_set', {
       where: { name: { $in: names } },
-      limit: names.length, // ← the UNSCOPED cap seed-name-lookup.ts carried before #11518
+      limit: names.length, // ← the UNSCOPED cap seed-name-lookup.ts carried before commit e1d773eb7
     });
     expect(ql.permRows.filter((r: any) => r.name === 'ehr_quality_inspector')).toHaveLength(2);
     expect(capped, 'the page is truncated — half the rows for this name are invisible').toHaveLength(1);
@@ -850,7 +850,7 @@ describe('control A — #11518 shape: a name carrying MORE THAN ONE row still re
 
 describe('control B — the provenance read is not a name-keyed table read at all', () => {
   it('every NAME-KEYED page read fails, and the verdict is STILL "package-declared"', async () => {
-    // The structural proof of immunity. #11518 is a defect of a name-keyed
+    // The structural proof of immunity. Commit e1d773eb7 repaired a defect of a name-keyed
     // page read over `sys_permission_set`; here every such read is made to
     // fail outright — the most extreme form of "this read did not answer" —
     // while the by-id target resolution keeps working so the middleware still
