@@ -622,7 +622,7 @@ export function lowerPreviewDateRange(
     const window = resolveAnalyticsDateRangeString(dateRange as string, { timezone });
     return { start: window.start, end: window.end, endExclusive: window.endExclusive };
   }
-  // [#17124] An oddly-sized array is REFUSED, by the one
+  // [commit 86c505286] An oddly-sized array is REFUSED, by the one
   // `explicitDateRangeWindow` every face in this package calls. ⛔ What this
   // replaced left the upper bound UNWRITTEN — `String(undefined)` is
   // `"undefined"`, and every ISO date sorts below it, so a one-entry array

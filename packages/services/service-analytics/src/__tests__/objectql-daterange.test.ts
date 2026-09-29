@@ -197,7 +197,7 @@ describe('ObjectQLStrategy — timeDimensions[].dateRange (#3650)', () => {
     expect(result.rows).toEqual([{ stage: 'lost', revenue: 200 }]);
   });
 
-  // [#17124] SUCCEEDS 'narrows rather than vanishes on a one-entry dateRange
+  // [commit 86c505286] SUCCEEDS 'narrows rather than vanishes on a one-entry dateRange
   // array', which pinned the point degeneration this card retired. ⛔ Not a
   // weakening of #3650: that card's complaint was 「no error, just every row
   // ever recorded」, and the old pin chose the narrower of two WRONG answers

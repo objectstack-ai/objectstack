@@ -23,10 +23,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
-import type { FlowTrigger, FlowTriggerBinding, FlowActivationRow } from './engine.js';
+import type { FlowTrigger, FlowTriggerBinding, FlowActivationRow, NodeExecutor, SuspendedRunStore } from './engine.js';
 import { InMemoryFlowActivationStore, ObjectStoreFlowActivationStore } from './flow-activation-store.js';
+import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
 import { registerMapNode } from './builtin/map-node.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
@@ -410,6 +412,207 @@ describe('ADR-0126 §7.3 — disabling a flow is refused while packaged flows ca
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// §7.3, the disable direction — a switched-off caller guards only while it
+// holds a parked run
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ADR-0126 §7.3 (disable direction) — a switched-off packaged caller guards its subflow only while it holds a parked run', () => {
+    // Switching a caller off stops its NEW runs only: a run it parked before
+    // the switch-off resumes through `resume()`, which does not consult
+    // activation, and walks on into its subflow node. So the guard reads
+    // reachability — a parked run — and never the caller's switch alone.
+    const nodeCtx = { logger: createTestLogger(), getService: () => undefined } as any;
+
+    /** A pause point any raw `resume()` may continue, as an approval or a wait would park a run. */
+    const PAUSER = {
+        type: 'pauser',
+        descriptor: defineActionDescriptor({
+            type: 'pauser', version: '1.0.0', name: 'pauser',
+            supportsPause: true, resumeAuthority: 'any',
+        }),
+        async execute() { return { success: true, suspend: true }; },
+    } as NodeExecutor;
+
+    /** An engine that can run and PARK, over the given durable run store (none: the hot cache alone). */
+    function parkingEngine(runStore?: SuspendedRunStore) {
+        const engine = new AutomationEngine(createTestLogger(), runStore);
+        const ledger = new InMemoryFlowActivationStore();
+        engine.setFlowActivationStore(ledger);
+        registerSubflowNode(engine, nodeCtx);
+        registerMapNode(engine, nodeCtx);
+        engine.registerNodeExecutor(PAUSER);
+        return { engine, ledger };
+    }
+
+    /**
+     * A packaged flow: `start → [hold (a pause)] → [call (subflow|map) target] → end`.
+     * `map` iterates two items, so a pausing per-item flow parks the caller AT its map node.
+     */
+    function flow(name: string, opts: { hold?: boolean; call?: { target: string; nodeType: 'subflow' | 'map' } } = {}) {
+        const nodes: Array<Record<string, unknown>> = [{ id: 'start', type: 'start', label: 'Start', config: {} }];
+        if (opts.hold) nodes.push({ id: 'hold', type: 'pauser', label: 'Hold' });
+        if (opts.call) {
+            nodes.push({
+                id: 'call',
+                type: opts.call.nodeType,
+                label: 'Call',
+                config: { flowName: opts.call.target, ...(opts.call.nodeType === 'map' ? { collection: [1, 2] } : {}) },
+            });
+        }
+        nodes.push({ id: 'end', type: 'end', label: 'End' });
+        return {
+            ...packagedFlow(name),
+            nodes,
+            edges: nodes.slice(1).map((n, i) => ({ id: `e${i}`, source: nodes[i].id as string, target: n.id as string })),
+        };
+    }
+
+    /** Disable `name` and hand back the refusal: the ADR-0112 envelope and `subflowCallers`, unchanged. */
+    async function refusedDisable(engine: AutomationEngine, name: string, callers: string[]): Promise<any> {
+        const thrown = await engine.toggleFlow(name, false).then(() => undefined, (e: unknown) => e);
+        expect(thrown, `disabling '${name}' was accepted`).toBeDefined();
+        expect((thrown as any).code).toBe('DELETE_RESTRICTED');
+        expect((thrown as any).status).toBe(409);
+        expect((thrown as any).subflowCallers).toEqual(callers);
+        expect((thrown as any).message).toContain(`Flow '${name}' cannot be disabled`);
+        return thrown;
+    }
+
+    /** The refusal names the parked run and the operator cancel door (ADR-0044) of the caller holding it. */
+    function expectNamesParkedRun(thrown: any, caller: string, runId: string) {
+        expect(thrown.message).toContain(`'${runId}'`);
+        expect(thrown.message).toContain(`POST /automation/${caller}/runs/:runId/cancel`);
+        expect(thrown.message).toContain('ADR-0044');
+    }
+
+    /** Refused means nothing moved: no ledger row for the callee. */
+    async function expectNoRow(ledger: InMemoryFlowActivationStore, name: string) {
+        expect((await ledger.list()).find((r) => r.name === name)).toBeUndefined();
+    }
+
+    it('the subflow pair: once the caller is switched off, the callee\'s disable completes at once — a caller with no parked run cannot reach it', async () => {
+        const { engine, ledger } = parkingEngine();
+        engine.registerFlow('shared_step', flow('shared_step'));
+        engine.registerFlow('vendor_process', flow('vendor_process', { call: { target: 'shared_step', nodeType: 'subflow' } }));
+        // A run that has ENDED is not parked, so it never counts.
+        expect((await engine.execute('vendor_process')).success).toBe(true);
+
+        // Armed, the caller guards, and the step it names is to switch it off.
+        const thrown = await refusedDisable(engine, 'shared_step', ['vendor_process']);
+        expect(thrown.message).toContain("Disable the calling flow 'vendor_process' first");
+
+        // The prescribed sequence, followed: caller, then callee.
+        await expect(engine.toggleFlow('vendor_process', false)).resolves.toBeUndefined();
+        await expect(engine.toggleFlow('shared_step', false)).resolves.toBeUndefined();
+        expect(await ledger.list()).toContainEqual({ name: 'shared_step', packageId: 'crm', active: false });
+        expect((await engine.execute('shared_step')).code).toBe('FLOW_DISABLED');
+    });
+
+    it('the map pair: while a per-item sign-off is parked, the refusal names the caller\'s run and the cancel door; after the cancel, the disable completes', async () => {
+        const { engine, ledger } = parkingEngine();
+        // The shipped map pair's shape: the per-item flow pauses (a sign-off).
+        engine.registerFlow('one_task_signoff', flow('one_task_signoff', { hold: true }));
+        engine.registerFlow('release_signoff', flow('release_signoff', { call: { target: 'one_task_signoff', nodeType: 'map' } }));
+
+        const started = await engine.execute('release_signoff');
+        expect(started.status).toBe('paused');
+        const runId = started.runId!;
+        // The caller waiting on its item is an ordinary parked run, AT its map node.
+        expect(engine.listSuspendedRuns()).toContainEqual(expect.objectContaining({ runId, flowName: 'release_signoff', nodeId: 'call' }));
+
+        await expect(engine.toggleFlow('release_signoff', false)).resolves.toBeUndefined();
+
+        const thrown = await refusedDisable(engine, 'one_task_signoff', ['release_signoff']);
+        expectNamesParkedRun(thrown, 'release_signoff', runId);
+        await expectNoRow(ledger, 'one_task_signoff');
+
+        // The door the refusal names, taken: the run ends, and the disable completes.
+        expect(await engine.cancelRun(runId, 'switching the per-item flow off')).toBe(true);
+        await expect(engine.toggleFlow('one_task_signoff', false)).resolves.toBeUndefined();
+        expect(await ledger.list()).toContainEqual({ name: 'one_task_signoff', packageId: 'crm', active: false });
+    });
+
+    it('CONTROL — a switched-off caller with an enabled callee resumes its parked run to success, so the run guards; once it finishes, the disable completes', async () => {
+        const { engine } = parkingEngine();
+        engine.registerFlow('shared_step', flow('shared_step'));
+        engine.registerFlow('vendor_process', flow('vendor_process', { hold: true, call: { target: 'shared_step', nodeType: 'subflow' } }));
+        const runId = (await engine.execute('vendor_process')).runId!;
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await refusedDisable(engine, 'shared_step', ['vendor_process']);
+        expectNamesParkedRun(thrown, 'vendor_process', runId);
+
+        // The run the refusal protected: switched off, and it still resumes
+        // THROUGH its subflow node, into the callee the refusal kept armed.
+        const resumed = await engine.resume(runId);
+        expect(resumed.success).toBe(true);
+        expect((await engine.getRun(runId))?.status).toBe('completed');
+
+        // "Or let it finish" — finished, the caller holds no parked run.
+        await expect(engine.toggleFlow('shared_step', false)).resolves.toBeUndefined();
+    });
+
+    it('a caller disabled by its definition\'s STATUS guards the same way — its parked run still resumes, since resume never consults enablement', async () => {
+        const { engine, ledger } = parkingEngine();
+        const vendorProcess = flow('vendor_process', { hold: true, call: { target: 'shared_step', nodeType: 'subflow' } });
+        engine.registerFlow('shared_step', flow('shared_step'));
+        engine.registerFlow('vendor_process', vendorProcess);
+        const runId = (await engine.execute('vendor_process')).runId!;
+        // Republished `obsolete`: disabled by its status, with no ledger row at all.
+        engine.registerFlow('vendor_process', { ...vendorProcess, status: 'obsolete' });
+        expect((await engine.execute('vendor_process')).code).toBe('FLOW_DISABLED');
+        await expectNoRow(ledger, 'vendor_process');
+
+        const thrown = await refusedDisable(engine, 'shared_step', ['vendor_process']);
+        expectNamesParkedRun(thrown, 'vendor_process', runId);
+        expect(thrown.message).not.toContain("Disable the calling flow 'vendor_process'");
+
+        expect((await engine.resume(runId)).success).toBe(true);
+        await expect(engine.toggleFlow('shared_step', false)).resolves.toBeUndefined();
+    });
+
+    it('a run a PREVIOUS process parked — in the durable store, not in this process\'s cache — still guards', async () => {
+        const runStore = new InMemorySuspendedRunStore();
+        const register = (engine: AutomationEngine) => {
+            engine.registerFlow('shared_step', flow('shared_step'));
+            engine.registerFlow('vendor_process', flow('vendor_process', { hold: true, call: { target: 'shared_step', nodeType: 'subflow' } }));
+        };
+        const before = parkingEngine(runStore);
+        register(before.engine);
+        const runId = (await before.engine.execute('vendor_process')).runId!;
+
+        // The restarted process: the same durable store, an empty hot cache.
+        const { engine, ledger } = parkingEngine(runStore);
+        register(engine);
+        expect(engine.listSuspendedRuns()).toEqual([]);
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await refusedDisable(engine, 'shared_step', ['vendor_process']);
+        expectNamesParkedRun(thrown, 'vendor_process', runId);
+        await expectNoRow(ledger, 'shared_step');
+
+        expect(await engine.cancelRun(runId)).toBe(true);
+        await expect(engine.toggleFlow('shared_step', false)).resolves.toBeUndefined();
+    });
+
+    it('a durable store that cannot be LISTED refuses the disable with its own failure — "unknown" is never read as "no parked run"', async () => {
+        const outage = new Error('suspended-run store unreachable');
+        const runStore = new InMemorySuspendedRunStore();
+        runStore.list = async () => { throw outage; };
+        const { engine, ledger } = parkingEngine(runStore);
+        engine.registerFlow('shared_step', flow('shared_step'));
+        engine.registerFlow('vendor_process', flow('vendor_process', { call: { target: 'shared_step', nodeType: 'subflow' } }));
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown = await engine.toggleFlow('shared_step', false).then(() => undefined, (e: unknown) => e);
+
+        expect(thrown).toBe(outage);
+        await expectNoRow(ledger, 'shared_step');
+        expect((await engine.execute('shared_step')).success).toBe(true);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // §7.3, the enable direction — a caller is not re-armed onto a disabled child
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -572,6 +775,31 @@ describe('ADR-0126 §7.3 (enable direction) — re-enabling a packaged caller is
         // be a remedy no sequence can complete.
         await expect(engine.toggleFlow('ping', true)).resolves.toBeUndefined();
         await expect(engine.toggleFlow('pong', true)).resolves.toBeUndefined();
+    });
+
+    it('a subflow disabled BOTH ways inside a ledger-disabled CYCLE is still named, with its publish remedy — the cycle exempts ledger bits only', async () => {
+        const { engine } = runnableEngine();
+        engine.registerFlow('ping', packagedFlow('ping'));
+        engine.registerFlow('pong', packagedFlow('pong'));
+        await engine.toggleFlow('ping', false);
+        await engine.toggleFlow('pong', false);
+        engine.registerFlow('ping', caller('ping', ['pong']));
+        // `pong` closes the ledger cycle AND its definition disables it: no
+        // enable order re-arms a status, so the cycle cannot excuse it.
+        engine.registerFlow('pong', { ...caller('pong', ['ping']), status: 'invalid' });
+
+        const thrown = await refusedEnable(engine, 'ping');
+
+        expect(thrown.message).toContain(
+            "'pong' (switched off in the activation ledger, and its definition's status is 'invalid')",
+        );
+        expect(thrown.message).toContain("Publish 'pong' with status 'active'");
+
+        // The remedy, followed: the definition republished active, the switch
+        // on (the ledger-only cycle exempts it now), then the caller.
+        engine.registerFlow('pong', caller('pong', ['ping']));
+        await expect(engine.toggleFlow('pong', true)).resolves.toBeUndefined();
+        await expect(engine.toggleFlow('ping', true)).resolves.toBeUndefined();
     });
 
     it('a flow calling ITSELF does not guard its own re-enable', async () => {
