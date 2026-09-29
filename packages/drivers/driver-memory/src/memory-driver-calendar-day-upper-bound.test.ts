@@ -183,7 +183,7 @@ describe('[#20600] InMemoryDriver — a bare-day upper bound on the last support
   });
 
   /** `where` · the ids it answers, sorted. */
-  const CASES: ReadonlyArray<readonly [string, () => FilterCondition, readonly string[]]> = [
+  const CASES: ReadonlyArray<readonly [string, () => FilterCondition | undefined, readonly string[]]> = [
     ["$lte '9999-12-31'", () => ({ created_at: { $lte: '9999-12-31' } }), ['c26', 'last', 'mid', 'open', 'prev']],
     ["$between ['2026-01-01', '9999-12-31']", () => ({ created_at: { $between: ['2026-01-01', '9999-12-31'] } }), ['c26', 'last', 'mid', 'open', 'prev']],
     ["$between ['9999-12-31', '9999-12-31']", () => ({ created_at: { $between: ['9999-12-31', '9999-12-31'] } }), ['last', 'mid', 'open']],
