@@ -1107,7 +1107,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // predicate cannot route at all, a `record-*` triggerType outside the
   // closed token grammar `triggerTypeToHookEvents` maps, and (#6637) a
   // `type: 'record_change'` flow whose triggerType the engine's binding resolver
-  // routes nowhere, silently demoting it to a manual flow. None of those verdicts
+  // routes nowhere, silently demoting it to a manual flow. #20553 made it five: an
+  // `api`-bound flow with no usable `config.secret`, which the engine's own
+  // `registerFlow` refuses (ADR-0041). None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
