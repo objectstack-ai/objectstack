@@ -32,6 +32,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { StandardErrorCode } from '../api/errors.zod.js';
 import {
   FILTER_OPERATORS,
   VALID_AST_OPERATORS,
@@ -320,7 +321,8 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
   // The third column is what the site's TODO must say, or `null` for the one
   // row that is not a legacy form at all (see the last row).
   const DECLINED_ROWS: ReadonlyArray<readonly [string, unknown, string | null]> = [
-    // The renderer at the pin skips a null key (constrains nothing); a rule would test IS NULL.
+    // At the pin a null key constrains nothing where the block queries an object and selects
+    // the null rows where its rows are inline — no one rule keeps both.
     ['a null value', { owner_id: null }, 'has the key `owner_id` set to null'],
     ['a null value beside a mappable key', { stage: 'open', owner_id: null }, 'has the key `owner_id` set to null'],
     // Direction lives in the VALUE — not in the one operator table.
@@ -357,7 +359,7 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
   });
 
   it('all-or-nothing: a declined key keeps the mappable keys beside it from converting', () => {
-    // Converting `stage` alone would drop `owner_id: null` from an AND list — a wider filter.
+    // Converting `stage` alone would drop `deleted_at: { $null: true }` from an AND list — a wider filter.
     const { value } = gridFilter({ stage: 'open', deleted_at: { $null: true } });
     expect(value).toEqual({ stage: 'open', deleted_at: { $null: true } });
   });
@@ -644,6 +646,51 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     expect(inline.todos[0]!.reason).toContain('carries the combinator `$or`');
     // Nothing about the rows' source is said, because nothing about it decides.
     expect(inline.todos[0]!.reason).toBe(bound.todos[0]!.reason);
+  });
+
+  it('a null-valued key is a TODO in the same words on an inline-row node and an object-bound one, naming an `is_null` rule its door takes', () => {
+    // At the objectui pin the key constrains nothing where the block queries an
+    // object and selects the rows whose value is null where its rows are inline,
+    // so no one rule keeps both: the one reason has to be true on either block.
+    const inline = convert(
+      pageWith({ type: 'object-map', properties: { staticData: [], filter: { owner_id: null } } }),
+    );
+    const bound = convert(
+      pageWith({ type: 'object-map', properties: { objectName: 'deal', filter: { owner_id: null } } }),
+    );
+    expect((componentOf(inline.stack).properties as Dict).filter).toEqual({ owner_id: null });
+    expect(inline.todos).toHaveLength(1);
+    expect(inline.todos[0]!.reason).toBe(bound.todos[0]!.reason);
+    const rule = { field: 'owner_id', operator: 'is_null' };
+    expect(inline.todos[0]!.reason).toContain(JSON.stringify(rule));
+    // The rule it names is one the block's door takes.
+    const door = ComponentPropsMap['object-map'] as unknown as {
+      safeParse: (v: unknown) => { error?: { issues: Array<{ path: PropertyKey[] }> } };
+    };
+    const atFilter = (v: unknown): number =>
+      door.safeParse(v).error?.issues.filter((i) => i.path[0] === 'filter').length ?? 0;
+    expect(atFilter({ objectName: 'deal', filter: [rule] })).toBe(0);
+    // Control: the door really judges this key — the stored record is refused there.
+    expect(atFilter({ objectName: 'deal', filter: { owner_id: null } })).toBeGreaterThan(0);
+  });
+
+  it('an empty operator object is a TODO in the same words on an inline-row node and an object-bound one, naming the refusal the renderer answers', () => {
+    // At the objectui pin the renderer refuses `{ amount: {} }` rather than
+    // ignoring it — `INVALID_FILTER` where the block queries an object, no rows
+    // where its rows are inline — and the one reason says so on either block.
+    const inline = convert(
+      pageWith({ type: 'object-map', properties: { staticData: [], filter: { amount: {} } } }),
+    );
+    const bound = convert(
+      pageWith({ type: 'object-map', properties: { objectName: 'deal', filter: { amount: {} } } }),
+    );
+    expect((componentOf(inline.stack).properties as Dict).filter).toEqual({ amount: {} });
+    expect(inline.todos).toHaveLength(1);
+    expect(inline.todos[0]!.reason).toBe(bound.todos[0]!.reason);
+    const code = 'INVALID_FILTER';
+    // The code it names is one the platform declares.
+    expect(StandardErrorCode.options).toContain(code);
+    expect(inline.todos[0]!.reason).toContain(`\`${code}\``);
   });
 
   it('names the block by its type, and by its `id` when it has one', () => {

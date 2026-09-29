@@ -11314,11 +11314,22 @@ function dollarKeysReason(keys: readonly string[]): string {
  * — `$and` / `$or` / `$not` above all — is not a field, so its record is left
  * alone; that is the ruled boundary, and flattening a combinator into the AND
  * list is exactly the silent selection change it excludes. A `null` value is
- * declined too, and not for a schema reason: the renderer at the
- * `.objectui-sha` pin (`convertFiltersToAST`) SKIPS a record key whose value is
- * null, so that key constrains nothing today, while an `equals null` rule would
- * test IS NULL. An empty operator object is declined for the same reason — it
- * constrains nothing, and no rule says "nothing".
+ * declined too, and not for a schema reason: at the `.objectui-sha` pin the key
+ * selects different rows on different blocks, so no one rule keeps it. Where a
+ * block queries an object, `convertFiltersToAST` SKIPS a record key whose value
+ * is null, so the key constrains nothing; where a block's rows are inline,
+ * `ValueDataSource.find` matches the record through `comparandEquals`, so the
+ * key selects the rows whose value is null. This entry never reads where a
+ * block's rows come from, so its reason states both and advises neither
+ * rewrite: it names the `is_null` rule for the rows with no value, and leaves
+ * which rows the filter should select to the author. An empty operator object
+ * is declined for a different reason: it names a field and no operator, so no
+ * rule spells it. At the same pin the renderer refuses it rather than ignoring
+ * it — where a block queries an object, `convertFiltersToAST` throws through
+ * `refuseEmptyOperatorMap` (`INVALID_FILTER`, 400); where a block's rows are
+ * inline, `ValueDataSource.find` answers no rows through
+ * `zeroKeyConditionRefusal`. Its reason says both and keeps the renderer's own
+ * remedy, dropping the key.
  *
  * Every top-level `$` key is judged before any field key, so the reason names
  * the combinator even when a field key beside it would decline as well. The
@@ -11336,10 +11347,15 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
       continue;
     }
     if (value === null) {
+      const isNull = 'is_null' satisfies ViewFilterOperator;
       return {
-        declined: `has the key \`${field}\` set to null: the renderer skips a null-valued key, so `
-          + `today it constrains nothing, while an \`${equals}\` rule would test for null. Drop the `
-          + 'key, or write a rule that tests for null if that is what it should select',
+        declined: `has the key \`${field}\` set to null, and what that key selects depends on where `
+          + 'the block\'s rows come from, so no one rule keeps it: where the block queries an object, '
+          + 'the renderer skips a null-valued key, so it constrains nothing; where its rows are inline '
+          + '(`data: { provider: \'value\' }` or `staticData`), it selects the rows whose '
+          + `\`${field}\` is null. Decide which rows it should select: the rows with no \`${field}\` `
+          + `value are the rule \`${JSON.stringify({ field, operator: isNull })}\`, and a filter that `
+          + `leaves \`${field}\` unconstrained has no rule for it`,
       };
     }
     if (!isRecordForm(value)) {
@@ -11352,8 +11368,10 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
     const operators = Object.entries(value);
     if (operators.length === 0) {
       return {
-        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
-          + 'nothing — and no rule says "nothing". Drop the key',
+        declined: `has the key \`${field}\` set to an empty operator object, which names the field `
+          + 'and no operator, so no rule spells it. The renderer does not ignore it today: where the '
+          + 'block queries an object, it refuses the filter (`INVALID_FILTER`, 400); where its rows '
+          + 'are inline, it answers no rows. Drop the key',
       };
     }
     for (const [op, comparand] of operators) {
@@ -11525,7 +11543,8 @@ function describeBlock(component: Dict): string {
  *
  * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
  * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
- * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
+ * `$exists`, `like`, …), a `null` value (skipped where a block queries an
+ * object, matched where its rows are inline — no one rule keeps both),
  * an array or object comparand in equality position, and any rule the door
  * would refuse. All-or-nothing per filter: converting part of an AND-list
  * widens it. ⛔ A combinator is never flattened into the AND list — for `$or`
@@ -11566,10 +11585,14 @@ function describeBlock(component: Dict): string {
  * `staticData`) is rewritten exactly as a block that queries an object:
  * measured at the `.objectui-sha` pin `dd3f7e1be356`, the renderers that match
  * inline rows in memory (`object-map`, `object-tree`, `object-calendar`,
- * `object-gantt`, through `ValueDataSource.find`) lower a rule array through
+ * `object-gantt`, through `ValueDataSource.find`) take those rows from
+ * `data: { provider: 'value' }` or `staticData`, lower a rule array through
  * the grid's own sink before matching, and select the same rows for it as for
  * the stored form — every mapped operator, against a control where the
- * lowering is absent and the rule array selects none.
+ * lowering is absent and the rule array selects none. A bare `data` array
+ * reaches none of them: `object-calendar` draws it as pre-fetched rows with no
+ * filter applied, and `object-map` / `object-gantt` do not take it as a record
+ * source.
  *
  * ## Why `retiredFromLoadPath`
  *
