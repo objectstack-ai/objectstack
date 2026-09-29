@@ -9659,7 +9659,7 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
  * `integration/ConnectorTrigger:interval` stay as the record that the bare
  * spellings were retired.
  *
- * ⚠️ The id was PUBLISHED: the 17.4.0 tarball carries it retired
+ * ⚠️ The id was PUBLISHED: the 17.4.0 and 17.5.0 tarballs carry it retired
  * (`retired-after.census.json`), and the 17.4.0 changelog names it. Measured
  * before it left: no code outside this package named the id, and the chain
  * replays only the ids a step lists — so an upgrading reader who greps it finds
