@@ -246,7 +246,7 @@ export interface ExtractOptions extends ExpectedEntryOptions {
    * The `<locale>.source-hashes.generated.ts` tables already committed beside
    * the bundles, keyed by locale.
    *
-   * This is the mechanism's ONLY memory (#11671 / #12069 Option A): a leaf that
+   * This is the mechanism's ONLY memory (commit 09b4f4e4e, ruling #12069 Option A): a leaf that
    * is a byte copy of a source revision keeps its record across runs, which is
    * what makes the drift detectable after the source moves. Passing nothing
    * makes the run behave like a first extract — every record is re-derived from
@@ -2291,7 +2291,7 @@ export function renderSourceHashModule(
   lines.push(' *');
   lines.push(" * Each entry is the digest of the SOURCE REVISION that this locale's leaf at");
   lines.push(' * that path is still a byte copy of — provenance for the generated half of the');
-  lines.push(' * bundles (#11671, maintainer ruling #12069 Option A, extending #8765 Option B).');
+  lines.push(' * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).');
   lines.push(' *');
   lines.push(' * An entry exists only while the leaf IS such a copy. Re-translate the leaf in');
   lines.push(' * `<locale>.objects.generated.ts` and the next extract drops its entry by');
