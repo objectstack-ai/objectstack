@@ -1092,7 +1092,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       backup_codes: {
         label: "バックアップコード",
-        help: "JSON シリアライズされたバックアップ回復コード"
+        help: "保存時に暗号化されたバックアップ回復コード（単一の不透明な暗号文であり、読み取り可能な JSON ではありません）"
       },
       verified: {
         label: "確認済み",
@@ -2372,7 +2372,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "ユーザーごとの通知受信ボックスエントリ",
+    description: "通知イベント — emit() 1 回につき 1 行（ADR-0030 レイヤー 2 の入口）",
     fields: {
       id: {
         label: "通知 ID"
@@ -2710,7 +2710,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_job_run: {
     label: "ジョブ実行",
     pluralLabel: "ジョブ実行",
-    description: "バックグラウンドジョブ実行の監査証跡",
+    description: "バックグラウンドジョブの実行履歴",
     fields: {
       id: {
         label: "実行 ID"
@@ -2999,7 +2999,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "マルチテナント分離のための組織。"
       },
       environment_id: {
-        label: "プロジェクト（非推奨）",
+        label: "環境（非推奨）",
         help: "非推奨。テナント分離には organization_id を使用してください。"
       },
       version: {

@@ -1092,7 +1092,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       backup_codes: {
         label: "备用恢复码",
-        help: "JSON 序列化的备用恢复码"
+        help: "备用恢复码，静态存储时加密（单个不透明密文，而非可读的 JSON）"
       },
       verified: {
         label: "已验证",
@@ -2372,7 +2372,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "按用户存储的通知收件箱条目",
+    description: "通知事件——每次 emit() 产生一行（ADR-0030 第 2 层入口）",
     fields: {
       id: {
         label: "通知 ID"
@@ -2710,7 +2710,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_job_run: {
     label: "任务执行",
     pluralLabel: "任务执行",
-    description: "后台任务执行审计记录",
+    description: "后台任务执行历史",
     fields: {
       id: {
         label: "执行 ID"
@@ -2999,7 +2999,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "用于多租户隔离的组织。"
       },
       environment_id: {
-        label: "项目（已废弃）",
+        label: "环境（已废弃）",
         help: "已废弃。请使用 organization_id 进行租户隔离。"
       },
       version: {
