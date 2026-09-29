@@ -223,7 +223,7 @@ no embedded replica for a remote url anyway. For a remote database, drop
 no local engine, so its url is not judged here: `@libsql/client` refuses a
 url it cannot open when the driver connects.
 
-The constructor also refuses (`VALIDATION_ERROR` / 400) three sync settings
+The constructor also refuses (`VALIDATION_ERROR` / 400) four sync settings
 that nothing would honour, each with the message `@objectstack/spec`'s
 `TursoConfigSchema` gives at authoring:
 
@@ -233,7 +233,11 @@ that nothing would honour, each with the message `@objectstack/spec`'s
   it. Set `syncUrl`, or remove `sync`;
 - a forced `mode: 'replica'` with no `syncUrl` (or an empty one), which would
   never sync and would run as a plain local database. Name the remote in
-  `syncUrl` beside the `file:` url, or drop `mode` for a local database.
+  `syncUrl` beside the `file:` url, or drop `mode` for a local database;
+- a forced `mode: 'local'` beside a non-empty `syncUrl`, which would still be
+  synced with that remote as an embedded replica, so the declared local mode
+  would be ignored. Drop `mode` for an embedded replica, or drop `syncUrl` (and
+  `sync`) for a plain local database.
 
 You can also force a specific mode:
 

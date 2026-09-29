@@ -24,7 +24,8 @@
  * a url that is none of those (a bare path, an unsupported scheme); a remote
  * url beside `syncUrl` or under `mode: 'local'` / `'replica'`; and a replica
  * whose url names an in-memory database. A forced `mode: 'replica'` with no
- * `syncUrl` is refused too, because nothing would ever sync it.
+ * `syncUrl` is refused too, because nothing would ever sync it, and so is a
+ * forced `mode: 'local'` beside a `syncUrl`, because it would sync anyway.
  */
 
 import {
@@ -126,7 +127,9 @@ export interface TursoDriverConfig {
    * would run on a private in-memory database. For a remote database, drop
    * `syncUrl` and keep the remote `url`. Under a forced `mode: 'remote'` it is
    * refused too (`VALIDATION_ERROR` / 400): the remote client never receives
-   * it, so no sync would ever run.
+   * it, so no sync would ever run. Under a forced `mode: 'local'` it is
+   * refused as well (`VALIDATION_ERROR` / 400): the driver would sync the
+   * database with it anyway and the declared local mode would be ignored.
    */
   syncUrl?: string;
 
@@ -196,6 +199,12 @@ export interface TursoDriverConfig {
    * constructor refuses it (`VALIDATION_ERROR` / 400), because nothing would
    * ever sync and the datasource would run as a plain local database. For a
    * local database, drop `mode`; for a replica, set `syncUrl`.
+   *
+   * A forced `'local'` is refused beside a (non-empty)
+   * {@link TursoDriverConfig.syncUrl} (`VALIDATION_ERROR` / 400): the driver
+   * syncs whenever `syncUrl` is set, so the datasource would run as an
+   * embedded replica under a `local` label. For a replica, drop `mode`; for a
+   * local database, drop `syncUrl` (and `sync`).
    */
   mode?: TursoTransportMode;
 
@@ -1144,7 +1153,41 @@ const REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL =
   "`https://` Turso endpoint. For a plain local database, drop `mode: 'replica'`.";
 
 /**
- * Throw one of the three sync-key refusals above as the ADR-0112 envelope.
+ * [#20586] A forced `mode: 'local'` beside a `syncUrl` — refused at construction.
+ *
+ * The same defect as the replica refusal above, the other way round. The
+ * driver used to build it with `transportMode = 'local'` and then run it as an
+ * embedded replica: `connect()` builds the sync client whenever `syncUrl` is
+ * set in a non-remote mode, whatever `mode` says. Measured on this package's
+ * source before this refusal (a `file:` url, forced `mode: 'local'`,
+ * `syncUrl`, `sync: { intervalSeconds: 1 }`, a sync-counting client): one sync
+ * on connect, `isSyncEnabled()` answered `true`, the interval started and
+ * synced again — exactly what the same config with no `mode` (a replica) did,
+ * while the same `file:` url with no `syncUrl` synced nothing. A declared mode
+ * the runtime ignores: the declared-but-not-enforced shape ADR-0049 does not
+ * ship. The datasource is not honoured as local by skipping the sync instead:
+ * that would ignore a declared `syncUrl`, the same defect with the keys
+ * swapped.
+ *
+ * Only a FORCED local mode reaches this: with no `mode`,
+ * {@link TursoDriver.detectMode} answers `replica` beside a `syncUrl`. A forced
+ * local mode on a url the local engine cannot open met `localEngineDefect`
+ * first, so this fires on a `file:` url or `:memory:`. An empty `syncUrl` is
+ * unset, as everywhere in this driver, and is not refused.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on `mode`
+ * for this shape, byte for byte, held equal by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first.
+ */
+const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
+  "`mode: 'local'` makes this datasource a plain local database, but `syncUrl` names a remote to " +
+  'replicate from: the database would still be synced with that remote as an embedded replica, ' +
+  'so the declared local mode would be ignored — the turso driver refuses this configuration ' +
+  'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: ' +
+  "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).";
+
+/**
+ * Throw one of the four sync-key refusals above as the ADR-0112 envelope.
  *
  * Raised BEFORE `super()`, AFTER the three refusals above it in the
  * constructor, so no configuration those already refuse changes which message
@@ -1599,6 +1642,14 @@ export class TursoDriver extends SqlDriver {
     // `REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL`.
     if (mode === 'replica' && !config.syncUrl) {
       refuseIgnoredSyncKey(REPLICA_MODE_WITHOUT_SYNC_URL_REFUSAL);
+    }
+    // [#20586] The same defect the other way round: a forced `mode: 'local'`
+    // beside a `syncUrl` would still be synced by `connect()`, so the declared
+    // local mode would be ignored. Refused here too, in the spec's words, last:
+    // every refusal above is exclusive of it except the url ones, which the
+    // spec contract also raises first. See `LOCAL_MODE_WITH_SYNC_URL_REFUSAL`.
+    if (mode === 'local' && config.syncUrl) {
+      refuseIgnoredSyncKey(LOCAL_MODE_WITH_SYNC_URL_REFUSAL);
     }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);

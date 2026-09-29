@@ -26,11 +26,14 @@
  * `TursoConfigSchema` issue texts byte for byte, and that equality is pinned in
  * `spec/turso-config-constructor-parity.test.ts`, not here. The refusals'
  * WIDTH is pinned by controls that must stay accepted: a remote config without
- * `syncUrl`, a replica on a `file:` url beside `syncUrl`, and `sync` beside
- * `syncUrl` under a forced `mode: 'local'`. The rider this card left standing
- * (`mode: 'replica'` on a `file:` url with no `syncUrl`) is refused since
- * #20437, together with the spec contract; it is pinned in
- * `turso-driver-forced-replica-without-sync-url-refusal.test.ts`.
+ * `syncUrl`, and a replica on a `file:` url beside `syncUrl`. The rider this
+ * card left standing (`mode: 'replica'` on a `file:` url with no `syncUrl`) is
+ * refused since #20437, together with the spec contract; it is pinned in
+ * `turso-driver-forced-replica-without-sync-url-refusal.test.ts`. The third
+ * control this file used to carry, `sync` beside `syncUrl` under a forced
+ * `mode: 'local'`, is refused since #20586 (the driver synced it anyway, under
+ * a `local` label); it is pinned in
+ * `turso-driver-forced-local-with-sync-url-refusal.test.ts`.
  *
  * # Reverse verification: direction predicted before it was run
  *
@@ -128,11 +131,5 @@ describe('CONTROLS — what the refusals must leave accepted', () => {
     const driver = new TursoDriver({ url: file('replica'), syncUrl: PRIMARY, sync: { onConnect: false } });
 
     expect(driver.transportMode).toBe('replica');
-  });
-
-  it("sync beside syncUrl under a forced mode: 'local' stays accepted, as the contract accepts it", () => {
-    const driver = new TursoDriver({ url: file('forced-local'), mode: 'local', syncUrl: PRIMARY, sync: { onConnect: false } });
-
-    expect(driver.transportMode).toBe('local');
   });
 });
