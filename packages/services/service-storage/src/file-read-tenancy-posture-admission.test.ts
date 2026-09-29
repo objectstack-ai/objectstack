@@ -576,10 +576,10 @@ describe('[#15352] §5b — a `tenancy` service that was REGISTERED and FAILED i
    * the digits are now asserted, and they are the declared ones.
    *
    * What happened: the authorizer always re-raised the brand
-   * (`isAuthzStoreUnavailableError(err) ⇒ throw`, #13279), and
+   * (`isAuthzStoreUnavailableError(err) ⇒ throw`, commit 6a180e42d), and
    * `registerStorageRoutes`' `authorizeDownload` absorbed that re-raise one
    * frame up in `catch { verdict = 'deny' }`, rendering an outage as the gate's
-   * own capability refusal — the confusion #13279 exists to prevent. That
+   * own capability refusal — the confusion commit 6a180e42d was made to prevent. That
    * `catch` now RELAYS the declared envelope instead (⛔ not a bare re-raise:
    * the route's outer `catch` would answer `500 INTERNAL`, and the shared
    * render for an escaped envelope is #16545 and has not landed).
