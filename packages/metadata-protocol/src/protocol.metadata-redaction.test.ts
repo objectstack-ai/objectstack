@@ -644,3 +644,85 @@ describe('#20552 — the protocol serves the projection and executes the stored 
         expect(allStrings(one)).toContain(FLOW_SECRET);
     });
 });
+
+// ---------------------------------------------------------------------------
+// #20552 — the FIRST save of a CODE-AUTHORED flow (no `sys_metadata` row yet)
+// ---------------------------------------------------------------------------
+//
+// The dominant authoring shape for an inbound flow: the secret is a literal in
+// the app's own source, the flow reaches the protocol through the registry, and
+// NO overlay row exists until the first Studio save. The read serves the
+// registry body projected; the save door must carry the secret forward from
+// that same body, or the first overlay row is persisted WITHOUT it — and, since
+// an overlay wins every merge, the next boot registers a secretless `api` flow
+// the engine refuses, while the save said it succeeded.
+
+/** A stub engine whose REGISTRY holds the code-authored flow, and whose `sys_metadata` holds nothing. */
+function makeRegistryOnlyEngine() {
+    const stub = makeStubEngine();
+    const registryFlow = storedInboundFlow();
+    stub.engine.registry.getItem = (type: string, name: string) =>
+        (type === 'flow' || type === 'flows') && name === 'inbound_hook' ? structuredClone(registryFlow) : undefined;
+    stub.engine.registry.listItems = (type: string) =>
+        (type === 'flow' || type === 'flows') ? [structuredClone(registryFlow)] : [];
+    return stub;
+}
+
+const overlayRow = (rows: Map<string, Row>, state: 'active' | 'draft') =>
+    Array.from(rows.values()).find((r) => r.type === 'flow' && r.name === 'inbound_hook' && r.state === state);
+
+describe('#20552 — first save of a registry-only (code-authored) flow keeps its secret', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('the served body saved straight back persists the overlay row WITH the stored secret', async () => {
+        const { engine, rows } = makeRegistryOnlyEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        expect(overlayRow(rows, 'active')).toBeUndefined();
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        expect(allStrings(served)).not.toContain(FLOW_SECRET);
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({
+            type: 'flow',
+            name: 'inbound_hook',
+            item: { ...editable, label: 'Edited in the designer', nodes: [editable.nodes[1], editable.nodes[0]] },
+        });
+
+        const row = overlayRow(rows, 'active');
+        expect(row).toBeDefined();
+        const persisted = JSON.parse(row!.metadata);
+        expect(persisted.label).toBe('Edited in the designer');
+        expect(startNodeOf(persisted).config.secret).toBe(FLOW_SECRET);
+    });
+
+    it('a DRAFT save then a publish carries the secret into the active row', async () => {
+        const { engine, rows } = makeRegistryOnlyEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', mode: 'draft', item: { ...editable, label: 'Draft edit' } });
+        expect(startNodeOf(JSON.parse(overlayRow(rows, 'draft')!.metadata)).config.secret).toBe(FLOW_SECRET);
+
+        await protocol.publishMetaItem({ type: 'flow', name: 'inbound_hook' });
+        const active = overlayRow(rows, 'active');
+        expect(active).toBeDefined();
+        const published = JSON.parse(active!.metadata);
+        expect(published.label).toBe('Draft edit');
+        expect(startNodeOf(published).config.secret).toBe(FLOW_SECRET);
+    });
+
+    it('an explicit value on that first save is the author`s word — a rotation replaces it', async () => {
+        const { engine, rows } = makeRegistryOnlyEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...rotated } = served;
+        void _d;
+        startNodeOf(rotated).config.secret = ROTATED;
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: rotated });
+        expect(startNodeOf(JSON.parse(overlayRow(rows, 'active')!.metadata)).config.secret).toBe(ROTATED);
+    });
+});
