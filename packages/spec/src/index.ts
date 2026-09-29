@@ -223,8 +223,13 @@ export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOpt
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
 export * from './conversions/index.js';
 
-// Metadata migration chain + change manifest (ADR-0087 D3/D4).
-export * from './migrations/index.js';
+// The metadata migration chain + change manifest (ADR-0087 D3/D4) is NOT re-exported
+// here: it is the `@objectstack/spec/migrations` subpath. Its registry is mostly the
+// `os migrate meta` guidance text, and the registry's import-time work pins all of it
+// into every bundle of the entry that carries it, so a root re-export made every
+// consumer of any root name (a browser first screen included) download it. The
+// conversion layer above stays here: `defineStack` / `normalizeStackInput` read it at
+// run time. `root-entry-migrations-split.pin.test.ts` holds both halves.
 
 export { type PluginContext } from './kernel/plugin.zod';
 
