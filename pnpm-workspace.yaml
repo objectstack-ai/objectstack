@@ -470,15 +470,17 @@ overrides:
   #     than a forced upgrade past what a dependent supports (the dompurify /
   #     nanoid shape above); both copies sat below it purely through lockfile
   #     inertia, the mechanism the devalue note records. Transitive-only: no
-  #     workspace manifest declares ip-address, so check-override-consistency
-  #     lists it as an override it cannot cross-check — correct for this
-  #     shape, a report and never a failure. GHSA-rpw4's range starts at 0, so
+  #     workspace manifest declares ip-address, so there is no published
+  #     declared range for check-override-consistency's manifest rule to hold
+  #     in lockstep with the target (it has none to cross-check, and says
+  #     nothing about this entry). GHSA-rpw4's range starts at 0, so
   #     the selector's floor is the package floor and only the upper bound is
   #     stated (the dompurify shape); the bound sits at the 11.0.0 major
   #     boundary per this block's header rule, never `<10.5.1`.
   #   undici GHSA-3wwx-pv8p-q78v (5.9; a malformed permessage-deflate frame
   #     past the size limit crashes the process from the WebSocket client) —
-  #     three affected lines, 6.25.0..6.28.1, 7.28.0..7.29.1 and 8.1.0..8.10.2.
+  #     three affected lines, >=6.25.0 <6.28.1, >=7.28.0 <7.29.1 and
+  #     >=8.1.0 <8.10.2.
   #     Two are live here, one copy each: 7.29.0 <- @ai-sdk/provider-utils
   #     (^7.28.0), and 8.9.0 <- jsdom@30.0.1 (^8.9.0). The 7.x copy is already
   #     inside the existing `>=7.23.0 <8.0.0` selector, so that entry is a
