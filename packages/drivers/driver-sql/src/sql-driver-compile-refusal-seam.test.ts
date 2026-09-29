@@ -228,7 +228,7 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'Operator "$exists" in this filter requires a boolean comparand',
   },
-  // ── #20444: the staged `$empty` operator, born in the seam ──────────────────
+  // ── #20444: the `$empty` operator, born in the seam ─────────────────────────
   {
     builder: 'nonBooleanEmptyComparandError',
     where: () => ({ [POLICY_COL]: { $empty: SECRET } }),

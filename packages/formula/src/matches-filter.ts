@@ -56,7 +56,8 @@
  *    below, for every record and both flags: the defect this paragraph names.
  *    It now has its arm in {@link evalOp}, judged by the stored value (this
  *    face's reading, ruling A on #20399). Today the declared-but-staged names
- *    are `$like`, `$ilike` and `$empty`, and each is answered here; a name the
+ *    are `$like` and `$ilike` (`$empty` left the staging in #20446), and each
+ *    is answered here; a name the
  *    protocol declares NEXT is owed an arm here by the PR that lets an author
  *    write it, or by the lane card its staging names.
  *
@@ -741,8 +742,10 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      */
     case '$exists': return v === true ? actual != null : actual == null;
     /**
-     * [#20444] `$empty` — the staged emptiness flag (declared by
-     * `FieldOperatorsSchema`, staged out of `FILTER_OPERATORS` like `$like`).
+     * [#20444] `$empty` — the emptiness flag (declared by
+     * `FieldOperatorsSchema`; staged out of `FILTER_OPERATORS` like `$like`
+     * until #20446 added it there and lowered `is_empty` / `is_not_empty` to
+     * it, so a policy's stored 「is empty」 reaches this arm too).
      * Ruling A on #20399 (record 5865693155) gives this face the BY-VALUE
      * reading, because it judges a record, not a declaration: null, a missing
      * key, `''` and `[]` are empty, through the spec's `isEmptyFilterValue`
@@ -773,8 +776,8 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      * because it is a decision rather than an omission.
      *
      * What #6520 did change is the arm's REACH: every operator `FILTER_OPERATORS`
-     * declares now has a case above it — and so does every declared-but-staged
-     * one (`$like`, `$ilike`, [#20444] `$empty`) — so this line is only
+     * declares now has a case above it (`$empty` among them since #20446) — and
+     * so does every declared-but-staged one (`$like`, `$ilike`) — so this line is only
      * reachable for a spelling the protocol does not have (a typo) or one it
      * retired (`$regex` / `$options`). No DECLARED operator is answered silently
      * here any more, which was the defect the #6993 census measured.

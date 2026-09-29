@@ -19,18 +19,18 @@
  * - `passes` / `deferred`: the driver read ran and received the filter as
  *   written.
  *
- * ## Two partitions, each measured rather than dropped
+ * ## One partition, measured rather than dropped
  *
  * - **`formula`** — refused one door EARLIER, by the #8296 materializable door,
  *   with `INVALID_FIELD`, whatever its return type: no driver materialises a
  *   formula column. Pinned in the direction it answers (the contract's module
  *   header says the suite partitions these rows out), and the door's own walk
  *   is pinned to judge the class correctly for the day that neighbour opens.
- * - **The staged `$empty` row** — `$empty` is declared but staged out of
- *   `FILTER_OPERATORS` until its engine arm lands (#20311's lane cards), so an
- *   end-to-end drive can answer it for a reason that is not this door's. The
- *   row is pinned at the DOOR ALONE (the walk and the narrowing return it
- *   untouched), and partitioned out of the engine drive.
+ *
+ * [#20446] The `$empty` row used to be a second partition, pinned at the door
+ * alone while `$empty` was staged out of `FILTER_OPERATORS`. It is in that
+ * array now and every face answers it, so the row is driven end to end with
+ * the other passing cases.
  *
  * The three-driver and REST cells (InMemoryDriver's answer is this suite's
  * recording driver's by construction — the door runs before any driver is
@@ -109,9 +109,9 @@ const refusalOf = async (p: Promise<unknown>): Promise<Thrown> =>
 
 /** A `formula` case — judged one door earlier, see the header. */
 const isFormulaCase = (c: NumberComparandDoorCase): boolean => c.declaredType === 'formula';
-/** The staged `$empty` row — pinned at the door alone, see the header. */
-const isStagedCase = (c: NumberComparandDoorCase): boolean => c.position.endsWith('.$empty');
-const engineDriven = (c: NumberComparandDoorCase): boolean => !isFormulaCase(c) && !isStagedCase(c);
+/** The `$empty` row — driven end to end since #20446, see the header. */
+const isEmptyFlagCase = (c: NumberComparandDoorCase): boolean => c.position.endsWith('.$empty');
+const engineDriven = (c: NumberComparandDoorCase): boolean => !isFormulaCase(c);
 
 const SEEDED = [
   { id: 'r1', f_number: 5 },
@@ -146,11 +146,10 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
   const PASSES = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.verdict === 'passes' && engineDriven(c));
   const DEFERRED = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.verdict === 'deferred' && engineDriven(c));
   const FORMULA = NUMBER_COMPARAND_DOOR_CASES.filter(isFormulaCase);
-  const STAGED = NUMBER_COMPARAND_DOOR_CASES.filter(isStagedCase);
 
   it('GUARD the case table is partitioned exactly, and every partition that carries a verdict is non-empty', () => {
     expect(NUMBER_COMPARAND_DOOR_CASES.length).toBe(
-      REFUSALS.length + NARROWS.length + PASSES.length + DEFERRED.length + FORMULA.length + STAGED.length,
+      REFUSALS.length + NARROWS.length + PASSES.length + DEFERRED.length + FORMULA.length,
     );
     expect(REFUSALS.length).toBeGreaterThan(0);
     expect(NARROWS.length).toBeGreaterThan(0);
@@ -158,7 +157,7 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     expect(FORMULA.length).toBeGreaterThan(0);
     // The untyped formula is the table's only deferred row, and it is judged one door earlier.
     expect(DEFERRED).toHaveLength(0);
-    expect(STAGED.map((c) => c.verdict)).toEqual(['passes']);
+    expect(PASSES.filter(isEmptyFlagCase)).toHaveLength(1);
     // Every refused form the grammar names is driven, not just the card's "abc" —
     // and [#20502] every non-string form (a boolean, a Date, an array) beside them.
     expect(new Set(REFUSALS.map((c) => c.form))).toEqual(new Set([...NON_NUMERIC_STRING_FORMS, ...NON_NUMERIC_VALUE_FORMS]));
@@ -229,12 +228,17 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     expect(findNonNumericComparand(schema, { f_formula_untyped: { $gt: 'abc' } })).toBeNull();
   });
 
-  it('the staged $empty row is pinned at the DOOR ALONE — the walk neither refuses nor rewrites it', () => {
+  it('the $empty row is driven end to end — the door neither refuses nor rewrites it, and the driver receives it', async () => {
     const schema = engine.registry.getObject(OBJECT);
-    for (const c of STAGED) {
+    const rows = PASSES.filter(isEmptyFlagCase);
+    expect(rows).toHaveLength(1);
+    for (const c of rows) {
       const filter = c.filter();
       expect(findNonNumericComparand(schema, filter), c.name).toBeNull();
       expect(narrowNumberComparands(OBJECT, 'find', schema, filter), c.name).toBe(filter);
+      reads.length = 0;
+      await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
+      expect(reads[0]?.ast?.where, c.name).toEqual(filter);
     }
   });
 

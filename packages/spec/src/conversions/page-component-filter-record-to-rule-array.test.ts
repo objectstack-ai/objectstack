@@ -435,8 +435,10 @@ describe('§4 lossless, measured over the declared vocabularies', () => {
       const source = op === '$eq' ? { f: v } : { f: { [op]: v } };
       expect(parseFilterAST([['f', rule, v]]), `${op} → ${rule}`).toEqual(source);
     }
-    // Exactly the two whose meaning lives in the VALUE, not the operator.
-    expect(declined.sort()).toEqual(['$exists', '$null']);
+    // Exactly the three whose meaning lives in the VALUE, not the operator
+    // (`$empty` joined `FILTER_OPERATORS` in #20446: its `true` / `false` is
+    // `is_empty` / `is_not_empty`).
+    expect(declined.sort()).toEqual(['$empty', '$exists', '$null']);
   });
 
   it('every AST operator spelling maps to a rule that lowers exactly as the source did — or is declined', () => {

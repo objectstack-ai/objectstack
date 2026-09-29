@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on `driver-sql`'s filter compiler
+ * [#20444] The `$empty` operator on `driver-sql`'s filter compiler
  * (`applyFilterCondition`), answered by the field's DECLARED row of the ruled
  * 「is empty」 table — ruling B on #20311 (record 5861435168), spelled as this
  * operator by ruling A on #20399 (record 5865693155) — through the spec's one
@@ -19,9 +19,9 @@
  * construct per dialect — SQLite always, PostgreSQL and MySQL where the
  * `Temporal Conformance (live PG + MySQL)` job provisions them.
  *
- * `$empty` is staged out of `FILTER_OPERATORS` (「照 $like 先例分阶段」, record
- * 5868169573), so the engine's front door still refuses it; the driver is
- * driven directly here, which is exactly the caller the arm answers today.
+ * The driver is driven directly here. Since #20446 `$empty` is in
+ * `FILTER_OPERATORS` and a stored view rule's `is_empty` lowers to it; that
+ * path is pinned in `sql-driver-20446-empty-flip.test.ts`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

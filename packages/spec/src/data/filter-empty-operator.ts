@@ -12,11 +12,12 @@
  * surface expands it by the field's declared type through one spec function".
  * This module is that function, and the value-level predicate beside it.
  *
- * The operator is STAGED (the maintainer's amendment of ruling A, record
- * 5868169573, 「照 $like 先例分阶段」): absent from `FILTER_OPERATORS` until
- * every face has an arm, and the `is_empty` / `is_not_empty` lowering still
- * emits `$null`. Nothing in this repository calls these functions yet; the
- * compile-surface lane cards do, one face each.
+ * The operator was staged (the maintainer's amendment of ruling A, record
+ * 5868169573, 「照 $like 先例分阶段」) until every compile face called these
+ * functions — the lane cards #20444 (the engine's drivers, formula and
+ * `having`) and #20445 (service-analytics). [#20446] It is in
+ * `FILTER_OPERATORS` now, and the `is_empty` / `is_not_empty` lowering emits
+ * it.
  *
  * ## Why this is its own module
  *

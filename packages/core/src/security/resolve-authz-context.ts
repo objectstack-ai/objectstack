@@ -451,9 +451,13 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
   // card exists to kill — an ex-member's automation would keep answering
   // success while reading nothing.
-  if (keyPrincipal?.tenantId && input.tenancyPosture) {
-    const posture = input.tenancyPosture;
-    if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
+  //
+  // [#20604] The membership rule is {@link vetOrganizationClaim}, the one the
+  // session arm below asks: a walled posture, and no current membership backing
+  // the key's organization. Only the CONSEQUENCE is this arm's own — the key is
+  // refused (#15256 2A) where the session arm drops the claim.
+  if (keyPrincipal?.tenantId) {
+    if (vetOrganizationClaim(keyPrincipal.tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined) {
       // [#15256 / 2A] The `organization_membership_ended` decision point — AFTER
       // grants, because the membership set is what decides it. One line, here.
       warnApiKeyRefusal({
@@ -582,6 +586,10 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
  * [#20580] A second reader asks it: the permission explainer, about the user
  * it explains in the caller's organization. That is how `security/explain`
  * resolves that user in the organization enforcement would resolve them in.
+ * [#20604] The API-key arm of {@link resolveAuthzContext} asks it too, about
+ * the organization a key is stamped with. The rule is the same; the
+ * consequence is that arm's own: a key IS its organization binding, so an
+ * unbacked key is refused (#15256 2A) where a session's claim is dropped.
  * ⛔ Nothing else spells this rule — a caller that needs it calls this.
  */
 export function vetOrganizationClaim(

@@ -182,8 +182,24 @@ import { AnalyticsService, CubeRegistry } from '@objectstack/service-analytics';
 const registry = new CubeRegistry();
 registry.registerAll([ordersCube]);
 
-const service = new AnalyticsService({ cubes: [ordersCube] });
+const service = new AnalyticsService({
+  cubes: [ordersCube],
+  // The declared type (and `multiple`) of a source object's field — what
+  // `AnalyticsServicePlugin` relays from the engine's registry.
+  sourceFieldMeta: (object, field) => {
+    const f = engine.getObject(object)?.fields?.[field];
+    return f ? { type: f.type, multiple: f.multiple === true } : undefined;
+  },
+});
 ```
+
+`sourceFieldMeta` is how the service knows a field's declared type. The view
+operators `is_empty` / `is_not_empty` — the `$empty` operator — need it: what
+counts as empty depends on the type (null or `''` for a text-like field, null or
+`[]` for a multi-value field, null only for every other type). A host built
+without it refuses them with `INVALID_FILTER` (a read scope, with
+`READ_SCOPE_COMPILE_FAILED`) rather than guess; pass `sourceFieldMeta`, or filter
+with `is_null` / `is_not_null` there.
 
 ## License
 

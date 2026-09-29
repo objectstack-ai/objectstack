@@ -43,6 +43,15 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
   beforeEach(async () => {
     driver = new InMemoryDriver({ persistence: false });
     await driver.connect();
+    // [#20446] The table is DECLARED, as every object the engine serves is
+    // (`syncSchema` at boot). `is_empty` / `is_not_empty` lower to `$empty`
+    // now, which this driver answers by the field's declared row and refuses
+    // on a column it was never told the type of — so an undeclared probe table
+    // would measure that refusal (pinned in `memory-20446-empty-flip.test.ts`),
+    // not the expressibility this file is about.
+    await driver.syncSchema(TABLE, {
+      fields: { name: { type: 'text' }, score: { type: 'number' }, note: { type: 'text' } },
+    });
     await driver.create(TABLE, { id: '1', name: 'alpha', score: 10, note: null });
     await driver.create(TABLE, { id: '2', name: 'beta', score: 20, note: 'set' });
   });
