@@ -84,9 +84,10 @@ export const DeliveryCube = defineCube({
       name: 'showcase_project',
     },
   },
-  refreshKey: {
-    every: '1 hour',
-  },
+  // No refresh cadence: no analytics result is cached, so every query against
+  // this cube is computed when it is asked. The `every: '1 hour'` this file
+  // declared was read by nothing, and the key is retired.
+  //
   // No `public` key: the cube is VISIBLE, the default. It is this app's
   // demonstration of the `/api/v1/analytics/*` surface (src/coverage.ts marks
   // `analyticsCubes` demonstrated, and the platform checklist's dashboards item

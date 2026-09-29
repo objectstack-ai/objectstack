@@ -420,7 +420,7 @@ describe('bridgeTools — the safety annotations a client receives', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * THE DIRECTION THE CASE ABOVE CANNOT SEE (#13486).
+ * THE DIRECTION THE CASE ABOVE CANNOT SEE (commit 6193e576d).
  *
  * `safetyAnnotations` keeps two literal name sets that are hand copies of
  * `PLATFORM_TOOLS_BY_PACKAGE`. The registry-driven pin above catches a name

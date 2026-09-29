@@ -3,8 +3,8 @@
 // ── The stdio ExecutionContext is assembled by the SHARED assembler (#7279) ──
 //
 // `resolveStdioExecutionContext` was the LAST hand-written `ExecutionContext`
-// assembly on the platform: #6216 converged the dispatcher / REST / share-link
-// sites onto `assembleExecutionContext` and this face was not in that card's
+// assembly on the platform: commit f586f1a89 converged the dispatcher / REST / share-link
+// sites onto `assembleExecutionContext` and this face was not in that commit's
 // inventory at all. Hand assembly is what let it fall behind the envelope in
 // two different ways, and this file pins both halves of the convergence plus
 // the one deliberate DIVERGENCE it keeps.

@@ -124,18 +124,9 @@
       }
     },
     "refreshKey": {
-      "children": {
-        "every": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Pre-aggregation / cache refresh cadence with no engine behind it. Census over the whole repository: `refreshKey` appears in `analytics.zod.ts` (the declaration), in `examples/app-showcase/src/data/analytics/showcase.cube.ts` (an AUTHOR writing it), in the generated authorable-surface artifacts, and in the protocol-18 strictness migration note — and in no consumer. There is no refresh scheduler, no pre-aggregation table and no cache keyed on it anywhere in packages/services, packages/drivers or packages/rest. The showcase authoring it is the evidence that the trap is live rather than theoretical."
-        },
-        "sql": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "The 'SQL to check for data changes' probe of the same unimplemented refresh mechanism — same census as `refreshKey.every`. The block's own `strictObject` history note ('a typo'd `sql` probe left the cube refreshing on nothing') describes a cadence that does not exist either way."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-29",
+      "note": "REMOVED 2026-09-29 (ADR-0049 enforce-or-remove; maintainer ruling on #20637, letter C: retire whole, build no cache) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources and stored rows by the protocol-18 conversion `cube-refresh-key-removed` (the D3 entry `cube-refresh-key-retired`). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). ⚠️ It is a LEAF now: the two rows that were drilled under it — `every` and `sql`, both `dead`, verified 2026-09-17 — left with the subtree, because the gate refuses `children` on a property that is not a container (the connector `health` precedent). Their verdicts are carried here, one reason for both: nothing read the block, and there was nothing for it to key on. Re-measured 2026-09-29 at 0be898499f: `git grep refreshKey` over the non-test sources of packages/services, packages/drivers and packages/rest answers 0 lines (4 for the neighbouring `.public` in the same pathspec); packages/services/service-analytics/src references no ICacheService or IJobService, and its one cache is the request-scoped packages/services/service-analytics/src/dimension-labels.ts#withLabelFetchCache — no analytics result is cached, so every query is computed when it is asked. The one author, examples/app-showcase (`every: '1 hour'`), no longer writes it. A refresh cadence is declared again when a result cache exists. The tombstone is packages/spec/src/data/analytics.zod.ts#CubeSchema."
     },
     "public": {
       "status": "live",

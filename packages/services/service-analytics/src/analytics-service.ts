@@ -92,10 +92,12 @@ import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSql
  * Analytics result augmented with drill-through metadata (ADR-0021 D2; see
  * queryDataset). Carried alongside `rows` so the host can drill a clicked bucket
  * back to the underlying records without the renderer knowing field mappings.
+ *
+ * The object those records belong to is not part of this augmentation: it is
+ * the contract's own `AnalyticsResult.object`, which every dataset answer
+ * carries, drillable or not (#20644).
  */
 type AnalyticsResultWithDrill = AnalyticsResult & {
-  /** The dataset's base object — the host drills into its records. */
-  object?: string;
   /** Selected drillable dimension NAME → underlying object FIELD name. */
   dimensionFields?: Record<string, string>;
   /**
@@ -1756,8 +1758,32 @@ export class AnalyticsService implements IAnalyticsService {
    * call's queries and nothing else, so a dataset named like a configured cube
    * neither replaces that cube nor re-publishes it, whatever the request's
    * admission answers.
+   *
+   * [#20644] Every answer names the dataset's base object as `object`
+   * (`AnalyticsResult.object`), whatever dimensions were selected and whether
+   * or not rows came back. It is set here, once, on the path every exit of
+   * {@link answerDataset} leaves through — the draft-preview return, the
+   * degraded "backing object unavailable" return and the main return — so an
+   * exit added later inherits it instead of needing its own copy. `query()`
+   * never passes through here, so a cube answer carries none.
    */
   async queryDataset(
+    dataset: Dataset,
+    selection: DatasetSelection,
+    context?: ExecutionContext,
+    options?: { previewDrafts?: boolean },
+  ): Promise<AnalyticsResult> {
+    const answer = await this.answerDataset(dataset, selection, context, options);
+    // A copy rather than a write onto `answer`, which may be the very object a
+    // strategy returned (the same ownership rule `applySqlEchoPolicy` keeps).
+    return { ...answer, object: dataset.object };
+  }
+
+  /**
+   * The body of {@link queryDataset}. None of its exits sets `object`: the
+   * caller sets it once, for all of them.
+   */
+  private async answerDataset(
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
@@ -1933,13 +1959,13 @@ export class AnalyticsService implements IAnalyticsService {
     // dimension NAMES, and the label resolution below OVERWRITES the raw grouped
     // value in each row with its display label. So before that happens, snapshot
     // the raw grouped values into a PARALLEL array (aligned to `rows` by index —
-    // the result rows are NOT mutated) and expose the dataset's `object` +
-    // dimension→field mapping so the renderer can build an exact-match filter.
+    // the result rows are NOT mutated) and expose the dimension→field mapping so
+    // the renderer can build an exact-match filter over the answer's `object`
+    // (set by {@link queryDataset} on every answer, drillable or not).
     // Date buckets are excluded — a humanized bucket ("2026-06") can't be
     // exact-matched against the stored timestamp, so they are not drillable.
     const drillDims = selectedDims.filter((d) => !!d.field && d.type !== 'date');
     if (drillDims.length && result.rows.length) {
-      (result as AnalyticsResultWithDrill).object = dataset.object;
       (result as AnalyticsResultWithDrill).dimensionFields = Object.fromEntries(
         drillDims.map((d) => [d.name, d.field as string]),
       );
@@ -2016,10 +2042,6 @@ export class AnalyticsService implements IAnalyticsService {
         }
         return ranges;
       });
-      // The equality drill block sets `object` only when a NON-date drill dim
-      // exists; a report grouped ONLY by time still needs the base object so the
-      // host can open its list. Safe to (re)set to the same dataset object.
-      (result as AnalyticsResultWithDrill).object = dataset.object;
     }
 
     // ADR-0021 — resolve grouped dimension values to human display labels

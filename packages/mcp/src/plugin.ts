@@ -5,7 +5,7 @@ import {
   assembleExecutionContext,
   resolveAuthzContext,
   resolveLocalizationContext,
-  // [#15348 / #16013 / #17114] The two symbols this door's tenancy-posture
+  // [#15348 / #16013 / commit 4af758d47] The two symbols this door's tenancy-posture
   // read is built from. `classifyAdmissionTenancyPosture` is the ONE shared
   // classification decision 1 option A requires (#13906) — branded "never
   // registered" ⇒ quiet `undefined`, every other rejection ⇒ the loud
@@ -64,7 +64,7 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  *    admitting on it is exactly the permissive-on-failure defect #13906 exists
  *    to repair, and the reason this seam is not a one-liner.
  *
- * [#17114] That classification is no longer hand-written here — it is
+ * [commit 4af758d47] That classification is no longer hand-written here — it is
  * `classifyAdmissionTenancyPosture` (`@objectstack/core`), the shared function
  * #16013 extracted and which this seam was one of the two left outside. ⛔ The
  * RESOLUTION is NOT shared: which of this door's two accessors may be asked is
@@ -123,7 +123,7 @@ async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPo
  * call is scoped exactly like the same identity over REST (RLS / FLS / tenant).
  *
  * [#7279] Assembled by the SHARED `assembleExecutionContext` rather than by
- * hand. This face was the last hand-written assembly left after #6216 converged
+ * hand. This face was the last hand-written assembly left after commit f586f1a89 converged
  * the dispatcher / REST / share-link sites, and hand assembly is what let it
  * fall behind the envelope twice over: it dropped `tabPermissions`, and it
  * resolved no localization at all. The assembler's field set is CLOSED, so the

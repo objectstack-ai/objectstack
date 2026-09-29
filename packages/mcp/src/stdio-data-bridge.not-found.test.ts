@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8422 — the stdio bridge's by-id write seams must throw the repo's ONE
+ * Commit 4810dd628 — the stdio bridge's by-id write seams must throw the repo's ONE
  * not-found envelope (`recordNotFoundError`, `@objectstack/core`), not a
  * locally minted `Error`.
  *
