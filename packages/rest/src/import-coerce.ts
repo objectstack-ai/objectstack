@@ -290,10 +290,10 @@ const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
  * spelling is refused, never guessed: `07/15/2026` and `15 July 2026` went to
  * `new Date(s)`, which reads them in the SERVER PROCESS's zone (the same cell
  * stored as `2026-07-15T14:00Z` on a New York host and `…T02:00Z` on a
- * Shanghai one, a `date` a day apart) and reads `07/08/2026` month-first; a
- * year-first spelling that is not ISO (`2026/7/15`, `2026-7-15`) is refused
- * with them. A space before a zone (`2026-07-15 10:00Z`) is refused as the
- * write door refuses it.
+ * Shanghai one, a `date` a day apart) and reads `07/08/2026` month-first. A
+ * space before a zone (`2026-07-15 10:00Z`) is refused as the write door
+ * refuses it. The one other text shape read at all is the year-first date,
+ * {@link YEAR_FIRST_CELL}.
  */
 const ISO_TEMPORAL_CELL =
   /^(\d{4})-(\d{2})-(\d{2})(?:(T| )(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
@@ -359,6 +359,54 @@ function readIsoTemporalCell(s: string): IsoTemporalCell | undefined {
   return { day, wall };
 }
 
+/**
+ * [#20534, maintainer ruling] The year-first date a spreadsheet writes, after
+ * trimming: `YYYY/M/D` or `YYYY-M-D` — a four-digit year, a one- or two-digit
+ * month and day, the SAME separator in both places — optionally followed by
+ * one space and a zone-naive `H:MM` or `H:MM:SS` with a one- or two-digit hour.
+ * `2026/7/15`, `2026/07/15`, `2026-7-15`, `2026/7/15 9:00`,
+ * `2026/08/01 06:00:00`, `2026-07-15 9:00`.
+ *
+ * It is Excel's default short date in zh-CN and ja-JP, and a CSV saved from
+ * Excel writes the text it displays. The year comes first, so there is no
+ * field order to guess and no zone to read: it names one day and one wall
+ * clock on every host. No zone, no fraction and no `T` separator are read in
+ * this form, and a mixed separator (`2026/7-15`) is not this form. A
+ * month-first or day-first date (`07/15/2026`, `15/07/2026`) and a two-digit
+ * year (`26/7/15`) stay refused.
+ */
+const YEAR_FIRST_CELL = /^(\d{4})([/-])(\d{1,2})\2(\d{1,2})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+
+/**
+ * Read a trimmed cell as a {@link YEAR_FIRST_CELL} shape, or `undefined`. The
+ * rules every other admitted cell keeps: the day must exist
+ * ({@link namesRealCalendarDay}, never rolled over), the hour runs 0..23 and
+ * the minute and second 00..59 (`24:00` is refused), and the day is the padded
+ * ISO `YYYY-MM-DD` (`2026/7/15` → `2026-07-15`). A clock is a wall clock, read
+ * exactly as the export shape's is.
+ */
+function readYearFirstCell(s: string): IsoTemporalCell | undefined {
+  const m = YEAR_FIRST_CELL.exec(s);
+  if (!m) return undefined;
+  const [, y, , mo, d, hh, mi, ss] = m;
+  const month = Number(mo);
+  const date = Number(d);
+  if (!namesRealCalendarDay(Number(y), month, date)) return undefined;
+  const day = `${y}-${pad2(month)}-${pad2(date)}`;
+  if (hh === undefined) return { day };
+  const wall = {
+    year: Number(y),
+    month,
+    day: date,
+    hour: Number(hh),
+    minute: Number(mi),
+    second: ss ? Number(ss) : 0,
+    millisecond: 0,
+  };
+  if (wall.hour > 23 || wall.minute > 59 || wall.second > 59) return undefined;
+  return { day, wall };
+}
+
 /** The `HH:MM:SS` UTC clock of an instant. */
 function utcClock(t: Date): string {
   return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}`;
@@ -376,19 +424,20 @@ function utcClock(t: Date): string {
  * ## Which text is read at all (#20534)
  *
  * A text cell is read only in an {@link ISO_TEMPORAL_CELL} shape — ISO 8601,
- * or the export's own `YYYY-MM-DD HH:mm:ss` — and only on a calendar day that
+ * or the export's own `YYYY-MM-DD HH:mm:ss` — or as a year-first date
+ * ({@link YEAR_FIRST_CELL}: `2026/7/15`, `2026/7/15 9:00`, stored padded, the
+ * clock read exactly as the export shape's), and only on a calendar day that
  * exists. A `time` cell may also be a bare `HH:MM` / `HH:MM:SS`. Every other
  * cell is refused on every branch; nothing reaches `new Date(s)`:
  *
- *  - **an impossible day** (`2026-02-30`, `2026-02-29`, `2026-04-31`, in any
- *    of the shapes) — `Date.UTC` and `Date.parse` rolled it into the next
- *    month, so a `datetime` was stored as March 2 and a `date` given in the
- *    `T…Z` spelling likewise; never rolled over now;
+ *  - **an impossible day** (`2026-02-30`, `2026-02-29`, `2026-04-31`,
+ *    `2026/2/30`, in any of the shapes) — `Date.UTC` and `Date.parse` rolled it
+ *    into the next month, so a `datetime` was stored as March 2 and a `date`
+ *    given in the `T…Z` spelling likewise; never rolled over now;
  *  - **a locale or prose spelling** (`07/15/2026 10:00`, `07/08/2026`,
- *    `15 July 2026`, `2026/7/15`, `2026-7-15`) — `new Date(s)` read it in the
- *    server process's zone and month-first, so the stored instant, and a
- *    `date`'s day, were properties of the deployment host; no zone and no
- *    field order is guessed now;
+ *    `15 July 2026`) — `new Date(s)` read it in the server process's zone and
+ *    month-first, so the stored instant, and a `date`'s day, were properties
+ *    of the deployment host; no zone and no field order is guessed now;
  *  - **a number** (`2026`, an Excel serial) — `new Date(String(n))` read it
  *    as a year, in the process zone.
  *
@@ -456,7 +505,7 @@ export function parseDateCell(
 
   if (kind === 'time' && TIME_OF_DAY.test(s)) return s.length === 5 ? `${s}:00` : s;
 
-  const cell = readIsoTemporalCell(s);
+  const cell = readIsoTemporalCell(s) ?? readYearFirstCell(s);
   if (!cell) return undefined;
 
   if (cell.wall) {
