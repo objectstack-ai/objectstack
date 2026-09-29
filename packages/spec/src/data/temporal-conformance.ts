@@ -217,6 +217,7 @@ export const TEMPORAL_ROWS: readonly TemporalRow[] = [
   { id: 'f_next',  at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', writerForm: 'native', why: 'next midnight — the exclusive edge a half-open bound must NOT keep' },
   { id: 'g_eom',   at: '2026-07-31T23:59:59.999Z', on: '2026-07-31', writerForm: 'wire',   why: 'last representable instant of a month — month rollover' },
   { id: 'h_leap',  at: '2024-02-29T12:00:00.000Z', on: '2024-02-29', writerForm: 'native', why: 'leap day — February rollover' },
+  { id: 'z_last',  at: '9999-12-31T10:00:00.000Z', on: '9999-12-31', writerForm: 'native', why: 'the last supported day (years 0001..9999), after its midnight — the one day with no next day, so its whole-day upper bound bounds nothing (#20600)' },
 ] as const;
 
 /** Which declared field type a case filters on. */
@@ -314,7 +315,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     kind: 'datetime',
     filter: { at: { $gte: '2026-07-28' } },
     tokenFilter: { at: { $gte: '{today}' } },
-    expected: ['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom'],
+    expected: ['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom', 'z_last'],
     note: 'A LOWER bound anchors to 00:00 — c_open is included precisely because the bound is inclusive of that instant.',
   },
   {
@@ -334,7 +335,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     kind: 'date',
     filter: { on: { $gt: '2026-07-28' } },
     tokenFilter: { on: { $gt: '{today}' } },
-    expected: ['f_next', 'g_eom'],
+    expected: ['f_next', 'g_eom', 'z_last'],
     note: 'The boundary day itself is out; the mirror-image of widening a lower bound.',
   },
 
@@ -352,7 +353,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $gte: '2026-07-28T09:15:00.000Z' } },
-    expected: ['d_mid', 'e_late', 'f_next', 'g_eom'],
+    expected: ['d_mid', 'e_late', 'f_next', 'g_eom', 'z_last'],
     note: 'd_mid is exactly the bound and inclusive.',
   },
 
@@ -390,6 +391,50 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     filter: { at: { $gte: '1969-12-31', $lte: '1969-12-31' } },
     expected: ['a_epoch'],
     note: 'Negative epoch ms. The #3773 family: any surface that assumes a datetime is a non-negative epoch, or reads one as a Julian day, breaks here first.',
+  },
+
+  // ── The last supported day: no next day, so no upper bound (#20600) ───────
+  {
+    name: 'datetime: a bare-day $lte on the last supported day has no upper bound',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '9999-12-31' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'f_next', 'g_eom', 'h_leap', 'z_last'],
+    note: 'Every supported value is at most 9999-12-31T23:59:59.999Z, so the whole-day bound of that day bounds nothing. Its next day spelled as text is the five-digit 10000-01-01, which sorts below 2026-… — a backend that compiled it answered no rows at all.',
+  },
+  {
+    name: 'datetime: a $between whose max is the last supported day keeps only its min',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $between: ['2026-07-29', '9999-12-31'] } },
+    dateRange: ['2026-07-29', '9999-12-31'],
+    expected: ['f_next', 'g_eom', 'z_last'],
+    note: 'The min still anchors to midnight (f_next is exactly on it); the max bounds nothing, so z_last (10:00 on the last day) is in.',
+  },
+  {
+    name: 'datetime: the last supported day as a one-day $between',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $between: ['9999-12-31', '9999-12-31'] } },
+    dateRange: ['9999-12-31', '9999-12-31'],
+    expected: ['z_last'],
+    note: 'The "today" shape on the last day: from its midnight, with no upper bound.',
+  },
+  {
+    name: 'datetime: the day before the last day is still a bound',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '9999-12-30' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'f_next', 'g_eom', 'h_leap'],
+    note: 'The control: 9999-12-30 has a next day, so the bound stops at 9999-12-31T00:00:00.000Z and z_last stays out.',
+  },
+  {
+    name: 'date: $lte on the last supported day keeps every day',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $lte: '9999-12-31' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'f_next', 'g_eom', 'h_leap', 'z_last'],
+    note: 'A backend that widens without seeing the column type widens a date column too; on the last day that must still keep every day, 9999-12-31 included.',
   },
 
   // ── Equality on the `date` column — the ADR's original defect (#1874) ────

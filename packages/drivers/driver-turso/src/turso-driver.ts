@@ -37,6 +37,7 @@ import {
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
+import { UNBOUNDED_ABOVE } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -2576,12 +2577,21 @@ export class TursoDriver extends SqlDriver {
             break;
           }
           out.$gte = this.temporalFilterValue(object, field, raw[0]);
-          Object.assign(out, this.toRemoteUpperBound(object, field, '$lte', raw[1]));
+          // [#20600] A max on the last supported day bounds nothing: the range
+          // keeps its minimum alone.
+          const upper = this.toRemoteUpperBound(object, field, '$lte', raw[1]);
+          if (upper !== UNBOUNDED_ABOVE) Object.assign(out, upper);
           break;
         }
-        case '$lte':
-          Object.assign(out, this.toRemoteUpperBound(object, field, op, raw));
+        case '$lte': {
+          // [#20600] `$lte` on the last supported day has no bound to send; what
+          // it still asks is that the column has a value, which the transport's
+          // `$null: false` arm spells `IS NOT NULL` — the reading local mode's
+          // emitter gives the same rewrite.
+          const upper = this.toRemoteUpperBound(object, field, op, raw);
+          Object.assign(out, upper === UNBOUNDED_ABOVE ? { $null: false } : upper);
           break;
+        }
         case '$in':
         case '$nin':
           out[op] = Array.isArray(raw)
@@ -2616,15 +2626,18 @@ export class TursoDriver extends SqlDriver {
    *
    * `calendarDayUpperBoundRewrite` is the inherited authority for that rule and
    * already scopes itself to `datetime`, so `date`/`time` columns compile
-   * byte-identically to before.
+   * byte-identically to before. [#20600] `UNBOUNDED_ABOVE` — the last
+   * supported day, whose whole-day bound bounds nothing — is handed back for
+   * the caller to compile no upper bound.
    */
   private toRemoteUpperBound(
     object: string,
     field: string,
     op: string,
     raw: unknown,
-  ): Record<string, unknown> {
+  ): Record<string, unknown> | typeof UNBOUNDED_ABOVE {
     const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
+    if (rewritten === UNBOUNDED_ABOVE) return UNBOUNDED_ABOVE;
     if (rewritten) return { [rewritten.op]: rewritten.value };
     return { [op]: this.temporalFilterValue(object, field, raw) };
   }
