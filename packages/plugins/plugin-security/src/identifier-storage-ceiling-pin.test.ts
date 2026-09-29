@@ -10,7 +10,7 @@ import { SysMetadataObject } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 
 /**
- * #12144 — the shared identifier schemas ↔ the storage columns that bound them.
+ * Commit 3a04b0125 — the shared identifier schemas ↔ the storage columns that bound them.
  *
  * `packages/spec/src/shared/identifiers.zod.ts` declares the platform's
  * identifier schemas with a floor and a grammar and **no `.max()`** — on
@@ -22,11 +22,11 @@ import { SecurityPlugin } from './security-plugin.js';
  * 255 for `sys_metadata.name`. A single shared `.max()` therefore cannot
  * equal every consumer's enforced ceiling: `.max(100)` would newly refuse
  * `sys_metadata` names in (100, 255] that are legal stored rows today —
- * accept-set narrowing beyond enforced reality, fenced out of #12144's
- * dispatch by triage.
+ * accept-set narrowing beyond enforced reality, fenced out of commit 3a04b0125's
+ * scope by triage.
  *
  * This pin links the two surfaces so they cannot drift apart silently, the
- * PR #12143 idiom: the widths are READ off the registration surface
+ * idiom of commit f64668d3c: the widths are READ off the registration surface
  * (`SecurityPlugin.init()` → the manifest `register({ objects })` call, and
  * the `SysMetadataObject` declaration), never restated inside the assertions
  * that use them. Only the one deliberate value pin restates them, so a width
@@ -34,7 +34,7 @@ import { SecurityPlugin } from './security-plugin.js';
  *
  * ## What a red on this file means
  *
- * - The **value pin** red: a storing column's width moved. Re-derive #12144's
+ * - The **value pin** red: a storing column's width moved. Re-derive commit 3a04b0125's
  *   table before accepting: does the spec schema still accept everything the
  *   column stores? Do the columns now AGREE on one width? If they all agree,
  *   the long-fenced declared-=-enforced `.max()` may finally be derivable —
@@ -48,7 +48,7 @@ import { SecurityPlugin } from './security-plugin.js';
  *   identifier schema at or above the widest storing column. Correct ONLY if
  *   every consuming surface's enforced ceiling equals it — which the value
  *   pin above will already be contradicting while the columns disagree. Prove
- *   the per-surface measurement (#12144's triage fence spells out the burden)
+ *   the per-surface measurement (the triage fence at the top of this file states the burden)
  *   before touching this pin.
  */
 
@@ -141,11 +141,11 @@ describe('shared identifier schemas ↔ the storage columns that bound them (#12
   });
 
   it('the enforced ceilings, pinned by value — a width change is a #12144 re-derivation moment', async () => {
-    // Pinned by VALUE, deliberately (the #12143 idiom's one restatement):
+    // Pinned by VALUE, deliberately (commit f64668d3c's idiom, its one restatement):
     // these widths are the ENFORCED ceilings on identifier-class values —
     // enforcement lives at the write seam (ObjectQL record-validator,
     // `max_length`), never in the spec schemas, which declare no `.max()`.
-    // If one of these reds, a column width moved: re-derive #12144 before
+    // If one of these reds, a column width moved: re-derive commit 3a04b0125's table before
     // accepting — and if the columns now all AGREE on one width, the
     // declared-=-enforced `.max()` that triage fenced may finally be
     // derivable; that is a spec accept-set change to escalate, not a value
@@ -182,7 +182,7 @@ describe('shared identifier schemas ↔ the storage columns that bound them (#12
     // correct ONLY when every consuming surface's enforced ceiling equals
     // it (declared = enforced, per surface, measured) — while the storing
     // columns disagree (see the value pin) no shared `.max()` can be, and
-    // the change is the narrowing #12144's triage explicitly fenced.
+    // the change is the narrowing triage fenced out of commit 3a04b0125.
     // Escalate with the per-surface measurement; do not edit this pin to
     // absorb the red.
     const widest = Math.max(...(await measuredColumns()).map((c) => c.width));

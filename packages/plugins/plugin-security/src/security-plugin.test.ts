@@ -16,10 +16,10 @@ import { RLS } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 /**
- * [#16608] What the ENGINE does inside the middleware's `next()` — the part of
+ * [commit a016f08b8] What the ENGINE does inside the middleware's `next()` — the part of
  * `ObjectQL.insert` the doubles in this file stand in for.
  *
- * Since #16608 the insert-side RLS `check` is not evaluated in the middleware:
+ * Since commit a016f08b8 the insert-side RLS `check` is not evaluated in the middleware:
  * it is INSTALLED on the operation context and run by the engine once the
  * `beforeInsert` chain has produced the row that will be stored. A double whose
  * executor is a bare `async () => {}` therefore models an engine that carries a
@@ -146,7 +146,7 @@ describe('SecurityPlugin', () => {
   // The predicate itself is pinned exhaustively next to its producer
   // (bootstrap-platform-admin-walled-owner.test.ts); THIS pin is that the
   // middleware actually consults it. [#11974 / #11663 L4] The trigger set is
-  // NARROWED: the #11343 update arm (email_verified / email) retired with the
+  // NARROWED: commit c0714eb5d's update arm (email_verified / email) retired with the
   // walled elevation it existed to re-attempt — under `single` (this suite's
   // posture) only a sys_user insert/create can change the promotion answer.
   // -------------------------------------------------------------------------
@@ -2183,8 +2183,8 @@ describe('SecurityPlugin', () => {
     it('PASSES an admin update of a package-managed set at THIS gate (ADR-0094: the refusal is the write-through producer\'s, not this gate\'s)', async () => {
       // update/delete on a package row are not refused at this gate — the
       // ADR-0094 write-through downstream translates them into a metadata
-      // write, and that producer decides. Since ADR-0094 D5-R (#6483 /
-      // PR #6608) the answer for a CODE-DECLARED set is 403 NOT_OVERRIDABLE,
+      // write, and that producer decides. Since ADR-0094 D5-R (commit
+      // ee58392e1) the answer for a CODE-DECLARED set is 403 NOT_OVERRIDABLE,
       // so "the write-through turns it into an env overlay" is no longer why
       // this passes; it passes because the gate's job is forging provenance,
       // not overridability. The refusal is covered in

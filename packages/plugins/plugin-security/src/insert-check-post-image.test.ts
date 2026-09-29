@@ -1,11 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16608] The write `check` judges THE ROW THAT WILL BE STORED — on `insert`
+ * [commit a016f08b8] The write `check` judges THE ROW THAT WILL BE STORED — on `insert`
  * as on `update`.
  *
  * ## What was measured, on `origin/main` @ `941232040` (already carrying
- * #16607's membership staging, PR #16722)
+ * the membership staging of commit 1d73d45c1)
  *
  * The app stamps a denormalised scoping field in `beforeInsert` — an
  * organization copied from the parent, read OUTSIDE RLS under `runAs: 'system'`
@@ -741,7 +741,7 @@ describe('[#16608] fail-closed — an engine that does not run the installed che
 // ── the contract review's cells, on the same both-drivers footing ──────────
 
 /**
- * [contract review of PR #16805, F1 — BLOCKING] **The row the seam judges must
+ * [contract review of commit a016f08b8, F1 — BLOCKING] **The row the seam judges must
  * be the row that is stored.**
  *
  * The first delivery of this card put the judgement immediately after the

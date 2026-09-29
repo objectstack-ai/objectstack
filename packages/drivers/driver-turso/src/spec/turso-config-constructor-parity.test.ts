@@ -30,7 +30,10 @@
  *    copies in `../turso-driver.ts`, and this is the pin that holds them equal.
  *    [#20437] The same holds for a forced `mode: 'replica'` with no `syncUrl`,
  *    refused on `mode` — the third copy. That row used to be accepted
- *    everywhere, as a replica that never synced.
+ *    everywhere, as a replica that never synced. [#20586] And for a forced
+ *    `mode: 'local'` beside a `syncUrl`, refused on `mode` too — the fourth
+ *    copy. That row used to be accepted everywhere as well, as a "local"
+ *    database the driver synced with the remote anyway.
  *
  * ⚠️ The mirror declares no `mode`, so zod strips an authored one before its
  * refinement runs: rows that FORCE a mode are judged by the constructor and the
@@ -103,7 +106,8 @@ const ROWS: Row[] = [
   { name: 'a remote url behind whitespace', config: { url: ` ${REMOTE}` }, ctor: 'accept' },
   { name: 'an empty syncUrl (unset)', config: { url: REMOTE, syncUrl: '' }, ctor: 'accept' },
   { name: "file: + syncUrl under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', syncUrl: REMOTE, sync: { onConnect: false } }, ctor: 'accept' },
-  { name: "file: + syncUrl under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: REMOTE, sync: { onConnect: false } }, ctor: 'accept' },
+  { name: "file: under a forced mode: 'local'", config: { url: FILE, mode: 'local' }, ctor: 'accept' },
+  { name: "file: + an empty syncUrl (unset) under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: '' }, ctor: 'accept' },
   { name: "libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' }, ctor: 'accept' },
   { name: "file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' }, ctor: 'accept' },
   { name: "a bare path under a forced mode: 'remote' (the client refuses it at connect)", config: { url: './data/app.db', mode: 'remote' }, ctor: 'accept' },
@@ -119,6 +123,8 @@ const ROWS: Row[] = [
   { name: "libsql:// + syncUrl under a forced mode: 'replica'", config: { url: REMOTE, mode: 'replica', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
   { name: "libsql:// under a forced mode: 'local'", config: { url: REMOTE, mode: 'local' }, ctor: 'refuse', refusedOn: 'url' },
   { name: "https:// under a forced mode: 'local'", config: { url: 'https://db.example.turso.io', mode: 'local' }, ctor: 'refuse', refusedOn: 'url' },
+  // [#20586] ORDER: a remote url keeps its `url` refusal ahead of the forced-local `syncUrl` one.
+  { name: "libsql:// + syncUrl under a forced mode: 'local'", config: { url: REMOTE, mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
 
   // ── a url that is none of file:, :memory: or remote, in a local or replica mode ──
   { name: 'a bare relative path', config: { url: './data/app.db' }, ctor: 'refuse', refusedOn: 'url' },
@@ -131,6 +137,8 @@ const ROWS: Row[] = [
   { name: 'a whitespace-only url', config: { url: '   ' }, ctor: 'refuse', refusedOn: 'url' },
   { name: 'a bare path beside syncUrl', config: { url: './data/replica.db', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
   { name: "a bare path under a forced mode: 'local'", config: { url: './data/app.db', mode: 'local' }, ctor: 'refuse', refusedOn: 'url' },
+  // [#20586] ORDER: a bare path keeps its `url` refusal ahead of the forced-local `syncUrl` one.
+  { name: "a bare path + syncUrl under a forced mode: 'local'", config: { url: './data/app.db', mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
   { name: "a bare path under a forced mode: 'replica'", config: { url: './data/replica.db', mode: 'replica' }, ctor: 'refuse', refusedOn: 'url' },
 
   // ── a replica on an in-memory url ───────────────────────────────────────
@@ -162,11 +170,23 @@ const ROWS: Row[] = [
   { name: "an uppercase FILE: url under a forced mode: 'replica'", config: { url: `FILE:${DIR}/upper-replica.db`, mode: 'replica' }, ctor: 'refuse', refusedOn: 'mode' },
   { name: "file: + an empty syncUrl (unset) under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', syncUrl: '' }, ctor: 'refuse', refusedOn: 'mode' },
   { name: "file: + timeoutMs under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', timeoutMs: 5000 }, ctor: 'refuse', refusedOn: 'mode' },
+
+  // ── a forced local mode beside a remote to replicate from: refused on `mode` (#20586) ──
+  // The first row was pinned `accept` until #20586: the driver labelled it local and synced it anyway.
+  { name: "file: + syncUrl under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: REMOTE, sync: { onConnect: false } }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file: + syncUrl, no sync, under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "an uppercase FILE: url + syncUrl under a forced mode: 'local'", config: { url: `FILE:${DIR}/upper-local.db`, mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "a file: url behind whitespace + syncUrl under a forced mode: 'local'", config: { url: ` ${FILE}`, mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file: + syncUrl + timeoutMs under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: REMOTE, timeoutMs: 5000 }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file: + a wss:// syncUrl under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: 'wss://db.example.turso.io' }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: ":memory: + syncUrl under a forced mode: 'local'", config: { url: ':memory:', mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file::memory: + syncUrl under a forced mode: 'local'", config: { url: 'file::memory:', mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
 ];
 
 /**
- * The rows the constructor refuses on a sync key, or on a forced replica with
- * no `syncUrl`: its message is a copy of the spec's (#20200, #20437).
+ * The rows the constructor refuses on a sync key, on a forced replica with no
+ * `syncUrl`, or on a forced local mode beside a `syncUrl`: its message is a
+ * copy of the spec's (#20200, #20437, #20586).
  */
 const SYNC_KEY_REFUSALS = ROWS.filter(
   (r) => r.ctor === 'refuse' && (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync' || r.refusedOn === 'mode'),
@@ -225,8 +245,11 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     expect(ROWS.filter((r) => r.refusedOn === 'timeoutMs').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'syncUrl').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'sync').length).toBeGreaterThanOrEqual(5);
-    expect(ROWS.filter((r) => r.refusedOn === 'mode').length).toBeGreaterThanOrEqual(4);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(12);
+    expect(ROWS.filter((r) => r.refusedOn === 'mode').length).toBeGreaterThanOrEqual(12);
+    // [#20586] The forced-local half of the `mode` rows, floored on its own so
+    // it cannot shrink behind the forced-replica half.
+    expect(ROWS.filter((r) => r.refusedOn === 'mode' && r.config.mode === 'local').length).toBeGreaterThanOrEqual(8);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(20);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
@@ -258,12 +281,12 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     });
   });
 
-  // [#20200] The two sync refusals, and [#20437] the forced-replica refusal,
-  // are copies of the spec contract's texts in `../turso-driver.ts` (the spec
-  // keeps them module-local); this is the pin that holds each copy equal to the
-  // schema's issue, byte for byte.
+  // [#20200] The two sync refusals, [#20437] the forced-replica refusal and
+  // [#20586] the forced-local one are copies of the spec contract's texts in
+  // `../turso-driver.ts` (the spec keeps them module-local); this is the pin
+  // that holds each copy equal to the schema's issue, byte for byte.
   describe.each(SYNC_KEY_REFUSALS)('$name', (row) => {
-    it("the constructor's message is the spec contract's, byte for byte (#20200, #20437)", () => {
+    it("the constructor's message is the spec contract's, byte for byte (#20200, #20437, #20586)", () => {
       const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
       expect(spec.refusedOn).toBe(row.refusedOn);
       expect(spec.message).toBeTypeOf('string');

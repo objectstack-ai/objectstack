@@ -161,7 +161,7 @@ export function sendOk(res: EnvelopeResponse, data: unknown, status = 200): void
  *
  * ## `userMessage` — the second declared channel, and why this `Pick` stays explicit
  *
- * #9934's producer-side opt-in (maintainer ruling 2026-08-19 on objectui#5210,
+ * Commit 79c46da90's producer-side opt-in (maintainer ruling 2026-08-19 on objectui#5210,
  * option 1) declares `ApiError.userMessage`: the text a producer marked, AT
  * THROW TIME, as addressed to the END USER. Presence IS the marking — a
  * consumer that sees the field renders it verbatim and keeps its generic

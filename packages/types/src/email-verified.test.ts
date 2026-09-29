@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11343 / #12751] The verified-email allow-list, pinned representation by
+ * [commit c0714eb5d / #12751] The verified-email allow-list, pinned representation by
  * representation. This predicate is shared between the walled owner-elevation
  * gate (which REFUSES on `false`) and the owner-verification boot diagnostic
  * (which stays quiet on `true`) — the pin here is what both consumers stand

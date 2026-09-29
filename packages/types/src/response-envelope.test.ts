@@ -247,7 +247,7 @@ describe('sendError — the `declaredCode` open channel', () => {
 });
 
 /**
- * The #9934 user-facing marking on the NESTED envelope (maintainer ruling
+ * Commit 79c46da90's user-facing marking on the NESTED envelope (maintainer ruling
  * 2026-08-19 on objectui#5210, option 1).
  *
  * `ApiErrorSchema` declares `userMessage` — the text a producer marked AT THROW

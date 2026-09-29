@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11843 — the packaged-permission-set lock answers at the METADATA door.
+ * Commit 5619aace3 — the packaged-permission-set lock answers at the METADATA door.
  *
  * The lock (`packaged-permission-set-lock.ts`) used to have exactly one
  * enforcement point: the `sys_permission_set` DATA door. The pre-persistence

@@ -92,7 +92,7 @@ export const SysPermissionSet = ObjectSchema.create({
       visible: "has(record.drift_status) && record.drift_status == 'overlay_shadow'",
     },
     {
-      // [#11703] ⭐ THIS PARAMS LIST *IS* THE PAYLOAD. Every definition facet a
+      // [commit 5cb62d88b] ⭐ THIS PARAMS LIST *IS* THE PAYLOAD. Every definition facet a
       // clone should carry has to be named below: the action POSTs its param
       // VALUES to the generic data door, so a column that is not a param is
       // simply absent from the body — `permissionSetBodyFromRow()` then reads
@@ -101,7 +101,7 @@ export const SysPermissionSet = ObjectSchema.create({
       // a silent grant loss: the clone is created, the success toast fires, and
       // the difference is discoverable only by diffing the two records.
       //
-      // That was live until #11703 — three of the six facets
+      // That was live until commit 5cb62d88b — three of the six facets
       // (`system_permissions`, `row_level_security`, `tab_permissions`) were
       // never listed, so cloning a set carrying system permissions or RLS
       // produced a clone with none of them. Fail-closed, and therefore quiet.
@@ -128,7 +128,7 @@ export const SysPermissionSet = ObjectSchema.create({
       // because putting one on a brand-new set on the admin's behalf is a
       // privilege decision, not a field copy. It is stated HERE, where the
       // admin is standing when the clone happens, because an UNEXPLAINED
-      // omission is the same silent drop #11703 reports, merely ruled.
+      // omission is the same silent drop commit 5cb62d88b fixed, merely ruled.
       description:
         'Copies this set\'s permissions into a new organization-owned set you can edit. '
         + 'Delegated-admin scope is not copied — grant it deliberately on the new set if it needs one.',
@@ -142,14 +142,14 @@ export const SysPermissionSet = ObjectSchema.create({
         { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'snake_case machine name, unique per organization' },
         // `description` is prose, not a permission facet: it stays editable
         // (renaming a clone's description is legitimate), while the five JSON
-        // facets below are declared `carryOver` — the #11753 ruling's
+        // facets below are declared `carryOver` — commit 0e4e51b0a's
         // non-editable carry-over. Copied verbatim, shown read-only, never
         // offered as a prefilled JSON textarea an admin could hand-mangle into
         // a clone that grants MORE than its base.
         { field: 'description', defaultFromRow: true },
         { field: 'object_permissions', defaultFromRow: true, carryOver: true },
         { field: 'field_permissions', defaultFromRow: true, carryOver: true },
-        // [#11703] The three facets the clone silently dropped. Same
+        // [commit 5cb62d88b] The three facets the clone silently dropped. Same
         // JSON-string shape as the two above: `permissionSetRowFields()`
         // writes all five with `JSON.stringify`, and the data door parses all
         // five back — the accept surface did not move, only what is SENT.

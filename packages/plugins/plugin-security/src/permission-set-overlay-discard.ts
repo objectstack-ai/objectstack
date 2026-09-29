@@ -22,7 +22,7 @@
  *
  * ## Why this bypasses `deleteMetaItem`, not calls it
  *
- * `permission` is `allowOrgOverride: false` since #6483/#6608 (ADR-0094
+ * `permission` is `allowOrgOverride: false` since commit ee58392e1 (ADR-0094
  * D5-R), so the protocol's ADR-0005 tier gate refuses `deleteMetaItem` on an
  * artifact-backed name with 403 `NOT_OVERRIDABLE` — see
  * `permission-set-projection.ts`'s header, "leaving the operator hatch

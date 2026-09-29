@@ -25,7 +25,7 @@
 // Maintainer ruling (2026-08-07, issue comment 5219846435): "enforce both
 // declared write-widening mechanisms. The row-level write gate must consult
 // `modifyAllRecords` (profile axis) and `sys_record_share.access_level =
-// 'edit'` (share axis)." Route: PR #6564's tri-state `ISharingService` verdict,
+// 'edit'` (share axis)." Route: commit 54299caad's tri-state `ISharingService` verdict,
 // composed by provenance — `allow` replaces the platform floor, `abstain` and
 // `deny` leave it standing.
 //

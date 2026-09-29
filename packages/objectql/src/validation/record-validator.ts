@@ -88,7 +88,7 @@ import {
   parseNumericString,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { isOutsideTemporalYearRange, isUninterpretableTemporalComparand } from '@objectstack/core';
+import { isUninterpretableTemporalComparand } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -840,62 +840,6 @@ function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message
   return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
 }
 
-/**
- * [#20525] The ISO 8601 spellings a `datetime` STRING is written in, after
- * trimming — the ones the platform itself writes, each read the same on every
- * host by the `datetime` storage rule (`@objectstack/core`'s
- * `temporalStorageForm`):
- *
- * - `YYYY-MM-DD` — midnight UTC;
- * - `YYYY-MM-DDTHH:MM[:SS[.f…]]`, then `Z`, a `±HH:MM` / `±HHMM` offset, or
- *   nothing — a zone-naive wall clock is read AS UTC (ADR-0074);
- * - `YYYY-MM-DD HH:MM[:SS[.f…]]`, zone-naive only — read AS UTC the same way.
- *
- * Every other spelling is refused. `Date.parse` reads `"2026/07/15 10:00"`,
- * `"07/15/2026 10:00"` or `"15 July 2026 10:00"` in the SERVER PROCESS's zone
- * and `"07/08/2026"` month-first, so the stored instant was a property of the
- * deployment host; it reads `"2026"` as a year, which the storage rule then
- * stores as 2026 epoch milliseconds (`1970-01-01T00:00:02.026Z`). A space
- * separator carries no zone because the storage rule hands such a string to
- * `Date.parse` whole, and its non-ISO reading moves `"0050-01-01 10:00+01:00"`
- * to 1950. `T` and `Z` are upper case: a zone-naive `"…t10:00"` is not the
- * form the storage rule reads as UTC.
- */
-const ISO_DATETIME_WRITE_FORM =
-  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?| \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/;
-
-/**
- * [#20525] Does the string's leading `YYYY-MM-DD` name a calendar day that
- * exists — month 01..12, day 01 to that month's length, February 29 only in a
- * leap year? Arithmetic, never a `Date` round trip: `Date.UTC` reads a year
- * 0..99 as 1900..1999, and `Date.parse` ROLLS an impossible day over
- * (`"2026-02-30"` is March 2), which is the defect this answers. A string with
- * no leading day answers `false`.
- */
-function namesRealCalendarDay(s: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (!m) return false;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (month < 1 || month > 12 || day < 1) return false;
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const length = month === 2 ? (leap ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
-  return day <= length;
-}
-
-/**
- * [#20525] Is a `date` / `datetime` STRING written in a form its storage rule
- * stores as written? A real leading calendar day for both kinds, and for a
- * `datetime` an {@link ISO_DATETIME_WRITE_FORM} spelling. A `date`'s other
- * spelling question is the #20481 one, asked beside this.
- */
-function writesAsIsoTemporal(value: string, kind: 'date' | 'datetime'): boolean {
-  const s = value.trim();
-  if (kind === 'datetime' && !ISO_DATETIME_WRITE_FORM.test(s)) return false;
-  return namesRealCalendarDay(s);
-}
-
 function validateOne(
   name: string,
   def: FieldDef,
@@ -1271,49 +1215,50 @@ function validateOne(
   // ── date/datetime ───────────────────────────────────────────────
   if (t === 'date' || t === 'datetime') {
     const readable = value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
-    // [#20264] …and names a year from 0001 to 9999, the range the
-    // temporal-comparand door holds a comparand to — one function,
-    // `@objectstack/core`'s `isOutsideTemporalYearRange`, answers both doors.
-    // A date written as `+010000-01-01T00:00:00.000Z` has no leading
-    // `YYYY-MM-DD`, so the storage rule kept it verbatim (a stored non-day,
-    // 201 on memory and SQLite) and PostgreSQL refused it with a 500; year 0
-    // is a 500 on PostgreSQL on both kinds. Same code and words as any other
-    // value that is not a valid date.
+    // …and the value is one `@objectstack/core`'s
+    // `isUninterpretableTemporalComparand` reads — the temporal-comparand
+    // door's rule, asked here rather than copied, so a value is refused as a
+    // written value exactly when it is refused as a comparand. What that one
+    // rule holds a `date` / `datetime` to:
     //
-    // [#20481] …and a `date` STRING is one the `date` storage rule reads: a
-    // leading `YYYY-MM-DD` (after trimming), which `temporalStorageForm`
-    // collapses to that day. The rule hands every other string back unchanged,
-    // so `"2026/07/15"`, `"07/15/2026"`, `"15 July 2026"` or `"2026-7-15"` —
-    // each `Date.parse`-readable — was stored verbatim on memory and SQLite, a
-    // non-day that sorts and compares as text beside real days, while
-    // PostgreSQL read it by its `DateStyle` (`07/08/2026` is July 8 under
-    // MDY and August 7 under DMY). No other spelling is canonicalised, on
-    // purpose: `07/08/2026` names two days, and a guess stores the wrong one
-    // silently. The question is asked of `@objectstack/core`'s
-    // `isUninterpretableTemporalComparand` — the temporal-comparand door's
-    // reading of the same rule, never a second copy of it here — so every
-    // `date` string that door refuses as a comparand is refused as a written
-    // value too; the `Date.parse` check above still applies on top of it
-    // (`2026-13-45` has a leading day shape and no reading). Its two
-    // comparand-only exemptions never reach here: a blank is missing before
-    // this arm, and a `{placeholder}` is not `Date.parse`-readable. A `Date`
-    // is not a string and keeps its UTC calendar day; a `datetime` is
-    // untouched.
-    const readsAsDay =
-      t !== 'date' || typeof value !== 'string' || !isUninterpretableTemporalComparand('date', value);
-    // [#20525] …and a STRING names a calendar day that exists, for a `date`
-    // and for the day part of a `datetime`, and a `datetime` string is one of
-    // the ISO spellings `ISO_DATETIME_WRITE_FORM` names. `Date.parse` rolled
-    // an impossible day over (`"2026-02-30T10:00:00Z"` was stored as March 2
-    // on every backend) and a `date` kept it verbatim (`"2026-02-30"`, a day
-    // that does not exist, on memory and SQLite; a 500 on PostgreSQL); it read
-    // a non-ISO `datetime` in the server process's zone. Refused, never rolled
-    // over and never re-read: the same `invalid_date` wire code as every other
-    // value that is not a valid date, naming the field. A `Date` names a real
-    // instant and is not a string, so it keeps its answer; a number stays
-    // refused by `readable`.
-    const writtenAsIso = typeof value !== 'string' || writesAsIsoTemporal(value, t);
-    if (readable && readsAsDay && writtenAsIso && !isOutsideTemporalYearRange(value, t)) return null;
+    // - [#20264] a year from 0001 to 9999, whatever the spelling (a `Date` or a
+    //   string; `isOutsideTemporalYearRange`). A date written as
+    //   `+010000-01-01T00:00:00.000Z` has no leading `YYYY-MM-DD`, so the
+    //   storage rule kept it verbatim (a stored non-day, 201 on memory and
+    //   SQLite) and PostgreSQL refused it with a 500; year 0 is a 500 on
+    //   PostgreSQL on both kinds.
+    // - [#20481] a `date` STRING the `date` storage rule reads: a leading
+    //   `YYYY-MM-DD` (after trimming), which `temporalStorageForm` collapses to
+    //   that day. The rule hands every other string back unchanged, so
+    //   `"2026/07/15"`, `"07/15/2026"`, `"15 July 2026"` or `"2026-7-15"` —
+    //   each `Date.parse`-readable — was stored verbatim on memory and SQLite,
+    //   a non-day that sorts and compares as text beside real days, while
+    //   PostgreSQL read it by its `DateStyle` (`07/08/2026` is July 8 under
+    //   MDY and August 7 under DMY). No other spelling is canonicalised, on
+    //   purpose: `07/08/2026` names two days, and a guess stores the wrong one
+    //   silently.
+    // - [#20525] a STRING whose leading day exists, for a `date` and for the
+    //   day part of a `datetime`, and a `datetime` string in one of the ISO
+    //   8601 spellings the platform writes. `Date.parse` rolled an impossible
+    //   day over (`"2026-02-30T10:00:00Z"` was stored as March 2 on every
+    //   backend) and a `date` kept it verbatim (`"2026-02-30"`, a day that does
+    //   not exist, on memory and SQLite; a 500 on PostgreSQL); it read a
+    //   non-ISO `datetime` in the server process's zone. [#20549] Both
+    //   predicates moved into that rule, so the comparand door refuses them
+    //   too.
+    //
+    // Refused, never rolled over and never re-read: the same `invalid_date`
+    // wire code as every other value that is not a valid date, naming the
+    // field. The rule's two comparand-only exemptions never reach here: a
+    // blank is missing before this arm, and a `{placeholder}` is not
+    // `Date.parse`-readable. `readable` stays on top of the rule, and it is
+    // the one place the two doors differ: a NUMBER is refused as a written
+    // `date` / `datetime` (the stored form is text, never epoch milliseconds),
+    // while a comparand may be one. It also refuses a string with a real
+    // leading day and nothing `Date.parse` reads after it (`2026-07-15T25:00`),
+    // which the `date` rule reads as its day when it is a comparand. A `Date`
+    // names a real instant and is judged by its year only.
+    if (readable && !isUninterpretableTemporalComparand(t, value)) return null;
     // Same wire code, two sentences: "a valid date" vs "a valid datetime".
     return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }

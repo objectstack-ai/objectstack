@@ -129,7 +129,6 @@ const FAMILY_ROWS: readonly Shape[] = [
   ['ISO instants as $between endpoints on a date field', () => ({ placed_on: { $between: ['2026-01-10T00:00:00Z', '2026-02-01T23:00:00Z'] } }), 4],
   ['an ISO instant $lt on a date field', () => ({ placed_on: { $lt: '2026-02-01T10:00:00.000Z' } }), 3],
   ['bare days as both $between endpoints on a datetime', () => ({ opened_at: { $between: ['2026-02-01', '2026-02-05'] } }), 2],
-  ['an epoch-ms string $gt on a datetime', () => ({ opened_at: { $gt: '1769940000000' } }), 3],
   ['an epoch-ms $lte on a datetime', () => ({ opened_at: { $lte: 1769940000000 } }), 3],
   ['an epoch-ms $eq on a datetime', () => ({ opened_at: { $eq: 1769940000000 } }), 1],
   ['an offset instant $gte on a datetime', () => ({ opened_at: { $gte: '2026-02-01T18:00:00+08:00' } }), 4],
@@ -186,6 +185,31 @@ describe('[#20176] a per-aggregation filter counts a temporal comparand by the c
     });
     expect(Object.fromEntries(rows.map((r: any) => [r.customer_id, r.m]))).toEqual({ c1: 0, c2: 2, c3: 1 });
   });
+});
+
+// [#20549] The family's epoch-ms STRING row counted 3 here, as its where twin
+// did. It is refused at both positions now, with every other bare integer
+// string: the storage rule reads one as epoch milliseconds, so `"2026"` meant
+// 1970-01-01T00:00:02.026Z and matched every later row, and the record
+// validator already refused it as a written value. Epoch milliseconds keep
+// counting as a NUMBER — row 5, and the family's `$lte` / `$eq` rows above.
+describe('[#20549] an epoch-ms STRING on a datetime is refused at the per-aggregation position, as on where', () => {
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: any) => e);
+  for (const value of ['1769940000000', '2026']) {
+    it(`${JSON.stringify(value)}: INVALID_FILTER / 400 at both positions; the number of the same instant counts 3`, async () => {
+      for (const kind of ['rows', 'native'] as const) {
+        const engine = await makeEngine(kind, ROWS);
+        const agg = await refusal(engine.aggregate(OBJECT, perAggregation({ opened_at: { $gt: value } })));
+        expect(agg?.code, `${kind}, per-aggregation`).toBe('INVALID_FILTER');
+        expect(agg?.status, `${kind}, per-aggregation`).toBe(400);
+        const where = await refusal(engine.find(OBJECT, { where: { opened_at: { $gt: value } } }));
+        expect(where?.code, `${kind}, where`).toBe('INVALID_FILTER');
+        expect(where?.status, `${kind}, where`).toBe(400);
+      }
+      const engine = await makeEngine('rows', ROWS);
+      expect(await engine.aggregate(OBJECT, perAggregation({ opened_at: { $gt: 1769940000000 } }))).toEqual([{ n: 6, m: 3 }]);
+    });
+  }
 });
 
 /** `having` over customer groups: the aggregated columns the rows below name. */

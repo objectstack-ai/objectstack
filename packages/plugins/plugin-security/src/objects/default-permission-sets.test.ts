@@ -280,7 +280,7 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
 });
 
 /**
- * [#8839] The `sys_comment` moderation carve-out — again a TRIPWIRE, not the
+ * [commit c25b2d52a] The `sys_comment` moderation carve-out — again a TRIPWIRE, not the
  * proof. The proof is over HTTP, in
  * `packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts`, which
  * boots org-bound and arms itself: an assertion whose expectation and reality
@@ -332,7 +332,7 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
     expect(floor.using).toBe('created_by == current_user.id');
     expect(floor.positions).toEqual(['org_member']);
 
-    // The update limb is deliberately NOT widened: #8839 ruled on delete, which
+    // The update limb is deliberately NOT widened: commit c25b2d52a's ruling is on delete, which
     // is the limb it measured. A `sys_comment` update policy appearing here is a
     // second access-widening riding in on this one's ruling.
     expect(policiesFor('member_default', 'sys_comment').map((p) => p.operation)).toEqual(['delete']);

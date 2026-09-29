@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11343 / #12751] Verified-email predicate over a stored `sys_user` row — a
+ * [commit c0714eb5d / #12751] Verified-email predicate over a stored `sys_user` row — a
  * fail-closed ALLOW-LIST over the representations a driver may hand back for
  * the `sys_user.email_verified` boolean column (JS `true`, SQLite `1`, and
  * their stringified forms). Everything else — `false`/`0`, `null`, an ABSENT

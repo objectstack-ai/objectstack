@@ -5664,8 +5664,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
       + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
       + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
-      + 'a page selects — as it does every filter of a component whose rows are inline, which '
-      + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+      + 'a page selects. It is retired from the load path, so authors are still refused at '
       + 'the door and taught the array; the stored-row seams and this chain replay it.',
   },
   {
@@ -9299,12 +9298,13 @@ const step18: MigrationStep = {
         + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
         + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
         + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
-        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
-        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
-        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
-        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
-        + 'their own rows in an in-memory data source that reads the record form and excludes '
-        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
+        + 'equality position, or an AST `and` / `or` group. None of this depends on where a '
+        + 'block\'s rows come from: a filter on a component whose rows are inline (`data: { '
+        + 'provider: \'value\' }`, a `data` array, or `staticData`) — the binding\'s included — is '
+        + 'rewritten or left exactly as it would be on a block that queries an object, because the '
+        + '`object-map`, `object-tree`, `object-calendar` and `object-gantt` blocks of the objectui '
+        + 'version this release pins match a rule array against those rows and select the rows the '
+        + 'stored form selected. A row left as stored keeps loading unchanged '
         + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
         + 'contract), and its `filter` door refuses the form: at `dataSource.filter` on the page\'s '
         + 'next save; at a block\'s `properties.filter` — like `properties.defaultFilters`, a key of '
@@ -13438,9 +13438,8 @@ const step18: MigrationStep = {
         + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
         + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
         + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
-        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
-        + 'string or number this key also took, and any filter on a grid whose rows are inline '
-        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, or the bare '
+        + 'string or number this key also took — and '
         + 'its door refuses such a value only as the component-props gate\'s advisory finding '
         + '(os validate, os build, os lint), since a re-save through the metadata API is not '
         + 'refused there: a record form with the message the filter door gives, a worked rewrite '
@@ -16982,6 +16981,56 @@ const step18: MigrationStep = {
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
     },
+    // A forced local mode beside a remote to replicate from, refused at both doors
+    // together: the datasource contract (on mode) and the turso driver's
+    // constructor, in one message. The driver used to label it local and run it as
+    // an embedded replica anyway. The twin of
+    // turso-config-forced-replica-without-sync-url-refused, the other way round. A
+    // structured TODO, not a D2 conversion: whether the author meant an embedded
+    // replica of that remote or a plain local file is intent no artifact records.
+    {
+      id: 'turso-config-forced-local-with-sync-url-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.TursoConfig (a turso / libsql datasource.config) and the TursoDriver constructor of '
+        + '@objectstack/driver-turso — mode local beside a non-empty syncUrl is now refused, on mode at '
+        + 'authoring and at construction. The published TursoConfigSchema mirror of '
+        + '@objectstack/driver-turso carries the same text for parity but declares no mode key and strips '
+        + 'an authored one, so it cannot see a forced mode and still accepts the config as a replica',
+      replacement:
+        'the configuration the author meant. An embedded replica drops mode: keep the file: url and '
+        + 'syncUrl, for example url file:./data/replica.db with syncUrl naming the remote, and the url '
+        + 'and syncUrl select the replica. A plain local database drops syncUrl and sync: a file: url '
+        + '(or :memory:) with no syncUrl is a local database, with or without mode local',
+      reason:
+        'A syncUrl names the remote an embedded replica syncs with, and the turso driver syncs whenever '
+        + 'it is set on a local engine, whatever mode says. The triage ruling of 2026-09-29 weighed '
+        + 'refusing this shape against honouring mode local by skipping the sync, and refused it: '
+        + 'honouring it would ignore a declared syncUrl, the same defect with the keys swapped, and a '
+        + 'loud contradiction is the author\'s to resolve. A forced mode local beside a syncUrl parsed '
+        + 'clean at authoring, and the driver built it with a local transport label and then ran it as '
+        + 'a replica: it synced on connect, started the sync interval and answered true to the '
+        + 'sync-enabled check, exactly as the same config with no mode did (measured on the driver '
+        + 'source). A declared mode the runtime ignores is the declared-but-not-enforced shape ADR-0049 '
+        + 'does not ship, so the datasource contract and the constructor now refuse it together, with '
+        + 'one message, which names both ways out. The sibling refusals keep their order: a forced '
+        + 'local mode on a remote url or a bare path meets its url refusal first. An empty syncUrl is '
+        + 'unset and is not refused. Stored datasource rows are not re-parsed when they load, so a '
+        + 'stored row in this shape now fails when its driver is built: the connection service records '
+        + 'it as failed-degraded, a test connection answers ok false, and under ADR-0062 D5 the boot '
+        + 'fails fast when objects bind to that datasource, unless OS_ALLOW_DRIVER_CONNECT_FAILURE is '
+        + 'set. Measured on this tree at the change: no example, template, published skill or '
+        + 'hand-written doc authors the shape, and no host default or environment variable sets mode '
+        + 'or syncUrl. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every turso datasource: os validate or defineStack, and a '
+        + 'save or test connection through the datasource admin service, report a forced local mode '
+        + 'beside a syncUrl at config.mode with both ways out. Decide per datasource whether it is an '
+        + 'embedded replica (drop mode) or a local file (drop syncUrl and sync). Done when every turso '
+        + 'datasource parses, the driver builds from it, and no datasource that declares mode local '
+        + 'carries a syncUrl.',
+    },
     // A forced embedded replica with no remote to replicate from, refused at both
     // doors together: the datasource contract (on mode) and the turso driver's
     // constructor, in one message. The driver used to build it as a replica that
@@ -17453,7 +17502,9 @@ const step18: MigrationStep = {
         'An html page\'s source is a JSX string, not a keyed document: `objectstack migrate meta` '
         + 'rewrites stored metadata by key and cannot rewrite a tag inside authored source, so the '
         + 'move is by hand, and which wrapper keeps a page\'s layout is the author\'s call. '
-        + '`objectstack validate`, `objectstack compile` (which `dev` and `start` run first) and '
+        + '`objectstack validate`, `objectstack compile` (which `dev` and `start` run before they '
+        + 'boot only when the artifact is missing or `--compile` is passed, and `dev`\'s watch mode '
+        + 'when a watched file changes) and '
         + '`objectstack lint` check that source against an SDUI component manifest: the '
         + '`sdui.manifest.json` in the directory the command runs in, then the copy '
         + '`@objectstack/console` ships. The second lookup asked for a file the console package '

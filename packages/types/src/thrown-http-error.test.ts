@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#9934] `declaredUserMessage` — the ONE read for "did the producer mark this
+// [commit 79c46da90] `declaredUserMessage` — the ONE read for "did the producer mark this
 // refusal's message user-facing?", and the resolver limb that carries it.
 //
 // The marking is the producer-side opt-in the objectui#5210 ruling asked for:
