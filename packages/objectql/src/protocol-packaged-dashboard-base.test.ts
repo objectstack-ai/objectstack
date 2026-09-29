@@ -115,9 +115,11 @@ function makeSession() {
             if (table !== 'sys_metadata') return null;
             return rows.find((r) => matchesWhere(r, o.where)) ?? null;
         },
-        async find(table: string, o: { where: Record<string, unknown> }) {
+        async find(table: string, o: { where: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            return rows.filter((r) => matchesWhere(r, o.where));
+            const matched = rows.filter((r) => matchesWhere(r, o.where));
+            // The caller's bound, applied after the filter, by presence.
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
     };
     const protocol: any = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
