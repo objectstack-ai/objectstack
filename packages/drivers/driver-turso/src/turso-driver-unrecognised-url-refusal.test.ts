@@ -48,10 +48,13 @@
  * - PRESERVATION, beside this file's neighbours: `file:` local and replica,
  *   `:memory:` local, a lowercase remote url, `mode: 'remote'`.
  * - The one WIDENED cell: an uppercase `FILE:` url naming a file under a
- *   forced `mode: 'replica'`, with or without `syncUrl`. At `a7581b326` the
+ *   forced `mode: 'replica'`, beside `syncUrl`. At `a7581b326` the
  *   constructor refused it (a forced replica had to start with a lowercase
  *   `file:`); it is now a `file:` url, so the replica runs on that file and
- *   keeps its rows across a restart.
+ *   keeps its rows across a restart. [#20437] The same cell with NO `syncUrl`
+ *   was widened here too, and is refused again since, on other grounds: a
+ *   forced replica with no remote never syncs and ran as a plain local
+ *   database (`turso-driver-forced-replica-without-sync-url-refusal.test.ts`).
  *
  * # Reverse verification: direction predicted before it was run
  *
@@ -299,26 +302,19 @@ describe('PRESERVATION: the recognised spellings construct, and the one cell thi
     ["libsql:// + mode 'remote'", { url: `libsql://${HOST}`, mode: 'remote' }, 'remote'],
     ["file: + mode 'remote'", { url: 'file:./data/app.db', mode: 'remote' }, 'remote'],
     // WIDENED: refused at a7581b326, where a forced replica had to start with a
-    // lowercase `file:`. An uppercase `FILE:` url is a `file:` url now.
-    ["WIDENED: FILE: + mode 'replica', no syncUrl", { url: 'FILE:./data/replica.db', mode: 'replica' }, 'replica'],
+    // lowercase `file:`. An uppercase `FILE:` url is a `file:` url now. (With no
+    // `syncUrl` it is refused since #20437, as a replica with no remote.)
     ["WIDENED: FILE: + mode 'replica' + syncUrl", { url: 'FILE:./data/replica.db', syncUrl: PRIMARY, mode: 'replica' }, 'replica'],
   ])('%s', (_label, config, mode) => {
     // Knex opens its connection lazily, so constructing never touches the file.
     expect(new TursoDriver(config).transportMode).toBe(mode);
   });
 
-  it.each<[string, boolean]>([
-    ['no syncUrl', false],
-    ['with syncUrl', true],
-  ])("WIDENED: FILE: + mode 'replica', %s, runs on the named file and keeps its rows across a restart", async (_label, withSync) => {
+  it("WIDENED: FILE: + mode 'replica' + syncUrl runs on the named file and keeps its rows across a restart", async () => {
     const url = upperFile(files.next());
     const stub = makeLibsqlSqliteStub();
     const make = () =>
-      new TursoDriver({
-        url,
-        mode: 'replica',
-        ...(withSync ? { syncUrl: PRIMARY, client: stub as never, sync: { onConnect: false } } : {}),
-      });
+      new TursoDriver({ url, mode: 'replica', syncUrl: PRIMARY, client: stub as never, sync: { onConnect: false } });
 
     const first = make();
     expect(first.transportMode).toBe('replica');

@@ -26,9 +26,11 @@
  * `TursoConfigSchema` issue texts byte for byte, and that equality is pinned in
  * `spec/turso-config-constructor-parity.test.ts`, not here. The refusals'
  * WIDTH is pinned by controls that must stay accepted: a remote config without
- * `syncUrl`, a replica on a `file:` url beside `syncUrl`, `sync` beside
- * `syncUrl` under a forced `mode: 'local'`, and the rider this card left
- * standing (`mode: 'replica'` on a `file:` url with no `syncUrl`; see the PR).
+ * `syncUrl`, a replica on a `file:` url beside `syncUrl`, and `sync` beside
+ * `syncUrl` under a forced `mode: 'local'`. The rider this card left standing
+ * (`mode: 'replica'` on a `file:` url with no `syncUrl`) is refused since
+ * #20437, together with the spec contract; it is pinned in
+ * `turso-driver-forced-replica-without-sync-url-refusal.test.ts`.
  *
  * # Reverse verification: direction predicted before it was run
  *
@@ -132,13 +134,5 @@ describe('CONTROLS — what the refusals must leave accepted', () => {
     const driver = new TursoDriver({ url: file('forced-local'), mode: 'local', syncUrl: PRIMARY, sync: { onConnect: false } });
 
     expect(driver.transportMode).toBe('local');
-  });
-
-  it("the rider stays: mode 'replica' on a file: url with no syncUrl and no sync still constructs", () => {
-    // Left standing on purpose (see the PR): refusing it here alone would make
-    // construction refuse a config both TursoConfigSchema copies accept.
-    const driver = new TursoDriver({ url: file('rider'), mode: 'replica' });
-
-    expect(driver.transportMode).toBe('replica');
   });
 });
