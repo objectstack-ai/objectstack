@@ -45,7 +45,7 @@ function fakeEngine() {
     registerDatasourceDef: (def) => {
       defs.push(def);
     },
-    // [#12010] The double deliberately stores MINIMAL stand-ins (a bare
+    // [commit 77b91bdb4] The double deliberately stores MINIMAL stand-ins (a bare
     // `{ name }` is how these tests simulate an `onEnable`-registered
     // driver), while the derived seam member answers the contract's
     // `IDataDriver | undefined`. Narrowing on the way out keeps the double

@@ -254,6 +254,30 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(resp.data.totals?.[1].rows[0].revenue).toBe(250);
   });
 
+  // `data.object` — the dataset's base object, which a consumer keys its
+  // record-change refresh on. The answer that most needs it is the one with no
+  // dimensions and no rows (a KPI tile before its first record), so that is the
+  // payload pinned. Preservation, not just acceptance: this schema strips an
+  // undeclared key, so an undeclared `object` would parse green and vanish.
+  it('should preserve data.object — the dataset base object — on a dimension-less, zero-row answer', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: { rows: [], fields: [{ name: 'count', type: 'number' }], object: 'showcase_project' },
+    });
+    expect(resp.data.object).toBe('showcase_project');
+
+    // Optional: a cube query answer carries none, and still parses.
+    const cube = AnalyticsResultResponseSchema.parse({ success: true, data: { rows: [], fields: [] } });
+    expect('object' in cube.data).toBe(false);
+
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { rows: [], fields: [], object: 42 },
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.object');
+  });
+
   it('should reject a percentScale outside the closed vocabulary, and a totals entry without dimensions', () => {
     expect(() =>
       AnalyticsResultResponseSchema.parse({

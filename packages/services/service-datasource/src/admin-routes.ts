@@ -412,7 +412,7 @@ export function registerDatasourceAdminRoutes(
    * The throw is raised inside `requireDatasourceAdmin`'s own `try`, so it
    * takes the relay that block already runs for the identical fault one seam
    * over: `isAuthzStoreUnavailableError(err)` re-raises it rather than
-   * laundering an outage into a denial (#13279). Deliberately NOT a new relay.
+   * laundering an outage into a denial (commit 6a180e42d). Deliberately NOT a new relay.
    *
    * ## Why `getServiceAsync`, and why its ABSENCE is quiet
    *
@@ -487,7 +487,7 @@ export function registerDatasourceAdminRoutes(
         systemPermissions = Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [];
       }
     } catch (err) {
-      // [#13279] "grants that could not be READ are not grants" was the exact
+      // [commit 6a180e42d] "grants that could not be READ are not grants" was the exact
       // reasoning the 2026-08-30 ruling reverses: an unreadable store licenses
       // no verdict at all, so the outage is re-raised instead of being answered
       // as a denial. Every other fault still fails closed, unchanged.

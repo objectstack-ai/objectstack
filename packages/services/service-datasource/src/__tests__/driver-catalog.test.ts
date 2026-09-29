@@ -46,7 +46,7 @@ describe('DRIVER_CATALOG', () => {
       expect(entry.description, entry.id).toBeTruthy();
       expect(entry.icon, entry.id).toBeTruthy();
     }
-    // `mongodb`, not `mongo`, since #6345 renamed the canonical driver id. This
+    // `mongodb`, not `mongo`, since commit e2798fab7 renamed the canonical driver id. This
     // list is the PUBLISHED contract Studio writes into `datasource.driver`, so
     // the assertion is the one that has to move with the rename — stored rows
     // carrying `mongo` are converged by the ADR-0087 conversion
