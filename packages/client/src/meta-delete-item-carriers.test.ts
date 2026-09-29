@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12181] `meta.deleteItem` sends the carriers the REST reset door reads —
+ * [commit cf71d73f8] `meta.deleteItem` sends the carriers the REST reset door reads —
  * the `If-Match` OCC pin and `?state=draft` — on BOTH declarations.
  *
  * ## The defect
@@ -262,7 +262,7 @@ describe('[#12181] the withheld third carrier', () => {
         const { client, fetchMock } = createMockClient(RESET_OK);
         await client.meta.deleteItem('view', 'shared_grid', {
             // `dropStorage` is deliberately NOT a member of
-            // `DeleteMetaItemOptions` (2026-08-28 ruling on #12181: the one
+            // `DeleteMetaItemOptions` (2026-08-28 ruling, landed by commit cf71d73f8: the one
             // carrier that ADDS destructive reach, with no measured caller).
             // This is the type-level half of the withholding; the runtime half
             // is below. Adding the member turns the directive on the next line

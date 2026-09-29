@@ -888,7 +888,7 @@ export async function returnTypePrecisionPins12104(): Promise<void> {
 }
 
 /**
- * [#14312 — the `oauth.*` family, card 1 of 3 of #12104] The five better-auth
+ * [commit e944fdb24 — the `oauth.*` family, card 1 of 3 of #12104] The five better-auth
  * -backed methods #12104 deliberately left alone. FOUR are bound here. The
  * fifth — `oauth.applications.delete` — was left at `Promise< any >` by this
  * card on purpose and was bound afterwards by #15451; its pins live in
@@ -970,7 +970,7 @@ export async function returnTypePrecisionPins14312(): Promise<void> {
 
     // ── the method this card deliberately left open ──────────────────────
     // `delete` used to be pinned here as `toEqualTypeOf< any >`, with the note
-    // that the line would have to be replaced when #14312's open decision
+    // that the line would have to be replaced when commit e944fdb24's open decision
     // landed. It landed as #15451, and the replacement is a whole function of
     // its own rather than a rewritten line, because binding this method was
     // not a narrowing — see `returnTypePrecisionPins15451`.
@@ -978,7 +978,7 @@ export async function returnTypePrecisionPins14312(): Promise<void> {
 
 /**
  * [#15451] `oauth.applications.delete` — the fifth member of the `oauth.*`
- * family, and the one #14312 could not reach.
+ * family, and the one commit e944fdb24 could not reach.
  *
  * ## This is NOT the narrowing its four siblings were
  *
@@ -1028,7 +1028,7 @@ export async function returnTypePrecisionPins15451(): Promise<void> {
 
 
 /**
- * [#14313 — the `auth.*` family, card 2 of 3 of #12104] The fourteen
+ * [commit b1b978c8d — the `auth.*` family, card 2 of 3 of #12104] The fourteen
  * better-auth-backed methods #12104 censused under `auth.*`. THIRTEEN are
  * bound here; the fourteenth is named below and is still `Promise< any >`
  * on purpose.
@@ -1127,7 +1127,7 @@ export async function returnTypePrecisionPins14313(): Promise<void> {
 
     // ── the method deliberately left open ────────────────────────────────
     // `deleteUser` still resolves to `any`, so `.anythingAtAll` compiles.
-    // Pinned as an EQUALITY rather than a suppression, exactly as #14312 did
+    // Pinned as an EQUALITY rather than a suppression, exactly as commit e944fdb24 did
     // for `oauth.applications.delete`: when the ruling that keeps the route
     // off is revisited, this line is the one that must be replaced.
     expectTypeOf(await client.auth.deleteUser({ password: 'p' })).toEqualTypeOf<any>();
@@ -1135,7 +1135,7 @@ export async function returnTypePrecisionPins14313(): Promise<void> {
 
 
 /**
- * [#14314 — the `organizations.*` family, card 3 of 3 of #12104] The twenty
+ * [commit 7092d63e4 — the `organizations.*` family, card 3 of 3 of #12104] The twenty
  * ledger entries of the family: NINETEEN unannotated `return res.json()`
  * members (organizations 11 · invitations 3 · teams 5) bound here, plus
  * `invitations.resend`, which carries no annotation of its own and inherits
@@ -1391,7 +1391,7 @@ export async function returnTypePrecisionPins13023(): Promise<void> {
  *    close.
  *
  * 2. THE GAP THIS BLOCK USED TO PIN AS UNDECLARED IS NOW CLOSED, on the spec
- *    side, which is the only side allowed to close it: #13208 (issue #13155)
+ *    side, which is the only side allowed to close it: commit 74049254d (issue #13155)
  *    widened `DeleteMetaItemResponseSchema` to declare `seq` and
  *    `projectionApplied` — the two wire-receipt keys `deleteMetaItem`'s
  *    repository-delete branch always sent. This file's two `@ts-expect-error`
@@ -1412,7 +1412,7 @@ export function deleteDataResponseIsNotTheMetaResetShape(): void {
 }
 
 export function metaResetResponseDeclaresTheWireReceipt(): void {
-    // #13208 declared both wire-receipt keys on the schema; these positive
+    // Commit 74049254d declared both wire-receipt keys on the schema; these positive
     // reads red as TS2339 if either is ever dropped from the bound type.
     void metaResetBody.seq;
     void metaResetBody.projectionApplied;

@@ -298,9 +298,9 @@ export const STUDIO_APP: App = {
     },
     {
       // Developer — first-party developer tooling surfaces hosted by the
-      // console (API console, flow run inspector, public forms registry).
-      // Registered as built-in components in the console's
-      // ComponentRegistry under the `developer:*` namespace.
+      // console (API console, flow run inspector, public forms registry,
+      // integrations & APIs). Registered as built-in components in the
+      // console's ComponentRegistry under the `developer:*` namespace.
       id: 'group_developer',
       type: 'group',
       label: 'Developer',
@@ -326,6 +326,20 @@ export const STUDIO_APP: App = {
           label: 'Public Forms',
           componentRef: 'developer:public-forms',
           icon: 'file-text',
+        },
+        {
+          // #20142 — the console's Integrations & APIs page: the environment's
+          // REST base URL, per-object endpoints and an `x-api-key` cURL
+          // sample. Its only in-app link was a card on the console's Developer
+          // Hub, which objectui#10520 retired once all four of the hub's
+          // destinations were registry keys; the console registers this one
+          // in `registerDeveloperComponents.tsx`. No gate beyond Studio's own
+          // `studio.access`, like its neighbours.
+          id: 'nav_integrations',
+          type: 'component',
+          label: 'Integrations & APIs',
+          componentRef: 'developer:integrations',
+          icon: 'plug-zap',
         },
       ],
     },

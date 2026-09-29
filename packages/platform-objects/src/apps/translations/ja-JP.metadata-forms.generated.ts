@@ -1853,7 +1853,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "ブロック",
-        helpText: "複数オブジェクトを結合（joined レポートのみ）"
+        helpText: "データセットにバインドされたサブレポート（joined レポートのみ）"
       },
       "blocks.name": {
         label: "名前"
@@ -2148,7 +2148,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "識別子とコンテンツ型。id は sendTemplate({ template: id, ... }) で参照される。"
+        description: "IEmailService.sendTemplate({ template: name, locale, ... }) が解決するテンプレート識別子。"
       },
       subject: {
         label: "件名",
@@ -2248,7 +2248,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "タブと行レベルセキュリティ",
-        description: "タブ表示、RLS ポリシー、述語評価用カスタムコンテキスト変数。"
+        description: "タブ表示と RLS ポリシー。"
       }
     },
     fields: {
@@ -2344,7 +2344,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "機能",
-        description: "エージェントが使用できるスキル、ツール、ナレッジソース。"
+        description: "エージェントが使用できるスキルとナレッジソース。"
       },
       access: {
         label: "アクセスとセキュリティ",

@@ -108,7 +108,7 @@ const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as co
  *
  * This mirrors `StorageMetadataStore`'s `StorageWriteContext` threading
  * (`createFile` #12745, `createSession` #12928, the update/delete halves
- * #13178) rather than inventing a second convention: the caller hands the
+ * in commit f087c376f) rather than inventing a second convention: the caller hands the
  * engine the organization it is acting in as an execution context, and the
  * platform's existing insert-side chokepoint decides the rest. ⛔ The
  * organization is NOT written onto the payload here — whether this object has
