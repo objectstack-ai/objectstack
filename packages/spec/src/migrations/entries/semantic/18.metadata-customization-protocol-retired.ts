@@ -24,8 +24,9 @@ export const entry: SemanticMigration = {
     + 'model (clone with a new machine name + ledger disable — never a field-level patch '
     + 'overlay)',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-29 on #12057 (「同意」 — retirement '
-    + 'adopted, re-scope rejected), executed widened by #13135 per the fork report on #12057: '
+    'ADR-0049 enforce-or-remove; the maintainer\'s ruling of 2026-08-29 adopted retirement and '
+    + 'rejected a re-scope, and it was executed widened to the full coupling set the fork report '
+    + 'on that ruling measured: '
     + 'the module declared a three-layer platform/user patch-overlay protocol with field-level '
     + 'change tracking and a 3-way-merge story, published reference docs described it as the '
     + 'customization architecture — and nothing reachable implemented it. The one '
@@ -33,7 +34,8 @@ export const entry: SemanticMigration = {
     + 'only by its own unit tests; no merge engine ever existed; no code read a '
     + '`CustomizationPolicy`. ADR-0126 §6 wall 4 supersedes the protocol as a matter of record '
     + '("nothing may build against it") — the per-field overlay layer it described is '
-    + 'precisely what the #11513 ruling recorded as deliberately not chartered. Why D3 '
+    + 'precisely what the 2026-08-24 lock-and-clone ruling (lock the packaged base, customize a '
+    + 'clone) left deliberately unchartered. Why D3 '
     + 'semantic and not a D2 conversion: the defs leave with no carrier key in any stack '
     + 'collection, and the three tombstoned keys live on plugin/manager configs, which are not '
     + 'stack collection members (`PLURAL_TO_SINGULAR` has no `plugins` entry) — a '

@@ -4800,6 +4800,45 @@ export class RestServer {
     }
 
     /**
+     * The served OpenAPI `info`: the bundled artifact's, with the identity
+     * members the host authored in `api.documentation` laid over it (#20294,
+     * ruling B on #20359 — ADR-0049 enforce-or-remove, the ENFORCE half).
+     *
+     * - Nothing authored (no block, `{}`, or only unset members) answers
+     *   `bundled` ITSELF, so the served block is byte-identical to the
+     *   artifact's — #11646's whole-block invariant, now the unset case.
+     * - Anything authored answers a NEW object and never writes into
+     *   `bundled`, which is the cached artifact's own `info`: a write there
+     *   would serve one request's overlay to every later request.
+     * - `title`, `description` and `termsOfService` overlay key by key.
+     * - `contact` and `license` REPLACE the bundled object whole: a member the
+     *   host left out is absent, never inherited, so `license: { name: 'MIT' }`
+     *   is not published at the bundled Apache-2.0 URL.
+     * - `version` is never read. It is a `retiredKey()` tombstone the
+     *   construction-time parse refuses, and `info.version` stays the
+     *   artifact's — the protocol version (#11646).
+     *
+     * Pure: its only inputs are its two arguments. The overlaid members are a
+     * closed list on purpose — the parsed block carries nothing else live, and
+     * a spread of it would publish whatever a later schema member meant for
+     * something other than `info`.
+     */
+    private static overlayDocumentationInfo(
+        bundled: Record<string, unknown> | undefined,
+        documentation: NormalizedRestServerConfig['api']['documentation'],
+    ): Record<string, unknown> | undefined {
+        if (!documentation) return bundled;
+        const authored: Record<string, unknown> = {};
+        if (documentation.title !== undefined) authored.title = documentation.title;
+        if (documentation.description !== undefined) authored.description = documentation.description;
+        if (documentation.termsOfService !== undefined) authored.termsOfService = documentation.termsOfService;
+        if (documentation.contact !== undefined) authored.contact = { ...documentation.contact };
+        if (documentation.license !== undefined) authored.license = { ...documentation.license };
+        if (Object.keys(authored).length === 0) return bundled;
+        return { ...bundled, ...authored };
+    }
+
+    /**
      * Register OpenAPI 3.1 spec + interactive docs viewer.
      *
      *   GET <basePath>/openapi.json   → enriched OpenAPI document
@@ -4839,7 +4878,11 @@ export class RestServer {
      * the cost of regenerating on every request, and a missing or
      * malformed file degrades to a stub instead of crashing. What survives
      * from it is what `packages/spec` genuinely owns: `components.schemas`,
-     * `info`, `securitySchemes` (and the document-level `security`).
+     * `info`, `securitySchemes` (and the document-level `security`) — with
+     * one addition to `info` since #20294: the publisher's identity members
+     * the host authored in `api.documentation` are laid over it, see
+     * {@link RestServer.overlayDocumentationInfo}. `info.version` stays the
+     * artifact's.
      */
     private registerOpenApiEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
@@ -4995,25 +5038,39 @@ export class RestServer {
                     logError('[REST] openapi.json endpoint enrichment skipped:', err?.message ?? err);
                 }
 
-                // `info` is passed through from the artifact UNTOUCHED — the
-                // whole block, version included. `packages/spec` produces it
-                // (`build-openapi.ts`, pinned by `openapi-self-consistency.test.ts`)
-                // and owns it, so the served document and the published
-                // `@objectstack/spec/openapi.json` export now state the same
-                // fact about the same field (#11646). This handler enriches
-                // `paths` and `servers`; it writes nothing into `info`.
+                // 5) `info`: the artifact's, with the publisher's identity laid
+                //    over it (#20294, ruling B on #20359). `packages/spec`
+                //    produces the block (`build-openapi.ts`, pinned by
+                //    `openapi-self-consistency.test.ts`); the host may sign it
+                //    with the identity members of `api.documentation` —
+                //    `title`, `description`, `termsOfService`, and `contact` /
+                //    `license` each replaced whole. Nothing authored serves the
+                //    artifact's `info` byte for byte, so the served document and
+                //    the published `@objectstack/spec/openapi.json` export still
+                //    state the same fact about every field nobody signed
+                //    (#11646's invariant, now the unset case). The same closure
+                //    serves this base and its environment-scoped twin, so both
+                //    doors carry the overlay. The helper returns a NEW object:
+                //    `enriched.info` is still the cached artifact's own `info`
+                //    here (the clone above is shallow), and writing into it
+                //    would leak one request's overlay into every later one.
                 //
-                // The API version identifier this deployment declares
-                // (`api.version`, which `normalizeConfig` defaults to `'v1'`)
-                // is not lost — it lives where it is observable, in the mount
-                // `${basePath}/${version}` -> `/api/v1`. The runtime version
-                // is answered by `{basePath}/discovery` and `/health`, derived
-                // from `OS_RUNTIME_VERSION` (#10993/#11235/#11292). OpenAPI
-                // 3.1 defines this field as "the version of the OpenAPI
-                // document (which is distinct from the OpenAPI Specification
-                // version or the API implementation version)" — the document
-                // being served IS the artifact, so its version is the
-                // artifact's.
+                //    `info.version` is NOT publisher identity, and nothing here
+                //    writes it: it stays the artifact's — the protocol version
+                //    (#11646) — and `api.documentation.version` is a retired
+                //    tombstone the construction-time parse already refused. The
+                //    API version identifier this deployment declares
+                //    (`api.version`, which `normalizeConfig` defaults to `'v1'`)
+                //    lives where it is observable, in the mount
+                //    `${basePath}/${version}` -> `/api/v1`. The runtime version
+                //    is answered by `{basePath}/discovery` and `/health`, derived
+                //    from `OS_RUNTIME_VERSION` (#10993/#11235/#11292). OpenAPI
+                //    3.1 defines this field as "the version of the OpenAPI
+                //    document (which is distinct from the OpenAPI Specification
+                //    version or the API implementation version)" — the document
+                //    being served IS the artifact, so its version is the
+                //    artifact's.
+                enriched.info = RestServer.overlayDocumentationInfo(enriched.info, this.config.api.documentation);
 
                 res.json(enriched);
             } catch (error: any) {
@@ -6238,10 +6295,28 @@ export class RestServer {
                         // `Deprecation` + RFC 8288 `Link` to the successor) are the
                         // ones the runtime dispatcher's item read asks too, so the
                         // deprecated spelling is one answer on both transports.
+                        //
+                        // [#20508] The `Link` names the path THIS request arrived
+                        // on (`IHttpRequest.path`), read the way the dispatcher
+                        // reads its request URL (`requestedItemPath`, runtime
+                        // `domains/meta.ts`): parsed as a URL path, without its
+                        // trailing slash. ⛔ Never `metaPath` — on the
+                        // environment-scoped mount that is the route TEMPLATE, and
+                        // the successor read `/environments/:environmentId/…/layers`,
+                        // a path no client can request. The parse is what keeps the
+                        // path a valid URI reference: the Hono adapter hands over a
+                        // `decodeURI`'d path (`lead%20all` arrives as `lead all`),
+                        // and the parse percent-encodes it again. A request with no
+                        // path names no successor: `Deprecation` alone, as the
+                        // helper prescribes for a transport that cannot say where
+                        // it serves the item.
                         const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
+                            const requestPath: unknown = req.path;
                             const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
-                                `${metaPath}/${req.params.type}/${req.params.name}`,
+                                typeof requestPath === 'string' && requestPath.startsWith('/')
+                                    ? new URL(`http://rest-server.invalid${requestPath}`).pathname.replace(/\/+$/, '') || undefined
+                                    : undefined,
                             );
                             for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
                             await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
@@ -8006,7 +8081,7 @@ export class RestServer {
                 }
             },
             metadata: {
-                summary: 'Diff two metadata versions (from/to query params; omit for previous-vs-current)',
+                summary: 'Diff two metadata versions (from/to query params; to defaults to the active version, from to the nearest earlier version whose body differs)',
                 tags: ['metadata'],
             },
         });
