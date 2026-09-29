@@ -71,7 +71,8 @@ function matchesWhere(row: any, where: any): boolean {
  * `org_alpha`-scoped `manage_metadata` set. `u_member` is the control: a
  * current `org_alpha` member holding the same grant. `u_global` was removed the
  * same way but holds the set GLOBALLY. `u_admin` holds `admin_full_access`
- * unscoped — the row the platform-admin bootstrap mints.
+ * unscoped — the row the platform-admin bootstrap mints. `u_orgless` signed in,
+ * never selected an organization and holds no grant at all.
  */
 const TABLES: Record<string, any[]> = {
     sys_api_key: [],
@@ -83,7 +84,7 @@ const TABLES: Record<string, any[]> = {
         { user_id: 'u_posex', organization_id: BETA, role: 'member' },
         { user_id: 'u_posmember', organization_id: ALPHA, role: 'member' },
     ],
-    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember']
+    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember', 'u_orgless']
         .map((id) => ({ id, email: `${id}@example.com` })),
     sys_user_permission_set: [
         { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
@@ -110,9 +111,9 @@ const TABLES: Record<string, any[]> = {
     ],
 };
 
-type Who = 'member' | 'exmember' | 'gone' | 'global' | 'admin' | 'admin_orgless' | 'posex' | 'posmember';
+type Who = 'member' | 'exmember' | 'gone' | 'global' | 'admin' | 'admin_orgless' | 'posex' | 'posmember' | 'orgless';
 
-/** Every session but the last names `org_alpha`. */
+/** Every session names `org_alpha` except `admin_orgless` and `orgless`, which name no organization. */
 const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeOrganizationId?: string }> = {
     member: { id: 'ses_member', token: 'tok_member', userId: 'u_member', activeOrganizationId: ALPHA },
     exmember: { id: 'ses_exmember', token: 'tok_exmember', userId: 'u_exmember', activeOrganizationId: ALPHA },
@@ -122,6 +123,7 @@ const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeO
     admin_orgless: { id: 'ses_admin2', token: 'tok_admin2', userId: 'u_admin' },
     posex: { id: 'ses_posex', token: 'tok_posex', userId: 'u_posex', activeOrganizationId: ALPHA },
     posmember: { id: 'ses_posmember', token: 'tok_posmember', userId: 'u_posmember', activeOrganizationId: ALPHA },
+    orgless: { id: 'ses_orgless', token: 'tok_orgless', userId: 'u_orgless' },
 };
 
 function rig() {
@@ -249,6 +251,12 @@ describe('[#20515] what the rule leaves unchanged', () => {
         expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
     });
 
+    it('CONTROL · the same current member passes PATCH /packages/:id/disable: 200, and the package is switched off', async () => {
+        const r = rig();
+        expect((await r.call('PATCH', 'member', `/packages/${PKG}/disable`)).status).toBe(200);
+        expect(switchedOff(r)).toBe(true);
+    });
+
     it('CONTROL · the position-bound set: a current org_alpha member with org_alpha active passes: 200', async () => {
         const r = rig();
         const answer = await r.call('DELETE', 'posmember', `/packages/${PKG}`);
@@ -269,8 +277,21 @@ describe('[#20515] what the rule leaves unchanged', () => {
 
     it('platform-admin standing (unscoped admin_full_access) passes with org_alpha active, and with no organization at all', async () => {
         expect((await rig().call('DELETE', 'admin', `/packages/${PKG}`)).status).toBe(200);
+        expect((await rig().call('PATCH', 'admin', `/packages/${PKG}/disable`)).status).toBe(200);
         const orgless = await rig().call('DELETE', 'admin_orgless', `/packages/${PKG}`);
         expect({ status: orgless.status, code: orgless.code }).toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
         expect((await rig().call('PATCH', 'admin_orgless', `/packages/${PKG}/disable`)).status).toBe(200);
+    });
+
+    it('a caller who never selected an organization and holds no grant is refused 403 on both doors, as before', async () => {
+        const r = rig();
+        const del = await r.call('DELETE', 'orgless', `/packages/${PKG}`);
+        expect({ status: del.status, code: del.code, httpStatus: del.httpStatus })
+            .toEqual({ status: 403, code: 'PERMISSION_DENIED', httpStatus: 403 });
+        const dis = await r.call('PATCH', 'orgless', `/packages/${PKG}/disable`);
+        expect({ status: dis.status, code: dis.code, httpStatus: dis.httpStatus })
+            .toEqual({ status: 403, code: 'PERMISSION_DENIED', httpStatus: 403 });
+        expect(r.deleteRequests).toEqual([]);
+        expect(switchedOff(r)).toBe(false);
     });
 });
