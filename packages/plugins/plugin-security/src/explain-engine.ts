@@ -897,9 +897,10 @@ function refusedPolicyNamesOf(
  * The message names the policy and both columns, where the matcher's own
  * message withholds them. The matcher withholds them because the caller of a
  * refused find or write is usually not the policy's author. Explain is the tool
- * that shows a principal the policy it runs under, and its report publishes
- * the same predicate (`readFilter`, the `rls` layer's `rowFilter`). So naming
- * the policy and its two columns here discloses nothing the report does not.
+ * that shows a principal the policy it runs under, and the report it gives the
+ * same caller for the same object publishes the same predicate: `readFilter`
+ * without a `recordId`, the `rls` layer's `rowFilter` with one. So naming the
+ * policy and its two columns here discloses nothing that report does not.
  */
 function crossFieldRefusalForExplain(
   cause: unknown,
