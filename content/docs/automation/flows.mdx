@@ -261,11 +261,11 @@ nothing is assigned or written in its place.
 {
   id: 'notify_slack',
   type: 'http',
-  label: 'Send Slack Notification',
+  label: 'Post Order Event',
   config: {
     url: 'https://api.example.com/v1/order-events',
     method: 'POST',
-    body: { text: 'New order: {record.name}' },
+    body: { event: 'order.created', name: '{record.name}' },
   },
 }
 ```
