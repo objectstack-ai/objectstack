@@ -20,7 +20,7 @@
 //
 // ⭐ WHAT THE ESCALATION BUYS, driven rather than argued: this gate is the ONLY
 // thing standing between a tenant org admin and the install-wide activation
-// row under a walled posture. It is #10243 exactly — a tenant org owner
+// row under a walled posture. It is exactly the leak commit 02b41232d measured — a tenant org owner
 // switching a shipped flow off ENVIRONMENT-WIDE — except that ADR-0126 made
 // the row DURABLE, so the same leak now survives a cold boot. The arms below
 // drive the real `POST /automation/:name/toggle` route and assert on whether
@@ -206,7 +206,7 @@ for (const posture of ['group', 'isolated'] as const) {
             expect(codeOf(response)).toBe('PERMISSION_DENIED');
             // The load-bearing assertion: refused BEFORE the write. A gate that
             // wrote the install-wide row and then refused would satisfy the two
-            // above and still be #10243.
+            // above and still be the leak commit 02b41232d measured.
             expect(h.toggleFlow).not.toHaveBeenCalled();
         });
 

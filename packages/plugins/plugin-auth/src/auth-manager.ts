@@ -127,7 +127,7 @@ import {
   interpolatePhoneSms,
   loadPhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
-// #14762 — the stored rung of the ruled locale ladder reuses the messaging
+// commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
 // is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
 // refusal of the stringified-nothing literals (`"undefined"`, `"null"`) is part
@@ -1691,7 +1691,7 @@ export class AuthManager {
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
-          // #14762 — the ladder's stored rung. It matters most HERE: an
+          // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
           // admin-initiated reset (`admin-import-users.ts` calls
           // `requestPasswordReset`) reaches this callback with the ADMIN's
           // request, so without this rung the user's mail carries the admin's
@@ -1756,7 +1756,7 @@ export class AuthManager {
             // template/loader errors, and returns status:'failed' on transport
             // errors — surface both so resend is honest and signup stays
             // resilient via better-auth's background-task error handling.
-            // #14762 — the stored rung, same ladder as the reset above. An
+            // commit 35e94c96b — the stored rung, same ladder as the reset above. An
             // admin re-triggering verification for a user is the same
             // requester-is-not-the-recipient shape.
             const storedLocale = await this.storedRecipientLocale({ id: user.id });
@@ -2164,7 +2164,7 @@ export class AuthManager {
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
             //
-            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (#11477) — and it DOES
+            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (commit 6dd3e6968) — and it DOES
             // still reach this hook, which is the opposite of the line above
             // and is the point. Its mount only runs `gateAdmin` and then
             // RE-DISPATCHES the request through `handleRequest`, so it re-enters
@@ -2575,7 +2575,7 @@ export class AuthManager {
         // default root domain — see project-provisioning.ts) pass CSRF checks
         // without operators having to configure trustedOrigins manually.
         //
-        // NON-PRODUCTION ONLY (#10366). This substitution is a development
+        // NON-PRODUCTION ONLY (commit bbe643c08). This substitution is a development
         // convenience and is now gated on the same `NODE_ENV` dev signal used
         // by the fallback auth secret and the dev Origin synthesis below, so
         // the boundary this comment claims is the boundary that is enforced.
@@ -3369,7 +3369,7 @@ export class AuthManager {
           //     `routes/crud-invites.mjs`, so an existing account being invited
           //     elsewhere reaches this callback normally). Their column is a
           //     language they chose for themselves — the same authority the
-          //     reset / verification sends read since #14762.
+          //     reset / verification sends read since commit 35e94c96b.
           //  2. NO row — a genuinely new invitee. Their language is still truly
           //     unknown at invitation time, so the deployment default stands,
           //     exactly as before.
@@ -3411,7 +3411,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_invitation',
               relatedId: invitation.id,
-              // #11741 — the invitation HOLDS its organization; thread it so
+              // commit b706af987 — the invitation HOLDS its organization; thread it so
               // the sys_email row is stamped. Org-less auth mail (reset /
               // verification / magic link) deliberately threads nothing.
               ...(invitation.organizationId
@@ -5157,7 +5157,7 @@ export class AuthManager {
   }
 
   /**
-   * [#11640] Whether an outbound email transport is wired RIGHT NOW.
+   * [commit bf8d129b5] Whether an outbound email transport is wired RIGHT NOW.
    *
    * The one public read of the fact every verification link depends on: with
    * no transport the `sendVerificationEmail` callback has nowhere to send, so
@@ -5198,7 +5198,7 @@ export class AuthManager {
    * entirely and `EmailService`'s ladder resolves its documented `en-US`
    * default exactly as before.
    *
-   * #14762 layered the per-recipient stored preference on TOP of both rungs:
+   * Commit 35e94c96b layered the per-recipient stored preference on TOP of both rungs:
    * `sys_user.locale` (#13881, ruling 2026-09-01) when the account holds one,
    * then this request's `Accept-Language`, then the deployment default. The
    * request rung did not lose its argument — it is still what answers for an
@@ -5222,7 +5222,7 @@ export class AuthManager {
       // address that would actually land.
       const target = newEmail.trim().toLowerCase();
       if (!target) return;
-      // #14762 — the stored rung on top of the #14319 ladder. The recipient is
+      // commit 35e94c96b — the stored rung on top of the #14319 ladder. The recipient is
       // the account holder, so their own column outranks the header the
       // request happened to carry.
       const storedLocale = from.id ? await this.storedRecipientLocale({ id: from.id }) : undefined;
@@ -5343,7 +5343,7 @@ export class AuthManager {
     // one provider template covers sign-in and reset, and the SMS reveals
     // nothing about what the code unlocks.
     //
-    // #14762 — the recipient of an OTP IS the user, so the locale is theirs to
+    // commit 35e94c96b — the recipient of an OTP IS the user, so the locale is theirs to
     // name: `sys_user.locale` first, the deployment default underneath.
     //
     // ⚠️ The row is looked up here rather than taken from the callback: the
@@ -5460,7 +5460,7 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * #14762 — this is now the SECOND rung, not the whole answer. The OTP send
+   * Commit 35e94c96b — this is now the SECOND rung, not the whole answer. The OTP send
    * reads the recipient's own `sys_user.locale` first (#13881, ruling
    * 2026-09-01, the same column the messaging channels resolve per recipient)
    * and falls here when the account holds none. #14641 gave the SMS INVITE
@@ -5513,7 +5513,7 @@ export class AuthManager {
    *
    * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
    * `sys_user.locale`, resolved per recipient by service-messaging for
-   * notification mail (`recipient-locale.ts`). #14762 layered it on top of
+   * notification mail (`recipient-locale.ts`). Commit 35e94c96b layered it on top of
    * this ladder for the sends that hold a recipient row — reset, verification
    * and the change-email notice — so the order is stored → request → this
    * rung, per the #14788 option-D ruling of 2026-09-03. Nothing here changed:
@@ -5530,7 +5530,7 @@ export class AuthManager {
   private emailLocale?: string;
 
   /**
-   * #14762 — the ladder's TOP rung: the recipient's own `sys_user.locale`,
+   * Commit 35e94c96b — the ladder's TOP rung: the recipient's own `sys_user.locale`,
    * read best-effort off the identity row.
    *
    * Returns `undefined` for every shape that cannot name a language — no data
@@ -5545,7 +5545,7 @@ export class AuthManager {
    * The read is one row on an indexed predicate, projected to the single
    * column, under a system context — the recipient's own language must resolve
    * regardless of who triggered the send, which is exactly the
-   * admin-initiated case #14762 was about, and the INVITER-triggered case
+   * admin-initiated case commit 35e94c96b fixed, and the INVITER-triggered case
    * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
    * sends that hold a user row), the unique `phone_number` (the SMS sends,
    * which are handed a number and nothing else), and the unique `email` (the
@@ -5580,7 +5580,7 @@ export class AuthManager {
    * what the ladder's "no locale means the DOCUMENTED default" contract is
    * written against.
    *
-   * #14762 — three rungs now, in the order ruled for #14788 on 2026-09-03
+   * Commit 35e94c96b — three rungs now, in the order ruled for #14788 on 2026-09-03
    * (option D): the recipient's own **stored** `sys_user.locale` → the
    * **request**'s `Accept-Language` (#14319) → the **deployment** default
    * (#8195). The recorded reasoning is that a value the user chose is stronger
@@ -5615,7 +5615,7 @@ export class AuthManager {
    * one exists, else the built-in bilingual text. Template lookups are
    * best-effort — an outage must never block an OTP send.
    *
-   * #14762 — `storedLocale` is the recipient's own `sys_user.locale` when the
+   * Commit 35e94c96b — `storedLocale` is the recipient's own `sys_user.locale` when the
    * caller could resolve one ({@link storedRecipientLocale}); the deployment
    * default stands underneath it. There is NO request rung on this surface:
    * the ruled ladder's middle rung is the request's `Accept-Language`, and an
@@ -5626,7 +5626,7 @@ export class AuthManager {
    * row as {@link phoneSmsLocaleChain}'s terminal floor exactly as before.
    *
    * A caller that passes nothing — or one whose recipient resolves no row —
-   * gets exactly the pre-#14762 deployment-default behaviour. #14641 made the
+   * gets exactly the deployment default, as before commit 35e94c96b. #14641 made the
    * SMS invite path a passer rather than an abstainer; it is no longer the
    * standing example of a caller that names nothing.
    */
@@ -7551,10 +7551,10 @@ export class AuthManager {
    * (this file, ~line 671) declares `{ info?; warn }` and NO `error`, and it is
    * re-exported from the package `index.ts`, so adding `error?` is a
    * published-shape change. #12981's ruling routes that LEVEL question to
-   * #13398 and tells this batch to fix the SILENCE only — the same split
-   * batches 1 and 2 landed for `plugin-security`'s two exported sinks. `warn`
-   * is the guaranteed channel here and the lowest level a reader still reads as
-   * a failure, so nothing is lost but loudness.
+   * the published-sink ruling (commit e238c79f0) and tells this batch to fix the
+   * SILENCE only — the same split batches 1 and 2 landed for `plugin-security`'s
+   * two exported sinks. `warn` is the guaranteed channel here and the lowest
+   * level a reader still reads as a failure, so nothing is lost but loudness.
    *
    * ⛔ Call `warn` through the PROPERTY, never through an extracted reference —
    * `@objectstack/core`'s `ObjectLogger` is class-based and its `warn` reaches
@@ -8023,7 +8023,7 @@ export class AuthManager {
         fields: ['id', 'password', 'previous_password_hashes'],
         context: SYSTEM_CTX,
       } as any);
-      // [#8676] Both columns are `internal: true`, so the engine's read path
+      // [commit d6e80b28b] Both columns are `internal: true`, so the engine's read path
       // omits them from the row above — with no `isSystem` carve-out and in
       // spite of the explicit projection (#7728's design). Recover them
       // through the privileged accessor, or `compareList` below is empty and
@@ -8071,7 +8071,7 @@ export class AuthManager {
         context: SYSTEM_CTX,
       } as any);
       if (!account?.id) return;
-      // [#8676] As above — the flagged column is omitted from the read, so
+      // [commit d6e80b28b] As above — the flagged column is omitted from the read, so
       // recover it before extending the ring. Without this the ring is rebuilt
       // from an empty history on every change and never grows past one entry.
       await recoverInternalFieldsForSystemRead(

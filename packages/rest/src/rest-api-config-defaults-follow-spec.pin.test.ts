@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14366] `RestApiConfigSchema` is the SINGLE SOURCE of the `api` sub-object's
+ * [commit 53cbad9f7] `RestApiConfigSchema` is the SINGLE SOURCE of the `api` sub-object's
  * defaults — `RestServer.normalizeConfig` follows a change to a
  * `z.default(...)` in `packages/spec` rather than restating it.
  *

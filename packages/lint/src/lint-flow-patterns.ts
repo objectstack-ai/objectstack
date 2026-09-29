@@ -55,7 +55,7 @@
  * specifically (range operators `>=`/`<=` are not flagged — they're the building
  * block of the correct pattern), keeping false positives near zero.
  *
- * #13681 / #14394 — per-iteration containment, as a PAIR of rules. A `loop`
+ * commit 8ed9c54b4 / #14394 — per-iteration containment, as a PAIR of rules. A `loop`
  * body has no error handling of its own: `loop-node.ts` iterates with a bare
  * `await`, so the first item whose node fails ends the entire run and every
  * later item goes unprocessed, silently. The containment spelling exists and was
@@ -261,7 +261,7 @@ export const FLOW_DECISION_INCLUSIVE_OVERLAP = 'flow-decision-inclusive-overlap'
  */
 export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
 /**
- * #13681 / #14394 — a `loop` body that runs a node which can fail, with no
+ * commit 8ed9c54b4 / #14394 — a `loop` body that runs a node which can fail, with no
  * `try_catch` between the loop and that node. The first failing item kills the
  * whole sweep: `loop-node.ts:123-135` iterates with a bare `await` and no
  * `try`/`catch` anywhere in the file, so the body's failure propagates out of
@@ -279,7 +279,7 @@ export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
  */
 export const FLOW_LOOP_BODY_UNCONTAINED = 'flow-loop-body-uncontained';
 /**
- * #13681 / #14394 — the near-miss shape: a `try_catch` that declares no `catch`
+ * commit 8ed9c54b4 / #14394 — the near-miss shape: a `try_catch` that declares no `catch`
  * region. `catch` is optional in the schema (`control-flow.zod.ts:315`) and
  * omitting it makes the container **fail** (`try-catch-node.ts:190`), so the
  * wrapped region dies exactly like an unwrapped one — measured side by side, the
@@ -340,7 +340,7 @@ const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record',
  *  - `http` — a non-2xx (when `failOnError`), a timeout/abort, or a failed
  *    durable enqueue (`http-nodes.ts:208, :249-253`).
  *  - `notify` — no title, an empty resolved recipient set, or a delivery throw
- *    (`notify-node.ts:293, :300, :446`). The measured #13681 case exactly: one
+ *    (`notify-node.ts:293, :300, :446`). The measured case commit 8ed9c54b4 records, exactly: one
  *    row with a null owner killed the sweep.
  *  - `connector_action` — a degraded connector, an unresolvable action, or a
  *    throwing call (`connector-nodes.ts:69, :76, :124`).
@@ -1330,7 +1330,7 @@ function scanApprovalReviseLoops(
 
 /**
  * The minimal `catch` region, measured end to end on the real `AutomationEngine`
- * (#13681) and quoted verbatim by both containment rules and by
+ * (commit 8ed9c54b4) and quoted verbatim by both containment rules and by
  * `content/docs/automation/flows.mdx`.
  *
  * `catch` cannot be empty: `FlowRegionSchema.nodes` is `.min(1)`
@@ -1425,7 +1425,7 @@ function scanUncontainedLoopBodies(
               `that is a legitimate reading and this stays a warning. ` +
               // The tracker ids stay OUT of the runtime string (`check:doc-authoring`):
               // an author reading this hint cannot resolve `#NNNN`. The measurement
-              // and the ruling behind this rule are #13681 / #14394; the docblock on
+              // and the ruling behind this rule are commit 8ed9c54b4 / #14394; the docblock on
               // {@link FLOW_LOOP_BODY_UNCONTAINED} carries them for the reader who can.
               `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
             // Warning, not `error`: see the severity policy at the top of this
@@ -1465,7 +1465,7 @@ function scanUncontainedLoopBodies(
 /**
  * #14394 rule B — a `try_catch` with no `catch` region, anywhere in the flow.
  *
- * Measured (#13681): the container fails through, and the run is byte-identical
+ * Measured (commit 8ed9c54b4): the container fails through, and the run is byte-identical
  * to the one with no `try_catch` at all. `retry`, when present, only delays it.
  *
  * A `catch` that is PRESENT but malformed is deliberately not this rule's
@@ -1737,7 +1737,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     purge, and this rule's main habitat — in range (#5383/#5635).
       scanUnboundedBulkWrites(at, graphNodes, findings);
 
-      // (g) #13681/#14394 — a `loop` body running a fallible node with no
+      // (g) commit 8ed9c54b4 / #14394 — a `loop` body running a fallible node with no
       //     `try_catch` between the loop and it. Per graph like the rest, and
       //     that is what keeps the count right: every `loop` node belongs to
       //     exactly one graph, so its body is descended exactly once, and a
@@ -1745,7 +1745,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     parent (see {@link scanUncontainedLoopBodies}).
       scanUncontainedLoopBodies(at, graphNodes, findings);
 
-      // (h) #13681/#14394 — the near-miss: a `try_catch` with no `catch`. Scanned
+      // (h) commit 8ed9c54b4 / #14394 — the near-miss: a `try_catch` with no `catch`. Scanned
       //     everywhere, not only inside a loop: the container fails through
       //     wherever it is written. Inside a loop body it is the shape (g)
       //     deliberately treats as contained, so exactly one of the two rules

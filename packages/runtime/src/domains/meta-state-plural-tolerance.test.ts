@@ -168,7 +168,7 @@ describe('dispatcher /meta FSM state read — the deliberate plural tolerance (#
                 'GET', `/meta/${segment}/task/state/status`, undefined, { from: 'todo' }, CTX(),
             );
 
-            // [#12195] `ROUTE_NOT_FOUND`, not `RESOURCE_NOT_FOUND`, and the
+            // [commit 7986d973f] `ROUTE_NOT_FOUND`, not `RESOURCE_NOT_FOUND`, and the
             // change is the retirement showing through. `/meta/objectss/task/
             // state/status` is four segments; the FSM branch requires the two
             // literals, so it used to fall into the compound fold, which

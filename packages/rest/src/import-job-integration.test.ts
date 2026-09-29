@@ -25,7 +25,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
-// #6535: the ONE definition of the async-import row ceiling. The pin below reads it
+// [commit a92b1793c] The ONE definition of the async-import row ceiling. The pin below reads it
 // from here so that moving it is observable at the enforcement point.
 import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
@@ -175,7 +175,7 @@ describe('async import job — real engine + protocol integration', () => {
     expect(results._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'score', code: 'invalid_number' });
   });
 
-  // #6535: the ceiling has ONE definition — the spec export — and rest is its only
+  // [commit a92b1793c] The ceiling has ONE definition — the spec export — and rest is its only
   // enforcer. So this case derives everything it knows about the ceiling from that
   // export: how big a payload must be to breach it, and the number the 413 copy is
   // required to name. Re-spelling 50_000 here would just move the duplicated literal

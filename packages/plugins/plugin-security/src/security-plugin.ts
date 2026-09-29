@@ -83,7 +83,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -1521,9 +1521,37 @@ export class SecurityPlugin implements Plugin {
           // UNREACHABLE. Letting the read fault propagate is what re-arms a
           // diagnostic this repo had already built, and it is the direction the
           // 2026-08-11 store-fault ruling settles: a fault propagates.
+          // [#20555] With NO active organization the read asks for the
+          // organization-less rows ONLY. `seedCtx(undefined)` carries no
+          // tenant, and `applyTenantScope` reads "no tenant" as an unscoped
+          // path, so a bare by-name read returned every organization's row of
+          // each name — and `resolveOwnOrganizationRow` answers an undefined
+          // organization with whichever row came first. The names asked for
+          // include the caller's POSITIONS (the fold in
+          // `resolvePermissionSetsForContextUnmemoized`), and with no active
+          // organization those still carry every membership's role plus the
+          // `everyone` anchor. Measured over a real `SqlDriver`: a member of
+          // one organization, with none active, resolved a set ANOTHER
+          // organization had authored under the name `org_member` — its
+          // `systemPermissions` and its object map, view/modify-all included —
+          // and a GLOBAL grant resolved another organization's same-named copy
+          // in place of the global row it named.
+          //
+          // The rule is the one `resolveUserAuthzGrants` applies to grant rows,
+          // and ADR-0123 D2's "tenant-scoped reads resolve to nothing": a row
+          // scoped to an organization applies only while that organization is
+          // active; an organization-less row applies everywhere. With a tenant
+          // the driver's scope already returns exactly those two classes. With
+          // none, the predicate below is that same scope, pushed into the read
+          // rather than filtered after it — after the `limit`, other
+          // organizations' copies could crowd out the global row this caller
+          // does hold.
+          const where = organizationId
+            ? { name: { $in: names } }
+            : { name: { $in: names }, organization_id: null };
           const rows = await ql.find(
             'sys_permission_set',
-            { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
+            { where, limit: Math.max(names.length * 4, 20) },
             { context: seedCtx(organizationId) },
           );
           const fetched = permissionSetPageOrRefuse(rows, names);
@@ -1546,7 +1574,9 @@ export class SecurityPlugin implements Plugin {
           //
           // Preference order is unchanged and still closes the cross-tenant
           // bleed #11121 fixed: this organization's own row WINS wherever it
-          // exists, and a leftover is consulted only in its absence.
+          // exists, and a leftover is consulted only in its absence. With no
+          // active organization every row here is organization-less (the read
+          // above asked for nothing else), so `own` is one of those.
           const byName = new Map<string, any>();
           for (const name of new Set(names)) {
             const { own, organizationLessResidue } = resolveOwnOrganizationRow(
@@ -4687,7 +4717,22 @@ export class SecurityPlugin implements Plugin {
       const callerTenantId = typeof callerContext?.tenantId === 'string' && callerContext.tenantId !== ''
         ? callerContext.tenantId
         : undefined;
-      targetContext = await buildContextForUser(this.ql, request.userId, Date.now(), callerTenantId);
+      // [#20580] ...but only while the explained user could be resolved in it.
+      // Explaining them in the caller's organization is a CLAIM on it made for
+      // them, and enforcement vets a claim before it resolves anything:
+      // under a walled posture a member removed from that organization, whose
+      // session still names it, has the claim dropped and resolves with NO
+      // active organization — so none of that organization's grants apply.
+      // `vetOrganizationClaim` is that check (the session arm of
+      // `resolveAuthzContext`), asked of the same membership set; the explainer
+      // spells no membership rule of its own.
+      const nowMs = Date.now();
+      let explained = await buildContextForUser(this.ql, request.userId, nowMs, callerTenantId);
+      const explainedTenantId = vetOrganizationClaim(callerTenantId, explained.accessible_org_ids ?? [], this.tenancyPosture);
+      if (explainedTenantId !== callerTenantId) {
+        explained = await buildContextForUser(this.ql, request.userId, nowMs, explainedTenantId);
+      }
+      targetContext = explained;
     }
 
     // [C2 / ADR-0095] The optional `sharing` service backs the record-grained

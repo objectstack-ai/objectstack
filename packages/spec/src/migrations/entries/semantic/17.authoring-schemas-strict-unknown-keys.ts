@@ -45,7 +45,8 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'authoring-schemas-strict-unknown-keys',
   surface:
-    'the protocol-17 authoring schemas closed against undeclared keys (#4001) — `automation/` '
+    'the protocol-17 authoring schemas closed against undeclared keys by the unknown-key '
+    + 'strictness wave — `automation/` '
     + '(flow and its six nested blocks, control-flow, state-machine, webhook, time-relative '
     + 'trigger, flow function), `security/` (permission sets, RLS policies, sharing rules) and '
     + '`identity/position`, `ui/` (responsive, theme, chart, `AriaProps`, fifteen `view` '
@@ -77,14 +78,19 @@ export const entry: SemanticMigration = {
     + 'is not an unknown-key close but the same defect one level up — the `view` union had an '
     + 'arm that both stripped and required nothing, so it matched every object and `saveMetaItem` '
     + 'persisted garbage as an ACTIVE view overlay that read back badged valid. '
-    + 'This is ONE entry for the whole major by the ruling on #7630 (2026-08-12), mirroring the '
+    + 'This is ONE entry for the whole major by the maintainer\'s 2026-08-12 ruling that the '
+    + 'wave is registered one entry per major, not one per batch, mirroring the '
     + "registry's only two precedents of this shape; the eleven batches it folds are the "
     + 'changesets `unknown-key-strictness-tier-a`, `-step2`, `-automation-batch11`, `-ui-batch13`, '
     + '`-ui-batch15`, `-ui-batch16`, `strict-automation-control-flow-state-machine`, '
     + '`view-subblock-strictness-batch18`, `rare-jars-shave`, '
     + '`user-filters-allow-add-tab-promote-and-close` and `view-union-identity-precondition`, '
-    + 'each carrying its own FROM → TO table in `CHANGELOG.md`. ADR-0049 / ADR-0078 / ADR-0087, '
-    + '#4001, #5073, #5599 (registered #7630, backfilling #6350).',
+    + 'each carrying its own FROM → TO table in `CHANGELOG.md`. One batch promoted a key before '
+    + 'closing its block: `userFilters.allowAddTab` was already read by objectui, so the '
+    + 'maintainer\'s 2026-08-04 ruling declared it in the spec rather than let a correct-looking '
+    + 'refusal tell authors to delete a working capability. The entry was registered in the '
+    + 'backfill of the v17 train\'s breaking changesets, which had never been compared against '
+    + 'the ledger. ADR-0049 / ADR-0078 / ADR-0087.',
   acceptanceCriteria:
     '`objectstack validate` passes with no unknown-key parse errors on any authoring surface — '
     + 'the sweep is "fix until nothing raises", and every rejection carries its own fix. '

@@ -11,7 +11,7 @@
  * stamped email-verified at creation. The trust anchor is the operator's
  * env-var declaration PLUS the operator-executed creation — not a mailbox
  * round-trip; SMTP stays required only for inviting OTHERS. This extends the
- * #11343 precedent (the dev-boot seeded admin, `auth-plugin.ts`
+ * commit c0714eb5d precedent (the dev-boot seeded admin, `auth-plugin.ts`
  * `maybeSeedDevAdmin`: "provisioned by the deployment's own boot command with
  * operator-known credentials — not an unknown self-registrant") to
  * production walled boots, whose owner previously had NO in-product way to
@@ -54,7 +54,7 @@
  *    dead for its owner). The ruling accepts the env declaration + the
  *    creation act as the anchor.
  *  - **`self-serve` class WITHOUT the carve-out**: NEVER qualifies — a
- *    self-registrant typing the owner's address proves nothing (#11343's
+ *    self-registrant typing the owner's address proves nothing (commit c0714eb5d's
  *    whole point), and that includes an invitation-admitted registration
  *    (the invitation carve-out admits the CREATION; it does not verify the
  *    mailbox).
@@ -78,7 +78,7 @@
  *    owner address inherits nothing: the decision is staged from the
  *    creation-time admission gate and consumed once by the `user.create`
  *    before-hook, a seam an update can never traverse.
- *  - Dev-boot behaviour (#11343's seed stamp) is unchanged: on a walled dev
+ *  - Dev-boot behaviour (commit c0714eb5d's seed stamp) is unchanged: on a walled dev
  *    boot whose declared owner is the seeded address, this module stamps the
  *    same account the seed would have stamped a moment later — idempotent by
  *    construction.

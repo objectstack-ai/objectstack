@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11640] The walled deployment that declares an owner it can never verify.
+ * [commit bf8d129b5] The walled deployment that declares an owner it can never verify.
  *
  * Maintainer ruling 2026-08-25 (decision-inbox batch 5, verbatim: 「全部同意」
  * accepting option **A**): at boot, a walled deployment with
@@ -25,7 +25,7 @@
  *
  * ## Why the deployment is a dead end
  *
- * #11343 made walled platform-admin standing require a VERIFIED owner-email
+ * Commit c0714eb5d made walled platform-admin standing require a VERIFIED owner-email
  * match (the string alone proves nothing — anyone who knows the address could
  * register it first), and the #11663 re-anchor kept the requirement while
  * retiring the elevation write: the verified match is now read at request
@@ -129,7 +129,7 @@ const env = (): Record<string, string | undefined> =>
 /**
  * The address `AuthPlugin.maybeSeedDevAdmin` provisions. Exported so the seed
  * and this check read ONE resolution: the check treats the seed as a
- * verification path (it stamps the seeded account `email_verified`, #11343),
+ * verification path (it stamps the seeded account `email_verified`, commit c0714eb5d),
  * which is only true while both agree on which address gets stamped.
  */
 export function devSeedAdminEmail(): string {
@@ -213,7 +213,7 @@ export interface VerificationPathWiring {
  * owner lookup (both the lowercased and the verbatim spelling, matches
  * re-checked through the shared predicates — the same two-spelling read
  * `plugin-security`'s `resolvePlatformAdminStanding` serves the audit surface
- * with). The verified answer is the shared [#11343] allow-list
+ * with). The verified answer is the shared [commit c0714eb5d] allow-list
  * (`isEmailVerifiedUserRow`) — the SAME predicate the derivation site reads
  * ([#11973]: `resolve-authz-context.ts` §6b-config, where an unverified
  * declared address resolves non-admin), so this probe can never forecast a
@@ -303,7 +303,7 @@ export interface WalledOwnerVerificationLogger {
  *     of the declared owner is stamped verified at creation, so a fresh
  *     walled boot with nothing wired is no longer a dead end. Two dev-boot
  *     sub-shapes keep their pre-#12751 answers: a seed armed for the
- *     declared owner's own address was already `null` (#11343's seed stamp),
+ *     declared owner's own address was already `null` (commit c0714eb5d's seed stamp),
  *     and a seed armed for some OTHER address still WARNS — the seed will
  *     spend the bootstrap carve-out on a non-owner account at `kernel:ready`,
  *     before the owner can ever be first.
@@ -337,7 +337,7 @@ export function resolveWalledOwnerVerificationPathWarning(
   if (state === 'owner-verified') return null;
 
   // The dev-admin seed provisions the declared owner AND stamps it verified
-  // (#11343) — but only ever on an EMPTY store, so it rescues exactly the
+  // (commit c0714eb5d) — but only ever on an EMPTY store, so it rescues exactly the
   // shapes where the store is empty or unknowable (the verify-harness boots
   // that probe nothing). An owner account that already exists unverified, or
   // a populated store with no owner account, is past the seed's reach and

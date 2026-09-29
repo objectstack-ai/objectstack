@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     + "direction: change `type` to `'text'`, which is what that field actually was, and "
     + 'keep the prose that asked for an id in `inlineHelpText`.',
   reason:
-    'Maintainer ruling A′, 2026-09-13 (decision batch #130 item 1), verbatim, '
+    'Maintainer ruling A′, 2026-09-13, verbatim, '
     + 'untranslated: 「同意」. ADR-0078 forbids metadata that parses, carries no marking and '
     + 'does nothing — and its own worked example of that state is a `lookup` with no '
     + '`reference`: the field renders a picker, the picker has no object to query, and '

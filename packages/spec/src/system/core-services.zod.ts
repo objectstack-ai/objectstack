@@ -268,7 +268,7 @@ export const ServiceRequirementDef = {
  * and the two are different concepts (a health value vs this `features`-bearing
  * object). One name for two declarations across two entry points is the
  * #4411 trap `check:dual-source-exports` guards, so the kernel side carries the
- * `Kernel` prefix its sibling `KernelServiceMapSchema` already uses (#6604,
+ * `Kernel` prefix its sibling `KernelServiceMapSchema` already uses (commit d127ff002,
  * maintainer ruling 2026-08-08 Option B).
  */
 export const KernelServiceStatusSchema = lazySchema(() => z.object({

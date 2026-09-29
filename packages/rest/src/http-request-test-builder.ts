@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The one place this package builds an `IHttpRequest` for a test (#13377).
+ * The one place this package builds an `IHttpRequest` for a test (commit e10cf3444).
  *
  * Test layer only — nothing in `src/index.ts` reaches it, so tsup (entry:
  * `src/index.ts`) never emits it into `dist` and it is not published. Same
@@ -32,7 +32,7 @@
  * ## Why each default is the default
  *
  * **`method` and `path` are NOT defaulted — they are read off the route under
- * test.** A constant default here is precisely the hazard #13377 names: a
+ * test.** A constant default here is precisely the hazard commit e10cf3444 was written to remove: a
  * `path` that does not match the route under test makes a passing test measure
  * something other than what it names, and `req.path` is live rather than
  * decorative — `RestServer.enforceAuth` feeds it to `isAuthGateAllowlisted`

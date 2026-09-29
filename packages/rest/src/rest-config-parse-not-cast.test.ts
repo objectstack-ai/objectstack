@@ -275,12 +275,12 @@ describe('[#11637] §C regression guards — the narrowing is exactly the declar
 });
 
 // ---------------------------------------------------------------------------
-// §D — [#14366] the parsed output is CONSUMED
+// §D — [commit 53cbad9f7] the parsed output is CONSUMED
 // ---------------------------------------------------------------------------
 
 /**
  * #11637 ran the parse and threw its result away; the block was rebuilt from a
- * `??` chain over the raw cast. #14366 folded the chain onto the parse after
+ * `??` chain over the raw cast. Commit 53cbad9f7 folded the chain onto the parse after
  * re-measuring both of #11637's reasons expired and the key diff empty in both
  * directions (14 read, 14 declared after the `.omit()`).
  *
@@ -335,7 +335,7 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
     });
 
     it('THE BOUNDED DELTA: an authored `documentation` arrives as the parse outputs it', () => {
-        // The single measured behaviour change of #14366, pinned rather than
+        // The single measured behaviour change of commit 53cbad9f7, pinned rather than
         // left to be rediscovered. The deleted `??` chain copied this object
         // through untouched (`documentation: api.documentation`), so a partial
         // one stayed partial; the parse fills the inner `.default()`s — of
@@ -384,7 +384,7 @@ describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
     });
 
     it('an undeclared key under `api` is not carried into the normalized config', () => {
-        // Unchanged by #14366 and pinned as the bound: the `??` chain copied a
+        // Unchanged by commit 53cbad9f7 and pinned as the bound: the `??` chain copied a
         // fixed list of 14 keys, and the non-strict parse strips anything not
         // declared. Both drop it — so consuming cannot have widened the surface.
         const api = normalizedApi(construct({ totallyUndeclared: 'x' } as never));

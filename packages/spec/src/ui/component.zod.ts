@@ -7,7 +7,7 @@ import {
   GanttConfigSchema,
   TreeConfigSchema,
   ListMapConfigSchema,
-  // [#17987] The element-level record-click carrier and the timeline config
+  // [commit e233db9db] The element-level record-click carrier and the timeline config
   // block are taken BY REFERENCE from the view face — one def each, so the
   // standalone element cannot fork the vocabulary a view already declares.
   NavigationConfigSchema,
@@ -31,7 +31,7 @@ import { retiredKey } from '../shared/retired-key';
 import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
-// shared source rather than re-spelled here (#6276).
+// shared source rather than re-spelled here (commit 78f0be872).
 import { SortItemSchema } from '../shared/enums.zod';
 import { strictObject } from '../shared/strict-object';
 import { ruleArrayFilterError } from './filter-rule-array';
@@ -162,7 +162,7 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 // happened is the reusable part: #5775's ruling named its keys individually, so
 // the two `element:record_picker` shorthands the renderer reads through the
 // SAME `ds.x ?? props.x` line as the keys that were named — `sort` and `limit`
-// — fell outside it and stayed undeclared. #6276 declared them on the same
+// — fell outside it and stayed undeclared. Commit 78f0be872 declared them on the same
 // #5611 rule (maintainer ruling 2026-08-08, direction A). The lesson for the
 // next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
 // key list a previous ruling happened to quote. Retiring the flat family
@@ -565,7 +565,7 @@ export const PageHeaderProps = strictObject({
    * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
    * loud that both are "overridable on the page:header". Closing this shape
    * without declaring them would turn an invited affordance into a hard
-   * rejection — the #6276 lesson, which is to enumerate by the RENDERER'S read
+   * rejection — the lesson of commit 78f0be872, which is to enumerate by the RENDERER'S read
    * pattern rather than by the key list a previous ruling happened to quote.
    *
    * Optional with NO schema default, deliberately: 3 and 1 are the renderer's
@@ -1461,8 +1461,8 @@ export const RecordActivityProps = strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   /**
-   * Feed/activity kinds to show — an OPEN vocabulary (#11658, executing the
-   * 2026-08-24 maintainer ruling on #11507: `sys_activity.type` is
+   * Feed/activity kinds to show — an OPEN vocabulary (commit 1a6a19c31, executing the
+   * 2026-08-24 maintainer ruling commit 88b9d749a declared: `sys_activity.type` is
    * author-extensible and "every closed map over this vocabulary is now the
    * bug"). The `FeedItemType` union branch is guidance only — it keeps the
    * built-in kinds visible in editor autocomplete and as an `anyOf` member of
@@ -2210,7 +2210,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * precisely because no render path reads it. Vocabulary does not separate
    * the two verdicts; a read point does. That missing separation has already
    * cost a full dispatch cycle re-deriving a cross-repo read point from
-   * scratch (#9397, closed premise-overtaken), which is why #9881 and #9972
+   * scratch (#9397, closed premise-overtaken), which is why #9881 and commit 60e0f900a
    * recorded it for the accordion and tab items. This is the same record for
    * the button.
    *
@@ -2301,7 +2301,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * They read `70-87` / `88-92` until the
    * `a472b0716` re-measure: wrong since written rather than shifted —
    * `button.tsx` was byte-identical at `00d3f09c5` and `a472b0716`, so only a
-   * re-READ could find them and a line-number refresh never would (#10274). Unpublished is not unread — the header `icon`
+   * re-READ could find them and a line-number refresh never would (commit d1ba685ec). Unpublished is not unread — the header `icon`
    * above is refused for the second, not the first, and this docblock exists
    * to hold them apart.
    */
@@ -2452,7 +2452,7 @@ export const ElementFormPropsSchema = lazySchema(() => strictObject({
  * box, so both were capability claims nothing kept (#5021 / #4988 precedent).
  * Either may return the day it is implemented; a declaration is not a roadmap.
  *
- * ⚠️ #6276 finished the same inventory one key-pair later, and the finding is
+ * ⚠️ Commit 78f0be872 finished the same inventory one key-pair later, and the finding is
  * worth stating as a rule rather than as two more keys. The renderer resolves
  * its query from FOUR keys through one identical pattern — `dataSource` first,
  * the flat `properties` shorthand second:
@@ -2543,7 +2543,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   }).optional()
     .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
-   * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
+   * Row order (commit 78f0be872). The flat shorthand for `dataSource.sort`, and the same
    * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
    * `$orderby`. `dataSource.sort` wins when both are written
    * (`ds.sort ?? props.sort`).
@@ -2551,7 +2551,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   sort: z.array(SortItemSchema).optional()
     .describe('Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set'),
   /**
-   * Row cap (#6276). The flat shorthand for `dataSource.limit`, same shape.
+   * Row cap (commit 78f0be872). The flat shorthand for `dataSource.limit`, same shape.
    * `dataSource.limit` wins when both are written, and with neither the
    * renderer queries `$top: 50` (`ds.limit ?? props.limit ?? 50`) — that 50 is
    * the renderer's fallback, not a schema default, so it is documented here
@@ -3476,7 +3476,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `[{ field, order }]` onto the same parameter. ⚠️ At THIS pin the string is
    * therefore still lowered, and this door refuses a spelling the pinned
    * renderer honours — the ruled sequence, not an oversight: objectui#8221's
-   * PR #8758 (merged 2026-09-09, after this pin) drops the string arm from
+   * PR objectui#8758 (merged 2026-09-09, after this pin) drops the string arm from
    * `convertSortToQueryParams`, and the next pin bump carries it in. The array
    * is the spelling both ends already agree on today; the header-arrow read at
    * `:3998` hands `schemaSort` to `parseSchemaSort` as `TableSortItem[]`, the
@@ -4011,7 +4011,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
   /**
-   * Card-click navigation (#17987 — the spec half of the objectui#8652
+   * Card-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`: declare `navigation` on the platform
    * element schemas).
    *
@@ -4059,7 +4059,7 @@ export type ObjectKanbanProps = z.input<typeof ObjectKanbanPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state on TWO keys.
  * `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
  * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
- * parse); `navigation` carries {@link NavigationConfigSchema} (#17987), whose
+ * parse); `navigation` carries {@link NavigationConfigSchema} (commit e233db9db), whose
  * four defaulted members (`mode`, `preventNavigation`, `openNewTab`, `size`)
  * materialize on parse — but only on a document that AUTHORED the key, since
  * the door itself is `.optional()` with no default of its own. So
@@ -4137,7 +4137,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * (`core/src/utils/sort-query.ts`) as the fetch's `$orderby`. ⚠️ That sink
    * still honours the legacy string clause at this pin — `sort-query.ts:66-70`
    * — so, exactly as on `object-grid`, this declaration lands ahead of the
-   * consumer-side retirement (objectui#8221's PR #8758, merged 2026-09-09) and
+   * consumer-side retirement (objectui#8221's PR objectui#8758, merged 2026-09-09) and
    * refuses a spelling the pinned helper still lowers. The array arm is
    * unaffected: the sink folds `[{ field, order }]` into the field-direction
    * map either way. Unlike the grid, `plugin-calendar/src/index.tsx` declares
@@ -4150,7 +4150,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   locale: z.string().optional().describe('Locale override for the calendar chrome'),
   loading: z.boolean().optional().describe('External loading state (honoured only alongside `data`)'),
   /**
-   * Event-click navigation (#17987 — the spec half of the objectui#8652
+   * Event-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`), the same carrier and the same def as
    * `object-kanban`'s above.
    *
@@ -4190,7 +4190,7 @@ export type ObjectCalendarProps = z.input<typeof ObjectCalendarPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state on TWO keys.
  * `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
  * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
- * parse); `navigation` carries {@link NavigationConfigSchema} (#17987), whose
+ * parse); `navigation` carries {@link NavigationConfigSchema} (commit e233db9db), whose
  * four defaulted members (`mode`, `preventNavigation`, `openNewTab`, `size`)
  * materialize on parse — but only on a document that AUTHORED the key, since
  * the door itself is `.optional()` with no default of its own. So
@@ -5065,7 +5065,7 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * other anchor beside it was still a `53ded82bf` reading, in the same file,
  * with nothing to tell the two apart. Every anchor below is now at this pin.)
  *
- * #17987 executes the objectui#8652 maintainer ruling (verbatim `B`). The
+ * Commit e233db9db executes the objectui#8652 maintainer ruling (verbatim `B`). The
  * ruling's carrier is `navigation`, declared below beside its `object-kanban`
  * and `object-calendar` twins; the ROW is the other half of the same card.
  * `object-timeline` is a registered renderer reachable only through the type
@@ -5223,7 +5223,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   mapping: z.unknown().optional()
     .describe("Record-to-entry field mapping ({ title, date, description, variant }) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has"),
   /**
-   * Entry-click navigation (#17987 — the spec half of the objectui#8652
+   * Entry-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`), the same carrier and the same def as
    * `object-kanban`'s and `object-calendar`'s above. Measured at the pin:
    * `ObjectTimeline.tsx:462-466` hands `(schema as any).navigation` to
@@ -5454,7 +5454,7 @@ export const ComponentPropsMap = {
   'object-map': ObjectMapPropsSchema,
   'object-gantt': ObjectGanttPropsSchema,
   'object-tree': ObjectTreePropsSchema,
-  // #17987, the row half of the objectui#8652 ruling (verbatim `B`). Same
+  // Commit e233db9db, the row half of the objectui#8652 ruling (verbatim `B`). Same
   // mechanism as the three rows above, on the LAST object-bound block that had
   // none: registered in objectui (`plugin-timeline`), reachable through the
   // type union's open string arm, and with no row here the #5068 gate skipped

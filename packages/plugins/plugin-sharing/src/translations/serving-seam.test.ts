@@ -5,7 +5,7 @@
 // ## What this file pins, and what it deliberately does not
 //
 // `os i18n extract --source-hashes` writes `<locale>.source-hashes.generated.ts`
-// (maintainer ruling #12069 Option A, #11671) and `withSourceFallback`
+// (maintainer ruling #12069 Option A, commit 09b4f4e4e) and `withSourceFallback`
 // substitutes the current source for a leaf whose record disagrees with it.
 // Those two halves landed apart: recording rolled out to all nine bundle sets
 // and the reading half stayed in `@objectstack/platform-objects`. Eight sets

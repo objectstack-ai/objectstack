@@ -3,7 +3,7 @@
 /**
  * The package's console shim, in one place.
  *
- * [#8850] Lifted out of `rest-server.ts` unchanged when the ADR-0112
+ * [commit 8664a2c99] Lifted out of `rest-server.ts` unchanged when the ADR-0112
  * error/fault-classification prologue moved to `error-response.ts`: both files
  * log through it, and the alternative — a second copy of the same two lines —
  * is the "two spellings of one thing" shape this repo pays for repeatedly. It

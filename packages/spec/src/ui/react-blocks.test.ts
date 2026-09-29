@@ -136,7 +136,7 @@ describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
 });
 
 /**
- * #11284 — the react tier converges on the metadata-tier vocabulary,
+ * Commit 5383fa670 — the react tier converges on the metadata-tier vocabulary,
  * deprecate-first (maintainer ruling 2026-08-23, recorded on-card): the
  * canonical spellings were declared and the old ones kept as deprecated
  * aliases. #14791 (maintainer ruling 2026-09-07) is the removal card: the

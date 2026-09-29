@@ -133,11 +133,11 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: 'id' } },
+  measures: { total: { label: 'Total', type: 'count', sql: 'id' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
-    amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    name: { label: 'Name', type: 'string', sql: 'name' },
+    amount: { label: 'Amount', type: 'number', sql: 'amount' },
   },
   public: true,
 };
@@ -179,8 +179,12 @@ const ACCEPTED_CASES: Record<string, FilterCondition> = {
   $exists: { name: { $exists: true } },
 };
 
-/** The spellings this face REFUSES — the complement, so the two sets are total. */
-const REFUSED_OPERATORS = ['$between', '$startsWith', '$endsWith', '$null'] as const;
+/**
+ * The spellings this face REFUSES — the complement, so the two sets are total.
+ * [#20446] `$empty` joined `FILTER_OPERATORS`, and this cube face refuses it as
+ * it refuses `$null`: a declared operator it has no lowering for.
+ */
+const REFUSED_OPERATORS = ['$between', '$startsWith', '$endsWith', '$null', '$empty'] as const;
 
 describe('[#7117] the analytics echo renders the query it describes', () => {
   let db: any;
@@ -399,10 +403,10 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
     ]) await temporal.create('ev', { ...r });
     const cube: Cube = {
       name: 'evs', title: 'Evs', sql: 'ev',
-      measures: { total: { name: 'total', label: 'T', type: 'count', sql: 'id' } },
+      measures: { total: { label: 'T', type: 'count', sql: 'id' } },
       dimensions: {
-        id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-        at: { name: 'at', label: 'At', type: 'time', sql: 'at' },
+        id: { label: 'Id', type: 'string', sql: 'id' },
+        at: { label: 'At', type: 'time', sql: 'at' },
       },
       public: true,
     };

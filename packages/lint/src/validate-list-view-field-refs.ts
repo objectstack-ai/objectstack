@@ -836,7 +836,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
   // `PUT /api/v1/meta/view` door carries and the runtime publish gate
   // snapshots. Recognisers mirrored from the sort/search twins, which carry
   // the full notes: the flattened list overlay (#9313, `viewKind: 'list'` with
-  // no nested `config`) and the ViewItem record (#10001, one level down
+  // no nested `config`) and the ViewItem record (commit f1b5ad39a, one level down
   // inside `config`).
   const views = asArray(stack.views);
   for (let vi = 0; vi < views.length; vi++) {

@@ -11,7 +11,7 @@
  *
  *  1. **Compile-time** (section 1). An undeclared key — or a misspelt verb — in
  *     one of these domains' request literals must be a COMPILE ERROR. That is
- *     the #11006 series' end state, and it stopped three seams short here.
+ *     the end state of commit cccbe51bf's ruled pattern, and it stopped three seams short here.
  *  2. **Runtime** (section 2). ⛔ A host may occupy the `protocol` slot with a
  *     PARTIAL object. Tightening the types and then deleting a
  *     `typeof … === 'function'` probe would trade the compile-time improvement

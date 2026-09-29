@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 780 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 779 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -933,12 +933,12 @@ export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< ty
 // `ConnectorStatus`, until ADR-0049 retired it with `connector.status`) — no
 // default, no transform, so author and parsed states coincide and D5 gives it
 // no `XParsed`. The connector-nested `WebhookEvent` / `WebhookSignatureAlgorithm`
-// pins left here with their schemas in the same retirement.
+// pins left here with their schemas in the same retirement, and the
+// `ConnectorTrigger` pin with its schema in the `triggers` retirement after it.
 export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
 export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
 export type Iso_integration_connector__ConnectorRetryStrategySchema = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso_integration_connector__ConnectorTriggerSchema = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
 export type Iso_integration_connector__ConnectorTypeSchema = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
 export type Iso_integration_connector__SyncStrategySchema = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
 
@@ -1666,7 +1666,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 780 isomorphic pins', () => {
+  it('still declares all 779 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2364,7 +2364,16 @@ describe('ADR-0122 type-alias convention', () => {
     // `ElementDefinitionListPropsSchema` pin above, so this entry's arrow
     // starts from 781. The count below was re-derived from the merged file,
     // not added up.
-    expect(pins).toHaveLength(780);
+    //
+    // 780 -> 779 is the ADR-0049 retirement of the connector `triggers` array:
+    // `ConnectorTriggerSchema` left whole with its carrier key (whole-def
+    // removal, `RETIRED_DEFS_BY_MAJOR[18]`), so its one M78 pin
+    // (Iso_integration_connector__ConnectorTriggerSchema) leaves with the
+    // schema. It carried no `XParsed` alias — its only tombstone, the
+    // `interval` rename's `retiredKey()`, kept input and output equal — so the
+    // pin was the whole of its footprint here. The M78 slot stays occupied by
+    // the module's surviving pins. -1 removed.
+    expect(pins).toHaveLength(779);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

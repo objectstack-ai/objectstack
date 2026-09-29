@@ -38,7 +38,7 @@
  * the ablation meaningful: with the new predicate removed, the eligibility
  * cases must flip red and these five must stay green.
  *
- * ## [#13608] The second seam: the same policy, held again at REDEMPTION
+ * ## [commit fc9ba76a5] The second seam: the same policy, held again at REDEMPTION
  *
  * Enforcing at mint alone left the adjacent half open, and the state the
  * predicate reads is exactly the state an editor changes: publish an article
@@ -69,7 +69,7 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { ShareLinkService } from './share-link-service.js';
-// [#13608] The PUBLIC seam an anonymous holder actually reaches. The refusal's
+// [commit fc9ba76a5] The PUBLIC seam an anonymous holder actually reaches. The refusal's
 // shape is a claim about what that caller can observe, so it is measured there
 // and not only on the service's return value.
 import { registerShareLinkRoutes } from './share-link-routes.js';
@@ -139,7 +139,7 @@ interface BootOptions {
    */
   shapeRow?: (row: any) => any;
   /**
-   * [#13608] Collect the service's server-side log. The redemption refusal is
+   * [commit fc9ba76a5] Collect the service's server-side log. The redemption refusal is
    * deliberately silent on the wire, so this is where the REASON it refused
    * becomes assertable — and where the ruling says the reason belongs.
    */
@@ -165,7 +165,7 @@ async function boot(article: any = ARTICLE, options: BootOptions = {}) {
 
   const schemas: Record<string, any> = { article, sys_share_link: SysShareLink };
   /**
-   * [#13608] Every read the service issues, in order. Two claims are measured
+   * [commit fc9ba76a5] Every read the service issues, in order. Two claims are measured
    * off it: the `id`-only probe is UNCHANGED for an object with no predicate,
    * and the eligibility path widens that same read rather than adding a second.
    */
@@ -595,7 +595,7 @@ describe('[#7861] publicSharing.eligibility is enforced at createLink', () => {
 
 
 /**
- * [#13608] The redemption seam.
+ * [commit fc9ba76a5] The redemption seam.
  *
  * `resolveToken` checked `revoked_at`, `expires_at`, the audience gates, the
  * password and record EXISTENCE — and served whatever survived, under
@@ -923,7 +923,7 @@ describe('[#13608] publicSharing.eligibility is enforced again at REDEMPTION', (
  * `publicSharing.enabled` governed MINTING only: `getPolicy()` collapsed to an
  * empty policy when the block was off, and `resolveToken` read nothing off
  * `policy.enabled`. So the platform held this shape — the predicate INSIDE
- * the block was re-evaluated at every redemption (#13608, above) while turning
+ * the block was re-evaluated at every redemption (commit fc9ba76a5, above) while turning
  * the ENTIRE block off did not stop a single existing link. Maintainer ruling
  * of 2026-09-01 (quoted verbatim in `share-link-service.test.ts`'s reversal
  * register): the switch is a standing policy held at every redemption,
@@ -983,7 +983,7 @@ describe('[#14033] publicSharing.enabled is a standing policy — the switch is 
   /**
    * The HTTP seam, driven end-to-end on the real service through the real
    * route, with the route's SECURE default context — every request below is
-   * anonymous. Same reading as the #13608 pin above, for the same reason: the
+   * anonymous. Same reading as the commit fc9ba76a5 pin above, for the same reason: the
    * switched-off link lands in the generic "invalid / expired / revoked"
    * answer, byte-for-byte what a token that NEVER EXISTED gets — not the 410
    * bucket, which would confirm the token was real, and not a 422 naming the
@@ -1268,7 +1268,7 @@ describe('[#14637] the route probe reads the standing policy before it answers f
     // Back-dated on the stored row, not minted: `createLink` refuses a past
     // `expiresAt` outright (`422 EXPIRY_IN_PAST`), so this is the only way to
     // reach an ALREADY-EXPIRED link — and it is exactly what the passage of
-    // time does to a live one. Same stamp the #13608 pins above use.
+    // time does to a live one. Same stamp the commit fc9ba76a5 pins above use.
     await driver.update('sys_share_link', link.id, {
       expires_at: new Date(Date.now() - 60_000).toISOString(),
     });
@@ -1306,7 +1306,7 @@ describe('[#14637] the route probe reads the standing policy before it answers f
 });
 
 /**
- * [#13608] Mount the real PUBLIC resolve route on the real service.
+ * [commit fc9ba76a5] Mount the real PUBLIC resolve route on the real service.
  *
  * Only the verbs `registerShareLinkRoutes` calls are implemented, and the
  * SECURE default `contextFromRequest` is deliberately left in place: it reads
@@ -1318,7 +1318,7 @@ describe('[#14637] the route probe reads the standing policy before it answers f
  * the `audience: 'signed_in'` arm from the serving side), and the returned
  * driver takes the request query (the only way to reach the `WRONG_PASSWORD`
  * arm). Omit both and this is byte-for-byte the anonymous, query-less harness
- * the #13608 and #14033 pins above drive.
+ * the commit fc9ba76a5 and #14033 pins above drive.
  */
 function mountResolveRoute(service: ShareLinkService, engine: unknown, signedInUserId?: string) {
   const routes = new Map<string, RouteHandler>();

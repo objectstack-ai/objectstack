@@ -259,15 +259,15 @@ describe('[#11065] the analytics face answers the same rate', () => {
     title: 'Cases',
     sql: TABLE,
     measures: {
-      slaViolationRate: { name: 'sla_violation_rate', label: 'SLA Violation Rate', type: 'avg', sql: 'is_sla_violated' },
-      slaViolations: { name: 'sla_violations', label: 'SLA Violations', type: 'sum', sql: 'is_sla_violated' },
-      minViolated: { name: 'min_violated', label: 'Min violated', type: 'min', sql: 'is_sla_violated' },
-      maxViolated: { name: 'max_violated', label: 'Max violated', type: 'max', sql: 'is_sla_violated' },
-      count: { name: 'count', label: 'Cases', type: 'count', sql: 'id' },
-      avgNote: { name: 'avg_note', label: 'Avg note', type: 'avg', sql: 'note' },
+      slaViolationRate: { label: 'SLA Violation Rate', type: 'avg', sql: 'is_sla_violated' },
+      slaViolations: { label: 'SLA Violations', type: 'sum', sql: 'is_sla_violated' },
+      minViolated: { label: 'Min violated', type: 'min', sql: 'is_sla_violated' },
+      maxViolated: { label: 'Max violated', type: 'max', sql: 'is_sla_violated' },
+      count: { label: 'Cases', type: 'count', sql: 'id' },
+      avgNote: { label: 'Avg note', type: 'avg', sql: 'note' },
     },
     dimensions: {
-      isClosed: { name: 'is_closed', label: 'Closed', type: 'boolean', sql: 'is_closed' },
+      isClosed: { label: 'Closed', type: 'boolean', sql: 'is_closed' },
     },
   } as unknown as Cube;
 

@@ -348,7 +348,7 @@ export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
  * try/catch outside any loop binds neither, so their absence means "not in a
  * loop", never "row unknown".
  *
- * `code` (#14419 / #14954) is the platform-classified error code (ADR-0112)
+ * `code` (commit c5a7448d5 / #14954) is the platform-classified error code (ADR-0112)
  * the failing node's own result carried — `create_record`'s `DUPLICATE_RECORD`
  * is the founding case — bound so a catch region can tell "the row is already
  * there" from "the store is down" by branching on `$error.code` instead of

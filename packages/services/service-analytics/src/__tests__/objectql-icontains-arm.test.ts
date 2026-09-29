@@ -71,7 +71,7 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { name: n, label: n, type: t, sql: n }]),
+    [['id', 'string'], ['name', 'string'], ['amt', 'number']].map(([n, t]) => [n, { label: n, type: t, sql: n }]),
   ),
   public: true,
 } as unknown as Cube;
@@ -113,6 +113,10 @@ describe('[#20098] `$icontains` on the ObjectQL strategy, over a real engine', (
       executeAggregate,
       getDatasetScope: () => datasetScope,
       declaredFieldType: (_object: string, field: string) => FIELDS[field]?.type,
+      // [#20446] …and the declared value shape, which `$empty` (in
+      // `FILTER_OPERATORS` since #20446) is answered by on the native face.
+      declaredValueShape: (_object: string, field: string) =>
+        (FIELDS[field] ? { type: FIELDS[field].type } : undefined),
       sqlDialect: () => 'sqlite',
     }) as unknown as StrategyContext;
   const service = (nativeSql: boolean) =>
@@ -258,6 +262,8 @@ describe('[#20098] `$icontains` on the ObjectQL strategy, over a real engine', (
     $icontains: { name: { $icontains: 'acme' } },
     $null: { name: { $null: true } },
     $exists: { name: { $exists: true } },
+    // [#20446] The text row: `name` holds null (a4) and `''` (a5).
+    $empty: { name: { $empty: true } },
   };
 
   it('the sample table covers every operator `FILTER_OPERATORS` declares', () => {

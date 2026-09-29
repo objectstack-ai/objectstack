@@ -10,7 +10,23 @@ import {
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
+  FLOW_API_TRIGGER_SECRET_MISSING,
+  validateFlowApiTriggerSecret,
 } from './validate-flow-trigger-readiness.js';
+import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
+
+/**
+ * [#20553] The flow-trigger family as the CLI table runs it: two registry
+ * entries over one file — `validateFlowTriggerReadiness` and, split out because
+ * it is CLI-only until #20611, `validateFlowApiTriggerSecret`. Cases that are
+ * about the WHOLE family's verdict on a stack (the severity map, the clean-stack
+ * floor, the api-secret cases' exhaustive assertions) judge through this.
+ */
+const cliFlowFamily = (stack: Record<string, unknown>) => [
+  ...validateFlowTriggerReadiness(stack),
+  ...validateFlowApiTriggerSecret(stack),
+];
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
   return {
@@ -1008,6 +1024,203 @@ describe('validateFlowTriggerReadiness', () => {
     });
   });
 
+  // ── #20553 — an `api`-bound flow with no usable secret (ADR-0041) ─────────
+  //
+  // The engine refuses such a flow in `registerFlow`; `os validate` builds no
+  // engine, so this rule is the only thing at authoring time that says so. The
+  // cases pin the three things the rule has to get right, each against the
+  // engine's MEASURED answer rather than a reading of `type`: which flows are
+  // `api`-bound, what counts as a usable secret, and that a flow the engine
+  // registers is never named.
+  describe('api trigger secret (ADR-0041)', () => {
+    function apiFlow(
+      config: Record<string, unknown>,
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        name: 'inbound_order',
+        type: 'api',
+        status: 'active',
+        nodes: [
+          { id: 'start', type: 'start', config },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        ...overrides,
+      };
+    }
+    const judge = (flow: Record<string, unknown>) =>
+      cliFlowFamily({ objects: [candidateObject], flows: [flow] });
+
+    it('fails a secretless `type: api` flow, naming the flow and the key', () => {
+      const findings = judge(apiFlow({ hookId: 'intake' }));
+      // Exhaustive: the flow is active and otherwise well-formed, so this id is
+      // the ONLY thing wrong with it.
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+      const [f] = findings;
+      expect(f.severity).toBe('error');
+      expect(f.where).toBe('flow "inbound_order" › start node');
+      expect(f.path).toBe('flows[0].nodes[0].config.secret');
+      expect(f.message).toContain(`type: 'api'`);
+      expect(f.message).toContain('config.secret');
+    });
+
+    it('passes the same flow once it carries a secret', () => {
+      expect(judge(apiFlow({ hookId: 'intake', secret: 'whsec_4f9a' }))).toEqual([]);
+    });
+
+    it('passes an `autolaunched` flow — the explicit-only form needs no secret', () => {
+      expect(judge(apiFlow({}, { type: 'autolaunched' }))).toEqual([]);
+      // …and the same flow flipped to `api` with nothing else changed fails.
+      expect(judge(apiFlow({}, { type: 'api' })).map((f) => f.rule)).toEqual([
+        FLOW_API_TRIGGER_SECRET_MISSING,
+      ]);
+    });
+
+    it('judges a start-node `triggerType: api` on any other flow type exactly like `type: api`', () => {
+      for (const type of ['autolaunched', 'screen', 'record_change']) {
+        const secretless = judge(apiFlow({ triggerType: 'api' }, { type }));
+        expect(secretless.map((f) => f.rule), type).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+        expect(secretless[0].path, type).toBe('flows[0].nodes[0].config.secret');
+        expect(secretless[0].message, type).toContain(`start-node triggerType: 'api'`);
+        expect(secretless[0].message, type).not.toContain(`type: 'api' and`);
+        expect(judge(apiFlow({ triggerType: 'api', secret: 's3cret' }, { type })), type).toEqual([]);
+      }
+      // Both declarations at once: still one finding, naming both.
+      const both = judge(apiFlow({ triggerType: 'api' }));
+      expect(both.map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+      expect(both[0].message).toContain(`type: 'api' and start-node triggerType: 'api'`);
+    });
+
+    it('fails a blank secret, and every non-string one, without echoing the value', () => {
+      for (const secret of ['  ', '', '\t\n', 12345, true, null, ['s3cret'], { value: 's3cret' }]) {
+        const findings = judge(apiFlow({ secret }));
+        expect(findings.map((f) => f.rule), JSON.stringify(secret)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+        // Only the TYPE is rendered — a finding travels into CI logs and
+        // publish-gate responses.
+        expect(findings[0].message, JSON.stringify(secret)).not.toContain('12345');
+        expect(findings[0].message, JSON.stringify(secret)).not.toContain('s3cret');
+      }
+      expect(judge(apiFlow({ secret: '  ' }))[0].message).toContain('blank');
+      expect(judge(apiFlow({ secret: 12345 }))[0].message).toContain('a number, not a string');
+      // The runtime trims before judging; a padded real secret is usable.
+      expect(judge(apiFlow({ secret: '  s3cret  ' }))).toEqual([]);
+    });
+
+    it('judges a disabled flow too — the engine refuses it whatever its status', () => {
+      for (const status of ['obsolete', 'draft']) {
+        expect(
+          judge(apiFlow({}, { status })).map((f) => f.rule),
+          status,
+        ).toContain(FLOW_API_TRIGGER_SECRET_MISSING);
+      }
+    });
+
+    it('judges a flow with no start node, located at `nodes`', () => {
+      const findings = judge({ name: 'no_start_api', type: 'api', status: 'active', nodes: [{ id: 'end', type: 'end' }] });
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+      expect(findings[0].where).toBe('flow "no_start_api"');
+      expect(findings[0].path).toBe('flows[0].nodes');
+      expect(findings[0].message).toContain('no start node');
+    });
+
+    it('matches the engine where precedence binds another trigger — each paired with the shape that fires', () => {
+      // Measured against the BUILT `AutomationEngine.registerFlow` at
+      // f11b5f20a2: each of these registers with no secret, because
+      // `deriveTriggerBinding` binds the higher-precedence trigger and never
+      // asks for one. The `type === 'api' || triggerType === 'api'` disjunction
+      // would refuse all five.
+      const boundElsewhere: Array<[string, Record<string, unknown>]> = [
+        ['api + config.schedule', apiFlow({ schedule: { type: 'interval', intervalMs: 60000 } })],
+        ['api + record-* token', apiFlow({ objectName: 'app_candidate', triggerType: 'record-after-create' })],
+        ['api + array record token', apiFlow({ objectName: 'app_candidate', triggerType: ['record-after-create'] })],
+        [
+          'api + timeRelative descriptor',
+          apiFlow({ timeRelative: { object: 'app_candidate', dateField: 'due_at', withinDays: 3 } }),
+        ],
+        [
+          'schedule + triggerType api',
+          apiFlow({ triggerType: 'api', schedule: { type: 'interval', intervalMs: 60000 } }, { type: 'schedule' }),
+        ],
+      ];
+      for (const [label, flow] of boundElsewhere) {
+        expect(judge(flow).map((f) => f.rule), label).not.toContain(FLOW_API_TRIGGER_SECRET_MISSING);
+      }
+      // A SCALAR `timeRelative` is not routed to the sweep, so the flow falls
+      // through to `api` — measured REFUSED by the engine — and both facts are
+      // reported, at two paths.
+      const scalar = judge(apiFlow({ timeRelative: 'daily' })).map((f) => f.rule);
+      expect(scalar).toContain(FLOW_API_TRIGGER_SECRET_MISSING);
+      expect(scalar).toContain(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
+      // Remove the higher-precedence sibling and the same flow is refused again.
+      expect(judge(apiFlow({})).map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+    });
+
+    it('the id is the published slug', () => {
+      expect(FLOW_API_TRIGGER_SECRET_MISSING).toBe('flow-api-trigger-secret-missing');
+    });
+
+    // [#20611] The id is CLI-only until the runtime publish gate judges the
+    // carried-forward body: a `/meta` save is gated BEFORE `saveMetaItem`
+    // restores the `config.secret` the flow read path withholds (#20552), so a
+    // signed flow's GET → edit → PUT would reach the gate secretless. Each side
+    // of the wall is pinned, and the gate pin carries its own positive control.
+    describe('one rule id on ONE side of the runtime wall — CLI-only until #20611', () => {
+      const secretless = apiFlow({ hookId: 'intake' });
+      const stack = { objects: [candidateObject], flows: [secretless] };
+
+      it('the split is whole: validateFlowTriggerReadiness alone no longer emits the id', () => {
+        expect(validateFlowTriggerReadiness(stack).map((f) => f.rule)).not.toContain(
+          FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        expect(validateFlowApiTriggerSecret(stack).map((f) => f.rule)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+      });
+
+      it('its registry entry gates all three commands on the cli surface only, with a reason', () => {
+        const entry = AUTHORING_RULES.find((r) => r.name === 'validateFlowApiTriggerSecret');
+        expect(entry).toBeDefined();
+        expect(entry!.tier).toBe('gating');
+        expect([...entry!.commands].sort()).toEqual([...AUTHORING_COMMANDS].sort());
+        expect(entry!.surfaces).toEqual(['cli']);
+        expect(entry!.runtimeTypes).toBeUndefined();
+        expect((entry!.surfaceReason ?? '').trim().length).toBeGreaterThan(40);
+        // …while the family's shared entry still crosses the wall.
+        expect(AUTHORING_RULES.find((r) => r.name === 'validateFlowTriggerReadiness')!.surfaces).toContain(
+          'runtime-publish',
+        );
+      });
+
+      it.each([...AUTHORING_COMMANDS])('os %s still refuses a secretless api flow through the table', (command) => {
+        const hits = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter(
+          (f) => f.rule === FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        expect(hits.map((f) => [f.severity, f.path])).toEqual([['error', 'flows[0].nodes[0].config.secret']]);
+      });
+
+      it('the runtime publish gate does not emit it — and still runs the rest of the family', () => {
+        const gated = runRuntimeAuthoringRules({ type: 'flow', item: secretless });
+        expect(gated.rulesRun).toContain('validateFlowTriggerReadiness');
+        expect(gated.rulesRun).not.toContain('validateFlowApiTriggerSecret');
+        expect([...gated.errors, ...gated.advisories].map((f) => f.rule)).not.toContain(
+          FLOW_API_TRIGGER_SECRET_MISSING,
+        );
+        // Positive control: the same door still refuses a flow the family
+        // proves dead, so the absence above is the wall, not a gate that ran
+        // nothing.
+        const dead = runRuntimeAuthoringRules({
+          type: 'flow',
+          item: {
+            name: 'declared_dead',
+            type: 'record_change',
+            status: 'active',
+            nodes: [{ id: 'start', type: 'start', config: { objectName: 'app_candidate', triggerType: 'onCreate' } }],
+          },
+        });
+        expect(dead.errors.map((f) => f.rule)).toContain(FLOW_TRIGGER_UNROUTABLE);
+      });
+    });
+  });
+
   // ── #5762 — the family's severity map ────────────────────────────────────
   //
   // The rules in this file were reviewed as ONE family and split on a single
@@ -1109,6 +1322,21 @@ describe('validateFlowTriggerReadiness', () => {
           ],
         },
       ],
+      [
+        FLOW_API_TRIGGER_SECRET_MISSING,
+        'error',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'unsigned_hook',
+              type: 'api',
+              status: 'active',
+              nodes: [{ id: 'start', type: 'start', config: { hookId: 'intake' } }],
+            },
+          ],
+        },
+      ],
       // ── The controls. Both are hedged, and the hedge is the whole reason the
       //    promotion above is not "everything in this file is an error now".
       [
@@ -1144,7 +1372,7 @@ describe('validateFlowTriggerReadiness', () => {
 
     for (const [rule, severity, stack] of provoke) {
       it(`${rule} is ${severity}`, () => {
-        const matching = validateFlowTriggerReadiness(stack).filter((f) => f.rule === rule);
+        const matching = cliFlowFamily(stack).filter((f) => f.rule === rule);
         // Non-vacuous first: the fixture really does provoke this id.
         expect(matching.length, `${rule} was not provoked by its own fixture`).toBeGreaterThan(0);
         for (const f of matching) expect(f.severity).toBe(severity);
@@ -1157,7 +1385,7 @@ describe('validateFlowTriggerReadiness', () => {
       // makes a gate read as a bug — and the cross-package sentence is exactly
       // what earns `flow-trigger-unknown-object` its warning.
       for (const [rule, severity, stack] of provoke) {
-        for (const f of validateFlowTriggerReadiness(stack).filter((x) => x.rule === rule)) {
+        for (const f of cliFlowFamily(stack).filter((x) => x.rule === rule)) {
           if (severity === 'warning' && rule === FLOW_TRIGGER_UNKNOWN_OBJECT) {
             expect(f.hint, rule).toMatch(/another installed package/);
           }
@@ -1174,7 +1402,7 @@ describe('validateFlowTriggerReadiness', () => {
       // correct flow fail. Without this, "everything is an error" would pass
       // every assertion above.
       expect(
-        validateFlowTriggerReadiness({
+        cliFlowFamily({
           objects: [candidateObject, { name: 'task', label: 'Task', fields: {} }],
           flows: [
             recordFlow({ status: 'active' }),
@@ -1197,6 +1425,16 @@ describe('validateFlowTriggerReadiness', () => {
                     organization: 'org_2mtx1w9d0k4bqf7v',
                   },
                 },
+              ],
+            },
+            // [#20553] A signed inbound flow is what a correct `api` flow looks
+            // like — the secret rule must not move this floor.
+            {
+              name: 'order_intake',
+              type: 'api',
+              status: 'active',
+              nodes: [
+                { id: 'start', type: 'start', config: { hookId: 'intake', secret: 'whsec_4f9a' } },
               ],
             },
           ],

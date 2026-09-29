@@ -541,7 +541,7 @@ describe('[#15349] §5 — a registered `tenancy` that cannot be built is 503, n
     });
 
     it('and an ANONYMOUS caller sees the outage too — ⛔ the 401 is not allowed to swallow it', async () => {
-        // [#13279] The failure this asserts against: degrading the outage to
+        // [commit 6a180e42d] The failure this asserts against: degrading the outage to
         // `{}` answers 401, byte-identical to a genuine anonymous caller.
         const h = await boot({ tenancy: 'factory-throws' });
         const res = await post(h, {});

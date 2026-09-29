@@ -106,7 +106,7 @@
  * line — ① the consequence, concretely, including that the system will keep
  * looking healthy, and ② the fix — and the message carries both.
  *
- * The #13398-class ruling caps this, and is satisfied rather than dodged:
+ * The sink ruling (commit e238c79f0) caps this, and is satisfied rather than dodged:
  * what it forbids is GROWING `error?` onto a published sink that lacks it.
  * {@link BootDiagnosticLogger} declares `error?` AND a required `warn` from
  * birth and nothing is widened — in particular the neighbouring
@@ -117,7 +117,7 @@
  *
  * ## Why `kernel:ready`, and why it shares the neighbour's hook
  *
- * Same hook site as the [#11640] walled-owner verification-path reporter, and
+ * Same hook site as the [commit bf8d129b5] walled-owner verification-path reporter, and
  * for a stronger reason than symmetry: both questions are answered from ONE
  * bounded human-population page read, performed here
  * ({@link probeHumanUsersPresence}) and handed to
@@ -509,7 +509,7 @@ export function resolveNoSignInAccountReport(
 
 /**
  * The `error` channel this report needs, with the `warn` fallback the
- * #13398-class ruling requires of a sink that may not declare `error`.
+ * published-sink ruling (commit e238c79f0) requires of a sink that may not declare `error`.
  *
  * `warn` is REQUIRED and `error` is optional, which is the #9754 shape
  * (`check:optional-error-sink`): the fallback channel a durability report

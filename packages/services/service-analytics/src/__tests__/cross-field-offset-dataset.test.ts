@@ -124,7 +124,7 @@ const CUBE: Cube = {
   sql: OBJECT,
   measures: { n: { sql: '*', type: 'count', title: 'n' } },
   dimensions: Object.fromEntries(
-    Object.keys(CROSS_FIELD_OFFSET_OBJECT_FIELDS).map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
+    Object.keys(CROSS_FIELD_OFFSET_OBJECT_FIELDS).map((n) => [n, { label: n, type: 'string', sql: n }]),
   ),
   public: true,
 } as unknown as Cube;

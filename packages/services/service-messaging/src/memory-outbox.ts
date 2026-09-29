@@ -87,7 +87,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             r.claimedBy = opts.nodeId;
             r.claimedAt = now;
             r.updatedAt = now;
-            // [#11859] The copy handed out carries the claim credential the
+            // [commit d9cf78eaa] The copy handed out carries the claim credential the
             // two lines above just stamped — the record IS the credential.
             out.push({ ...r, claimedBy: opts.nodeId, claimedAt: now });
         }
@@ -117,7 +117,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
 
     async ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
         const id = claimed.id;
-        // [#11859] The runtime half of the ClaimedDeliveryRecord contract, for
+        // [commit d9cf78eaa] The runtime half of the ClaimedDeliveryRecord contract, for
         // JS callers and casts: a record with no claim credential was not
         // handed out by claim()/claimDigest() and is refused before any read.
         if (typeof claimed.claimedBy !== 'string' || typeof claimed.claimedAt !== 'number') {
@@ -128,7 +128,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         // to corrupt and no claim to lose. Unchanged, and declared on the
         // interface so the two backends agree about it.
         if (!r) return;
-        // [#11453] The status precondition. `ack` completes a delivery this
+        // [commit 1a47a5368] The status precondition. `ack` completes a delivery this
         // caller CLAIMED; an unclaimed `pending` row (the ack-as-cancel trap)
         // or an already-terminal one is refused, and nothing below runs — so a
         // refused ack leaves status, attempts and error exactly as they were.
@@ -141,7 +141,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }
-        // [#11859] Ownership: the row is claimed, but not by the claim this
+        // [commit d9cf78eaa] Ownership: the row is claimed, but not by the claim this
         // record came from — it was reaped and re-claimed while the send ran
         // (possibly by this same store handing it to this same node again: the
         // credential is the PAIR, so a later claim's `claimedAt` refuses the
@@ -155,7 +155,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         }
         const now = this.clock();
         // Reached only for a genuinely claimed row, so this counts a real
-        // dispatch attempt and nothing else (#11453).
+        // dispatch attempt and nothing else (commit 1a47a5368).
         r.attempts += 1;
         r.lastAttemptedAt = now;
         r.claimedBy = undefined;

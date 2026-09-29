@@ -215,11 +215,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "提及",
-        help: "@mention 对象的 JSON 数组"
+        help: "评论中被 @ 提及的用户 ID 的 JSON 数组"
       },
       reactions: {
         label: "回应",
-        help: "表情回应对象的 JSON 数组"
+        help: "将每个表情映射到对其做出回应的用户 ID 列表的 JSON 对象"
       },
       is_edited: {
         label: "已编辑"

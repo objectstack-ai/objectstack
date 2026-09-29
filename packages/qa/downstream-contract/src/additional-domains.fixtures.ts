@@ -113,10 +113,10 @@ export const DcCube: Cube = {
   description: 'Account analytics.',
   sql: 'dc_account',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+    count: { label: 'Count', type: 'count', sql: '*' },
   },
   dimensions: {
-    stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
   },
 };
 

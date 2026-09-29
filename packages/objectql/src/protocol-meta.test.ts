@@ -1914,8 +1914,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: {
                     name: 'orders',
                     sql: 'orders',
-                    measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
-                    dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+                    measures: { count: { label: 'Count', type: 'count', sql: '*' } },
+                    dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
                 },
                 organizationId: 'org_alpha',
             });

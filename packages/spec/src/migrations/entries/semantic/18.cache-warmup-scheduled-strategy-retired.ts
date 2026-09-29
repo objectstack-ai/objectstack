@@ -16,11 +16,12 @@ export const entry: SemanticMigration = {
     + 'the vocabulary ever described without pointing outside itself. There is no '
     + 'replacement for the cadence: a warmup on a schedule is a job. Declare a `job` with '
     + 'schedule.expression (system/job.zod.ts) whose handler does the warming — that is '
-    + 'the one cron slot this platform evaluates, and it is the slot #16320 deliberately '
-    + 'kept when it deleted the other seven',
+    + 'the one cron slot this platform evaluates, and it is the slot deliberately kept '
+    + 'when the seven cron-typed positions nothing read were deleted',
   reason:
-    'ADR-0049 enforce-or-remove, closing the residue #16320 left inside the schema it had '
-    + 'just edited. That card deleted CacheWarmup.schedule — the cron key this enum member '
+    'ADR-0049 enforce-or-remove, closing the residue the retirement of the seven cron-typed '
+    + 'positions nothing reads left inside the schema it had just edited. That retirement '
+    + 'deleted CacheWarmup.schedule — the cron key this enum member '
     + 'selected — and declined the member itself on the reading that it is "a value, not a '
     + "position this ruling names\". That is a statement about the ruling's SCOPE, not a "
     + 'finding that the value was sound: after the deletion the member declared a warmup '
@@ -42,14 +43,16 @@ export const entry: SemanticMigration = {
     + 'conversion because there is no source to rewrite: CacheWarmup is bound to no '
     + 'metadata type and embedded in no stack collection, so no authored document and no '
     + 'stored row has ever carried this value, and os migrate meta has nothing to list. '
-    + 'Route 3 of the retirement playbook, the #4834 / #11825 shape: this entry IS the '
-    + 'declaration. ADR-0049, ADR-0087, #17157, #16320.',
+    + 'Route 3 of the retirement playbook, the shape of the dynamic plugin-loading family\'s '
+    + 'removal and the advanced plugin-lifecycle config\'s retirement: this entry IS the '
+    + 'declaration. ADR-0049, ADR-0087.',
   acceptanceCriteria:
     "No configuration passes strategy: 'scheduled' to CacheWarmupSchema or to "
     + 'DistributedCacheConfigSchema.warmup. TypeScript callers cannot: '
     + "CacheWarmup['strategy'] is now 'eager' | 'lazy', so the literal is a compile error "
     + 'at the authoring site. Callers that arrive as JSON get a parse REFUSAL — not the '
-    + 'silent strip #16320 left for the schedule key beside it, because a narrowed enum '
+    + 'silent strip the cron-position retirement left for '
+    + 'the schedule key beside it, because a narrowed enum '
     + 'rejects rather than drops — carrying the prescription, which names the job route. '
     + 'Concretely, check two places. (1) Any host or deployment config embedding a '
     + 'DistributedCacheConfig: a warmup block selecting the retired strategy now fails to '

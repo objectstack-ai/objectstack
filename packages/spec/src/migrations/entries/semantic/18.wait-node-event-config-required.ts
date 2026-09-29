@@ -31,8 +31,8 @@ export const entry: SemanticMigration = {
     + 'stored boundary node is an authoring-surface repair: the native construct for error '
     + 'handling is a `try_catch` region (ADR-0031).',
   reason:
-    'Maintainer ruling, decision batch #127 item 5, verbatim and untranslated: '
-    + '「16678 具体解释，计划用哪个字段判断经理。其他同意」 — carrying the presented option: the '
+    'Maintainer ruling of 2026-09-13, the clause of the reply that covers this item, verbatim '
+    + 'and untranslated: 「其他同意」 — carrying the presented option: the '
     + 'protocol is the source of truth; a designer never invents a default the protocol does '
     + 'not apply; a default the protocol should have is declared by the protocol; a required '
     + 'key has no "unset behaves as". ⛔ NOT losslessly convertible, and the reason is that the '

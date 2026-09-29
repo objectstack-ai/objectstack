@@ -21,25 +21,21 @@ export const DeliveryCube = defineCube({
   sql: 'showcase_task',
   measures: {
     count: {
-      name: 'count',
       label: 'Task Count',
       type: 'count',
       sql: '*',
     },
     total_estimate_hours: {
-      name: 'total_estimate_hours',
       label: 'Total Estimated Hours',
       type: 'sum',
       sql: 'estimate_hours',
     },
     avg_estimate_hours: {
-      name: 'avg_estimate_hours',
       label: 'Average Estimate (h)',
       type: 'avg',
       sql: 'estimate_hours',
     },
     done_rate: {
-      name: 'done_rate',
       label: 'Done Rate (%)',
       type: 'number',
       sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)",
@@ -48,25 +44,21 @@ export const DeliveryCube = defineCube({
   },
   dimensions: {
     status: {
-      name: 'status',
       label: 'Status',
       type: 'string',
       sql: 'status',
     },
     priority: {
-      name: 'priority',
       label: 'Priority',
       type: 'string',
       sql: 'priority',
     },
     due_date: {
-      name: 'due_date',
       label: 'Due Date',
       type: 'time',
       sql: 'due_date',
     },
     assignee: {
-      name: 'assignee',
       label: 'Assignee',
       type: 'string',
       sql: 'assignee',

@@ -303,6 +303,78 @@ describe('[#20336] numberComparandRefusalMessage', () => {
       expect(message.slice(0, 500), form).toContain(head);
     }
   });
+
+  // [#20510] `having`'s site kind, and the driver-bound PostgreSQL clause.
+  describe('[#20510] `aggregated` and `boundByDriver`', () => {
+    const havingSite = {
+      field: 'total', declaredType: 'number', path: 'having.total.$gt', value: 'abc',
+      form: 'not-a-number' as const, aggregated: true as const, boundByDriver: false as const,
+    };
+
+    it('an aggregated site says "a numeric aggregated column", never "declared"', () => {
+      const message = numberComparandRefusalMessage(havingSite, "aggregate('deal')");
+      expect(message).toContain("filter on 'total' compares a numeric aggregated column against \"abc\" at having.total.$gt");
+      expect(message).not.toContain('declared');
+    });
+
+    it('a non-aggregated site keeps saying "a declared … field", set or not', () => {
+      expect(numberComparandRefusalMessage({ ...havingSite, aggregated: false }))
+        .toContain("compares a declared number field against");
+      const { aggregated: _omit, ...unset } = havingSite;
+      expect(numberComparandRefusalMessage(unset)).toContain("compares a declared number field against");
+    });
+
+    it('boundByDriver: false drops the PostgreSQL clause for not-a-number, boolean and date — the only three that ever had one', () => {
+      for (const form of ['not-a-number', 'boolean', 'date'] as const) {
+        const bound = numberComparandRefusalMessage({ ...havingSite, form, boundByDriver: true });
+        const unbound = numberComparandRefusalMessage({ ...havingSite, form, boundByDriver: false });
+        expect(bound, form).toContain('PostgreSQL');
+        expect(unbound, form).not.toContain('PostgreSQL');
+        // Nothing else about the sentence moves — only the PostgreSQL clause is gone.
+        expect(unbound.length, form).toBeLessThan(bound.length);
+      }
+    });
+
+    it('boundByDriver has no effect on a form that never named PostgreSQL', () => {
+      for (const form of NON_NUMERIC_STRING_FORMS.filter((f) => f !== 'not-a-number')) {
+        expect(numberComparandRefusalMessage({ ...havingSite, form, boundByDriver: true }))
+          .toBe(numberComparandRefusalMessage({ ...havingSite, form, boundByDriver: false }));
+      }
+      expect(numberComparandRefusalMessage({ ...havingSite, form: 'array', boundByDriver: true }))
+        .toBe(numberComparandRefusalMessage({ ...havingSite, form: 'array', boundByDriver: false }));
+    });
+
+    it('unset boundByDriver defaults to true — an existing `where` site is unaffected', () => {
+      for (const form of ['not-a-number', 'boolean', 'date'] as const) {
+        const { boundByDriver: _omit, ...unset } = { ...havingSite, form, aggregated: false };
+        expect(numberComparandRefusalMessage(unset))
+          .toBe(numberComparandRefusalMessage({ ...havingSite, form, aggregated: false, boundByDriver: true }));
+      }
+    });
+
+    it('[#20510] the pre-existing `where` message is unchanged, byte for byte', () => {
+      const at = new Date(Date.UTC(2026, 0, 1));
+      expect(numberComparandRefusalMessage(site, "find('deal')")).toBe(
+        "find('deal'): filter on 'amount' compares a declared number field against \"abc\" at where.amount.$gt, "
+        + 'which is not a number: it has no numeric reading, and backends answer it differently '
+        + '(PostgreSQL with a server error). The filter was NOT applied. Write a number (12, -3.5, 1e3) or a '
+        + 'string of exactly that JSON spelling ("12").',
+      );
+      expect(numberComparandRefusalMessage({ ...site, value: true, form: 'boolean' }, "find('deal')")).toBe(
+        "find('deal'): filter on 'amount' compares a declared number field against true at where.amount.$gt, "
+        + 'which is not a number: a boolean names no number (true is not 1), and backends answer it differently '
+        + '(PostgreSQL with a server error). The filter was NOT applied. Write a number (12, -3.5, 1e3) or a '
+        + 'string of exactly that JSON spelling ("12").',
+      );
+      expect(numberComparandRefusalMessage({ ...site, value: at, form: 'date' }, "find('deal')")).toBe(
+        "find('deal'): filter on 'amount' compares a declared number field against "
+        + 'Date(2026-01-01T00:00:00.000Z) at where.amount.$gt, which is not a number: a Date is an instant, not '
+        + 'a number, and backends answer it differently (PostgreSQL with a server error); compare a Date with a '
+        + 'date or datetime field. The filter was NOT applied. Write a number (12, -3.5, 1e3) or a string of '
+        + 'exactly that JSON spelling ("12").',
+      );
+    });
+  });
 });
 
 // ── The fixture ──────────────────────────────────────────────────────────────

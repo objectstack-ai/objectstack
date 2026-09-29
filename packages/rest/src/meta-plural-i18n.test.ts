@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #6349 — the `/meta` routes' PLURAL spelling gets the same i18n as the
+ * Commit 2443bb4c4 — the `/meta` routes' PLURAL spelling gets the same i18n as the
  * singular one.
  *
  * `translateMetaItem` / `translateMetaItems` decide "does this type translate"
@@ -327,19 +327,19 @@ describe('#6349 §2 single item `GET /meta/:type/:name`', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §3 — [#12195] the compound-name read is RETIRED
+// §3 — [commit 7986d973f] the compound-name read is RETIRED
 // ---------------------------------------------------------------------------
 
 describe('#6349 §3 — the compound-name arity no longer exists', () => {
     /**
      * This section drove `GET /meta/:type/:section/:name` and asserted the
      * plural type spelling translated identically to the singular there. The
-     * arity is retired (#12176 stage 3), so the translation surface it covered
+     * arity is retired (stage 3, commit 7986d973f), so the translation surface it covered
      * is served by §2's single-item read — which folds the type through the
      * same `canonicalMetaUrlType` and runs the same translator.
      *
      * What is left to pin is the absence, so a re-mounted compound arity cannot
-     * quietly reappear WITHOUT the plural fold (the #6349 defect: one spelling
+     * quietly reappear WITHOUT the plural fold (the defect commit 2443bb4c4 fixed: one spelling
      * translated, the other not).
      */
     it('mounts no compound `:section` arity to translate', () => {

@@ -52,7 +52,7 @@ async function refusePackageRequest(
   req: any,
   res: any,
 ): Promise<boolean> {
-  // [#13279] The gate's OWN net. `rethrowAuthzStoreUnavailable` keeps the
+  // [commit 6a180e42d] The gate's OWN net. `rethrowAuthzStoreUnavailable` keeps the
   // fail-closed default for every fault except a permission-store outage, which
   // must reach `handlePackageRouteError` and be answered as the 503
   // `SERVICE_UNAVAILABLE` it is — never as a capability denial the caller could
@@ -207,7 +207,7 @@ function sendThrownError(res: any, error: unknown): void {
   // adding one here would be a new rule at one door and would re-create the
   // divergence this closes.
   const declaredCode = demotedDeclaredCode(thrown);
-  // [#12502] The producer's user-facing refusal text (#9934), the SECOND
+  // [#12502] The producer's user-facing refusal text (commit 79c46da90), the SECOND
   // declared channel this writer was holding and dropping. A third spread into
   // the same object, and the three do not interact: `details` is structured
   // context, `declaredCode` is a code spelling, `userMessage` is prose a
@@ -225,7 +225,7 @@ function sendThrownError(res: any, error: unknown): void {
   // obligation to re-derive and inventing one to match the sibling would be the
   // mistake, not the safe choice. Byte for byte the dispatcher twin's
   // expression (`errorFromThrown`, `packages/runtime/src/http-dispatcher.ts`),
-  // which serves this same path and has emitted the channel since #9934.
+  // which serves this same path and has emitted the channel since commit 79c46da90.
   //
   // ⚠️ NOT withheld on the sanitised 5xx above, and this one needs no judgement
   // call: the withhold rewrites a LOCAL `message` const, and

@@ -82,8 +82,8 @@ const cubeWithMeasureType = (type: string): Cube => ({
   name: 'sales',
   title: 'Sales',
   sql: 'opportunity',
-  measures: { revenue: { name: 'revenue', label: 'Revenue', type, sql: 'amount' } as Cube['measures'][string] },
-  dimensions: { region: { name: 'region', label: 'Region', type: 'string', sql: 'region' } },
+  measures: { revenue: { label: 'Revenue', type, sql: 'amount' } as Cube['measures'][string] },
+  dimensions: { region: { label: 'Region', type: 'string', sql: 'region' } },
   public: true,
 });
 

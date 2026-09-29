@@ -12,7 +12,7 @@
  *   * `GET /meta/:type` swallows every one-segment path — `diagnostics`,
  *     `_drafts`, `types` — that is not registered ahead of it;
  *   * `GET /meta/:type/:section/:name` swallowed every three-segment path —
- *     `/history`, `/audit`, `/diff`, `/published` — likewise. [#12195] That
+ *     `/history`, `/audit`, `/diff`, `/published` — likewise. [commit 7986d973f] That
  *     one is RETIRED with compound-name addressing, so the hazard is gone
  *     rather than ordered around; the pin below inverted to match, because a
  *     re-mount is how the hazard comes back and an order pin phrased against
@@ -94,7 +94,7 @@ describe('/meta registration order', () => {
     }
   });
 
-  // [#12195] The three compound arities are RETIRED, so the two pins that used
+  // [commit 7986d973f] The three compound arities are RETIRED, so the two pins that used
   // to live here — "every three-segment literal precedes the compound-name
   // catch-all" and "the FSM state read precedes the compound `/published`
   // twin" — no longer have a second route to order against.

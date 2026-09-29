@@ -72,7 +72,7 @@ export const authIdentityObjects: any[] = [
   // Stable @better-auth/scim 1.7.x model set (#3653): seven library-managed
   // tables plus the ObjectStack-owned credential store for the app-owned
   // verifyBearerToken route. The rc.1-era SysScimProvider retired under
-  // #11757.
+  // commit 4d25d22d4.
   SysScimConnectionBinding,
   SysScimConnectionCredential,
   SysScimGroup,

@@ -2,7 +2,7 @@
 
 /**
  * The published prose that teaches the ADR-0020 D3.3 legal-next-state
- * introspection route spells it the way the REST ledger does (#10178, #14561).
+ * introspection route spells it the way the REST ledger does (commit 38cf397ea, #14561).
  *
  * WHY THIS EXISTS (measured, not argued). #9180 step ② retired the plural
  * `/api/v1/meta/objects/:name/state/:field` registration and moved the SDK to

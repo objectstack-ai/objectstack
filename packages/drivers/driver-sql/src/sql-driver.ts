@@ -16173,7 +16173,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#20444] Compile `{ field: { $empty: true | false } }` — the staged
+   * [#20444] Compile `{ field: { $empty: true | false } }` — the
    * emptiness operator, answered by the field's DECLARED row of the ruled
    * 「is empty」 table (ruling B on #20311, record 5861435168; spelled as this
    * operator by ruling A on #20399, record 5865693155), through the spec's one
@@ -16201,10 +16201,11 @@ export class SqlDriver implements IDataDriver {
    * ({@link undeclaredEmptyOperatorFieldError}), and the multi-value row on a
    * dialect this driver does not model ({@link emptyListUnsupportedDialectError}).
    *
-   * ⚠️ Staged: `$empty` is not in `FILTER_OPERATORS` yet (the maintainer's
-   * amendment of ruling A, record 5868169573: 「照 $like 先例分阶段」), so the
-   * engine's front door still refuses it; this arm answers a caller that
-   * reaches the driver directly, and it is what the flip card turns on.
+   * [#20446] `$empty` is in `FILTER_OPERATORS`, and the view operators
+   * `is_empty` / `is_not_empty` lower to it, so a stored view rule reaches this
+   * arm: the undeclared-field refusal above is what such a rule on the
+   * built-in `id` (or any column this driver was never told the type of)
+   * answers, where the old `$null` lowering compiled `IS NULL`.
    */
   private applyEmptyOperator(
     builder: any,

@@ -20,7 +20,7 @@ export const entry: SemanticMigration = {
     + 'uses `SnakeCaseIdentifierSchema` or `SystemIdentifierSchema` from '
     + '`@objectstack/spec/shared` directly — both stay published.)',
   reason:
-    'Maintainer ruling 2026-09-01 on #13612 (director decision batch C, '
+    'Maintainer ruling 2026-09-01 (director decision batch C, '
     + 'verbatim 「同意」: retire) — ADR-0049 enforce-or-remove. The brands '
     + 'promised compile-time safety ("you cannot pass an ObjectName where a '
     + 'FieldName is expected") that no consumer could obtain: no schema in '

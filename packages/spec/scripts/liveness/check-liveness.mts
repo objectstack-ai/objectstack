@@ -450,6 +450,8 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 //
 // The census filed with #14446 found the two members that make governing it
 // worth the row: `events[].type` accepts `RealtimeEventType`, whose four members
+// (as measured at `5f5511f0`, before #20288 repointed the enum at the emitted
+// `DataEventType` + `BulkDataEventType` names)
 // are spelled `record.created` / `record.updated` / `record.deleted` /
 // `field.changed` while the engine publishes `data.record.*` (DataEventType,
 // src/api/events.zod.ts) — DISJOINT vocabularies, so every member of the

@@ -9,15 +9,15 @@ import type {
   SharingRuleRecipientType,
 } from '@objectstack/spec/contracts';
 // [#7136] The full `resolveAuthzContext` envelope — what `ISharingRuleService`
-// has declared for every one of these context parameters since #6523 (the
-// #6206 ruling: no per-site subset contracts).
+// has declared for every one of these context parameters since commit aa4b90d9a (the
+// full-envelope ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 // [#15981] The built-in platform-operator position NAME is deliberately NOT
 // imported here any more. It used to spell the second half of
 // {@link SharingRuleService.hasPlatformAuthority}, and reading it as authority
 // became an escalation channel once `positions[]` started carrying ADR-0057 D4
 // `sys_user_position` names; that predicate now reads the ADR-0095 rung.
-// [#8710] The ONE predicate for `sys_position.active` / `sys_permission_set.active`
+// [commit 04d03c3a0] The ONE predicate for `sys_position.active` / `sys_permission_set.active`
 // (#8613). Reused rather than re-spelled: two notions of "is this row active"
 // — one honouring the 1/0 and 'false' storage shapes, one not — is how the
 // enforcement hole this closes gets re-opened one seam over.
@@ -191,7 +191,7 @@ export interface SharingRuleServiceOptions {
 }
 
 /**
- * [#8710] Memo for the catalogue reads a recipient expansion adds, scoped to
+ * [commit 04d03c3a0] Memo for the catalogue reads a recipient expansion adds, scoped to
  * ONE evaluator pass.
  *
  * The lifetime is the whole design. It is the same lifetime the graph services
@@ -916,7 +916,7 @@ export class SharingRuleService implements ISharingRuleService {
     const rules = await this.listRules({ object }, context);
     if (rules.length === 0) return [];
     const results: SharingRuleReconcilePassResult[] = [];
-    // [#8710] ONE pass, so N rules naming the same position pay ONE catalogue
+    // [commit 04d03c3a0] ONE pass, so N rules naming the same position pay ONE catalogue
     // read — and the memo dies with this call, so the next pass re-reads and a
     // deactivation is honoured immediately.
     const pass: RuleEvaluationPass = {};
@@ -1189,7 +1189,7 @@ export class SharingRuleService implements ISharingRuleService {
    * the evaluator must still see rows no individual recipient could, it must
    * just stop seeing rows the RULE has no business in.
    *
-   * ## [#14484] The same context is what the grant is WRITTEN under
+   * ## [commit 3f64fe6c6] The same context is what the grant is WRITTEN under
    *
    * `reconcile` / `reconcileForRecord` hand this context to
    * `SharingService.grant`, which stamps `sys_record_share.organization_id`
@@ -1445,7 +1445,7 @@ export class SharingRuleService implements ISharingRuleService {
       return members;
     }
     if (rule.recipient_type === 'position') {
-      // [#8710] A DEACTIVATED position confers NOTHING — checked before the
+      // [commit 04d03c3a0] A DEACTIVATED position confers NOTHING — checked before the
       // expansion, not after it, so the rule's desired grant set is empty and
       // the reconcilers' existing revoke-the-remainder branches retract what it
       // already materialised. See {@link positionConfersAccess}.
@@ -1537,7 +1537,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [#8710] Does `positionName` still CONFER access in this rule's
+   * [commit 04d03c3a0] Does `positionName` still CONFER access in this rule's
    * organization? Memoised for the pass; the extra read is accepted.
    *
    * Maintainer ruling, 2026-08-15, verbatim:
@@ -1579,7 +1579,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [#8710] The catalogue verdict for one position name. Three fallbacks, each
+   * [commit 04d03c3a0] The catalogue verdict for one position name. Three fallbacks, each
    * of them a way this could otherwise have become a silent mass revocation:
    *
    *  1. **A name with no `sys_position` row is untouched.** Position names
@@ -1647,7 +1647,7 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * ## The defect this closes, and which half of it is the security half
    *
-   * `sys_record_share` is tenant-scoped in the #13491 ledger (#14484), so on a
+   * `sys_record_share` is tenant-scoped in the #13491 ledger (commit 3f64fe6c6), so on a
    * walled install an organization-less system insert on it is refused loudly
    * with {@link SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE}. `SharingService.grant`
    * resolves the organization on every path that can; a platform-global rule

@@ -57,7 +57,7 @@
  *     These are spellings that already worked at the URL boundary, including
  *     the camelCase ones and the five that name PLUGIN-registered kinds with no
  *     static registry entry at all (`webhooks`, `connectors`, … — `themes` was
- *     one of them until #10485 retired the carrier, and left this limb WITH
+ *     one of them until commit 35ad101bc retired the carrier, and left this limb WITH
  *     the `PLURAL_TO_SINGULAR` row, which is how a retired kind exits the
  *     spelling contract without this module changing).
  *     Keeping this limb whole is what makes the derivation non-breaking: no
@@ -263,7 +263,7 @@ export function metaUrlSpellingRefusal(
  * registry entry. A refusal quantified over the registry alone would refuse
  * all five, i.e. break `PUT /meta/webhook/stripe`, which is the exact
  * operation the plugin path exists to serve. (`theme` was the sixth until
- * #10485 retired its carrier; dropping the `PLURAL_TO_SINGULAR` row is what
+ * commit 35ad101bc retired its carrier; dropping the `PLURAL_TO_SINGULAR` row is what
  * moved `/meta/theme` from this set to `unrecognisedMetaTypeRefusal`'s
  * verdict.)
  *

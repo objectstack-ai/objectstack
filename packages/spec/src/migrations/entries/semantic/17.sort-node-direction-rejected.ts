@@ -30,11 +30,13 @@ export const entry: SemanticMigration = {
     + 'is trivially mechanical, but a stored `direction: "asc"` is ambiguous evidence — the '
     + 'author may have written it meaning ascending and been silently GIVEN ascending, so '
     + 'the visible behaviour never contradicted them, and only they can say whether the '
-    + 'sort they have been reading was the sort they asked for. Registered by the #6350 stock '
-    + 'reconciliation: the in-code alias tombstone shipped with #4721, but the ledger half '
+    + 'sort they have been reading was the sort they asked for. Registered by the stock '
+    + 'reconciliation of the v17 train\'s breaking changesets: the in-code alias tombstone '
+    + 'shipped with the change that closed both doors '
+    + '(maintainer ruling 2026-08-03), but the ledger half '
     + 'never did, and a retirement needs both — the tombstone is the proof the removal was '
     + 'declared, the ledger entry is what `spec-changes.json`, the upgrade guide and '
-    + '`os migrate meta` project to consumers. ADR-0049 / ADR-0087, #4721 (backfilled #6350).',
+    + '`os migrate meta` project to consumers. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No authored `orderBy` entry — in metadata, in a saved view\'s `sort[]`, or in a REST / '
     + 'RPC request body — spells the key `direction`. The upgrade\'s own verify loop is that '

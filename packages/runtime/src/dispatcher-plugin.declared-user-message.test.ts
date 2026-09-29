@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13241] `errorResponseBase` carries the producer's `userMessage` to the wire
+ * [commit a21d2a9cf] `errorResponseBase` carries the producer's `userMessage` to the wire
  * — the author-facing text channel the declared-5xx prose withhold names as its
  * own compensation, and the one ADR-0112 boundary that dropped it.
  *
@@ -29,10 +29,10 @@
  *
  * ## Why this is the compensation channel and not a decoration
  *
- * The 2026-08-27 ruling on #12509 (option D), propagated to #12281, made this
+ * The 2026-08-27 ruling on #12509 (option D), landed in commit 0783d7b80, made this
  * exit withhold the message of every **declared** 5xx:
  *
- * > the author-facing text channel is `userMessage` (#9934), never the raw
+ * > the author-facing text channel is `userMessage` [commit 79c46da90], never the raw
  * > message.
  *
  * That sentence only holds if the channel exists here. Before this change a
@@ -43,7 +43,7 @@
  *
  * ## ⚠️ Status-agnostic, which is wider than the card's framing
  *
- * #9934 made the mark status-agnostic on purpose ("a 400, 403, 409 or 503
+ * Commit 79c46da90 made the mark status-agnostic on purpose ("a 400, 403, 409 or 503
  * refusal may all carry it"), so the gap here was never confined to the
  * declared-5xx band that motivated it: a marked **4xx** refusal reaching this
  * exit lost the field too, with no withhold anywhere in the picture. `§2` drives
@@ -194,14 +194,14 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             expect(res.statusCode).toBe(503);
             expect(res.body.success).toBe(false);
 
-            // The withhold still holds — this change must not re-open #12281.
+            // The withhold still holds — this change must not undo commit 0783d7b80.
             expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
             expect(JSON.stringify(res.body)).not.toContain('acme_prod');
 
             // …and the author's channel now survives it.
             expect(res.body.error.userMessage).toBe('Reporting is briefly offline. Try again in a few minutes.');
 
-            // The mark never MOVES the status or the code (#9934's third
+            // The mark never MOVES the status or the code (commit 79c46da90, the ruling's third
             // constraint) — a marked fault is still the sanitised fault.
             expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
         });
@@ -209,7 +209,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
         it('an UNMARKED declared 5xx is byte-identical to before — the mark is opt-in', async () => {
             // The regression guard on the paragraph above: if the field were
             // synthesised from `message` rather than read from the throw, the
-            // withheld prose would ride out on the new channel and #12281 would
+            // withheld prose would ride out on the new channel and commit 0783d7b80 would
             // be undone by its own compensation.
             const res = await throwFromAnalyticsQuery(
                 declaring({ status: 503, code: 'SERVICE_UNAVAILABLE' }, 'Upstream warehouse pool exhausted for tenant acme_prod.'),
@@ -299,7 +299,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             expect(res.statusCode).toBe(403);
             expect(res.body.error.code).toBe('PERMISSION_DENIED');
             // The half this card repaired: the author's channel now survives
-            // the denial door too (#9934 is status-agnostic, and 403 is the
+            // the denial door too (commit 79c46da90's mark is status-agnostic, and 403 is the
             // refusal class most likely to carry authored text).
             expect(res.body.error.userMessage).toBe('Ask an admin for the Reporting role.');
             // …verbatim, and never in place of the diagnostic channel.

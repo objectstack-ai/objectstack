@@ -21,7 +21,7 @@ export const entry: SemanticMigration = {
     + 'was validating platform event names, it parses through the enums '
     + 'instead.)',
   reason:
-    'Maintainer ruling 2026-09-01 on #13613 (director decision batch C, '
+    'Maintainer ruling 2026-09-01 (director decision batch C, '
     + 'verbatim 「同意」: retire) — ADR-0049 enforce-or-remove. The schema '
     + 'presented itself as the platform\'s event-name grammar while nothing '
     + 'that runs consumed its three binding schemas, and the closed enums '

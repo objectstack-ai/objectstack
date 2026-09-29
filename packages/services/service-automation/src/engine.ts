@@ -5364,7 +5364,10 @@ export class AutomationEngine implements IAutomationService {
                     typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
                 if (!this.evaluateCondition(condExpr, variables)) {
                     this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
-                    return { success: true, output: { skipped: true, reason: 'condition_not_met' } };
+                    // `flowLabel` rides even here, unlike `successMessage` /
+                    // `summary`: it names the flow, it claims no work done, and
+                    // this answer reaches a runner as a 200 like any other.
+                    return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
                 }
             }
 
@@ -5411,7 +5414,7 @@ export class AutomationEngine implements IAutomationService {
                         `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
                     { recordId: String(guardRecordId) },
                 );
-                return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
+                return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' }, flowLabel: flow.label };
             }
             if (reentryKey) {
                 this.activeRecordFlows.add(reentryKey);
@@ -5568,6 +5571,10 @@ export class AutomationEngine implements IAutomationService {
                 // one would be a toast about work nobody did. They carry no
                 // `summary` for exactly the same reason.
                 successMessage: flow.successMessage,
+                // The authored flow name for the runner header and the
+                // completion toast — on EVERY evaluation's result, paused and
+                // terminal alike (see `AutomationResult.flowLabel`).
+                flowLabel: flow.label,
                 // #4354 — hand the counts back synchronously so a caller
                 // (a `subflow` roll-up, a runtime test asserting the sweep wrote
                 // something) never has to re-read the run to learn what it did.
@@ -5631,6 +5638,7 @@ export class AutomationEngine implements IAutomationService {
                     runId,
                     durationMs,
                     screen: err.screen,
+                    flowLabel: flow.label,
                 };
             }
 
@@ -5780,7 +5788,9 @@ export class AutomationEngine implements IAutomationService {
             // `persistSuspendedRun` stored the continuation under — so it is
             // the only id `resume()` can be called with.
             if (flow.errorHandling?.strategy === 'retry') {
-                return this.retryExecution(flowName, context, startTime, flow.errorHandling, flow.errorMessage);
+                return this.retryExecution(
+                    flowName, context, startTime, flow.errorHandling, flow.errorMessage, flow.label,
+                );
             }
             return {
                 success: false,
@@ -5833,6 +5843,7 @@ export class AutomationEngine implements IAutomationService {
                 // to the raw node error text, which is what every non-screen
                 // flow showed until now.
                 errorMessage: flow.errorMessage,
+                flowLabel: flow.label,
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
                 // [#17562] Recomputed when the guard above had to abandon
@@ -6532,6 +6543,10 @@ export class AutomationEngine implements IAutomationService {
                             runId,
                             durationMs: Date.now() - run.startTime,
                             screen: childRes.screen,
+                            // THIS run's flow, not the child's: the caller
+                            // addressed this run id and its runner names the
+                            // flow it launched. The child only lends a screen.
+                            flowLabel: flow.label,
                         };
                     }
                     // [#14379] A child REFUSAL is not a child failure. The
@@ -6593,7 +6608,7 @@ export class AutomationEngine implements IAutomationService {
                             error,
                             this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
                         );
-                        return { success: false, error, durationMs: Date.now() - run.startTime };
+                        return { success: false, error, durationMs: Date.now() - run.startTime, flowLabel: flow.label };
                     }
                     // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
                     // refusing terminal — an `end` declaring
@@ -7007,6 +7022,7 @@ export class AutomationEngine implements IAutomationService {
                     output,
                     durationMs,
                     successMessage: flow.successMessage,
+                    flowLabel: flow.label,
                     summary,
                 };
             } catch (err: unknown) {
@@ -7097,7 +7113,7 @@ export class AutomationEngine implements IAutomationService {
                         steps,
                         variables: variablesSnapshot,
                     }, context);
-                    return { success: true, status: 'paused', runId, durationMs, screen: err.screen };
+                    return { success: true, status: 'paused', runId, durationMs, screen: err.screen, flowLabel: flow.label };
                 }
 
                 const errorMessage = err instanceof Error ? err.message : String(err);
@@ -7256,6 +7272,7 @@ export class AutomationEngine implements IAutomationService {
                     // worse) condition, which this stamp must not claim.
                     status: 'stranded',
                     errorMessage: flow.errorMessage,
+                    flowLabel: flow.label,
                     // [#15555] Recomputed when the guard above had to abandon
                     // `recordLog`: the same pure function of the same steps
                     // that `recordLog`'s own first statement runs, so the two
@@ -8970,6 +8987,8 @@ export class AutomationEngine implements IAutomationService {
      *    `'paused'`, so callers can resume it", and a refused run is never
      *    resumed — handing one back would advertise a verb that answers
      *    `RUN_NOT_FOUND`.
+     *  - `flowLabel` — the refused run's own flow, as on every evaluation's
+     *    result: the refusal notice is still shown under the flow's name.
      *
      * The `recordLog` call is guarded exactly as the completion sites are
      * (#16274 / #15555): a history write must never break the run that
@@ -9038,6 +9057,7 @@ export class AutomationEngine implements IAutomationService {
             success: true,
             status: 'refused',
             refusalMessage: args.refusalMessage,
+            flowLabel: args.flow.label,
             output,
             durationMs: args.durationMs,
             summary: logged?.summary ?? summarizeRun(args.steps),
@@ -11252,7 +11272,8 @@ export class AutomationEngine implements IAutomationService {
      * passed rather than re-read: `execute()` already holds the parsed flow,
      * and the exhausted exit below must report the definition THIS dispatch
      * started under — not whatever a hot-reload re-registered under the same
-     * name while the loop slept between attempts (#9414).
+     * name while the loop slept between attempts (#9414). `flowLabel` is
+     * passed for the same reason.
      */
     private async retryExecution(
         flowName: string,
@@ -11260,6 +11281,7 @@ export class AutomationEngine implements IAutomationService {
         startTime: number,
         errorHandling: NonNullable<FlowParsed['errorHandling']>,
         flowErrorMessage: string | undefined,
+        flowLabel: string,
     ): Promise<AutomationResult> {
         // `maxRetries >= 1` is guaranteed under `strategy: 'retry'` — the schema
         // refuses the zero-attempt spelling of "retry" (#4247), so reaching this
@@ -11332,6 +11354,7 @@ export class AutomationEngine implements IAutomationService {
             durationMs: Date.now() - startTime,
             status: 'failed',
             errorMessage: flowErrorMessage,
+            flowLabel,
         };
     }
 
@@ -11627,7 +11650,7 @@ export class AutomationEngine implements IAutomationService {
             // The author's completion text has to be produced here as well, or
             // `successMessage` would be a function of which attempt happened to
             // work — the same route-dependent shape the fix is removing.
-            return { success: true, output, durationMs, successMessage: flow.successMessage, summary };
+            return { success: true, output, durationMs, successMessage: flow.successMessage, flowLabel: flow.label, summary };
         } catch (err: unknown) {
             // [#15788] The THIRD producer: an attempt that reached a refusing
             // `end`. A flow under `errorHandling.strategy: 'retry'` is handed
@@ -11730,6 +11753,7 @@ export class AutomationEngine implements IAutomationService {
                     runId,
                     durationMs,
                     screen: err.screen,
+                    flowLabel: flow.label,
                 };
             }
 
@@ -11802,6 +11826,7 @@ export class AutomationEngine implements IAutomationService {
                 durationMs,
                 status: 'failed',
                 errorMessage: flow.errorMessage,
+                flowLabel: flow.label,
                 // [#17562] Recomputed when the guard above had to abandon
                 // `recordLog`: the same pure function of the same steps that
                 // `recordLog`'s own first statement runs, so the two spellings

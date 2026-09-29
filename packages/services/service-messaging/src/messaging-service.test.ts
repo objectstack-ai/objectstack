@@ -796,7 +796,7 @@ function recordFinds(engine: any): Array<{ object: string; query: any }> {
 }
 
 /**
- * [#6363] `ListNotificationsResponseSchema.unreadCount` is published into the
+ * [commit 17d095413] `ListNotificationsResponseSchema.unreadCount` is published into the
  * API reference as "Total number of unread notifications". It was counted
  * inside `rows.map(...)`, i.e. over the `limit`-truncated window, so the badge
  * saturated at the window size forever: measured on a real stack with 60
@@ -960,7 +960,7 @@ describe('[#6363] listInbox — unreadCount is the TOTAL unread, not the fetched
  * documented as "mark **every** currently-unread inbox message as read"
  * cleared at most 200 receipts per call.
  *
- * #6363 did not introduce this; it removed the cover. While `unreadCount` was
+ * Commit 17d095413 did not introduce this; it removed the cover. While `unreadCount` was
  * counted over the window the truncation was self-consistent and invisible
  * (clear 200, poll, see a window with nothing unread in it, badge 0). Now that
  * the badge is the true total, one response pair states the contradiction on
@@ -968,8 +968,8 @@ describe('[#6363] listInbox — unreadCount is the TOTAL unread, not the fetched
  * `GET /notifications → { unreadCount: 150 }`.
  *
  * Route C — redefine "all" as "the current window" — was excluded by the
- * maintainer's #6363 Option A ruling (make the declaration true). The sweep now
- * reads the unread SET directly instead of a page of the list.
+ * maintainer's Option A ruling that commit 17d095413 landed (make the declaration
+ * true). The sweep now reads the unread SET directly instead of a page of the list.
  */
 describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window', () => {
     const logger = silentLogger();
@@ -980,7 +980,7 @@ describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window
 
         const res = await svc.markAllRead('u1');
         // Before: `readCount: 200`, and 150 messages still unread behind a
-        // badge that — since #6363 — reported them correctly.
+        // badge that — since commit 17d095413 — reported them correctly.
         expect(res).toEqual({ success: true, readCount: 350 });
         expect((await svc.listInbox('u1')).unreadCount).toBe(0);
 
@@ -1042,7 +1042,7 @@ describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window
             expect(calls, `inbox of ${n}`).toHaveLength(2);
             const inboxRead = calls.find((c) => c.object === 'sys_inbox_message')!;
             // Unwindowed, unordered and one column wide — the same projection
-            // #6363's `countUnreadTotal` already reads to answer the badge, so
+            // commit 17d095413's `countUnreadTotal` already reads to answer the badge, so
             // the sweep asks the data layer for nothing the bell poll does not
             // ask it on every saturated page.
             expect(inboxRead.query.where).toEqual({ user_id: 'u1' });
@@ -1119,7 +1119,7 @@ describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window
         // fed `markRead` the inbox ROW id (`listInbox` views it as `nid ??
         // String(m.id)`), which inserted a receipt the join never reads back —
         // it could not make the row read and still counted itself into
-        // `readCount`. Skipping it keeps `readCount` honest; #6363's count goes
+        // `readCount`. Skipping it keeps `readCount` honest; commit 17d095413's count goes
         // on reporting the row as unread, which is the true state. Whether such
         // a row should be readable at all is #6448 — a gap in the receipt KEY,
         // not in this sweep, and dormant: the single `emit()` ingress always
@@ -1268,7 +1268,7 @@ describe('MessagingService — plugin-facing inbox writes scoped to the authenti
 });
 
 /**
- * [#11452] The plugin-facing inbox READ door.
+ * [commit 3b5f0360c] The plugin-facing inbox READ door.
  *
  * The measured BEFORE, the read-side sibling of #10753: the messaging service
  * is registered as a kernel service and the kernel hands every plugin ONE

@@ -563,7 +563,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // build the other command would have stopped. Joining the suite is the whole
   // fix; the two hand-wired call sites are deleted with it (#4345 follow-up).
   { name: 'validateReadonlyFlowWrites', run: validateReadonlyFlowWrites },
-  // [#13653] The SAME question as the member above, on the surface that had no
+  // [commit 36d287803] The SAME question as the member above, on the surface that had no
   // answer for it: a hook body's `ctx.api.object('x').update({ readonlyField })`.
   // A hook's `ctx.api` is a ScopedContext over the TRIGGERING operation's
   // context, so on a non-system trigger the engine strips the key and the call

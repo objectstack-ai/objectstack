@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14704 — the single-record `/data` door must not ship the QuickJS debug
+ * Commit 1c7adc73d — the single-record `/data` door must not ship the QuickJS debug
  * wrapper out of a declared-code structured arm.
  *
  * ## What was measured, on `origin/main` @ `99b4deba49`
@@ -21,7 +21,7 @@
  *
  * The bulk door is right because #11588 taught `resolveErrorResponse`'s
  * declared-status passthrough to read `sandboxBusinessMessage`, and because
- * #14541 excludes a sandbox-origin error from the shared consult entirely. The
+ * commit 6d178a408 excludes a sandbox-origin error from the shared consult entirely. The
  * single door reached the arms and shipped the wrapper — #11588's own defect,
  * one door over, with the direction reversed rather than closed.
  *
@@ -36,7 +36,7 @@
  *  §3 the non-sandbox control: a plain producer on the same codes keeps
  *     `error.message` byte for byte — the two-read rule is a read of a field
  *     the sandbox populated, never a strip of the wrapper off `.message`;
- *  §4 CONVERGED (#15071, maintainer ruling 2026-09-04 / batch #27, option B):
+ *  §4 CONVERGED (commit cf6e0a193, maintainer ruling 2026-09-04 / batch #27, option B):
  *     a sandboxed CRASH carrying a declared code reaches the unwrap door's
  *     sanitised `500 UNCLASSIFIED_FAULT` whatever code it declares — the
  *     terminal moved above the arms (`isSandboxCrash`). This section was the
@@ -47,7 +47,7 @@
  *     crash branch moves", so an ordinary declared refusal is untouched;
  *  §5 the bulk-door control: this change is unreachable from
  *     `resolveErrorResponse`, which declines the consult for a sandbox-origin
- *     error (#14541), so nothing moves on those routes;
+ *     error (commit 6d178a408), so nothing moves on those routes;
  *  §6 the drift guard: every arm in the shared classification that relays a
  *     PRODUCER sentence asks the shared rule, so the next arm cannot
  *     reintroduce the raw relay silently.
@@ -63,7 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The classification's own source, read once: §4-derivation and §6 both scan it
- * — one re-derives the arm list from the tree (the #15071 ruling's execution
+ * — one re-derives the arm list from the tree (the ruling commit cf6e0a193 landed: its execution
  * constraint), the other guards the sentence rule. Same package, so the read
  * does not escape it (AGENTS.md → cross-package test inputs).
  */
@@ -233,8 +233,8 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
     });
 
     /**
-     * FLIPPED by #15071, deliberately and in that card's PR, from
-     * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline PR #15065 used
+     * FLIPPED by commit cf6e0a193, deliberately and in that commit, from
+     * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline commit 1c7adc73d used
      * on its own §4 one file over. ⛔ The section is not DELETED: it is the only
      * thing that would notice the divergence coming back, and what changes is
      * its verdict, not its existence.
@@ -256,7 +256,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
      *
      *  - **the flip**, per arm and by NAME over {@link ARMS} — the list the
      *    ruling required be RE-DERIVED from the tree rather than copied from
-     *    #14704, and `§4-derivation` below is the guard that keeps it derived;
+     *    the list commit 1c7adc73d enumerated, and `§4-derivation` below is the guard that keeps it derived;
      *  - **the positive control STAYS** and is still a control: the same crash
      *    carrying NO declared code reaches the same sanitised 500, so a green
      *    flip leg cannot be read as "the terminal swallowed everything";
@@ -337,7 +337,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
 
         /**
          * The ruling's own execution constraint: *"the seat re-derives the arm
-         * list from the tree, not from #14704's list."* Re-deriving once is a
+         * list from the tree, not from [commit 1c7adc73d]'s list."* Re-deriving once is a
          * reading that rots; this leg is the same re-derivation asked
          * mechanically, so the next arm added to the shared classification is
          * either covered above or excused here BY NAME.
@@ -422,7 +422,7 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
         });
 
         it('a sandbox-origin error never reaches the shared consult there (#14541)', () => {
-            // Proof by the consequence #14541 recorded: the arms' structured
+            // Proof by the consequence commit 6d178a408 recorded: the arms' structured
             // fields are absent on this door for a sandbox producer.
             const wire = bulkDoor(sandboxRefusal({ code: 'DELETE_RESTRICTED', status: 409, object: 'account', dependentObject: 'contact' }), 'account');
             expect(wire.body).not.toHaveProperty('dependentObject');

@@ -34,7 +34,7 @@ import { isEngineDuplicateRecordEnvelope } from './error-response.js';
  * no verdict at all and the write answered `VALIDATION_FAILED`.
  *
  * So the dry-run branch below calls {@link ImportProtocolLike.validateData}
- * (#6037) instead: the engine runs the same `validateRecord` /
+ * (commit 18189983d) instead: the engine runs the same `validateRecord` /
  * `evaluateValidationRules` `insert()` runs, under this deployment's own
  * ADR-0104 posture, and persists nothing. Agreement is by construction rather
  * than by a copy kept in step by hand.
@@ -150,7 +150,7 @@ export interface ImportProtocolLike {
    */
   insertManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
   /**
-   * Validate-only (#6037 — #4633 ruling D). The write path's verdict on a
+   * Validate-only (commit 18189983d — #4633 ruling D). The write path's verdict on a
    * candidate row, with nothing persisted. The dry run routes through THIS
    * rather than re-deriving a verdict of its own.
    *
@@ -325,14 +325,14 @@ export function sanitizeRowError(raw: unknown): string {
  * `code` therefore speaks one vocabulary across the whole row report: the
  * field-level catalog (ADR-0114) that `coerceRow`'s cell failures already use.
  *
- * ## One wire spelling for a unique-constraint refusal (#14723)
+ * ## One wire spelling for a unique-constraint refusal (commit 65846bc46)
  *
  * The engine answers a driver's unique violation with its `DuplicateRecordError`
  * envelope (`code: 'DUPLICATE_RECORD'`, `status: 409`, the driver's error on
  * `cause`), and this report used to relay that code verbatim — while the
  * WHOLE-REQUEST failure on the very same `POST /data/:object/import` answered
  * `UNIQUE_VIOLATION` through `mapDataError`. Maintainer ruling (2026-09-03,
- * #14723): one wire spelling on every route. So the engine's envelope is mapped
+ * commit 65846bc46): one wire spelling on every route. So the engine's envelope is mapped
  * to `UNIQUE_VIOLATION` here, by the same predicate the whole-request arm uses
  * ({@link isEngineDuplicateRecordEnvelope}: registered code AND class name),
  * before the producer's own code is read. A field-level finding still wins
@@ -518,7 +518,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
    *
    * Runs on EVERY dry run, whatever `runAutomations` says. The write's
    * `beforeInsert` hooks fire before validation and could in principle derive
-   * a field this reports on — a boundary #6037 documents and deliberately does
+   * a field this reports on — a boundary commit 18189983d documents and deliberately does
    * not close, because firing user-authored hooks (mail, outbound calls,
    * writes to other objects) inside a preview is the retired `validateOnly`
    * defect in a new spelling. Gating on `!runAutomations` instead would leave

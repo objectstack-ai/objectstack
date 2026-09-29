@@ -7673,7 +7673,6 @@ const metricFiltersRemoved: MetadataConversion = {
         measures: {
           // The card's measured shape: parsed, registered, returned unfiltered.
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
@@ -7682,10 +7681,10 @@ const metricFiltersRemoved: MetadataConversion = {
           // A metric WITHOUT the key rides through untouched — the strip
           // dispatches on key presence, and the copy-on-write contract keeps
           // the reference.
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7695,15 +7694,14 @@ const metricFiltersRemoved: MetadataConversion = {
         sql: 'orders',
         measures: {
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
           },
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7769,25 +7767,25 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           // Mixed list — the sub-day names go, the rest stays in its order.
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['hour', 'day', 'month'],
           },
           // Sub-day ONLY — the key goes rather than becoming an empty list.
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
             granularities: ['second', 'minute'],
           },
           // Neither retired member nor the key at all: both ride through, and
           // the copy-on-write contract keeps the references.
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7795,20 +7793,20 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['day', 'month'],
           },
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
           },
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7899,8 +7897,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             // The persisted shape: `sql` was REQUIRED and `relationship` was
             // MATERIALIZED by the schema's own default, so this is what a cube
@@ -7920,9 +7918,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
           // A SECOND cube, so the notices have to distinguish two of them.
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             // Only the cardinality — a join whose `sql` an author already
@@ -7937,8 +7935,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             project: { name: 'showcase_project' },
             owner: { name: 'sys_user' },
@@ -7947,9 +7945,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             customer: { name: 'crm_account' },
@@ -7961,6 +7959,141 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
     // `billing.customer` loses the materialized default, and `delivery.owner`
     // produces none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `measures.<metric>.name` and `dimensions.<dimension>.name` — the inner name a
+ * cube member used to REQUIRE (#20300, ADR-0049 enforce-or-remove; triage
+ * verdict RETIRE by the maintainer's criterion: Cube.dev and LookML key a
+ * member by its declared name, with no second inner name that can disagree).
+ *
+ * `measures` and `dimensions` are RECORDS, and every consumer resolves a member
+ * by its KEY — `AnalyticsService#getMeta` and the in-memory driver publish
+ * `<cube>.<key>`, `NativeSQLStrategy#lookupMember` and the in-memory driver's
+ * `resolveMeasure` / `resolveDimension` index the bag by key. The inner `name`
+ * was a second copy of the identity that nothing read.
+ *
+ * ## Why a D2 strip, and why it strips a DISAGREEING value too
+ *
+ * The key was REQUIRED, so every cube artifact written from the old schema's
+ * parse output, and every stored `analytics_cube` row, carries it on every
+ * member — and after the tombstone the boot door refuses it
+ * (`ObjectStackDefinitionSchema` spreads `analyticsCubes: z.array(CubeSchema)`).
+ * Only the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so this
+ * entry is what keeps a deployed cube booting.
+ *
+ * A value EQUAL to its key is the lossless case the triage named. A value that
+ * DISAGREES is stripped as well, and that is not a guess about intent: the key
+ * already won everywhere, so the running system never saw the inner spelling,
+ * and deleting it changes no query and no discovery answer. Leaving it in place
+ * would change one — the cube would stop loading. What the strip cannot decide
+ * is which spelling the author MEANT, so the notice prints both (`from` carries
+ * the inner value, `to` names the key that stays) and the paired D3 entry
+ * `cube-member-inner-name-retired` addresses that judgement to the author.
+ *
+ * Members live one level below the collection item, in two records, so the
+ * walk runs per member — the `metric-filters-removed` shape, over both bags.
+ * The emitted path NAMES the cube, as `cube-join-sql-and-relationship-removed`
+ * does: an index into the author's `analyticsCubes[]` is a position, not a name.
+ */
+const cubeMemberInnerNameRemoved: MetadataConversion = {
+  id: 'cube-member-inner-name-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name',
+  summary:
+    "cube member key 'name' removed from measures and dimensions (ADR-0049 enforce-or-remove — nothing read it: "
+    + 'every consumer resolves a member by its record KEY, published and queried as `<cube>.<key>`. The '
+    + 'record key is the member\'s name; to rename a member, rename its key)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      let next: Dict = cube;
+      for (const bag of ['measures', 'dimensions'] as const) {
+        const members = cube[bag];
+        if (!isDict(members)) continue;
+        let touched = false;
+        const nextMembers: Dict = { ...members };
+        for (const [key, member] of Object.entries(members)) {
+          if (!isDict(member) || !('name' in member)) continue;
+          const { name, ...rest } = member;
+          const at = `${where}.${bag}.${key}.name`;
+          emit(name === key
+            ? { from: 'name', to: '(removed)', path: at }
+            : { from: `name ${JSON.stringify(name)}`, to: `(removed; the record key "${key}" is the name)`, path: at });
+          nextMembers[key] = rest;
+          touched = true;
+        }
+        if (touched) next = { ...next, [bag]: nextMembers };
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            // The persisted shape: `name` was REQUIRED, and every producer in
+            // the repo wrote it equal to the key it filed the member under.
+            count: { name: 'count', label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { name: 'total_amount', label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them.
+          name: 'events',
+          sql: 'event',
+          measures: {
+            // DISAGREEING — the in-memory driver's own fixtures authored this
+            // shape and queried `events.eventCount`: the key won, the inner
+            // spelling was inert. Stripped, and the notice prints both.
+            eventCount: { name: 'event_count', label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            // Already canonical — rides through untouched. The fixture's own
+            // control: the strip dispatches on key presence.
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            count: { label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          name: 'events',
+          sql: 'event',
+          measures: {
+            eventCount: { label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: three equal names on `orders`, one
+    // disagreeing name on `events`, and none for the canonical `events.kind`.
+    expectedNotices: 4,
   },
 };
 
@@ -9273,8 +9406,8 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
         // Minimal by the §3 disjointness contract: the retired key and nothing
         // else this major's other `connectors[]` entries also walk
         // (`errorMapping`, `health` / `status` / `webhooks` — `health` once as
-        // `health.circuitBreaker.monitoringWindow` — and `triggers[].interval`),
-        // so every notice here is attributable to this id.
+        // `health.circuitBreaker.monitoringWindow` — and `triggers`, once as
+        // `triggers[].interval`), so every notice here is attributable to this id.
         { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
         // A connector that never authored the key keeps its identity — the
         // copy-on-write contract `stripKeys` / `mapCollection` are built on.
@@ -9506,100 +9639,33 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
   },
 };
 
-/**
- * The connector duration key whose name carried no unit → suffixed (protocol
- * 18, #15680 for #14478): `triggers[].interval` → `intervalSeconds`. The bare
- * token `interval` means MILLISECONDS elsewhere in this same spec, so the
- * identical spelling carried two units a thousandfold apart.
+/*
+ * ABSORBED — `connector-health-and-trigger-durations-unit-in-key` (protocol 18,
+ * #15680 for #14478). It renamed the two connector durations whose names carried
+ * no unit: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
+ * `triggers[].interval` → `intervalSeconds` (the bare token `interval` means
+ * MILLISECONDS elsewhere in this spec, while a trigger interval meant SECONDS).
+ * Both halves were then removed with the block each key lived in, inside the
+ * same unreleased protocol step: the breaker half by
+ * `connector-resilience-keys-removed` (the whole `health` block), and the trigger
+ * half by `connector-triggers-removed` below (the whole `triggers` array).
+ * Composed, a rename followed by a strip of its container is unobservable — any
+ * pre-18 `health` or `triggers` ends deleted regardless of its inner spelling —
+ * and the table's disjoint-fixture contract cannot hold a fixture whose
+ * container another entry deletes (`spec-property-retirement` §0, the
+ * `agent-knowledge-topics-to-sources` precedent above). So the entry left the
+ * table. Each removal's prescription names the pre-rename spelling it absorbed;
+ * the retired-key rows `integration/CircuitBreakerConfig:monitoringWindow` and
+ * `integration/ConnectorTrigger:interval` stay as the record that the bare
+ * spellings were retired.
  *
- * ⚠️ This entry used to carry a SECOND rename, `health.circuitBreaker.
- * monitoringWindow` → `monitoringWindowMs` — the sharpest case of that card:
- * `monitoringWindow` (ms) sat ONE key below `resetTimeoutMs`, which already
- * spelled its unit. That half was ABSORBED by `connector-resilience-keys-removed`
- * (ADR-0049 enforce-or-remove, the same unreleased protocol step): the whole
- * `health` block left the schema, so a breaker key renamed here would be
- * stripped by the removal immediately after — a composition with no observable
- * rename — and the table's disjoint-fixture contract cannot hold a fixture
- * whose `health` block another entry deletes (`spec-property-retirement` §0,
- * the `agent.knowledge` precedent). An author who still holds either spelling
- * is served by the removal: its notice names `health`, and the tombstone's
- * prescription names both `monitoringWindow` and `monitoringWindowMs`. The id
- * keeps its original spelling on purpose — ids are how the chain, the step
- * list and every published changelog refer to an entry.
- *
- * A published connector row lands whole in `sys_metadata` (`ConnectorSchema`'s
- * own docblock says so, which is why #7990 forbids inline secrets on it), so
- * the chain has a seam that sees the key — hence a conversion. Retired from the
- * load path, tombstoned at the schema, replayable here.
+ * ⚠️ The id was PUBLISHED: the 17.4.0 and 17.5.0 tarballs carry it retired
+ * (`retired-after.census.json`), and the 17.4.0 changelog names it. Measured
+ * before it left: no code outside this package named the id, and the chain
+ * replays only the ids a step lists — so an upgrading reader who greps it finds
+ * this note and the two removals it points at, and a stored row or artifact
+ * holding either old spelling meets the removal that deletes its container.
  */
-const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
-  id: 'connector-health-and-trigger-durations-unit-in-key',
-  toMajor: 18,
-  retiredFromLoadPath: true,
-  retiredAfter: '17.3.0',
-  surface: 'connector.triggers[].interval',
-  summary: "connector key 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged. The breaker half, 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs', was absorbed by the removal of the whole 'health' block)",
-  apply(stack, emit) {
-    return mapCollection(stack, 'connectors', (connector, path) => {
-      let next = connector;
-
-      const triggers = next.triggers;
-      if (Array.isArray(triggers)) {
-        let triggersChanged = false;
-        const nextTriggers = triggers.map((trigger, i) => {
-          if (!isDict(trigger)) return trigger;
-          const renamed = renameKey(trigger, 'interval', 'intervalSeconds');
-          if (!renamed) return trigger;
-          emit({
-            from: 'interval',
-            to: 'intervalSeconds',
-            path: `${path}.triggers[${i}].intervalSeconds`,
-          });
-          triggersChanged = true;
-          return renamed;
-        });
-        if (triggersChanged) next = { ...next, triggers: nextTriggers };
-      }
-
-      return next;
-    });
-  },
-  fixture: {
-    before: {
-      connectors: [
-        {
-          name: 'billing_api',
-          label: 'Billing API',
-          type: 'rest',
-          // No `health` block: `connector-resilience-keys-removed` strips it
-          // whole, so it may not appear in this fixture (disjointness, §3).
-          triggers: [
-            { key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 },
-            // A webhook trigger authors no interval and keeps its identity.
-            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
-          ],
-        },
-        // A connector that authored no trigger keeps its identity (copy-on-write).
-        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
-      ],
-    },
-    after: {
-      connectors: [
-        {
-          name: 'billing_api',
-          label: 'Billing API',
-          type: 'rest',
-          triggers: [
-            { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
-            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
-          ],
-        },
-        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
-      ],
-    },
-    expectedNotices: 1,
-  },
-};
 
 /**
  * `connector.health`, `connector.status` and `connector.webhooks` removed
@@ -9623,7 +9689,9 @@ const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
  * carries that judgement). The whole `health` block goes as one key, so this
  * entry also serves an author still holding the pre-rename
  * `circuitBreaker.monitoringWindow` spelling — the rename's breaker half was
- * absorbed here (see `connector-health-and-trigger-durations-unit-in-key`).
+ * absorbed here (see the ABSORBED note for
+ * `connector-health-and-trigger-durations-unit-in-key` above, whose trigger half
+ * `connector-triggers-removed` absorbed in turn).
  *
  * `retiredFromLoadPath`: `ConnectorSchema` tombstones all three keys
  * (`retiredKey`, tsc `never` + the parse-time prescription), so a live parse
@@ -9691,6 +9759,97 @@ const connectorResilienceKeysRemoved: MetadataConversion = {
     // Three from `erp_gateway` (health, status, webhooks — the nested keys
     // leave with their block and are not counted), one from `hr_feed`.
     expectedNotices: 4,
+  },
+};
+
+/**
+ * `connector.triggers` removed (protocol 18 — ADR-0049 enforce-or-remove, by
+ * ruling on the maintainer's criterion for a declared-but-unenforced family;
+ * ADR-0041 keeps connector-event triggers in its third tier, as their own
+ * trigger package).
+ *
+ * The whole `ConnectorTrigger` array — `key`, `label`, `description`,
+ * `type: 'polling' | 'webhook'`, `intervalSeconds` — measured with no reader:
+ * `AutomationEngine.registerConnector` walks a connector's `actions` only, the
+ * engine's trigger registry holds FLOW trigger kinds that no connector trigger
+ * ever entered, no polling loop read an interval and no receiver was driven by
+ * a `webhook` trigger. No connector package, provider or example declared one.
+ *
+ * A pure lossless delete, one notice per connector carrying the key: a trigger
+ * never started anything, so there is no behaviour to preserve. The array is
+ * STRIPPED, never turned into flows — what replaces a trigger is an `api` flow
+ * (an external event) or a `schedule` flow (a scheduled pull) calling the
+ * connector's action, and which of those should exist, with what cadence and
+ * which action, is the author's call (the family's D3 entry,
+ * `connector-triggers-retired`, carries it). The whole array goes as one key, so
+ * this entry also serves an author still holding the pre-rename
+ * `triggers[].interval` spelling: that rename was absorbed here (see the
+ * ABSORBED note for `connector-health-and-trigger-durations-unit-in-key` above).
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones the key (`retiredKey`,
+ * tsc `never` + the parse-time prescription), so a live parse refuses loudly.
+ * This entry exists because a stored connector row CAN carry it — the
+ * `PUT /meta/connector/:name` door persisted what it parsed, and a descriptor's
+ * `triggers` parsed clean there — and the rehydration seam
+ * `applyConversionsToStoredItem('connector', row)` is live for this type; so
+ * 17.x rows replay clean, and `os migrate meta --from 17` lists the mechanical
+ * edits for author sources.
+ */
+const connectorTriggersRemoved: MetadataConversion = {
+  id: 'connector-triggers-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'connector.triggers',
+  summary:
+    "connector key 'triggers' removed (ADR-0049 — a connector trigger never started anything: "
+    + 'the automation engine registered a connector\'s actions only, no polling loop read an '
+    + 'interval and no receiver was driven by a webhook trigger. The ConnectorTrigger shape went '
+    + 'with it, including the `interval` spelling renamed to `intervalSeconds` earlier in this '
+    + 'step. Start the work from a flow that calls the connector\'s action instead: an `api` flow '
+    + 'for an external event, a `schedule` flow for a scheduled pull)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['triggers'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        // Minimal by the §3 disjointness contract: the retired key and nothing
+        // else this major's other `connectors[]` entries walk. The measured
+        // shape — a polling and a webhook trigger.
+        {
+          name: 'billing_api',
+          label: 'Billing API',
+          type: 'api',
+          triggers: [
+            { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
+            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
+          ],
+        },
+        // A stored row written before the unit rename: the absorbed
+        // `interval` spelling ends with the whole array gone, in one notice.
+        {
+          name: 'crm_feed',
+          label: 'CRM Feed',
+          type: 'saas',
+          triggers: [{ key: 'new_lead', label: 'New lead', type: 'polling', interval: 300 }],
+        },
+        // A connector that never authored the key keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        { name: 'billing_api', label: 'Billing API', type: 'api' },
+        { name: 'crm_feed', label: 'CRM Feed', type: 'saas' },
+        { name: 'crm_catalog', label: 'CRM Catalog', type: 'saas' },
+      ],
+    },
+    // One per connector carrying the key; the triggers inside the array leave
+    // with it and are not counted.
+    expectedNotices: 2,
   },
 };
 
@@ -10975,9 +11134,11 @@ interface MappedFilterRule {
  * door runs on `operator` — to a canonical `VIEW_FILTER_OPERATORS` member.
  * That maps the fourteen comparison, set, range and text operators
  * (`$gt` → `greater_than`, `$nin` → `not_in`, `$notContains` → `not_contains`,
- * …) and declines the two whose meaning lives in their VALUE (`$null`,
- * `$exists`); the lowering of every mapped rule back to the same `$` operator
- * is pinned per operator against `parseFilterAST` by the test.
+ * …) and declines the three whose meaning lives in their VALUE (`$null`,
+ * `$exists`, and — in `FILTER_OPERATORS` since #20446 — `$empty`, whose
+ * `true` / `false` is `is_empty` / `is_not_empty`); the lowering of every
+ * mapped rule back to the same `$` operator is pinned per operator against
+ * `parseFilterAST` by the test.
  */
 function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefined {
   if (!(FILTER_OPERATORS as readonly string[]).includes(op)) return undefined;
@@ -12467,10 +12628,12 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     jobTimeoutToTimeoutMs,
     apiEndpointCacheTtlToCacheTtlSeconds,
     dashboardRefreshIntervalToRefreshIntervalSeconds,
-    connectorHealthAndTriggerDurationsUnitInKey,
-    // AFTER the duration renames above: it strips the whole `health` block, and
-    // an author's pre-rename breaker key must end with the block gone.
+    // The connector duration rename that sat here
+    // (`connector-health-and-trigger-durations-unit-in-key`) was absorbed by the
+    // two removals below, each of which strips the container a renamed key
+    // lived in — see its ABSORBED note.
     connectorResilienceKeysRemoved,
+    connectorTriggersRemoved,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
     viewPageMountRemoved,
@@ -12488,6 +12651,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     currencyConfigPrecisionRemoved,
     permissionRlsTagsRemoved,
     actionAriaRemoved,
+    cubeMemberInnerNameRemoved,
     flowDecisionModeInclusiveExplicit,
     viewListTabsRemoved,
   ],

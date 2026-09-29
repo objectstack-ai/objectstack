@@ -79,7 +79,7 @@ const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin
  * destroys. Only the caller changes; the gate itself is pinned in
  * `domains/automation-write-capability-gate.test.ts`.
  *
- * [#10243] `POST /:name/toggle` uses this caller too, since the 2026-08-23
+ * [commit 266436a7f] `POST /:name/toggle` uses this caller too, since the 2026-08-23
  * ruling put enablement in the same write set. The EXECUTION routes on the
  * domain (trigger / resume) keep `AUTHED_CALLER`, deliberately — that half of
  * the line did not move.
@@ -141,7 +141,7 @@ describe('HttpDispatcher', () => {
                 type: 'objects',
                 name: 'my_obj',
                 item: body,
-                // [#10888] Server-stated, and asserted here rather than relaxed
+                // [commit d806081dd] Server-stated, and asserted here rather than relaxed
                 // to `objectContaining`: this door's whole claim to the face is
                 // that it answers through `errorFromThrown`, which carries a
                 // refusal's `issues[]` in `details` (pinned below). If the face
@@ -179,10 +179,10 @@ describe('HttpDispatcher', () => {
             // name='views/all_leads' — the dispatcher's own compound arity,
             // folding every trailing segment into one slash-bearing key.
             //
-            // #12176 retired compound metadata item names (maintainer ruling
-            // 2026-08-25); #12194 refuses every slash-bearing name at the
+            // Commit 7986d973f retired compound metadata item names (maintainer ruling
+            // 2026-08-25); commit 311433f6b refuses every slash-bearing name at the
             // publish door, so the fold could only address names that can no
-            // longer be created; #12195 removes it. The domain now DECLINES,
+            // longer be created; commit 7986d973f removes it. The domain now DECLINES,
             // and nothing is written.
             const path = '/lead/views/all_leads';
 
@@ -202,7 +202,7 @@ describe('HttpDispatcher', () => {
             // nothing decodes for it, so `%2F` keeps the path at two segments
             // and `decodeMetaNameSegment` restores the stored key — which is
             // what keeps a pre-grammar residue row addressable here, per
-            // #12194's "any stored junk name remains listable and clearable".
+            // commit 311433f6b: any stored junk name stays listable and clearable.
             const result = await dispatcher.handleMetadata('/lead/views%2Fall_leads', context, 'PUT', body);
 
             expect(result.handled).toBe(true);
@@ -424,7 +424,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should toggle a flow via POST /:name/toggle', async () => {
-            // [#10243] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
+            // [commit 266436a7f] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
             // `manage_metadata` write set by ruling. This case is about ROUTING
             // — which service method the path reaches, with which arguments —
             // so only the caller changes.

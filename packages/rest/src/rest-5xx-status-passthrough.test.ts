@@ -29,7 +29,7 @@
 // not just the status.
 //
 // The `code` half is spelled with `declaresServerFault` (`@objectstack/types`,
-// PR #6122) — the criterion this repo already uses for "the producer declared a
+// Commit 64cd01082) — the criterion this repo already uses for "the producer declared a
 // server fault" at the analytics route and in `runtime`'s dispatcher — rather
 // than a fourth open-coded truthiness check.
 //

@@ -91,7 +91,7 @@
  *     without this rung the dispatch widening (#9313's other half) would be
  *     a silent no-op that reads as coverage. See the self rung note at the
  *     walk below for how the shape is recognised.
- *   - `views[].config.sort` on a standalone ViewItem RECORD (#10001) — the
+ *   - `views[].config.sort` on a standalone ViewItem RECORD (commit f1b5ad39a) — the
  *     wire union's OTHER standalone member (`ViewItemWireSchema`,
  *     `{ name, object, viewKind: 'list', config }`), through the same door:
  *     objectui's `updateView` round-trips the whole record on every
@@ -131,7 +131,7 @@
  * #4463 P2 gap this module's first landing recorded — and is walked since
  * #9313 (the self rung above). Its sibling shape, a standalone ViewItem
  * RECORD (`{ name, object, viewKind, config }` — `config.sort` one level
- * down), was #9313's recorded follow-up scope and is walked since #10001
+ * down), was #9313's recorded follow-up scope and is walked since commit f1b5ad39a
  * (the record rung above).
  *
  * ── Skips, matching the search axis one for one (ADR-0072 D1) ────────────
@@ -169,7 +169,7 @@
  * nothing. Existence rightly stays silent; PROVENANCE is a second question,
  * asked only of the names skip 3 already kept and answered by the per-object
  * index ({@link indexUnprovisionedAnchors}) rather than the object-independent
- * union. This is the SORT twin of the SEARCH wiring #8404 added on the
+ * union. This is the SORT twin of the SEARCH wiring commit b849e6911 added on the
  * identical index, and it is the same shape the four filter/binding rules
  * carry since #8340.
  *
@@ -564,7 +564,7 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     // `viewKind: 'list'` (REQUIRED on the overlay arm since #7741, and a key
     // the strict container schema refuses by name, so a container can never
     // match) with no nested `config` (a body carrying one is a ViewItem
-    // RECORD, judged by its own record rung below since #10001).
+    // RECORD, judged by its own record rung below since commit f1b5ad39a).
     // `view-walk.ts` established the same
     // `self` rung for the section-carrying shapes; this is its list twin.
     //
@@ -583,7 +583,7 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
       );
     }
 
-    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    // ── [commit f1b5ad39a] The RECORD rung: a standalone ViewItem record ──
     //
     // The self rung's structural complement — `ViewMetadataSchema`'s member 1
     // (`ViewItemWireSchema`): `{ name, object, viewKind: 'list', config }`,

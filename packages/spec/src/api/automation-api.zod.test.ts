@@ -403,6 +403,30 @@ describe('TriggerFlowResponseSchema', () => {
     expect(result.data.summary?.acted).toBe(1);
   });
 
+  // `AutomationResult.flowLabel` — the flow's authored label, which a runner
+  // shows (and translates) in its header and completion toast. The compile-
+  // time `TriggerFlowDataMatchesContract` guard above holds the member's
+  // presence; this holds its SURVIVAL: the schema strips undeclared keys, so
+  // a mirror missing the member would parse clean and drop the label.
+  it('should preserve the authored flowLabel on a paused and on a finished run', () => {
+    const paused = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: true,
+        status: 'paused',
+        runId: 'run_screen_003',
+        screen: { nodeId: 'ask', fields: [] },
+        flowLabel: 'Order Intake Wizard',
+      },
+    });
+    const finished = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: { success: true, successMessage: 'Done.', flowLabel: 'Order Intake Wizard' },
+    });
+    expect(paused.data.flowLabel).toBe('Order Intake Wizard');
+    expect(finished.data.flowLabel).toBe('Order Intake Wizard');
+  });
+
   it('should preserve the failure classification code alongside error', () => {
     const result = TriggerFlowResponseSchema.parse({
       success: true,

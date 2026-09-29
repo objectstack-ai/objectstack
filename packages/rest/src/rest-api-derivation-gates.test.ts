@@ -128,7 +128,7 @@ describe('REST gate — action alias normalization (#3391)', () => {
     const ro = { apiMethods: ['get', 'list'] };
     expect(allowed(ro, 'query')).toBe(true); // query → list
     expect(allowed(ro, 'find')).toBe(true);  // find → list
-    // [#6259] Was `allowed(ro, 'batch', …)` — the third alias this table
+    // [commit 6968885ef] Was `allowed(ro, 'batch', …)` — the third alias this table
     // claimed to normalize, and the only one no producer ever sends. Every
     // `enforceApiAccess` call site passes a canonical literal, and the
     // cross-object `POST /batch` route (rest-server.ts, `registerBatchEndpoints`)
@@ -138,7 +138,7 @@ describe('REST gate — action alias normalization (#3391)', () => {
     expect(allowed(ro, 'bulk', { bulkChild: 'create' })).toBe(false);
   });
 
-  // [#6259] The REST half of the absence pin. Stated as the fork it is:
+  // [commit 6968885ef] The REST half of the absence pin. Stated as the fork it is:
   // `batch` is not DENIED, it is unrecognized — and an unrecognized action is
   // ungated by `apiMethods` (custom actions never were). That is precisely why
   // a producer-less row could not be dismissed as harmless: while it existed,

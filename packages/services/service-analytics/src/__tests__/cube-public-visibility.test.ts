@@ -52,8 +52,8 @@ const silentLogger = {
   child: vi.fn().mockReturnThis(),
 } as any;
 
-const measures = { count: { name: 'count', label: 'Count', type: 'count' as const, sql: '*' } };
-const dimensions = { status: { name: 'status', label: 'Status', type: 'string' as const, sql: 'status' } };
+const measures = { count: { label: 'Count', type: 'count' as const, sql: '*' } };
+const dimensions = { status: { label: 'Status', type: 'string' as const, sql: 'status' } };
 
 const hiddenCube: Cube = { name: 'hidden_cube', sql: 'hidden_table', measures, dimensions, public: false };
 const visibleCube: Cube = { name: 'visible_cube', sql: 'visible_table', measures, dimensions, public: true };

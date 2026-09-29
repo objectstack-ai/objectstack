@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on this package's three filter faces.
+ * [#20444] The `$empty` operator on this package's three filter faces.
  *
  * - **The live query path** (`InMemoryDriver.find` → mingo) holds the field
  *   declarations `syncSchema` recorded, so it answers by the field's DECLARED
@@ -144,10 +144,10 @@ describe('[#20444] InMemoryDriver — $empty on the live path, the reference mat
       name: TABLE,
       title: 'empty',
       sql: TABLE,
-      measures: { count: { name: 'count', label: 'Rows', type: 'count', sql: 'id' } },
+      measures: { count: { label: 'Rows', type: 'count', sql: 'id' } },
       dimensions: {
-        id: { name: 'id', label: 'id', type: 'string', sql: 'id' },
-        title: { name: 'title', label: 'title', type: 'string', sql: 'title' },
+        id: { label: 'id', type: 'string', sql: 'id' },
+        title: { label: 'title', type: 'string', sql: 'title' },
       },
       public: true,
     } as Cube;

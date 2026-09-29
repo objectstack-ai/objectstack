@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8421/#12194 — the COMPOUND `/meta` arity write is refused at the item-name
+ * #8421 / commit 311433f6b — the COMPOUND `/meta` arity write is refused at the item-name
  * grammar gate, pinned at the LIVE ROUTE.
  *
  * `/metadata/lead/views/all_leads` is `type='lead'`, `name='views/all_leads'`:
  * ONE operation reaching ONE `saveMetaItem`. Under #8421 that shape was
  * EXEMPTED from the unrecognised-type refusal (the `:type` segment carries an
  * OBJECT name no static contract can enumerate), and this file pinned the
- * exemption at the wire. #12194 (stage 1 of #12176's maintainer-ruled
+ * exemption at the wire. Commit 311433f6b (stage 1 of the maintainer-ruled
  * retirement of compound-name addressing, 2026-08-25) reverses the pinned
  * direction: the item-name grammar refuses every slash-bearing name BEFORE the
  * type verdict runs, so the compound WRITE now answers `400 INVALID_REQUEST`
@@ -34,7 +34,7 @@
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
- * On the pre-#12194 tree (grammar gate absent, compound exemption present)
+ * On the tree before commit 311433f6b (grammar gate absent, compound exemption present)
  * the two compound cases run the OTHER way — `200`, row stored under the
  * slash key. Measured on `origin/main@22c42c9b` before the door change: this
  * file's two compound pins were the acceptance direction; after the door
@@ -224,9 +224,9 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         );
 
         // The domain answers a LOCATED not-found rather than serving the path.
-        // Until #12195 it folded `views/all_leads` out of the trailing segments
+        // Until commit 7986d973f it folded `views/all_leads` out of the trailing segments
         // and answered — first by minting the row under the slash key
-        // (pre-#12194), then by refusing it at the grammar gate (#12194).
+        // (before commit 311433f6b), then by refusing it at the grammar gate (commit 311433f6b).
         // Neither happens now: there is no three-segment metadata route.
         //
         // ADR-0112: code AND status. A bare 404 assertion could not tell this
@@ -257,7 +257,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
 
         // A caller who genuinely means the name `views/all_leads` percent-encodes
         // it, which keeps the path at TWO segments. `decodeMetaNameSegment`
-        // restores the stored spelling, and #12194's grammar is what answers —
+        // restores the stored spelling, and the grammar of commit 311433f6b is what answers —
         // 400 with the dotted prescription, the caller's mistake named as such.
         //
         // This is the pin that separates "the route is gone" from "the name is
@@ -296,7 +296,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         // [#6245] spec-valid body — `webhook` resolves a schema through
         // UNREGISTERED_KIND_SCHEMAS, and this control measures the ARITY
         // door, so a malformed body would 422 and misread it. (`theme` was
-        // the specimen until #10485 retired that kind.)
+        // the specimen until commit 35ad101bc retired that kind.)
         const res = responseOf(await dispatcher.handleMetadata(
             '/webhook/midnight_hook', ctx(), 'PUT',
             { name: 'midnight_hook', label: 'Midnight', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
@@ -308,7 +308,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
 
     it('CONTROL — the capability gate still fires first at the SIMPLE arity', async () => {
         // #7019's gate is what masked this site, and it must keep masking an
-        // UNAUTHORIZED caller. [#12195] Driven at the simple arity now: the
+        // UNAUTHORIZED caller. [commit 7986d973f] Driven at the simple arity now: the
         // compound form this used to use is no longer handled at all, so it
         // would answer ROUTE_NOT_FOUND before any gate — which would make this
         // a control over nothing.

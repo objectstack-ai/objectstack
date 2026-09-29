@@ -13,9 +13,10 @@ export const entry: SemanticMigration = {
     + 'mechanism to declare an expiry window or a reminder interval to. `ESignatureConfig` '
     + 'itself stays (`provider` / `enabled` / `signers`), unchanged',
   reason:
-    'ADR-0049 enforce-or-remove; the 2026-09-02 ruling on #14477 held this pair on one '
+    'ADR-0049 enforce-or-remove; the 2026-09-02 ruling on the unread deadline keys held this '
+    + 'pair on one '
     + 'condition — "no roadmap ⇒ they retire with the other three families" — and the '
-    + 'maintainer answered it on 2026-09-05 (decision batch #40, no roadmapped e-signature '
+    + 'maintainer answered it on 2026-09-05 (no roadmapped e-signature '
     + 'consumer), so the ruling\'s own branch resolves to retirement. Two day-shaped keys sat '
     + 'on the published authorable surface (`authorable-surface/data.json`) and in the '
     + 'generated reference docs — an author could write `expirationDays: 30` and reasonably '

@@ -62,7 +62,7 @@ describe('EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT — measured carriage', () 
     // form/button.tsx reads schema.label — and the row covers that BARE
     // `button` spelling alone: action/action-button.tsx registers as
     // `action:button`, a different key this map deliberately does not
-    // carry (objectstack#13672; see the module docblock).
+    // carry (commit e854a531a; see the module docblock).
     expect(EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT).toEqual({
       statistic: ['label', 'value', 'description'],
       card: ['title', 'description'],
@@ -115,8 +115,8 @@ describe('expressionBindableTextKeysFor — the mechanical per-type answer', () 
     // `text` binds through its own `content` leg; `element:*` / `page:*`
     // config rides the evaluated `properties` bag; and a namespace-prefixed
     // spelling is a DIFFERENT key from the bare name, so `action:button` and
-    // `ui:button` answer empty by construction — the pair the objectstack#13672
-    // ruling recorded as deliberately out, pinned here so a later prefix-
+    // `ui:button` answer empty by construction — the pair commit e854a531a
+    // recorded as deliberately out, pinned here so a later prefix-
     // stripping "fix" cannot move the machine face in silence. None of them get
     // rows inferred from what their renderers happen to read.
     for (const type of [

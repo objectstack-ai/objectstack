@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#9934] The producer-side user-facing marking, at the REST door — the
+// [commit 79c46da90] The producer-side user-facing marking, at the REST door — the
 // producer half of the objectui#5210 ruling (maintainer, 2026-08-19, option 1).
 //
 // A hook refusal that declares `userMessage` on the thrown error carries that
@@ -102,7 +102,7 @@ describe('[#9934] mapDataError: the marking carries the exact text; unmarked car
 
     it('rides the sandbox unwrap — a body hook refusal keeps its marking at 400', () => {
         // The shape `quickjs-runner` produces for a body's deliberate throw:
-        // `innerMessage` set (business message), plus the #9934 side-channel.
+        // `innerMessage` set (business message), plus the commit 79c46da90 side-channel.
         const err = Object.assign(new Error("hook 'close_guard' threw: Error: 删除被阻断"), {
             innerMessage: '删除被阻断',
             userMessage: USER_TEXT,

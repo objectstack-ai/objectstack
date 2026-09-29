@@ -58,7 +58,7 @@ describe('BulkActionDefSchema (#4457)', () => {
       expect(def.params?.[0]).toMatchObject({ object: 'sys_user', labelField: 'name' });
     });
 
-    // ── RE-JUDGED, NOT RE-SPELLED (#18177) ─────────────────────────────────
+    // ── RE-JUDGED, NOT RE-SPELLED (commit adabccf5f) ───────────────────────
     // This case used to be `forwards unknown WIDGET config on a param — the
     // renderer declares a catch-all`, and it asserted that `min`/`max`/`step`
     // rode through. That is the exact behaviour letter A removed, so the
@@ -304,7 +304,7 @@ describe('BulkActionDefSchema (#4457)', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // #18177 — maintainer ruling batch #146 item 4, letter A.
+  // Commit adabccf5f — maintainer ruling batch #146 item 4, letter A.
   //
   // The card that produced this ruling turned on ONE measurement: the open
   // shape accepted `zzz_nonsense_key_that_no_producer_emits_8755` in the same

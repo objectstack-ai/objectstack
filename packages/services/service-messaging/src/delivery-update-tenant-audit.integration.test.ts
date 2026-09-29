@@ -18,7 +18,7 @@
  * tenant-classification contract this file pins (#10740) is unchanged —
  * threaded `tenantId`, never `bypassTenantAudit`.
  *
- * [#11453] `SqlNotificationOutbox.ack` has since made the SAME move for the
+ * [commit 1a47a5368] `SqlNotificationOutbox.ack` has since made the SAME move for the
  * same reason: its new status precondition ("this row must still be
  * `in_flight`") is a compare-and-set, and a predicate on the by-id path is
  * silently discarded, so it rides `multi: true` too. Its audit op is
@@ -89,10 +89,10 @@ let driver: SqlDriver;
 let warns: Array<{ msg: string; meta: any }>;
 /** Every `options` bag that reached `SqlDriver.update` — the `update` op only. */
 let driverUpdates: Array<{ object: string; id: unknown; options: any }>;
-/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009, the notification `ack`'s since #11453, and the HTTP `ack`'s since #17634. */
+/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009, the notification `ack`'s since commit 1a47a5368, and the HTTP `ack`'s since #17634. */
 let driverUpdateManys: Array<{ object: string; where: unknown; options: any }>;
 
-/** The audit line for the PREDICATE op — `redeliver`'s write since #11009, the notification `ack`'s since #11453. */
+/** The audit line for the PREDICATE op — `redeliver`'s write since #11009, the notification `ack`'s since commit 1a47a5368. */
 const auditedUpdateMany = (object: string): boolean =>
     warns.some((w) => w.msg.includes(`[tenant-audit] updateMany on tenant-scoped object "${object}"`));
 
@@ -226,7 +226,7 @@ describe('ack — the two dispatcher sites are a classified global sweep (update
         //
         // [#17634] The dispatcher's ack hands the claim credential, so it is a
         // compare-and-set on the predicate path and the reading moves to the
-        // `updateMany` spy — the move the notification ack made in #11453. The
+        // `updateMany` spy — the move the notification ack made in commit 1a47a5368. The
         // claim path writes there too (its reap and its atomic claim), so the
         // filter names what an ACK write looks like: a scalar id bound to
         // `in_flight` AND to the claiming node. That predicate IS the
@@ -283,7 +283,7 @@ describe('ack — the two dispatcher sites are a classified global sweep (update
         ]);
         // ② Declared global, for both organizations' rows.
         //
-        // [#11453] The ack's op is `updateMany` now, so the reading moves to
+        // [commit 1a47a5368] The ack's op is `updateMany` now, so the reading moves to
         // that spy. The claim path writes there too (its reap and its atomic
         // claim), so the filter names what an ACK write looks like — and that
         // predicate is not incidental: `{ id: <scalar>, status: 'in_flight' }`

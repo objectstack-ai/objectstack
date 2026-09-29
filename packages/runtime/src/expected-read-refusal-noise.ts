@@ -2,8 +2,8 @@
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * [#10629] Expected `refused a read on` noise: WITHHELD from the shared log,
- *          and ASSERTED instead — the shape PR #10630 landed, factored out
+ * [commit 13a6cb4ad] Expected `refused a read on` noise: WITHHELD from the shared log,
+ *          and ASSERTED instead — the shape commit dd8172ee2 landed, factored out
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * ## The defect this closes
@@ -34,8 +34,8 @@
  *      … no such table: <table>`, from `SqlDriver.backendStatementFault`
  *      through the driver's own `logger.warn`;
  *   2. `Find operation failed {"object":"<table>",…}` one frame up
- *      (`objectql/src/engine.ts`), carrying the same fault. ⚠️ [#13273] It used
- *      to be `ERROR`, with a stack, for EVERY cause; since #13273 the engine
+ *      (`objectql/src/engine.ts`), carrying the same fault. ⚠️ [commit 3a86a65e7] It used
+ *      to be `ERROR`, with a stack, for EVERY cause; since commit 3a86a65e7 the engine
  *      asks `isMissingTableError` and puts the "table not provisioned" class
  *      — i.e. exactly the class this module is declared over — on `debug`
  *      instead, with no stack and a `reason: 'table-not-provisioned'` meta.
@@ -49,7 +49,7 @@
  * Turbo interleaves package logs without attribution, so in the shared shard
  * log those are indistinguishable from a real failure. Not a hypothetical:
  * lines of exactly this shape were lifted VERBATIM into a p1 flake signature
- * (#10293) and sent a whole dispatch cycle at the wrong mechanism.
+ * (a vitest teardown race, fixed by commit 92a69d813) and sent a whole dispatch cycle at the wrong mechanism.
  * Expected-failure noise from a green test is a diagnosis tax on every future
  * red shard.
  *
@@ -91,7 +91,7 @@
  * rule for all of them, and do not read a quiet engine channel in one fixture
  * as evidence about another.
  *
- * ⚠️ [#13273] The threshold moved for the "table not provisioned" class, and
+ * ⚠️ [commit 3a86a65e7] The threshold moved for the "table not provisioned" class, and
  * moved DOWN: that frame is now `debug` (rank 0), so a fixture has to be at
  * `debug` to see an unrecognised one, where `info` used to be enough. The
  * asymmetry above is unchanged in shape — the engine channel is still only as
@@ -124,11 +124,11 @@
  *
  * ## Why a shared module rather than a copy per fixture
  *
- * PR #10630 established this shape on two files and wrote it inline in each.
+ * Commit dd8172ee2 established this shape on two files and wrote it inline in each.
  * The enumerated remainder is sixteen more, across four distinct probe sites,
  * and sixteen copies of one predicate is sixteen places for it to drift —
  * including drifting *looser*, which is the direction that turns a pin back
- * into a mute without anything going red. The mechanism below is #10630's
+ * into a mute without anything going red. The mechanism below is commit dd8172ee2's
  * verbatim: the same two sinks, the same "named table AND named reason"
  * predicate, the same pending-refusal gate on the engine frame, the same
  * count-and-assert discipline. Only the duplication is gone.
@@ -167,7 +167,7 @@ export interface ExpectedReadRefusalCapture {
    * The expected channels that never fired, one sentence each — the assertion
    * surface. `expect(capture.silentChannels()).toEqual([])` is one call that
    * still makes a silent channel NAME ITSELF in the diff, which is what
-   * #10630's "one assertion per channel" bought at sixteen times the bulk.
+   * commit dd8172ee2's "one assertion per channel" bought at sixteen times the bulk.
    *
    * ⛔ Repairing a failure here means re-deriving the declared table list or
    * finding out why the probe stopped — NEVER relaxing this: a runtime read
@@ -194,7 +194,7 @@ export interface ExpectedReadRefusalCapture {
    * setter, which is the same access `engine-readonly-when-parent.test.ts`
    * established.
    *
-   * ⚠️ [#13273] Both channels, because the engine now picks between them by
+   * ⚠️ [commit 3a86a65e7] Both channels, because the engine now picks between them by
    * cause: a read whose table was never provisioned goes to `debug`, every
    * other read failure to `warn` ([#17212]; it was `error`). Wrapping only one
    * would leave this capture blind on whichever half the engine chose.
@@ -409,7 +409,7 @@ export function captureExpectedReadRefusals(
               target.warn(msg, meta, ...rest);
             };
           }
-          // [#13273] The SAME frame, on the channel the engine now chooses for
+          // [commit 3a86a65e7] The SAME frame, on the channel the engine now chooses for
           // a read whose table was never provisioned — which is every read this
           // capture is declared over. `debug(msg, meta)` has no `error`
           // argument, so the driver's envelope arrives as `meta.error` instead;
@@ -434,7 +434,7 @@ export function captureExpectedReadRefusals(
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * [#10983] A SECOND, independent predicate: cross-field `{ $field }` refusal
+ * [commit 6a4e929f5] A SECOND, independent predicate: cross-field `{ $field }` refusal
  *          engine noise (#7929) — the sibling {@link captureExpectedReadRefusals}
  *          cannot recognise, because it has no table to key on
  * ═══════════════════════════════════════════════════════════════════════════

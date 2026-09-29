@@ -26,8 +26,8 @@ and complete lifecycle management.
 
 This protocol supports multiple authentication strategies, bidirectional sync,
 field mapping, and an executed retry policy. It declares no health probe, no
-circuit breaker, no authored status and no webhooks of its own — see "What
-this layer does NOT provide" below.
+circuit breaker, no authored status, no webhooks and no triggers of its own —
+see "What this layer does NOT provide" below.
 
 ## What this layer does NOT provide
 
@@ -70,6 +70,14 @@ be dispatched is the computed `state` (`ready` / `degraded`) that
 delivered is declared in the stack's top-level `webhooks:` collection. The
 "REMOVED: `health`, `status` and the nested `webhooks`" section below records
 the measurement.
+
+**There are no connector triggers.** The `triggers` array (`polling` /
+`webhook`) was removed in `@objectstack/spec` 17 (ADR-0049 enforce-or-remove):
+nothing ever registered, polled or received one, so a declared trigger never
+started a flow. Work starts from a FLOW that calls the connector's action in a
+`connector_action` node — an `api` flow for an external event, a `schedule`
+flow for a scheduled pull. The "REMOVED: `triggers`" section below records the
+measurement.
 
 `connectionTimeoutMs` used to be the second exception and is now **removed**
 (ADR-0049, the narrower second decision that surface was owed): it was
@@ -163,8 +171,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema, SyncStrategySchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, RetryConfig, SyncStrategy } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema, SyncStrategySchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, RetryConfig, SyncStrategy } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -188,7 +196,7 @@ const result = ConnectorSchema.parse(data);
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
-| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions  |
+| **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
 | **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
@@ -281,17 +289,6 @@ const result = ConnectorSchema.parse(data);
 | **inputSchema** | `Record<string, any>` | optional | Input parameters schema (JSON Schema) |
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
 | **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
-
-### Nested Shape: `Connector.triggers[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Trigger key |
-| **label** | `string` | ✅ | Trigger label |
-| **description** | `string` | optional |  |
-| **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **intervalSeconds** | `number` | optional | Polling interval in seconds |
-| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `Connector.syncConfig`
 
@@ -520,22 +517,6 @@ Retry strategy
 
 ---
 
-## ConnectorTrigger
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Trigger key |
-| **label** | `string` | ✅ | Trigger label |
-| **description** | `string` | optional |  |
-| **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **intervalSeconds** | `number` | optional | Polling interval in seconds |
-| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-
-
----
-
 ## ConnectorType
 
 Connector type
@@ -586,7 +567,7 @@ Connector type
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
-| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions  |
+| **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
 | **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
@@ -679,17 +660,6 @@ Connector type
 | **inputSchema** | `Record<string, any>` | optional | Input parameters schema (JSON Schema) |
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
 | **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
-
-### Nested Shape: `DeclarativeConnectorEntry.triggers[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Trigger key |
-| **label** | `string` | ✅ | Trigger label |
-| **description** | `string` | optional |  |
-| **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **intervalSeconds** | `number` | optional | Polling interval in seconds |
-| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.syncConfig`
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11712 → #12195] `?mode=draft` on the `/meta` save doors — a two-door parity
+ * [#11712 → commit 7986d973f] `?mode=draft` on the `/meta` save doors — a two-door parity
  * suite whose SECOND DOOR NO LONGER EXISTS.
  *
  * ## What this file is now, and why it was not deleted
@@ -23,9 +23,9 @@
  * The caller asked for a staging buffer and got a publish, with a `200` and no
  * signal at the call site.
  *
- * #12176's maintainer ruling (2026-08-25) retired compound metadata item names
- * outright. Stage 1 (#12194) declared the item-name grammar and refuses every
- * slash-bearing name at the publish door; stage 3 (#12195) un-mounts the arity.
+ * The maintainer ruling of 2026-08-25 (completed by commit 7986d973f) retired compound metadata item names
+ * outright. Stage 1 (commit 311433f6b) declared the item-name grammar and refuses every
+ * slash-bearing name at the publish door; stage 3 (commit 7986d973f) un-mounts the arity.
  * So the divergence is not fixed — the door it needed is GONE.
  *
  * ⛔ The file is REWORKED rather than deleted, deliberately. "The divergence is
@@ -39,7 +39,7 @@
  *     are unchanged;
  *  3. #6877's repeated-parameter guard is re-pinned on the surviving door (§3);
  *  4. the slash-bearing name a caller would once have spelled compound is
- *     pinned answering #12194's `400 INVALID_REQUEST` at the surviving door
+ *     pinned answering commit 311433f6b's `400 INVALID_REQUEST` at the surviving door
  *     (§4) — the capability that REPLACED the compound arity, and the case that
  *     answered `200` + published-live before this retirement.
  *
@@ -66,7 +66,7 @@
  * `meta-compound-save-force-parity.test.ts` documents. The `200` save answer is
  * the protocol's own `{ success, version, seq, state, message }`. The `400`
  * from `refuseRepeatedQueryParams` is hand-built by the route and NESTED:
- * `{ error: { code, message } }`. #12194's grammar refusal is the ADR-0112
+ * `{ error: { code, message } }`. Commit 311433f6b's grammar refusal is the ADR-0112
  * envelope with a TOP-LEVEL `code` (`INVALID_REQUEST`).
  */
 
@@ -272,7 +272,7 @@ function boot() {
         outcome: (name: string) => [labelOf(name, 'active'), labelOf(name, 'draft')] as const,
         singleOutcome: () => [labelOf(SINGLE_NAME, 'active'), labelOf(SINGLE_NAME, 'draft')] as const,
         /**
-         * [#12195] The compound door's REGISTRATION, not a call to it. This
+         * [commit 7986d973f] The compound door's REGISTRATION, not a call to it. This
          * used to be `compoundPut()`, driving `PUT COMPOUND_PATH`; the arity is
          * retired, so what is assertable now is that nothing is mounted there.
          */
@@ -285,7 +285,7 @@ function boot() {
         singlePut: (query: Record<string, unknown> = {}) =>
             call(SINGLE_PATH, { type: 'object', name: SINGLE_NAME }, query),
         /**
-         * [#12195] The surviving door addressed with an ARBITRARY name — the
+         * [commit 7986d973f] The surviving door addressed with an ARBITRARY name — the
          * shape a caller now uses for a slash-bearing one. Hono decodes `%2F`
          * before the handler runs, so the handler sees the raw name and this
          * helper hands it over directly, which is the same value.
@@ -301,14 +301,14 @@ const STAGED = [LIVE_LABEL, SUBMITTED_LABEL];
 const PUBLISHED = [SUBMITTED_LABEL, undefined];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. ⭐ [#12195] The compound door is GONE — the pin the removal owes
+// 1. ⭐ [commit 7986d973f] The compound door is GONE — the pin the removal owes
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#11712 / #12195] the compound-name `PUT` arity is retired', () => {
     /**
      * ⛔ This file's original subject — "`?mode=draft` is honoured at one door
-     * and dropped at the other" — is DISSOLVED, not fixed. #12176 retired
-     * compound metadata item names; #12194 refuses every slash-bearing name at
+     * and dropped at the other" — is DISSOLVED, not fixed. Commit 7986d973f retired
+     * compound metadata item names; commit 311433f6b refuses every slash-bearing name at
      * the publish door; this stage un-mounts the arity that used to serve them.
      *
      * The pins are REWORKED rather than deleted, because "the divergence is
@@ -447,7 +447,7 @@ describe('[#11712 / #6877] a REPEATED query parameter is refused, never read as 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. ⭐ [#12194] A slash-bearing name is refused at the GRAMMAR gate — the
+// 4. ⭐ [commit 311433f6b] A slash-bearing name is refused at the GRAMMAR gate — the
 //    capability that replaced the compound door, pinned where callers meet it.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -456,7 +456,7 @@ describe('[#12194 / #12195] a slash-bearing name is refused at the surviving doo
      * With the compound arity gone, `crm/task` reaches the single-segment door
      * percent-encoded (`%2F`) — the spelling the SDK now sends for every name,
      * and the one Hono decodes back to `crm/task` before the handler sees it.
-     * What answers is #12194's grammar refusal, with the ADR-0112 envelope.
+     * What answers is commit 311433f6b's grammar refusal, with the ADR-0112 envelope.
      *
      * This is the pin that makes the removal safe to read: the old compound
      * door answered `200` and published live for this exact input.

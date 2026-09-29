@@ -21,7 +21,7 @@
  *      It neither rejects the unknown key nor strips it.
  *   3. `engine.ts` hands the row to `driver.create` / the driver's update.
  *
- * ...and, until #13657, the driver decided — so the two families disagreed:
+ * ...and, until commit b003cf2e8, the driver decided — so the two families disagreed:
  *
  *   • SQL — the stray column reached the statement and the WHOLE write failed.
  *     Nothing was stored, and the error named a column, not a field, far from
@@ -29,7 +29,7 @@
  *   • Schemaless (memory, and MongoDB on the same `...data` spread) — the key
  *     WAS persisted, as an undeclared column nothing downstream reads.
  *
- * [#13657] That divergence is CLOSED. The declared-field door now has a
+ * [commit b003cf2e8] That divergence is CLOSED. The declared-field door now has a
  * POST-hook half (`undeclaredWriteFieldErrors`, run again over the payload the
  * `before*` hooks produced, before any statement is built), so a body-written
  * undeclared key is refused by the object's FIELD MAP — `INVALID_FIELD` / 400,
@@ -83,7 +83,7 @@
  * sentences fail until they are rewritten — which is the half a sentence could
  * never do for itself (#6664, ruling C).
  *
- * Why it has to stay — and the reason survives #13657 intact, one word over.
+ * Why it has to stay — and the reason survives commit b003cf2e8 intact, one word over.
  * This file used to pin a PRODUCT DIVERGENCE between two driver families
  * (rejected as a whole statement by SQL, accepted verbatim by the schemaless
  * family); it now pins the CONVERGENCE that replaced it. Either way the claim
@@ -93,7 +93,7 @@
  * behaves the same on the same `...data` spread, but would put a real database
  * in CI's path). Delete this arm and the guardrail silently becomes a one-sided
  * assertion about SQL — and "identical on every driver", the whole point of
- * #13657, stops being pinned at all. ⚠️ If anything, the schemaless arm matters
+ * commit b003cf2e8, stops being pinned at all. ⚠️ If anything, the schemaless arm matters
  * MORE now: it is the family that used to accept the key, so it is the arm that
  * would witness a regression first.
  *
@@ -220,9 +220,9 @@ const CORRECT_HOOK = {
  * The subject is unchanged and still measured on both families: a key a BODY
  * writes is added AFTER the PRE-hook door, so `applyMutationsToInput` →
  * `validateRecord`'s `if (!def) continue` is still intact and still proved
- * here. [#13657] What it reaches is no longer the driver: the POST-hook half of
+ * here. [commit b003cf2e8] What it reaches is no longer the driver: the POST-hook half of
  * the door refuses it first, on both families. The caller-payload half has its
- * own cases below, pinning the pre-hook door — which #13657 deliberately did
+ * own cases below, pinning the pre-hook door — which commit b003cf2e8 deliberately did
  * NOT move, since #8737 put it ahead of the hooks so a refused payload consumes
  * no autonumber.
  */
@@ -234,7 +234,7 @@ const UPDATE_TYPO_HOOK = {
 };
 
 /**
- * [#10629] The SQL half of this fixture provisions `deal` and nothing else, so
+ * [commit 13a6cb4ad] The SQL half of this fixture provisions `deal` and nothing else, so
  * the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -249,19 +249,19 @@ const ABSENT_TENANCY_TABLE = 'sys_organization';
 describe('#4271 / #13657 an undeclared field written by an L2 body — one answer on both families', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest boot. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
     // failure here can never leave the engine running. Unconditional on purpose:
     // a memory boot declares an EMPTY expectation, so this still fails loudly if
     // a boot ever forgets to install a capture at all.
     //
-    // [#13657] `required` is narrowed to nothing — the documented remedy for
+    // [commit b003cf2e8] `required` is narrowed to nothing — the documented remedy for
     // "a table read on only SOME of a file's paths", which is what
     // `sys_organization` became here. The single-tenant probe runs on the way
     // to the STATEMENT, and the post-hook door now refuses the body-written
@@ -282,7 +282,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
-    // [#10629] Installed before the driver runs a statement — the sink the
+    // [commit 13a6cb4ad] Installed before the driver runs a statement — the sink the
     // expected refusal's first half travels out on.
     noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
     noise.captureDriver(driver);
@@ -291,7 +291,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
   }
 
   async function bootMemory(hook?: unknown) {
-    // [#10629] A schemaless driver never refuses a read on a missing table, so
+    // [commit 13a6cb4ad] A schemaless driver never refuses a read on a missing table, so
     // this family expects no noise at all — an EMPTY declaration rather than a
     // skipped one, which keeps the shared `afterEach` assertion honest.
     noise = captureExpectedReadRefusals([]);
@@ -300,7 +300,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
 
   async function boot(driver: unknown, hook?: unknown) {
     engine = new ObjectQL();
-    // [#10629] The engine frame that sits directly above the driver's refusal.
+    // [commit 13a6cb4ad] The engine frame that sits directly above the driver's refusal.
     noise?.captureEngine(engine);
     engine.registerDriver(driver as any, true);
     await engine.init();
@@ -312,12 +312,12 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
     return engine;
   }
 
-  // ─── [#13657] Both families, one answer ───────────────────────────────────
+  // ─── [commit b003cf2e8] Both families, one answer ─────────────────────────
 
   /**
-   * [#13657] What this block used to pin, and why it does not any more.
+   * [commit b003cf2e8] What this block used to pin, and why it does not any more.
    *
-   * Until #13657 these were two arms because the runtime gave two answers to
+   * Until commit b003cf2e8 these were two arms because the runtime gave two answers to
    * one question. A key an L2 body wrote was added AFTER the declared-field
    * door (#8682 / #8738, moved ahead of the hooks by #8737), so nothing between
    * `applyMutationsToInput` and the driver judged it, and the DRIVER decided:
@@ -331,7 +331,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
    *                name, one that field-level security can never gate.
    *
    * One app, one body, two meanings decided by which driver a deployment
-   * happened to run — and nothing in the app could tell which. #13657 added the
+   * happened to run — and nothing in the app could tell which. Commit b003cf2e8 added the
    * POST-hook half of the door, so the key is now refused by the object's FIELD
    * MAP before any statement is built. There is no driver left to disagree.
    *
@@ -354,7 +354,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
 
       const err: any = await e.insert('deal', { stage: 'open', amount: 10 }).catch((x: unknown) => x);
 
-      // The caller path's answer, on both families. Before #13657 this read
+      // The caller path's answer, on both families. Before commit b003cf2e8 this read
       // `code: 'SQLITE_ERROR', status: undefined` on SQL and no error at all on
       // memory.
       expect(err?.code).toBe('INVALID_FIELD');
@@ -479,7 +479,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
    * from, and they are about DIFFERENT call shapes:
    *
    *   • the L2 BODY block mutates `ctx.input`, which the engine folds into the
-   *     CALLER's payload — refused by the POST-hook half of the door (#13657);
+   *     CALLER's payload — refused by the POST-hook half of the door (commit b003cf2e8);
    *   • the CALLER block hands the engine a payload directly — refused by the
    *     PRE-hook half (#8682 / #8738).
    *

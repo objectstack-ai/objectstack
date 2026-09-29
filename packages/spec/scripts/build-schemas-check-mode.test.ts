@@ -1222,7 +1222,9 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     ).not.toContain(GUIDANCE_ROUTE_LEAF);
     // The lit leg and the dark leg of the same read: the retired key's rejection
     // carries a prescription bullet, an undeclared neighbour's does not.
-    const metric = { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' };
+    // No inner `name`: it is a retiredKey() tombstone now, and carrying it would
+    // fail `lit` for that reason instead of the guidance-route key under test.
+    const metric = { label: 'Revenue', type: 'sum', sql: 'amount' };
     const lit = MetricSchema.safeParse({ ...metric, [GUIDANCE_ROUTE_LEAF]: [{ sql: '1 = 1' }] });
     const dark = MetricSchema.safeParse({ ...metric, zzNotPrescribed18301: 1 });
     expect(lit.success, `writing '${GUIDANCE_ROUTE_LEAF}' is accepted again — re-pick the fixture`).toBe(false);

@@ -336,7 +336,7 @@ describe('#15079 point 3 — the authorization point: a caller who cannot read o
         expect(res.body.error.code).toBe('RECORD_NOT_FOUND');
         expect(res.body.error.message).toContain(RECORD_ID);
         expect(res.body.error.message).toContain(OBJECT);
-        // ⛔ The #14143 class: a swallowed load must never become an implicit
+        // ⛔ The class commit f19475c0a closed: a swallowed load must never become an implicit
         // grant. The verdict is CONSUMED — no write was even attempted.
         expect(rig.updates).toHaveLength(0);
         expect(rig.row.status).toBe('open');

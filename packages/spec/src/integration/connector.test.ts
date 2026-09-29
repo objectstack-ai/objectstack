@@ -30,10 +30,10 @@ import {
   // `connector.status`, ADR-0049; pinned in
   // `connector-resilience-keys-retirement.test.ts`.)
 
-  // Trigger (declared-but-unread, #3197 — the pin block at the bottom judges
-  // its unit-carrying key name, not a runtime it does not have)
-  ConnectorTriggerSchema,
-  
+  // (The trigger shape — `ConnectorTriggerSchema` — was retired with
+  // `connector.triggers`, ADR-0049; `connector-triggers-retirement.test.ts`
+  // pins its absence and the refusal of both of its interval spellings.)
+
   // Types
   type Connector,
   type ConnectorFieldMapping,
@@ -1323,32 +1323,11 @@ describe('[#14676] ADR-0087 registration', () => {
   });
 });
 
-// #15680 (stack card 5/6 of #14478) — ruling B. The old trigger spelling is a
-// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
-// never on a bare `toThrow()`. The shape is not strict, so without the
-// tombstone the old key would be STRIPPED in silence and a polling trigger
-// would lose its cadence entirely.
-//
-// This block also pinned the breaker half of the same card —
-// `CircuitBreakerConfig.monitoringWindow` → `monitoringWindowMs` and the
-// `resetTimeoutMs` neighbour. That half left with the whole `health` block
-// (ADR-0049, `connector-resilience-keys-retirement.test.ts`), which pins that
-// both breaker spellings now meet the `health` prescription.
-describe('connector durations carry their unit (#15680)', () => {
-  it('REFUSES the retired trigger `interval` with the rename in the message', () => {
-    const result = ConnectorTriggerSchema.safeParse({
-      key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60,
-    });
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
-    expect(issue).toBeDefined();
-    expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain('`ConnectorTrigger.interval` was renamed to `intervalSeconds`');
-  });
-
-  it('accepts the new trigger spelling', () => {
-    expect(ConnectorTriggerSchema.parse({
-      key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60,
-    }).intervalSeconds).toBe(60);
-  });
-});
+// #15680 (stack card 5/6 of #14478) — ruling B pinned the connector durations
+// that carried no unit here: `CircuitBreakerConfig.monitoringWindow` →
+// `monitoringWindowMs` and `ConnectorTrigger.interval` → `intervalSeconds`. Both
+// halves left with the container each key lived in (ADR-0049, the same
+// unreleased protocol step): the breaker half with the whole `health` block
+// (`connector-resilience-keys-retirement.test.ts`), and the trigger half with the
+// whole `triggers` array (`connector-triggers-retirement.test.ts`), each of which
+// pins that both spellings of its key now meet the removal's prescription.

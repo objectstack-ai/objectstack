@@ -336,10 +336,10 @@ describe('#5669 — the gate: a `where` over a missing field is a 400, not a dri
             name: 'account_cube',
             title: 'Accounts',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                industry: { name: 'industry', label: 'Industry', type: 'string', sql: 'industry' },
-                legacy: { name: 'legacy', label: 'Legacy', type: 'string', sql: 'dropped_column' },
+                industry: { label: 'Industry', type: 'string', sql: 'industry' },
+                legacy: { label: 'Legacy', type: 'string', sql: 'dropped_column' },
             },
             public: true,
         };
@@ -440,7 +440,7 @@ describe('#5669 — the dataset face: refused before SQL exists, so nothing can 
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
             public: true,
         };
@@ -510,9 +510,9 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'renamed_cube',
             title: 'Renamed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
-                assessed: { name: 'assessed', label: 'Assessed', type: 'time', sql: 'assessed_at' },
+                assessed: { label: 'Assessed', type: 'time', sql: 'assessed_at' },
             },
             public: true,
         };
@@ -538,8 +538,8 @@ describe('#5669 — what the gate must NOT do', () => {
             title: 'Measures',
             sql: 'crm_account',
             measures: {
-                count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-                revenue: { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'annual_revenue' },
+                count: { label: 'Count', type: 'count', sql: '*' },
+                revenue: { label: 'Revenue', type: 'sum', sql: 'annual_revenue' },
             },
             dimensions: {},
             public: true,
@@ -569,7 +569,7 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'derived_cube',
             title: 'Derived',
             sql: 'SELECT * FROM crm_account WHERE active = 1',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
             public: true,
         };
@@ -602,7 +602,7 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'joined_cube',
             title: 'Joined',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
             public: true,
         };
@@ -634,7 +634,7 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'joined_cube',
             title: 'Joined',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {},
             public: true,
         };
@@ -698,10 +698,9 @@ describe('#5669 — what the gate must NOT do', () => {
             name: 'computed_cube',
             title: 'Computed',
             sql: 'crm_account',
-            measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+            measures: { count: { label: 'Count', type: 'count', sql: '*' } },
             dimensions: {
                 bucket: {
-                    name: 'bucket',
                     label: 'Bucket',
                     type: 'string',
                     sql: "CASE WHEN annual_revenue > 0 THEN 'yes' ELSE 'no' END",

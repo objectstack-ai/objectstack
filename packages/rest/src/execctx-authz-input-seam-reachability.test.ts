@@ -591,7 +591,7 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     const captured = await drive(mount(serverWith(viaKernelManager(kernel))), { 'x-api-key': RAW_EXMEMBER_KEY });
     expect(captured.status).toBe(503);
     // ⭐ And it answers as an OUTAGE, not as a permission denial — the
-    // distinction #13279 ruled on and this repair reuses rather than reinvents.
+    // distinction commit 6a180e42d drew and this repair reuses rather than reinvents.
     expect(captured.body?.success).not.toBe(true);
   });
 

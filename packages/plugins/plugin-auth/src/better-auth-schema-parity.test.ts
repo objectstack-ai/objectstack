@@ -151,7 +151,7 @@ const PLATFORM_OBJECTS: Record<string, PlatformObject> = Object.fromEntries(
     SysTwoFactor, SysDeviceCode, SysJwks,
     // Bridged at the adapter layer rather than via a plugin `schema` option —
     // see the sso/scim block at the bottom of this file (#3653). (The rc.1-era
-    // `SysScimProvider` backed no stable model; it retired under #11757.)
+    // `SysScimProvider` backed no stable model; it retired under commit 4d25d22d4.)
     SysSsoProvider,
     SysScimConnectionBinding, SysScimGroup, SysScimGroupMember,
     SysScimIdentityTombstone, SysScimProjectionGrant, SysScimSubject,

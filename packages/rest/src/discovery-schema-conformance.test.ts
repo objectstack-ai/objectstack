@@ -340,8 +340,8 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
   // line after calling the producer, so the wire answer was the MOUNTED PATH
   // SEGMENT (`'v1'` by default) — the string the caller had just typed to reach
   // the endpoint. `DiscoverySchema` declares `version` under "System Identity"
-  // next to `name` and `environment`, and the #10993 ruling (reaffirmed by
-  // #11235/#11242) settled that as the SERVING ARTIFACT's version.
+  // next to `name` and `environment`, and the #10993 ruling (which commits
+  // 98ea3443f and 376c70f98 landed) settled that as the SERVING ARTIFACT's version.
   //
   // Every assertion below pins PROVENANCE, never a literal version string: the
   // wire answer is compared against the producer's own answer, or against a

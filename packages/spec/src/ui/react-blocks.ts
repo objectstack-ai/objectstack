@@ -36,7 +36,7 @@ export interface ReactInteractionProp {
   required?: boolean;
   description: string;
   /**
-   * Deprecate-first retirement of a react-tier spelling (#11284, maintainer
+   * Deprecate-first retirement of a react-tier spelling (commit 5383fa670, maintainer
    * ruling 2026-08-23): the react tier converges on the metadata-tier
    * vocabulary. A deprecated prop stays published and accepted for the whole
    * deprecation window — removal is a later card, never a side effect here, and
@@ -91,7 +91,7 @@ export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> 
 /**
  * Overlay props RETIRED from a block, per tag — the react-tier twin of
  * `retiredKey()` on a metadata schema (#14791, maintainer ruling 2026-09-07:
- * the #11284 aliases go with no deprecation window). The spelling is gone
+ * the aliases commit 5383fa670 deprecated go with no deprecation window). The spelling is gone
  * from {@link REACT_BLOCKS}, so the generated contract no longer publishes it;
  * this ledger is what lets `validate-react-page-props` refuse it BY NAME, with
  * the prescription, instead of passing it as an unknown prop the renderer may
@@ -106,7 +106,7 @@ export const REACT_RETIRED_OVERLAY_PROPS: Readonly<
   Record<string, Readonly<Record<string, { replacedBy: string; note: string }>>>
 > = {
   ListView: {
-    // #11284 published these as deprecated aliases of ListViewSchema's own
+    // Commit 5383fa670 published these as deprecated aliases of ListViewSchema's own
     // `data` / `type`; #14791 retires them outright, the consumer fold having
     // landed (objectui `normalizeListViewSchema`, console pin a472b071).
     objectName: {
@@ -292,7 +292,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
     schemaType: 'list-view',
     summary: "Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`: the same two keys a metadata list view authors, and the only spellings (the `objectName` / `viewType` aliases are retired).",
     schema: ListViewSchema,
-    // #11284 (maintainer ruling 2026-08-23): the react tier converges on the
+    // Commit 5383fa670 (maintainer ruling 2026-08-23): the react tier converges on the
     // metadata-tier vocabulary — `type` and `data` are ListViewSchema's own
     // props (objectui#2890 A6). #14791 (maintainer ruling 2026-09-07) retired
     // the overlay aliases `objectName` / `viewType` with no window once the

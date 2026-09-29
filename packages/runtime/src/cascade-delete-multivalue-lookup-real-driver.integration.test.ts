@@ -164,7 +164,7 @@ const SINGLE = {
 const OWNER_PACKAGE = 'com.objectstack.test.9362';
 
 /**
- * [#10629] This fixture provisions its own business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its own business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -371,14 +371,14 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
     () => {
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
-    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest rig. */
     let noise: ExpectedReadRefusalCapture | null = null;
 
     afterEach(async () => {
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-        // [#10629] The capture is a PIN, not a mute — asserted after teardown so
+        // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so
         // a failure here can never leave the engine running. Every test in this
         // file rigs and writes, so the probe fires for each of them: this holds
         // for a single `-t` run as well as for the whole file.
@@ -405,7 +405,7 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
 
     async function rig(objects: unknown[]) {
         const real = await newDriver();
-        // [#10629] Installed before the driver runs a statement and before the
+        // [commit 13a6cb4ad] Installed before the driver runs a statement and before the
         // engine issues a read — the two sinks the expected refusal travels out on.
         // [#18617] The reason half is this CELL'S dialect: the refusal line the
         // driver writes says `no such table: sys_organization` on SQLite and

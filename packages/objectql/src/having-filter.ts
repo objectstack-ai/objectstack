@@ -213,8 +213,8 @@ export function aggregationFilterClause(index: number): FilterClause {
 // #5499 freeze was lifted for this operator as a sanctioned one-off (maintainer
 // ruling, 2026-08-08), strictly for semantic parity.
 //
-// [#20444] `$empty` IS here — the staged emptiness flag (declared by
-// `FieldOperatorsSchema`, out of `FILTER_OPERATORS` until its flip card), with
+// [#20444] `$empty` IS here — the emptiness flag (declared by
+// `FieldOperatorsSchema`, in `FILTER_OPERATORS` since #20446), with
 // its arm in {@link checkCondition} and its comparand gate beside
 // `$icontains`' — judged BY VALUE, the reading ruling A on #20399 (record
 // 5865693155) gives this face. See {@link emptyFlagComparandError}.

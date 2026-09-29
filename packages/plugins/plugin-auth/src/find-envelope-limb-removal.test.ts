@@ -44,8 +44,8 @@
  *
  * ## The fifteenth case is a different defect
  *
- * `settleSelfRegistrationGrant` also carried #15092's DROP shape, and it is
- * fixed in the OPPOSITE direction — see the `describe` at the end of the file.
+ * `settleSelfRegistrationGrant` also carried the silent-DROP shape, and commit
+ * 9e9f03abe fixed it in the OPPOSITE direction — see the last `describe` in the file.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -446,7 +446,7 @@ describe('#15597 — the blocks driven through their real production entry point
 });
 
 /**
- * ## The fifteenth block: #15092's DROP shape, fixed in the OPPOSITE direction
+ * ## The fifteenth block: the silent-DROP shape, fixed the OPPOSITE way (commit 9e9f03abe)
  *
  * `settleSelfRegistrationGrant` filtered its permission-set candidates with
  * `r?.active !== false && typeof r?.id === 'string' && r.id`. The first clause

@@ -202,7 +202,7 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         // `restoreArtifactRegistryView` removes on delete. Pinned here because
         // the write-through is what makes that separation load-bearing.
         //
-        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // Commit ee58392e1 rolled `action`'s `allowOrgOverride` back to `false`
         // (ADR-0005: page/app/action are ❌ in the amendment table), so
         // overriding this PACKAGED action needs the one documented door that
         // remains — the `OS_METADATA_WRITABLE` operator escape hatch. The
@@ -362,7 +362,7 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         // "reset to artifact default" would delete the artifact instead of
         // revealing it.
         //
-        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // Commit ee58392e1 rolled `action`'s `allowOrgOverride` back to `false`
         // (ADR-0005: page/app/action are ❌ in the amendment table), so
         // overriding this PACKAGED action needs the one documented door that
         // remains — the `OS_METADATA_WRITABLE` operator escape hatch, exactly

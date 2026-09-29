@@ -27,7 +27,8 @@ export const entry: SemanticMigration = {
     + 'admin holds no app-authored set in which to write the per-object `false` that would '
     + 'have won. So an application could declare an object exportable by nobody, ship, and be '
     + 'silently wrong on an exfiltration boundary — declared ≠ enforced, on the axis where a '
-    + 'silent gap costs the most. This is #5491 applied to export: that change removed '
+    + 'silent gap costs the most. This is the 2026-08-07 ruling on the member baseline '
+    + 'applied to export: that change removed '
     + '`member_default`\'s CRUD wildcard because a wildcard in a set every principal resolves '
     + 'is not a default but a floor nobody can get under; the export wildcard survived by '
     + 'omission rather than by decision, one tier up. It cannot be mechanically converted, in '
@@ -39,7 +40,8 @@ export const entry: SemanticMigration = {
     + 'was never the defect (controls C1–C3 of the same run show it enforcing exactly), '
     + 'specific-over-wildcard precedence is unchanged, `allowExport` on a `"*"` entry remains a '
     + 'supported authoring shape in an app\'s OWN sets, and READ is untouched — an admin still '
-    + 'sees every record they saw before. ADR-0087, maintainer ruling 2026-08-15, #8681.',
+    + 'sees every record they saw before. ADR-0087; maintainer ruling 2026-08-15, which '
+    + 'removed `allowExport` from the wildcard entry of both shipped admin sets.',
   acceptanceCriteria:
     'For every principal whose ADMIN export you rely on, the grant is now authored where you '
     + 'control it: an app/environment permission set held by that principal names each object '

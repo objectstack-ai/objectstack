@@ -208,7 +208,7 @@ export const ExplainLayerSchema = lazySchema(() => z.object({
     /**
      * Grant-lifecycle state — ONE shared "held but not resolving, because X"
      * vocabulary for every lifecycle control that can silently take a held
-     * grant out of resolution (#8714). Omitted/`active` = contributing
+     * grant out of resolution (commit 42b05af89). Omitted/`active` = contributing
      * normally; the other members mean the row EXISTS but contributed
      * NOTHING, and name why, so "why did access disappear" is self-answering:
      *

@@ -28,12 +28,12 @@ interface ExternalDatasourceServiceLike {
    */
   validateAll(): Promise<SchemaValidationReportLike>;
   /**
-   * [#10961] The scoped twin: validate the federated objects bound to ONE
+   * [commit 222d06fc1] The scoped twin: validate the federated objects bound to ONE
    * datasource, driving live introspection against THAT datasource only.
    *
    * OPTIONAL, and probed rather than assumed, because it is deliberately not on
-   * `IExternalDatasourceService` — #10537's triage authorized the service-side
-   * composition, not a contract-surface expansion, and #10961's triage carried
+   * `IExternalDatasourceService` — commit e634ecf6a, as triaged, took the service-side
+   * composition, not a contract-surface expansion, and commit 222d06fc1 carried
    * that ruling forward unchanged. What is asserted here rather than
    * contract-checked is the method's NAME; nothing about the shape it returns,
    * which is the report type both spellings already share.
@@ -155,7 +155,7 @@ interface DatasourceDef {
     validation?: {
       onMismatch?: 'fail' | 'warn' | 'ignore';
       /**
-       * [#13037] The BOOT gate's per-datasource opt-out — read by
+       * [commit e7dfb1d69] The BOOT gate's per-datasource opt-out — read by
        * {@link bootCheckEnabled}, and by nothing else on purpose. The scope
        * boundary the maintainer pinned when ruling this key ENFORCED (rather
        * than retired) is stated at that function.
@@ -187,7 +187,7 @@ export interface ExternalSchemaDriftEvent {
  *   - `warn`   → logs the diff and continues,
  *   - `ignore` → does nothing.
  *
- * [#13037] A datasource that sets `external.validation.checkOnBoot: false` is
+ * [commit e7dfb1d69] A datasource that sets `external.validation.checkOnBoot: false` is
  * skipped by this sweep entirely — no policy is applied to its rows, so no
  * mismatch on it can abort boot. Its BACKGROUND drift checking is a separate
  * policy and is unaffected; see {@link bootCheckEnabled} for the scope the
@@ -197,7 +197,7 @@ export interface ExternalSchemaDriftEvent {
  * `kind: 'unreachable'` (the remote could not be read, so validation was
  * indeterminate — see the kind's docblock in `@objectstack/spec/shared`) never
  * feeds that policy: it is logged loudly and boot continues, under every
- * `onMismatch` value (maintainer ruling 2026-08-23, #11166).
+ * `onMismatch` value (maintainer ruling 2026-08-23, landed in commit 735f5c709).
  *
  * No-op when the `external-datasource` service is not registered (federation
  * unused).
@@ -276,7 +276,7 @@ export class ExternalValidationPlugin implements Plugin {
     }
 
     const metadata = safeGet<MetadataServiceLike>(ctx, 'metadata');
-    // [#13037] One definition read per datasource per sweep, shared by the
+    // [commit e7dfb1d69] One definition read per datasource per sweep, shared by the
     // `checkOnBoot` gate below and the `onMismatch` resolution after it.
     const loadDef = createDatasourceDefLoader(metadata);
     let report: Awaited<ReturnType<ExternalDatasourceServiceLike['validateAll']>>;
@@ -287,7 +287,7 @@ export class ExternalValidationPlugin implements Plugin {
       return;
     }
 
-    // [#13037] Honour each datasource's `external.validation.checkOnBoot`
+    // [commit e7dfb1d69] Honour each datasource's `external.validation.checkOnBoot`
     // BEFORE any verdict is drawn from its rows. The sweep is whole-farm and
     // the key is per-datasource, so the opt-out can only be applied here, row
     // by row — a datasource that set `false` is dropped, and every other
@@ -323,7 +323,7 @@ export class ExternalValidationPlugin implements Plugin {
     }
 
     for (const r of failures) {
-      // [#11166] An `unreachable` row is NOT a schema mismatch — the remote
+      // [commit 735f5c709] An `unreachable` row is NOT a schema mismatch — the remote
       // (or the object's own definition) could not be read, so validation was
       // indeterminate and there is no measured fact to gate on. Maintainer
       // ruling 2026-08-23: no `onMismatch: 'fail'` abort for unreachable —
@@ -379,7 +379,7 @@ export class ExternalValidationPlugin implements Plugin {
    * (e.g. a second `kernel:ready`) first clears existing timers so intervals
    * don't accumulate.
    *
-   * ⭐ [#13037] **`external.validation.checkOnBoot` does not reach here, by
+   * ⭐ [commit e7dfb1d69] **`external.validation.checkOnBoot` does not reach here, by
    * ruling.** The maintainer pinned that gate's scope to the BOOT STEP ONLY
    * (2026-08-29): a datasource that set `checkOnBoot: false` still gets the
    * background drift checker it asked for via `checkIntervalMs`, because the
@@ -426,7 +426,7 @@ export class ExternalValidationPlugin implements Plugin {
    * `external.schema.drift` event per mismatch. Exposed for testing; invoked
    * from the interval armed by {@link scheduleDriftChecks}. Never throws.
    *
-   * ## [#10961] The work is scoped by the CALL, not by a filter over a sweep
+   * ## [commit 222d06fc1] The work is scoped by the CALL, not by a filter over a sweep
    *
    * This body used to ask for `validateAll()` — every federated object on every
    * federated datasource, each validation driving a live remote-schema
@@ -438,7 +438,7 @@ export class ExternalValidationPlugin implements Plugin {
    * two armed timers introspected six remotes per cycle where two were asked
    * for, and each additional tick repeated it.
    *
-   * That makes this the periodic twin of the request-gate defect #10537 named,
+   * That makes this the periodic twin of the request-gate defect commit e634ecf6a fixed,
    * and worse in the one way that matters: a request gate has a caller waiting
    * on the answer and paying attention to the latency, while this is
    * **unattended** — the fan-out repeats on every interval, forever, with
@@ -536,7 +536,7 @@ export class ExternalValidationPlugin implements Plugin {
       }
     }
     if (drifted.length > 0) {
-      // [#11166] Same distinction as the boot gate, one layer down: an
+      // [commit 735f5c709] Same distinction as the boot gate, one layer down: an
       // `unreachable` row is "could not watch", not "schema changed". The
       // event above is still emitted for it — audit/notification consumers
       // discriminate on the entry's `kind` — but the operator-facing summary
@@ -571,7 +571,7 @@ export function createExternalValidationPlugin(): ExternalValidationPlugin {
  * Reads one datasource definition per NAME per sweep, answering `undefined` for
  * anything it could not read.
  *
- * [#13037] Introduced because the boot gate now asks the definition two
+ * [commit e7dfb1d69] Introduced because the boot gate now asks the definition two
  * questions — "does this datasource opt out of the boot check?" and, only for
  * the rows that stayed, "what is its `onMismatch` policy?" — and asking twice
  * would double the metadata reads for every mismatching row. Memoized per
@@ -604,7 +604,7 @@ function createDatasourceDefLoader(
 }
 
 /**
- * [#13037] Does the BOOT sweep apply to this datasource?
+ * [commit e7dfb1d69] Does the BOOT sweep apply to this datasource?
  *
  * ## ⭐ Scope, pinned by the maintainer at the ruling (2026-08-29)
  *

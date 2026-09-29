@@ -2,7 +2,7 @@
 
 /**
  * Authenticated-caller scoping for the plugin-facing inbox surface
- * (ADR-0030 Layer 5) — the write door (#10753) and the read door (#11452).
+ * (ADR-0030 Layer 5) — the write door (#10753) and the read door (commit 3b5f0360c).
  *
  * ## The shape this closes
  *
@@ -22,7 +22,7 @@
  * permission check sees it either. Unconstrained and undeclared, in both
  * directions.
  *
- * The READ side has the same shape (#11452): `listInbox(userId, opts)` keys
+ * The READ side has the same shape (closed by commit 3b5f0360c): `listInbox(userId, opts)` keys
  * its whole read — inbox rows joined with read-state — on the same free
  * parameter, so an in-process caller could read ANY user's inbox titles,
  * bodies and read-state. Both doors resolve their recipient here.
@@ -83,9 +83,9 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
  * `ExecutionContext` the caller was handed, passed through whole.
  *
  * Passed WHOLE, deliberately: the measured defect family behind
- * `assembleExecutionContext` (#6071, #6206, #6551) is "a field exists on
- * `ExecutionContext`, one copy carries it, another silently does not". A
- * hand-picked `{ userId }` slice here would be one more such copy.
+ * `assembleExecutionContext` (#6071, #6551, and the share-link envelope trim
+ * commit 8e13ca876 undid) is "a field exists on `ExecutionContext`, one copy
+ * carries it, another silently does not". A hand-picked `{ userId }` slice here would be one more such copy.
  */
 export type InboxCaller = ExecutionContext;
 

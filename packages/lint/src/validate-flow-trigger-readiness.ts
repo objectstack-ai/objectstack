@@ -51,7 +51,17 @@
 //      silence — every named runtime channel skips it because they all key off
 //      the same resolution that already gave up.
 //
-//   ⚠️ A sixth rule lived here and is RETIRED (#17396):
+//   6. A flow bound to the inbound `api` trigger whose start node carries no
+//      usable `config.secret` (ADR-0041). The automation engine refuses such a
+//      flow at REGISTRATION, whatever its `status`, and the trigger refuses to
+//      arm it — yet `os validate` never builds the engine, so until this rule
+//      it answered "passed" for a flow no runtime will ever register. It is its
+//      OWN exported rule, `validateFlowApiTriggerSecret` (1h, at the foot of
+//      this file), because it runs on the CLI surface only until #20611 — see
+//      its docblock for why, and see `FLOW_API_TRIGGER_SECRET_MISSING` for why
+//      the judgement is carried here rather than read from the runtime.
+//
+//   ⚠️ One more rule lived here and is RETIRED (#17396):
 //      `flow-schedule-organization-missing`, a `warning` on a time-triggered
 //      flow declaring no `config.organization`. It was true while every such
 //      flow owed the key. It is not true now: a deployment-level switch gates
@@ -92,6 +102,16 @@
 //     authored-token → resolved-type map is a private chain of literal
 //     `startsWith` / `typeof` tests with no registry lookup anywhere in it. No
 //     package can teach the engine a new authored token.
+//   - `error` — `flow-api-trigger-secret-missing` joins the family on the same
+//     question, and its answer is the most direct one here: the verdict is the
+//     engine's own REGISTRATION refusal, a hardcoded check inside
+//     `registerFlow` that runs before any trigger is consulted and whatever the
+//     flow's `status`. The "installing something fixes it" hypothesis was
+//     measured for it too, and is false: an engine with a registered `api`
+//     trigger that would arm anything still refuses the flow, because it never
+//     reaches the point of asking that trigger. The rule speaks only for flows
+//     whose binding the ENGINE resolves to `api` (see 1h), so every flow it
+//     names is one the engine refuses.
 //   ⚠️ `flow-schedule-organization-missing` was the family's one measured
 //     exception — `error` on the criterion, held at `warning` by the shipped
 //     corpus — and it is retired (#17396) rather than re-severitied. The
@@ -119,6 +139,14 @@
 // never refused because stored flow B is dead, and a tenant's existing dead
 // flows keep being served. What IS refused is the dead flow's own publish — and,
 // on the CLI surface, a package build whose stack contains one.
+//
+// ⚠️ All of the above is about `validateFlowTriggerReadiness`. The sixth id,
+// `flow-api-trigger-secret-missing`, lives in `validateFlowApiTriggerSecret` on
+// its own registry entry, which is CLI-only until #20611: the publish gate
+// judges a `/meta` save before the stored `config.secret` the read path withheld
+// is restored, so at that door a signed flow's round trip would read as
+// secretless. That door still stores a secretless flow today, and the engine
+// refuses it at registration.
 
 import {
   TimeRelativeTriggerSchema,
@@ -193,6 +221,38 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-desc
  *     call sites that each skip it.
  */
 export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
+/**
+ * #20553 — ADR-0041 (`trigger-api` acceptance criteria: "a per-flow secret;
+ * HMAC signature verification"). A flow whose binding resolves to the inbound
+ * `api` trigger, and whose start node carries no usable `config.secret`, is
+ * refused by the automation engine at registration and by the trigger at arm
+ * time, so it can never receive a post.
+ *
+ * `flow-<descriptor>-<verdict>`: the descriptor is the `api` trigger's secret
+ * and the verdict is "missing" — absent, blank after `trim()`, or not a string,
+ * the three spellings both runtime copies read as one.
+ *
+ * ## The runtime copies, and why this rule cannot read them
+ *
+ * The judgement lives twice in the runtime, on purpose (each package has no
+ * dependency on the other, and each protects a host the other does not):
+ *
+ *   - `AutomationEngine.validateApiTriggerSecret`
+ *     (`packages/services/service-automation/src/engine.ts`), called from
+ *     `registerFlow` — the publish-time refusal an author sees;
+ *   - `ApiTrigger.start()` (`packages/triggers/trigger-api/src/api-trigger.ts`)
+ *     — the arm-time refusal, for a host that binds without that engine.
+ *
+ * Neither is readable from here. The engine's is a PRIVATE method of a runtime
+ * package, the trigger's is inline in `start()`, and this package's stated
+ * dependency direction is lint → `@objectstack/spec`, never onto a runtime.
+ * `@objectstack/spec` exports no predicate for the secret (it exports only the
+ * KIND half, `resolveFlowTriggerKind`, which 1h does read). So the rule carries
+ * the one-line judgement — a string, non-empty after `trim()`, on the start
+ * node's `config` — and a spec-level predicate all three could share would be
+ * its own change, editing both runtime copies to read it.
+ */
+export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing';
 
 type AnyRec = Record<string, unknown>;
 
@@ -241,6 +301,43 @@ function renderTriggerToken(v: unknown): string {
   return json === undefined ? `a ${typeof v}` : json;
 }
 
+/**
+ * What is wrong with an `api`-bound flow's secret, for the 1h message — or
+ * `undefined` when the secret is usable.
+ *
+ * "Usable" is the runtime's judgement, character for character: a string that
+ * is non-empty after `trim()` (`validateApiTriggerSecret` and `ApiTrigger.start()`
+ * both read it that way — see {@link FLOW_API_TRIGGER_SECRET_MISSING}).
+ *
+ * ⛔ The value itself is never rendered, only its TYPE. A finding travels into
+ * CI logs and publish-gate responses, and a non-string `secret` is still
+ * something an author put where a secret goes.
+ */
+function describeUnusableSecret(start: { node: AnyRec } | undefined, config: AnyRec): string | undefined {
+  if (!start) return 'it has no start node, so nothing declares a config.secret';
+  const secret = config.secret;
+  if (typeof secret === 'string') {
+    return secret.trim() !== '' ? undefined : `its start node's config.secret is blank`;
+  }
+  if (secret === undefined) return 'its start node declares no config.secret';
+  const kind = secret === null ? 'null' : Array.isArray(secret) ? 'an array' : `a ${typeof secret}`;
+  return `its start node's config.secret is ${kind}, not a string`;
+}
+
+/**
+ * The array-form record `triggerType` — `['record-after-create', …]`, any
+ * `record-` element. The ONE spelling of this predicate in the file: 1d reports
+ * the shape, and {@link validateFlowApiTriggerSecret} excludes it from the `api`
+ * binding exactly as the engine's `deriveTriggerBinding` pre-check does (it
+ * routes the shape to the record-change trigger before asking for a kind).
+ */
+function isArrayRecordTriggerType(config: AnyRec): boolean {
+  return (
+    Array.isArray(config.triggerType) &&
+    (config.triggerType as unknown[]).some((t) => typeof t === 'string' && t.startsWith('record-'))
+  );
+}
+
 /** The start node of a flow definition, if any. */
 function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined {
   const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
@@ -278,9 +375,7 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     // detection because a non-string triggerType folds to `undefined` above, so the
     // runtime misclassifies the flow as manual and it never fires with zero output
     // (#3481). Any record-* element is enough to recognize the (unsupported) intent.
-    const isArrayRecordTriggered =
-      Array.isArray(config.triggerType) &&
-      (config.triggerType as unknown[]).some((t) => typeof t === 'string' && t.startsWith('record-'));
+    const isArrayRecordTriggered = isArrayRecordTriggerType(config);
     const isTimeRelative = config.timeRelative != null && typeof config.timeRelative === 'object';
     // The auto-triggered predicate is the spec's `resolveFlowTriggerKind`: the
     // same start-node reads this rule makes above, in the engine's precedence,
@@ -676,6 +771,11 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     diagnostic, it is the diagnostic moving to where the question is
     //     answerable.
 
+    // 1h. ⚠️ NOT here — the `api` trigger's secret (#20553) is its own exported
+    //     rule, {@link validateFlowApiTriggerSecret} below, on its own registry
+    //     entry: it sits on the OTHER side of the runtime wall (CLI-only until
+    //     #20611), and one rule id sits on ONE side of it.
+
     // 2. Auto-triggered flow whose status is 'draft' — authored or defaulted
     //    (defineFlow parses at definition time, so the two are the same here).
     if (isAutoTriggered && (flow.status == null || flow.status === 'draft')) {
@@ -692,5 +792,91 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     }
   });
 
+  return findings;
+}
+
+/**
+ * 1h. #20553 — a flow bound to the inbound `api` trigger with no usable
+ * `config.secret` (ADR-0041). The engine refuses it in `registerFlow` (the
+ * `/automation` write doors answer 400; a boot skips it with a warning) and
+ * `ApiTrigger.start()` refuses to arm it; `os validate`, which builds neither,
+ * said nothing.
+ *
+ * WHICH flows are `api`-bound is the ENGINE's answer, not a reading of `type`:
+ * `deriveTriggerBinding` first routes an array-form record `triggerType` to the
+ * record-change trigger (1d's shape), and otherwise takes
+ * `resolveFlowTriggerKind`'s kind — the spec export this file already reads.
+ * `bindsApiTrigger` is those two steps, in that order, and nothing else.
+ * ⛔ Not the `flow.type === 'api' || triggerType === 'api'` disjunction 1f uses
+ * for "routes SOMEWHERE": the resolver ranks record / time-relative / schedule
+ * ahead of `api`, so a `type: 'api'` flow whose start node also carries a
+ * `record-*` token, a `timeRelative` descriptor or a `config.schedule` is bound
+ * to THAT trigger, and the engine never asks it for a secret. Measured on the
+ * built engine: those five precedence shapes (with the array form, and
+ * `type: 'schedule'` beside `triggerType: 'api'`) all register; the disjunction
+ * would have refused every one.
+ *
+ * `status` is deliberately not read: the engine refuses an `obsolete` flow too
+ * (a refused flow is never stored at all), so a secretless disabled flow still
+ * fails its own registration. A flow with NO start node is judged as well — the
+ * engine reads its `config` as `{}` and refuses it for the same reason — and is
+ * located at `nodes`, since there is no start node to point at.
+ *
+ * ## Why this is a separate function from {@link validateFlowTriggerReadiness}
+ *
+ * A surface boundary, not taste — the registry's `validateSecurityRoleWord`
+ * split is the precedent. `validateFlowTriggerReadiness` runs on the runtime
+ * publish gate too; this rule cannot, yet (#20611). The flow read path withholds
+ * `config.secret` from every served definition (#20552), and `saveMetaItem`
+ * restores the stored secret only just before the put — AFTER the runtime
+ * authoring gate has judged the body the caller sent. So an ordinary `/meta`
+ * GET → edit → PUT of a SIGNED flow reaches the gate secretless, and this rule
+ * would refuse a save that keeps the secret. Measured on `825c33ff9f`: with this
+ * id at the gate, `protocol.metadata-redaction.test.ts` fails exactly its two
+ * round-trip pins; with it dropped there, 26/26 pass. So this id stays CLI-only
+ * (`os validate` / `os build` / `os lint`, whose stacks carry the author's own
+ * secret) until the gate judges the carried-forward body, and it is split out
+ * WHOLE rather than filtered at one entry: one rule id sits on ONE side of the
+ * wall. Meanwhile the `/meta` door behaves as it did before this rule existed:
+ * it stores a secretless flow, and the engine refuses it at registration.
+ */
+export function validateFlowApiTriggerSecret(stack: AnyRec): FlowTriggerReadinessFinding[] {
+  const findings: FlowTriggerReadinessFinding[] = [];
+  recordsOf(stack.flows).forEach((flow, flowIndex) => {
+    const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
+    const start = startNodeOf(flow);
+    const config = (start?.node.config ?? {}) as AnyRec;
+    const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
+    const bindsApiTrigger = !isArrayRecordTriggerType(config) && resolveFlowTriggerKind(flow) === 'api';
+    const secretProblem = bindsApiTrigger ? describeUnusableSecret(start, config) : undefined;
+    if (!secretProblem) return;
+    // Which declaration binds it — the engine's own message names the same
+    // two, so an author who meets both channels reads one story.
+    const binds = [
+      flow.type === 'api' ? `type: 'api'` : undefined,
+      triggerType === 'api' ? `start-node triggerType: 'api'` : undefined,
+    ].filter((s): s is string => s !== undefined);
+    findings.push({
+      // `error` — the never-fire family, and the strongest verdict in it: the
+      // engine does not merely leave this flow unfired, it refuses to register
+      // it, in a hardcoded check no installed package can reach (see the
+      // Severity section at the top of this file).
+      severity: 'error',
+      rule: FLOW_API_TRIGGER_SECRET_MISSING,
+      where: start ? `flow "${flowName}" › start node` : `flow "${flowName}"`,
+      path: start
+        ? `flows[${flowIndex}].nodes[${start.index}].config.secret`
+        : `flows[${flowIndex}].nodes`,
+      message:
+        `binds the inbound api trigger (${binds.join(' and ')}) but ${secretProblem}. An inbound hook ` +
+        `is armed only with a per-flow secret that every post is HMAC-verified against (ADR-0041), so the ` +
+        `automation engine refuses to register this flow, whatever its status, and it never receives a post.`,
+      hint:
+        `Set a non-blank string config.secret on the start node, and sign each post with it: the ` +
+        `x-objectstack-signature header carries 'sha256=' and the hex HMAC-SHA256 of the raw body. A flow that is ` +
+        `only ever started explicitly and never receives inbound posts is type: 'autolaunched', with no ` +
+        `triggerType: 'api' on its start node — that flow needs no secret.`,
+    });
+  });
   return findings;
 }

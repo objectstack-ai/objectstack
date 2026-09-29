@@ -12,7 +12,7 @@
 //
 // ⚠️ NOT because core cannot compile a pin — this header used to say
 // `@objectstack/core` "has no `typecheck` script (it is a type-check DEBT
-// ledger entry)", and that is false on this tree in BOTH halves. #14613 split
+// ledger entry)", and that is false on this tree in BOTH halves. Commit 81208086a split
 // a `tsconfig.test.json` out of core's build config and core's `typecheck`
 // NAMES it (via `check:test-typecheck --project`), so a `@ts-expect-error`
 // over there is compiled rather than the phantom pin

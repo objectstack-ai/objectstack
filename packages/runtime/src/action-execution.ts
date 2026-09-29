@@ -900,14 +900,14 @@ export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
  * and a downstream reader that had to tell them apart could only infer.
  *
  * [#15168] **The wiring takes the subject LOAD, not a bare record.** The flow
- * face of #14143's signal (`AutomationContext.recordLoadDenied`, declared by
+ * face of commit f19475c0a's signal (`AutomationContext.recordLoadDenied`, declared by
  * #14244) is derived here, once, from {@link loadActionSubjectRecord}'s
  * outcome — so a caller cannot hand this door a record while dropping the
  * verdict that says the caller could not read it. Both call sites already held
  * that outcome and were passing `subject.record` out of it; taking the whole
  * `subject` removes the second de-facto source rather than adding a key beside
  * it, and makes the omission a compile error instead of a silent inertness one
- * door over (the shape #14143 was filed for).
+ * door over (the shape commit f19475c0a fixed).
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -1685,10 +1685,10 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
 
 /**
  * The subject-record load's outcome, as the two action doors hand it to a
- * handler (#14143).
+ * handler (commit f19475c0a).
  */
 export interface ActionSubjectRecordLoad {
-    /** What the handler receives as `ctx.record`. Unchanged by #14143. */
+    /** What the handler receives as `ctx.record`. Unchanged by commit f19475c0a. */
     record: Record<string, unknown>;
     /**
      * `true` exactly when a caller-scope load was ATTEMPTED and did not deliver
@@ -1700,7 +1700,7 @@ export interface ActionSubjectRecordLoad {
 
 /**
  * Load an action's subject record IN THE CALLER'S OWN SCOPE, and report whether
- * that load actually delivered the row (#14143). ONE producer for both action
+ * that load actually delivered the row (commit f19475c0a). ONE producer for both action
  * doors — the MCP `run_action` bridge below and the REST `/actions` route
  * (`domains/actions.ts`) — because the signal it emits is documented to app
  * authors, and a signal only one of two doors sets is an authorization guard
@@ -1793,7 +1793,7 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
  * reading it left open ("whether the automation engine acts on it … is a
  * separate reading") is this function. A swallowed load must never become an
  * implicit grant — the rule is #15079's, and a rule implemented at one of three
- * doors is the failure class #14143 and #15168 each already paid for here.
+ * doors is the failure class commit f19475c0a and #15168 each already paid for here.
  *
  * ## The predicate is the LOAD's verdict — ⛔ never the action's `locations`
  *
@@ -1906,11 +1906,11 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * 'update'` + `patch` (#14092, maintainer ruling 2026-09-01, quoted on the
  * card). ONE implementation, called by BOTH action doors.
  *
- * ## Shared on purpose, for the #14143 reason
+ * ## Shared on purpose, for the reason of commit f19475c0a
  *
  * The REST `/actions` door and the MCP `run_action` bridge are two doors onto
  * one action model, and this repo has now paid twice for a rule implemented at
- * one of them: #14143 (a `recordLoadDenied` signal only one door set) and
+ * one of them: commit f19475c0a (a `recordLoadDenied` signal only one door set) and
  * #15168 (a flow face with no populator at all). An authorization rule is the
  * worst possible thing to fork, and contract point 3 is an authorization rule
  * — so the branch each door owns is three lines, and everything that decides
@@ -1944,7 +1944,7 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * the caller's own scope actually delivered it. A caller who cannot read the
  * row is refused HERE, before any write is attempted, on
  * `subject.recordLoadDenied`. Re-deriving that from `subject.record` is the
- * #14143 defect verbatim: the door stamps `record.id = recordId` on a refused
+ * defect commit f19475c0a fixed, verbatim: the door stamps `record.id = recordId` on a refused
  * load, so `record.id` is truthy either way and `if (!record?.id)` is false on
  * a row the caller cannot see. A swallowed load must never become an implicit
  * grant.
@@ -2202,7 +2202,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // Load the subject record under RLS when row-context (engages the same
     // permission path as get_record — an unseen record reads as not-found).
-    // [#14143] Through the ONE shared producer, so this door and the REST
+    // [commit f19475c0a] Through the ONE shared producer, so this door and the REST
     // `/actions` door emit the same `recordLoadDenied` signal to handlers.
     const subject = await loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
@@ -2213,7 +2213,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // first, and an action with no handler has no body to elevate for. The
     // shared executor the REST `/actions` door also calls, so the two doors
     // cannot disagree about the identity the write carries — the failure class
-    // #14143 and #15168 each paid for once, on this exact seam.
+    // commit f19475c0a and #15168 each paid for once, on this exact seam.
     if (isDeclarativeUpdateAction(action)) {
         const result = await executeDeclarativeUpdateAction(deps, action, {
             objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData,
@@ -2281,7 +2281,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     );
     const actionContext: any = {
         record,
-        // [#14143] The caller-scope load's verdict, on the same context the
+        // [commit f19475c0a] The caller-scope load's verdict, on the same context the
         // record rides. `ctx.record.id` is present either way (the stamp is
         // load-bearing for record-less actions), so this is the ONLY thing that
         // tells a handler its subject row did not resolve for THIS caller —

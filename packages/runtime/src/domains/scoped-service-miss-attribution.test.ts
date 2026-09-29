@@ -352,7 +352,7 @@ const tenantAdmin = (environmentId?: string): HttpProtocolContext => ({
 const flip = (d: HttpDispatcher, ctx: HttpProtocolContext) =>
     d.handleActions(`/_activation/${OBJECT}/${ACTION}`, 'POST', { enabled: false }, ctx);
 
-/** Door 3 — `POST /automation/:name/toggle` (`./automation.ts`, read-only here: PR #16755 holds that file). */
+/** Door 3 — `POST /automation/:name/toggle` (`./automation.ts`, read-only here: the change that landed as commit 44c849c7d held that file). */
 const FLOW = 'vendor_lead_router';
 const FLOW_DEFINITION = { name: FLOW, label: 'Vendor Lead Router', type: 'autolaunched', nodes: [], edges: [] };
 

@@ -246,7 +246,7 @@ const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizatio
 
 /**
  * The `error` channel this census needs, with the `warn` fallback the
- * #13398-class ruling requires of a sink that may not declare `error`.
+ * published-sink ruling (commit e238c79f0) requires of a sink that may not declare `error`.
  *
  * Declared HERE, at birth, with `error?` beside a REQUIRED `warn` — the #9754
  * shape `check:optional-error-sink-contract` is satisfied by. Field shapes are
@@ -254,8 +254,8 @@ const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizatio
  * host sink that satisfies one satisfies the other.
  *
  * ⛔ {@link TenancyServiceDeps.logger} is NOT widened to carry this. Growing
- * `error?` onto a published sink that lacks it is exactly what the #13398-class
- * ruling forbids, and that sink's `warn` is OPTIONAL — widening it in place
+ * `error?` onto a published sink that lacks it is exactly what the sink ruling
+ * (commit e238c79f0) forbids, and that sink's `warn` is OPTIONAL — widening it in place
  * would mint the "an optional `error` with no declared alternative" shape the
  * gate above exists to refuse. {@link asTenancyBootDiagnosticSink} narrows the
  * declared sink to this one at RUNTIME instead, proving the required member

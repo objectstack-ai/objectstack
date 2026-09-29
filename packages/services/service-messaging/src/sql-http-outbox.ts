@@ -334,7 +334,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
      * Record one attempt's outcome — see {@link IHttpOutbox.ack}.
      *
      * [#17634] Handed `claimed` — as `HttpDispatcher` always hands it — this is
-     * the compare-and-set `SqlNotificationOutbox.ack` performs (#11453, #11859):
+     * the compare-and-set `SqlNotificationOutbox.ack` performs (commits 1a47a5368, d9cf78eaa):
      * two deterministic refusals read before any write, the same two tests
      * re-stated IN a conditional UPDATE (the half that holds under the race),
      * and a read-back that reports a write which matched nothing instead of a

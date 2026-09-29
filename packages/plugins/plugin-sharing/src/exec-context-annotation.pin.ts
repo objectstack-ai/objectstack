@@ -4,8 +4,8 @@
  * #7136 — compile-time pin for the CONTEXT type this plugin's enforcement
  * methods accept.
  *
- * #6523 converged 36 contract signatures onto the full `ExecutionContext` (the
- * #6206 ruling: enforcement adjudicates on the whole `resolveAuthzContext`
+ * Commit aa4b90d9a converged 36 contract signatures onto the full `ExecutionContext` (the
+ * full-envelope ruling: enforcement adjudicates on the whole `resolveAuthzContext`
  * envelope, never a per-site subset). #7136 is the consumer half — the
  * implementations here now annotate their own parameters with that same
  * envelope instead of the six-field shape they used to name.

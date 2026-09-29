@@ -227,7 +227,7 @@ describe('[#7826] sys_session TTL sweep — real declaration, real Reaper, live 
   });
 
   it('ABLATION — without `onlyWhen` the same sweep reaps the tombstone too', async () => {
-    // The declaration minus its filter: the naive policy #10165 existed to
+    // The declaration minus its filter: the naive policy commit 801296050 existed to
     // make avoidable. This is the case the sparing control has to discriminate
     // against, so the control is not vacuous.
     const { driver, service } = await seeded({

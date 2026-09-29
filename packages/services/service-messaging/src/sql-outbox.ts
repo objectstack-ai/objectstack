@@ -166,7 +166,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
         );
 
-        // 4. Read back only the rows we own. [#11859] The read-back WHERE just
+        // 4. Read back only the rows we own. [commit d9cf78eaa] The read-back WHERE just
         //    proved (claimed_by, claimed_at) — the claim credential — so the
         //    explicit stamp below narrows to ClaimedDeliveryRecord without a
         //    cast, and states nothing the query did not already establish.
@@ -216,7 +216,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
 
     async ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
         const id = claimed.id;
-        // [#11859] The runtime half of the ClaimedDeliveryRecord contract, for
+        // [commit d9cf78eaa] The runtime half of the ClaimedDeliveryRecord contract, for
         // JS callers and casts: a record with no claim credential was not
         // handed out by claim()/claimDigest() and is refused before any IO.
         if (typeof claimed.claimedBy !== 'string' || typeof claimed.claimedAt !== 'number') {
@@ -234,7 +234,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // An id matching no row is not a contract violation: no state to
         // corrupt, no claim to lose. Declared on the interface, unchanged.
         if (!current) return;
-        // [#11453] Precondition, half one: the loud, deterministic refusal for
+        // [commit 1a47a5368] Precondition, half one: the loud, deterministic refusal for
         // a row that is not claimed at all — the ack-as-cancel trap. Refused
         // BEFORE any write, so a refused ack leaves the row byte-identical.
         if (current.status !== 'in_flight') {
@@ -243,7 +243,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }
-        // [#11859] Ownership, read half: the row is claimed, but not by the
+        // [commit d9cf78eaa] Ownership, read half: the row is claimed, but not by the
         // claim this record came from — reaped and re-claimed while the send
         // ran (`status = 'in_flight'` alone matches B's live attempt, which is
         // exactly the overwrite the card measured). Deterministic refusal
@@ -275,12 +275,12 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             error = result.error ?? null;
         }
 
-        // [#11453] Precondition, half two: the ATOMIC one. The tests above are
+        // [commit 1a47a5368] Precondition, half two: the ATOMIC one. The tests above are
         // reads, and a read cannot hold a row still — `claim()` is atomic by
         // contract and this call was never part of that atom, which is the
-        // race the card describes. So the requirement is re-stated IN the
+        // race that commit describes. So the requirement is re-stated IN the
         // write: the row is transitioned only if it is STILL `in_flight` AND
-        // [#11859] still held by THIS claim — the (`claimed_by`, `claimed_at`)
+        // [commit d9cf78eaa] still held by THIS claim — the (`claimed_by`, `claimed_at`)
         // credential round-tripped from the record `claim()` returned. A row
         // reaped by the visibility timeout and re-claimed between the read and
         // here matches nothing and is left entirely alone, whoever re-claimed

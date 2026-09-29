@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#6306] ONE API base for the whole REST surface — pinned end to end through
+// [commit fec784863] ONE API base for the whole REST surface — pinned end to end through
 // the plugin that composes it in production.
 //
 // The defect this replaces: `RestServer.getApiBasePath()` answers
@@ -13,7 +13,7 @@
 // `/api/v1` (`packages.*` ×4, `datasources/:name/external/*` ×5). Those 9
 // were also absent from `{apiPath}/openapi.json` (71 paths vs 79), because
 // that document is filtered to this server's base — the filter is what made
-// the split visible (#5822 / PR #6303).
+// the split visible (#5822 / commit 465c5fc14).
 //
 // What is pinned here, and at which level. This file drives
 // `createRestApiPlugin(config).start(ctx)` — the real composition — over a

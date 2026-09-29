@@ -57,7 +57,7 @@ import {
  * Supports the operators the RLS layer and common policies emit: implicit
  * equality, `$eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$between/$contains/$notContains/
  * $startsWith/$endsWith/$null/$exists`, and `$and/$or/$not` combinators — plus
- * `$icontains` (#6520) and the staged `$empty` (#20445, the last section).
+ * `$icontains` (#6520) and `$empty` (#20445, the last section).
  *
  * ## `''` means TRUE, and that is a value — not "nothing happened"
  *
@@ -610,17 +610,17 @@ import {
  * when the flag is not a boolean ({@link assertBooleanFlagComparands}, the
  * gate the two null flags already had).
  *
- * The operator stays STAGED — absent from `FILTER_OPERATORS` until every face
- * has its arm (the maintainer's amendment of ruling A: 「照 $like 先例分阶段」)
- * — so no in-repo producer emits it in a read scope yet; the CEL lowering's
- * `is_empty` still emits `$null`. An in-process `getReadScope` producer can.
+ * [#20446] The operator is in `FILTER_OPERATORS`, and the view operators
+ * `is_empty` / `is_not_empty` lower to it, so a read scope built from a stored
+ * 「is empty」 rule carries it here — as an in-process `getReadScope` producer
+ * always could. A host that wires no `sourceFieldMeta` cannot name a field's
+ * declaration, so such a scope is refused on it (fail-closed, in this
+ * module's envelope) where the old `$null` lowering compiled `IS NULL`.
  *
  * The ObjectQL execute face does not meet this compiler: it hands the scope to
- * the engine, whose `$empty` arm is the engine lane's (`driver-sql` and its
- * heirs, a sibling card of ruling A). Until that arm lands the engine's driver
- * refuses the operator there (`INVALID_FILTER` / 400, the operator and field
- * withheld from its message), so one scope is refused on that face and
- * answered on the other two; nothing is dropped on any of them.
+ * the engine, whose drivers answer `$empty` by the declared row (#20444) and
+ * refuse it on a column they hold no declaration for; nothing is dropped on
+ * any face.
  *
  * What `$empty` did NOT change is the envelope of an operator this compiler
  * has no arm for: still `READ_SCOPE_COMPILE_FAILED` / 500, withheld, per the

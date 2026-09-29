@@ -24,7 +24,7 @@
  * ①b — the arm that re-dresses `classifiedRefusalAnswer`'s body with
  * `...refusalFields` — IS the arm the card measured, and it does carry the mark
  * because that body comes from `resolveErrorResponse`, whose arms already ride
- * it (`withDeclaredUserMessage`, #9934). §5 pins ①b as untouched, so the two
+ * it (`withDeclaredUserMessage`, commit 79c46da90). §5 pins ①b as untouched, so the two
  * classified arms are not flattened into one story in either direction.
  *
  * What ①, ③a and ③b have in common is that none of them holds a classified body
@@ -43,7 +43,7 @@
  *   1. `classifyDataError` (`error-response.ts`), whose only caller is the
  *      exported `mapDataError`, which IS `withDeclaredUserMessage(error,
  *      classifyDataError(…))`. That door already carries the mark, applied one
- *      layer OUT and branch-agnostically over every arm — the shape #9934 chose
+ *      layer OUT and branch-agnostically over every arm — the shape commit 79c46da90 chose
  *      deliberately, and the reason the shared body-builder carries no mark of
  *      its own.
  *   2. this route's ③a.
@@ -323,7 +323,7 @@ describe('[#12710] §4 both doors carry the same producer mark for the same thro
       const flat = dataDoor(c.error());
       // POSITIVE CONTROL — without this the analytics assertion below could pass
       // for the wrong reason (two doors agreeing the mark does not belong on
-      // this terminal). #9934 rules that it does; `/data` is where that ruling
+      // this terminal). The ruling commit 79c46da90 landed says it does; `/data` is where that ruling
       // already lives.
       expect(
         flat.body.userMessage,

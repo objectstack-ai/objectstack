@@ -98,7 +98,7 @@ function metadataFor(objects: any[]) {
 }
 
 /**
- * [#10629] This fixture provisions its own business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its own business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -111,14 +111,14 @@ const ABSENT_TENANCY_TABLE = 'sys_organization';
 describe('bulk-write hardening on a REAL SqlDriver (framework#3147–#3152, #3172, #3173)', () => {
   let dir: string | null = null;
   let engine: ObjectQL | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest boot. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
     // failure here can never leave the engine running. Every test in this file
     // boots and writes, so the probe fires for each of them: this holds for a
     // single `-t` run as well as for the whole file.
@@ -129,7 +129,7 @@ describe('bulk-write hardening on a REAL SqlDriver (framework#3147–#3152, #317
   async function boot(objects: any[], plan: FaultPlan = {}) {
     dir = mkdtempSync(join(tmpdir(), 'os-bulk-real-'));
     const real = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
-    // [#10629] Installed on the REAL driver (the one that logs) before it runs
+    // [commit 13a6cb4ad] Installed on the REAL driver (the one that logs) before it runs
     // a statement, and on the engine before it issues a read — the two sinks the
     // expected refusal travels out on. `wrapDriver` prototype-delegates, so the
     // wrapper resolves `logger` through the chain to this sink.

@@ -87,15 +87,15 @@ const CUBE: Cube = {
   title: 'TD Delivery Analytics',
   sql: OBJECT,
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
+    count: { label: 'Count', type: 'count', sql: '*' },
     total_estimate_hours: {
-      name: 'total_estimate_hours', label: 'Total Estimated Hours', type: 'sum', sql: 'estimate_hours',
+      label: 'Total Estimated Hours', type: 'sum', sql: 'estimate_hours',
     },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
     // `type: 'time'` over a `Field.date` column — the shape the report buckets.
-    due_date: { name: 'due_date', label: 'Due Date', type: 'time', sql: 'due_date' },
+    due_date: { label: 'Due Date', type: 'time', sql: 'due_date' },
   },
 } as unknown as Cube;
 

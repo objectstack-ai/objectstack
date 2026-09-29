@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on BOTH of TursoDriver's faces — the
+ * [#20444] The `$empty` operator on BOTH of TursoDriver's faces — the
  * local transport (which inherits `SqlDriver.applyFilterCondition`) and the
  * remote one (`RemoteTransport.buildWhereSQL`, an independent compiler) — held
  * to one row set, by the field's DECLARED row of the ruled 「is empty」 table

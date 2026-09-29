@@ -436,9 +436,11 @@
  * refused by {@link assertBooleanNullFlags} with the two null flags. The leaf
  * is TOTAL on every consumer, so the `$not` rewrite adds no guard to it.
  *
- * The operator stays STAGED (absent from `FILTER_OPERATORS`, 「照 $like 先例分阶段」):
- * the view operators `is_empty` / `is_not_empty` still lower to `$null`, and
- * the draft preview does not evaluate `$empty` — it refuses it with its other
+ * [#20446] The operator is in `FILTER_OPERATORS`, and the view operators
+ * `is_empty` / `is_not_empty` lower to it (through `parseFilterAST`, the
+ * array door), so a host that wires no `sourceFieldMeta` refuses a stored
+ * 「is empty」 rule here where the old `$null` lowering compiled `IS NULL`. The
+ * draft preview does not evaluate `$empty` — it refuses it with its other
  * unevaluated operators (`preview-evaluator.ts`).
  *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator

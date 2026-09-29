@@ -308,10 +308,10 @@ const CUBE = {
   name: 'deals',
   title: 'Deals',
   sql: 't',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: 'id' } },
+  measures: { total: { label: 'Total', type: 'count', sql: 'id' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    name: { label: 'Name', type: 'string', sql: 'name' },
   },
   public: true,
 } as never;

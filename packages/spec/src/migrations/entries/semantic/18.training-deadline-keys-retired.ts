@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     + 're-assigns training on an interval, escalates an expired certification or sends a '
     + 'reminder, so there is no live mechanism to declare a duration or deadline to',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on the unread deadline keys '
+    + '(ruled A: retire per '
     + 'family). Five minute/day-shaped keys sat on the published authorable surface and in the '
     + 'generated reference docs — an author could write `validityDays: 365` and reasonably '
     + 'expect a certificate to expire — and read by NOTHING: the schemas are exported from '

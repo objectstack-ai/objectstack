@@ -84,7 +84,7 @@ interface FactoryOptions {
  * body's own `ctx.log.info('task completed: …')` absent.
  *
  * That is the third limb of this shape removed from this file, not the first:
- * `doc` / `previousDoc` (#5906) and `session.user` (#6316) were also keys no
+ * `doc` / `previousDoc` (#5906) and `session.user` (commit 448ac9565) were also keys no
  * producer ever wrote, deleted rather than left as a second de-facto contract
  * (Prime Directive #12). The remedy is the same — read the source that exists.
  * `opts.logger` is the engine's own `Logger`, handed to the factory by all four
@@ -505,7 +505,7 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
 }
 
 /**
- * [#14760] The entry value as the VM could actually have seen it, or `ok:
+ * [commit ee32e1cb8] The entry value as the VM could actually have seen it, or `ok:
  * false` for a host value the round-trip cannot evaluate at all.
  *
  * Leg 2 of {@link carriedInputKeys} compares an entry snapshot against the VM's
@@ -527,7 +527,7 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
  * readonly. Normalising the comparison closes both, because an untouched key is
  * no longer carried at all and the host simply keeps its own value.
  *
- * ⛔ The fail-open is NOT reversed. #14758 chose "anything we cannot prove
+ * ⛔ The fail-open is NOT reversed. Commit 84199cb87 chose "anything we cannot prove
  * equal is reported as changed and therefore CARRIED" deliberately, and a value
  * that throws here — a cycle, a bigint, a `toJSON` returning `undefined` — still
  * takes exactly that path. What changes is that the fail-open stops firing on
@@ -538,14 +538,14 @@ function jsonSeenByVm(value: unknown): { ok: true; value: unknown } | { ok: fals
   try {
     return { ok: true, value: JSON.parse(JSON.stringify(value)) as unknown };
   } catch {
-    /* unrepresentable (cycle, bigint) — #14758's fail-open, for this key only */
+    /* unrepresentable (cycle, bigint) — commit 84199cb87's fail-open, for this key only */
     return { ok: false };
   }
 }
 
 /**
- * [#14758] Which keys of the exit dump the write-back should re-assert, or
- * `undefined` to assert all of them (the pre-#14758 behaviour).
+ * [commit 84199cb87] Which keys of the exit dump the write-back should re-assert, or
+ * `undefined` to assert all of them (the behaviour before commit 84199cb87).
  *
  * Two sources, unioned, and neither is sufficient alone:
  *
@@ -565,7 +565,7 @@ function jsonSeenByVm(value: unknown): { ok: true; value: unknown } | { ok: fals
  *     whose ENTRY value is an object because a primitive cannot be mutated in
  *     place — every change to one is an assignment (1) already saw — and
  *     confining it there is what keeps this leg from re-widening into the value
- *     diff #14099's ruling refused. [#14760] Normalising the entry side is what
+ *     diff #14099's ruling refused. [commit ee32e1cb8] Normalising the entry side is what
  *     makes the comparison answer "did the body write through this?" instead of
  *     "is this host value already JSON?"; without it every `Date`-valued key
  *     answered the second question, in the wrong direction, forever.
@@ -603,7 +603,7 @@ function carriedInputKeys(
  * preserves insertion order for string keys but reorders integer-like ones, and
  * a reorder is not a write.
  *
- * [#14760] BOTH sides are JSON values by the time they reach here: `b` is the
+ * [commit ee32e1cb8] BOTH sides are JSON values by the time they reach here: `b` is the
  * VM's exit dump, and `a` is the entry snapshot already put through
  * {@link jsonSeenByVm}. So this compares like for like, and it no longer stands
  * in for the round-trip itself. It used to: an unequal verdict meant either
@@ -668,7 +668,7 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
  * returns it (`delete ctx.input.x; return { x: 1 };`) keeps the explicit patch
  * — the return value is the later, more deliberate statement of the two.
  *
- * ## [#14758] Why the merge is a KEY SET and no longer the whole dump
+ * ## [commit 84199cb87] Why the merge is a KEY SET and no longer the whole dump
  *
  * `mutatedInput` is the whole post-run `ctx.input`, so `Object.assign(target,
  * mutated)` re-asserted every key a body could see, touched or not. `target` is
@@ -709,7 +709,7 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
  *    itself ever fires, so the recorder cannot list `meta`. The dump is the only
  *    witness for those, and {@link carriedInputKeys} reads it the narrowest way
  *    available: an OBJECT-valued entry key whose dumped value no longer matches
- *    the entry snapshot — [#14760] as {@link jsonSeenByVm} shows it to the VM —
+ *    the entry snapshot — [commit ee32e1cb8] as {@link jsonSeenByVm} shows it to the VM —
  *    was written through, and is carried. Primitives need no such leg: a
  *    primitive cannot be mutated in place, so every change to one is an
  *    assignment the recorder saw.
@@ -732,7 +732,7 @@ function applyMutationsToInput(
     }
     const carried = carriedInputKeys(mutated, result.mutatedInputKeys, entryInput);
     if (carried === undefined) {
-      // The recorder could not speak — pre-#14758 behaviour, verbatim.
+      // The recorder could not speak — the behaviour before commit 84199cb87, verbatim.
       Object.assign(target, mutated);
     } else {
       for (const key of carried) {
@@ -877,7 +877,7 @@ function buildSandboxContext(
     // reliably distinguish create (`!ctx.previous`) from update/delete.
     previous: unwrapProxyToPlain(previousRaw),
     // `engineCtx.user` is the ONLY source, and the `?? engineCtx?.session?.user`
-    // limb that used to follow it was removed in #6316 (same family as #5906
+    // limb that used to follow it was removed in commit 448ac9565 (same family as #5906
     // above, and as #4984): `HookContext['session']` declares no `user` key
     // (`packages/spec/src/data/hook.zod.ts`) and its sole producer —
     // ObjectQL's `buildSession()` (`packages/objectql/src/engine.ts`), which
@@ -907,7 +907,7 @@ function buildSandboxContext(
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
     inputOptions,
-    // [#13644] The declared referential-cleanup marker, carried across the
+    // [commit 34ce8e7db] The declared referential-cleanup marker, carried across the
     // sandbox boundary BY CONTRACT — copied only in its declared shape
     // (`true`), the same unrecognised-shape rule as `dispatch` above: anything
     // else is left ABSENT, so `ctx.referentialFieldClear === true` reads "not
@@ -935,7 +935,7 @@ function buildActionSandboxContext(
   return {
     input: unwrapProxyToPlain(actionCtx?.params ?? {}),
     previous: undefined,
-    // Same removal as the hook face above (#6316), measured on this face's own
+    // Same removal as the hook face above (commit 448ac9565), measured on this face's own
     // shapes: `ActionSession` (`packages/spec/src/ui/action-params.zod.ts`)
     // declares `userId` / `organizationId` / `positions` / `roles` and no
     // `user`, and its sole producer `buildActionSession()`
@@ -953,7 +953,7 @@ function buildActionSandboxContext(
     // downstream writes it back. `warnDiscardedRecordWrites` reports the writes
     // a body makes to it rather than letting them vanish.
     record: unwrapProxyToPlain(actionCtx?.record),
-    // [#14143] The caller-scope load's verdict, marshalled EXPLICITLY for the
+    // [commit f19475c0a] The caller-scope load's verdict, marshalled EXPLICITLY for the
     // same reason `dispatch` / `referentialFieldClear` are on the hook face: a
     // body cannot reach the dispatcher's locals, and `ctx.record.id` is stamped
     // even when the caller cannot read the row, so without this key an action

@@ -9,7 +9,7 @@ import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
-// [#8710] The ADDRESSING primitive, imported so the negative half of the
+// [commit 04d03c3a0] The ADDRESSING primitive, imported so the negative half of the
 // ruling can be pinned in the same suite as the positive half: the filter
 // belongs to the sharing CALL SITE, never to the expansion helper.
 import { PositionGraphService } from './position-graph.js';
@@ -1866,7 +1866,7 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
 });
 
 // ---------------------------------------------------------------------------
-// #8710 — a DEACTIVATED `sys_position` confers no sharing-rule shares
+// commit 04d03c3a0 — a DEACTIVATED `sys_position` confers no sharing-rule shares
 //
 // Maintainer ruling, 2026-08-15, the recitable line:
 //

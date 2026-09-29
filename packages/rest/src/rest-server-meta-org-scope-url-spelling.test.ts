@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #10340 — the `/meta` doors decided ORGANIZATION SCOPE from the RAW url
+// Before commit 26f3588fb the `/meta` doors decided ORGANIZATION SCOPE from the RAW url
 // spelling while storage folded it through the COMPLETE map.
 //
 // ── What was broken ───────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ import { RestServer } from './rest-server.js';
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 
-// The two measured members of the disagreement set (#10340's table,
+// The two measured members of the disagreement set (both named in commit 26f3588fb,
 // re-derived at head by execution): URL-only spellings of
 // `allowOrgOverride: true` types, invisible to the manifest map.
 const MEMBERS = [
@@ -202,7 +202,7 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
                 });
                 expect(requestFrom(b6.rollbackMetaItem).organizationId).toBe(ORG);
 
-                // [#12195] The compound-name GET and PUT were driven here too,
+                // [commit 7986d973f] The compound-name GET and PUT were driven here too,
                 // as the doors most likely to be left org-BLIND while their
                 // twins were fixed (#9454). Their arity is retired, so the
                 // spelling map is exercised through the single-segment doors
@@ -256,7 +256,7 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
         });
 
         it('⛔ leaves GET /meta/_drafts unfolded — it matches the draft row STORED type, by design', async () => {
-            // Deliberately NOT a site (#10340 records why): stored types are
+            // Deliberately NOT a site (commit 26f3588fb keeps it unfolded by design): stored types are
             // canonical because the protocol folds on save, so `?type=` is a
             // filter against stored rows, not a URL segment. Folding it would
             // be a behaviour change, not a repair.
