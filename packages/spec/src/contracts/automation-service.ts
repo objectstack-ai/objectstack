@@ -463,6 +463,28 @@ export interface AutomationResult {
     successMessage?: string;
     errorMessage?: string;
     /**
+     * The flow definition's authored `label`, copied verbatim the same way as
+     * the two messages above, so a flow runner can name the flow it is running
+     * (the runner header, the completion toast) in words rather than by its
+     * API name — and translate it against `flows.<flow>.label`, falling back
+     * to this string.
+     *
+     * Set on every result that describes an EVALUATION of a registered flow —
+     * `status: 'paused'`, a terminal success (no `status`, including the two
+     * skip exits), `'failed'`, `'stranded'` and `'refused'`, and a resumed
+     * parent whose delegated child failed. Absent on every refusal that
+     * carries a {@link code} (the run never dispatched, or a resume never
+     * continued it) and when the flow is not registered.
+     *
+     * Always the label of the flow the result's run belongs to — for a
+     * `subflow` chain that is the run the caller addressed (the parent), never
+     * the child the screen came from. `FlowSchema` requires `label`, so on
+     * those results it is always present and always what the author wrote —
+     * ⛔ never replaced by the flow's API name, which the caller already
+     * holds as the name it triggered.
+     */
+    flowLabel?: string;
+    /**
      * #14945: the rendered refusal, set when `status` is `'refused'` — the
      * `end` node's `message` template interpolated against the run's
      * variables, so it names the record (`Refused: Acme Corp is a confirmed

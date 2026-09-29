@@ -354,6 +354,13 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     errorMessage: z.string().optional().describe(
       'Friendly terminal message copied from the flow definition on failure',
     ),
+    flowLabel: z.string().optional().describe(
+      'The flow definition\'s authored `label`, copied verbatim so a runner can name the flow '
+      + '(header, completion toast) and translate it against `flows.<flow>.label`. Set on every '
+      + 'result of an evaluation of a registered flow (paused and terminal alike); absent on a '
+      + 'refusal carrying `code`. For a subflow chain it is the addressed (parent) run\'s flow. '
+      + 'Never defaulted to the API name',
+    ),
     refusalMessage: z.string().optional().describe(
       'Rendered refusal, set when `status` is `refused` - the `end` node\'s `message` '
       + 'template interpolated against the run\'s variables, so it names the record. '
