@@ -48,7 +48,7 @@ export * from './widget.zod';
 export * from './component.zod';
 export * from './component-type-vocabulary';
 export * from './react-blocks';
-// `theme.zod.ts` was RETIRED WHOLE at #10485 (ADR-0049 enforce-or-remove;
+// `theme.zod.ts` was RETIRED WHOLE by commit 35ad101bc (ADR-0049 enforce-or-remove;
 // maintainer ruling 2026-08-21: 退役授权面 — `app.branding` is the one colour
 // surface; objectui's ThemeEngine/ThemeContext and their unit tests are
 // retained). `ThemeSchema`, its sub-blocks (`ColorPaletteSchema`,
@@ -102,7 +102,7 @@ export * from './expression-bindable-text-keys.zod';
 
 // [#12414] entry-nameability: factory return types expand to mention
 // `/data`'s `FilterCondition`, which `/ui` does not re-export. Same invariant
-// (maintainer ruling recorded on #11350), same repair: re-export from the
+// (maintainer ruling 2026-08-23, recorded in commit ece4dad31), same repair: re-export from the
 // declaring module.
 export type { FilterCondition } from '../data/filter.zod';
 // [#14556] entry-nameability, the same shape one module over: the compiled

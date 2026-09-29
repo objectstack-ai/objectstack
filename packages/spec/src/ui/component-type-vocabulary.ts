@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The page-component TYPE vocabulary claim (#12950, riding the #12183 ruling of
+ * The page-component TYPE vocabulary claim (commit 225e7690f, riding the #12183 ruling of
  * 2026-08-26) — which `PageComponentSchema.type` strings the spec answers for,
  * and which half of the string space stays open.
  *
