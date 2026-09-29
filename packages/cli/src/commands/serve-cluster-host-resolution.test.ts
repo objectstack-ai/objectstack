@@ -49,19 +49,19 @@
  *    time it cost the organizations load (cloud#1013); the second
  *    time it cost EE multi-node boot outright (#10645).
  *
- *    #10769 closed the class rather than hoisting a third time: the helper is
+ *    Commit 3d7deb700 closed the class rather than hoisting a third time: the helper is
  *    now a module-scope FUNCTION DECLARATION, hoisted over the entire module, so
  *    "above the definition" is not a state this file can be in. The scan below
  *    pins that shape — a `const`, or a declaration nested inside a function,
  *    fails — which is strictly stronger than the ordering check it replaced.
  *
- * 3. EVERY app-declarable optional load, by source scan (#10769). The cluster
+ * 3. EVERY app-declarable optional load, by source scan (commit 3d7deb700). The cluster
  *    pair was only the instance that happened to ship. A package is treated as
  *    app-declarable exactly when `packages/cli`'s own manifest does not declare
  *    it — mechanically, so a newly added optional package is covered without
  *    anyone remembering this file. Bare `import()` of such a package fails.
  *
- * 4. The DIRECTION of the scan's own ignorance (#12162). A specifier the scan
+ * 4. The DIRECTION of the scan's own ignorance (commit c0f5e8f21). A specifier the scan
  *    cannot resolve carries no package name, so it falls OUT of the judged
  *    population rather than into it: the sweep does not report the load as
  *    unknowable, it reports nothing at all and keeps passing over the
@@ -381,7 +381,7 @@ function resolveImportedLiteral(
  *
  * The search is confined to the source ABOVE the call and takes the NEAREST
  * preceding binding, because a `const` only exists below itself — the same
- * temporal-dead-zone fact #10769 pinned for `importFromHost`. Unconfined, the
+ * temporal-dead-zone fact commit 3d7deb700 pinned for `importFromHost`. Unconfined, the
  * match is a whole-file FIRST-HIT search for `const <name> =`, and in a
  * 5000-line file that is a coin toss: `importFromHost(pkg)` inside
  * `loadOptionalServicePlugin`, whose `pkg` is a PARAMETER, resolved against a
@@ -596,8 +596,8 @@ const APP_DECLARABLE_LOADS = LOAD_SITES.filter(
  *
  *   bare `import()` — the strong excuse, "can only ever name a CLI-declared
  *   package or a non-package":
- *     :431   fallbackSpecifier   the host importer's own caller base (#11157)
- *     :754   pluginSpecifier     the app's config-plugin, non-package branch (#10908)
+ *     :431   fallbackSpecifier   the host importer's own caller base (commit a4cb7817f)
+ *     :754   pluginSpecifier     the app's config-plugin, non-package branch (commit 9cc6777d3)
  *     :1653  absolutePath ? …    a path to the served artifact, never a package
  *     :2778  appPkg              loops @objectstack/setup + /account, both CLI-declared
  *     :3346  spec.pkg            Serve.CAPABILITY_PROVIDERS, all CLI-declared
@@ -626,7 +626,7 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
   'spec.pkg': 'Serve.CAPABILITY_PROVIDERS entries are all CLI-declared',
   'ex.pkg': 'CAPABILITY_PROVIDERS `extras` entries are all CLI-declared',
   // The app's own `plugins: [...]` config entries, routed through
-  // `Serve.importConfigPlugin` (#10908). ONE bare `import()` site remains there,
+  // `Serve.importConfigPlugin` (commit 9cc6777d3). ONE bare `import()` site remains there,
   // and it is the reason this list exists rather than a hole in it: the
   // specifier is not a package name at all (an absolute path, a `file://` URL, a
   // `node:` builtin), so nothing a package.json can declare, and every one of
@@ -634,13 +634,13 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
   //
   // It used to be TWO. The second was the UNDECLARED branch, which kept a local
   // `import()` because the host importer's fallback resolved from
-  // `@objectstack/types` rather than from this CLI. #11157 threaded the base
+  // `@objectstack/types` rather than from this CLI. Commit a4cb7817f threaded the base
   // (`fallbackImport`), which made that branch identical to the helper's own
   // fallback, and it was collapsed into `importFromHost`. Pinned behaviourally,
   // not by this comment, in `serve-config-plugin-host-resolution.test.ts` and
   // `serve-host-fallback-base.test.ts`.
   pluginSpecifier: 'the non-package branch: an absolute path, a file:// URL or a node: builtin (#10908)',
-  // `importFromHost`'s own `fallbackImport` (#11157) — the caller base
+  // `importFromHost`'s own `fallbackImport` (commit a4cb7817f) — the caller base
   // `createHostImporter` resolves everything the served app does NOT declare
   // from. It is a bare `import()` on purpose and it MUST be written in this
   // file: ESM resolves a bare specifier against the module containing the call,
@@ -667,7 +667,7 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
  * is reported here by file, line and specifier text instead of vanishing.
  */
 const UNRESOLVABLE_HOST_LOADS: Record<string, string> = {
-  // `Serve.importConfigPlugin`'s package branch (#10908): the same app-config
+  // `Serve.importConfigPlugin`'s package branch (commit 9cc6777d3): the same app-config
   // specifier as the bare entry above, taking the host-anchored path. It is a
   // runtime value from the served app's own `plugins: [...]`, so no scan can
   // know it — and it needs no scan, because reaching it through the host
@@ -769,7 +769,7 @@ describe('os serve → cluster block source shape', () => {
   // ── Replaces the former "definition is ABOVE the cluster block" assertion ──
   //
   // That assertion pinned an ORDERING inside one long boot method, which is the
-  // shape #10769 removed: `importFromHost` is now a module-scope FUNCTION
+  // shape commit 3d7deb700 removed: `importFromHost` is now a module-scope FUNCTION
   // DECLARATION, hoisted over the entire module. The ordering it used to check
   // is not merely satisfied, it is unrepresentable — so the check below is the
   // strictly stronger one it must be read as. Ordering can only regress again if
@@ -811,9 +811,9 @@ describe('os serve → cluster block source shape', () => {
 
 /**
  * The detection backstop, widened from the cluster pair to EVERY app-declarable
- * optional load in `serve.ts` (#10769).
+ * optional load in `serve.ts` (commit 3d7deb700).
  *
- * The structural half of that card makes the ordering hazard unrepresentable
+ * The structural half of that commit makes the ordering hazard unrepresentable
  * (`importFromHost` is a hoisted module-scope declaration). This sweep is what
  * catches the remaining way in: a load written as a bare `import()` even though
  * the helper was reachable. It classifies mechanically rather than from a
@@ -828,7 +828,7 @@ describe('os serve → every app-declarable optional load is host-anchored', () 
     // read as a clean bill of health.
     expect(LOAD_SITES.length, 'no dynamic loads found in serve.ts at all').toBeGreaterThan(25);
 
-    // ── Does a COUNTING floor still earn its place? (#12162) ────────────────
+    // ── Does a COUNTING floor still earn its place? (commit c0f5e8f21) ──────
     //
     // Yes — but NOT for the job it used to be given, and it must never again be
     // read as the guard of last resort.
@@ -890,7 +890,7 @@ describe('os serve → every app-declarable optional load is host-anchored', () 
       '@objectstack/service-cluster',    // const binding   (#10645)
       '@objectstack/service-cluster-',   // template prefix (#10645, the driver)
       '@objectstack/organizations',      // const <- static (cloud#1013, #11614)
-      '@objectstack/service-i18n',       // const binding   (#10769)
+      '@objectstack/service-i18n',       // const binding   (commit 3d7deb700)
     ]) {
       expect(found, `the sweep no longer sees the ${pkg} load`).toContain(pkg);
     }

@@ -339,7 +339,7 @@ export default class MigrateApply extends Command {
       // ⛔ The detection mechanism is deliberately not "drop it and let the
       // constraint fail". On this table it would not fail: `syncDeclaredIndexes`
       // logs a plain UNIQUE whose CREATE fails on existing duplicates and lets
-      // the boot continue (#14902 / #15479), so a database holding the class
+      // the boot continue (commit 61821e54c / #15479), so a database holding the class
       // carries no such constraint to violate. The drop would simply make the
       // rows indistinguishable and let a sign-in resolve onto the wrong user's
       // account — silently. Hence a row-level pre-flight, run against the live

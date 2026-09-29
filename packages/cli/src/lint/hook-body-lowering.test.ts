@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13651 — the silent downgrade becomes a lint verdict.
+ * Commit ada3834ad — the silent downgrade becomes a lint verdict.
  *
  * The pins here are about the DISTINCTION, not just the noise: an accidental
  * scope leak must be an `error` (so a gate can fail on it) while the structural
  * refusal must stay a `warning` (so the legitimate fallback-to-bundling path is
  * not punished). A test that only asserted "something was reported" would pass
- * on the change this card explicitly forbids — deleting the catch.
+ * on the change the card behind that commit explicitly forbids — deleting the catch.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -131,7 +131,7 @@ describe('checkHookBodyLowering', () => {
     });
 
     it('leaves the module-scope remedy exactly as it was', () => {
-      // The reverse leg: the #13651 sentence must not have been rewritten for
+      // The reverse leg: the sentence commit ada3834ad wrote must not have been rewritten for
       // every author by a branch added for one new sub-case.
       const [issue] = checkHookBodyLowering({ hooks: [freeIdentifierHook] });
       expect(issue.message).toContain('Inline the value(s) into the handler, or reach them through `ctx`.');
@@ -194,7 +194,7 @@ describe('checkHookBodyLowering', () => {
     });
 
     it('keeps the two instrument kinds distinct from each other, not just from the verdict arms', () => {
-      // `unknown` is deliberately not folded into `unparseable` (#13651): a
+      // `unknown` is deliberately not folded into `unparseable` (commit ada3834ad): a
       // broken instrument and a limited instrument are different events.
       const [unparseable] = checkHookBodyLowering({ hooks: [{ ...unparseableHook }] });
       const [unknown] = checkHookBodyLowering({ hooks: [{ ...explodingHook }] });

@@ -36,10 +36,10 @@
  * `start.ts` and once in `dev.ts`, and that duplication is exactly how the two
  * can drift apart from each other as well as from the resolver.
  *
- * SCOPE (#6860 vs #6345): this pins the CANONICAL kinds — the `driverId` values
+ * SCOPE (#6860 vs commit e2798fab7): this pins the CANONICAL kinds — the `driverId` values
  * the resolver produces. The resolver also accepts aliases (`pg`, `mysql2`,
  * `libsql`, `mingo`, `wasm`, …) which the flag deliberately does not offer;
- * converging that vocabulary is #6345's job, and this pin is written so it does
+ * converging that vocabulary was commit e2798fab7's job, and this pin is written so it does
  * not prejudge it — an alias collapses to its canonical id and is not demanded
  * of the flag.
  */
@@ -101,7 +101,7 @@ function candidateTokens(): string[] {
  * is supplied so it resolves normally; the catch is kept so the derivation
  * survives another kind growing the same "recognized but unusable" shape.
  *
- * `err.recognized` is what keeps that catch honest (#6345). The resolver now
+ * `err.recognized` is what keeps that catch honest (commit e2798fab7). The resolver now
  * ALSO throws `UnsupportedDriverError` for a spelling nothing claims — the CLI
  * half of "both hosts refuse the same input", which replaced a silent fall-through
  * to the dev SQLite default. Reading `driverType` off that error would report the

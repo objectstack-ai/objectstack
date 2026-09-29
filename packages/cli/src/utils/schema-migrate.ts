@@ -192,7 +192,7 @@ export async function bootSchemaStack(
      * `true` when this run's stdout belongs to a machine-readable payload
      * (`--json`) — the boot then sends everything the kernel and its plugins
      * write to **stderr** so `JSON.parse(stdout)` succeeds on the whole
-     * stream, with no heuristic extraction (#6217).
+     * stream, with no heuristic extraction (commit 2b641ddd4).
      *
      * REQUIRED, and required on purpose. Every command in this family declares
      * a `--json` flag, and each of them re-introduced the same defect
@@ -294,7 +294,7 @@ export async function bootSchemaStack(
   // Taken BEFORE the first line the boot can print. `createStandaloneStack`
   // announces a missing compiled artifact on `console.log` before any plugin
   // is constructed, so a reservation installed one statement later already
-  // arrives too late to keep stdout a single JSON document (#6217).
+  // arrives too late to keep stdout a single JSON document (commit 2b641ddd4).
   const releaseStdout = opts.jsonOutput ? reserveStdoutForJson() : () => { /* stdout is the caller's */ };
 
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
@@ -458,7 +458,7 @@ export async function bootSchemaStack(
       // Only now — `kernel.shutdown()` is itself two INFO lines ("Graceful
       // shutdown started" / "complete"), and under `--json` those printed
       // BELOW the payload, which is half of what made stdout unparseable
-      // (#6217). Released after the kernel is down, when nothing is left to
+      // (before commit 2b641ddd4). Released after the kernel is down, when nothing is left to
       // write; a failed boot never reaches here on purpose.
       releaseStdout();
     },

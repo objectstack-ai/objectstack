@@ -45,14 +45,14 @@
  *
  * ## What this pin asserts
  *
- * BOTH DIRECTIONS, since #14657.
+ * BOTH DIRECTIONS, since commit 431979e67.
  *
  * FORWARD (#13871): every token the three vocabularies key on is a `FieldType`
  * member.
  *
- * BACKWARD (#14657): every `FieldType` member is keyed on by all three. #13871
+ * BACKWARD (commit 431979e67): every `FieldType` member is keyed on by all three. #13871
  * deliberately did not assert this, because "what column type does each
- * unmapped member deserve" was an open question; #14657 answered it member by
+ * unmapped member deserve" was an open question; commit 431979e67 answered it member by
  * member and this half became assertable. It matters because the gap was
  * SILENT: 21 real members had no entry in either map (24 in the switch), and
  * every one of them generated a plausible-looking wrong schema — TS `unknown`,
@@ -69,13 +69,13 @@
  * is the only mechanism, which is why the totality assertion lives here rather
  * than being left to the compiler.
  *
- * ## The #14828 half: the VALUE, for the classes whose answer is derivable
+ * ## The commit 08706f0e0 half: the VALUE, for the classes whose answer is derivable
  *
- * #13871 and #14657 both measured PRESENCE only, and said so: "a
+ * #13871 and commit 431979e67 both measured PRESENCE only, and said so: "a
  * wrong-but-present entry is a different defect (`autonumber: 'SERIAL'` against
  * a runtime that writes a rendered string, `formula` given a column the runtime
  * never creates), filed separately rather than pinned here on a guess." That
- * card is #14828, and this is where its rule lands — as the triage note said it
+ * card landed as commit 08706f0e0, and this is where its rule lands — as the triage note said it
  * should, because a FOURTH hand-carried table of right answers would be the
  * same defect one file over.
  *
@@ -89,7 +89,7 @@
  *     physical shape is. The driver is the authority for which column exists.
  *     ⭐ [#18199] That clause used to continue "; the spec's `isMultiValueField`
  *     is the ADR-0104 D1 VALUE contract and answers a different question
- *     (#14829's pin argues this in full)", and the second half stopped being
+ *     ([commit ee370d318]'s pin argues this in full)", and the second half stopped being
  *     true: the maintainer ruling of 2026-09-13 (decision batch #128 item 5,
  *     option 1′) gave "multi-valued" ONE definition, #17469 derived all three
  *     driver sites from it, and #18199 derived `generate.ts` from it too. The
@@ -101,10 +101,10 @@
  *
  * ⚰️ The FILE_REFERENCE_TYPES family used to be excluded from all of this,
  * deliberately: those five were in the driver's `JSON_COLUMN_TYPES` while this
- * generator gave them a varchar — #14657's ADR-0104 D3 answer against a driver
+ * generator gave them a varchar — commit 431979e67's ADR-0104 D3 answer against a driver
  * that was still pre-D3, i.e. a decision about which side moves rather than a
- * wrong value to correct. The ruling on #15041 decided it and #15989 landed it,
- * so the exclusion below became coverage. [#17883] The width the two migration
+ * wrong value to correct. The ruling in ADR-0104's 2026-09-05 addendum decided it and #15989 landed it,
+ * so the exclusion below became coverage. [commit b06b2db5c] The width the two migration
  * formats emit for the family is a second question and has a pin of its own —
  * `generate-file-reference-width.pin.test.ts`.
  *
@@ -150,7 +150,7 @@ const REAL_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
  * `const NAME: Record<string, VALUE> = {` at top level — the lookup tables.
  *
  * `VALUE` is captured rather than fixed because `FIELD_TYPE_SQL_MAP` answers
- * `string | null` since #14828: `null` is the VIRTUAL answer (no column at
+ * `string | null` since commit 08706f0e0: `null` is the VIRTUAL answer (no column at
  * all), carried in the table so the two migration generators cannot disagree
  * about which fields materialise. The terminator each table must carry is
  * DERIVED from its own declared value type below, so widening one table cannot
@@ -174,7 +174,7 @@ function lookupTableValueType(name: string): string {
 
 /**
  * The terminator every lookup table must carry — the type-level half of the
- * #14657 totality rule. Required rather than tolerated: if someone deletes the
+ * totality rule commit 431979e67 added. Required rather than tolerated: if someone deletes the
  * annotation, extraction fails loudly here instead of the compiler silently
  * stopping to check.
  */
@@ -257,7 +257,7 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
     expect(ghosts, 'the field-type switch cases on types that are not FieldType members').toEqual([]);
   });
 
-  // ── The #14657 half: no real member may go unmapped ──────────────────────
+  // ── The commit 431979e67 half: no real member may go unmapped ────────────
   //
   // Read this as one rule stated three times, not three rules: the authority is
   // `FieldType`, and each vocabulary is measured against it. A member added to
@@ -313,7 +313,7 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
 
 
 /* ────────────────────────────────────────────────────────────────────────────
- * #14828 — the VALUES, derived from the platform rather than retyped here
+ * Commit 08706f0e0 — the VALUES, derived from the platform rather than retyped here
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** `packages/drivers/driver-sql/src` — declared for `@objectstack/cli#test` in `turbo.json`. */
@@ -325,7 +325,7 @@ const SCHEMA_DRIFT_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-dr
  * The body of `SqlDriver.createColumn`'s `switch (type)` — THE authority on
  * which physical column a field type gets.
  *
- * Source-read rather than driven, for the reason #14829's pin already states:
+ * Source-read rather than driven, for the reason commit ee370d318's pin already states:
  * `createColumn` is `protected` and needs a knex table builder, so exercising
  * it would mean a live driver and a built `dist`. What has to be pinned is its
  * DECISION, and that is legible in the source.
@@ -387,9 +387,9 @@ function sqlColumn(type: string): string | null {
  * The `table.x('f_type'[, …])` call one field type contributes, or `null` for
  * none.
  *
- * [#17883] The argument list is part of the call and is captured with it. The
+ * [commit b06b2db5c] The argument list is part of the call and is captured with it. The
  * reader used to stop at the name, so a SIZED call — `table.string(name, 2048)`,
- * which is what the file family takes since #17883 — read as no column at all,
+ * which is what the file family takes since commit b06b2db5c — read as no column at all,
  * and every assertion below would have been answering a question about absence
  * instead of one about the column.
  */
@@ -657,7 +657,7 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
   // ⚰️ This block was labelled 「recorded divergence, NOT coverage」 and asserted
   // that driver-sql's `JSON_COLUMN_TYPES` DID spread `FILE_REFERENCE_TYPES`
   // while this generator gave the family a varchar — two ADR-0104 positions,
-  // deliberately unresolved, with the maintainer ruling on #15041 as the thing
+  // deliberately unresolved, with the maintainer ruling (ADR-0104, 2026-09-05 addendum) as the thing
   // that would resolve it. The ruling landed: option A, the physical column
   // holds the actual `sys_file` id, and 「the driver is the side that moves」.
   // Its step 3 says this block is retired to coverage WHEN the driver lands,
@@ -691,7 +691,7 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
 
     for (const type of FILE_REFERENCE_TYPES) {
       expect(sqlColumn(type)).toBe('VARCHAR(2048)');
-      // [#17883] Was a bare `table.string('f_type')` — knex's varchar(255),
+      // [commit b06b2db5c] Was a bare `table.string('f_type')` — knex's varchar(255),
       // which left THIS generator's two formats disagreeing about the family
       // after the driver had already moved to 2048. The width agreement itself
       // is `generate-file-reference-width.pin.test.ts`; what stays here is the

@@ -6,7 +6,7 @@
  * ## What was broken
  *
  * Everywhere else in this CLI `--json` means "stdout is exactly one JSON
- * document" (#6217). The device-flow path could not honour that and did not
+ * document" (commit 2b641ddd4). The device-flow path could not honour that and did not
  * try: it wrote the RFC 8628 device-authorization payload compact, and then,
  * after the token poll succeeded, the result payload 2-space indented. Measured
  * against a live device endpoint, stdout came out as

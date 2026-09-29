@@ -12,7 +12,7 @@
  * ## `--json` here is NDJSON — a declared exception, same as `os login` (#6730)
  *
  * Everywhere else in this CLI `--json` means "stdout is exactly one JSON
- * document" (#6217). Both device-flow login commands are declared exceptions to
+ * document" (commit 2b641ddd4). Both device-flow login commands are declared exceptions to
  * that, and they are the SAME exception: one compact JSON document per line.
  *
  * ### What was broken

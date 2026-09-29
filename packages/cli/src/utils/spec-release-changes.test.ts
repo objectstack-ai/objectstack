@@ -42,7 +42,7 @@ describe('readSpecReleaseChanges (ADR-0087 D4 per-release section)', () => {
   });
 
   it('⛔ reports NOTHING, never zeros, for a manifest with no release section', () => {
-    // This is the pre-#17080 artifact, and the whole defect it fixes: a
+    // This is the artifact from before commit 8b4890343, and the whole defect it fixes: a
     // consumer that reads `added: 0` from a release which moved 225 exports
     // concludes the upgrade is safe. Absence must stay distinguishable from a
     // measured empty delta.

@@ -52,7 +52,7 @@ function safeGetService(kernel: any, name: string): any {
  * seeder docblock (`bootstrap-platform-admin.ts`) this line must not
  * contradict: the skip decision is unconditionally intentional (only
  * platform-owned rows are ever reconciled), but a stored `'admin'` stamp is
- * NOT always a deliberate Setup takeover — on any install predating #8692
+ * NOT always a deliberate Setup takeover — on any install predating commit 712e185db
  * the platform's own seeder wrote that exact stamp, so `resynced 0 / skipped
  * N` is a permanent, by-design outcome there rather than a sign the command
  * failed. `'user'` is named too: it is the legacy spelling of the same
@@ -93,7 +93,7 @@ export function resyncSkipExplanationLine(resyncSkipped: number): string | null 
  * `'admin'` — or the legacy spelling `'user'`, healed to `'admin'` by the
  * boot-time vocabulary normalizer (`normalizeManagedByVocab`) — is left alone
  * too, but is NOT always a deliberate override: on any install created before
- * #8692 (2026-08-15) the platform's OWN seeded default sets carry that same
+ * commit 712e185db (the 2026-08-15 ruling) the platform's OWN seeded default sets carry that same
  * `'admin'` stamp, indistinguishable from a genuine Setup takeover, so
  * `resynced 0 / skipped N` is a permanent, by-design outcome on those
  * installs rather than a bug.

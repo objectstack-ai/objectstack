@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11174 — `os validate --strict` reaches the SAME exit status with `--json` as
+ * Commit ab23c67ab — `os validate --strict` reaches the SAME exit status with `--json` as
  * without it, over the real CLI process.
  *
  * ## The defect this pins shut
@@ -18,7 +18,7 @@
  * Actions step — and inert. A pipeline gating on the exit status of the exact
  * documented invocation read 0 and concluded the stack was clean.
  *
- * This is the second half of a pair. The first (#10953) made the four structural
+ * This is the second half of a pair. The first (commit be7262e72) made the four structural
  * advisories *reachable* in the payload, so a pipeline could at least gate on
  * `warnings.length` itself; it did not touch the exit code, and a pipeline
  * trusting the exit status still could not.
@@ -305,7 +305,7 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const text = await runCli(['validate', '--strict'], conversionsDir);
     const json = await runCli(['validate', '--json', '--strict'], conversionsDir);
 
-    // Floor, then parity — the #11174 contract this file exists for.
+    // Floor, then parity — the contract commit ab23c67ab set, which this file exists for.
     expect(text.code, `text --strict must fail on a retiring conversion:\n${text.stdout}\n${text.stderr}`).toBe(1);
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(text.code);
     expect(text.stdout).toContain('Strict mode: warnings treated as errors');
