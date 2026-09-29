@@ -1853,7 +1853,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "Bloques",
-        helpText: "Une varios objetos (solo informe joined)"
+        helpText: "Subinformes vinculados a un conjunto de datos (solo informe joined)"
       },
       "blocks.name": {
         label: "Nombre"
@@ -2148,7 +2148,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Identificador y tipo de contenido. El id se referencia con sendTemplate({ template: id, ... })."
+        description: "Identificador de plantilla que resuelve IEmailService.sendTemplate({ template: name, locale, ... })."
       },
       subject: {
         label: "Asunto",
@@ -2248,7 +2248,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "Pestaña y seguridad a nivel de fila",
-        description: "Visibilidad de pestañas, políticas RLS y variables de contexto personalizadas para evaluar predicados."
+        description: "Visibilidad de pestañas y políticas RLS."
       }
     },
     fields: {
@@ -2344,7 +2344,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "Capacidades",
-        description: "Skills, herramientas y fuentes de conocimiento que puede usar el agente."
+        description: "Skills y fuentes de conocimiento que puede usar el agente."
       },
       access: {
         label: "Acceso y seguridad",
