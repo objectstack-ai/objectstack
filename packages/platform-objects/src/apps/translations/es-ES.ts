@@ -77,6 +77,7 @@ export const esES: TranslationData = {
         nav_approval_requests: { label: 'Solicitudes' },
         nav_approval_actions: { label: 'Historial de Acciones' },
         nav_approval_delegations: { label: 'Delegaciones (ausencia)' },
+        nav_ai_approvals: { label: 'Aprobaciones de IA' },
 
         nav_settings_hub: { label: 'Todos los Ajustes' },
         nav_settings_localization: { label: 'Localización' },
@@ -94,6 +95,7 @@ export const esES: TranslationData = {
 
         nav_sessions: { label: 'Sesiones' },
         nav_audit_logs: { label: 'Registros de Auditoría' },
+        nav_audit_log_browser: { label: 'Explorador de registros de auditoría' },
         nav_notifications: { label: 'Notificaciones' },
 
         // Integrations — contributed at RUNTIME by the owning capability
@@ -137,6 +139,7 @@ export const esES: TranslationData = {
         nav_api_console: { label: 'Consola de API' },
         nav_flow_runs: { label: 'Ejecuciones de flujo' },
         nav_public_forms: { label: 'Formularios públicos' },
+        nav_integrations: { label: 'Integraciones y API' },
         group_integration: { label: 'Integración' },
         nav_email_templates: { label: 'Plantillas de correo' },
       },

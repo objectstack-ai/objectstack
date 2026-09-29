@@ -77,6 +77,7 @@ export const jaJP: TranslationData = {
         nav_approval_requests: { label: 'リクエスト' },
         nav_approval_actions: { label: 'アクション履歴' },
         nav_approval_delegations: { label: '委任 (不在時)' },
+        nav_ai_approvals: { label: 'AI 承認' },
 
         nav_settings_hub: { label: 'すべての設定' },
         nav_settings_localization: { label: 'ローカリゼーション' },
@@ -94,6 +95,7 @@ export const jaJP: TranslationData = {
 
         nav_sessions: { label: 'セッション' },
         nav_audit_logs: { label: '監査ログ' },
+        nav_audit_log_browser: { label: '監査ログブラウザー' },
         nav_notifications: { label: '通知' },
 
         // Integrations — contributed at RUNTIME by the owning capability
@@ -137,6 +139,7 @@ export const jaJP: TranslationData = {
         nav_api_console: { label: 'API コンソール' },
         nav_flow_runs: { label: 'フロー実行履歴' },
         nav_public_forms: { label: '公開フォーム' },
+        nav_integrations: { label: '連携と API' },
         group_integration: { label: '連携' },
         nav_email_templates: { label: 'メールテンプレート' },
       },

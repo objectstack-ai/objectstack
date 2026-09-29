@@ -12,7 +12,8 @@
  * Some entries/groups are intentionally contributed by the capability plugin
  * that owns the underlying objects rather than living here (ADR-0029 K2):
  *   - `group_integrations` → `@objectstack/plugin-webhooks` (K2.a)
- *   - `group_approvals`     → `@objectstack/plugin-approvals` (K2.b)
+ *   - `group_approvals`     → `@objectstack/plugin-approvals` (K2.b); the one
+ *     exception is `nav_ai_approvals`, gated on the `ai` service (see below)
  *   - `group_access_control` Positions / Permission Sets → `@objectstack/plugin-security`
  *   - `group_access_control` Sharing Rules / Record Shares → `@objectstack/plugin-sharing`
  * As each remaining domain moves to its capability plugin, its entries move out
@@ -103,7 +104,34 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     ],
   },
   // group_approvals is contributed by @objectstack/plugin-approvals, which owns
-  // sys_approval_request / sys_approval_action (ADR-0029 K2.b).
+  // sys_approval_request / sys_approval_action (ADR-0029 K2.b). The approvals
+  // ENGINE's entries stay there. The one entry this package places in the
+  // slot is the AI pending-action queue below, whose capability no package
+  // of this repository provides — `platform-objects.test.ts` pins that it is
+  // the only one.
+  {
+    app: 'setup',
+    group: 'group_approvals',
+    // After plugin-approvals' own entries (priority 100): the engine's inbox
+    // stays the slot's first, working surface.
+    priority: 200,
+    items: [
+      // #20142 — the console's AI Approvals queue: the whole AI pending-action
+      // queue (`/api/v1/ai/pending-actions`) with approve / reject. The console
+      // registers the key in `registerSystemComponents.tsx`; its only in-app
+      // link was the System Hub card wall, retired by objectui#10520.
+      //
+      // `requiresService: 'ai'` is load-bearing, not decoration. The `ai` slot
+      // has no implementation in the open framework (`CORE_SERVICE_PROVIDER.ai`
+      // is `null` — `@objectstack/service-ai` ships in Cloud/Enterprise), so on
+      // a Community Edition boot the page's only data source answers 501.
+      // The gate is stripped server-side by `filterAppForUser` (ADR-0057 D10),
+      // so the entry never reaches a browser whose runtime cannot serve it.
+      // Same shape as `nav_account_approvals`' `requiresService: 'approvals'`.
+      // `group_approvals` already requires `manage_platform_settings`.
+      { id: 'nav_ai_approvals', type: 'component', label: 'AI Approvals', componentRef: 'ai:approvals', icon: 'bot', requiresService: 'ai' },
+    ],
+  },
   {
     app: 'setup',
     group: 'group_configuration',

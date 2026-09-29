@@ -84,6 +84,7 @@ export const zhCN: TranslationData = {
         // `审批委派` matches sys_approval_delegation's object label; `(外出)`
         // renders the entry's own "(OOO)" qualifier.
         nav_approval_delegations: { label: '审批委派（外出）' },
+        nav_ai_approvals: { label: 'AI 审批' },
 
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
@@ -101,6 +102,7 @@ export const zhCN: TranslationData = {
 
         nav_sessions: { label: '会话' },
         nav_audit_logs: { label: '审计日志' },
+        nav_audit_log_browser: { label: '审计日志浏览器' },
         nav_notifications: { label: '通知' },
 
         // Integrations — contributed at RUNTIME by the owning capability
@@ -147,6 +149,7 @@ export const zhCN: TranslationData = {
         nav_api_console: { label: 'API 控制台' },
         nav_flow_runs: { label: '流程运行记录' },
         nav_public_forms: { label: '公开表单' },
+        nav_integrations: { label: '集成与 API' },
         group_integration: { label: '集成' },
         nav_email_templates: { label: '邮件模板' },
       },
