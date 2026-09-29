@@ -307,7 +307,7 @@ describe('#6877 §1 — a repeated single-valued parameter is refused, not resol
         expect(protocol.diffMetaItem).not.toHaveBeenCalled();
     });
 
-    // [#12195] The compound-name read `GET /meta/:type/:section/:name?package`
+    // [commit 7986d973f] The compound-name read `GET /meta/:type/:section/:name?package`
     // was pinned here until its arity was retired. The single-segment read
     // above carries the same `?package` refusal, and it is the door every name
     // reaches now.

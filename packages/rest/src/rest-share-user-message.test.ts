@@ -11,7 +11,7 @@
  * — the flat `/data` door's own classification — and re-dressed `status`,
  * `code`, the message and (since #12510) `declaredCode` into the nested
  * ADR-0112 D5 envelope (#8111). The classification's body was ALREADY carrying
- * the producer's `userMessage`, attached by `withDeclaredUserMessage` (#9934),
+ * the producer's `userMessage`, attached by `withDeclaredUserMessage` (commit 79c46da90),
  * and it was dropped at the re-dress.
  *
  * Measured on `07e646565` before the repair, one producer driven through the
@@ -302,7 +302,7 @@ const MARKED: Array<{
     {
         // The sandbox limb with NO declared status: `classifyDataError`'s unwrap
         // door answers 400 and the nested envelope fills the required `code`
-        // from the catalog floor. The mark rides that arm too — #9934's rule is
+        // from the catalog floor. The mark rides that arm too — commit 79c46da90's rule is
         // branch-agnostic by construction.
         name: 'a sandboxed hook body with a sentence and NO declared status',
         error: sandboxRefusal('sharing is frozen until the access review closes', {

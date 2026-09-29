@@ -595,7 +595,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 // fold happens, not about whether one happens. `getMetaDiagnostics` reads each
 // swept type through `getMetaItems({ type: t, organizationId })`.
 //
-// ⚠️ [#14683, recorded by #15034] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+// ⚠️ [commit 96326040f, recorded by #15034] `getMetaItems` NOW APPLIES THE REGISTRY GATE
 // ITSELF, after folding the request type. This header used to say it applied
 // none and that the scope was therefore the caller's to decide per type; that
 // sentence is FALSE on today's tree. What that dissolved is the obstacle the
@@ -629,7 +629,7 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 // `ctx?.tenantId` at the call site and that assertion, and only it, turns red."
 // MEASURED on the merged tree, that ablation now leaves this file GREEN IN FULL
 // (30/30 at that revision; the file has grown since) — `getMetaItems`' own gate
-// re-folds the raw tenant id, phantom control included. Same fate as #14677's
+// re-folds the raw tenant id, phantom control included. Same fate as commit a4e4d2d78's
 // ablation B, and for the same reason.
 //
 // ⇒ What this file DOES still discriminate is the organization being DROPPED:
@@ -683,7 +683,7 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
         });
 
         it('a plural URL spelling is folded before the scope decision, not after', async () => {
-            // [#10340] The predicate is asked with `canonicalMetaUrlType(...)`,
+            // [commit 26f3588fb] The predicate is asked with `canonicalMetaUrlType(...)`,
             // never the raw segment: `declaresOrgOverride` answers `false` for
             // URL-only spellings, so an unfolded `views` would silently drop
             // back to env-wide and this case would report a clean tile again.
@@ -711,7 +711,7 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
             // would serve them again. ⚠️ [#15034] PREDICTED DIRECTION,
             // CORRECTED: replacing the predicate with `ctx?.tenantId` at the
             // call site no longer moves this count — `getMetaItems`' own gate
-            // (#14683) re-folds it. What still drives it to 2 is a read door
+            // (commit 96326040f) re-folds it. What still drives it to 2 is a read door
             // that reaches the store with the org unfolded, which is why the
             // control stays.
             const written = await b.put(NON_OVERRIDABLE, 'accounts');
@@ -796,7 +796,7 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
             // the whole-registry sweep`, which asserted the OPPOSITE and
             // carried "if this reddens, read the card before making it green".
             // #15622 IS that card. It ruled the untyped arm forwards the
-            // caller's organization RAW, because since #14683 the callee folds
+            // caller's organization RAW, because since commit 96326040f the callee folds
             // per swept type inside its own loop — so one org id now expresses
             // exactly the per-type scope the old pin said it could not. The
             // assertion is INVERTED rather than deleted so the next reader sees
@@ -974,7 +974,7 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
 // on a non-overridable target (`object`, `flow`, `app` — the most common
 // delete there is) it would suppress the organization altogether and leave the
 // false clearance exactly where it was. Raw is nevertheless not an
-// unconditional tenant: since #14683 `getMetaItems` applies
+// unconditional tenant: since commit 96326040f `getMetaItems` applies
 // `organizationIdForMetaRead` to its OWN `request.type`, so the per-SOURCE
 // decision is the callee's.
 //

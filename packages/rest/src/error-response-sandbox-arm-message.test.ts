@@ -36,7 +36,7 @@
  *  §3 the non-sandbox control: a plain producer on the same codes keeps
  *     `error.message` byte for byte — the two-read rule is a read of a field
  *     the sandbox populated, never a strip of the wrapper off `.message`;
- *  §4 CONVERGED (#15071, maintainer ruling 2026-09-04 / batch #27, option B):
+ *  §4 CONVERGED (commit cf6e0a193, maintainer ruling 2026-09-04 / batch #27, option B):
  *     a sandboxed CRASH carrying a declared code reaches the unwrap door's
  *     sanitised `500 UNCLASSIFIED_FAULT` whatever code it declares — the
  *     terminal moved above the arms (`isSandboxCrash`). This section was the
@@ -63,7 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The classification's own source, read once: §4-derivation and §6 both scan it
- * — one re-derives the arm list from the tree (the #15071 ruling's execution
+ * — one re-derives the arm list from the tree (the commit cf6e0a193 ruling's execution
  * constraint), the other guards the sentence rule. Same package, so the read
  * does not escape it (AGENTS.md → cross-package test inputs).
  */
@@ -233,8 +233,8 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
     });
 
     /**
-     * FLIPPED by #15071, deliberately and in that card's PR, from
-     * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline PR #15065 used
+     * FLIPPED by commit cf6e0a193, deliberately and in that card's PR, from
+     * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline commit 1c7adc73d used
      * on its own §4 one file over. ⛔ The section is not DELETED: it is the only
      * thing that would notice the divergence coming back, and what changes is
      * its verdict, not its existence.

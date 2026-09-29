@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8885] The approvals routes' wire codes are REGISTERED vocabulary — pins
+ * [commit 30b1c636a] The approvals routes' wire codes are REGISTERED vocabulary — pins
  * for the population the card's sweep found.
  *
- * The #8885 sweep measured 9 codes reaching the wire from `packages/rest` that
+ * The commit 30b1c636a sweep measured 9 codes reaching the wire from `packages/rest` that
  * were in neither `StandardErrorCode` nor `ERROR_CODE_LEDGER`, all in one
  * family and all with the same cause: the approvals route factories spell the
  * terminal 500 catch's code as a TEMPLATE
@@ -29,7 +29,7 @@
  *    (single-occurrence `.replace('-', '_')` included), so a route name the
  *    template would mangle into an invalid code also fails here.
  * [#14573] The file has since become the home for the approvals door's
- * live-emission pins generally, not only the #8885 population: the
+ * live-emission pins generally, not only the commit 30b1c636a population: the
  * `FORBIDDEN` → 403 case below pins a row that is registered vocabulary and
  * whose emission was — contrary to that card's premise — already observed
  * elsewhere. See its own comment for where, and why it is pinned here too.

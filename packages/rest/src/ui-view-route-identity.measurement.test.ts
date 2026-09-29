@@ -20,14 +20,14 @@
  *
  * ## The three questions, and why the second is the big one
  *
- * #13160 / PR #13213's census drove every `resolveExecCtx` consumer in
+ * #13160 / commit 4801296e7's census drove every `resolveExecCtx` consumer in
  * `rest-server.ts` and found 52 of 52 bare sites refusing an absent context
  * with 401. This route surfaced there precisely because it is NOT a consumer —
  * the one metadata-touching route in the table that resolves no identity at
  * all. That census stopped at the seam and said so. This file continues past
  * it:
  *
- *   1. §1-§2 — the seam, reproduced INDEPENDENTLY of #13213 (its own harness,
+ *   1. §1-§2 — the seam, reproduced INDEPENDENTLY of commit 4801296e7 (its own harness,
  *      its own instrument), plus the exact argument object the seam hands the
  *      producer.
  *   2. §3-§4 — ⭐ the half #13214 marks UNMEASURED: does `getUiView` apply

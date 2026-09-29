@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#9967] A sandboxed hook body that DECLARES its own HTTP status is served
+// [commit 8f266f1cd] A sandboxed hook body that DECLARES its own HTTP status is served
 // with it on `/api/v1/data` — the sandbox unwrap no longer outranks the
 // declared-status read.
 //
@@ -26,11 +26,11 @@
 //   - a body that CRASHES (`isScriptFaultMessage`) stays the sanitised 500 —
 //     even when the crash object carries a stray `status`;
 //   - the envelope carries no `code` for a body that DECLARED none.
-//     ⚠️ [#10345] That third bullet used to read "the envelope still carries NO
+//     ⚠️ [commit cad8b42f0] That third bullet used to read "the envelope still carries NO
 //     `code` field (old @objectstack/client builds prepend `code` to the
 //     human-readable message)". Every fixture below declares no code, so what
 //     the section actually pinned was ADR-0112's "invent nothing" half, and it
-//     is green on both sides of #10345. The blanket claim was the defect: a
+//     is green on both sides of commit cad8b42f0. The blanket claim was the defect: a
 //     hook that DID declare a code lost it here. See `error-response.ts` for
 //     why the client-compat rationale is retired.
 //
@@ -94,7 +94,7 @@ describe('[#9967] mapDataError: a sandboxed body that declares a 4xx status keep
         // The unwrap branch's own contract (`object` rides; no `code` is
         // invented for a producer that declared none) is unchanged by the fix;
         // compared output-to-output so a field later added to BOTH envelopes
-        // (#9934's marking, #10345's declared `code`) keeps this green.
+        // (commit 79c46da90's marking, commit cad8b42f0's declared `code`) keeps this green.
         const declared = mapDataError(sandboxRefusal({ status: 403 }), 'showcase_task');
         const undeclared = mapDataError(sandboxRefusal(), 'showcase_task');
 

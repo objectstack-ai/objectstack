@@ -4,7 +4,7 @@
  * How a thrown thing becomes an HTTP answer — ADR-0112's concern, at the REST
  * boundary.
  *
- * [#8850] Moved here from `rest-server.ts`, where this code sat at module level
+ * [commit 8664a2c99] Moved here from `rest-server.ts`, where this code sat at module level
  * ahead of the `RestServer` class for historical rather than structural
  * reasons: none of it reads class state, and the class body is not its subject.
  * The move is a MOVE — every function below is byte-identical to the version
@@ -312,7 +312,7 @@ export function sandboxBusinessMessage(error: any): string | undefined {
  * ## ⛔ What this deliberately does NOT decide
  *
  * Fault classification. A sandboxed **CRASH** (#7543) no longer reaches this
- * function at all: #15071 put {@link isSandboxCrash} ABOVE the code-gated arms
+ * function at all: commit cf6e0a193 put {@link isSandboxCrash} ABOVE the code-gated arms
  * in {@link classifyDataError}, so a crashed body is answered by
  * {@link UNCLASSIFIED_FAULT} whatever code it declared, and the other door
  * declines the consult for a sandbox producer outright (the section above).
@@ -324,7 +324,7 @@ export function sandboxBusinessMessage(error: any): string | undefined {
  *
  * ⚠️ CONVERGED was the no-declared-status case only until #17273: a crash that
  * DECLARED a status used to leave {@link resolveErrorResponse} at that status,
- * wrapper and all, through a passthrough #15071 did not touch. That door now
+ * wrapper and all, through a passthrough commit cf6e0a193 did not touch. That door now
  * asks the SAME {@link isSandboxCrash} gate before its passthrough, so the
  * question has one answer at both doors for every band — flipped from ACCEPTED
  * DIVERGENCE to CONVERGED in
@@ -486,7 +486,7 @@ export function declaredHttpStatus(error: any): number | undefined {
  * any case; a number in the field callers branch on is the loudest possible
  * violation of a closed vocabulary. All four flat arms now ask ONE question.
  *
- * [#10345] Five arms, since the sandbox unwrap door joined them. It emitted no
+ * [commit cad8b42f0] Five arms, since the sandbox unwrap door joined them. It emitted no
  * `code` at all, so #9232 found nothing there to narrow and left it out — and
  * an exit that never speaks the vocabulary is the one a vocabulary sweep
  * cannot see. `rest-thrown-code-vocabulary.test.ts`'s `ARMS` table enumerates
@@ -670,7 +670,7 @@ function missingRelationIsObject(raw: string, object: string | undefined): boole
  * not permitted …" — trips the `'<obj>' … not` substring check and
  * returns a misleading 404.
  *
- * [#9934] The exported face is a WRAPPER: classification happens in
+ * [commit 79c46da90] The exported face is a WRAPPER: classification happens in
  * {@link classifyDataError} below (this docblock's subject, byte-for-byte the
  * old `mapDataError`), and the wrapper then rides the producer's declared
  * `userMessage` onto whatever body classification chose — see
@@ -682,7 +682,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
 }
 
 /**
- * [#9934] Carry a producer-marked user-facing refusal text onto a classified
+ * [commit 79c46da90] Carry a producer-marked user-facing refusal text onto a classified
  * wire body — the REST door's half of the objectui#5210 ruling (producer-side
  * opt-in; the console render half is objectui's).
  *
@@ -800,7 +800,7 @@ function isSandboxOrigin(error: any): boolean {
 }
 
 /**
- * [#15071] Did a sandboxed body CRASH — as opposed to reporting a refusal?
+ * [commit cf6e0a193] Did a sandboxed body CRASH — as opposed to reporting a refusal?
  *
  * The two reads {@link sandboxBusinessMessage} already makes, asked from the
  * other side: a sandbox origin ({@link isSandboxOrigin}) whose unwrapped
@@ -873,7 +873,7 @@ function fiveXxArmDisplacesDeclared4xx(
 }
 
 /**
- * [#14389 / #14723] Is this thrown value the ENGINE's unique-violation
+ * [#14389 / commit 65846bc46] Is this thrown value the ENGINE's unique-violation
  * envelope — `@objectstack/objectql`'s `DuplicateRecordError`?
  *
  * Gated on the envelope, name AND code, not on the code alone: a hook that
@@ -975,7 +975,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  * not. ⛔ So "the code is new there" is the wrong way round; the withheld value
  * is the change.
  *
- * ## One wire spelling on the route — the rows too (#14723)
+ * ## One wire spelling on the route — the rows too (commit 65846bc46)
  *
  * The #14541 contract review (condition 2) disclosed a fork this file's "one
  * condition, one wire code" framing did not cover: the DOORS answered a
@@ -987,7 +987,7 @@ export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
  * `POST /data/:object/import` said `UNIQUE_VIOLATION` while a row on the SAME
  * route said `DUPLICATE_RECORD`.
  *
- * Maintainer ruling (2026-09-03, #14723): a unique-constraint refusal has ONE
+ * Maintainer ruling (2026-09-03, commit 65846bc46): a unique-constraint refusal has ONE
  * wire spelling on every route, `UNIQUE_VIOLATION` — the standard-catalog
  * member the published protocol docs give for the 409 constraint-violation
  * body. The row derivations now apply the same mapping this arm applies, keyed
@@ -1274,7 +1274,7 @@ function structuredCodeAnswer(
 }
 
 function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
-    // [#15071] A sandboxed CRASH is a fault before it is anything else — above
+    // [commit cf6e0a193] A sandboxed CRASH is a fault before it is anything else — above
     // the arms, because the arms are asked before the unwrap door that used to
     // hold this terminal. Maintainer ruling 2026-09-04 (batch #27), option B:
     // a crash "reaches the unwrap door's sanitised 500 whatever code it
@@ -1319,7 +1319,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // The full wrapper still reaches server logs via the callers'
     // "[REST] Unhandled error" logging and the BodyRunner's own error log.
     //
-    // [#10345] The `code` the producer declared rides too — via
+    // [commit cad8b42f0] The `code` the producer declared rides too — via
     // {@link thrownCodeFields}, the same one definition the three arms around
     // it use. This branch used to omit `code` unconditionally, and that
     // omission is what the card measured: a QuickJS hook throwing
@@ -1375,13 +1375,13 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // `TypeError: not a function` is an internal fault rather than a
         // business message — {@link isScriptFaultMessage}. "Deliberately FIRST:
         // a crash outranks everything else about the error, including a stray
-        // declared `status`" is unchanged as a rule; [#15071] moved the gate
+        // declared `status`" is unchanged as a rule; [commit cf6e0a193] moved the gate
         // that applies it to the TOP of this function ({@link isSandboxCrash}),
         // because the code-gated arms above are asked before this door and were
         // answering a crash with a business status and the wrapper prose. So
         // this branch keeps its meaning and loses its guard — the guard did not
         // disappear, it out-ranks more of the file than it used to.
-        // [#9967] A body that NAMES its own HTTP status is asking to be served
+        // [commit 8f266f1cd] A body that NAMES its own HTTP status is asking to be served
         // with it — the same #7867 rule `domains/actions.ts` applies on the
         // custom-action route. The QuickJS side-channel carries a body-thrown
         // error's declared `status` out of the VM onto `SandboxError.status`,
@@ -1395,7 +1395,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // pins (`hook-error-format.dogfood.test.ts`) require.
         const declared = declaredHttpStatus(error);
         if (declared === undefined || declared < 500) {
-            // [#10345] `status` is resolved BEFORE the code fields are asked
+            // [commit cad8b42f0] `status` is resolved BEFORE the code fields are asked
             // for, and handed to {@link thrownCodeFields} as the fallback, so
             // an unregistered spelling demotes against the status the client
             // actually receives rather than against a default — the #9232 §5
@@ -1483,7 +1483,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // The `code` rides along on {@link declaresServerFault}, the criterion
         // `@objectstack/types` already owns for "this producer DECLARED a
         // server fault" (`status >= 500` *and* a non-empty string `code`; PR
-        // #6122, pinned by `error-leak.test.ts`, read by the analytics route
+        // Commit 64cd01082, pinned by `error-leak.test.ts`, read by the analytics route
         // here and by `runtime`'s dispatcher). Inside this branch its status
         // half is already true, so what it adds is the `code` half — and it
         // adds it as a TESTED predicate rather than a fourth open-coded
@@ -2048,7 +2048,7 @@ export function sendDeclaredFault(
  * [#9098] Emits through {@link sendDeclaredFault}, so `FIELD_VISIBILITY_UNRESOLVED`
  * is now checked against the closed ADR-0112 vocabulary at COMPILE time. It was
  * this call — an object literal handed to an `error: any` parameter — that put
- * an unregistered code on the wire for as long as it did (#8885 registered it;
+ * an unregistered code on the wire for as long as it did (commit 30b1c636a registered it;
  * this makes the next one impossible rather than merely findable). The wire
  * answer is unchanged: 503, `code`, and the #5437-withheld prose.
  */
@@ -2100,10 +2100,10 @@ function logWithheldServerFault(
  */
 function resolveErrorResponse(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // [#17273] A sandboxed body that CRASHED is a fault before it is anything
-    // else — the SAME terminal ordering #15071 gave {@link classifyDataError},
+    // else — the SAME terminal ordering commit cf6e0a193 gave {@link classifyDataError},
     // asked here so the ruling reaches the other door too.
     //
-    // #15071 converged the single `/data` door and named the residue rather
+    // Commit cf6e0a193 converged the single `/data` door and named the residue rather
     // than rediscovering it: {@link isSandboxCrash} went ABOVE that function's
     // code-gated arms, so a crashed body reaches {@link UNCLASSIFIED_FAULT}
     // whatever it declared — while THIS door kept answering the declared
@@ -2113,7 +2113,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // answers, decided by which route caught it — and the one this door gave
     // put the runner's `TypeError: …` text on the wire at a business status.
     //
-    // The ruling that decides it is #15071's, quoted on {@link isSandboxCrash}
+    // The ruling that decides it is commit cf6e0a193's, quoted on {@link isSandboxCrash}
     // and NOT restated here: *"A declared code is the author's statement about
     // the failure mode they **handled**. A crash … is not that mode, so it is
     // classified as a fault"*, against *"an internal stack-shaped sentence at a
@@ -2277,8 +2277,8 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // {@link thrownCodeFields}. This arm's old gate was bare truthiness, so
         // it also admitted a non-string `code`; that limb is gone with the
         // narrowing, and the flat arms now ask one question (five of them since
-        // #10345 brought the sandbox unwrap door into the vocabulary).
-        // [#9934] Both passthrough arms ride a producer-declared `userMessage`
+        // Commit cad8b42f0 brought the sandbox unwrap door into the vocabulary).
+        // [commit 79c46da90] Both passthrough arms ride a producer-declared `userMessage`
         // onto the body, the same rule as the exported `mapDataError` wrapper —
         // see {@link withDeclaredUserMessage}. On the 5xx arm the PROSE is
         // still withheld (#5437); the marked channel is authored user text, not

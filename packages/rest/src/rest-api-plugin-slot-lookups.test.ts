@@ -71,7 +71,7 @@ const captured = vi.hoisted(() => ({ ctorArgs: [] as unknown[][] }));
 // is the only expensive thing here, so it is the only thing suppressed, and
 // every other method the composition root calls stays the production one. That
 // matters beyond tidiness — the plugin also asks the instance for the API base
-// (`getApiBasePath()`, #6306), and a hand-written stub that lists only the
+// (`getApiBasePath()`, commit fec784863), and a hand-written stub that lists only the
 // methods the plugin happened to call the day it was written turns each new
 // collaborator call into a `TypeError` here, in a file about slot WIRING that
 // has no opinion on the base. Inheriting the contract keeps this test measuring

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14723] An import ROW reports a unique-constraint refusal as
+ * [commit 65846bc46] An import ROW reports a unique-constraint refusal as
  * `UNIQUE_VIOLATION` — the one wire spelling the route has.
  *
  * ## The fork this closes

@@ -58,7 +58,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
     ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
-    // [#13279] §8 drives the real loud failure rather than a stand-in, so the
+    // [commit 6a180e42d] §8 drives the real loud failure rather than a stand-in, so the
     // propagation it observes is the one production raises.
     AuthzStoreUnavailableError, AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
@@ -82,7 +82,7 @@ type Handler = (req: any, res: any) => any;
  * Every `this.resolveExecCtx(environmentId, req)` invocation, with the line it
  * sits on and whether it carries its OWN `.catch(…)`.
  *
- * [#13279] The catch ARGUMENT changed: a caught site passes
+ * [commit 6a180e42d] The catch ARGUMENT changed: a caught site passes
  * `rethrowAuthzStoreUnavailable` instead of `() => undefined`, so a
  * permission-store outage is re-raised rather than degraded into a refusal.
  * The detection below keys on `.catch(` and is deliberately spelling-agnostic,
@@ -698,7 +698,7 @@ describe('[#13160] §6 the boundary of this census', () => {
         // `package-door-execctx-fault-reading.test.ts` (PR #13153) —
         // fail-CLOSED, two ablation legs, both rival readings falsified.
         // ⛔ Recorded as DEFERRED to that file, never as "assumed closed".
-        // [#13279] The catch argument is now `rethrowAuthzStoreUnavailable`
+        // [commit 6a180e42d] The catch argument is now `rethrowAuthzStoreUnavailable`
         // (was `() => undefined`): a permission-store OUTAGE must reach the
         // door as the 503 it is instead of being laundered into a 401/403.
         // This grep tracks the wrapper's CURRENT spelling — the site is still

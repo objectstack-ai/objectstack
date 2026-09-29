@@ -524,7 +524,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
         });
 
         /**
-         * [#15071] The crash sibling of the case above — CONVERGED where the
+         * [commit cf6e0a193] The crash sibling of the case above — CONVERGED where the
          * producer declared no status, and named as a DIVERGENCE where it did.
          *
          * The maintainer ruling (2026-09-04, batch #27, option B) moved the
@@ -565,8 +565,8 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
 
         /**
          * FLIPPED by #17273, deliberately and in that card's PR, from
-         * `ACCEPTED DIVERGENCE (#15071 widens it)` to `CONVERGED` — the same
-         * discipline #14704 used on the sentence case above and #15071 used on
+         * `ACCEPTED DIVERGENCE (commit cf6e0a193 widens it)` to `CONVERGED` — the same
+         * discipline #14704 used on the sentence case above and commit cf6e0a193 used on
          * `error-response-sandbox-arm-message.test.ts` §4. ⛔ The case is not
          * DELETED: it is the only thing that would notice the divergence coming
          * back, and what changes is its verdict, not its existence.
@@ -574,7 +574,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * ## What the old verdict bought, and why it had to change
          *
          * `ACCEPTED DIVERGENCE` bought "the next reader knows this is
-         * unconverged" — never "nothing is wrong here". #15071 could not take
+         * unconverged" — never "nothing is wrong here". Commit cf6e0a193 could not take
          * this shape because closing it means moving the STATUS
          * `resolveErrorResponse`'s passthrough decided, the #11588-fenced
          * contract question, so it recorded the boundary IN the pin and had the
@@ -587,7 +587,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * `500`, the declared `DELETE_RESTRICTED` → the catalog's
          * `INTERNAL_ERROR`, and the runner's `hook 'guard' threw: TypeError: …`
          * debug wrapper → the generic sentence. Nothing is added to the body.
-         * The single door is byte-identical to what #15071 left.
+         * The single door is byte-identical to what commit cf6e0a193 left.
          */
         it('CONVERGED (#17273): a sandboxed CRASH that DECLARED a 4xx status is the fault terminal at both doors', () => {
             const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
@@ -597,7 +597,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.object = 'account';
             const bulk = bulkDoor(err, 'account');
             const single = singleDoor(err, 'account');
-            // The single door: what #15071 ruled — a crash is a fault.
+            // The single door: what commit cf6e0a193 ruled — a crash is a fault.
             expect(single.status).toBe(500);
             expect(single.body.code).toBe('INTERNAL_ERROR');
             expect(String(single.body.error)).not.toContain('threw:');
@@ -621,7 +621,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * The crash terminal in `resolveErrorResponse` is deliberately not
          * band-scoped: scoping it to 4xx would have converged the shape above
          * while minting a NEW divergence one band over — the single door has
-         * answered `500 INTERNAL_ERROR` for this error since #15071, and the
+         * answered `500 INTERNAL_ERROR` for this error since commit cf6e0a193, and the
          * bulk door's 5xx arm would have kept `503` with the declared code.
          *
          * ⛔ This is NOT a narrowing of the 5xx arm's unconditional prose-drop
@@ -651,7 +651,7 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
          * the flip moved. An implementation that degraded every SANDBOX-origin
          * error to the fault terminal would turn both cases above green while
          * deleting the whole sandbox-refusal surface on the bulk door —
-         * #15071's ruling fences exactly that: *"Ordinary declared refusals (a
+         * Commit cf6e0a193's ruling fences exactly that: *"Ordinary declared refusals (a
          * hook that throws a business error carrying a code, no crash) are
          * **untouched** — only the crash branch moves."*
          *

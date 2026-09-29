@@ -49,7 +49,7 @@
  *
  * ⛔ Not a re-judgement of either catch: `declaresHttpAnswer`'s docblock
  * already says a declared 5xx is re-thrown too. The contract review of PR
- * #16650 required the consequence to be NAMED and PINNED, nothing else.
+ * Commit 001a83b04 required the consequence to be NAMED and PINNED, nothing else.
  */
 
 import { describe, it, expect, vi } from 'vitest';
