@@ -180,6 +180,7 @@ describe('the record is invisible to every data reader, and frozen', () => {
 
   it('is frozen, entries included', () => {
     const record = stackConversionsOf(built());
+    expect(record, 'anti-vacuity: an empty record is frozen by construction').toHaveLength(1);
     expect(Object.isFrozen(record)).toBe(true);
     expect(record.every((n) => Object.isFrozen(n))).toBe(true);
     expect(() => (record as ConversionNotice[]).push(record[0])).toThrow(TypeError);
@@ -187,6 +188,7 @@ describe('the record is invisible to every data reader, and frozen', () => {
 
   it('never reaches JSON, and the strict stack schema neither sees nor refuses it', () => {
     const stack = built();
+    expect(stackConversionsOf(stack), 'anti-vacuity: there IS a record to leak').toHaveLength(1);
     expect(JSON.stringify(stack)).not.toContain('page-header-subtitle-alias');
     expect(ObjectStackDefinitionSchema.safeParse(stack).success).toBe(true);
   });
@@ -210,8 +212,10 @@ describe('stackConversionsOf answers [] wherever the mark is absent', () => {
   it('a forged record on an unmarked value is not read', () => {
     const stack = built();
     const forged: Record<symbol, unknown> = {};
+    const genuine = stackConversionsOf(stack);
+    expect(genuine, 'anti-vacuity: the forged record is a non-empty one').toHaveLength(1);
     Object.defineProperty(forged, Symbol.for('objectstack.stack.conversions'), {
-      value: stackConversionsOf(stack),
+      value: genuine,
       enumerable: false,
     });
     expect(hasStackProvenance(forged)).toBe(false);
@@ -253,6 +257,8 @@ describe('composeStacks records its inputs’ records, in input order, one appli
     const a = build('aa', 'description');
     const b = build('bb', 'subtitle');
     const c = build('cc', 'description');
+    expect(stackConversionsOf(a), 'anti-vacuity: the inputs carry records').toHaveLength(1);
+    expect(stackConversionsOf(c)).toHaveLength(1);
     expect(stackConversionsOf(composeStacks([]))).toEqual([]);
     // a single input is returned as-is, record included
     expect(composeStacks([a] as ObjectStackDefinition[])).toBe(a);
