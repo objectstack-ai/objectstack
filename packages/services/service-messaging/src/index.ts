@@ -105,7 +105,7 @@ export { CHANNEL_UNAVAILABLE_REASONS } from './channel.js';
 export type {
     INotificationOutbox,
     NotificationDeliveryRecord,
-    // [#11859] What claim()/claimDigest() hand out and ack() takes back — the
+    // [commit d9cf78eaa] What claim()/claimDigest() hand out and ack() takes back — the
     // record carrying the claim credential the compare-and-set binds.
     ClaimedDeliveryRecord,
     DeliveryStatus,
@@ -116,7 +116,7 @@ export type {
     ReapOptions,
     AckResult,
 } from './outbox.js';
-// [#11453] `ack()`'s status precondition refuses with this, so a caller that
+// [commit 1a47a5368] `ack()`'s status precondition refuses with this, so a caller that
 // wants to distinguish "I lost the claim" from a transport fault can catch it.
 export { NotificationAckError } from './outbox.js';
 export { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';

@@ -59,7 +59,7 @@ export const NotificationReceipt = ObjectSchema.create({
             label: 'Notification Event',
             required: true,
             searchable: true,
-            // [#12978] Referenced-column bound (#11374 route A): FK to
+            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): FK to
             // `sys_notification.id` — physical varchar(255), the id column
             // driver-sql creates (`table.string('id').primary()`).
             maxLength: 255,
@@ -76,7 +76,7 @@ export const NotificationReceipt = ObjectSchema.create({
             label: 'Recipient User',
             required: true,
             searchable: true,
-            // [#12978] Referenced-column bound (#11374 route A): a
+            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): a
             // `sys_user.id` — physical varchar(255), as above.
             maxLength: 255,
         }),
@@ -84,7 +84,7 @@ export const NotificationReceipt = ObjectSchema.create({
         channel: Field.text({
             label: 'Channel',
             required: true,
-            // [#12978] Machine channel-id vocabulary (#11374 route A), same
+            // [commit e4902d2b9] Machine channel-id vocabulary (route A, ruling 2026-08-24), same
             // sourcing as `sys_notification_delivery.channel`: registered
             // `MessagingChannel.id`s, 64 per the landed machine-vocabulary
             // precedent (sys_session.revoke_reason, maxLength: 64).
