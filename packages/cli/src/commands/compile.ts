@@ -262,6 +262,15 @@ export default class Compile extends Command {
       //     catch-all below (`--json`: `error` + `code`, exit 1), the same
       //     envelope a `defineStack` refusal raised at load reaches.
       refuseUnbuiltStack(loaded);
+      // 1b. The ADR-0087 D2 conversions the PRODUCER applied — the same fold
+      //     `os validate` makes at its step 1b, for the same reason: `defineStack`
+      //     converts at load, so step 2's pass below finds nothing of the
+      //     default export left to convert, and `conversions` read `[]` on every
+      //     `defineStack` config. Read by `loadConfig` off the default export
+      //     before its named-export merge (`stackConversionsOf`). ⛔ Folded,
+      //     never recomputed. Rendered on the text face at step 2 with the
+      //     pass's own findings, in this one list.
+      conversionNotices.push(...loaded.stackConversions);
 
       if (!flags.json) {
         printKV('Config', path.relative(process.cwd(), absolutePath));
@@ -277,7 +286,10 @@ export default class Compile extends Command {
       //    bites harder than it reads, because the notice is the ONLY warning an
       //    old-shape author gets before the conversion retires and their metadata
       //    stops loading. Five conversions are live today (protocol 11 and 15),
-      //    so the gap is real, not hypothetical.
+      //    so the gap is real, not hypothetical. After step 1b the pass can still
+      //    find what the producer never saw — a key `loadConfig` merged onto the
+      //    stack from a NAMED export of the config module — and appends it to
+      //    the same list.
       if (!flags.json) printStep('Normalizing stack definition...');
       // The sink is declared above the `try` (see its note there); the CALL that
       // fills it stays right here, at the step that owns it.
