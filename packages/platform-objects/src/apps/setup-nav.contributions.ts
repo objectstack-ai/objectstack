@@ -124,7 +124,8 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiresService: 'ai'` is load-bearing, not decoration. The `ai` slot
       // has no implementation in the open framework (`CORE_SERVICE_PROVIDER.ai`
       // is `null` — `@objectstack/service-ai` ships in Cloud/Enterprise), so on
-      // a Community Edition boot the page's only data source answers 501.
+      // a Community Edition boot the page's only data source answers 501 (the
+      // platform checklist's FOLLOW-UPS row K2 records that reading).
       // The gate is stripped server-side by `filterAppForUser` (ADR-0057 D10),
       // so the entry never reaches a browser whose runtime cannot serve it.
       // Same shape as `nav_account_approvals`' `requiresService: 'approvals'`.
