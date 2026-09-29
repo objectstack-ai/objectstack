@@ -229,6 +229,7 @@
     "objectStackErrorMap": "src/shared/error-map.zod.ts#objectStackErrorMap (const)",
     "partitionAssembledViewArtifacts": "src/ui/assembled-views.zod.ts#partitionAssembledViewArtifacts (function)",
     "safeParsePretty": "src/shared/error-map.zod.ts#safeParsePretty (function)",
+    "stackConversionsOf": "src/stack-provenance.ts#stackConversionsOf (function)",
     "suggestFieldType": "src/shared/field-type-suggestion.ts#suggestFieldType (function)",
     "tmpl": "src/shared/expression.zod.ts#tmpl (function)"
   }
