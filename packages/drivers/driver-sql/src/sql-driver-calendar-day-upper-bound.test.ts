@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseFilterAST, UNBOUNDED_ABOVE } from '@objectstack/spec/data';
+import { parseFilterAST, UNBOUNDED_ABOVE, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
@@ -322,7 +322,7 @@ describe('[#20600] a bare-day upper bound on the last supported day', () => {
     ] as const;
 
     /** `where` on `at` · the ids it answers, sorted — `none` has no value. */
-    const CASES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
+    const CASES: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
       ["$lte '9999-12-31'", { at: { $lte: '9999-12-31' } }, ['c26', 'last', 'mid', 'open', 'prev']],
       ["$between ['2026-01-01', '9999-12-31']", { at: { $between: ['2026-01-01', '9999-12-31'] } }, ['c26', 'last', 'mid', 'open', 'prev']],
       ["$between ['9999-12-31', '9999-12-31']", { at: { $between: ['9999-12-31', '9999-12-31'] } }, ['last', 'mid', 'open']],
@@ -336,7 +336,7 @@ describe('[#20600] a bare-day upper bound on the last supported day', () => {
 
     const run = async (driver: SqlDriver) => {
       const got: Record<string, string[]> = {};
-      for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where } as any));
+      for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where }));
       expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
     };
 

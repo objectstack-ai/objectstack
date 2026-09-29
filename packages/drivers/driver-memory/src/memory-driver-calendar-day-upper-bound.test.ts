@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import type { Cube } from '@objectstack/spec/data';
@@ -183,7 +183,7 @@ describe('[#20600] InMemoryDriver — a bare-day upper bound on the last support
   });
 
   /** `where` · the ids it answers, sorted. */
-  const CASES: ReadonlyArray<readonly [string, () => unknown, readonly string[]]> = [
+  const CASES: ReadonlyArray<readonly [string, () => FilterCondition, readonly string[]]> = [
     ["$lte '9999-12-31'", () => ({ created_at: { $lte: '9999-12-31' } }), ['c26', 'last', 'mid', 'open', 'prev']],
     ["$between ['2026-01-01', '9999-12-31']", () => ({ created_at: { $between: ['2026-01-01', '9999-12-31'] } }), ['c26', 'last', 'mid', 'open', 'prev']],
     ["$between ['9999-12-31', '9999-12-31']", () => ({ created_at: { $between: ['9999-12-31', '9999-12-31'] } }), ['last', 'mid', 'open']],
@@ -200,7 +200,7 @@ describe('[#20600] InMemoryDriver — a bare-day upper bound on the last support
 
   it('compiles no upper bound on 9999-12-31; 9999-12-30 is a bound; the lower-bound operators do not move', async () => {
     const got: Record<string, string[]> = {};
-    for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: where() } as any));
+    for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: where() }));
     expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
   });
 
