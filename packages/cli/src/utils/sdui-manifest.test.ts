@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -86,12 +86,15 @@ describe('resolveSduiManifest — says WHY it has no manifest', () => {
     expect(r).toEqual({ status: 'resolved', manifest: MANIFEST, path: join(dir, PROJECT_SDUI_MANIFEST_FILE) });
   });
 
-  // Hermetic: the console is located from an origin inside this empty
-  // directory, where `@objectstack/console` does not resolve — so the answer
-  // does not depend on whether this checkout has built the console. Both legs
-  // are named, in order.
+  // Hermetic: the console is located from an origin nothing resolves from
+  // (`createRequire` refuses a relative one), so the answer does not depend on
+  // whether this checkout has built the console. ⚠️ An absolute origin in an
+  // empty directory is NOT that: a runner started through pnpm's `.bin` shim
+  // inherits a NODE_PATH carrying the virtual store's hoisted packages, and
+  // `@objectstack/console` resolves from anywhere through it. Both legs are
+  // named, in order; the console-leg block below pins the absolute spelling.
   it('absent: names the project path, then the console copy', () => {
-    expect(resolveSduiManifest(dir, pathToFileURL(join(dir, 'cli.mjs')))).toEqual({
+    expect(resolveSduiManifest(dir, 'not-an-absolute-origin.mjs')).toEqual({
       status: 'absent',
       lookedAt: [join(dir, PROJECT_SDUI_MANIFEST_FILE), CONSOLE_SDUI_MANIFEST],
     });
@@ -147,7 +150,8 @@ describe('the console leg — the copy @objectstack/console ships is reached, th
   let root = '';
   let project = '';
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'os-sdui-console-'));
+    // Real path: module resolution answers with one (`/var` is `/private/var` on macOS).
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'os-sdui-console-')));
     project = join(root, 'project');
     mkdirSync(project);
   });
