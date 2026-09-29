@@ -37,7 +37,7 @@ import {
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { UNBOUNDED_ABOVE } from '@objectstack/spec/data';
+import { UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -2580,7 +2580,7 @@ export class TursoDriver extends SqlDriver {
           // [#20600] A max on the last supported day bounds nothing: the range
           // keeps its minimum alone.
           const upper = this.toRemoteUpperBound(object, field, '$lte', raw[1]);
-          if (upper !== UNBOUNDED_ABOVE) Object.assign(out, upper);
+          if (!isUnboundedAbove(upper)) Object.assign(out, upper);
           break;
         }
         case '$lte': {
@@ -2589,7 +2589,7 @@ export class TursoDriver extends SqlDriver {
           // `$null: false` arm spells `IS NOT NULL` — the reading local mode's
           // emitter gives the same rewrite.
           const upper = this.toRemoteUpperBound(object, field, op, raw);
-          Object.assign(out, upper === UNBOUNDED_ABOVE ? { $null: false } : upper);
+          Object.assign(out, isUnboundedAbove(upper) ? { $null: false } : upper);
           break;
         }
         case '$in':
@@ -2635,9 +2635,9 @@ export class TursoDriver extends SqlDriver {
     field: string,
     op: string,
     raw: unknown,
-  ): Record<string, unknown> | typeof UNBOUNDED_ABOVE {
+  ): Record<string, unknown> | UnboundedAbove {
     const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
-    if (rewritten === UNBOUNDED_ABOVE) return UNBOUNDED_ABOVE;
+    if (isUnboundedAbove(rewritten)) return UNBOUNDED_ABOVE;
     if (rewritten) return { [rewritten.op]: rewritten.value };
     return { [op]: this.temporalFilterValue(object, field, raw) };
   }

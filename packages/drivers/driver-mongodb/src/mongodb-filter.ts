@@ -24,7 +24,7 @@
  */
 
 import type { Filter } from 'mongodb';
-import { nextUtcCalendarDay, UNBOUNDED_ABOVE } from '@objectstack/core';
+import { nextUtcCalendarDay, isUnboundedAbove } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 // [#5659] The Filter Protocol's boolean identity reduction, shared with
 // driver-sql, driver-memory and the flow linter and proven against the same
@@ -1163,7 +1163,7 @@ function translateFieldOperators(
         // `$ne: null`, the lowering `$exists: true` takes above. Collected like
         // every other write, so an author's own `$ne` survives beside it.
         const nextDay = nextUtcCalendarDay(value);
-        if (nextDay === UNBOUNDED_ABOVE) put('$ne', null);
+        if (isUnboundedAbove(nextDay)) put('$ne', null);
         else if (nextDay != null) put('$lt', store(nextDay));
         else put('$lte', store(value));
         break;
@@ -1257,7 +1257,7 @@ function translateFieldOperators(
         // [#20600] A max on the last supported day bounds nothing: the range
         // keeps its minimum alone.
         const betweenNextDay = nextUtcCalendarDay(value[1]);
-        if (betweenNextDay === UNBOUNDED_ABOVE) break;
+        if (isUnboundedAbove(betweenNextDay)) break;
         if (betweenNextDay != null) put('$lt', store(betweenNextDay));
         else put('$lte', store(value[1]));
         break;

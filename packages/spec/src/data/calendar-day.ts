@@ -41,34 +41,57 @@
  */
 
 /**
+ * The type of {@link UNBOUNDED_ABOVE}: a `symbol` carrying a STRUCTURAL brand.
+ *
+ * Structural, not `unique symbol`, and that is the point. A `unique symbol` is
+ * nominal to the declaration that spells it, and this package ships the `./data`
+ * entry's declarations twice (`dist/data/index.d.mts` under `import`,
+ * `dist/data/index.d.ts` under `require`), each declaring its own copy. A
+ * program that reaches the sentinel through both files saw two unrelated
+ * `unique symbol`s: the comparison against the constant was refused as having
+ * "no overlap" (TS2367), and the guard stopped narrowing (TS2339) — measured in
+ * `@objectstack/dogfood`, whose program maps one workspace package to source and
+ * the rest to built types. Two copies of this alias are one type wherever they meet, so the answer
+ * of the helper from one file and the constant or guard from another agree.
+ *
+ * Still a `symbol`, so the last day stays a member every caller must handle:
+ * TypeScript refuses it in a template literal (TS2731), in a relational
+ * comparison (TS2469) and where a `string` is expected (TS2345). ⛔ Never widen
+ * it into `string`: a string-typed sentinel compiles and sorts silently as a
+ * bound — the defect this answer exists to end. The brand key names no property
+ * the value really has; it only makes the type distinct from every other
+ * `symbol`. Narrow it with {@link isUnboundedAbove} (or `typeof … === 'symbol'`):
+ * because the type is not a unit type, `=== UNBOUNDED_ABOVE` compares, but does
+ * not narrow.
+ */
+export type UnboundedAbove = symbol & { readonly __objectstackCalendarDayBound: 'unbounded-above' };
+
+/**
  * The answer {@link nextUtcCalendarDay} gives for `9999-12-31`, the last day of
  * the supported years: that day's whole-day bound is past every supported
  * value, so an emitter compiles NO upper bound for it (see the module note).
  *
- * A symbol, so no caller can compile it as a bound by accident: TypeScript
- * refuses it in a template literal, in a relational comparison and where a
- * `string` is expected, and it is distinct from `null` ("not a calendar day").
- * Registered with `Symbol.for`, so two bundled copies of this module answer the
- * same value — `@objectstack/spec` and `@objectstack/spec/data` are separate
- * entry points, and a caller may import the helper from one and this constant
- * from the other.
+ * A symbol, so no caller can compile it as a bound by accident, and distinct
+ * from `null` ("not a calendar day"); its type is {@link UnboundedAbove}.
+ * Registered with `Symbol.for`, so every bundled copy of this module (the ESM
+ * and CJS builds, the browser builds) answers the same VALUE, whichever one a
+ * caller's import resolved to. The structural type is what makes the copies'
+ * declarations one TYPE as well.
  */
-export const UNBOUNDED_ABOVE: unique symbol = Symbol.for('objectstack.calendarDay.unboundedAbove');
+export const UNBOUNDED_ABOVE = Symbol.for('objectstack.calendarDay.unboundedAbove') as UnboundedAbove;
 
 /**
- * The calendar day after a bare `YYYY-MM-DD` string — the exclusive upper bound
- * of that day — or {@link UNBOUNDED_ABOVE} for `9999-12-31`, the last day of
- * the supported years, whose whole-day bound bounds nothing.
- *
- * Returns `null` for anything that is not a valid bare calendar day. That
- * refusal is load-bearing in two directions:
- *   - a full ISO timestamp or a `Date` keeps **instant** semantics and must not
- *     be widened, so callers get `null` and compile their original bound;
- *   - an impossible day (`2026-02-30`, `2026-13-01`) is rejected rather than
- *     rolled over, so a caller falls back to the untranslated comparand instead
- *     of silently querying a date the author never wrote.
+ * Is `value` {@link UNBOUNDED_ABOVE}? The guard every reader of
+ * {@link nextUtcCalendarDay} shares: it narrows the answer to `string | null`
+ * on its false branch in any program, whichever declaration file each import
+ * resolved to — which `=== UNBOUNDED_ABOVE` cannot do (see {@link UnboundedAbove}).
+ * An unregistered `Symbol('objectstack.calendarDay.unboundedAbove')` is not it.
  */
-export function nextUtcCalendarDay(value: unknown): string | typeof UNBOUNDED_ABOVE | null {
+export function isUnboundedAbove(value: unknown): value is UnboundedAbove {
+  return value === UNBOUNDED_ABOVE;
+}
+
+export function nextUtcCalendarDay(value: unknown): string | UnboundedAbove | null {
   if (typeof value !== 'string') return null;
   const day = value.trim();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);

@@ -18,7 +18,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, UNBOUNDED_ABOVE } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -548,7 +548,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // [#20600] A bare end on the last supported day has no next day to
           // stop before: every value is inside it, so the window keeps its
           // start alone.
-          if (nextDay === UNBOUNDED_ABOVE) {
+          if (isUnboundedAbove(nextDay)) {
             whereClauses.push(`(${lower})`);
           } else {
             const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
@@ -1245,7 +1245,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // [#20600] On the last supported day there is no next day: every value is
       // inside the bound, so what `lte` still asks is a value — the `set` arm's
       // `IS NOT NULL`.
-      if (nextDay === UNBOUNDED_ABOVE) return `${rawCol} IS NOT NULL`;
+      if (isUnboundedAbove(nextDay)) return `${rawCol} IS NOT NULL`;
       if (nextDay != null) {
         params.push(this.coerceTemporal(ctx, target, nextDay));
         return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;

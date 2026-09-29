@@ -11,7 +11,7 @@ import {
   Logger,
   createLogger,
   nextUtcCalendarDay,
-  UNBOUNDED_ABOVE,
+  isUnboundedAbove,
   // [#16322] The ONE lowering of the closed `dateRange` preset vocabulary and
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
@@ -271,7 +271,7 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // inside the bound, so what `lte` still asks is a value (the `set` row below).
   lte: ({ comparands }) => {
     const nextDay = nextUtcCalendarDay(comparands[0]);
-    if (nextDay === UNBOUNDED_ABOVE) return { $ne: null };
+    if (isUnboundedAbove(nextDay)) return { $ne: null };
     return nextDay != null ? { $lt: nextDay } : { $lte: comparands[0] };
   },
   // The list operators take the WHOLE list. An empty one is a real predicate —
@@ -466,7 +466,7 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
   // above answers `$ne: null` there.
   lte: ({ column, comparands, literal }) => {
     const nextDay = nextUtcCalendarDay(comparands[0]);
-    if (nextDay === UNBOUNDED_ABOVE) return `${column} IS NOT NULL`;
+    if (isUnboundedAbove(nextDay)) return `${column} IS NOT NULL`;
     return nextDay != null
       ? `${column} < ${literal(nextDay)}`
       : `${column} <= ${literal(comparands[0])}`;
@@ -1003,8 +1003,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // day to stop before: every value is inside it, so the window keeps
           // its start alone, in both spellings.
           const widened = resolved.endExclusive ? null : nextUtcCalendarDay(end);
-          const unbounded = widened === UNBOUNDED_ABOVE;
-          const widenedDay = unbounded ? null : widened;
+          const unbounded = isUnboundedAbove(widened);
+          const widenedDay = isUnboundedAbove(widened) ? null : widened;
           const upperString = resolved.endExclusive ? end : widenedDay;
           const upperDate = widenedDay != null
             ? new Date(`${widenedDay}T00:00:00.000Z`)

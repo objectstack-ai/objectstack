@@ -14,7 +14,7 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay, UNBOUNDED_ABOVE } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
@@ -1401,7 +1401,7 @@ export class InMemoryDriver implements IDataDriver {
         // is inside the bound, so what `<=` still asks is a value (`$ne: null`,
         // the `is_not_null` arm below).
         const nextDay = nextUtcCalendarDay(value);
-        if (nextDay === UNBOUNDED_ABOVE) return { [field]: { $ne: null } };
+        if (isUnboundedAbove(nextDay)) return { [field]: { $ne: null } };
         return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
       }
       case 'in':
@@ -1476,7 +1476,7 @@ export class InMemoryDriver implements IDataDriver {
           // [#20600] A max on the last supported day bounds nothing: the range
           // keeps its minimum alone.
           const nextDay = nextUtcCalendarDay(value[1]);
-          if (nextDay === UNBOUNDED_ABOVE) return { [field]: { $gte: store(value[0]) } };
+          if (isUnboundedAbove(nextDay)) return { [field]: { $gte: store(value[0]) } };
           return {
             [field]: nextDay != null
               ? { $gte: store(value[0]), $lt: store(nextDay) }
@@ -1726,7 +1726,7 @@ export class InMemoryDriver implements IDataDriver {
           // [#20600] A max on the last supported day bounds nothing: the
           // range keeps its minimum alone.
           const betweenNextDay = nextUtcCalendarDay(val[1]);
-          if (betweenNextDay === UNBOUNDED_ABOVE) break;
+          if (isUnboundedAbove(betweenNextDay)) break;
           if (betweenNextDay != null) put('$lt', store(betweenNextDay));
           else put('$lte', store(val[1]));
           break;
@@ -1743,7 +1743,7 @@ export class InMemoryDriver implements IDataDriver {
           // `$ne: null`, the lowering `$null: false` takes below. Collected like
           // every other write, so an author's own `$ne` survives beside it.
           const nextDay = nextUtcCalendarDay(val);
-          if (nextDay === UNBOUNDED_ABOVE) put('$ne', null);
+          if (isUnboundedAbove(nextDay)) put('$ne', null);
           else if (nextDay != null) put('$lt', store(nextDay));
           else put('$lte', store(val));
           break;

@@ -114,7 +114,7 @@ import {
 // the spec and shared by every JS evaluation face — so a `check` evaluated here
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
 // domain.
-import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains, UNBOUNDED_ABOVE } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains, isUnboundedAbove } from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, likewise defined once in the
 // spec: this face evaluates the pattern in JS, `driver-sql` compiles the same
 // one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
@@ -863,7 +863,7 @@ function assertComparableReference(
 function lteBound(actual: unknown, bound: unknown): boolean {
   if (bound == null) return false;
   const nextDay = nextUtcCalendarDay(bound);
-  if (nextDay === UNBOUNDED_ABOVE) return utcInstantMs(actual) !== null || order(actual, bound, (a, b) => a <= b);
+  if (isUnboundedAbove(nextDay)) return utcInstantMs(actual) !== null || order(actual, bound, (a, b) => a <= b);
   if (nextDay != null) return order(actual, nextDay, (a, b) => a < b);
   return order(actual, bound, (a, b) => a <= b);
 }

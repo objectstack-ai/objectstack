@@ -151,7 +151,7 @@ import { isEmptyFilterValue } from '@objectstack/spec/data';
 // reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
 // the spec, where that rule is declared.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
-import { nextUtcCalendarDay, UNBOUNDED_ABOVE } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -1320,10 +1320,10 @@ function listHolds(list: readonly unknown[], value: unknown): boolean {
 function wholeDayUpperBound(
   bound: unknown,
   kind: TemporalComparandKind | undefined,
-): unknown | typeof UNBOUNDED_ABOVE {
+): unknown | UnboundedAbove {
   if (kind !== 'datetime') return undefined;
   const next = nextUtcCalendarDay(bound);
-  if (next === UNBOUNDED_ABOVE) return UNBOUNDED_ABOVE;
+  if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
   return next === null ? undefined : temporalStorageForm(next, 'datetime');
 }
 
@@ -1422,7 +1422,7 @@ function checkCondition(
       case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
       case '$lte': {
         const dayAfter = wholeDayUpperBound(target, kind);
-        if (dayAfter === UNBOUNDED_ABOVE) {
+        if (isUnboundedAbove(dayAfter)) {
           // [#20600] No upper bound: what `$lte` still asks is a value.
           if (stored === null || stored === undefined) return false;
           break;
@@ -1438,7 +1438,7 @@ function checkCondition(
         // [#20600] A max on the last supported day bounds nothing: the range
         // keeps its minimum alone.
         if (ordered(stored, form(target[0]), (a, b) => a < b)
-          || (dayAfter === UNBOUNDED_ABOVE
+          || (isUnboundedAbove(dayAfter)
             ? false
             : dayAfter !== undefined
               ? ordered(stored, dayAfter, (a, b) => a >= b)

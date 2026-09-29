@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { nextUtcCalendarDay, utcInstantMs, UNBOUNDED_ABOVE } from './calendar-day';
+import { nextUtcCalendarDay, utcInstantMs, UNBOUNDED_ABOVE, isUnboundedAbove } from './calendar-day';
 
 describe('nextUtcCalendarDay', () => {
   it('advances one calendar day', () => {
@@ -138,7 +138,7 @@ describe('[#20600] the last supported day answers UNBOUNDED_ABOVE', () => {
     for (let ms = Date.parse('9999-01-01T00:00:00.000Z'); ms <= Date.parse('9999-12-31T00:00:00.000Z'); ms += 86_400_000) {
       const day = new Date(ms).toISOString().slice(0, 10);
       const next = nextUtcCalendarDay(day);
-      if (next === UNBOUNDED_ABOVE) unbounded += 1;
+      if (isUnboundedAbove(next)) unbounded += 1;
       else expect(next, day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
     expect(unbounded).toBe(1);
@@ -153,6 +153,22 @@ describe('[#20600] the last supported day answers UNBOUNDED_ABOVE', () => {
 
   it('is one registered symbol, so a second bundled copy of the helper answers the same value', () => {
     expect(UNBOUNDED_ABOVE).toBe(Symbol.for('objectstack.calendarDay.unboundedAbove'));
+  });
+
+  it('isUnboundedAbove is true for that answer alone, and narrows it away', () => {
+    expect(isUnboundedAbove(nextUtcCalendarDay('9999-12-31'))).toBe(true);
+    expect(isUnboundedAbove(UNBOUNDED_ABOVE)).toBe(true);
+    expect(isUnboundedAbove(Symbol.for('objectstack.calendarDay.unboundedAbove'))).toBe(true);
+    // An unregistered symbol with the same description is another value.
+    expect(isUnboundedAbove(Symbol('objectstack.calendarDay.unboundedAbove'))).toBe(false);
+    for (const other of [nextUtcCalendarDay('9999-12-30'), null, undefined, '10000-01-01', '9999-12-31', {}]) {
+      expect(isUnboundedAbove(other), String(other)).toBe(false);
+    }
+    // The false branch is `string | null` to the compiler: a template literal
+    // compiles there, and would not on the unnarrowed answer (TS2731).
+    const next = nextUtcCalendarDay('9999-12-30');
+    const bound = isUnboundedAbove(next) || next === null ? null : `${next}T00:00:00.000Z`;
+    expect(bound).toBe('9999-12-31T00:00:00.000Z');
   });
 
   it("utcInstantMs still reads 9999-12-31 as that day's midnight UTC", () => {

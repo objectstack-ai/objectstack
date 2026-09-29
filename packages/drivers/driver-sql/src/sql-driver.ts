@@ -90,7 +90,13 @@ import {
   declareTargetedTable,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { nextUtcCalendarDay, temporalStorageForm, UNBOUNDED_ABOVE } from '@objectstack/core';
+import {
+  nextUtcCalendarDay,
+  temporalStorageForm,
+  UNBOUNDED_ABOVE,
+  isUnboundedAbove,
+  type UnboundedAbove,
+} from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
@@ -15407,11 +15413,11 @@ export class SqlDriver implements IDataDriver {
     table: string | null,
     field: string,
     value: unknown,
-  ): unknown | typeof UNBOUNDED_ABOVE | null {
+  ): unknown | UnboundedAbove | null {
     if (this.temporalFieldKind(table, field) !== 'datetime') return null;
     const next = nextUtcCalendarDay(value);
     if (next == null) return null;
-    if (next === UNBOUNDED_ABOVE) return UNBOUNDED_ABOVE;
+    if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
     return this.storageDatetimeValue(`${next}T00:00:00.000Z`);
   }
 
@@ -15430,11 +15436,11 @@ export class SqlDriver implements IDataDriver {
     field: string,
     op: string,
     value: unknown,
-  ): { op: string; value: unknown } | typeof UNBOUNDED_ABOVE | null {
+  ): { op: string; value: unknown } | UnboundedAbove | null {
     if (op !== '$lte' && op !== '<=') return null;
     const upper = this.calendarDayExclusiveUpperBound(table, field, value);
     if (upper == null) return null;
-    if (upper === UNBOUNDED_ABOVE) return UNBOUNDED_ABOVE;
+    if (isUnboundedAbove(upper)) return UNBOUNDED_ABOVE;
     return { op: op === '$lte' ? '$lt' : '<', value: upper };
   }
 
@@ -15452,7 +15458,7 @@ export class SqlDriver implements IDataDriver {
     table: string | null,
     field: string,
     value: unknown,
-  ): { lower: unknown; upper: unknown | typeof UNBOUNDED_ABOVE } | null {
+  ): { lower: unknown; upper: unknown | UnboundedAbove } | null {
     if (!Array.isArray(value) || value.length !== 2) return null;
     const upper = this.calendarDayExclusiveUpperBound(table, field, value[1]);
     if (upper == null) return null;
@@ -16967,7 +16973,7 @@ export class SqlDriver implements IDataDriver {
             if (dayRange) {
               // [#20600] A max on the last supported day bounds nothing: the
               // range keeps its minimum alone.
-              const bounded = dayRange.upper !== UNBOUNDED_ABOVE;
+              const bounded = !isUnboundedAbove(dayRange.upper);
               (builder as any)[method]((qb: any) => {
                 if (columnExpr) {
                   this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
@@ -16981,7 +16987,7 @@ export class SqlDriver implements IDataDriver {
             }
           }
           const rewrite = this.calendarDayUpperBoundRewrite(table, localField, rawOp, opValue);
-          if (rewrite === UNBOUNDED_ABOVE) {
+          if (isUnboundedAbove(rewrite)) {
             // [#20600] `$lte` on the last supported day: no upper bound, so the
             // comparison asks only that the column has a value — the `IS NOT
             // NULL` the `$ne: null` arm below spells. The raw column, not

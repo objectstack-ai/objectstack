@@ -28,7 +28,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, UNBOUNDED_ABOVE } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
   rebucketCrossObject,
@@ -548,7 +548,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const nextDay = nextUtcCalendarDay(bounds.$lte);
       // [#20600] A bare end on the last supported day renders no upper bound,
       // because the driver compiles none for it.
-      if (nextDay === UNBOUNDED_ABOVE) {
+      if (isUnboundedAbove(nextDay)) {
         params.push(bounds.$gte);
         whereParts.push(`(${field} >= $${params.length})`);
         continue;

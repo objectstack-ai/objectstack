@@ -192,10 +192,12 @@ export function zonedWallClockToUtcMs(parts: WallClockParts, tz?: string): numbe
  *
  * Re-exported here so the published `@objectstack/core` surface is unchanged
  * for the drivers and analytics strategies that already import it from here.
- * [#20600] `UNBOUNDED_ABOVE` travels with the helper: it is the helper's answer
- * for `9999-12-31`, and every caller of one has to name the other.
+ * [#20600] `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard
+ * `isUnboundedAbove` travel with the helper: the constant is the helper's answer
+ * for `9999-12-31`, and every caller of one narrows it with the guard.
  */
-export { nextUtcCalendarDay, utcInstantMs, UNBOUNDED_ABOVE } from '@objectstack/spec/data';
+export { nextUtcCalendarDay, utcInstantMs, UNBOUNDED_ABOVE, isUnboundedAbove } from '@objectstack/spec/data';
+export type { UnboundedAbove } from '@objectstack/spec/data';
 
 /**
  * Granularity of a canonical date-bucket key. Mirrors `@objectstack/spec`'s

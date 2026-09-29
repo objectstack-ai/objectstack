@@ -35,7 +35,7 @@ import {
   nextUtcCalendarDay,
   resolveAnalyticsDateRangeString,
   utcInstantMs,
-  UNBOUNDED_ABOVE,
+  isUnboundedAbove,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -103,7 +103,7 @@ function compare(a: unknown, b: unknown): number {
  */
 function lteBound(value: unknown, bound: unknown): boolean {
   const nextDay = nextUtcCalendarDay(bound);
-  if (nextDay === UNBOUNDED_ABOVE) return utcInstantMs(value) !== null || compare(value, bound) <= 0;
+  if (isUnboundedAbove(nextDay)) return utcInstantMs(value) !== null || compare(value, bound) <= 0;
   if (nextDay != null) return compare(value, nextDay) < 0;
   return compare(value, bound) <= 0;
 }
@@ -687,7 +687,7 @@ export function evaluateAnalyticsQueryOverRows(
       const v = String(r[field] ?? '');
       const inUpper = endExclusive
         ? v < end
-        : nextDay === UNBOUNDED_ABOVE
+        : isUnboundedAbove(nextDay)
           ? true
           : nextDay != null
             ? v < nextDay
