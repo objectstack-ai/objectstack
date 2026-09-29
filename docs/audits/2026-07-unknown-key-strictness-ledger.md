@@ -15,7 +15,7 @@ is wire/response shape where strictness would be a forward-compat bug.
 
 | | Where it lives | Who writes it |
 |---|---|---|
-| Site counts, strip counts, section headers, per-class subtotals, posture totals | [**`…strictness-ledger.counts.md`**](./2026-07-unknown-key-strictness-ledger.counts.md) — generated | `pnpm --filter @objectstack/spec gen:strictness-ledger` |
+| Site counts, strip counts, section headers, per-class subtotals, posture rows | [**`…strictness-ledger.counts/`**](./2026-07-unknown-key-strictness-ledger.counts/) — generated, one shard per source directory; the cross-directory totals are summed by `check:strictness-ledger` when it reads them and committed nowhere | `pnpm --filter @objectstack/spec gen:strictness-ledger` |
 | `Class` verdicts, evidence, findings log, exemption rationales, batch history | **this file** — hand-written | you |
 
 **Why the split.** Every merge conflict this file produced during the campaign
@@ -68,7 +68,7 @@ One question decides the class: **who writes this schema's input?**
 | **wire** | Another machine: server responses, connector payloads, runtime envelopes, persisted runtime state | stay tolerant (`.strip` / `.passthrough`); strictness here turns an upstream *addition* into our parse crash |
 | **open** | Deliberately schemaless user data (record bodies, per-node-type `config`, React props) | stay open; a *sibling* contract validates it (e.g. a node executor's `configSchema`, #4027/#4040) |
 | **no door** | **Nobody — nothing parses it.** The shape is exported and typed, but no schema declares a carrier key for it, so it is unreachable from every metadata-type root and from `defineStack`, and nothing calls `.parse()` on it outside its own test. Added at 批 13, when the first run of files resolved its `(p)` this way | **out of this ratchet's scope.** `.strict()` is a property of a PARSE; with no parse it enforces nothing and only makes a dead slot look load-bearing — *"a precisely-validated dead slot is the more convincing lie"* (#4583). The live question is ADR-0049 enforce-or-remove — retire the vocabulary or give it a carrier — so a row here points at an issue, never at a batch (#4988, #5015) |
-| **no gate** | **An author — through a carrier this protocol does not PARSE.** The carrier key exists and is live (authors write it, a renderer reads it), but no `.parse()` sits between them; whatever checking exists re-derives the schema's rules by hand. Added at 批 15 on `ChartAggregateSchema` (`<ObjectChart aggregate={…}>`); 批 17 then found the same shape at scale — all 29 sites of `ui/component.zod.ts`, behind `PageComponentSchema.properties`, which made it the largest class in `ui/` **at the time**. ⚠️ **Both exemplars have since had their parse wired and LEFT the class** (#5020 / #5068 — their strip rows carry the flips), so this bucket's current population is **ZERO**: `…counts.md` reads `no gate — carrier live, no parse | 0` globally and in all five directory subtotals. Read the exemplars as the shape's definition, not as a live inventory — there is no un-wired `no gate` site anywhere in the tree today. The verdict stays in the vocabulary regardless: an empty class is not a defect, it is a word waiting for the next site that measures this way (#5249 established exactly that when it ADDED `covered` rather than rounding an unlike shape onto a wrong-action verdict) | **out of this ratchet's scope, for the opposite reason.** Same absent parse, so closing it still enforces nothing — but the vocabulary is ALIVE, so the fix is to wire the parse at the carrier's own gate, not to retire anything. A row here points at that wiring issue |
+| **no gate** | **An author — through a carrier this protocol does not PARSE.** The carrier key exists and is live (authors write it, a renderer reads it), but no `.parse()` sits between them; whatever checking exists re-derives the schema's rules by hand. Added at 批 15 on `ChartAggregateSchema` (`<ObjectChart aggregate={…}>`); 批 17 then found the same shape at scale — all 29 sites of `ui/component.zod.ts`, behind `PageComponentSchema.properties`, which made it the largest class in `ui/` **at the time**. ⚠️ **Both exemplars have since had their parse wired and LEFT the class** (#5020 / #5068 — their strip rows carry the flips), so this bucket's current population is **ZERO**: the `…counts/` shards read `no gate — carrier live, no parse | 0` in all five triaged directories, and so does the global split `check:strictness-ledger` sums from them. Read the exemplars as the shape's definition, not as a live inventory — there is no un-wired `no gate` site anywhere in the tree today. The verdict stays in the vocabulary regardless: an empty class is not a defect, it is a word waiting for the next site that measures this way (#5249 established exactly that when it ADDED `covered` rather than rounding an unlike shape onto a wrong-action verdict) | **out of this ratchet's scope, for the opposite reason.** Same absent parse, so closing it still enforces nothing — but the vocabulary is ALIVE, so the fix is to wire the parse at the carrier's own gate, not to retire anything. A row here points at that wiring issue |
 | **covered** | **An author — but never through THIS site.** A module-private shape FRAGMENT with no carrier key and no `.parse()` of its own, whose keys reach authors only after being copied into consumers that each gate them. The copy must be a `...X.shape` SPREAD, because a spread lands the keys in a fresh `z.object` whose posture is its own — `.extend()` / `.merge()` / `.omit()` INHERIT the base's posture, which makes the base a real door and puts it back in `authorable` (finding 16, and `view.zod.ts`'s `FormFieldBaseSchema` one directory over). Added at #5249 on `ui/app.zod.ts`'s `BaseNavItemSchema` | **out of this ratchet's scope, and the follow-up is NOTHING.** Same absent parse, so closing it enforces nothing — and unlike `no door` the vocabulary is fully ALIVE and fully GATED, at every consumer, so retirement would delete keys those consumers still accept and check. This is the one verdict that prescribes no next step, which is exactly why it needed its own word: a row here is DONE, not queued |
 
 A fourth answer to "who writes this input" is **nobody**, and it is only
@@ -651,7 +651,7 @@ block) when `position` joined the ratchet.
 ## File-level triage — the five authorable directories
 
 **The per-file site counts live in
-[the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#file-level-triage--site-counts),
+[the counts shards](./2026-07-unknown-key-strictness-ledger.counts/) (each directory's `— sites` table),
 not here** (#5107). A site is every `z.object(` / `strictObject(` /
 `z.strictObject(` / `z.looseObject(` CALL, read from the AST rather than matched
 textually (see `scripts/lib/strictness-ledger.ts` for why the textual method was
@@ -832,7 +832,7 @@ every schema closed with the OLDER `z.object(…).strict()` idiom — reading
 
 This section is the WORKLIST for that number. The number itself — per file, per
 directory, and split by class — is
-[in the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#remaining-strip-sites--the-batch-planning-map),
+[in the counts shards](./2026-07-unknown-key-strictness-ledger.counts/) (each directory's `— open` table),
 generated (#5107). What stays here is the row: which file is still open, and the
 per-schema verdict and evidence that say whether its remainder is work or a
 deliberate floor.
@@ -919,7 +919,7 @@ instead: neither number is written by hand any more, so there is nothing here fo
 a merge to get plausibly wrong. A clean-looking merge here was evidence of
 nothing, eleven times, which is what finally bought the split.
 
-**Authorable strip in `automation/`: 0** ([counts file](./2026-07-unknown-key-strictness-ledger.counts.md#automation--open);
+**Authorable strip in `automation/`: 0** ([counts file](./2026-07-unknown-key-strictness-ledger.counts/automation.md#automation--open);
 was 41 of 67 when the ruling was written). **The ruling's `automation/` main body
 is complete** — every remaining strip site in this directory is wire, and none is
 in the forced scope: `execution`, `bpmn-interop`, `node-executor`, `etl`'s
@@ -1108,7 +1108,7 @@ branch never wrote either. A reopening moves this line exactly as a closure does
 rather than adjusted by anyone's delta.
 
 **Authorable strip in `ui/`:
-[see the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#ui--open)**
+[see the counts file](./2026-07-unknown-key-strictness-ledger.counts/ui.md#ui--open)**
 (it was 123 of 123 when the ruling was written). The subtotal is summed from the
 surviving rows' declared `Class` splits, never decremented by a batch's own
 delta — eleven instances above are why that is now a generator and not a
@@ -1264,7 +1264,7 @@ triage row record which one was taken.
 | `driver-sql.zod.ts` | wire | **out of scope** |
 
 **Authorable strip in `data/`:**
-[the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#data--open) splits this
+[the counts file](./2026-07-unknown-key-strictness-ledger.counts/data.md#data--open) splits this
 directory three ways, and the first two buckets are now **empty**: `object` was the one
 **firm** authorable row left, its single site deliberately HELD on #5247 — **that hold
 was spent by objectui#4772 and the site closed 2026-08-16 (14 of 14; the row left the
@@ -1360,7 +1360,7 @@ missing one is indistinguishable from a directory nobody walked.
 ## Other directories (coarse; classify per schema before touching)
 
 Site totals are
-[in the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#other-directories-untriaged).
+[in the counts shards](./2026-07-unknown-key-strictness-ledger.counts/), one file per directory.
 These directories were never gated — the numbers here were hand-copied and
 ungated, which is the same failure one level coarser, so they moved with the
 rest at #5107.

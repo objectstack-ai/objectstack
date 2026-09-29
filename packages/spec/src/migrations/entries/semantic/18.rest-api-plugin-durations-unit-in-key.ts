@@ -10,7 +10,7 @@ export const entry: SemanticMigration = {
   replacement: 'timeoutMs (milliseconds), cacheTtlSeconds (seconds) and defaultCacheTtlSeconds '
     + '(seconds, default 300) — rename each key; every value is unchanged',
   reason:
-    'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+    'Maintainer ruling B on duration units (2026-09-02, its population widened on 2026-09-05 to every authored and every runtime-emitted duration, bar the exemptions a schema declares on the key itself): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
     + 'RestApiEndpoint is this rule\'s clearest specimen after the founding one: `timeout` in '
     + 'MILLISECONDS and `cacheTtl` in SECONDS sat three lines apart on one shape, each unit named '
     + 'only in its describe, so the two numbers were indistinguishable at the authoring site and a '
@@ -26,7 +26,7 @@ export const entry: SemanticMigration = {
     + 'chain has no seam that ever runs on them. That is the disposition '
     + 'api/RestApiEndpoint:handlerStatus already carries on this very shape '
     + '(rest-api-endpoint-handler-status-retired), and what ruling B prescribes for a key that is '
-    + 'not authorable metadata. #15677, #14478, ADR-0087.',
+    + 'not authorable metadata. ADR-0087.',
   acceptanceCriteria:
     'Every RestApiEndpointSchema.parse(…) and RestApiPluginConfigSchema.parse(…) site spells '
     + '`timeoutMs`, `cacheTtlSeconds` and `performance.defaultCacheTtlSeconds`; authoring any old '

@@ -29,8 +29,10 @@ export const entry: SemanticMigration = {
     + 'is read only when filter is absent, and its own description has prescribed filter all '
     + 'along',
   reason:
-    '#19514, out of objectui#9050 ruling C-prime (maintainer 2026-09-20, verbatim, '
-    + 'untranslated): 「the differences are the protocol\'s to close」. This is the SAME value '
+    'The protocol half of the maintainer\'s ruling C-prime of 2026-09-20 on objectui\'s '
+    + 'render-time filter converter — the protocol is the only refusal set, so a document it '
+    + 'accepts never throws at render time — verbatim, untranslated: 「the differences are the '
+    + 'protocol\'s to close」. This is the SAME value '
     + 'in the SAME role as filter — the key\'s own description says it is read only when '
     + 'filter is absent — and the consumer reads it through the SAME lowering sink, so every '
     + 'refusal that sink can give was reachable from a document the protocol had just '

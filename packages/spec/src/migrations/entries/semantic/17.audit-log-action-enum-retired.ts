@@ -23,8 +23,9 @@ export const entry: SemanticMigration = {
     + 'on every deployment, and still is — what changed is that the contract no longer '
     + 'promises otherwise',
   reason:
-    'Maintainer ruling 2026-08-12 (#7675), the retirement half of a two-half verdict: the '
-    + 'cheap writers get built (#8144 login/logout, #8145 config_change) and the enum '
+    'Maintainer ruling 2026-08-12 on the audit log\'s writerless actions, the retirement half '
+    + 'of a two-half verdict: the cheap writers get built (`login` / `logout` on the auth '
+    + 'session hooks, `config_change` from the settings service) and the enum '
     + 'values with no feature behind them are retired. 原则记录:空 widget + 永远查不到东西的'
     + '过滤器是可见产品缺陷;审计面宁窄勿谎. '
     + 'The defect was false compliance on a COMPLIANCE surface, which is the sharpest form '
@@ -54,7 +55,7 @@ export const entry: SemanticMigration = {
     + 'on this object at all (`validateRecord` skips `readonly` fields, and every field '
     + 'here is readonly), so nothing rejects stored history and no backfill is required or '
     + 'wanted. Deleting audit history to satisfy a schema narrowing would be the one '
-    + 'genuinely destructive reading of this change. ADR-0049 / ADR-0087, #8147.',
+    + 'genuinely destructive reading of this change. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No consumer filters `sys_audit_log` on `action = "export"` or '
     + '`action = "permission_change"` expecting rows: both were empty everywhere before '
