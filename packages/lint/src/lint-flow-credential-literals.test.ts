@@ -332,15 +332,17 @@ describe('flow-credential-literal — registered once, at every door, as an advi
     const result = runRuntimeAuthoringRules({ type: 'flow', item: probeFlow() });
     expect(result.rulesRun).toContain('lintFlowCredentialLiterals');
     expect(result.errors.filter((f) => f.rule === FLOW_CREDENTIAL_LITERAL)).toEqual([]);
-    // Name-keyed at the wire (`flows.<name>…`), as every collection-resident
-    // finding leaves this gate.
+    // The written flow is the per-write snapshot's sole `flows` member, and
+    // `flows` is not a name-keyed context collection, so the wire path keeps
+    // its index — `flows[0]…`, the same spelling the CLI reports for a
+    // one-flow stack.
     expect(result.advisories.filter((f) => f.rule === FLOW_CREDENTIAL_LITERAL).map((f) => f.path)).toEqual([
-      'flows.probe_open_map.nodes[1].config.headers.Authorization',
-      'flows.probe_open_map.nodes[1].config.headers["x-api-key"]',
-      'flows.probe_open_map.nodes[1].config.url',
-      'flows.probe_open_map.nodes[2].config.try.nodes[0].config.headers.Authorization',
-      'flows.probe_open_map.nodes[3].connectorConfig.input.apiKey',
-      'flows.probe_open_map.nodes[3].connectorConfig.input.auth.clientSecret',
+      'flows[0].nodes[1].config.headers.Authorization',
+      'flows[0].nodes[1].config.headers["x-api-key"]',
+      'flows[0].nodes[1].config.url',
+      'flows[0].nodes[2].config.try.nodes[0].config.headers.Authorization',
+      'flows[0].nodes[3].connectorConfig.input.apiKey',
+      'flows[0].nodes[3].connectorConfig.input.auth.clientSecret',
     ]);
   });
 
