@@ -26,6 +26,10 @@
 // definition — shared with this package's query path, `formula`, and the SQL
 // family's emitters.
 import { reduceFilterVerdict, asciiCaseInsensitiveContains, matchesLikePattern } from '@objectstack/spec/data';
+// [#20444] `$empty`'s value-level half, the spec's one definition. This matcher
+// holds no field declarations, so it takes the reading the spec gives such a
+// face: null, `undefined`, `''` and `[]` are empty.
+import { isEmptyFilterValue } from '@objectstack/spec/data';
 
 import { assertFilterConditionShape } from './filter-refusal.js';
 
@@ -457,8 +461,10 @@ function checkCondition(value: any, condition: any): boolean {
         // over the VALUE would still reach arms whose no-value answer is ruled
         // elsewhere. Only the cells' STATE moved — refused at the door, rather
         // than held for a ruling.
+        // [#20444] `$empty` is about the absence too, so its arm answers the
+        // MISSING reading itself — `undefined` is empty, like `null`.
         if (value === undefined && op !== '$exists' && op !== '$null' && op !== '$eq'
-            && !noValueSatisfiesNegation(op)) {
+            && op !== '$empty' && !noValueSatisfiesNegation(op)) {
             return false; 
         }
 
@@ -656,6 +662,21 @@ function checkCondition(value: any, condition: any): boolean {
                 // identical `$between` note above).
                 if (target === true && value != null) return false;
                 if (target === false && value == null) return false;
+                break;
+            // [#20444] The staged emptiness flag — ruling A on #20399 (record
+            // 5865693155) gives a face holding NO field declarations the
+            // by-value reading, and this matcher holds none: null, `undefined`,
+            // `''` and `[]` are empty, through the spec's `isEmptyFilterValue`
+            // rather than a copy of it. `false` is the exact complement. The
+            // shape gate refused a non-boolean `target` before evaluation
+            // started, so the comparison is exhaustive.
+            //
+            // It differs from the live query path's DECLARED row only on a
+            // stored state the declaration does not predict — `''` in a
+            // non-text column (a write-door defect), `[]` in a scalar one —
+            // never on a value the field's own type can hold.
+            case '$empty':
+                if (isEmptyFilterValue(value) !== (target === true)) return false;
                 break;
             // [#5702] The `$regex` arm that stood here is GONE. It was the only
             // real regex evaluator in the repo, and the reason #4706 retired the

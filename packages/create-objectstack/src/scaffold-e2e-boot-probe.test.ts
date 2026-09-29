@@ -68,12 +68,22 @@
 // listening and nothing was checked.
 //
 // One substitution is NOT a stub: the port literal is rewritten to a per-run
-// free port before the script runs, so this test cannot collide with a
-// concurrent agent in the same container — which would be a poor look in this
-// file of all files. The literal is deliberately not the contract (see the
-// workflow comment: every `runs-on:` in this repo is `ubuntu-latest`, one VM per
-// job, so the fixed ports stay); the contract is what the loop accepts and
-// refuses, and that is port-independent.
+// port before the script runs, so this test cannot collide with a concurrent
+// agent in the same container — which would be a poor look in this file of all
+// files. The literal is deliberately not the contract (see the workflow
+// comment: every `runs-on:` in this repo is `ubuntu-latest`, one VM per job, so
+// the fixed ports stay); the contract is what the loop accepts and refuses, and
+// that is port-independent.
+//
+// ⛔ That per-run port is HELD, never merely probed. The kernel assigns it
+// (`listen(0)`) to a holder process that keeps it bound until the server the
+// block boots has bound it too — `portHolder()` below. The advisory probe it
+// replaced tested a port free and let go of it, and the stub then waited out
+// its boot delay before binding: over a second, on a port inside
+// `ip_local_port_range`, which is also where the kernel draws source ports for
+// OUTBOUND connections. A lost race there reads exactly like the stub's own
+// refusal — the block exits 1 on its liveness check about two seconds in — so
+// every assertion on a block's exit status also carries what the block said.
 //
 // Deliberately NOT asserted: that `docker run` refuses a duplicate `--name` and
 // a taken `-p` host port. That claim is docker's documented behaviour and it is
@@ -86,7 +96,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -143,30 +152,22 @@ function stepScript(stepName: string): string {
   return `${body.join('\n')}\n`;
 }
 
-/** A TCP port free right now, searching upward from `base`. Advisory only. */
-async function pickFreePort(base: number): Promise<number> {
-  const isFree = (port: number) =>
-    new Promise<boolean>((resolve) => {
-      const probe = net.createServer();
-      probe.once('error', () => resolve(false));
-      probe.once('listening', () => probe.close(() => resolve(true)));
-      probe.listen(port);
-    });
-  for (let port = base; port < base + 400; port += 1) {
-    if (await isFree(port)) return port;
-  }
-  throw new Error(`no free TCP port in [${base}, ${base + 400})`);
-}
-
 /**
  * Stands in for `os start --port N` with the semantics MEASURED above: a busy
  * port is REFUSED (never shifted), and the refusal arrives after a boot delay,
  * because that delay is what let the pre-fix loop accept a neighbour while our
  * own process was still alive and undecided.
+ *
+ * Handed a port holder (`STUB_PORT_HOLDER_PID`, see `portHolder()`), it binds
+ * with `reusePort` — joining the holder's binding instead of racing it — and
+ * ends the holder once its own listener is up. That is the whole hand-over;
+ * a port held by anything else is still refused, exactly as `os start` refuses
+ * it. Its answers name the port it bound, so a run can prove where it served.
  */
 const OS_START_STUB = `
 const http = require('node:http');
 const port = Number(process.argv[2]);
+const holder = Number(process.env.STUB_PORT_HOLDER_PID || '0');
 setTimeout(() => {
   if (process.env.OS_STUB_DIE_ON_BOOT === '1') {
     console.log('  boot failed: artifact could not be read');
@@ -174,7 +175,7 @@ setTimeout(() => {
   }
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ iam: 'OURS', url: req.url }));
+    res.end(JSON.stringify({ iam: 'OURS', port: server.address().port, url: req.url }));
   });
   server.once('error', (err) => {
     if (err.code === 'EADDRINUSE') {
@@ -184,7 +185,10 @@ setTimeout(() => {
     }
     throw err;
   });
-  server.listen(port);
+  server.listen({ port, reusePort: holder > 0 }, () => {
+    if (holder > 0) process.kill(holder, 'SIGKILL');
+    console.log('  listening on ' + port + (holder > 0 ? ', taken over from its holder' : ''));
+  });
 }, Number(process.env.OS_STUB_BOOT_MS || '1200'));
 `;
 
@@ -213,10 +217,14 @@ exec "$STUB_NODE" "$STUB_DIR/os-start.js" "$PORT"
  * simply never became healthy. That ordering is the point: a container that
  * dies after already answering is not a case the loop can get wrong, because
  * the loop has already broken out of it.
+ *
+ * Takes a held host port over the way `OS_START_STUB` does: bind with
+ * `reusePort`, then end the holder.
  */
 const CONTAINER_STUB = `
 const http = require('node:http');
 const dieMs = Number(process.env.STUB_CONTAINER_DIE_MS || '0');
+const holder = Number(process.env.STUB_PORT_HOLDER_PID || '0');
 if (dieMs > 0) {
   setTimeout(() => { console.log('container crashed on purpose'); process.exit(1); }, dieMs);
 } else {
@@ -225,7 +233,9 @@ if (dieMs > 0) {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ iam: 'OUR-CONTAINER', url: req.url }));
     })
-    .listen(Number(process.argv[2]));
+    .listen({ port: Number(process.argv[2]), reusePort: holder > 0 }, () => {
+      if (holder > 0) process.kill(holder, 'SIGKILL');
+    });
 }
 `;
 
@@ -268,7 +278,9 @@ if (cmd === 'run') {
     process.stdout.write(String(child.pid) + '\\n');
     process.exit(0);
   }));
-  probe.listen(Number(hostPort));
+  // A host port handed over by the harness's holder is joined, not refused;
+  // one held by anything else still fails the run, as docker's -p does.
+  probe.listen({ port: Number(hostPort), reusePort: Number(process.env.STUB_PORT_HOLDER_PID || '0') > 0 });
 } else if (cmd === 'inspect') {
   let st;
   try { st = JSON.parse(fs.readFileSync(at(argv[argv.length - 1]), 'utf8')); } catch { process.exit(1); }
@@ -357,6 +369,21 @@ function runBlock(h: Harness, script: string): Ran {
 }
 
 /**
+ * What a block said, as the failure message of an assertion on its run.
+ *
+ * A bare `expected 1 to be +0` names no exit path: the pre-flight refusal, the
+ * liveness exit and the timeout all end in `exit 1`, and the block's own
+ * `::error::` line and the server log it dumps are what tell them apart. So they
+ * travel with the verdict instead of being left for a later `toContain` to show.
+ */
+function said(r: Ran): string {
+  return (
+    `the block exited ${r.status} after ${r.seconds}s — its own output:\n` +
+    `--- block output ---\n${r.out.trim() || '(nothing: the block wrote neither stdout nor stderr)'}`
+  );
+}
+
+/**
  * A neighbouring run's healthy server, answering everything with 200.
  *
  * A CHILD PROCESS, not an in-process `http.createServer`, and that is not a
@@ -382,12 +409,13 @@ function runBlock(h: Harness, script: string): Ran {
  * and each one is a reason raising the budget could not have repaired it:
  *
  *   * The failure reproduces with a perfectly healthy child on a port
- *     `pickFreePort` had just approved. `node` refused the bind with
+ *     `pickFreePort` — the advisory probe this file then carried — had just
+ *     approved. `node` refused the bind with
  *     `listen EADDRINUSE 0.0.0.0:39510` while `ss -ltn` showed NO listener on
  *     39510 — the port was the local ephemeral port of an unrelated outbound
  *     ESTABLISHED connection belonging to another process in the container.
- *     `pickFreePort` proves a port is bindable at the instant it asks; its own
- *     docblock says "advisory only", and this is what that costs. Reproduced
+ *     `pickFreePort` proved a port bindable at the instant it asked; its own
+ *     docblock said "advisory only", and this is what that costs. Reproduced
  *     3/3 against the pre-fix helper: 20761ms, 20930ms, 20886ms, every one of
  *     them reporting `the neighbour never came up on port 39510` and nothing
  *     else.
@@ -407,13 +435,15 @@ function runBlock(h: Harness, script: string): Ran {
  * decides the others — which is why this file still names no budget.
  *
  * The child also asks the KERNEL for the port (`listen(0)`) and reports back
- * what it was given, so the window `pickFreePort` leaves open is not merely
+ * what it was given, so the window an advisory probe leaves open is not merely
  * reported on, it is closed: the neighbour holds the binding continuously from
- * before its caller learns the number. `port` is for the controls, which need
- * to aim a second neighbour at a port that is genuinely taken.
+ * before its caller learns the number. `port` is for the controls and the
+ * occupier pins, which need to aim a second child at a port that is genuinely
+ * taken. `portHolder()` is this same instrument with a child that serves
+ * nothing.
  */
 interface NeighbourOptions {
-  /** Bind this port instead of asking the kernel. Controls only. */
+  /** Bind this port instead of asking the kernel. Controls and occupiers only. */
   port?: number;
   /** Replace the child's program text — the controls hand in broken ones. */
   stub?: string;
@@ -421,11 +451,20 @@ interface NeighbourOptions {
   exec?: string;
   /** The backstop, ⛔ not a budget: every other failure mode reports at once. */
   timeoutMs?: number;
+  /**
+   * Whether "up" means ANSWERED (a 200 at the probe URL) or only ANNOUNCED.
+   * `false` is for the port holder, which answers nothing by design.
+   */
+  answers?: boolean;
+  /** Who a diagnosis names. */
+  role?: string;
 }
 
 interface Neighbour {
   /** The port the child really bound, read back from the child. */
   port: number;
+  /** The child's pid — what the stubs are handed to end a port holder. */
+  pid: number;
   stop: () => void;
 }
 
@@ -435,6 +474,8 @@ async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
     stub = NEIGHBOUR_STUB,
     exec = process.execPath,
     timeoutMs = 30_000,
+    answers = true,
+    role = 'the neighbour',
   } = options;
   const started = Date.now();
   const child = spawn(exec, ['-e', stub], {
@@ -462,8 +503,8 @@ async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
   const where = requested === 0 ? 'on a kernel-assigned port' : `on port ${requested}`;
   const diagnosis = (headline: string) =>
     new Error(
-      `the neighbour never came up ${where} after ${Date.now() - started}ms: ${headline}\n` +
-        `--- neighbour output ---\n${
+      `${role} never came up ${where} after ${Date.now() - started}ms: ${headline}\n` +
+        `--- its own output ---\n${
           state.output.trim() || '(nothing: the child wrote neither stdout nor stderr)'
         }`,
     );
@@ -505,6 +546,13 @@ async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
   } finally {
     clearTimeout(backstop);
   }
+  // A child that announced was spawned, so it has a pid; say so if it does not.
+  const pid = child.pid;
+  if (pid === undefined) {
+    stop();
+    throw diagnosis(`it announced a listener on port ${bound} and has no pid`);
+  }
+  if (!answers) return { port: bound, pid, stop };
 
   // Announced is not answered. This is the one window the backstop really
   // guards, and the only one where waiting longer is not obviously wrong.
@@ -521,7 +569,7 @@ async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(1_000) });
       await res.arrayBuffer();
-      if (res.ok) return { port: bound, stop };
+      if (res.ok) return { port: bound, pid, stop };
       last = `HTTP ${res.status}`;
     } catch (err) {
       last = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -558,6 +606,57 @@ server.listen(Number(process.env.NEIGHBOUR_PORT || '0'), () => {
 });
 `;
 
+/**
+ * The port holder's program. It speaks the neighbour's announce protocol, so
+ * `neighbour()` spawns it, reads its port back and diagnoses it unchanged.
+ *
+ * It resets every connection rather than leaving it unanswered: the block's
+ * pre-flight `curl -fsS` must fail at once, exactly as against a closed port,
+ * and that curl carries no `--max-time`, so a holder that accepted and never
+ * answered would hang the block. And before announcing, it binds a second
+ * `reusePort` socket to its own port and lets go of it: a hand-over the stubs
+ * could not complete fails HERE, naming the flag, and not later in the block as
+ * `Port N is already in use` — the one line a lost port race also prints.
+ */
+const PORT_HOLDER_STUB = `
+const net = require('node:net');
+const say = (line, then) => process.stdout.write(line + '\\n', then);
+const fail = (why) => say('NEIGHBOUR-LISTEN-ERROR ' + why, () => process.exit(1));
+const holder = net.createServer((socket) => socket.resetAndDestroy());
+holder.once('error', (err) => fail((err && err.code) || String(err)));
+holder.listen({ port: 0, reusePort: true }, () => {
+  const port = holder.address().port;
+  const joiner = net.createServer();
+  joiner.once('error', (err) => fail('reusePort-not-in-effect:' + ((err && err.code) || String(err))));
+  joiner.listen({ port, reusePort: true }, () => joiner.close(() => say('NEIGHBOUR-LISTENING ' + port)));
+});
+`;
+
+/**
+ * A port for a block to boot on, HELD from the kernel's answer until the
+ * server that block starts has bound it — never "free right now" and let go.
+ *
+ * The holder asks the kernel for a port (`listen(0)`) with `SO_REUSEPORT` set
+ * and keeps that listener open. Handed its pid (`STUB_PORT_HOLDER_PID`), the
+ * stubs standing in for `os start` and for the container bind the same port
+ * with the same flag — joining the holder's binding rather than racing for the
+ * number — and end the holder once their own listener is up. The port is bound
+ * at every instant between the two, so for the whole of the stub's boot delay:
+ *
+ *   * no outbound connection can be given it as a source port — the kernel's
+ *     connect() skips a port something has explicitly bound, which is what an
+ *     advisory probe inside `ip_local_port_range` could never rule out;
+ *   * no other `listen(0)` can be assigned it;
+ *   * any other binder — anything without `SO_REUSEPORT`, i.e. anything that
+ *     is not this harness — is refused with EADDRINUSE instead of taking it.
+ *
+ * Linux-only, like the suite it serves (`RUNNABLE`): libuv answers ENOTSUP to
+ * `reusePort` on macOS. Stopping it after a stub has ended it is harmless.
+ */
+function portHolder(): Promise<Neighbour> {
+  return neighbour({ stub: PORT_HOLDER_STUB, answers: false, role: 'the port holder' });
+}
+
 function curlBody(url: string): string {
   try {
     return execFileSync('curl', ['-fsS', url], { encoding: 'utf8' }).trim();
@@ -586,40 +685,64 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
           // spelling the loop probes, or "refused" below proves nothing.
           expect(curlBody(`http://localhost:${port}/api/v1/health`)).toContain('NEIGHBOUR');
           const r = runBlock(harness(), script);
-          expect(r.status).not.toBe(0);
+          expect(r.status, said(r)).not.toBe(0);
           expect(r.out).toContain('already serving');
           // The whole card: it must NOT have gone on to assert /api/v1/ready
           // against the neighbour, which is what the pre-fix block did (and
           // printed, since `curl -fsS .../ready` echoes the body).
           expect(r.out).not.toContain('"iam":"NEIGHBOUR"');
           // And it says so at once — the answer never depended on waiting.
-          expect(r.seconds).toBeLessThan(20);
+          expect(r.seconds, said(r)).toBeLessThan(20);
         } finally {
           n.stop();
         }
       }, 120_000);
 
       it('accepts the server it booted itself, and probes THAT one', async () => {
-        const port = await pickFreePort(38700);
-        const script = stepScript(step).replaceAll('8080', String(port));
-        const r = runBlock(harness(), script);
-        expect(r.status).toBe(0);
-        // `curl -fsS .../api/v1/ready` echoes the body, so the run says out loud
-        // whose app it asserted on. This is the guard that keeps the case above
-        // from passing for the trivial reason that the block always fails.
-        expect(r.out).toContain('"iam":"OURS"');
+        const held = await portHolder();
+        try {
+          const port = held.port;
+          // The holder serves nothing, so the pre-flight reads it as a closed
+          // port — or "accepted" below could mean the pre-flight never ran.
+          expect(curlBody(`http://localhost:${port}/api/v1/health`)).toBe('NONE');
+          // And it really HOLDS the port: a deliberate occupier aimed at it is
+          // refused. An advisory probe let go of the number it approved, so an
+          // occupier arriving before the stub's bind took it, and the block
+          // then died on its liveness check with `Port N is already in use`.
+          const occupier = await failedNeighbour({ port, role: 'the occupier' });
+          expect(occupier.message).toContain('its listener refused to bind: EADDRINUSE');
+
+          const script = stepScript(step).replaceAll('8080', String(port));
+          const r = runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
+          expect(r.status, said(r)).toBe(0);
+          // `curl -fsS .../api/v1/ready` echoes the body, so the run says out loud
+          // whose app it asserted on. This is the guard that keeps the case above
+          // from passing for the trivial reason that the block always fails.
+          expect(r.out).toContain('"iam":"OURS"');
+          // ...and where: the stub names the port it bound, the handed-over one.
+          expect(r.out).toContain(`"port":${port},`);
+        } finally {
+          held.stop();
+        }
       }, 120_000);
 
       it('fails fast, and says why, when the server it started exits', async () => {
-        const port = await pickFreePort(38700);
-        const script = stepScript(step).replaceAll('8080', String(port));
-        const r = runBlock(harness({ OS_STUB_DIE_ON_BOOT: '1' }), script);
-        expect(r.status).not.toBe(0);
-        expect(r.out).toContain('exited before becoming healthy');
-        // The server log is dumped, so the reason is in the run's own output.
-        expect(r.out).toContain('artifact could not be read');
-        // The pre-fix loop reached its 60s ceiling before saying anything.
-        expect(r.seconds).toBeLessThan(30);
+        const held = await portHolder();
+        try {
+          const script = stepScript(step).replaceAll('8080', String(held.port));
+          const r = runBlock(
+            harness({ OS_STUB_DIE_ON_BOOT: '1', STUB_PORT_HOLDER_PID: String(held.pid) }),
+            script,
+          );
+          expect(r.status, said(r)).not.toBe(0);
+          expect(r.out).toContain('exited before becoming healthy');
+          // The server log is dumped, so the reason is in the run's own output.
+          expect(r.out).toContain('artifact could not be read');
+          // The pre-fix loop reached its 60s ceiling before saying anything.
+          expect(r.seconds, said(r)).toBeLessThan(30);
+        } finally {
+          held.stop();
+        }
       }, 120_000);
     });
   }
@@ -628,22 +751,33 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
     const step = 'Docker build and run (scaffolded Dockerfile)';
 
     it('stops polling once its own container has exited, instead of waiting out the timeout', async () => {
-      const port = await pickFreePort(38900);
-      const script = stepScript(step).replaceAll('18080', String(port));
-      const r = runBlock(harness({ STUB_CONTAINER_DIE_MS: '1500' }), script);
-      expect(r.status).not.toBe(0);
-      expect(r.out).toContain('no longer running');
-      // Vacuity guard: the container really did start and then die, rather than
-      // never having run at all — `docker logs` carries its own last words.
-      expect(r.out).toContain('container crashed on purpose');
-      expect(r.seconds).toBeLessThan(30);
+      const held = await portHolder();
+      try {
+        const script = stepScript(step).replaceAll('18080', String(held.port));
+        const r = runBlock(
+          harness({ STUB_CONTAINER_DIE_MS: '1500', STUB_PORT_HOLDER_PID: String(held.pid) }),
+          script,
+        );
+        expect(r.status, said(r)).not.toBe(0);
+        expect(r.out).toContain('no longer running');
+        // Vacuity guard: the container really did start and then die, rather than
+        // never having run at all — `docker logs` carries its own last words.
+        expect(r.out).toContain('container crashed on purpose');
+        expect(r.seconds, said(r)).toBeLessThan(30);
+      } finally {
+        held.stop();
+      }
     }, 120_000);
 
     it('passes while its container stays up', async () => {
-      const port = await pickFreePort(38900);
-      const script = stepScript(step).replaceAll('18080', String(port));
-      const r = runBlock(harness(), script);
-      expect(r.status).toBe(0);
+      const held = await portHolder();
+      try {
+        const script = stepScript(step).replaceAll('18080', String(held.port));
+        const r = runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
+        expect(r.status, said(r)).toBe(0);
+      } finally {
+        held.stop();
+      }
     }, 120_000);
   });
 });
@@ -669,7 +803,7 @@ async function failedNeighbour(
   if (came) {
     came.stop();
     throw new Error(
-      `this control is vacuous: the neighbour was supposed to fail and it came up on port ${came.port}`,
+      `this control is vacuous: ${options.role ?? 'the neighbour'} was supposed to fail and it came up on port ${came.port}`,
     );
   }
   return {
@@ -754,6 +888,23 @@ describe.skipIf(!RUNNABLE)('[#19424] the neighbour harness says WHY it did not c
     });
     expect(message).toContain('it never spawned');
     expect(message).toContain('ENOENT');
+    expect(seconds).toBeLessThan(10);
+  }, 60_000);
+
+  it('names reusePort when the port holder hands out a port nothing else can join', async () => {
+    // The holder with its own flag taken away: the stubs could not take such a
+    // port over, and the holder must say so before anyone is handed it.
+    const unjoinable = PORT_HOLDER_STUB.replace('{ port: 0, reusePort: true }', '{ port: 0 }');
+    // Guard the mutation itself: an anchor that matched nothing would run the
+    // real holder, and the case would then fail for a reason it never names.
+    expect(unjoinable).not.toBe(PORT_HOLDER_STUB);
+    const { message, seconds } = await failedNeighbour({
+      stub: unjoinable,
+      answers: false,
+      role: 'the port holder',
+    });
+    expect(message).toContain('the port holder never came up');
+    expect(message).toContain('its listener refused to bind: reusePort-not-in-effect:EADDRINUSE');
     expect(seconds).toBeLessThan(10);
   }, 60_000);
 });

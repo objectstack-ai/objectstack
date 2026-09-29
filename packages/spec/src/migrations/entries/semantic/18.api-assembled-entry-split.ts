@@ -20,7 +20,8 @@ export const entry: SemanticMigration = {
     + 'the request schemas of both read doors, the install / uninstall / upgrade / rollback shapes, '
     + '`PackageApiErrorCode` — stays on `@objectstack/spec/api`.',
   reason:
-    'Maintainer ruling on #18576 (batch #145 item 1, letter B, 「同意,其他也同意」): split the API entry '
+    'Maintainer ruling of 2026-09-17, option B (narrow the entry, rather than add a bundle-weight '
+    + 'rule to the browser-reachability ledger or accept the weight as it stood): split the API entry '
     + 'so its browser-facing half no longer carries the assembled-package declarations. Those five embed '
     + 'the ASSEMBLED package body, which reaches the whole metadata vocabulary and, behind it, the '
     + 'datasource declaration and the driver-config validators; declared inside `@objectstack/spec/api`, '

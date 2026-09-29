@@ -37,8 +37,9 @@ export const entry: SemanticMigration = {
     + 'seams apart: one is a rename, the other is a different API.\n\n'
     + 'The refusal is scoped to those six names, not to everything outside the dispatched set. '
     + '`triggerHooks` is public, so a plugin dispatching its own event under a name outside the '
-    + "engine's vocabulary (`'myPlugin:flush'`) is a legitimate reading — that is why #3195 made "
-    + 'this branch a warn — and it still warns and still registers. The population is DERIVED '
+    + "engine's vocabulary (`'myPlugin:flush'`) is a legitimate reading — that is why the change "
+    + 'that collapsed the hook taxonomy to the eight dispatched events made this branch a warn — '
+    + 'and it still warns and still registers. The population is DERIVED '
     + 'from the operation union rather than typed out, so a new engine verb widens it without an '
     + 'edit; a hand-written list of refused names would be this same defect one layer up.\n\n'
     + 'This is a RUNTIME registration API, not stored metadata, so — like '
@@ -47,7 +48,7 @@ export const entry: SemanticMigration = {
     + 'channel. The metadata door was never open on this axis: `HookSchema.events` is '
     + '`z.array(HookEvent)`, and `HookEvent` enumerates exactly the eight dispatched names, so no '
     + 'authored or stored hook could ever carry one of the six. The exposure was entirely on the '
-    + 'code door. #17713, #3195, ADR-0078.',
+    + 'code door. ADR-0078.',
   acceptanceCriteria:
     'No `registerHook` call site passes `beforeFindOne`, `afterFindOne`, `beforeCount`, '
     + '`afterCount`, `beforeAggregate` or `afterAggregate`. Every read filter that was written '

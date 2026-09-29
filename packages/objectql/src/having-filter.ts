@@ -143,6 +143,9 @@ import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 // evaluator — the lift `@objectstack/formula` applies to the same pairing — so a
 // `Date` bound here compares the way the same bound in a `where` does.
 import { utcInstantMs } from '@objectstack/spec/data';
+// [#20444] `$empty`'s value-level half — the spec's one definition of what a
+// stored value counts as empty for a face that judges by value.
+import { isEmptyFilterValue } from '@objectstack/spec/data';
 // [#20176] The storage rule a temporal column puts a value in — ONE function,
 // shared with `driver-sql`'s and `driver-memory`'s `where` — and the whole-day
 // reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
@@ -209,10 +212,17 @@ export function aggregationFilterClause(index: number): FilterClause {
 // by all six JS evaluation faces, so this face needs no fold of its own. The
 // #5499 freeze was lifted for this operator as a sanctioned one-off (maintainer
 // ruling, 2026-08-08), strictly for semantic parity.
+//
+// [#20444] `$empty` IS here — the staged emptiness flag (declared by
+// `FieldOperatorsSchema`, out of `FILTER_OPERATORS` until its flip card), with
+// its arm in {@link checkCondition} and its comparand gate beside
+// `$icontains`' — judged BY VALUE, the reading ruling A on #20399 (record
+// 5865693155) gives this face. See {@link emptyFlagComparandError}.
 const CONDITION_OPERATORS = [
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$between',
   '$in', '$nin', '$exists', '$null',
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
+  '$empty',
 ] as const;
 
 /**
@@ -316,6 +326,23 @@ function unknownOperator(
     `Unsupported operator '${op}' in \`${clause.root}\`. ${clause.semantics} and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
     + `return unfiltered aggregates (#4286, ADR-0078).`,
+  );
+}
+
+/**
+ * [#20444] `$empty` received a comparand that is not a boolean.
+ * `FieldOperatorsSchema` declares `$empty: z.boolean()`: `true` asks for the
+ * empty rows, `false` for their exact complement. A third value is refused
+ * rather than read — this face refuses the malformations it can see, where a
+ * two-branch reading would silently constrain nothing (the lenient `$null`
+ * arm's standing hazard).
+ */
+function emptyFlagComparandError(field: string, value: unknown, path: string): Error {
+  const shown = JSON.stringify(value) ?? String(value);
+  return invalidFilterError(
+    `Operator "$empty" on field "${field}" at ${path} requires a boolean comparand (true or false), `
+    + `received ${shown}. @objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true `
+    + `asks for the empty rows, false for their exact complement.`,
   );
 }
 
@@ -596,6 +623,9 @@ function offsetPairViolation(
  */
 const NO_VALUE_ANSWERED_BY_OPERATOR: ReadonlySet<string> = new Set([
   '$exists', '$ne', '$null', '$nin', '$notContains',
+  // [#20444] About the absence too: a column the row does not carry is EMPTY,
+  // so `$empty: true` must reach its arm rather than the exit's `false`.
+  '$empty',
 ]);
 
 /**
@@ -1041,6 +1071,12 @@ function assertConditionIsEvaluable(
     if (op === '$icontains' && (typeof target !== 'string' || target === '')) {
       throw icontainsComparandError(field, target, `${path}.${op}`);
     }
+    // [#20444] Before the vocabulary check for the same reason as the gate
+    // above: the flag is a known operator, and its only malformation is a
+    // comparand that is not a boolean.
+    if (op === '$empty' && typeof target !== 'boolean') {
+      throw emptyFlagComparandError(field, target, `${path}.${op}`);
+    }
     if (!(CONDITION_OPERATORS as readonly string[]).includes(op)) {
       throw unknownOperator(op, 'condition', keys, scope.clause);
     }
@@ -1348,6 +1384,11 @@ function checkCondition(
     if (op === '$icontains' && (typeof target !== 'string' || target === '')) {
       throw icontainsComparandError(field, target, `${path}.${op}`);
     }
+    // [#20444] The flag's shape is the filter's, not the row's — above the
+    // no-value exit for the #7158 reason the gate above gives.
+    if (op === '$empty' && typeof target !== 'boolean') {
+      throw emptyFlagComparandError(field, target, `${path}.${op}`);
+    }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     // [#20099] A `{ $field }` reference as the whole comparand of a scalar
     // comparison is RESOLVED against this row. The arms below would compare the
@@ -1396,6 +1437,18 @@ function checkCondition(
       case '$null':
         if (target === true && value != null) return false;
         if (target === false && value == null) return false;
+        break;
+      // [#20444] The staged emptiness flag, judged BY VALUE — the aggregated
+      // row carries no field declaration of its own, so this face takes the
+      // reading ruling A on #20399 gives it: null, a missing column, `''` and
+      // `[]` are empty (the spec's `isEmptyFilterValue`, not a copy of it), and
+      // `false` is the exact complement. So `0` from a `count` / `sum` is NOT
+      // empty — a group with no rows to count is a zero, not a missing value —
+      // and a groupBy text column holding `''` IS empty, the row a declared
+      // text field takes too. The one divergence from a declared-type face is
+      // `''` in a non-text column, the write-door class #20308 closed.
+      case '$empty':
+        if (isEmptyFilterValue(value) !== (target === true)) return false;
         break;
       case '$contains': if (typeof value !== 'string' || !value.includes(target)) return false; break;
       // [#5905] The mirror of `$contains`, NOT its copy-with-a-negated-test.

@@ -1022,8 +1022,15 @@ describe('[#20478] the layered view: the reference moves — each spelling and p
     });
 
     it('?package= scopes the code layer, and the object mask projects every layer', async () => {
-        const scoped = await bootRest('non-holder').read('/meta/app/payroll/layers', { package: 'crm' });
-        expect({ status: scoped.status, code: scoped.body?.code, effective: scoped.body?.effective }).toEqual({ status: 200, code: null, effective: null });
+        // [#20507] Scoped to a package that ships no `crm`, the code layer is
+        // gone and the overlay row still answers for the name.
+        const scoped = await bootRest('non-holder').read('/meta/app/crm/layers', { package: 'elsewhere' });
+        expect({ status: scoped.status, code: scoped.body?.code, effective: scoped.body?.effective?.label })
+            .toEqual({ status: 200, code: null, effective: 'CRM (overlay)' });
+        // …and a scope that leaves NO layer behind the name is its absence, the
+        // plain read's 404 — never a 200 with every layer null.
+        const emptied = await bootRest('non-holder').read('/meta/app/payroll/layers', { package: 'crm' });
+        expect({ status: emptied.status, code: emptied.code }).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
         const invoice = await bootRest('non-holder').read('/meta/object/invoice/layers');
         for (const layer of ['code', 'overlay', 'effective']) expect(Object.keys(invoice.body?.[layer]?.fields ?? {}), layer).toEqual(['amount']);
     });
@@ -1054,6 +1061,66 @@ describe('[#20478] the layered view: the controls', () => {
             expect(sameAnswer(dispatcher, rest) ? [] : [mismatchOf('author', dispatcher, rest)], path).toEqual([]);
             if (path.endsWith('/layers')) expect({ status: rest.status, code: rest.code }).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
             else expect({ status: rest.status, label: rest.item?.label, deprecation: rest.deprecation }).toEqual({ status: 200, label: 'CRM', deprecation: undefined });
+        }
+    });
+});
+
+/**
+ * [#20507] ADR-0045 §3: "Hidden" means externally unobservable, consistently
+ * across every surface. A member asking the layered view for an unpublished app
+ * is answered its absence (the gate withholds it); a member asking for a name
+ * with nothing behind it used to be answered `200` with every layer `null` —
+ * so the two answers told the member which unpublished apps exist. The shared
+ * chain (`createMetaLayeredAnswer`) now answers a name with no layer present as
+ * the plain read answers it, judged before the gate, once for both spellings
+ * and both transports.
+ */
+describe('[#20507] the layered view: a name with nothing behind it answers what an unpublished app answers — both spellings, both transports', () => {
+    const TRANSPORTS = { RestServer: bootRest, dispatcher: bootDispatcher } as const;
+    const SPELLINGS: Record<string, (name: string) => [string, Record<string, string>]> = {
+        '/layers': (name) => [`/meta/app/${name}/layers`, {}],
+        '?layers=true': (name) => [`/meta/app/${name}`, { layers: 'true' }],
+    };
+    // Everything an answer carries. The flag's `Link` names the caller's OWN
+    // request path, so the name is masked out of it: it says nothing about the item.
+    const whole = (a: Answer, name: string) => ({
+        status: a.status, code: a.code, body: a.body, vary: a.vary, cacheControl: a.cacheControl,
+        deprecation: a.deprecation, link: a.link?.replace(name, 'NAME'),
+    });
+    const nav = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
+
+    for (const [transport, boot] of Object.entries(TRANSPORTS)) {
+        for (const [spelling, at] of Object.entries(SPELLINGS)) {
+            it(`${spelling} on ${transport}: as a member, an absent name and an unpublished app answer the same status and body`, async () => {
+                const unpublished = await boot('non-holder').read(...at('launchpad'));
+                const absent = await boot('non-holder').read(...at('no_such_app'));
+                expect({ status: unpublished.status, code: unpublished.code }).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+                expect(whole(absent, 'no_such_app')).toEqual(whole(unpublished, 'launchpad'));
+            });
+
+            it(`${spelling} on ${transport}: control — a published app is still served to the member, every layer pruned`, async () => {
+                const published = await boot('non-holder').read(...at('crm'));
+                const layered = served(published, transport === 'dispatcher' ? 'dispatcher' : 'rest') as any;
+                expect(published.status).toBe(200);
+                for (const layer of ['code', 'overlay', 'effective']) {
+                    expect(nav(layered?.[layer]), layer).toEqual(['nav_leads', 'nav_org_directory']);
+                }
+            });
+        }
+    }
+
+    it('whoever asks, an absent name is the same 404; an unpublished app is still served to a builder', async () => {
+        for (const [transport, boot] of Object.entries(TRANSPORTS)) {
+            for (const [spelling, at] of Object.entries(SPELLINGS)) {
+                for (const who of ITEM_CALLERS) {
+                    const absent = await boot(who).read(...at('no_such_app'));
+                    expect({ status: absent.status, code: absent.code }, `${spelling} ${transport} ${who}`)
+                        .toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+                }
+                // ADR-0045 §3: the builder (`studio.access`) still receives the unpublished app.
+                const built = await boot('builder').read(...at('launchpad'));
+                expect(built.status, `${spelling} ${transport} builder launchpad`).toBe(200);
+            }
         }
     });
 });

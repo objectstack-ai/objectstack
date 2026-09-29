@@ -2516,8 +2516,10 @@ export interface MetaLayeredRequest {
  *  - `serve` — send `layered`, under `cacheControl` when it owes one
  *    ({@link META_UNDETERMINED_CACHE_CONTROL}, ADR-0106 D6 tier 2). No `Vary`:
  *    the layered view is not translated;
- *  - `refuse` — the gate's {@link MetaItemReadRefusal} for a layer the caller
- *    may not read (`absent` included: an unpublished app to a non-builder);
+ *  - `refuse` — `absent` for a name with no layer behind it (#20507), or the
+ *    gate's {@link MetaItemReadRefusal} for a layer the caller may not read
+ *    (`absent` included: an unpublished app to a non-builder), one answer for
+ *    both;
  *  - `mask-fault` — a layer's projection left the schema with no field (D6),
  *    which the transport answers as its field-visibility fault.
  */
@@ -2558,9 +2560,18 @@ export type MetaLayeredAnswer =
  * what is STORED at each layer, so locale-collapsing it (or serving it from the
  * published-value cache) would misreport the thing being diagnosed.
  *
- * ## The steps, in `RestServer`'s order (unchanged)
+ * ## The steps, in `RestServer`'s order
  *
- *  1. [#20156] THE per-caller gate on EVERY present layer, `effective` first
+ *  1. [#20507] Absence — an answer with no layer present is `absent`, judged
+ *     BEFORE the gate, exactly as the plain read judges an envelope with no
+ *     `item` ({@link createMetaItemAnswer} step 1). ADR-0045 §3: "Hidden"
+ *     means externally unobservable. The gate answers an unpublished app to a
+ *     non-builder as `absent`, so a name with nothing behind it must get that
+ *     same answer. The protocol answered it `200` with every layer `null`, and
+ *     that difference told a member which unpublished apps exist. The
+ *     protocol's `effective` is never null while another layer is present, so
+ *     this is the name resolving to nothing at all, for every caller.
+ *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
  *     (it is what the plain read serves, so its refusal is the plain read's
  *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
  *     (these are STORED versions, which Studio's designer loads and saves
@@ -2571,17 +2582,15 @@ export type MetaLayeredAnswer =
  *     {@link MetaReadGateCaller.mayWriteItem} — its own save door's admission;
  *     absent reads as `false` (every caller pruned). Every layer is judged
  *     before any is served, so a refusal sends nothing of the others.
- *  2. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
+ *  3. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
  *
  * The protocol's answer is never mutated. A layer the gate or the mask leaves as
  * it was is served as it was, and every other key of the answer
  * (`overlayScope`, `_diagnostics`, the ADR-0010 protection envelope) rides
- * through untouched. With nothing behind the name the protocol answers every
- * layer `null`, and so does this chain: no layer is present to judge. A gate
- * input that cannot be read REJECTS: the transport answers that fault, ⛔ never
- * a layered view with a layer missing.
+ * through untouched. A gate input that cannot be read REJECTS: the transport
+ * answers that fault, ⛔ never a layered view with a layer missing.
  */
 export function createMetaLayeredAnswer(
     sources: MetaItemReadGateSources,
@@ -2590,11 +2599,15 @@ export function createMetaLayeredAnswer(
     const { metaType, name, maskPosture } = request;
     return async (raw) => {
         const layered = raw as Record<string, unknown> | null | undefined;
+        const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
 
-        // 1. [#20156] THE per-caller gate, on every present layer.
+        // 1. [#20507] Absence — ADR-0045 §3: a name with no layer behind it is
+        //    the plain read's absence, answered before the gate.
+        if (present.length === 0) return { kind: 'refuse', refusal: { reason: 'absent' } };
+
+        // 2. [#20156] THE per-caller gate, on every present layer.
         const served = new Map<string, unknown>();
         {
-            const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
             const judge = createMetaItemReadGate(
                 sources, metaType, name, present.map((layer) => layered![layer]), STORED_VERSION_DOOR_POLICY,
             );
@@ -2605,7 +2618,7 @@ export function createMetaLayeredAnswer(
             }
         }
 
-        // 2. [ADR-0106 D5(4)] The mask, on every layer.
+        // 3. [ADR-0106 D5(4)] The mask, on every layer.
         let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
         for (const layer of META_ITEM_MASKED_LAYERS) {
             const document = served.has(layer) ? served.get(layer) : layered?.[layer];

@@ -47,6 +47,19 @@
  *    that test a silent `false` for `$like` would have been the same defect
  *    under a new name.
  *
+ *    [#20444] The claim was FALSE for a while, and is true again because of an
+ *    arm, not a rewording. `$empty` was declared by `FieldOperatorsSchema` /
+ *    `SpecialOperatorSchema` (#20311) and staged out of `FILTER_OPERATORS` like
+ *    `$like`, but its arms were placed in per-lane cards rather than in the
+ *    declaring PR — so from that declaration until this face's arm landed, an
+ *    RLS `check` written with `$empty` was answered by the silent `false`
+ *    below, for every record and both flags: the defect this paragraph names.
+ *    It now has its arm in {@link evalOp}, judged by the stored value (this
+ *    face's reading, ruling A on #20399). Today the declared-but-staged names
+ *    are `$like`, `$ilike` and `$empty`, and each is answered here; a name the
+ *    protocol declares NEXT is owed an arm here by the PR that lets an author
+ *    write it, or by the lane card its staging names.
+ *
  * What stays open, deliberately and on the record: a RETIRED spelling
  * (`$regex` / `$options`) still gets the silent `false` here while the other five
  * faces print `RETIRED_FILTER_OPERATORS`' prescription naming `$icontains`. That
@@ -106,6 +119,9 @@ import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains } from '
 // one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
 // it was typed and never again.
 import { matchesLikePattern } from '@objectstack/spec/data';
+// [#20444] `$empty`'s value-level half — the spec's one definition of what a
+// stored value counts as empty for a face that reads no field declaration.
+import { isEmptyFilterValue } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -725,16 +741,43 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      */
     case '$exists': return v === true ? actual != null : actual == null;
     /**
+     * [#20444] `$empty` — the staged emptiness flag (declared by
+     * `FieldOperatorsSchema`, staged out of `FILTER_OPERATORS` like `$like`).
+     * Ruling A on #20399 (record 5865693155) gives this face the BY-VALUE
+     * reading, because it judges a record, not a declaration: null, a missing
+     * key, `''` and `[]` are empty, through the spec's `isEmptyFilterValue`
+     * rather than a copy of it, and `false` is the exact complement.
+     *
+     * That differs from the declared-type faces (the SQL family, the document
+     * drivers, and the read-scope compiler that lowers the same policy for the
+     * read) only on a stored state the declaration does not predict: `''` in a
+     * non-text column — the write-door class #20308 closed — or `[]` in a
+     * scalar one. On every value a field's own type can hold, the write
+     * `check` and the read agree.
+     *
+     * Read off `raw`, not the resolved `v`: the flag is a boolean by
+     * declaration, never a value of another column, so a `{ $field }` in its
+     * slot is not resolved into one. Anything but `true` / `false` answers
+     * `false` — the write is denied — which is this face's standing answer to
+     * an unevaluable condition (the header's "unknown-operator posture"); the
+     * spec's save door and every query face refuse such a flag loudly.
+     */
+    case '$empty':
+      if (raw === true) return isEmptyFilterValue(actual);
+      if (raw === false) return !isEmptyFilterValue(actual);
+      return false;
+    /**
      * An operator this evaluator does not know answers `false` — the write is
      * DENIED — rather than throwing. [#6520] examined this arm and KEPT it; the
      * reasoning is on this module's header under "the unknown-operator posture",
      * because it is a decision rather than an omission.
      *
      * What #6520 did change is the arm's REACH: every operator `FILTER_OPERATORS`
-     * declares now has a case above it, so this line is only reachable for a
-     * spelling the protocol does not have (a typo) or one it retired
-     * (`$regex` / `$options`). No DECLARED operator is answered silently here
-     * any more, which was the defect the #6993 census measured.
+     * declares now has a case above it — and so does every declared-but-staged
+     * one (`$like`, `$ilike`, [#20444] `$empty`) — so this line is only
+     * reachable for a spelling the protocol does not have (a typo) or one it
+     * retired (`$regex` / `$options`). No DECLARED operator is answered silently
+     * here any more, which was the defect the #6993 census measured.
      */
     default: return false; // unknown operator → fail closed
   }
