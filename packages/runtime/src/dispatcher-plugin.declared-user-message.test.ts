@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13241] `errorResponseBase` carries the producer's `userMessage` to the wire
+ * [commit a21d2a9cf] `errorResponseBase` carries the producer's `userMessage` to the wire
  * — the author-facing text channel the declared-5xx prose withhold names as its
  * own compensation, and the one ADR-0112 boundary that dropped it.
  *
@@ -29,7 +29,7 @@
  *
  * ## Why this is the compensation channel and not a decoration
  *
- * The 2026-08-27 ruling on #12509 (option D), propagated to #12281, made this
+ * The 2026-08-27 ruling on #12509 (option D), landed in commit 0783d7b80, made this
  * exit withhold the message of every **declared** 5xx:
  *
  * > the author-facing text channel is `userMessage` [commit 79c46da90], never the raw
@@ -194,7 +194,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             expect(res.statusCode).toBe(503);
             expect(res.body.success).toBe(false);
 
-            // The withhold still holds — this change must not re-open #12281.
+            // The withhold still holds — this change must not undo commit 0783d7b80.
             expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
             expect(JSON.stringify(res.body)).not.toContain('acme_prod');
 
@@ -209,7 +209,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
         it('an UNMARKED declared 5xx is byte-identical to before — the mark is opt-in', async () => {
             // The regression guard on the paragraph above: if the field were
             // synthesised from `message` rather than read from the throw, the
-            // withheld prose would ride out on the new channel and #12281 would
+            // withheld prose would ride out on the new channel and commit 0783d7b80 would
             // be undone by its own compensation.
             const res = await throwFromAnalyticsQuery(
                 declaring({ status: 503, code: 'SERVICE_UNAVAILABLE' }, 'Upstream warehouse pool exhausted for tenant acme_prod.'),

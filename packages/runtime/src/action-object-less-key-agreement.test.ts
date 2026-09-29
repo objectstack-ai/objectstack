@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * "Object-less" has ONE answer inside `action-execution.ts` (#14864).
+ * "Object-less" has ONE answer inside `action-execution.ts` (commit 066dd3bd0).
  *
  * `isObjectLessActionKey` (`@objectstack/objectql`) is the canonical predicate:
  * the routed object is object-less when it is the canonical

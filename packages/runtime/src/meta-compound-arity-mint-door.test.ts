@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8421/#12194 — the COMPOUND `/meta` arity write is refused at the item-name
+ * #8421 / commit 311433f6b — the COMPOUND `/meta` arity write is refused at the item-name
  * grammar gate, pinned at the LIVE ROUTE.
  *
  * `/metadata/lead/views/all_leads` is `type='lead'`, `name='views/all_leads'`:
@@ -224,7 +224,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         );
 
         // The domain answers a LOCATED not-found rather than serving the path.
-        // Until #12195 it folded `views/all_leads` out of the trailing segments
+        // Until commit 7986d973f it folded `views/all_leads` out of the trailing segments
         // and answered — first by minting the row under the slash key
         // (before commit 311433f6b), then by refusing it at the grammar gate (commit 311433f6b).
         // Neither happens now: there is no three-segment metadata route.
@@ -308,7 +308,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
 
     it('CONTROL — the capability gate still fires first at the SIMPLE arity', async () => {
         // #7019's gate is what masked this site, and it must keep masking an
-        // UNAUTHORIZED caller. [#12195] Driven at the simple arity now: the
+        // UNAUTHORIZED caller. [commit 7986d973f] Driven at the simple arity now: the
         // compound form this used to use is no longer handled at all, so it
         // would answer ROUTE_NOT_FOUND before any gate — which would make this
         // a control over nothing.

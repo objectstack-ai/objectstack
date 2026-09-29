@@ -4,14 +4,14 @@
  * [#13623] The DENIAL door carries the producer's `userMessage` — the second
  * door that dropped it, and the one whose refusals users most need to read.
  *
- * ## Why this is a second door and not the one #13241 repaired
+ * ## Why this is a second door and not the one commit a21d2a9cf repaired
  *
  * `HttpDispatcher.dispatch`'s foot catch is **not a pure rethrow**. It
  * recognises `isPermissionDeniedError` — `name === 'PermissionDeniedError'`
  * **or** `code === 'PERMISSION_DENIED'` **or** a message starting
  * `[Security] Access denied` — and answers it itself, from
  * `packages/runtime/src/http-dispatcher.ts`. Such a throw therefore never
- * reaches `dispatcher-plugin`'s `errorResponseBase`, which is the exit #13241
+ * reaches `dispatcher-plugin`'s `errorResponseBase`, which is the exit commit a21d2a9cf
  * taught to carry the mark. Same field, same contract, different door.
  *
  * `ApiErrorSchema.userMessage` has declared the slot all along, and

@@ -200,7 +200,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
   let kernel: ObjectKernel;
   let baseUrl: string;
   let messaging: MessagingService;
-  /** [#10629] The expected-noise capture, asserted by every authed test below. */
+  /** [commit 13a6cb4ad] The expected-noise capture, asserted by every authed test below. */
   const noise = captureExpectedReadRefusals([...ABSENT_AUTHZ_TABLES]);
 
   beforeAll(async () => {
@@ -210,7 +210,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     // MessagingServicePlugin registers the `notification` service the dispatcher
     // resolves and owns the inbox tables. Inline delivery (reliableDelivery:false)
     // writes the inbox row synchronously so `emit()` is observable immediately.
-    // [#10629] The driver is named rather than inlined so its logger can be
+    // [commit 13a6cb4ad] The driver is named rather than inlined so its logger can be
     // scoped before it ever runs a statement.
     const driver = new SqliteWasmDriver({ filename: ':memory:' });
     noise.captureDriver(driver);
@@ -230,7 +230,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
 
     await kernel.bootstrap();
 
-    // [#10629] The engine only exists once the kernel has bootstrapped; the
+    // [commit 13a6cb4ad] The engine only exists once the kernel has bootstrapped; the
     // reads this scopes all happen later, per request.
     noise.captureEngine(kernel.getService<unknown>('objectql'));
 
@@ -339,7 +339,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(served.status).toBe(200);
     expect((await served.json() as { success: boolean }).success).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in
@@ -392,7 +392,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(2);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in
@@ -450,7 +450,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(TOTAL);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in

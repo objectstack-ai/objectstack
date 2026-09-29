@@ -663,7 +663,7 @@ export class HttpDispatcher {
                 acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
         } catch (err) {
-            // [#13906 decision 1 A / #13279] The ONE fault that must stay loud:
+            // [#13906 decision 1 A / commit 6a180e42d] The ONE fault that must stay loud:
             // an authorization input that exists and could not be read (a
             // failed permission-store read, a `tenancy` service that is
             // registered and failed to build). Swallowing it here answered an
@@ -2794,7 +2794,7 @@ export class HttpDispatcher {
                     console.warn(`[HttpDispatcher] PERMISSION_DENIED on ${method} ${cleanPath} — ${withheld}`);
                 }
                 // [#13623] The producer's marked user-facing text rides out —
-                // the SECOND door that dropped it. #13241 repaired the
+                // the SECOND door that dropped it. Commit a21d2a9cf repaired the
                 // THROW-TRANSPARENT exit (`dispatcher-plugin.errorResponseBase`);
                 // a marked denial never reaches that exit, because this catch is
                 // not a pure rethrow: it recognises the denial and answers it

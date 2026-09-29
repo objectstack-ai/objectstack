@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8848] `DELETE` / `PATCH` / `POST` on `/metadata/:type/:name` must be
+ * [commit 4fc4a3c0b] `DELETE` / `PATCH` / `POST` on `/metadata/:type/:name` must be
  * REFUSED with a `405` naming what is allowed — never answered as a READ.
  *
  * ## The defect this pins

@@ -234,7 +234,7 @@ const UPDATE_TYPO_HOOK = {
 };
 
 /**
- * [#10629] The SQL half of this fixture provisions `deal` and nothing else, so
+ * [commit 13a6cb4ad] The SQL half of this fixture provisions `deal` and nothing else, so
  * the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -249,14 +249,14 @@ const ABSENT_TENANCY_TABLE = 'sys_organization';
 describe('#4271 / #13657 an undeclared field written by an L2 body — one answer on both families', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest boot. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
     // failure here can never leave the engine running. Unconditional on purpose:
     // a memory boot declares an EMPTY expectation, so this still fails loudly if
     // a boot ever forgets to install a capture at all.
@@ -282,7 +282,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
-    // [#10629] Installed before the driver runs a statement — the sink the
+    // [commit 13a6cb4ad] Installed before the driver runs a statement — the sink the
     // expected refusal's first half travels out on.
     noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
     noise.captureDriver(driver);
@@ -291,7 +291,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
   }
 
   async function bootMemory(hook?: unknown) {
-    // [#10629] A schemaless driver never refuses a read on a missing table, so
+    // [commit 13a6cb4ad] A schemaless driver never refuses a read on a missing table, so
     // this family expects no noise at all — an EMPTY declaration rather than a
     // skipped one, which keeps the shared `afterEach` assertion honest.
     noise = captureExpectedReadRefusals([]);
@@ -300,7 +300,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
 
   async function boot(driver: unknown, hook?: unknown) {
     engine = new ObjectQL();
-    // [#10629] The engine frame that sits directly above the driver's refusal.
+    // [commit 13a6cb4ad] The engine frame that sits directly above the driver's refusal.
     noise?.captureEngine(engine);
     engine.registerDriver(driver as any, true);
     await engine.init();

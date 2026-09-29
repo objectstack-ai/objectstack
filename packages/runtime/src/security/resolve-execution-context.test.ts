@@ -13,7 +13,7 @@ import { hashApiKey } from './api-key.js';
  * tests isolate the API-key verify path.
  */
 /**
- * [#10978] Enforce the caller's `limit`, the way a real driver does.
+ * [commit 4c9780c7a] Enforce the caller's `limit`, the way a real driver does.
  *
  * A double that matches `where` and returns every matched row cannot tell a read
  * bounded at 200 from the same read bounded at 1000, or from an unbounded one —
@@ -741,7 +741,7 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
   });
 
   // -------------------------------------------------------------------------
-  // [#17114] The classification above is now `classifyAdmissionTenancyPosture`
+  // [commit 4af758d47] The classification above is now `classifyAdmissionTenancyPosture`
   // (`@objectstack/core`) rather than a hand-written copy of it — one of the
   // two seams #16013 left behind. The RESOLUTION stayed here: this facade's
   // `opts.getService` is handed in as the thunk.

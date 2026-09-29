@@ -4,7 +4,7 @@
  * # Flow clone — whole-definition copy under a new machine name (ADR-0126 §7.1)
  *
  * The copy half of ADR-0126's packaged-metadata customization model, shaped on
- * the landed permission-set clone (`sys-permission-set.object.ts`, #11513): an
+ * the landed permission-set clone (`sys-permission-set.object.ts`, commit e170b0ae5): an
  * admin who cannot edit a packaged flow in place gets an ordinary,
  * org-authored sibling to edit instead.
  *

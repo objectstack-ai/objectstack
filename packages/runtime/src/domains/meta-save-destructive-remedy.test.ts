@@ -16,7 +16,7 @@
  *
  * ## Why this half was NOT repaired by threading the parameter
  *
- * The maintainer ruled a SPLIT (2026-08-23) over the two doors #11015 left
+ * The maintainer ruled a SPLIT (2026-08-23) over the two doors commit 82cb6e849 left
  * open, and the split is the decision rather than an inconsistency to be tidied
  * away later:
  *
@@ -29,7 +29,7 @@
  *    the transport does not have. Threading one would be a NEW public surface,
  *    which no ruling has opened.
  *
- * So the repair is #11015's landed mechanism, applied mechanically: a face value
+ * So the repair is the mechanism commit 82cb6e849 landed, applied mechanically: a face value
  * (`'meta-dispatch'`), stated at this call site, that renders a clause naming
  * what a caller can actually do HERE.
  *
@@ -43,7 +43,7 @@
  * `'meta-envelope'` in the first place. Splitting the face for the 409's sake
  * therefore had to leave the 422 exactly where it was, and the 422's polarity
  * is "declare to trim" — silence renders the FULL prose — so a face that fell
- * through would re-introduce #10888's duplication on this door alone, silently,
+ * through would re-introduce the duplication commit d806081dd removed on this door alone, silently,
  * with every 409 assertion green. Section 3 is that pin.
  *
  * ## Harness
@@ -268,8 +268,8 @@ describe('[#11095] dispatcher PUT /meta — the destructive refusal', () => {
 
         const res: any = await put(stack, objectBody(NAME, SHRUNK_FIELDS));
 
-        // Only the remedy clause is face-aware. #10886's sole-carrier verdict is
-        // untouched by this card exactly as it was untouched by #11015.
+        // Only the remedy clause is face-aware. Commit 809e61221's sole-carrier verdict is
+        // untouched by this card exactly as it was untouched by commit 82cb6e849.
         expect(res.response?.body?.error?.message).toContain("Field 'b' removed");
         // Row 3 of the face inventory says this door is NOT a sole carrier, and
         // the claim is about THIS body.

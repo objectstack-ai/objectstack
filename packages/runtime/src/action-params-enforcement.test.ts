@@ -2,7 +2,7 @@
 
 /**
  * `enforceActionParams` — the ADR-0104 D2 gate itself, not its validator
- * (#14864).
+ * (commit 066dd3bd0).
  *
  * ## What was measured, and why this file exists
  *

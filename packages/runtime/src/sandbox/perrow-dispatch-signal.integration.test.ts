@@ -213,7 +213,7 @@ describe('#11552 — a shipped body observes the per-row dispatch signal and the
     // predicate write from inside a body.
     expect(single[0].optionsMulti).not.toBe(true);
 
-    // [#10629] Withheld-noise pin, same as the sibling real-SQLite harness.
+    // [commit 13a6cb4ad] Withheld-noise pin, same as the sibling real-SQLite harness.
     expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

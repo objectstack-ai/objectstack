@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #15068 — the publish-then-read path under `applyPublishedSeeds`, and the
+ * Commit 8744de9e9 — the publish-then-read path under `applyPublishedSeeds`, and the
  * proof that its org-then-env ladder cannot choose between its two rungs.
  *
  * ## What the ladder was, and why deleting it needed a measurement
@@ -24,7 +24,7 @@
  * ## The mechanism, in one line
  *
  * `getMetaItem` opens with `organizationIdForMetaRead(request.type,
- * request.organizationId)` (#14908, the singular twin of #14683's plural
+ * request.organizationId)` (commit d5cbb44f3, the singular twin of commit 96326040f's plural
  * gate) and spends that binding — never `request.organizationId` — on every
  * read below it. `seed` declares `allowOrgOverride: false`
  * (`metadata-plugin.zod.ts`), so the predicate answers `undefined` whatever
@@ -34,7 +34,7 @@
  * ⛔ The repair is NOT to restore org-awareness to this read. An org-scoped
  * `seed` row is the unhydratable phantom `reportUnhydratableOrgScopedRows`
  * exists to warn about — the same argument the `app` flip one function up
- * carries since #15063.
+ * carries since commit ad35745e8.
  *
  * ## How this file is composed, and which half is doubled
  *
@@ -487,7 +487,7 @@ describe('#15068 · 2 · the publish path stops spending an organization the gat
         const { readBackArgs } = await publishThenRead({ activeOrganizationId: ORG });
 
         // Not cosmetic: an `organizationId` on a non-overridable read is the
-        // shape #14908 and #15063 exist to stop anyone reading as meaningful.
+        // shape commits d5cbb44f3 and ad35745e8 exist to stop anyone reading as meaningful.
         expect(readBackArgs).toEqual([{ type: 'seed', name: SEED }]);
     });
 

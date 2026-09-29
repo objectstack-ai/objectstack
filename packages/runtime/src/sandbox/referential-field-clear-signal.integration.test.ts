@@ -169,7 +169,7 @@ describe('#13644 — a shipped body observes ctx.referentialFieldClear across th
     const cleared = (await engine.findOne('probe_rfc_note', { where: { id: n.id } })) as any;
     expect(cleared.account).toBeNull();
 
-    // [#10629] Withheld-noise pin, same as the sibling harnesses.
+    // [commit 13a6cb4ad] Withheld-noise pin, same as the sibling harnesses.
     expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
   }, 30000);
 });

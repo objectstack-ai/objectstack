@@ -2,7 +2,7 @@
 //
 // #7314 — the third libSQL loader, and the two ways it disagreed with this one.
 //
-// #6268 converged the two HOST-injected loaders (CLI + standalone stack) onto
+// Commit 68f5eccb1 converged the two HOST-injected loaders (CLI + standalone stack) onto
 // `turso-driver-factory.ts`. A third arm it could not reach —
 // `createDefaultDatasourceDriverFactory`'s `turso` case in
 // `@objectstack/service-datasource` — serves every door that is NOT a host's
@@ -169,7 +169,7 @@ describe('#7314 point 2 — one MissingDriverPackageError class across the seam'
   // Until #7314 that arm raised a plain `Error` and this assertion could not
   // have been written.
   it('the open-core arm raises an error the runtime binding matches', async () => {
-    // ⭐ STAGED absence since #12943. `@objectstack/driver-turso` is now an
+    // ⭐ STAGED absence since commit 090f2302e. `@objectstack/driver-turso` is now an
     // OPTIONAL PEER of `@objectstack/service-datasource` and of this package —
     // the honest install-time declaration of a relationship the source already
     // had. It installs nothing for a consumer, but pnpm LINKS an optional

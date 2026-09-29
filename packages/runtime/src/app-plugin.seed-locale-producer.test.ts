@@ -33,7 +33,7 @@ import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@obj
  * -time paths in other declared file surfaces, and the ledger row records that
  * split rather than claiming it away.
  *
- * ⛔ Not housed in `seed-loader.test.ts` — the natural home, held by PR #16783.
+ * ⛔ Not housed in `seed-loader.test.ts` — the natural home, then held by the change that landed as commit 854639b31.
  */
 
 /**

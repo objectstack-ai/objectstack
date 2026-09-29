@@ -420,7 +420,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // Capture mutated ctx.input so the host can write through.
           const mutatedInput = readCtxInputJson(vm);
           // …and, on the hook path, WHICH of those keys the body actually
-          // wrote (#14758), so the write-back carries the body's own key set
+          // wrote (commit 84199cb87), so the write-back carries the body's own key set
           // rather than re-asserting the whole dump onto the engine's payload.
           const mutatedInputKeys =
             args.origin.kind === 'hook' ? readInputWritesJson(vm) : undefined;
@@ -878,7 +878,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     }
     sugar.value.dispose();
 
-    // [#14758] The hook path's INPUT write-recorder — the instrument that lets
+    // [commit 84199cb87] The hook path's INPUT write-recorder — the instrument that lets
     // `applyMutationsToInput` carry back the keys the body wrote instead of
     // every key it could see.
     //
@@ -1532,7 +1532,7 @@ function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
 }
 
 /**
- * [#14758] After the script has settled, dump the keys the write-recorder proxy
+ * [commit 84199cb87] After the script has settled, dump the keys the write-recorder proxy
  * saw on `ctx.input` — the keys the BODY assigned, defined or deleted, as
  * opposed to every key `readCtxInputJson` can see.
  *

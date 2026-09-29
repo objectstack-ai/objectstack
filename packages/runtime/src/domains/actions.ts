@@ -122,7 +122,7 @@ function isActionActivationWrite(parts: string[], method: string): boolean {
  *
  * ## Order of operations, and why each step is where it is
  *
- *  1. **Both authority gates, first.** `manage_metadata` (#10243: switching a
+ *  1. **Both authority gates, first.** `manage_metadata` (commit 266436a7f: switching a
  *     shipped artifact off is functionally equivalent to deleting it), then the
  *     ADR-0126 §5 posture gate. Ahead of the body checks and ahead of any
  *     lookup, so a refused caller writes nothing and learns nothing — neither
@@ -884,7 +884,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // `ReferenceError` / a driver's own class "is a crash (500)") and the
         // header of this very file (`did it reject or crash? … crash → 500`).
         //
-        // The rule is #15071's, ruled on the `/data` door and quoted there
+        // The rule is commit cf6e0a193's, ruled on the `/data` door and quoted there
         // rather than restated: *"A declared code is the author's statement
         // about the failure mode they **handled**. A crash … is not that mode,
         // so it is classified as a fault"*. This is the same terminal at the

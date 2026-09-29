@@ -180,7 +180,7 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
         // `effect: 'writes'` included — which is #4396's silent un-declaring in
         // the other spelling: the function still registers, still runs, and its
         // writes are still counted as none, so #4354's broken-sweep alert stays
-        // quiet on the one run that needed it. Unreachable until #6238 let the
+        // quiet on the one run that needed it. Unreachable until commit c8d6f6e08 let the
         // array form past the parse; reachable now, so it is handled here.
         if (Array.isArray(declaredFunctions)) {
             const moduleFns = fns as Record<string, unknown>;

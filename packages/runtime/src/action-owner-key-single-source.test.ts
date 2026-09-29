@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The standalone-action owner-key ladder has ONE spelling (#14422).
+ * The standalone-action owner-key ladder has ONE spelling (commit dc7c226b9).
  *
  * `action.objectName` -> `action.object` -> the object-less
  * `GLOBAL_ACTION_OBJECT_KEY` decides which engine key a standalone `action`
@@ -26,16 +26,16 @@
  * B reads this package's own source and fails if the ladder grows a second
  * body here.
  *
- * Half C closes the same hole one level down (#14678). #14422 converged the
+ * Half C closes the same hole one level down (commit 73ad0bba7). Commit dc7c226b9 converged the
  * LADDER, and the runtime kept three bare `'global'` spellings elsewhere in
  * `action-execution.ts` that the ladder check could not see: a live comparison
  * in `seedFlowActionParams`, a warn-once log key in `enforceActionParams`, and
  * a docblock. All three were equal in value and invisible to every test in the
- * repo, which is the whole shape #14422 was filed to remove — so the same
+ * repo, which is the whole shape commit dc7c226b9 was written to remove — so the same
  * convergence needed the same weld, or the next reader re-inlines one and
  * nothing says so.
  *
- * Half D (#14878) is the odd one out and says so at its own section below: it
+ * Half D (commit 29db3cd2a) is the odd one out and says so at its own section below: it
  * is not about this package's source at all. It is the TREE-scoped absence pin
  * for the plugin member this convergence deleted, carried here as well as in
  * `@objectstack/objectql` so that losing either copy still leaves a guard.
@@ -157,14 +157,14 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
         // file was written to replace. Both controls are positive assertions
         // against text the converged file must carry.
         //
-        // [#14864] The second control used to be the `seedFlowActionParams`
+        // [commit 066dd3bd0] The second control used to be the `seedFlowActionParams`
         // comparison `objectName !== GLOBAL_ACTION_OBJECT_KEY`. That guard is
         // gone — it was one of the two rival answers to "is this route
         // object-less", and it now delegates to `isObjectLessActionKey` like
         // its neighbours. Re-anchored rather than deleted, and deliberately
         // onto a site this file's own subject does not move: the warn-once log
         // key in `enforceActionParams`, which is the SECOND of the three bare
-        // literals #14678 converged and is untouched by the predicate work.
+        // literals commit 73ad0bba7 converged and is untouched by the predicate work.
         // ⛔ Do not re-anchor a control onto the thing the next change is most
         // likely to edit — a control that moves with its subject stops being a
         // control.
@@ -184,9 +184,9 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
 });
 
 /**
- * ── Half D [#14878]: the absence assertion is TREE-scoped, not FILE-scoped ───
+ * ── Half D [commit 29db3cd2a]: the absence assertion is TREE-scoped, not FILE-scoped ───
  *
- * #14667 deleted a private `actionObjectKey` member from `ObjectQLPlugin` and
+ * Commit dc7c226b9 deleted a private `actionObjectKey` member from `ObjectQLPlugin` and
  * DID write a guard for it — `not.toContain(...)` against `plugin.ts`. The kind
  * of guard was right; its SCOPE was the defect. A pin written by the deleting PR
  * can only look where its author thought to look, and the whole failure mode is
@@ -260,7 +260,7 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
  */
 
 /**
- * The member #14667 deleted from `ObjectQLPlugin`. Held as DATA: naming a symbol
+ * The member commit dc7c226b9 deleted from `ObjectQLPlugin`. Held as DATA: naming a symbol
  * in a string cannot resurrect it, and this file is excluded from its own scan
  * precisely so it may carry the name.
  */
