@@ -4,7 +4,20 @@
 
 `os validate` refuses an `api` flow with no per-flow secret, the flow the automation engine already refuses to register (#20553).
 
-Clause-②: yes (accept/reject: `os validate` newly refuses a secretless `api` flow)
+Clause-②: yes (narrowing — `os validate` / `os build` / `os lint` and the runtime metadata publish gate newly refuse a secretless `api`-bound flow; the new exported rule id `FLOW_API_TRIGGER_SECRET_MISSING` widens `@objectstack/lint`)
+
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and the start node `config` stays the open record it was. What changes is that two authoring doors, `os validate` / `os build` / `os lint` and the runtime metadata publish gate, now refuse one authored shape: an `api`-bound flow whose start node carries no usable `config.secret`. `objectstack migrate meta` could not rewrite that shape even in principle, because the missing value is a shared secret only the author and the sending system can supply. A stored flow of that shape is already refused at registration by `@objectstack/service-automation` in the same release, whose own changeset carries this same disposition for that load path; the publish gate judges only the item being written, so no stored row is re-judged here. -->
+
+**BREAKING** — an accept-set narrowing at two authoring doors, shipped as
+`minor` under the launch-window convention (`check-changeset-no-major` refuses
+`major` until GA; breaking-ness is carried by this banner and the ADR-0087
+disposition above, not by the level). A stack that declares an `api`-bound flow
+whose start node carries no usable `config.secret` used to pass `os validate`,
+`os build` and `os lint`; they now exit non-zero and name the flow. The runtime
+metadata publish gate used to pass a `state: 'active'` write of such a flow; it
+now refuses it before the flow is stored. **One-line fix:** set a non-blank
+`config.secret` on the flow's start node — or, for a flow that is only ever
+started explicitly, declare `type: 'autolaunched'` with no `triggerType: 'api'`.
 
 `validate-flow-trigger-readiness` gains one rule id, `flow-api-trigger-secret-missing`, at `error`. It names a flow whose binding resolves to the inbound `api` trigger when that flow's start node carries no usable `config.secret`. A usable secret is a string that is non-empty after trimming. The rule fires for a missing, blank or non-string secret, and for an `api` flow with no start node.
 
