@@ -26,10 +26,12 @@ import {
 import { FieldSchema, FieldType } from './field.zod';
 import { ObjectSchema } from './object.zod';
 import { FieldOperatorsSchema, parseFilterAST } from './filter.zod';
+import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { TEXT_FILTER_OPERATORS } from './filter-text-operator-declared-type';
 import { numericColumnFor } from './numeric-column-representation';
 import {
   NON_NUMERIC_STRING_FORMS,
+  NON_NUMERIC_VALUE_FORMS,
   NUMBER_COMPARAND_DOOR_CASES,
   NUMBER_COMPARAND_DOOR_FIXTURE,
   NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS,
@@ -182,10 +184,49 @@ describe('[#20336] numberComparandDoorVerdict', () => {
     expect(numberComparandDoorVerdict({ type: 'formula', returnType: 'number' }, '1e3')).toEqual({ verdict: 'narrows', value: 1000 });
   });
 
-  it('passes every non-string comparand — they are not this door\'s subject', () => {
-    for (const v of [12, 0, -1.5, null, true, false, new Date(0), 10n, [1, 2], { $field: 'x' }, undefined]) {
-      expect(numberComparandDoorVerdict({ type: 'number' }, v), String(v)).toEqual({ verdict: 'passes' });
+  it('[#20502] refuses a boolean, a Date and an array on a number field with the INVALID_FILTER / 400 envelope and its form', () => {
+    const refused: ReadonlyArray<readonly [unknown, string]> = [
+      [true, 'boolean'], [false, 'boolean'],
+      [new Date(0), 'date'], [new Date(Number.NaN), 'date'],
+      [[1, 2], 'array'], [[], 'array'], [['12'], 'array'],
+    ];
+    for (const [v, form] of refused) {
+      for (const type of NUMBER_COMPARAND_DOOR_JUDGED_TYPES) {
+        expect(numberComparandDoorVerdict({ type }, v), `${type} · ${String(v)}`).toEqual({
+          verdict: 'door-refusal', form, code: 'INVALID_FILTER', status: 400,
+        });
+      }
+      expect(numberComparandDoorVerdict({ type: 'formula', returnType: 'number' }, v), String(v))
+        .toMatchObject({ verdict: 'door-refusal', form });
     }
+    expect(sorted(new Set(refused.map(([, form]) => form)))).toEqual(sorted(NON_NUMERIC_VALUE_FORMS));
+  });
+
+  it('[#20502] passes a number, a bigint and null, and leaves every value outside the accepted comparand types to the comparand-type door', () => {
+    const passes: readonly unknown[] = [
+      12, 0, -1.5, 1e21, 10n, null,
+      // Outside the comparand-type door's accepted set — refused THERE, on every field.
+      undefined, { a: 1 }, { $field: 'x' }, new Map(), Symbol('s'), () => 1,
+    ];
+    for (const v of passes) {
+      expect(numberComparandDoorVerdict({ type: 'number' }, v), String(typeof v)).toEqual({ verdict: 'passes' });
+    }
+    // The ones the comparand-type door refuses are really refused there, by that door, on a number field too.
+    for (const v of [undefined, { a: 1 }, new Map()]) {
+      let thrown: (Error & { code?: string; status?: number }) | undefined;
+      try { normalizeFilterComparandTypes({ amount: { $gt: v } }); } catch (e) { thrown = e as typeof thrown; }
+      expect({ code: thrown?.code, status: thrown?.status }, String(typeof v)).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    }
+  });
+
+  it('[#20502] a boolean or a Date on a field that is NOT numeric is not this door\'s subject', () => {
+    for (const t of [...BOOLEAN_VALUE_TYPES, ...CALENDAR_DATE_TYPES, ...INSTANT_TYPES, ...STRING_VALUE_TYPES]) {
+      for (const v of [true, new Date(0), [1]]) {
+        expect(numberComparandDoorVerdict({ type: t }, v), `${t} · ${String(v)}`).toEqual({ verdict: 'passes' });
+      }
+    }
+    expect(numberComparandDoorVerdict({ type: 'formula', returnType: 'boolean' }, true)).toEqual({ verdict: 'passes' });
+    expect(numberComparandDoorVerdict({ type: 'formula' }, true)).toEqual({ verdict: 'deferred' });
   });
 
   it('passes any string on a field that is not numeric, and defers on an unreadable formula', () => {
@@ -218,17 +259,32 @@ describe('[#20336] numberComparandRefusalMessage', () => {
       .toContain('formula field returning number');
   });
 
+  const ALL_FORMS = [...NON_NUMERIC_STRING_FORMS, ...NON_NUMERIC_VALUE_FORMS];
+
   it('says something different for every form, and carries no tracker number', () => {
-    const messages = NON_NUMERIC_STRING_FORMS.map((form) => numberComparandRefusalMessage({ ...site, form }));
-    expect(new Set(messages).size).toBe(NON_NUMERIC_STRING_FORMS.length);
+    const messages = ALL_FORMS.map((form) => numberComparandRefusalMessage({ ...site, form }));
+    expect(new Set(messages).size).toBe(ALL_FORMS.length);
     for (const m of messages) expect(m).not.toMatch(/#\d/);
+  });
+
+  it('[#20502] names a Date AS a Date — its JSON form is a quoted string, which would read as the string the grammar refuses', () => {
+    const at = new Date(Date.UTC(2026, 0, 1));
+    const message = numberComparandRefusalMessage({ ...site, value: at, form: 'date' }, "find('deal')");
+    expect(message.startsWith(
+      "find('deal'): filter on 'amount' compares a declared number field against Date(2026-01-01T00:00:00.000Z) at where.amount.$gt",
+    )).toBe(true);
+    expect(numberComparandRefusalMessage({ ...site, value: new Date(Number.NaN), form: 'date' })).toContain('Date(Invalid Date)');
+    expect(numberComparandRefusalMessage({ ...site, value: true, form: 'boolean' })).toContain('against true at where.amount.$gt');
+    expect(numberComparandRefusalMessage({ ...site, value: [1, 2], form: 'array' })).toContain('against [1,2] at where.amount.$gt');
+    // A string renders exactly as before this change.
+    expect(numberComparandRefusalMessage(site)).toContain('against "abc" at where.amount.$gt');
   });
 
   it('stays inside the 500-character client bound for every refusal in the case table, at the longest position', () => {
     for (const c of NUMBER_COMPARAND_DOOR_CASES.filter(isRefusal)) {
       const message = numberComparandRefusalMessage({
         field: c.key, declaredType: c.declaredType, returnType: c.returnType,
-        path: `aggregations[0].filter.${c.position}`, value: c.comparand as string, form: c.form,
+        path: `aggregations[0].filter.${c.position}`, value: c.comparand, form: c.form,
       }, `aggregate('${NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT}')`);
       expect(message.length, c.name).toBeLessThanOrEqual(500);
     }
@@ -236,10 +292,11 @@ describe('[#20336] numberComparandRefusalMessage', () => {
 
   it('front-loads what a caller acts on: with 40-character names the head still ends inside the first 500 characters', () => {
     const name = 'f'.repeat(40);
-    for (const form of NON_NUMERIC_STRING_FORMS) {
+    const longest: Record<string, unknown> = { boolean: false, date: new Date(8.64e15), array: Array.from({ length: 200 }, () => 1) };
+    for (const form of ALL_FORMS) {
       const message = numberComparandRefusalMessage({
         field: name, declaredType: 'formula', returnType: 'number',
-        path: `aggregations[12].filter.${name}.$between[1]`, value: 'x'.repeat(200), form,
+        path: `aggregations[12].filter.${name}.$between[1]`, value: form in longest ? longest[form] : 'x'.repeat(200), form,
       }, `aggregate('${'o'.repeat(40)}')`);
       const head = message.slice(0, message.indexOf(' The filter was NOT applied'));
       expect(head.length, form).toBeLessThanOrEqual(500);
@@ -311,7 +368,22 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
       expect(c.declaredType, c.name).toBe(f.type);
       expect(c.returnType, c.name).toBe(f.returnType);
       expect(comparandAt(c, c.filter() as Record<string, unknown>), c.name).toEqual(c.comparand);
-      expect(c.verdict, c.name).toBe(numberComparandDoorVerdict(f, c.comparand).verdict);
+      // The verdict is defined at a JUDGED position; a flag operator's comparand is never handed to it.
+      const op = /\.(\$\w+)/.exec(c.position)?.[1];
+      const judgedPosition = op === undefined
+        || [...NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS, ...NUMBER_COMPARAND_DOOR_LIST_OPERATORS].includes(op as never);
+      expect(c.verdict, c.name).toBe(judgedPosition ? numberComparandDoorVerdict(f, c.comparand).verdict : 'passes');
+    }
+  });
+
+  it('[#20502] the flag operators pass their boolean — the door never judges $null / $exists / $empty, whatever the verdict says of a boolean', () => {
+    const flags = NUMBER_COMPARAND_DOOR_CASES.filter((c) => /\.\$(?:null|exists|empty)$/.test(c.position));
+    expect(sorted(flags.map((c) => c.position))).toEqual(['f_number.$empty', 'f_number.$exists', 'f_number.$null']);
+    for (const c of flags) {
+      expect(typeof c.comparand, c.name).toBe('boolean');
+      expect(c.verdict, c.name).toBe('passes');
+      // …while the same boolean at a judged position is refused: the position, not the value, decides.
+      expect(numberComparandDoorVerdict({ type: 'number' }, c.comparand), c.name).toMatchObject({ verdict: 'door-refusal', form: 'boolean' });
     }
   });
 
@@ -347,6 +419,34 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     }
   });
 
+  it('[#20502] refuses false at $gt on every judged field, and true and a Date at every judged position on f_number', () => {
+    const value = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]'));
+    const judgedFields = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.filter((f) => numberComparandFieldVerdict(f) === 'judged');
+    const falseAtGt = value.filter((c) => c.comparand === false);
+    expect(sorted(falseAtGt.map((c) => c.key))).toEqual(sorted(judgedFields.map((f) => f.name)));
+    for (const c of falseAtGt) expect(isRefusal(c) && c.form === 'boolean', c.name).toBe(true);
+
+    const onNumber = value.filter((c) => c.key === 'f_number' && c.comparand !== false);
+    const judged = new Set(NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[position]')).map((c) => c.position));
+    for (const p of judged) {
+      const forms = onNumber.filter((c) => c.position === p && isRefusal(c)).map((c) => (c as NumberComparandDoorRefusalCase).form);
+      const equality = /^f_number(?:\.\$(?:eq|ne))?$/.test(p);
+      expect(sorted(forms), p).toEqual(sorted(equality ? ['boolean', 'date'] : ['array', 'boolean', 'date']));
+    }
+  });
+
+  it('[#20502] the non-string rows that PASS: the null test, and a boolean or a Date on a field class that holds one', () => {
+    const passing = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]') && c.verdict === 'passes');
+    expect(passing.map((c) => [c.position, c.comparand instanceof Date ? 'Date' : c.comparand])).toEqual([
+      ['f_number', null], ['f_number.$ne', null], ['f_boolean.$eq', true], ['f_datetime.$gt', 'Date'],
+    ]);
+  });
+
+  it('[#20502] the refused forms: every string form and every value form is in the table', () => {
+    const forms = new Set(NUMBER_COMPARAND_DOOR_CASES.filter(isRefusal).map((c) => c.form));
+    expect(sorted(forms)).toEqual(sorted([...NON_NUMERIC_STRING_FORMS, ...NON_NUMERIC_VALUE_FORMS]));
+  });
+
   it('covers all four verdicts — a table with one answer would not need the discriminant', () => {
     const verdicts = new Set(NUMBER_COMPARAND_DOOR_CASES.map((c) => c.verdict));
     expect(sorted(verdicts)).toEqual(['deferred', 'door-refusal', 'narrows', 'passes']);
@@ -356,11 +456,12 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     for (const c of NUMBER_COMPARAND_DOOR_CASES.filter(isRefusal)) {
       expect(c.code, c.name).toBe(StandardErrorCode.enum.INVALID_FILTER);
       expect(c.status, c.name).toBe(400);
-      expect(c.mustMention, c.name).toEqual(expect.arrayContaining([c.key, c.declaredType, JSON.stringify(c.comparand), c.position]));
+      const rendered = c.comparand instanceof Date ? `Date(${c.comparand.toISOString()})` : JSON.stringify(c.comparand);
+      expect(c.mustMention, c.name).toEqual(expect.arrayContaining([c.key, c.declaredType, rendered, c.position]));
       // …and the words the module hands the door do contain each of them.
       const message = numberComparandRefusalMessage({
         field: c.key, declaredType: c.declaredType, returnType: c.returnType,
-        path: `where.${c.position}`, value: c.comparand as string, form: c.form,
+        path: `where.${c.position}`, value: c.comparand, form: c.form,
       }, `find('${NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT}')`);
       for (const s of c.mustMention) expect(message, c.name).toContain(s);
     }
@@ -388,5 +489,16 @@ describe('[#20336] NUMBER_COMPARAND_DOOR_CASES', () => {
     expect(c.filter()).not.toBe(c.filter());
     expect(c.filter()).toEqual(c.filter());
     expect(c.expectedFilter()).not.toBe(c.expectedFilter());
+    // [#20502] A Date or an array comparand is mutable: each filter holds its own copy.
+    for (const mutable of [
+      NUMBER_COMPARAND_DOOR_CASES.find((x) => x.comparand instanceof Date)!,
+      NUMBER_COMPARAND_DOOR_CASES.find((x) => Array.isArray(x.comparand))!,
+    ]) {
+      const first = comparandAt(mutable, mutable.filter() as Record<string, unknown>);
+      const second = comparandAt(mutable, mutable.filter() as Record<string, unknown>);
+      expect(first, mutable.name).not.toBe(second);
+      expect(first, mutable.name).not.toBe(mutable.comparand);
+      expect(first, mutable.name).toEqual(mutable.comparand);
+    }
   });
 });
