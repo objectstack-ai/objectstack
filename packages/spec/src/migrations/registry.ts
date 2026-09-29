@@ -5269,6 +5269,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`filter`.',
   },
   {
+    id: 'cube-refresh-key-retired',
+    order: 49,
+    text:
+      'It also retires a cube\'s `refreshKey` whole — the refresh cadence `every` and the '
+      + 'data-change probe `sql` (ADR-0049 enforce-or-remove). Nothing read either key, and no '
+      + 'analytics result is cached, so a declared cadence refreshed nothing and every query was '
+      + 'computed when it was asked, as it still is. The key is a retiredKey tombstone on '
+      + '`CubeSchema`, and the D2 conversion `cube-refresh-key-removed` strips the whole block from '
+      + 'every cube as a pure lossless delete, retired from the load path. Its D3 record is the '
+      + 'semantic entry `cube-refresh-key-retired`. A refresh cadence is declared again when a '
+      + 'result cache exists.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:
