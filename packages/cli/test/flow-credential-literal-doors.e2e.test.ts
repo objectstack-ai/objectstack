@@ -165,6 +165,8 @@ describe('flow-credential-literal at the CLI doors', () => {
     const found = validateFindings(lit.stdout);
     expect(found.map((f) => f.path)).toEqual(LIT_PATHS);
     expect(found.every((f) => f.severity === 'warning')).toBe(true);
+    // The route is in the message, which is what the text face prints.
+    expect(found.every((f) => (f.message ?? '').includes('auth.credentialRef'))).toBe(true);
     for (const sentinel of SENTINELS) expect(JSON.stringify(found).includes(sentinel), sentinel).toBe(false);
 
     const dark = await runCli(['validate', '--json'], dirs.get('dark')!);
@@ -179,6 +181,7 @@ describe('flow-credential-literal at the CLI doors', () => {
     const found = lintFindings(lit.stdout);
     expect(found.map((f) => f.path)).toEqual(LIT_PATHS);
     expect(found.every((f) => f.severity === 'warning')).toBe(true);
+    expect(found.every((f) => (f.message ?? '').includes('auth.credentialRef'))).toBe(true);
     for (const sentinel of SENTINELS) expect(JSON.stringify(found).includes(sentinel), sentinel).toBe(false);
 
     const dark = await runCli(['lint', '--json'], dirs.get('dark')!);

@@ -94,6 +94,7 @@ describe('the save door carries flow-credential-literal as an advisory', () => {
     for (const a of advisories) {
       expect(a.severity).toBe('warning');
       expect(a.message).toContain('every member who can read flows');
+      expect(a.message).toContain('auth.credentialRef');
       expect(a.hint).toContain('credentialRef');
     }
 

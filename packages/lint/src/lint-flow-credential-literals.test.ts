@@ -201,6 +201,9 @@ describe('flow-credential-literal — the pin set', () => {
     expect(header.where).toBe("flow 'scan_control' · node 'h' (http)");
     expect(header.message).toContain("header 'X-Api-Key'");
     expect(header.message).toContain('every member who can read flows');
+    // The route rides the MESSAGE: the CLI text faces print `where: message`
+    // and leave the hint to `--json`.
+    expect(header.message).toContain("declarative connector's `auth.credentialRef`");
     expect(header.hint).toContain('credentialRef');
     expect(header.hint).toContain('connector_action');
 
@@ -210,6 +213,7 @@ describe('flow-credential-literal — the pin set', () => {
 
     const input = byPath.get('flows[2].nodes[3].connectorConfig.input.auth.clientSecret')!;
     expect(input.message).toContain("connector input 'auth.clientSecret'");
+    expect(input.message).toContain('authenticates through its own `auth.credentialRef`');
     expect(input.hint).toContain('credentialRef');
 
     const nested = byPath.get('flows[2].nodes[2].config.try.nodes[0].config.headers.Authorization')!;

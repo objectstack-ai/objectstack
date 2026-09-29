@@ -71,7 +71,15 @@ export interface FlowCredentialLiteralFinding {
 /** Why the value is exposed — the same sentence for all three positions. */
 const SERVED =
   'A flow definition is served, as authored, to every member who can read flows, so this value is ' +
-  'readable by all of them.';
+  'readable by all of them';
+
+/**
+ * The route, in the MESSAGE and not only in the hint: `os validate` and `os lint`
+ * print `where: message` on their text faces and leave the hint to `--json`, so
+ * a route stated only in the hint never reaches the author who reads the terminal.
+ */
+const STEER_HTTP = "; route the credential through a declarative connector's `auth.credentialRef` instead.";
+const STEER_INPUT = "; drop it from `input` — the connector authenticates through its own `auth.credentialRef`.";
 
 /** The connector route, stated once. */
 const CONNECTOR_ROUTE =
@@ -136,13 +144,13 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
       const where = regionTrail
         ? `flow '${flowName}' · ${regionTrail} · node '${nodeId}' (${nodeType})`
         : `flow '${flowName}' · node '${nodeId}' (${nodeType})`;
-      const report = (entryPath: string, what: string, route: string): void => {
+      const report = (entryPath: string, what: string, steer: string, route: string): void => {
         findings.push({
           severity: 'warning',
           rule: FLOW_CREDENTIAL_LITERAL,
           where,
           path: entryPath,
-          message: `${what} holds a literal value that reads as a credential. ${SERVED}`,
+          message: `${what} holds a literal value that reads as a credential. ${SERVED}${steer}`,
           hint: `${route}${NOT_A_GATE}`,
         });
       };
@@ -152,7 +160,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
         if (isRec(headers)) {
           for (const [name, value] of Object.entries(headers)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, CONNECTOR_ROUTE);
+            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_HTTP, CONNECTOR_ROUTE);
           }
         }
         if (typeof url === 'string') {
@@ -161,6 +169,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
             report(
               `${path}.config.url`,
               `the url's query parameter '${name}'`,
+              STEER_HTTP,
               `${CONNECTOR_ROUTE} An \`api-key\` credential can travel as a query parameter (\`paramName\`).`,
             );
           }
@@ -182,7 +191,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
             return;
           }
           if (isCredentialShapedLiteral(name, value)) {
-            report(at, `connector input '${label}'`, CONNECTOR_INPUT_ROUTE);
+            report(at, `connector input '${label}'`, STEER_INPUT, CONNECTOR_INPUT_ROUTE);
           }
         };
         walk(connectorConfig.input, '', `${path}.connectorConfig.input`, '', 0);
