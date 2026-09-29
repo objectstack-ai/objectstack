@@ -217,8 +217,9 @@ export interface AnalyticsResult {
  *
  * `description` (on the cube and on each member) and a measure's `format` are
  * copied from the cube definition when it declares them and absent when it
- * does not; `api/analytics.zod.ts#AnalyticsMetadataResponseSchema` declares
- * the same shape and `api/analytics.test.ts` binds the two at compile time.
+ * does not; `packages/spec/src/api/analytics.zod.ts#AnalyticsMetadataResponseSchema`
+ * declares the same shape and `packages/spec/src/api/analytics.test.ts` binds
+ * the two at compile time.
  */
 export interface CubeMeta {
     /** Cube name */
