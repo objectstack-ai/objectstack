@@ -33,7 +33,7 @@ import {
  * then connect unauthenticated, which is precisely the failure #4410 exists to
  * end, surviving in the one driver #4410 could not see.
  *
- * The maintainer's #6345 ruling closes it by making turso a complete builtin
+ * The maintainer's ruling (commit e2798fab7) closes it by making turso a complete builtin
  * rather than a permanent exception. Optionality of the PACKAGE is orthogonal to
  * existence of the CONTRACT — `mongodb` and `sqlite-wasm` are optional installs
  * too, and both have had a contract since #4410.
@@ -354,7 +354,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * The libSQL endpoint or local file. REQUIRED — there is no default: this
      * is the single fact that makes `hasLocalDefault: false` true for turso,
      * and the reason both boot hosts refuse a driver selection with no URL
-     * rather than guessing one (#6345 fork 2).
+     * rather than guessing one (commit e2798fab7's fork 2).
      *
      * Credential-free by contract since #8082: a `user:password@` userinfo is
      * refused at publish exactly like an inline `authToken` (#7990) — bind the

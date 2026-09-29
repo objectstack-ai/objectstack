@@ -91,7 +91,7 @@ export type ExecutionStatus = z.input<typeof ExecutionStatus>;
  * parent answers "what did this run cause", and until this slot existed the
  * failure count did not: a parent whose child lost a row read `failed: 0`,
  * which is the misreading the run-level `failed` was added to prevent
- * (#13681), one level up. The slot carries a COMPLETED child's
+ * (commit 18d816a50), one level up. The slot carries a COMPLETED child's
  * `summary.failed` and folds into the delegating node's `failures` — the same
  * fold shape `acted` has, so `failed = Σ nodes[].failures` keeps holding with
  * the child counted in. It is NOT the same rule as `acted` at the failed-child

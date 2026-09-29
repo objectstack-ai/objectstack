@@ -10,7 +10,7 @@
  * three `403 PERMISSION_DENIED` gates in plugin-security — the object CRUD
  * grant and the capability AND-gate (#7414, #7451), the row-level pre-image
  * write denial and the row-level CHECK post-image denial (#7451) — and two
- * `403 FORBIDDEN` refusals whose keys land ahead of their emitters (#12493):
+ * `403 FORBIDDEN` refusals whose keys land ahead of their emitters (commit aa5994e17):
  * the sharing middleware's by-id write denial (`record_write_denied`; emitter
  * conversion is #12260's half) and plugin-approvals' non-submitter recall
  * refusal (`approval_recall_not_submitter`; emitter conversion is #11993's
@@ -32,7 +32,7 @@
  * | `record_write_denied` | they can see this record, but changing or deleting it is beyond their access | ask its owner, or an administrator |
  * | `approval_recall_not_submitter` | they asked to recall an approval request someone else submitted | ask the submitter, or an administrator |
  *
- * `record_write_denied` (#12493) is NOT `record_access_denied` restated: the
+ * `record_write_denied` (commit aa5994e17) is NOT `record_access_denied` restated: the
  * sharing middleware's by-id write gate fires on a row the READ path already
  * admitted — the user is typically looking at the record it refuses — so
  * "You do not have access to this record" would be false the moment it
@@ -42,7 +42,7 @@
  * which verb was refused is a developer fact that stays on
  * `developerMessage` and the structured `details`.
  *
- * `approval_recall_not_submitter` (#12493) names who CAN act because that is
+ * `approval_recall_not_submitter` (commit aa5994e17) names who CAN act because that is
  * the entire content of the refusal: recall belongs to the request's
  * submitter (a privileged administrator may also recall to release a stuck
  * record — the #3424 override), so the sentence sends the user to the
@@ -189,7 +189,7 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     predicate is an authored expression over the whole row). Naming the
  *     object without naming the field would send the user hunting.
  *
- * The two #12493 keys take no placeholders either, re-derived per site:
+ * The two keys commit aa5994e17 added take no placeholders either, re-derived per site:
  *
  *   - `record_write_denied` — the sharing gate's nameable facts are the
  *     object's API name and the row's opaque id (the raw string interpolated

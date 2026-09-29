@@ -15,8 +15,8 @@ import { z } from 'zod';
  *
  * **Bound surfaces — this is the whole list.**
  * An earlier revision of this docblock claimed eleven consuming surfaces. The
- * per-surface census on #12245 — its `os-dev-report` comment is the
- * measurement of record, taken on `origin/main` @ `e2debee6` — measured
+ * per-surface census that commit c41b42e8d records — the measurement of record,
+ * taken on `origin/main` @ `e2debee6` — measured
  * **exactly one** of those eleven as validated by this schema; the other ten
  * are validated by something else (next block). What composes this schema is:
  *
@@ -66,10 +66,10 @@ import { z } from 'zod';
  * | Labels | Any case | `Client Account`, `Submit Form` |
  *
  * The dot this grammar accepts is unexercised on the one live surface: 0 of
- * the 1218 authored select option values contain one (#12245). Recorded as the
+ * the 1218 authored select option values contain one (commit c41b42e8d). Recorded as the
  * measurement it is — dots are accepted, not a convention to write in.
  *
- * **Length ceiling — storage-owned, deliberately not declared here (#12144).**
+ * **Length ceiling — storage-owned, deliberately not declared here (commit 3a04b0125).**
  * The identifier schemas in this file declare a floor and a grammar but no
  * `.max()`: the enforced ceiling on an identifier is the `maxLength` of the
  * column that stores it (refused at the write seam by ObjectQL's record
@@ -125,7 +125,7 @@ export const SystemIdentifierSchema = lazySchema(() => z
  *
  * No `.max()` is declared, deliberately — identifier length ceilings are
  * storage-owned and the storing columns disagree; see the length-ceiling note
- * on {@link SystemIdentifierSchema} and issue #12144.
+ * on {@link SystemIdentifierSchema} and commit 3a04b0125.
  */
 export const SnakeCaseIdentifierSchema = lazySchema(() => z
   .string()
@@ -137,8 +137,8 @@ export const SnakeCaseIdentifierSchema = lazySchema(() => z
   .describe('Snake case identifier (lowercase with underscores only)'));
 
 /**
- * Metadata item-name grammar — the ONE segment source (#12194, stage 1 of the
- * #12176 maintainer-ruled retirement of compound `<section>/<name>` addressing,
+ * Metadata item-name grammar — the ONE segment source (commit 311433f6b, stage 1 of
+ * the maintainer-ruled retirement of compound `<section>/<name>` addressing,
  * 2026-08-25).
  *
  * Both patterns below are built from this segment so the item-name grammar has
@@ -186,7 +186,7 @@ export const QUALIFIED_ITEM_NAME_PATTERN = new RegExp(
  * (`crm_lead`, `crm_lead.pipeline`).
  *
  * A slash never belongs in an item name: the compound `<section>/<name>`
- * convention is retired (#12176 — sub-resource identity is spelled with a
+ * convention is retired (commit 7986d973f — sub-resource identity is spelled with a
  * dot; containment is expressed by structure, never by a separator inside
  * the identity string).
  *

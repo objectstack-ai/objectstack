@@ -1577,7 +1577,7 @@ function lookupPageAttr(
  * or omitting one it reads — so there is one list and both sides import it.
  * `translation.zod.ts` declares the same five; `translation.test.ts` pins the
  * two in agreement. (`submitLabel` retired with its only declarer,
- * `element:form` — #9249 / #10926.)
+ * `element:form` — #9249 / commit d173125fb.)
  */
 export const PAGE_COMPONENT_COPY_KEYS = [
   'title', 'description', 'label', 'placeholder', 'emptyText',
@@ -1616,7 +1616,7 @@ function lookupPageComponentCopy(
 }
 
 /**
- * How many levels of composition nesting — `properties.children` (#12961) and
+ * How many levels of composition nesting — `properties.children` (commit 901355c3b) and
  * `properties.items[].children` (#16772), each panel costing one level —
  * {@link walkAddressedPageComponents} descends below root level.
  * Authored page trees run three or four deep in practice, so the cap is not a
@@ -1628,7 +1628,7 @@ function lookupPageComponentCopy(
  * the cycle guard catches a subtree that contains itself, the cap catches one
  * that is merely absurd. Still deliberately NOT exported — the NUMBER is a
  * safety property, not a contract consumers address; what IS exported is the
- * walk that encloses it (#13218), so no consumer needs the number to stay in
+ * walk that encloses it (commit c45d8e6b4), so no consumer needs the number to stay in
  * step. The pin lives in `i18n-resolver.test.ts`, which restates this literal
  * so raising it here reds there; the CLI's deep-chain differential
  * (`platform-page-i18n-parity.test.ts`) holds both consumers of the walk to
@@ -1669,7 +1669,7 @@ export interface AddressedPageComponentContext {
   depth: number;
   /**
    * `true` when this component OWNS its id's `pages.<name>.components.<id>`
-   * entry under the ruled collision arbitration (#12961): a root-level
+   * entry under the ruled collision arbitration (commit 901355c3b): a root-level
    * component carrying the id wins outright — even over a nested match seen
    * earlier in document order — and among nested components the depth-first
    * document-order FIRST sighting takes it. At most one visited component is
@@ -1693,11 +1693,11 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  * (this package) and the CLI extractor's `collectExpectedEntries`
  * (`packages/cli`, behind `os i18n extract` / `os i18n coverage`).
  *
- * Exported for the same reason {@link PAGE_COMPONENT_COPY_KEYS} is (#13218,
+ * Exported for the same reason {@link PAGE_COMPONENT_COPY_KEYS} is (commit c45d8e6b4,
  * ruled 2026-08-30, completing that precedent): the WALK used to be
  * hand-mirrored across the two packages, and a mirrored traversal drifts into
  * the classic pair of failures — the extractor offering an id the resolver
- * ignores, or omitting one it reads (#13109 was the second half going live).
+ * ignores, or omitting one it reads (the second half went live; commit 8b236c826 fixed it).
  * Five invariants live here and ONLY here:
  *
  *   - roots: `regions[].components[]` AND `slots.<slot>` — a `kind: 'slotted'`
@@ -1746,7 +1746,7 @@ export function walkAddressedPageComponents(
     ? doc.slots
     : undefined;
 
-  // Collision arbitration, pass 1 (#12961): every id carried by a ROOT-LEVEL
+  // Collision arbitration, pass 1 (commit 901355c3b): every id carried by a ROOT-LEVEL
   // component — a region's entry or a slot's. The ruling makes root level the
   // outright winner when an id repeats across levels, so the whole set has to
   // be known before the descent visits its first nested component — a
@@ -1927,7 +1927,7 @@ export function walkAddressedPageComponents(
  * therefore id-only.
  *
  * Components nested in a container's declared `properties.children` array are
- * visited too, recursively (#12961, ruled 2026-08-29). This REVERSES the
+ * visited too, recursively (commit 901355c3b, ruled 2026-08-29). This REVERSES the
  * region-only boundary that stood here — "components nested inside another
  * component's `properties` are untyped free-form props" — which had made the
  * resolver narrower than the face it serves: `pages.<name>.components.<id>`
@@ -1939,7 +1939,7 @@ export function walkAddressedPageComponents(
  *
  * Two composition slots are descended: `children` — the one composition key
  * (#5775) — and, since #16772, a `page:tabs` / `page:accordion` panel's
- * `items[].children`, which sits one level deeper than the slot the #12961
+ * `items[].children`, which sits one level deeper than the slot commit 901355c3b's
  * ruling named and was left for its own contract call; that call is #16772,
  * measured on a slotted contract page whose seven tab panels held every
  * related list and the resolver reached none of them. `body` / `footer` stay
@@ -1968,7 +1968,7 @@ export function walkAddressedPageComponents(
  *
  * The traversal itself — roots, descent key, depth cap, cycle guard,
  * collision arbitration — is {@link walkAddressedPageComponents}, the ONE
- * walk this resolver and the CLI extractor both consume (#13218); this
+ * walk this resolver and the CLI extractor both consume (commit c45d8e6b4); this
  * function owns only what happens AT each component it hands back.
  *
  * A list page's filter-preset tab bar
@@ -1993,14 +1993,14 @@ export function translatePage<T extends PageLike>(
   const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
-  // arbitration — is the shared walk (#13218). This visitor owns only the
+  // arbitration — is the shared walk (commit c45d8e6b4). This visitor owns only the
   // per-component overlay; the walk re-attaches each node's translated
   // `children` after the visitor returns, so the overlay never contends with
   // the descent for a key (`children` is not a copy key).
   const { regions, slots } = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
     // Per-component copy (#6080) — addressed by the component's own id, and
     // applied before the page-name route below. `addressed` carries the ruled
-    // collision arbitration (#12961), so a looked-up entry is this component's
+    // collision arbitration (commit 901355c3b), so a looked-up entry is this component's
     // alone; within one call `lookupPageComponentCopy` is a pure function of
     // the id (bundle, page name and options are fixed), so the walk's
     // claim-on-first-sighting selects the same component a
@@ -2514,10 +2514,10 @@ function builtinSystemFieldLabel(
  *    exactly the packaged string — is a no-op: the catalog still applies, and
  *    the tenant sees the packaged translation of the word they typed.
  *
- * ## [#8460] Exported, because the SAME question is asked one layer down
+ * ## [ADR-0029 D9.2a] Exported, because the SAME question is asked one layer down
  *
  * The 2026-08-13 ruling settled catalog-vs-explicit-scalar here. The 2026-08-13
- * ruling on #8460 settled extension-vs-tenant-overlay inside the object FOLD —
+ * ruling (ADR-0029 D9.2a) settled extension-vs-tenant-overlay inside the object FOLD —
  * `mergeObjectDefinitions` applies an extender's scalar only while the fold's
  * base still carries the packaged owner's value — and required it be "the same
  * comparison-based mechanism, one layer down", explicitly not a second
