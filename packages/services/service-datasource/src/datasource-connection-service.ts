@@ -92,13 +92,13 @@ export interface DatasourceBoundObject {
  * #4251 B3 sweep pattern, applied here exactly as `datasource-admin-plugin.ts`
  * applied it to its own `DataEngineLike` one file over, under #11493's ruling.
  *
- * [#12010] Every member was hand-written here until this change, and the
- * inventory that filed that card measured what it cost. Three of them —
+ * [commit 77b91bdb4] Every member was hand-written here until this change, and the
+ * inventory that filed its card measured what it cost. Three of them —
  * `registerDatasourceDef`, `markDatasourceUnavailable`,
  * `clearDatasourceUnavailable` — were declared by NO contract at all: real
  * `ObjectQL` methods, called across a package boundary, meeting no compiler on
- * the producer side, so drift landed silently in this consumer. #12248
- * adjudicated all three onto {@link IDataEngine} and #12482 followed with
+ * the producer side, so drift landed silently in this consumer. Commit 8425c17cc
+ * adopted all three onto {@link IDataEngine} per the ruling, and #12482 followed with
  * `syncObjectSchema`; deriving is what makes the next drift a build error here
  * instead of a re-declaration that quietly disagrees.
  *
@@ -606,7 +606,7 @@ export class DatasourceConnectionService {
       // `default` goes through the engine's default-driver fallback, never
       // `drivers.get('default')`, and the natural name keeps logs/lookups
       // byte-for-byte with the pre-#3826 boot.
-      // [#12010] `DatasourceDriverHandle.driver` is declared `unknown` — the
+      // [commit 77b91bdb4] `DatasourceDriverHandle.driver` is declared `unknown` — the
       // factory escape hatch is open to any host-built driver — so a cast is
       // unavoidable somewhere on this path. It belongs HERE, at the one call
       // site that constructs the value, not widened into the exported seam
@@ -697,7 +697,7 @@ export class DatasourceConnectionService {
   async disconnect(name: string, opts: { asDefault?: boolean } = {}): Promise<void> {
     const engine = this.cfg.engine();
     const driverName = opts.asDefault ? engine?.getDefaultDriverName?.() : name;
-    // [#12010] Cast-free: `getDriverByName` now answers the contract's
+    // [commit 77b91bdb4] Cast-free: `getDriverByName` now answers the contract's
     // `IDataDriver | undefined` instead of a locally re-declared `unknown`.
     // The `typeof … === 'function'` guard below stays — a host-built driver in
     // the registry satisfies the contract only structurally.

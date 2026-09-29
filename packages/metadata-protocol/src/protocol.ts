@@ -168,6 +168,7 @@ import {
     carryForwardRedactedValues,
     hasMetadataRedactor,
     redactMetadataItem,
+    redactedPathsCarriedForward,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
@@ -4998,6 +4999,23 @@ export class ObjectStackProtocolImplementation implements
          * the only one holding the answer to.
          */
         pending?: RuntimePendingDeclarations;
+        /**
+         * [#20611] How to learn the positions in `body` that this write's
+         * carry-forward will fill from the stored row — the credentials the read
+         * path withheld, which a body saved back after a read arrives without.
+         * Stated by `saveMetaItem`, the one door whose body can arrive that way;
+         * the draft→active promotion judges the stored draft row, which already
+         * holds what that draft's own save carried forward, so it states nothing.
+         *
+         * A function, called only once the gate is known to run (after the
+         * early returns below): a draft save, the package-author channel and
+         * the `migrate-stored` pass pay no stored-row read for it. ⛔ It is NOT
+         * wrapped in the best-effort guard the collections get: a stored-row read
+         * that fails fails this save, as the carry-forward's own read does —
+         * answering "nothing is stored" instead would refuse a signed flow's
+         * round trip for a secret it still holds.
+         */
+        restoredCredentialPaths?: () => Promise<readonly string[]>;
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
@@ -5106,7 +5124,10 @@ export class ObjectStackProtocolImplementation implements
         // `sys_metadata` read and they do not depend on one another, so the
         // store leg costs one round trip of latency for the whole context
         // instead of five.
-        const [objects, permissions, books, datasets] = await Promise.all([
+        const [restoredCredentialPaths, objects, permissions, books, datasets] = await Promise.all([
+            // [#20611] The host's half of the redaction context — positions
+            // only, read from the row at rest; see the evt field.
+            evt.restoredCredentialPaths?.(),
             listCollection('object', 'objects'),
             listCollection('permission', 'permissions'),
             listCollection('book', 'books'),
@@ -5161,6 +5182,7 @@ export class ObjectStackProtocolImplementation implements
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
             ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
+            ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
@@ -7310,6 +7332,26 @@ export class ObjectStackProtocolImplementation implements
         item: any;
     }): Promise<any> {
         if (!hasMetadataRedactor(args.type)) return args.item;
+        const body = await this.storedBodyForCarryForward(args);
+        if (!body) return args.item;
+        return carryForwardRedactedValues(args.type, args.item, body);
+    }
+
+    /**
+     * The body a carry-forward compares against: the overlay row at the write's
+     * own state, the ACTIVE row for a draft save with no draft row yet (see
+     * {@link carryForwardRedactedCredentials} for why that fallback is
+     * load-bearing), else the CODE layer. RAW in every case — the bytes the
+     * read exits redacted — and read with no `try`/`catch`, for the reason the
+     * carry-forward gives.
+     */
+    private async storedBodyForCarryForward(args: {
+        type: string;
+        repo: SysMetadataRepository;
+        ref: Parameters<SysMetadataRepository['get']>[0];
+        state: 'draft' | 'active';
+        packageId: string | null;
+    }): Promise<unknown> {
         let stored = await args.repo.get(args.ref, {
             state: args.state,
             packageId: args.packageId,
@@ -7326,9 +7368,50 @@ export class ObjectStackProtocolImplementation implements
         // literal in the app's source, the shipped reference shape — had its
         // FIRST save persist an overlay row with the credential dropped, and
         // an overlay wins every later merge.
-        const body = stored?.body ?? await this.readCodeLayerForCarryForward(args.type, args.ref.name, args.packageId);
-        if (!body) return args.item;
-        return carryForwardRedactedValues(args.type, args.item, body);
+        return stored?.body ?? await this.readCodeLayerForCarryForward(args.type, args.ref.name, args.packageId);
+    }
+
+    /**
+     * [#20611] The runtime authoring gate's half of the redaction context: the
+     * positions in `item` that {@link carryForwardRedactedCredentials} will fill
+     * from the stored row when this save reaches its put — computed from the
+     * SAME stored body, by the same plan (`redactedPathsCarriedForward`), and
+     * without grafting anything. The carry-forward stays after every gate, so no
+     * gate handles a restored credential; the gate is told only WHERE one will
+     * be restored, which is what it needs to read a withheld-and-stored
+     * credential as present rather than missing.
+     *
+     * Its own read of the row, deliberately not shared with the carry-forward's:
+     * that one stays immediately before the put, where it has always been, so a
+     * write racing this save between the two is still carried from the latest
+     * row. The cost is one more indexed read on an active save of a type with a
+     * registered redactor, and nothing for any other type.
+     */
+    private async restoredCredentialPathsFor(args: {
+        type: string;
+        organizationId: string | null;
+        name: string;
+        packageId: string | null;
+        item: unknown;
+    }): Promise<readonly string[]> {
+        if (!hasMetadataRedactor(args.type)) return [];
+        const repo = this.getOverlayRepo(args.organizationId);
+        const ref = {
+            type: args.type,
+            name: args.name,
+            org: args.organizationId ?? 'env',
+        } as Parameters<typeof repo.get>[0];
+        const body = await this.storedBodyForCarryForward({
+            type: args.type,
+            repo,
+            ref,
+            // The gate judges `active` writes only (#4463 D1), so this is the
+            // state a gated save's carry-forward reads.
+            state: 'active',
+            packageId: args.packageId,
+        });
+        if (!body) return [];
+        return redactedPathsCarriedForward(args.type, args.item, body);
     }
 
     /**
@@ -16349,11 +16432,12 @@ export class ObjectStackProtocolImplementation implements
         // captured and rides the 2xx this write is about to earn. Held in a
         // local rather than on `this`: the gate is per-write and two concurrent
         // saves must not read each other's findings.
+        const gatedItem: unknown = request.item;
         const runtimeAdvisories = await this.assertRuntimeAuthoringRules({
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
-            body: request.item,
+            body: gatedItem,
             source: writeSource,
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason
@@ -16364,6 +16448,22 @@ export class ObjectStackProtocolImplementation implements
             // has carried it all along, it just never reached the gate. Null
             // (a bare tenant overlay) narrows nothing.
             packageId: request.packageId ?? null,
+            // [#20611] The redaction context. The read path withholds a
+            // credential from every served definition (a flow's start-node
+            // `config.secret`), so a body saved back after a read arrives
+            // without it, and the carry-forward below restores it only AFTER
+            // every gate — on purpose, so no gate handles a restored credential.
+            // The gate is handed WHERE it will be restored instead, computed
+            // from the same stored body the carry-forward reads: a rule then
+            // reads a withheld-and-stored credential as present, and one that
+            // is absent and not stored as missing. The body judged is unchanged.
+            restoredCredentialPaths: () => this.restoredCredentialPathsFor({
+                type: singularType,
+                organizationId: request.organizationId ?? null,
+                name: request.name,
+                packageId: request.packageId ?? null,
+                item: gatedItem,
+            }),
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
@@ -16585,6 +16685,11 @@ export class ObjectStackProtocolImplementation implements
         // ⛔ Preserves cleartext already at rest; creates none. Getting stored
         // cleartext OUT of the store is #8081 item 3's migration, deliberately
         // not attempted on a write door the author drove.
+        //
+        // [#20611] The runtime authoring gate above was told WHERE this graft
+        // lands (`restoredCredentialPathsFor`, the same plan over the same
+        // stored body), never what it restores — so a rule reads a withheld
+        // credential as present without any gate handling it.
         request.item = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,

@@ -337,6 +337,28 @@ export interface AuthoringRuleContext {
    * this input or does not judge.
    */
   judgeFilter?: IObjectQLEngine['judgeFilter'];
+  /**
+   * [#20611] The credential positions of the WRITTEN item that the write path
+   * restores from the stored row before it persists the item — stack-relative,
+   * in the rules' own finding-path spelling (`flows[0].nodes[1].config.secret`).
+   *
+   * Set only by the runtime publish gate (`runtime-gate.ts`), from what its host
+   * states; ABSENT on the three CLI commands, whose stacks carry the author's
+   * own values. It exists because the read path withholds a credential from
+   * every served definition (a flow's start-node `config.secret`), so a body
+   * saved back after a read arrives WITHOUT it, and the host's carry-forward
+   * puts the stored value back only after every gate has run — on purpose, so
+   * that no gate handles a restored credential. A rule therefore cannot tell a
+   * withheld credential from a missing one by reading the body, and this set is
+   * how it is told: a path listed here is WITHHELD AND STORED, and a rule
+   * judging whether a credential is present reads it as present. A path not
+   * listed is judged on the body as sent, so a credential that is absent and
+   * not stored is missing.
+   *
+   * ⛔ Positions only, never values: the gate never sees a restored credential.
+   * Read by `validateFlowApiTriggerSecret` only.
+   */
+  restoredCredentialPaths?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1113,7 +1135,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // routes nowhere, silently demoting it to a manual flow. #20553 made it five: an
   // `api`-bound flow with no usable `config.secret`, which the engine's own
   // `registerFlow` refuses (ADR-0041) — on its OWN entry below
-  // (`validateFlowApiTriggerSecret`), because it is CLI-only for now. None of those verdicts
+  // (`validateFlowApiTriggerSecret`), because it reads a context input this entry
+  // has no use for (#20611). None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
@@ -1144,33 +1167,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateFlowTriggerReadiness(stack),
   },
   // #20553 — `flow-api-trigger-secret-missing`, split out of the entry above as
-  // its own exported rule (the `validateSecurityRoleWord` precedent: one rule id
-  // sits on ONE side of the runtime wall). Same family, same `error`, all three
-  // commands — but NOT the runtime publish gate yet, and #20611 is the card that
-  // moves it across. The flow read path withholds `config.secret` from every
-  // served definition (#20552) and `saveMetaItem` restores the stored secret only
-  // just before the put, AFTER this table has judged the body the caller sent —
-  // so on the gate, a signed flow's ordinary GET → edit → PUT reads as
-  // secretless. Measured on `825c33ff9f`: with this id on the gate, the two
-  // round-trip pins in `protocol.metadata-redaction.test.ts` fail; off it, 26/26.
-  // The `/meta` door therefore keeps its pre-rule behaviour (it stores a
-  // secretless flow, and the engine refuses it at registration) until the gate
-  // judges the carried-forward body — then this entry becomes `CLI_AND_RUNTIME`
-  // with `runtimeTypes: ['flow']`, like the one above.
+  // its own exported rule. Same family, same `error`, all three commands.
+  //
+  // #20611 — and the runtime publish gate too. The flow read path withholds
+  // `config.secret` from every served definition (#20552), and `saveMetaItem`
+  // restores the stored secret only just before the put, AFTER this table has
+  // judged the body the caller sent — deliberately, so no gate handles a
+  // restored credential. So the gate is handed the POSITIONS that restore will
+  // fill (`AuthoringRuleContext.restoredCredentialPaths`), and the rule reads a
+  // withheld-and-stored secret as present: a signed flow's ordinary
+  // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
+  // with this id instead of being stored for the engine to refuse at
+  // registration.
   {
     name: 'validateFlowApiTriggerSecret',
     tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'Not yet runtime-safe: the publish gate judges a /meta save BEFORE saveMetaItem restores the ' +
-      'inbound-hook secret the flow read path withholds, so a signed api flow\'s ordinary GET, edit, PUT ' +
-      'round trip reaches this rule secretless and would be refused. It crosses when the gate judges the ' +
-      'carried-forward body (the seam follow-up named in the comment above); until then the engine\'s ' +
-      'registerFlow refusal is what a secretless flow saved through /meta meets.',
-    run: (stack) => validateFlowApiTriggerSecret(stack),
+    // Runtime publish gate (#20611): judged on the per-write snapshot like the
+    // entry above, with the host's restored-credential positions read as
+    // present. The CLI never sets that input, so there the author's own
+    // `config.secret` is the whole answer.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) =>
+      validateFlowApiTriggerSecret(stack, { restoredCredentialPaths: ctx.restoredCredentialPaths }),
   },
   // ADR-0090 D3 fallout — an approval `{ type: 'role' }` resolves against the
   // better-auth org-membership tier, not positions, so a position name authored

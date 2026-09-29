@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8696 — a bound `external.credentialsRef` reaches the client on the mysql
+ * Commit 72050cc47 — a bound `external.credentialsRef` reaches the client on the mysql
  * arm's DSN branch, not only on its discrete-fields branch.
  *
  * ## The defect
@@ -69,7 +69,7 @@
  * The first failure is the whole defect in one line: the arm answered with the
  * DSN *string*, which has no key for a credential to live in.
  *
- * ## The mongodb half, added second (#8696's remaining arm)
+ * ## The mongodb half, added second (commit 90a12fb18, the remaining arm)
  *
  * `buildMongoUrl`'s `if (explicit) return explicit;` dropped the bound secret
  * the same way, and is closed by `buildMongoAuth` — `options.auth` beside an
