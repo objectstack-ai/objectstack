@@ -16685,6 +16685,11 @@ export class ObjectStackProtocolImplementation implements
         // ⛔ Preserves cleartext already at rest; creates none. Getting stored
         // cleartext OUT of the store is #8081 item 3's migration, deliberately
         // not attempted on a write door the author drove.
+        //
+        // [#20611] The runtime authoring gate above was told WHERE this graft
+        // lands (`restoredCredentialPathsFor`, the same plan over the same
+        // stored body), never what it restores — so a rule reads a withheld
+        // credential as present without any gate handling it.
         request.item = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
