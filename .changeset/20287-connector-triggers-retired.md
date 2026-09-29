@@ -28,7 +28,7 @@ declared trigger parsed clean and never started a flow.
 | removed | what to write instead |
 | --- | --- |
 | `connector.triggers` with a `type: 'polling'` trigger (`intervalSeconds`, or the pre-rename `interval`) | delete the key, and write a `schedule` flow whose `connector_action` node calls the connector's action — at the cadence you meant, in seconds. |
-| `connector.triggers` with a `type: 'webhook'` trigger | delete the key, and write an `api` flow that the external sender calls, with a `connector_action` node calling the connector's action. It opens an inbound endpoint that never existed before, so decide how it authenticates the sender. |
+| `connector.triggers` with a `type: 'webhook'` trigger | delete the key, and write an `api` flow that the external sender calls, with a `connector_action` node calling the connector's action. It opens an inbound endpoint that never existed before: an `api` flow is refused without a per-flow secret and every call must carry its signature, so the sender must be able to sign. |
 | `ConnectorTriggerSchema`, `ConnectorTrigger` | no replacement — nothing parsed or constructed a connector trigger. |
 
 **The one-line fix: delete `triggers:` from every connector.**
@@ -65,8 +65,8 @@ with a prescription naming the two shapes that work, and in `tsc` (its input typ
   holding either spelling ends with no `triggers` at all. The retired-key row
   `integration/ConnectorTrigger:interval` stays as the record.
 - **D3 entry `connector-triggers-retired`** carries the family's judgement: which
-  triggers should exist now as flows, the cadence in seconds, and how an inbound `api`
-  flow authenticates its sender. The absorbed rename's own D3 entry
+  triggers should exist now as flows, the cadence in seconds, and whether an external
+  sender can sign the calls a signed `api` flow requires. The absorbed rename's own D3 entry
   (`connector-resilience-durations-unit-in-key`, never released) is gone with its
   conversion.
 - **No deprecation window**, per the project's startup-stage posture.

@@ -38,8 +38,10 @@ export const entry: SemanticMigration = {
     + 'written `interval: 60000` for one minute asked for once every sixteen hours or so — carry '
     + 'the intended cadence, not the stored number, into the schedule. Third, turning a '
     + '`webhook` trigger into an `api` flow opens an inbound endpoint that never existed before '
-    + '(the trigger declared no receiver and no verification), so how that endpoint '
-    + 'authenticates its sender is part of the author\'s decision. The chain: '
+    + '(the trigger declared no receiver and no verification), and the platform refuses an `api` '
+    + 'flow with no per-flow secret and verifies a signature on every call — so whether the '
+    + 'external sender can sign its calls decides whether that flow can receive them directly. '
+    + 'The chain: '
     + 'in this same protocol step, `connector-health-and-trigger-durations-unit-in-key` no '
     + 'longer renames `triggers[].interval` — the whole array that key lived in is removed, so an '
     + 'author holding either spelling ends with no key at all.',
