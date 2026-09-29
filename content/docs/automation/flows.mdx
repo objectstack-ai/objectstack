@@ -261,14 +261,18 @@ nothing is assigned or written in its place.
 {
   id: 'notify_slack',
   type: 'http',
-  label: 'Send Slack Notification',
+  label: 'Post Order Event',
   config: {
-    url: 'https://hooks.slack.com/services/...',
+    url: 'https://api.example.com/v1/order-events',
     method: 'POST',
-    body: { text: 'New order: {record.name}' },
+    body: { event: 'order.created', name: '{record.name}' },
   },
 }
 ```
+
+<Callout type="warn" title="Do not put a secret in an http node's url or headers">
+A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential to a declarative connector's `auth.credentialRef` and call it with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). Only `signingSecret` (and a start node's `secret`) is withheld when a definition is served; `url` and `headers` are served as written.
+</Callout>
 
 **Script:**
 

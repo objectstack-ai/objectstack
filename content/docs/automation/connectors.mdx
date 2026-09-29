@@ -114,6 +114,8 @@ Materializes a single **`request`** action accepting
 payload per call. Use it when the upstream is "just HTTP" and you don't have a
 spec document.
 
+Do not put a credential in `headers` or `defaultHeaders`: both are stored in metadata and served with it. Declare it as `auth.credentialRef` instead — the resolved `auth` is applied to every request — as the `Authorization` header, or for `api-key` as `headerName` (default `X-API-Key`) or the `paramName` query parameter.
+
 ### `provider: 'openapi'` — one action per operation
 
 Config: **`spec`** (required) and **`baseUrl`** (optional — overrides the
