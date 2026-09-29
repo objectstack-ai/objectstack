@@ -278,6 +278,63 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.object');
   });
 
+  // The four drill-through sidecars (ADR-0021 D2), on the answer that carries all
+  // four at once: a dataset grouped by a lookup (equality drill) and by a
+  // quarter-bucketed date (range drill), with a grand total and a per-account
+  // subtotal. Preservation, not just acceptance: this schema strips an undeclared
+  // key, so an undeclared sidecar would parse green and vanish.
+  const drillable = {
+    rows: [
+      { account: 'Acme', close_date: '2026-Q2', revenue: 100 },
+      { account: 'Globex', close_date: '2026-Q3', revenue: 40 },
+    ],
+    fields: [
+      { name: 'account', type: 'string' },
+      { name: 'close_date', type: 'time' },
+      { name: 'revenue', type: 'number' },
+    ],
+    totals: [
+      { dimensions: [], rows: [{ revenue: 140 }] },
+      { dimensions: ['account'], rows: [{ account: 'Acme', revenue: 100 }, { account: 'Globex', revenue: 40 }] },
+    ],
+    object: 'opportunity',
+    dimensionFields: { account: 'account' },
+    drillRawRows: [{ account: 'acc_1' }, { account: 'acc_2' }],
+    drillRawTotals: [[{}], [{ account: 'acc_1' }, { account: 'acc_2' }]],
+    drillRanges: [
+      { close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } },
+      { close_date: { field: 'close_date', gte: '2026-07-01', lt: '2026-10-01' } },
+    ],
+  };
+
+  it('should preserve all four drill-through sidecars on a drillable dataset answer', () => {
+    const resp = AnalyticsResultResponseSchema.parse({ success: true, data: drillable });
+    expect(resp.data.dimensionFields).toEqual({ account: 'account' });
+    expect(resp.data.drillRawRows).toEqual([{ account: 'acc_1' }, { account: 'acc_2' }]);
+    expect(resp.data.drillRawTotals).toEqual([[{}], [{ account: 'acc_1' }, { account: 'acc_2' }]]);
+    expect(resp.data.drillRanges).toEqual(drillable.drillRanges);
+
+    // Optional: a cube query answer, and a non-drillable dataset answer, carry none.
+    const bare = AnalyticsResultResponseSchema.parse({ success: true, data: { rows: [], fields: [] } });
+    for (const key of ['dimensionFields', 'drillRawRows', 'drillRawTotals', 'drillRanges']) {
+      expect(key in bare.data).toBe(false);
+    }
+  });
+
+  it.each([
+    ['dimensionFields', { account: 42 }, 'data.dimensionFields.account'],
+    ['drillRawRows', { account: 'acc_1' }, 'data.drillRawRows'],
+    ['drillRawTotals', [{ account: 'acc_1' }], 'data.drillRawTotals.0'],
+    ['drillRanges', [{ close_date: { field: 'close_date', gte: '2026-04-01' } }], 'data.drillRanges.0.close_date.lt'],
+  ])('should refuse a malformed %s at its own path', (key, value, path) => {
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { ...drillable, [key]: value },
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toEqual([path]);
+  });
+
   it('should reject a percentScale outside the closed vocabulary, and a totals entry without dimensions', () => {
     expect(() =>
       AnalyticsResultResponseSchema.parse({

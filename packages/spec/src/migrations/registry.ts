@@ -11493,6 +11493,9 @@ const step18: MigrationStep = {
         + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
         + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
         + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      // The edits this entry judges: every `mode: 'inclusive'` that conversion
+      // writes is one decision to keep, delete or narrow, per the criteria above.
+      conversionIds: ['flow-decision-mode-inclusive-explicit'],
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.

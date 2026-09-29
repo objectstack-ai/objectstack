@@ -115,6 +115,51 @@ describe('Analytics Service Contract', () => {
     expect(offType.rows).toEqual([]);
   });
 
+  // The four drill-through sidecars (ADR-0021 D2), declared on the answer
+  // itself: a `queryDataset` implementation returns them against the plain
+  // `AnalyticsResult`, and a caller reads each one without a cast (a read of an
+  // undeclared member is a compile error, so these reads are the existence pin).
+  // The `@ts-expect-error` lines pin each member's TYPE.
+  it('carries the drill-through sidecars on a drillable dataset answer', async () => {
+    const service: IAnalyticsService = {
+      query: async () => ({ rows: [], fields: [] }),
+      getMeta: async () => [],
+      queryDataset: async (dataset) => ({
+        rows: [{ account: 'Acme', close_date: '2026-Q2', revenue: 100 }],
+        fields: [{ name: 'revenue', type: 'number' }],
+        totals: [{ dimensions: [], rows: [{ revenue: 100 }] }],
+        object: dataset.object,
+        dimensionFields: { account: 'account' },
+        drillRawRows: [{ account: 'acc_1' }],
+        drillRawTotals: [[{}]],
+        drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } }],
+      }),
+    };
+
+    const answer = await service.queryDataset!(
+      { name: 'pipeline', label: 'Pipeline', object: 'opportunity', dimensions: [], measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }] },
+      { measures: ['revenue'], dimensions: ['account', 'close_date'] },
+    );
+    const field: string | undefined = answer.dimensionFields?.account;
+    expect(field).toBe('account');
+    expect(answer.drillRawRows?.[0]).toEqual({ account: 'acc_1' });
+    expect(answer.drillRawTotals?.[0]?.[0]).toEqual({});
+    const range: { field: string; gte: string; lt: string } | undefined = answer.drillRanges?.[0]?.close_date;
+    expect(range).toEqual({ field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' });
+
+    const offType: AnalyticsResult[] = [
+      // @ts-expect-error — `dimensionFields` maps a dimension name to a field NAME, a string
+      { rows: [], fields: [], dimensionFields: { account: 42 } },
+      // @ts-expect-error — `drillRawRows` is an array aligned to `rows`, not one map
+      { rows: [], fields: [], drillRawRows: { account: 'acc_1' } },
+      // @ts-expect-error — `drillRawTotals` is one array of maps PER totals grouping
+      { rows: [], fields: [], drillRawTotals: [{ account: 'acc_1' }] },
+      // @ts-expect-error — a `drillRanges` entry carries both bounds
+      { rows: [], fields: [], drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01' } }] },
+    ];
+    expect(offType).toHaveLength(4);
+  });
+
   it('should generate SQL without executing', async () => {
     const service: IAnalyticsService = {
       query: async () => ({ rows: [], fields: [] }),
