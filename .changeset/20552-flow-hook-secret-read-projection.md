@@ -34,7 +34,7 @@ set on the start node again.
 read served none — keeps the stored secret, on both authoring surfaces (the metadata
 plane's save door and the automation domain's `PUT` / `POST`). Only an explicit value
 replaces it, so a rotation is written as before. The start node is matched by its
-`id`, not its position, so an edit that reorders `nodes` keeps it too.
+`id`, not its position, so an edit that reorders `nodes` keeps it too. The first save of an item that has no stored row yet, such as a code-authored flow or datasource, takes the value from the code layer the read served, for every type with a registered redactor.
 
 - `@objectstack/service-automation` owns the projection (`redactFlowCredentials`) and
   registers it as the `flow` read-path redactor at plugin `init`. The engine keeps
