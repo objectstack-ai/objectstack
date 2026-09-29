@@ -19,6 +19,6 @@ Clause-②: no (narrowing)
 
 - Enabling a flow that is already enabled. Nothing is re-armed.
 - A flow the customer authored, or a subflow the customer authored.
-- A subflow in a cycle of switched-off flows with the flow being enabled, including a flow that calls itself. Each flow in such a cycle would refuse the others, so no order could complete.
+- A subflow in a cycle of switched-off flows with the flow being enabled, including a flow that calls itself. Each flow in such a cycle would refuse the others, so no order could complete. A subflow in such a cycle whose definition's `status` also disables it is still named, with its publish remedy: no enable order changes a status.
 
-Disabling a subflow is unchanged.
+The disable direction of the same guard is described in its own entry, "disabling a packaged subflow completes once its packaged callers are switched off and hold no parked run".
