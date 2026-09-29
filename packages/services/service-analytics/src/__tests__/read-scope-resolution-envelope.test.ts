@@ -75,7 +75,8 @@ interface Refusal extends Error {
   status?: unknown;
 }
 
-const EMPTY = { rows: [], fields: [], totals: [] };
+/** The degraded answer: no rows — and, like every dataset answer, its base object (#20644). */
+const EMPTY = { rows: [], fields: [], totals: [], object: 'opportunity' };
 
 const dataset = DatasetSchema.parse({
   name: 'sales',
