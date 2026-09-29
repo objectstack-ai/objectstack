@@ -27,8 +27,8 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  *
  * This protocol supports multiple authentication strategies, bidirectional sync,
  * field mapping, and an executed retry policy. It declares no health probe, no
- * circuit breaker, no authored status and no webhooks of its own — see "What
- * this layer does NOT provide" below.
+ * circuit breaker, no authored status, no webhooks and no triggers of its own —
+ * see "What this layer does NOT provide" below.
  *
  * ## What this layer does NOT provide
  *
@@ -71,6 +71,14 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * delivered is declared in the stack's top-level `webhooks:` collection. The
  * "REMOVED: `health`, `status` and the nested `webhooks`" section below records
  * the measurement.
+ *
+ * **There are no connector triggers.** The `triggers` array (`polling` /
+ * `webhook`) was removed in `@objectstack/spec` 17 (ADR-0049 enforce-or-remove):
+ * nothing ever registered, polled or received one, so a declared trigger never
+ * started a flow. Work starts from a FLOW that calls the connector's action in a
+ * `connector_action` node — an `api` flow for an external event, a `schedule`
+ * flow for a scheduled pull. The "REMOVED: `triggers`" section below records the
+ * measurement.
  *
  * `connectionTimeoutMs` used to be the second exception and is now **removed**
  * (ADR-0049, the narrower second decision that surface was owed): it was
@@ -688,8 +696,10 @@ const CONNECTOR_RETIRED_KEY_RESIDUE = {
 // in this same unreleased protocol step; the rename's breaker half is ABSORBED
 // by this removal (`spec-property-retirement` §0): a renamed key that is then
 // stripped with its whole block is unobservable, and the conversion table's
-// disjoint-fixture contract cannot hold both. `triggers[].interval` →
-// `intervalSeconds` is a different family and is untouched.
+// disjoint-fixture contract cannot hold both. The same rename's other half,
+// `triggers[].interval` → `intervalSeconds`, was a different family and was
+// left standing here; it was absorbed in turn when the whole `triggers` array
+// was retired — see "REMOVED: `triggers`" below.
 
 /**
  * The prescription an author meets when they write `health` — in `tsc` (the
@@ -742,6 +752,73 @@ const WEBHOOKS_RETIRED =
   + '`WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack\'s '
   + 'top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on '
   + 'record events — note that doing so STARTS deliveries this connector never made. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+// ============================================================================
+// REMOVED: `triggers` (ADR-0049)
+// ============================================================================
+//
+// `connector.triggers` — the `ConnectorTrigger` shape (`key`, `label`,
+// `description`, `type: 'polling' | 'webhook'`, `intervalSeconds`) — declared a
+// connector-owned way to start an automation, and NOTHING ever read it. Its own
+// docblock said so ("NOT YET ENFORCED — declared but never read by the
+// runtime"). Measured on `origin/main` before the removal:
+// `AutomationEngine.registerConnector` walks `parsed.actions` only and stores the
+// rest of the def unread; the engine's trigger registry holds FLOW trigger kinds
+// (`record_change`, `time_relative`, `schedule`, `api` — a closed set) and no
+// connector trigger ever entered it; no polling loop read `intervalSeconds`; no
+// receiver was driven by a `webhook` trigger; and no connector package, provider
+// or example declared one. The only runtime touch was a REFUSAL on a
+// provider-bound declarative instance, whose reason ("the provider derives them
+// from the upstream at boot") was itself untrue — no provider derives a trigger.
+//
+// Retired rather than built, by ruling on the maintainer's criterion for a
+// declared-but-unenforced family: the accepted ADR-0041 places connector-event
+// triggers (webhook-subscribe and poll) in its third tier, as their own trigger
+// package, promoted only when real projects ask for it. When that happens the
+// family returns in the mainstream shape — a subscribe / unsubscribe lifecycle,
+// signature verification, a dedupe cursor — which these five keys could not
+// carry. What works today, and what the prescription below names, is a FLOW that
+// calls the connector's action: an external event starts an `api` flow, and a
+// scheduled pull is a `schedule` flow.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent strip
+// (ADR-0104): `triggers` is a `retiredKey()` tombstone below, inherited by
+// `DeclarativeConnectorEntrySchema` because both published carriers wrap the same
+// private `ConnectorBaseSchema`. That made the provider-bound refusal unreachable
+// (every carrier now refuses the key outright, with the prescription), so the
+// rule and its untrue reason left with it. `integration/ConnectorTrigger` leaves
+// whole (`RETIRED_DEFS_BY_MAJOR[18]`), because an exported value schema with no
+// consumer reads as a capability. Registered as `integration/Connector:triggers`
+// and `integration/DeclarativeConnectorEntry:triggers` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; authored sources and stored rows are rewritten by
+// the D2 conversion `connector-triggers-removed`, and the family's judgement
+// lives in the D3 entry `connector-triggers-retired`.
+//
+// `triggers[].interval` → `intervalSeconds` was renamed earlier in this same
+// unreleased protocol step; that rename is ABSORBED by this removal
+// (`spec-property-retirement` §0), as its breaker half was by the `health`
+// removal above: a key renamed and then stripped with its whole array is
+// unobservable, and the conversion table's disjoint-fixture contract cannot hold
+// both. The `integration/ConnectorTrigger:interval` registration stays — it is
+// still the record that the bare `interval` spelling was retired.
+
+/**
+ * The prescription an author meets when they write `triggers` on a connector —
+ * in `tsc` (the key's input type is `never`) and at parse (this string is the
+ * issue message). It serves the author who still holds the pre-rename
+ * `interval` spelling too; the closing sentence is the house `os migrate meta`
+ * form pinned by `shared/retired-key-migrate-sentence.test.ts`.
+ */
+const TRIGGERS_RETIRED =
+  '`connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'a connector trigger never started anything: `AutomationEngine.registerConnector` registers '
+  + 'a connector\'s actions only, no polling loop read `intervalSeconds` (or the `interval` '
+  + 'spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete '
+  + 'the key; the `ConnectorTrigger` shape leaves with it. To start work from an external '
+  + 'system, write a flow that calls the connector\'s action in a `connector_action` node: for '
+  + 'an external event, an `api` flow that the event\'s sender calls; for a scheduled pull, a '
+  + '`schedule` flow. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ============================================================================
@@ -836,35 +913,10 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
 }));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
-/**
- * Connector Trigger Definition
- *
- * ⚠️ NOT YET ENFORCED — declared but never read by the runtime (#3197).
- * `AutomationEngine.registerConnector` ignores a connector's `triggers`; the
- * only runtime touch is the authoring-time reject rule that forbids triggers
- * on provider-bound declarative instances (ADR-0097 §5). No polling loop or
- * webhook receiver is driven by these definitions.
- */
-export const ConnectorTriggerSchema = lazySchema(() => z.object({
-  key: z.string().describe('Trigger key'),
-  label: z.string().describe('Trigger label'),
-  description: z.string().optional(),
-  type: z.enum(['polling', 'webhook']).describe('Trigger type'),
-  // Renamed from `interval` (#15680, ruling B on #14478): the unit lived only in
-  // the describe prose, and a polling cadence is exactly the number a reader
-  // guesses at — the same bare `interval` means MILLISECONDS elsewhere in this
-  // spec, so the identical name carried two units a thousandfold apart.
-  intervalSeconds: z.number().optional().describe('Polling interval in seconds'),
-
-  /** Tombstone for the rename above (#15680, ruling B on #14478). */
-  interval: retiredKey(
-    '`ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
-    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
-    + 'prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
-  ),
-}));
-export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
+// `ConnectorTriggerSchema` / `ConnectorTrigger` (`key`, `label`, `description`,
+// `type: 'polling' | 'webhook'`, `intervalSeconds`, and the `interval` tombstone
+// of its unit rename) used to be declared here. It left whole with the
+// `triggers` key it was the only carrier of — see "REMOVED: `triggers`" above.
 
 /**
  * Base Connector Schema
@@ -956,7 +1008,18 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
 
   /** Zapier-style Capabilities */
   actions: z.array(ConnectorActionSchema).optional(),
-  triggers: z.array(ConnectorTriggerSchema).optional().describe('Trigger definitions '),
+
+  /**
+   * `triggers` — RETIRED (ADR-0049 enforce-or-remove). A connector trigger never
+   * started anything: `registerConnector` registers actions only, no polling
+   * loop or receiver was driven by one, and no provider derives one. What starts
+   * work from an external system is a flow calling the connector's action — an
+   * `api` flow for an external event, a `schedule` flow for a scheduled pull.
+   * `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+   * strip (ADR-0104); the tombstone makes the removal audible in `tsc` and at
+   * parse. See "REMOVED: `triggers`" above.
+   */
+  triggers: retiredKey(TRIGGERS_RETIRED),
   
   /**
    * Data synchronization configuration
@@ -1182,9 +1245,17 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * The remaining rules key off `provider` — instance vs. catalog descriptor:
  *  - `providerConfig` / `auth` require a `provider`; on a pure descriptor they
  *    are meaningless materialization inputs, so they are rejected.
- *  - A provider-bound instance must NOT author `actions` / `triggers` — the
- *    provider derives them from the upstream (OpenAPI document / MCP `tools/list`);
- *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
+ *  - A provider-bound instance must NOT author `actions` — the provider derives
+ *    them from the upstream (OpenAPI document / MCP `tools/list`); authoring both
+ *    the instance and its actions reintroduces drift (§5 non-goals).
+ *
+ * `triggers` used to be the second key of that last rule, refused with the
+ * reason that the provider derives triggers too. That reason was untrue — no
+ * provider ever derived a trigger — and the rule is gone rather than corrected:
+ * `triggers` is now a `retiredKey()` tombstone on the shared base, so every
+ * carrier — descriptor and instance alike — refuses any value with the
+ * retirement prescription, and a provider-bound refusal could only ever repeat
+ * that verdict with a wrong reason (see "REMOVED: `triggers`" above).
  */
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
@@ -1233,13 +1304,6 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         code: 'custom',
         path: ['actions'],
         message: `Provider-bound connector instance '${entry.name}' must not author \`actions\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
-      });
-    }
-    if (entry.triggers && entry.triggers.length > 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['triggers'],
-        message: `Provider-bound connector instance '${entry.name}' must not author \`triggers\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
       });
     }
   }), CONNECTOR_RETIRED_KEY_RESIDUE),
