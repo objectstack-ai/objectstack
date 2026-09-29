@@ -63,7 +63,7 @@ The 15 source files are `sql-driver.ts`, `turso-driver.ts`, `remote-transport.ts
   - F9;
   - F10, which the drivers seat's correction (`5205970996`) split into F10a / F10b, plus F10c;
   - F7;
-  - F8, named as "the sixth and a half".
+  - F8, named as 「第六个半」.
 - **Never named:**
   - **F2's lowering half.** `TursoDriver.toRemoteFilter` puts comparands into storage form, applies the whole-day rule and lowers `$between` before the transport sees the filter. Its own comment says "`RemoteTransport` stays the dumb SQL builder it is documented to be". It is a small shape A that already exists.
   - **F3, F4 and F5.** `driver-memory` has three faces, not one.
@@ -82,7 +82,7 @@ Since August, most of the *refusal* half has moved into shared modules:
 
 | Rule | One definition | Where it runs |
 |---|---|---|
-| boolean identities (`$and: []`, `$or: []`, `$not: {}`) | `reduceFilterVerdict` (spec `filter-verdict.ts`, #5659) | inside F1, F3/F4 and F6 |
+| boolean identities (`$and: []`, `$or: []`, `$not: {}`) | `reduceFilterVerdict` (spec `filter-verdict.ts`, #5659) | inside F1, F4 and F6 (and the flow linter) |
 | comparand shape (list operators, the equality slot, the `$ne` slot) | `assertListComparandShapes` (spec `filter-comparand-shape.ts`) | the engine seam, the RLS compile seam, the read-scope door, the analytics `where` door, the preview door, `parseFilterAST` and the save door |
 | comparand type, including `undefined` (ruling #7872) | `normalizeFilterComparandTypes` (spec `filter-comparand-type.ts`) | the same seams |
 | a temporal comparand the column can read | core `isUninterpretableTemporalComparand` + objectql `temporal-comparand-door.ts` | the engine seam (plus the analytics raw-SQL decline) |
@@ -135,14 +135,14 @@ Everything below is read from the merged commits and the cards' threads.
 | Ruling | Cards | PRs (commits) | Rounds | Face-file edits (distinct) | Shared files edited | What the rounds were spent on |
 |---|---|---|---|---|---|---|
 | `$empty` — ruling A on #20399 (#20311 declares it → #20445 analytics → #20444 engine faces → #20446 flip) | 4 | #20442 (7), #20498 (4), #20523 (7), #20570 (18) | 2 + 2 + 1 + 8 = **13** | 4 + 9 + 8 = 21 (**13 distinct**) | `filter-empty-operator.ts` and 5 other spec files | The operator stayed staged out of `FILTER_OPERATORS` until "one compile-surface lane card per face" had landed. #20446's rulings in rounds 2 and 3 were about *which faces hold a field declaration*: federated objects, an analytics host with no `sourceFieldMeta`, and harness tables no driver had declared. |
-| Last supported day — #20600, then #20661 | 2 | #20643 (19), #20714 (3) | 2 + 1 = **3** | 10 + 1 = 11 (**10 distinct**) | spec `calendar-day.ts`, `temporal-conformance.ts`; core `datetime.ts` | Round 1 failed at tier because the new sentinel was typed twice across two declaration files. The fix then had to be narrowed at "17 direct call sites in 9 files, plus Turso's indirect one" (review `5894730557`). The same work found a tenth face whose own order of operations was wrong: F5 converted to storage form before widening. That became #20661. |
+| Last supported day — #20600, then #20661 | 2 | #20643 (19), #20714 (3) | 2 + 1 = **3** | 10 + 1 = 11 (**10 distinct**) | spec `calendar-day.ts`, `temporal-conformance.ts`; core `datetime.ts` | Round 1 failed at tier because the new sentinel was typed twice across two declaration files. The fix then had to be narrowed at "17 direct call sites in 9 files, plus Turso's indirect one" (the seat's ACCEPT record `5894771815`, summarizing review `5894730557`). The same work found a tenth face whose own order of operations was wrong: F5 converted to storage form before widening. That became #20661. |
 | Temporal comparand door — #20549 + #20480 | 2 | #20668 (2) | **1** | **0** | core `temporal-comparand.ts`, objectql `temporal-comparand-door.ts`, `record-validator.ts` | None. The rule lives at the engine seam, so the faces changed only in tests. |
 
 And the pattern this investigation evaluates: #5977 (PR #6004, 7 files, 1 commit) moved the #5298 NULL guard into service-analytics' shared tree. It aligned three compilers with no edits to them.
 
 ### 2.2 The natural experiment
 
-In the same week, in the same lanes:
+Over the same two days (2026-09-28 and 09-29):
 
 - A rule enforced once at a shared seam cost 1 round and 0 face files.
 - Two rules implemented at the emitters cost 3 and 13 rounds and 10 and 13 distinct face files.
@@ -192,7 +192,7 @@ Every "refused 400" is `INVALID_FILTER` / 400.
    - F8 and F5 are two more readings, and F8 disagrees with F3 on `$eq`.
    - F6 hands `undefined` to the BSON encoder. How the server answers was NOT MEASURED, because there was no `mongod` here.
    - F9 moved from `= NULL` to a refusal (PR #6390).
-2. **On the production paths, the split is masked by doors.** Since #7872 the comparand-type door runs at each of these seams:
+2. **On the production paths, the split is masked by doors.** The comparand-type door (ruling #7872) now runs at each of these seams:
    - the engine seam: `where`, `aggregations[i].filter` and `having`;
    - the RLS compile seam, `judgeCompiledComparands` (`rls-compiler.ts:284`, #20212), which serves both `using` and `check`, so F7 never receives a policy comparand the door has not judged;
    - the analytics `where` and preview doors;
@@ -226,3 +226,345 @@ These were measured at the faces' published or internal entry points. None was m
 
    So a drafted chart would count rows the published chart excludes. `FILTER_TEXT_CASES` is not wired into F11's suites. The REST `?preview=` door was NOT MEASURED.
 4. **F4 has no production caller** (§1.1), yet rulings keep paying for it. #20444 edited it, #13356 is the no-value fix, and #13166 aligned it. It is a test oracle carried as a face.
+
+---
+
+## 3. Candidate shape A — the shared semantic tree (H3)
+
+### 3.1 The #5977 pattern, stated precisely
+
+#5977 did four things, and each is a design rule:
+
+1. **The rule became structure in a tree every compiler already reads.** `fieldLeaves` emits a negative-polarity leaf as `or(notSet, comparison)`. The `$not` operand gets one more `{col: {$null: false}}` conjunct. The compilers compile what they are handed.
+2. **Which leaves get the rule was decided once.** The deciding table is the polarity pair `nullValueSatisfiesOperator` / `operatorIsNullTotal`, and it is asked about the *comparand*, never about a list of operator names. This is why `$ne: null` stays `IS NOT NULL` and is not widened.
+3. **No compiler needed to know the rule.** F10a, F10b and F10c aligned with no edit.
+4. **Applying it twice is harmless.** The engine path guards twice (`c IS NULL OR (c IS NULL OR c <> v)`), and that is the same predicate. Idempotence is what lets the rest of a migration go face by face.
+
+Two more in-repo instances already work at the `FilterCondition` level. `nullSafeNegationOperand` rewrites a `$not` operand before emission, in each of its four copies. F2's `TursoDriver.toRemoteFilter` rewrites `$between`, the whole-day bound and storage form before the transport sees the filter.
+
+### 3.2 What the shared tree would hold
+
+| Rule | Today | In the tree |
+|---|---|---|
+| comparand shape and type, `undefined` included (#6050, #7872); whether a temporal comparand is interpretable (#20549) | shape and type: 1 shared door, plus 4 local `assertDefinedComparands` copies. Temporal: the engine seam only. | the existing doors run first, so the lowered output never holds a refused comparand. A temporal comparand leaves the tree as a calendar-day or ISO string, and storage form stays with the driver (§3.3). |
+| boolean identities (#5322, #5134) | shared `reduceFilterVerdict`, called by each face with its own hooks | TRUE / FALSE are resolved once; an empty combinator is gone or is a constant |
+| NULL polarity (#5146 `$not`; #5298 `$ne` / `$nin` / `$notContains`) | 4 hand copies, 293 code lines | a negative-polarity leaf becomes `{$or: [{f: {$null: true}}, {f: {op: v}}]}`; a `$not` operand is made total leaf by leaf, exactly as the copies do |
+| `$between` | lowered separately in F1, F2 and F10 | two conjuncts, `$gte` and the upper bound below |
+| whole-day upper bound (ADR-0053 D-D1), last supported day (#20600) | 10 face files, 41 call sites; F9 has none | a `$lte` on a bare day, or a `$between` maximum on one, becomes `$lt` `nextUtcCalendarDay(day)` in the **calendar-string** domain; on `9999-12-31` it becomes `{$null: false}` |
+| order of widening and storage form (ADR-0053 D-E3) | kept by convention in each face; F5 broke it (#20661) | structural: the tree runs before any face converts to storage form, so the #20661 class cannot recur |
+| `$exists` (#13529, "has a value") | read per face | one spelling of presence (`$null`) |
+| `$empty` (#20311, declared row) | `expandEmptyOperator` called inside 9 faces | the `null` and `''` rows as structure; the empty-list test stays a dialect leaf (§3.3) |
+| one operator per conjunct | operator maps, where a lowered key can collide with a sibling (df18120502; Turso remote, noted on #20643) | the lowering emits `$and` conjuncts, so it cannot create a collision |
+
+### 3.3 What stays per dialect — the last inch
+
+- **Storage form of comparands and columns.** ADR-0053 D-A1 keeps the driver as "the single source of dialect truth" (`temporalFilterValue` / `temporalFilterColumnSql`). The tree hands a calendar string, and the driver converts it.
+- **Text-match constructs.**
+  - `LIKE` or `GLOB`, and `ESCAPE`;
+  - the ASCII-fold construct per dialect (#6518, #15684, #16020);
+  - the `$like` → `GLOB` translation, which is already one shared helper.
+- **JSON-column constructs.** Membership for `$contains` on a JSON column (#17590), and the empty-list test for `$empty` on a multi-value column.
+- **Surface mechanics.** Identifier quoting, aliasing, bind placeholders and parameter renumbering; Mongo `$nor` / `$regex`; mingo documents.
+- **Refusal envelopes, which depend on context.**
+  - `INVALID_FILTER` / 400 against `READ_SCOPE_COMPILE_FAILED` / 500;
+  - the SQL drivers' withheld-diagnostic redaction (#7929, #8220).
+- **Gates that read the physical column map.** Examples are the JSON-column operator refusal and the non-text-column constant (#14079). They could move up once declarations reach the seam. The slice leaves them where they are.
+
+### 3.4 The output vocabulary — the constraint the census exposes
+
+Every face that consumes the lowering must accept its output. Today's intersection is too small:
+
+- F5 accepts 12 operators and only `$and`.
+- F11 accepts 10 operators, with no `$null` and no `$exists`.
+- Together that leaves `$eq $ne $gt $gte $lt $lte $in $nin $contains` and `$and`.
+
+That set has no null test and no `$or`. So neither the NULL guard nor the last-day `{$null: false}` could be handed to F5 or F11 as they stand.
+
+The design therefore fixes a **closed output vocabulary**: `$eq $ne $gt $gte $lt $lte $in $nin`, the text family, `$null` (boolean) and `$and $or $not`. It widens F5 (`$or`, `$not`, `$null`) and F11 (`$null`) as part of the migration. Both faces evaluate in two-valued mingo/JS, which express all three natively.
+
+The alternative is to skip the guard at the JS seams, because it is redundant under two-valued evaluation. That would re-create a per-face exception, which is the thing being removed.
+
+### 3.5 Two representations
+
+- **T1 — `FilterCondition` → `FilterCondition`,** with each operator split into its own `$and` conjunct.
+  - Strengths:
+    - Every face already reads it.
+    - The engine seam already returns a rewritten `where`.
+    - Both in-repo precedents (§3.1) are T1.
+    - Faces keep their own copies at first, harmlessly, and delete them later.
+  - Limits:
+    - TRUE / FALSE are spelled `{}` / `{$not: {}}` rather than typed.
+    - There is no new leaf kind: "empty list" has no spelling.
+    - A face can still misread a shape the lowering emits.
+- **T2 — a typed tree** with kinds `const` / `and` / `or` / `not` / `leaf{field, op, value}`, compiled by every face.
+  - Service-analytics' `NormalizedFilterNode` is the in-repo prototype, with Cube operator names.
+  - Constants and leaf lists are explicit, and "compilers own only dialect" is literally true.
+  - The cost is a rewrite of every compile entry in §1.1.
+
+T1 is a step toward T2, not a detour, provided it lives where T2 would live: T2 is T1's output parsed into kinds.
+
+### 3.6 Where it runs, and where it lives
+
+**It runs at the seams that already run the doors**, so no new entry point is created. The seam positions, seven in five files:
+
+| Seam | Position |
+|---|---|
+| engine `where` | `lowerWhereFilterArray`, after `normalizeFilterComparandTypes` (`engine.ts:1034`) |
+| engine `aggregations[i].filter` | `engine.ts:16387` |
+| engine `having` | `engine.ts:16470` |
+| RLS compile seam, serving `using` and `check` | `judgeCompiledComparands` (`rls-compiler.ts:284`) |
+| analytics `where` and preview door, serving F10 and F11 | `normalizeWhereComparands` (`filter-normalizer.ts:2218`) |
+| read scope | the entry of `compileScopedFilterToSql` (`read-scope-sql.ts:747`) |
+| F5 — a new door | `normalizeFilters` (`memory-analytics.ts:1501`) |
+
+**Where it lives is a decision (§6 D3).**
+
+- **Beside the doors in `@objectstack/spec/data`.** That follows the precedent of `filter-verdict.ts`, `filter-comparand-*.ts`, `filter-empty-operator.ts` and `calendar-day.ts`, and adds no dependency edge. `@objectstack/formula` depends on `@objectstack/spec` alone.
+- **In `@objectstack/core`.** That honours Prime Directive #2 ("No business logic in `packages/spec`") literally, but adds a `formula → core` edge.
+
+### 3.7 What shape A does not remove
+
+A ruling that adds a new predicate *kind* or a dialect construct still costs one arm per compiler. Examples are JSON membership (#17590), the per-dialect case folds (#15684, #16020) and the empty-list test. The tree removes the tax for rulings that are *compositions* of leaves every face already compiles. §4.3 counts both kinds.
+
+### 3.8 Governance
+
+- **ADR-0053 D-D1 would be reversed in placement.** It says "Operator-sensitive translation lives at the comparison EMITTERS". Moving the whole-day rewrite into a shared lowering reverses where that translation lives, so it needs a new ADR or an amended status line (Prime Directive #13). `docs/adr/**` is a Tier H surface.
+- **D-A1 and D-E3 stand.** The driver still owns storage form, and widening still happens before conversion. The lowering makes D-E3 structural.
+- **ADR-0058 D1 / D6 are compatible.** `FilterCondition` stays the canonical pushdown shape. The lowering sits after it and before the backends.
+- **No ADR records where the NULL polarity or the doors live.** Those are rulings recorded in code (#5146, #5298, #7872), so moving them needs no ADR.
+
+---
+
+## 4. Cost account (H4)
+
+### 4.1 One-time cost of the slice, step by step
+
+- **S1 — the lowering module, T1.** It is a pure function. Its pins are its own unit table:
+  - each rule of §3.2, input to output;
+  - idempotence, `lower(lower(x)) === lower(x)`;
+  - closure of the output vocabulary (§3.4).
+
+  `FILTER_LOGIC_CASES` and `TEMPORAL_CASES` can be driven through `lower` and then F7. This is an ordinary suite, not a gate.
+- **S2 — the seam calls.** Seven positions in five files (§3.6). The F5 call also installs the two comparand doors F5 lacks (§2.5 item 2).
+- **S3 — widen F5 and F11 to the output vocabulary** (§3.4).
+- **S4 — the ADR-0053 D-D1 amendment,** by the maintainer's hand (Tier H).
+- **S5 — deletions.** One lane card per group. Each is proven by that face's existing suites staying green before and after, with an ablation.
+
+| Face | Receives the lowered filter via | Edited by the slice (S2 / S3) | Deleted later (S5) | Suites that hold it today | Risk |
+|---|---|---|---|---|---|
+| F1 `driver-sql` | the engine seam | no | polarity quartet (67 lines), `assertDefinedComparands`, the `calendarDay*Rewrite` calls (5 sites) — only under D4 (b) | `FILTER_LOGIC`, `FILTER_TEXT`, `TEMPORAL`, `FILTER_COMPARAND_TYPE` on SQLite, plus the PostgreSQL/MySQL live matrix | direct callers (D4); a 21,103-line file |
+| F2 `driver-turso` remote | the engine seam, then `toRemoteFilter` | no | `toRemoteFilter`'s `$between` / whole-day arms (3 sites), the transport's polarity copy (69 lines) | turso filter-logic (local and remote), local/remote NULL parity | a live remote server was NOT MEASURED here |
+| F3 `driver-memory` query | the engine seam | no | whole-day calls (8 sites) | memory filter-logic, temporal, text | — |
+| F4 reference matcher | — (no production caller) | no | keep as test oracle, or retire (D6) | 20 test files | — |
+| F5 cube face | the new `normalizeFilters` door | **yes**: doors + lowering, and widen `$or` / `$not` / `$null` | whole-day calls (5 sites) | its own suites; not in `check:driver-conformance` | an accept-set widening, so a changeset with its Clause-② line |
+| F6 `driver-mongodb` | the engine seam | no | whole-day calls (4 sites) | mongodb filter-logic, text, temporal, comparand-type | the server answer was NOT MEASURED here |
+| F7 `formula` | the RLS compile seam (policies); the engine (via F8) | no | `lteBound` (2 sites), only under D4 (b): F7 is also a public evaluator (explain engine, test doubles) | matches-filter not-null-safe, or-semantics, temporal | — |
+| F8 `having` | the engine seam | no | whole-day calls (4 sites) | having filter-logic, text, temporal | — |
+| F9 read scope | the new call at its entry | **yes**: the lowering call | polarity quartet (67 lines), `assertDefinedComparands` | read-scope-sql conformance, read-scope not-null-safe | fixes §2.5 item 1, which changes the rows a scope returns, so it needs a changeset |
+| F10 `where` → tree | the analytics `where` door | no | polarity quartet (90 lines), `assertDefinedComparands`, the `$between` lowering | native-sql filter-logic, text, temporal | echo fidelity (R6) |
+| F11 preview | the analytics door it shares with F10 | **yes**: widen `$null` | `lteBound` (4 sites) | preview-temporal conformance | — |
+
+**Measured sizes:**
+
+- 7 seam positions in 5 files;
+- 3 faces edited by the slice;
+- 293 code lines in 4 polarity copies;
+- 4 local `assertDefinedComparands` copies;
+- 41 whole-day call sites in 10 face files.
+
+**Effort — an estimate, NOT a measurement.** Using §2.1's measured rounds as the yardstick (a card that touches one shared module and at most three faces took 1–2 rounds):
+
+- S1–S3 are about one engine-lane card and one analytics/memory card;
+- S5 is about four lane cards;
+- in all, about 6 cards and 8–12 rounds, plus the maintainer's ADR amendment.
+
+### 4.2 The conformance net that would hold it
+
+| Case-set | Non-spec test files wiring it today |
+|---|---|
+| `FILTER_LOGIC_CASES` (36 cases) | 33 (the card counted 11 hand-copied wirings in August) |
+| `FILTER_TEXT_CASES` | 19 |
+| `TEMPORAL_CASES` | 10 |
+| `TEMPORAL_TIME_CASES` | 9 |
+| `FILTER_COMPARAND_TYPE_CASES` | 8 |
+
+`node scripts/check-driver-conformance.mjs` answers OK: "50 covered cell(s), 0 in the DEBT ledger, 0 exempt". It scores the five driver packages only. Its header leaves `formula` and service-analytics "to their own suites".
+
+That scope is how two of §2.5's findings stayed invisible:
+
+- F9 wires no `TEMPORAL_CASES`, which is how item 1 survived;
+- F11 wires no `FILTER_TEXT_CASES`, which is how item 3 survived.
+
+The slice needs **no new gate**. It needs the lowering's own unit table. It would also benefit from two ordinary suites: `TEMPORAL_CASES` through F9, and `FILTER_TEXT_CASES` through F11.
+
+### 4.3 The recurring tax the slice removes
+
+The 18 filter-semantics commits of §2.3, classified by what shape A would have done with them. The classification is my reading of each commit's subject and diff, not a measurement.
+
+| Class | Commits | Shape A's effect |
+|---|---|---|
+| structure over leaves every face compiles | `1a75e39d4a` (#20600 last day), `a646120dc7` (text operator over a stored non-string value, which needs declarations at the seam), `9dac1ae017` (`$exists` = has a value), `178325bcbe` (F4 no-value) | **4** — one edit instead of N |
+| partly structure | `fb386074f5`, `f1e921ab8e`, `2b53993aca` (`$empty`: the `null` and `''` rows are structure; the empty-list test is a dialect leaf) | **3** — fewer face edits |
+| refusal at a door (the pattern that has already converged) | `8a44ce7182` (`$like` NUL), `5c7cbe37e6` (vacating read scopes), `51efbf1168` (text operator over a temporal type) | 3 — unaffected |
+| dialect construct | `54bb2f125f`, `fd014b1713`, `dcad825d46` (case-exact and ASCII-fold constructs per dialect) | 3 — stays per dialect by design |
+| front end, engine capability or analytics vocabulary | `6936d0755b` (per-aggregation filter), `0da638cd9f`, `86c5052869` (`dateRange`), `7c1039b388` (read-scope placeholders) | 4 — outside the lowering |
+| clobber inside a face's own lowering | `df18120502` | 1 — T2 only |
+
+So, over those 46 days, T1 would have turned 4 of the 18 multi-face commits into single edits and shortened 3 more, and T2 would have added one. Seven of the 18 are dialect or front-end work, and convergence does not touch them.
+
+The larger saving is not in that count. It is in the divergences that per-face copies keep producing between rulings. §2.5 found three, and #20661 was a fourth, found by the #20600 work.
+
+### 4.4 Order of work
+
+1. **The ADR-0053 D-D1 amendment first, in its own PR.** `docs/adr/**` is Tier H, and a mixed diff is governed whole, so keeping it separate keeps the code slice off Tier H. The code slice waits on the amendment (Prime Directive #13).
+2. **S1 + S2 on the engine and RLS seams.** This is one card in the engine lane. F1, F2, F3, F6, F7 and F8 then receive the lowered filter with no edits of their own.
+3. **S2 on the analytics seams, S3, and F5's door.** This covers the analytics lane and `driver-memory`. §2.5 items 1 and 2 close here.
+4. **S5 deletions,** one lane card each, each proven by the face's existing suites and an ablation.
+5. **T2 — only on measured need.** Measure the next filter-semantics ruling against §2.1's baseline first.
+
+### 4.5 Risks
+
+- **R1 — double application.** Idempotence is measured for the NULL guard (#5977). The whole-day rewrite emits `$lt`, which no face rewrites again, and `$between` is gone before any face sees it. Both need an idempotence pin (S1).
+- **R2 — provenance marks (#8220).** Rewritten nodes are new objects. A refusal raised inside one resolves as ambiguous, and so stays withheld from the author. That is fail-closed, and F1 already behaves this way under its own `$not` rewrite. The lowering must copy the marks forward to keep today's author-visible refusals.
+- **R3 — declarations at the seam.** Scoping the whole-day rule to `datetime` and reading `$empty`'s row both need field types.
+  - The engine seam has them.
+  - F9 has `declaredValueShape`.
+  - F7 and F11 hold none, so they get the type-blind reading, which D-D1 already sanctions: `< next-day` ≡ `<= day` for `date` text.
+- **R4 — direct driver callers bypass the seams.** Decision D4.
+- **R5 — accept sets move.** F9's whole-day fix changes the rows a scope returns. F5's and F11's widening admits shapes they refuse today. Each needs a changeset and its Clause-② line.
+- **R6 — echo fidelity.** F10b must reproduce F10a. Both read the lowered tree, so they agree by construction.
+- **R7 — hot files.** `sql-driver.ts` (21,103 lines) and `remote-transport.ts` (4,771 lines) collide with parallel lane work. The slice leaves both untouched until S5.
+
+---
+
+## 5. Recommendation — build, a smaller first slice, or not now
+
+The three options:
+
+- **A — build shape A in full.** T2, compiled by all 14 compile entries of §1.1.
+- **B — a smaller first slice.** T1 at the existing seams, as costed in §4.1, followed by the S5 deletions.
+- **C — not now.** Keep the accepted process half and the doors, and pay the tax per ruling. The process half is the per-ruling compiler-face checklist of 2026-08-07, now `.claude/skills/pm-dispatch/references/compile-surfaces.md`.
+
+The analysis follows the four fixed axes of the dispatch frame.
+
+**实际业务需求 — real, measured need.**
+
+The authors whose filters pass through these faces are real:
+
+- every stored view filter rule, lowered by REST and read through F1, F3 or F6;
+- every RLS policy (F1 on CRUD reads, F7 on writes, F9 in analytics);
+- every widget and dataset `where` (F10, and F11 in draft preview);
+- every `having` (F8).
+
+The measured cost is 18 filter-semantics commits that each edited 3 or more face files in 46 days, 13 rounds for the `$empty` ruling alone, and three live divergences found by one census (§2.5). Those divergences reach authors as *different rows for one predicate*.
+
+- B targets exactly the absorbable classes (7 of the 18) and closes all three divergences.
+- A adds, over B, one commit class (the clobber) and typed constants. No measured demand exists for more.
+- C leaves the tax and the divergences in place. The checklist existed throughout the time F5's ordering defect (#20661) and §2.5's three divergences sat undetected. It has also drifted from the code it lists, measured against §1.1:
+  - it names F4, which has no production caller, as the `driver-memory` face;
+  - it omits F3, F5, F11, F10c and F2's lowering half;
+  - it still calls `having` 「唯一没有 conformance 表覆盖的面」, though `having-filter.test.ts` now runs `FILTER_LOGIC_CASES`;
+  - its line numbers point to the August tree (`applyFilterCondition` at `:7083`; it is at `:16789` today).
+
+**项目长远合理性 — long-term soundness.**
+
+- A is the end state.
+- B is on the path to it, because T2 is T1's output parsed into kinds (§3.5).
+- C keeps N dialects of *meaning*. That is the "one concept, one implementation" line `filter-verdict.ts` already crossed for the boolean identities.
+
+B keeps ADR-0053 D-A1 intact and makes D-E3 structural. It costs one honest ADR amendment (D-D1). Its interim state — faces holding idempotent copies until S5 — is declared, and each copy has a deletion card, so it is not a workaround.
+
+**防 AI 写错 — making the AI mistake structurally harder.**
+
+An author, human or AI, cannot see which face a filter will land on. One RLS policy is read by F1, F7 and F9, and §2.5 item 1 shows those faces answering it differently. Per-face meaning cannot be learned.
+
+- Under B, a new face inherits the absorbed rules at its seam. It is correct by construction, not by someone remembering a checklist. F5 shows what happens to a face nobody remembered: it has no door at all.
+- B adds no consumer tolerance. It lowers once and refuses at the seams. Its widening of F5 and F11 implements operators the spec already declares (「声明而未兑现是实现缺口,补实现」); it is not leniency toward off-spec input.
+- C relies on a checklist, which is guidance an agent reads, not enforcement.
+
+**创业阶段不扩散需求 — no scope creep at the startup stage.**
+
+- **A** is a multi-week rewrite across three lanes. It is the expansion this axis defaults against.
+- **B** is bounded: about 6 cards, as estimated in §4.1. It deletes more code than it adds — 293 polarity lines, 41 whole-day call sites and 4 `undefined` copies. It creates no new authorable surface and **recommends no new gate**, per 「新增门禁默认否」.
+
+  Its staging (S2 before S5) is an internal work order. It exposes no dual spelling to authors. To honour 「过渡也从紧」, the S5 cards should queue as soon as S2 lands, not be left open-ended.
+- **C** costs nothing now, and then costs every future ruling.
+
+**The axes conflict only on A.** Long-term soundness favours it; the startup axis refuses it now.
+
+**Recommendation: B**, starting with the ADR-0053 D-D1 amendment. **A: not now.** Revisit it only after the next filter-semantics ruling is measured against §2.1's baseline under B. **C: not recommended**, because the tax and the divergences are measured, not predicted.
+
+This is a proposal. The build decision is the maintainer's.
+
+---
+
+## 6. Decisions for the maintainer
+
+| # | Question | Options | Recommendation |
+|---|---|---|---|
+| D1 | Build? | A full build · B first slice · C not now | **B** (§5) |
+| D2 | The slice's representation | T1 (`FilterCondition` → `FilterCondition`, `$and` conjuncts) · T2 (typed tree) | **T1** now; T2 only on measured need |
+| D3 | Where the lowering lives | `@objectstack/spec/data`, beside the doors · `@objectstack/core` | **spec**: the precedent is the doors themselves, and it adds no dependency edge. `formula` depends on spec alone, so core would add a `formula → core` edge. The tension with Prime Directive #2 is named, not hidden. |
+| D4 | Direct driver callers, which bypass the seams | (a) faces keep their local guards permanently, so the copies survive and S5 shrinks to analytics, F5 and F11 · (b) drivers receive seam-lowered input only, as #7872 chose for comparand types ("inherit it by receiving already-validated input") | **(b)**, following #7872. The in-repo direct driver callers named on #20446 (`5886202626`) are `metadata`'s loaders and history cleanup and the CLI's `secret-reference-union`. Whether any of them builds a filter the lowering would change was NOT MEASURED. |
+| D5 | ADR-0053 D-D1 | amend its placement · write a new ADR that supersedes it | amend the placement; keep D-A1 and D-E3 as they are |
+| D6 | F4, the reference matcher with no production caller | keep it as a test oracle, declared not-a-face and owed no ruling arms · retire it and point its 20 test files at F7 or F3 | **retire** it |
+| D7 | Scope of F3–F6, given the #5499 freeze dissolved on 2026-08-11 | in · out | **in**. Under B, F3 and F6 are seam-fed at no cost, and F5 needs its door either way. |
+
+---
+
+## Appendix A — method, reproduction, and what was NOT MEASURED
+
+**Probes.** They are scratch scripts, not committed.
+
+- Worktree sources ran under `tsx`. Package imports resolved to a `dist` built with `OS_SKIP_DTS=1` for `spec`, `types`, `core`, `observability`, `formula`, `driver-sql` and `driver-turso`, under the shared verify lock.
+- F1 and F2 ran as plain Node against their built `dist`. F1 used `better-sqlite3` `:memory:`. F2 called `buildWhereSQL` with a stub client.
+- §2.4: the fixture `{id:'1',d:'v1'}`, `{id:'2',d:'v2'}`, `{id:'3',d:null}`, `{id:'4'}`, with the five shapes shown. Each face was called at its own entry point, with no door in front. F5's controls are no `where`, `{d:'v1'}` and `{d:null}`.
+- §2.5 item 1: rows `t` = `2026-07-27T10:00:00.000Z`, `2026-07-28T10:00:00.000Z`, `2026-07-29T10:00:00.000Z` and `null`. The filter is `{t: {$lte: '2026-07-28'}}`. F1's column was declared `datetime`, and F9's compiled SQL was executed on SQLite.
+- §2.5 item 3: rows `ACME Corp`, `acme ltd` and `Beta`, with `$contains` `'acme'` and `'ACME'`.
+
+**Counts.**
+
+- **Face files per commit:** `git show --name-only` against the 15-file list of §1.1.
+- **The window:** `node scripts/pm/git-history.mjs log --since=2026-08-14 --ref=3711e0b763`. Its receipt reads "complete clone (no fetch)".
+- **Polarity copies:** non-comment lines from `nullValueSatisfiesOperator` to the next top-level declaration after `nullSafeNegationOperand`.
+- **Whole-day call sites:** `git grep -c -E "nextUtcCalendarDay\(|isUnboundedAbove\("` over non-test `src`.
+- **Case-set wiring:** `git grep -l` over non-spec test files.
+- **Rounds:** the number of `os-dev-report` comments on each card, read over REST.
+- **The driver conformance matrix:** `node scripts/check-driver-conformance.mjs`.
+
+**NOT MEASURED:**
+
+- PostgreSQL and MySQL for §2.4 and §2.5. Only SQLite was measured.
+- A live `mongod`: §2.4 reports F6's translation only.
+- A live Turso remote server: F2 was measured at compile time only.
+- Every HTTP door: the REST `?preview=` route, the analytics routes and the data routes.
+- The sibling repositories `objectui` and `cloud`.
+- The `undefined` path through direct driver callers, the security tenant check and the explain engine.
+- The effort figures in §4.1, which are estimates.
+
+## Appendix B — the 22 commits that edited three or more face files (2026-08-14 → `3711e0b763`)
+
+| Face files | Commit | Subject (abridged) | §4.3 class |
+|---|---|---|---|
+| 10 | `1a75e39d4a` | a datetime `$lte` / `$between` maximum on 9999-12-31 includes the whole last day (#20600) | structure |
+| 9 | `fb386074f5` | the engine's filter faces answer the staged `$empty` (#20444) | partly structure |
+| 8 | `f1e921ab8e` | `$empty` joins `FILTER_OPERATORS`; `is_empty` lowers to it (#20446) | partly structure |
+| 8 | `a646120dc7` | `FILTER_TEXT_CASES` declares a text operator over a stored non-string value | structure |
+| 5 | `6936d0755b` | per-aggregation filter on `engine.aggregate` | engine capability |
+| 4 | `8a44ce7182` | a `$like` / `$ilike` pattern holding U+0000 is refused | door |
+| 4 | `54bb2f125f` | the case-sensitive text family compiled per SQL dialect | dialect |
+| 4 | `2b53993aca` | both analytics filter faces answer `$empty` by declared type (#20445) | partly structure |
+| 4 | `0da638cd9f` | the closed `dateRange` preset vocabulary lowered once | front end |
+| 3 | `fd014b1713` | the `unknown` dialect arm folds `$icontains` portably | dialect |
+| 3 | `f6fa22ce1a` | a boolean aggregand column in the aggregation fixture | not filter semantics |
+| 3 | `df18120502` | a lowered operator key stops clobbering a sibling | clobber (T2 only) |
+| 3 | `dcad825d46` | the `$icontains` ASCII fold per dialect | dialect |
+| 3 | `be5c60291c` | eight more `IDataDriver` doors publish their declared type | not filter semantics |
+| 3 | `9dac1ae017` | `$exists` means HAS A VALUE on three faces | structure |
+| 3 | `96d8b20ee4` | docs: retire the dissolved #5499 freeze claims | not filter semantics |
+| 3 | `86c5052869` | a `dateRange` array that is not a two-bound window is refused once | front end |
+| 3 | `7c1039b388` | NativeSQL and the echo resolve a read-scope placeholder with the caller's context | front end |
+| 3 | `5c7cbe37e6` | refuse vacating read scopes on the echo and NativeSQL merge sites | door |
+| 3 | `5ba2ec3ca4` | a transport can declare it has no transactions | not filter semantics |
+| 3 | `51efbf1168` | type-gate a text operator over a declared temporal column | door |
+| 3 | `178325bcbe` | a no-value row satisfies `$nin` / `$notContains` in the reference matcher | structure |
