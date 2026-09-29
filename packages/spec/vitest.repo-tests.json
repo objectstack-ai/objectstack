@@ -1,6 +1,7 @@
 [
   "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
+  "scripts/conversions-major18-merge.test.ts",
   "scripts/count-shards-merge.test.ts",
   "scripts/def-key-collisions.test.ts",
   "scripts/dist-freshness-adoption.test.ts",

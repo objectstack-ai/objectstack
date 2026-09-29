@@ -64,7 +64,12 @@ import {
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
-import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
+import {
+  DatasetExecutor,
+  declaredDefaultGranularity,
+  resolveDimensionGranularity,
+  type DateGranularityValue,
+} from './dataset-executor.js';
 import {
   resolveDimensionLabels,
   createOrderLabelResolver,
@@ -354,6 +359,9 @@ const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
  *   `measures.revenue = {sql: 'annual_revenue'}` answers
  *   `where: {revenue: {$gt: 100}}` as `annual_revenue > ?`, and a
  *   dimensions-only lookup would have called `revenue` a missing column.
+ * - `'measure'` — {@link withDeclaredMeasureFormats}, matching
+ *   `lookupMember(…, 'measure')`, which looks in `cube.measures` only: a
+ *   measure column must never borrow a same-named dimension's entry.
  *
  * Extracted from #5520's gate so #5669's second caller reads the tree the same
  * way — two open-coded copies of `lookupMember` in one file is exactly how
@@ -362,15 +370,17 @@ const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
 function declaredMemberEntry(
   cube: Cube,
   member: string,
-  kind: 'dimension' | 'any',
+  kind: 'dimension' | 'measure' | 'any',
 ): { key: string; sql?: unknown } | undefined {
   const bags: Array<Record<string, { sql?: unknown } | undefined>> =
     kind === 'dimension'
       ? [cube.dimensions as Record<string, { sql?: unknown } | undefined>]
-      : [
-          cube.dimensions as Record<string, { sql?: unknown } | undefined>,
-          cube.measures as Record<string, { sql?: unknown } | undefined>,
-        ];
+      : kind === 'measure'
+        ? [cube.measures as Record<string, { sql?: unknown } | undefined>]
+        : [
+            cube.dimensions as Record<string, { sql?: unknown } | undefined>,
+            cube.measures as Record<string, { sql?: unknown } | undefined>,
+          ];
   // `key` is spread LAST in every arm: it is the bag key this member RESOLVED
   // to, and a `key` property on the cube entry itself must not shadow it.
   for (const bag of bags) {
@@ -411,6 +421,101 @@ function resolveMemberSource(
   // the column the strategies will emit.
   if (member.includes('.')) return { key: member, source: null };
   return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
+}
+
+/**
+ * `analytics_cube.dimensions.granularities` on the query doors: bucket every
+ * GROUPED time dimension that names no granularity at the default its cube
+ * dimension declares ({@link declaredDefaultGranularity} — a single-entry
+ * list).
+ *
+ * The compiled-dataset path has always done this, one layer up:
+ * `DatasetExecutor.buildQuery` fills the same default into the query it hands
+ * `query()`, and until this ran on the query doors that was the ONLY place the
+ * key was read. A cube registered through `AnalyticsServiceConfig.cubes` —
+ * the authoring door — never becomes a `CompiledDataset`, so its declared
+ * `granularities` reached no reader: a query grouping by the dimension got one
+ * group per distinct timestamp, the #3588 shape. Run here, the one rule covers
+ * every cube that answers the name, whoever produced it; on the dataset path
+ * it finds the default already filled and changes nothing.
+ *
+ * The same scoping `buildQuery` applies, and for the same reason (#5688):
+ *
+ * - a `timeDimensions` entry that names no granularity is filled only when its
+ *   dimension is also GROUPED (listed in `dimensions`) — an entry carrying
+ *   only a `dateRange` is a window, a filter, and must stay one;
+ * - a grouped time dimension with no `timeDimensions` entry at all gets one,
+ *   spelled as the `dimensions` entry spells it, because the strategies key a
+ *   bucket by that spelling;
+ * - a stated `granularity` is never overridden, and one outside the declared
+ *   list is not refused (the dataset path compares against no list either).
+ *
+ * Returns `query` itself when nothing applies, so a query with nothing to
+ * default reaches the strategies byte-identical to before.
+ */
+function withDeclaredGranularityDefaults(query: AnalyticsQuery, cube: Cube | undefined): AnalyticsQuery {
+  if (!cube || !query.dimensions?.length) return query;
+  const defaultOf = (member: string): DateGranularityValue | undefined => {
+    const entry = declaredMemberEntry(cube, member, 'dimension');
+    return entry ? declaredDefaultGranularity(cube.dimensions[entry.key]) : undefined;
+  };
+  const grouped = new Set(query.dimensions);
+  let filled = false;
+  const timeDimensions = (query.timeDimensions ?? []).map((t) => {
+    if (t.granularity || !grouped.has(t.dimension)) return t;
+    const granularity = defaultOf(t.dimension);
+    if (!granularity) return t;
+    filled = true;
+    return { ...t, granularity };
+  });
+  const named = new Set(timeDimensions.map((t) => t.dimension));
+  for (const member of query.dimensions) {
+    if (named.has(member)) continue;
+    const granularity = defaultOf(member);
+    if (!granularity) continue;
+    filled = true;
+    named.add(member);
+    timeDimensions.push({ dimension: member, granularity });
+  }
+  return filled ? { ...query, timeDimensions } : query;
+}
+
+/**
+ * `analytics_cube.measures.format` on the query doors: describe each MEASURE
+ * column of a result with the display `format` its cube measure declares.
+ *
+ * `fields[].format` is the presentation surface a client formats amounts from
+ * (`AnalyticsResult`); `GET /analytics/meta` deliberately does not carry it.
+ * The compiled-dataset path fills it from the dataset's own measure
+ * (`enrichResultColumns`), and the dataset compiler copies that same value onto
+ * the cube it mints — so for a compiled dataset the value read here is the one
+ * already there. A cube registered through `AnalyticsServiceConfig.cubes` has
+ * no dataset: until this ran, its authored `format` reached no reader and
+ * `POST /analytics/query` described the column with `name` and `type` only.
+ *
+ * Only columns the request named under `measures` are described (the
+ * strategies name a measure column by the request's own spelling), resolved
+ * through the measures bag alone. A value a column already carries is never
+ * replaced — this describes, it does not correct. Copy-on-write: the strategy,
+ * or the delegated fallback service, owns the object it returned.
+ */
+function withDeclaredMeasureFormats(
+  result: AnalyticsResult,
+  query: AnalyticsQuery,
+  cube: Cube | undefined,
+): AnalyticsResult {
+  if (!cube || !result?.fields?.length || !query.measures?.length) return result;
+  const requested = new Set(query.measures);
+  let fields: AnalyticsResult['fields'] | undefined;
+  result.fields.forEach((f, i) => {
+    if (f.format != null || !requested.has(f.name)) return;
+    const entry = declaredMemberEntry(cube, f.name, 'measure');
+    const format = entry ? cube.measures[entry.key]?.format : undefined;
+    if (typeof format !== 'string' || format === '') return;
+    fields ??= [...result.fields];
+    fields[i] = { ...f, format };
+  });
+  return fields ? { ...result, fields } : result;
 }
 
 /**
@@ -1492,7 +1597,13 @@ export class AnalyticsService implements IAnalyticsService {
     // period boundary. An unresolvable placeholder throws the resolver's
     // `FILTER_TOKEN_*` 400 instead of charting zero.
     const tokenCtx = filterTokenContextFrom(context, new Date());
-    const query = this.resolveQueryTokens(queryInput, tokenCtx);
+    // `analytics_cube.dimensions.granularities` — the cube's declared default
+    // bucket, filled in before the gates and strategy selection run, so both
+    // see the query that will actually be bucketed.
+    const query = withDeclaredGranularityDefaults(
+      this.resolveQueryTokens(queryInput, tokenCtx),
+      scope.getCube(queryInput.cube),
+    );
 
     this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
@@ -1508,7 +1619,12 @@ export class AnalyticsService implements IAnalyticsService {
         // service minted (e.g. `MemoryAnalyticsService`, which always echoes).
         // Gating any one of those would leave the others serving, which is the
         // shape the defect already had.
-        return this.applySqlEchoPolicy(await strategy.execute(query, ctx));
+        //
+        // `analytics_cube.measures.format` is described at the same seam, for
+        // the same reason: whichever strategy answered, the measure columns
+        // leave with the format the cube declares.
+        const result = await strategy.execute(query, ctx);
+        return this.applySqlEchoPolicy(withDeclaredMeasureFormats(result, query, scope.getCube(query.cube!)));
       } catch (e) {
         if ((e as { code?: string })?.code === 'RAW_SQL_UNSUPPORTED') {
           this.logger.warn(
@@ -2208,11 +2324,16 @@ export class AnalyticsService implements IAnalyticsService {
     // the same `FILTER_TOKEN_*` refusal), never a literal `{current_user_id}`
     // the real execution would not bind.
     const tokenCtx = filterTokenContextFrom(context, new Date());
-    const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
     // [#20381] Same request scope as `query()`: nothing minted here reaches the
     // shared registry, admitted or refused.
     const scope = this.requestScope();
+    // …and the same declared default bucket, so the dry run shows the
+    // statement `query()` would run rather than an unbucketed one.
+    const query = withDeclaredGranularityDefaults(
+      this.resolveQueryTokens(queryInput, tokenCtx),
+      scope.getCube(queryInput.cube),
+    );
     this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);

@@ -12481,6 +12481,122 @@ function rewriteDecisionModesInGraph(
   return changed ? { ...graph, nodes: nextNodes } : graph;
 }
 
+/**
+ * One conversion of an OPEN major, with its place in that major's application
+ * order (#20574).
+ *
+ * A major's list is APPLICATION order — the loader runs the conversions in
+ * sequence — but the major that retirements still add to is authored as
+ * entries, because a list appended at its end does not merge: every retirement
+ * PR inserted into the same gap, so any two in flight conflicted.
+ */
+interface OrderedConversion {
+  /** The conversion. Its IDENTIFIER is the key the list is kept sorted by. */
+  readonly conversion: MetadataConversion;
+  /** Where it applies within its major: ascending `order`, ties broken by the conversion's `id`. */
+  readonly order: number;
+}
+
+/** A major's conversions in application order: ascending `order`, ties by the conversion's `id`. */
+function inApplicationOrder(entries: readonly OrderedConversion[]): readonly MetadataConversion[] {
+  return [...entries]
+    .sort((a, b) => a.order - b.order || (a.conversion.id < b.conversion.id ? -1 : a.conversion.id > b.conversion.id ? 1 : 0))
+    .map((e) => e.conversion);
+}
+
+/**
+ * Major 18's conversions, one entry per conversion.
+ *
+ * ⚠️ SORTED BY THE CONVERSION'S IDENTIFIER, NOT BY APPLICATION ORDER — that is
+ * the point of the shape. Git reports a conflict whenever two branches insert
+ * into the SAME gap between two unchanged lines, whatever they insert, and
+ * GitHub's server-side merge runs no driver that could say otherwise. A list
+ * appended at its end is one gap, so any two retirements in flight conflicted
+ * here. Kept sorted by identifier, two retirements insert into different gaps
+ * and merge clean — one existing entry between them is enough. `order`, not the
+ * position in this list, says where a conversion applies: `ALL_CONVERSIONS`,
+ * which the loader runs in sequence, and step 18's `conversionIds` both read
+ * `CONVERSIONS_BY_MAJOR[18]`, which is this list in `order`.
+ *
+ * To add a conversion:
+ * - Insert `{ conversion: <identifier>, order: <n> }` where its identifier
+ *   sorts (code-unit order, as `<` compares two strings) — never at the end.
+ * - `order` is one more than the highest here. Two retirements in flight may
+ *   take the same number; they then apply in `id` order. One that must apply
+ *   BEFORE an existing entry takes a number between its neighbours' (`23.5`)
+ *   instead of renumbering them.
+ * - DEFINE it directly above the definition of the entry that follows it in
+ *   this list, so the conversion defined next after it is that entry. One that
+ *   sorts last is defined after every other conversion, directly above
+ *   `OrderedConversion`. The end of the definitions is one gap too: defining
+ *   every new conversion there conflicts exactly as appending here did.
+ *
+ * `scripts/conversions-major18-merge.test.ts` holds both rules for every entry
+ * added after this shape, and proves the merge.
+ */
+const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: actionAriaRemoved, order: 43 },
+  { conversion: apiEndpointCacheTtlToCacheTtlSeconds, order: 23 },
+  { conversion: chartConfigAriaRemoved, order: 32 },
+  { conversion: connectorConnectionTimeoutMsRemoved, order: 20 },
+  { conversion: connectorErrorMappingRemoved, order: 19 },
+  // The connector duration rename that applied just before these two
+  // (`connector-health-and-trigger-durations-unit-in-key`, between orders 24
+  // and 25) was absorbed by the two removals below, each of which strips the
+  // container a renamed key lived in — see its ABSORBED note.
+  { conversion: connectorResilienceKeysRemoved, order: 25 },
+  { conversion: connectorTriggersRemoved, order: 26 },
+  { conversion: cubeJoinSqlAndRelationshipRemoved, order: 9 },
+  { conversion: cubeMemberInnerNameRemoved, order: 44 },
+  { conversion: cubeSubDayGranularitiesRemoved, order: 8 },
+  { conversion: currencyConfigPrecisionRemoved, order: 41 },
+  { conversion: dashboardRefreshIntervalToRefreshIntervalSeconds, order: 24 },
+  { conversion: dashboardWidgetChartConfigStructureRemoved, order: 33 },
+  { conversion: elementFilterRemoved, order: 4 },
+  { conversion: elementFormRemoved, order: 5 },
+  { conversion: elementInputTargetVariableRemoved, order: 3 },
+  { conversion: fieldColumnListsCanonicalized, order: 6 },
+  { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
+  { conversion: fieldReferenceToAlias, order: 18 },
+  { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
+  { conversion: formLayoutInlineGridToVertical, order: 40 },
+  { conversion: formViewOptionDefaultRemoved, order: 17 },
+  { conversion: hookTimeoutToTimeoutMs, order: 21 },
+  { conversion: jobTimeoutToTimeoutMs, order: 22 },
+  { conversion: listViewSortStringClauseToArray, order: 30 },
+  { conversion: mappingLookupParamsRemoved, order: 11 },
+  { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
+  { conversion: metricFiltersRemoved, order: 7 },
+  { conversion: objectGridDefaultSortRemoved, order: 14 },
+  { conversion: objectKanbanQuickAddRemoved, order: 15 },
+  { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
+  { conversion: pageAssignedProfilesRemoved, order: 31 },
+  { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
+  { conversion: pageComponentResponsiveRemoved, order: 13 },
+  { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
+  { conversion: permissionRlsTagsRemoved, order: 42 },
+  { conversion: recordChatterPositionVocabulary, order: 2 },
+  { conversion: recordHighlightsFieldIconRemoved, order: 10 },
+  { conversion: reportJoinedChartRemoved, order: 38 },
+  { conversion: translationComponentSubmitLabelRemoved, order: 12 },
+  { conversion: translationPerAppSettingsRemoved, order: 34 },
+  { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewItemOwnerHiddenRemoved, order: 37 },
+  { conversion: viewListTabsRemoved, order: 46 },
+  { conversion: viewOverlayOwnerHiddenRemoved, order: 39 },
+  { conversion: viewPageMountRemoved, order: 29 },
+];
+
+/**
+ * Every conversion, grouped by the major that introduced its canonical shape
+ * (`toMajor`), each major's list in APPLICATION order: {@link ALL_CONVERSIONS}
+ * concatenates them by ascending major and the loader runs it in sequence.
+ *
+ * A released major's list is a plain array, closed with its release. The major
+ * that retirements still add to is authored as sorted entries with an explicit
+ * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
+ * conflict here; the next major takes the same shape when it opens.
+ */
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -12552,58 +12668,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     appHiddenToUnpublished,
     actionGlobalNavLocationRemoved,
   ],
-  18: [
-    fieldMalformedScalePrecisionRemoved,
-    recordChatterPositionVocabulary,
-    elementInputTargetVariableRemoved,
-    elementFilterRemoved,
-    elementFormRemoved,
-    fieldColumnListsCanonicalized,
-    metricFiltersRemoved,
-    cubeSubDayGranularitiesRemoved,
-    cubeJoinSqlAndRelationshipRemoved,
-    recordHighlightsFieldIconRemoved,
-    mappingLookupParamsRemoved,
-    translationComponentSubmitLabelRemoved,
-    pageComponentResponsiveRemoved,
-    objectGridDefaultSortRemoved,
-    objectKanbanQuickAddRemoved,
-    permissionAllowRestorePurgeRemoved,
-    formViewOptionDefaultRemoved,
-    fieldReferenceToAlias,
-    connectorErrorMappingRemoved,
-    connectorConnectionTimeoutMsRemoved,
-    hookTimeoutToTimeoutMs,
-    jobTimeoutToTimeoutMs,
-    apiEndpointCacheTtlToCacheTtlSeconds,
-    dashboardRefreshIntervalToRefreshIntervalSeconds,
-    // The connector duration rename that sat here
-    // (`connector-health-and-trigger-durations-unit-in-key`) was absorbed by the
-    // two removals below, each of which strips the container a renamed key
-    // lived in — see its ABSORBED note.
-    connectorResilienceKeysRemoved,
-    connectorTriggersRemoved,
-    memoryPersistenceAutoSaveIntervalToMs,
-    tursoConfigTimeoutToTimeoutMs,
-    viewPageMountRemoved,
-    listViewSortStringClauseToArray,
-    pageAssignedProfilesRemoved,
-    chartConfigAriaRemoved,
-    dashboardWidgetChartConfigStructureRemoved,
-    translationPerAppSettingsRemoved,
-    objectTenancyOrganizationFieldRemoved,
-    pageComponentFilterRecordToRuleArray,
-    viewItemOwnerHiddenRemoved,
-    reportJoinedChartRemoved,
-    viewOverlayOwnerHiddenRemoved,
-    formLayoutInlineGridToVertical,
-    currencyConfigPrecisionRemoved,
-    permissionRlsTagsRemoved,
-    actionAriaRemoved,
-    cubeMemberInnerNameRemoved,
-    flowDecisionModeInclusiveExplicit,
-    viewListTabsRemoved,
-  ],
+  18: inApplicationOrder(MAJOR_18_CONVERSIONS),
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */

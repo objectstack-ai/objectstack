@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_position: {
     label: "Puesto",
     pluralLabel: "Puestos",
-    description: "Definiciones de puesto para el control de acceso RBAC",
+    description: "Definiciones de puesto para la distribución de capacidades (ADR-0090)",
     fields: {
       label: {
         label: "Nombre visible"
