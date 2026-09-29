@@ -17,6 +17,11 @@
  * whole environment (200), and `DELETE /packages/:id` reached the door's own
  * organization check (400 `TENANT_SCOPE_REQUIRED`) instead of the gate's 403.
  *
+ * The same held for a set the left organization bound to one of its own
+ * POSITIONS: with no tenant the position read is installation-wide, so the left
+ * organization's copy of `org_member` fed its bindings to anyone still an
+ * `org_member` somewhere.
+ *
  * The rule now: with no active organization only the global grants apply, and
  * a grant scoped to an organization applies only while that organization is the
  * active tenant (`resolveUserAuthzGrants`, `@objectstack/core`).
@@ -75,8 +80,10 @@ const TABLES: Record<string, any[]> = {
         { user_id: 'u_exmember', organization_id: BETA, role: 'member' },
         { user_id: 'u_global', organization_id: BETA, role: 'member' },
         { user_id: 'u_admin', organization_id: ALPHA, role: 'owner' },
+        { user_id: 'u_posex', organization_id: BETA, role: 'member' },
+        { user_id: 'u_posmember', organization_id: ALPHA, role: 'member' },
     ],
-    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin']
+    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember']
         .map((id) => ({ id, email: `${id}@example.com` })),
     sys_user_permission_set: [
         { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
@@ -88,10 +95,22 @@ const TABLES: Record<string, any[]> = {
     sys_permission_set: [
         { id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata', 'studio.access'] },
         { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        { id: 'ps_members', name: 'alpha_member_tools', system_permissions: ['manage_metadata'] },
+    ],
+    // The per-organization copies of the `org_member` built-in a walled catalog
+    // holds; org_alpha bound a metadata-editing set to ITS copy. This double
+    // ignores the read's tenant, which is exactly what an organization-less
+    // resolution's installation-wide `sys_position` read does.
+    sys_position: [
+        { id: 'pos_member_alpha', name: 'org_member', organization_id: ALPHA },
+        { id: 'pos_member_beta', name: 'org_member', organization_id: BETA },
+    ],
+    sys_position_permission_set: [
+        { position_id: 'pos_member_alpha', permission_set_id: 'ps_members' },
     ],
 };
 
-type Who = 'member' | 'exmember' | 'gone' | 'global' | 'admin' | 'admin_orgless';
+type Who = 'member' | 'exmember' | 'gone' | 'global' | 'admin' | 'admin_orgless' | 'posex' | 'posmember';
 
 /** Every session but the last names `org_alpha`. */
 const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeOrganizationId?: string }> = {
@@ -101,6 +120,8 @@ const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeO
     global: { id: 'ses_global', token: 'tok_global', userId: 'u_global', activeOrganizationId: ALPHA },
     admin: { id: 'ses_admin', token: 'tok_admin', userId: 'u_admin', activeOrganizationId: ALPHA },
     admin_orgless: { id: 'ses_admin2', token: 'tok_admin2', userId: 'u_admin' },
+    posex: { id: 'ses_posex', token: 'tok_posex', userId: 'u_posex', activeOrganizationId: ALPHA },
+    posmember: { id: 'ses_posmember', token: 'tok_posmember', userId: 'u_posmember', activeOrganizationId: ALPHA },
 };
 
 function rig() {
@@ -185,6 +206,9 @@ afterEach(() => { warnSpy.mockRestore(); });
 const REMOVED: Array<[Who, string]> = [
     ['exmember', 'a member removed from org_alpha, still a member of org_beta'],
     ['gone', 'a member removed from org_alpha, with no membership left anywhere'],
+    // The same set reached through a POSITION: org_alpha bound it to its own
+    // copy of `org_member`, and this member is still an `org_member` elsewhere.
+    ['posex', 'a member removed from org_alpha whose org_member binding there carried manage_metadata'],
 ];
 
 describe('[#20515] a removed member\'s organization-scoped manage_metadata no longer passes the /packages gate', () => {
@@ -221,6 +245,13 @@ describe('[#20515] what the rule leaves unchanged', () => {
     it('CONTROL · a current member with the same grant and org_alpha active passes: DELETE /packages/:id answers 200', async () => {
         const r = rig();
         const answer = await r.call('DELETE', 'member', `/packages/${PKG}`);
+        expect(answer.status).toBe(200);
+        expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
+    });
+
+    it('CONTROL · the position-bound set: a current org_alpha member with org_alpha active passes: 200', async () => {
+        const r = rig();
+        const answer = await r.call('DELETE', 'posmember', `/packages/${PKG}`);
         expect(answer.status).toBe(200);
         expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
     });

@@ -1903,6 +1903,65 @@ describe('[#20515] with no active organization, only global grants apply', () =>
     });
   });
 
+  /**
+   * §6a — position-bound sets. Under a walled posture the catalog holds one
+   * copy of each built-in position PER ORGANIZATION (`everyone`, `org_member`,
+   * …), and an organization binds its own sets to its own copies. With no
+   * tenant the `sys_position` read is installation-wide, so every
+   * organization's copy of a name the caller holds used to feed its bindings in.
+   * This double ignores the context's tenant exactly as that read does.
+   */
+  describe('§6a: a position row scoped to an organization binds nothing with no tenant', () => {
+    const catalog = () => ({
+      sys_position: [
+        { id: 'pos_member_alpha', name: 'org_member', organization_id: ALPHA },
+        { id: 'pos_member_beta', name: 'org_member', organization_id: BETA },
+        { id: 'pos_everyone_alpha', name: 'everyone', organization_id: ALPHA },
+        { id: 'pos_everyone_global', name: 'everyone', organization_id: null },
+      ],
+      sys_position_permission_set: [
+        { position_id: 'pos_member_alpha', permission_set_id: 'ps_alpha_members' },
+        { position_id: 'pos_everyone_alpha', permission_set_id: 'ps_alpha_everyone' },
+        { position_id: 'pos_everyone_global', permission_set_id: 'ps_global_everyone' },
+      ],
+      sys_permission_set: [
+        { id: 'ps_alpha_members', name: 'alpha_member_tools', system_permissions: ['manage_metadata'] },
+        { id: 'ps_alpha_everyone', name: 'alpha_everyone_extra' },
+        { id: 'ps_global_everyone', name: 'global_everyone_default' },
+      ],
+    });
+    /** Removed from alpha, still an `org_member` of beta — the role name alpha bound its set to. */
+    const exMember = () => makeQl({
+      sys_user: [{ id: 'u_ex' }],
+      sys_member: [{ user_id: 'u_ex', organization_id: BETA, role: 'member' }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+      ...catalog(),
+    });
+
+    it('no tenant: neither alpha\'s org_member binding nor alpha\'s everyone binding applies; the global everyone binding does', async () => {
+      const grants = await resolveUserAuthzGrants(exMember(), 'u_ex', {});
+      expect(grants.positions).toContain('org_member');
+      expect([...grants.permissions].sort()).toEqual(['global_everyone_default']);
+      expect(grants.systemPermissions).not.toContain('manage_metadata');
+    });
+
+    it('in beta: alpha\'s bindings still do not apply; in alpha (a current member there): they do', async () => {
+      const inBeta = await resolveUserAuthzGrants(exMember(), 'u_ex', { tenantId: BETA });
+      expect([...inBeta.permissions].sort()).toEqual(['global_everyone_default']);
+      const alphaMember = makeQl({
+        sys_user: [{ id: 'u_in' }],
+        sys_member: [{ user_id: 'u_in', organization_id: ALPHA, role: 'member' }],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+        ...catalog(),
+      });
+      const inAlpha = await resolveUserAuthzGrants(alphaMember, 'u_in', { tenantId: ALPHA });
+      expect([...inAlpha.permissions].sort()).toEqual(['alpha_everyone_extra', 'alpha_member_tools', 'global_everyone_default']);
+      expect(inAlpha.systemPermissions).toContain('manage_metadata');
+    });
+  });
+
   describe('through the session arm: the removed member whose claim is dropped', () => {
     /**
      * `u_ex` was removed from `org_alpha` and is still a member of `org_beta`;
