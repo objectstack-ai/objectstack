@@ -737,6 +737,7 @@
     "TursoDriverSpec (const)",
     "TursoTransportMode (type)",
     "TursoTransportModeSchema (const)",
+    "UNBOUNDED_ABOVE (const)",
     "UNRESOLVED_PLACEHOLDER_REFUSED (const)",
     "URL_CREDENTIAL_QUERY_PARAM_REFUSED (const)",
     "URL_EMBEDDED_CREDENTIAL_REFUSED (const)",

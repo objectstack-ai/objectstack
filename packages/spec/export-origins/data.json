@@ -724,6 +724,7 @@
     "TursoDriverSpec": "src/data/driver/turso.zod.ts#TursoDriverSpec (const)",
     "TursoTransportMode": "src/data/driver/turso.zod.ts#TursoTransportMode (type)",
     "TursoTransportModeSchema": "src/data/driver/turso.zod.ts#TursoTransportModeSchema (const)",
+    "UNBOUNDED_ABOVE": "src/data/calendar-day.ts#UNBOUNDED_ABOVE (const)",
     "UNRESOLVED_PLACEHOLDER_REFUSED": "src/data/driver/common.zod.ts#UNRESOLVED_PLACEHOLDER_REFUSED (const)",
     "URL_CREDENTIAL_QUERY_PARAM_REFUSED": "src/data/driver/common.zod.ts#URL_CREDENTIAL_QUERY_PARAM_REFUSED (const)",
     "URL_EMBEDDED_CREDENTIAL_REFUSED": "src/data/driver/common.zod.ts#URL_EMBEDDED_CREDENTIAL_REFUSED (const)",
