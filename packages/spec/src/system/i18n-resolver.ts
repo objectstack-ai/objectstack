@@ -1227,24 +1227,74 @@ function lookupGlobalFilterOption(
   return undefined;
 }
 
+/** A plain (non-array) object, or `undefined`. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** A global-filter option value the bundle can address (`String(value)`). */
+function isOptionValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+/**
+ * [#20680] The packaged counterpart of one addressable part of a dashboard —
+ * a widget, a global filter, a filter option — found in `parent[key]` (an
+ * array) by the key the bundle addresses it by.
+ *
+ * Three answers, and the difference between the first two is the point:
+ *
+ *  - `undefined` when `parent` is unknown — no packaged base was supplied, so
+ *    nothing may be inferred and the catalog keeps applying
+ *    ({@link valueOverridesPackagedBase} answers `false` for it);
+ *  - `{}` when the base IS known but carries no such part — the part was
+ *    authored after the fact (a widget the tenant added), so every string on
+ *    it counts as diverged, as a scalar the packaged object never declared
+ *    does under #8284;
+ *  - the packaged part itself otherwise.
+ */
+function packagedDashboardPart(
+  parent: Record<string, unknown> | undefined,
+  key: 'widgets' | 'globalFilters' | 'options',
+  matches: (candidate: Record<string, any>) => boolean,
+): Record<string, unknown> | undefined {
+  if (parent === undefined) return undefined;
+  const list = parent[key];
+  if (!Array.isArray(list)) return {};
+  for (const candidate of list) {
+    const record = asRecord(candidate);
+    if (record !== undefined && matches(record)) return record;
+  }
+  return {};
+}
+
 /**
  * Overlay `dashboards.<name>.globalFilters.<key>.{label,options.<value>}`
  * onto one authored filter (#16772). Returns the input object itself when
  * nothing resolved, so `translateDashboard` can tell "untouched" from
  * "rebuilt" by identity and leave `globalFilters` off the copy when no filter
  * moved.
+ *
+ * `packagedFilter` is the same filter in the dashboard's packaged base
+ * ({@link packagedDashboardPart}); a label that diverged from it is authored
+ * and keeps its value (#20680, see {@link translateDashboard}).
  */
 function translateGlobalFilter(
   filter: GlobalFilterLike,
   bundle: TranslationBundle,
   dashboardName: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedFilter: Record<string, unknown> | undefined,
 ): GlobalFilterLike {
   const key = globalFilterKey(filter);
   if (key === undefined) return filter;
 
   let next = filter;
-  const label = lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
+  const label = valueOverridesPackagedBase(packagedFilter, 'label', filter.label)
+    ? undefined
+    : lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
   if (label !== undefined) next = { ...next, label };
 
   if (Array.isArray(filter.options)) {
@@ -1257,6 +1307,12 @@ function translateGlobalFilter(
       // is the one spelling every value has; `null`/`undefined`/objects have
       // no such spelling and are left alone.
       if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return option;
+      const packagedOption = packagedDashboardPart(
+        packagedFilter,
+        'options',
+        (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(value),
+      );
+      if (valueOverridesPackagedBase(packagedOption, 'label', option.label)) return option;
       const translated = lookupGlobalFilterOption(bundle, dashboardName, key, String(value), opts);
       if (translated === undefined) return option;
       changed = true;
@@ -1319,25 +1375,64 @@ function lookupWidgetAttr(
  * a string. Only filters the bundle actually addresses are rebuilt, and
  * `globalFilters` is left off the copy entirely when none moved, so a
  * dashboard without filters gains no invented key.
+ *
+ * ## [#20680] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog is keyed by dashboard name and widget id, and it is the
+ * packaged translation of the PACKAGED declaration. Consulting it first
+ * overwrote every string authored on top of that declaration — measured: an
+ * org overlay on the platform's own `system_overview` (ADR-0126 Regime O,
+ * "yours to edit directly") published `200`, `?layers=true` showed it as
+ * effective, the metadata protocol's item and list reads both returned it,
+ * and the `/meta` item and list doors — the list is what the console draws
+ * the board from — kept serving the shipped widget title, because
+ * `platform-objects` ships an `en` bundle whose `widgets.<id>.title` repeats
+ * it. A dashboard whose bundle carries no widget titles (the showcase
+ * control) served the same overlay correctly.
+ *
+ * So every translatable string here follows the one sentence ADR-0029 D9.2a
+ * records for both object layers — *an explicit override beats a packaged
+ * default* — by the same comparison #8284 was ruled on: the catalog applies
+ * only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies (the packaged dashboard declaration, before any tenant overlay —
+ * `getPackagedDashboardBase` on the metadata protocol). Each string is judged
+ * against ITS packaged counterpart, found by the key the bundle addresses it
+ * by (widget `id`, filter key, option `value`), so an edited widget title
+ * leaves every other widget translated; a widget, filter or option the base
+ * does not carry was authored after the fact and counts as diverged (the
+ * object rule's "a base that declares no such scalar"). No base supplied is
+ * the pre-#20680 behaviour, unchanged: the catalog applies.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
   if (!name || !bundle) return doc;
 
-  const label = lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
-  const description = lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', doc.label)
+    ? doc.label
+    : lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
+  const description = valueOverridesPackagedBase(base, 'description', doc.description)
+    ? doc.description
+    : lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
 
   let globalFilters: GlobalFilterLike[] | undefined;
   if (Array.isArray(doc.globalFilters)) {
     let changed = false;
     const rebuilt = doc.globalFilters.map((filter) => {
       if (!filter || typeof filter !== 'object') return filter;
-      const next = translateGlobalFilter(filter, bundle, name, opts);
+      const key = globalFilterKey(filter);
+      const packagedFilter = packagedDashboardPart(
+        base,
+        'globalFilters',
+        (candidate) => key !== undefined && globalFilterKey(candidate) === key,
+      );
+      const next = translateGlobalFilter(filter, bundle, name, opts, packagedFilter);
       if (next !== filter) changed = true;
       return next;
     });
@@ -1348,11 +1443,24 @@ export function translateDashboard<T extends DashboardLike>(
     ? doc.widgets.map((w) => {
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
-        const title = lookupWidgetAttr(bundle, name, w.id, 'title', opts);
+        const packagedWidget = packagedDashboardPart(base, 'widgets', (candidate) => candidate.id === w.id);
+        const title = valueOverridesPackagedBase(packagedWidget, 'title', w.title)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'title', opts);
         if (title) next.title = title;
-        const desc = lookupWidgetAttr(bundle, name, w.id, 'description', opts);
+        const desc = valueOverridesPackagedBase(packagedWidget, 'description', w.description)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'description', opts);
         if (desc) next.description = desc;
-        const subCaption = lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
+        // The sub-caption's packaged counterpart is the packaged widget's own
+        // `options` bag — `{}` when that widget declared none, so an authored
+        // sub-caption on it still counts as diverged.
+        const packagedOptions = packagedWidget === undefined
+          ? undefined
+          : asRecord(packagedWidget.options) ?? {};
+        const subCaption = valueOverridesPackagedBase(packagedOptions, 'description', w.options?.description)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
         if (subCaption) next.options = { ...w.options, description: subCaption };
         return next;
       })
@@ -2534,6 +2642,19 @@ export function scalarOverridesPackagedBase(
   key: 'label' | 'pluralLabel' | 'description',
   value: unknown,
 ): boolean {
+  return valueOverridesPackagedBase(base, key, value);
+}
+
+/**
+ * [#20680] The ONE comparison behind {@link scalarOverridesPackagedBase},
+ * keyed by any attribute name — the exported predicate's key union names the
+ * object scalars its two callers ask about, and the dashboard translator
+ * ({@link translateDashboard}) asks the same question of `title`, which that
+ * union does not carry. One implementation, so the three conservative edges
+ * documented on the exported predicate hold for every caller alike; ⛔ never
+ * a second copy of the comparison.
+ */
+function valueOverridesPackagedBase(base: unknown, key: string, value: unknown): boolean {
   if (!base || typeof base !== 'object') return false;
   if (typeof value !== 'string' || value.length === 0) return false;
   return (base as Record<string, unknown>)[key] !== value;
