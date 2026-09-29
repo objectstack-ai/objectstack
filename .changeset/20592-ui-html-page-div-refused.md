@@ -17,8 +17,8 @@ the layout containers to reach for instead only when their layout is wanted, and
 says how to prove the rewrite done.
 
 What moves for a consumer of this package: `MIGRATIONS_BY_MAJOR` carries the
-entry, and `objectstack migrate meta` prints it for a range that reaches
-protocol 18. Nothing else does. The protocol-18 step is not cut yet, so
-`spec-changes.json` and the protocol upgrade guide, which project the steps up
-to the current protocol major, are unchanged, and no schema accepts or refuses
-anything it did not before.
+entry, and `objectstack migrate meta` prints it, because its default range
+already runs to protocol 18, the highest major with a step. Nothing else does.
+The protocol-18 step is not cut yet, so `spec-changes.json` and the protocol
+upgrade guide, which project the steps up to the current protocol major, are
+unchanged, and no schema accepts or refuses anything it did not before.
