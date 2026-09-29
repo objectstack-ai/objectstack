@@ -8,7 +8,9 @@ import {
     MemoryHttpOutbox,
     HttpDispatcher,
     signHttpBody,
+    HTTP_SIGNATURE_HEADER,
 } from '@objectstack/service-messaging';
+import { signHttpBody as coreSignHttpBody, HTTP_SIGNATURE_HEADER as CORE_HTTP_SIGNATURE_HEADER } from '@objectstack/core';
 import { AutomationEngine } from '../engine.js';
 import { registerHttpNodes } from './http-nodes.js';
 
@@ -313,5 +315,18 @@ describe('http node signing — durable arm with the outbox wired', () => {
         expect(await outbox.list()).toHaveLength(0);
         await dispatcher.tick();
         expect(received).toHaveLength(0);
+    });
+});
+
+/**
+ * One scheme, not two copies: the signer the node uses (`@objectstack/core`'s)
+ * and the one `@objectstack/service-messaging` publishes to receivers are the
+ * SAME binding, not two implementations that happen to agree today.
+ */
+describe('http signature scheme — one binding', () => {
+    it("service-messaging's published signer and header are @objectstack/core's own", () => {
+        expect(signHttpBody).toBe(coreSignHttpBody);
+        expect(HTTP_SIGNATURE_HEADER).toBe(CORE_HTTP_SIGNATURE_HEADER);
+        expect(HTTP_SIGNATURE_HEADER.toLowerCase()).toBe(SIGNATURE_HEADER_LC);
     });
 });

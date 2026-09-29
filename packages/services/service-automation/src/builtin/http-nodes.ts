@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, HttpConfigSchema } from '@objectstack/spec/automation';
 import type { HttpConfigParsed } from '@objectstack/spec/automation';
@@ -32,6 +33,14 @@ import { parseNodeConfig } from './parse-config.js';
  *    path; that descriptor key was retired in #6748 — a suspending HTTP node
  *    would declare `supportsPause: true` plus a `resumeAuthority` and return
  *    `suspend: true`, which is the mechanism the engine actually enforces.)
+ *
+ * `signingSecret` means `X-Objectstack-Signature` on EVERY arm, with ONE scheme
+ * (`@objectstack/core`'s `signHttpBody`): the outbox signs the body it will
+ * POST, and the inline call — including the durable arm's no-outbox fallback —
+ * signs the exact bytes it hands `fetch`, the empty string when there is no
+ * body. An authored `''` sends unsigned on purpose, on every arm; a non-empty
+ * value that renders to nothing at run time refuses the node rather than let
+ * the call leave unsigned.
  */
 
 /** Structural view of `service-messaging`'s HTTP outbox surface (ADR-0018 M3). */
@@ -122,6 +131,21 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const timeoutMs = cfg.timeoutMs;
             const signingSecret = cfg.signingSecret;
 
+            // A secret the author SET that rendered to nothing — a `{token}`
+            // with no value in this run — cannot sign, and sending anyway is
+            // the one outcome the key exists to prevent: the receiver gets a
+            // request it cannot authenticate while the run reports success.
+            // Only an authored `''` means "unsigned on purpose" (the outbox
+            // reads it the same way). A non-string result never reaches here:
+            // the contract parse above already refused it, naming the key.
+            if (typeof raw.signingSecret === 'string' && raw.signingSecret !== '' && !signingSecret) {
+                return refuseNode(
+                    `http '${node.id}': config.signingSecret is set but resolved to no value in this run, so the ` +
+                        `request cannot carry ${HTTP_SIGNATURE_HEADER} and was not sent. Give the value its template ` +
+                        `reads to the run, or author signingSecret: '' to send unsigned on purpose.`,
+                );
+            }
+
             // ── Durable mode: enqueue onto the messaging HTTP outbox ──────────
             if (durable) {
                 const messaging = getMessaging();
@@ -208,7 +232,8 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                         return { success: false, error: `http (durable) failed to enqueue: ${(err as Error).message}` };
                     }
                 }
-                // No outbox available — degrade to a best-effort inline call.
+                // No outbox available — degrade to a best-effort inline call,
+                // which signs exactly as the outbox would have.
                 ctx.logger.warn(
                     `[http] node '${node.id}' requested durable delivery but no messaging HTTP outbox is wired; falling back to inline fetch`,
                 );
@@ -222,11 +247,19 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const reads = /^(GET|HEAD|OPTIONS)$/i.test(method);
             const controller = new AbortController();
             const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+            // The exact bytes this arm sends, and therefore the bytes it signs.
+            // They are this arm's own serialization, not the outbox's
+            // `deliveryBody`; a receiver verifies over what it received, so each
+            // arm signs what it sends. No body is signed as the empty string.
+            const requestBody = body !== undefined && body !== null ? JSON.stringify(body) : undefined;
+            const requestHeaders = signingSecret
+                ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
+                : headers;
             try {
                 const response = await fetch(url, {
                     method,
-                    headers,
-                    body: body !== undefined && body !== null ? JSON.stringify(body) : undefined,
+                    headers: requestHeaders,
+                    body: requestBody,
                     signal: controller.signal,
                 });
                 const data = await readBody(response);
