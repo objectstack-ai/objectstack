@@ -28,11 +28,11 @@ const ordersCube: Cube = {
   title: 'Orders',
   sql: 'orders',
   measures: {
-    count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-    total_amount: { name: 'total_amount', label: 'Total Amount', type: 'sum', sql: 'amount' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    total_amount: { label: 'Total Amount', type: 'sum', sql: 'amount' },
   },
   dimensions: {
-    status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+    status: { label: 'Status', type: 'string', sql: 'status' },
   },
 };
 

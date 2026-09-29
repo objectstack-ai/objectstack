@@ -204,11 +204,11 @@ describe('[#6814] the analytics face answers count_distinct the same number', ()
     title: 'Agg',
     sql: TABLE,
     measures: {
-      distinctStage: { name: 'distinct_stage', label: 'Distinct stage', type: 'count_distinct', sql: 'stage' },
-      distinctScore: { name: 'distinct_score', label: 'Distinct score', type: 'count_distinct', sql: 'score' },
+      distinctStage: { label: 'Distinct stage', type: 'count_distinct', sql: 'stage' },
+      distinctScore: { label: 'Distinct score', type: 'count_distinct', sql: 'score' },
     },
     dimensions: {
-      region: { name: 'region', label: 'Region', type: 'string', sql: 'region' },
+      region: { label: 'Region', type: 'string', sql: 'region' },
     },
   } as unknown as Cube;
 

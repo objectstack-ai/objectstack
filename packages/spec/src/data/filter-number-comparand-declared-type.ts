@@ -126,11 +126,53 @@
  * are pinned to partition `FieldOperatorsSchema`'s keys, so an operator
  * declared later fails that pin instead of slipping past the door.
  *
- * ## Only STRING comparands are judged
+ * ## Which comparands: a number passes, a string is read, a boolean, a `Date` and an array are refused
  *
- * A number, `null`, a `Date`, a boolean, a `bigint`: the card and its
- * direction are about strings, and the other types are the comparand-type
- * door's or no door's. Unjudged means the verdict is `passes`.
+ * [#20502] One verdict for every comparand at a judged position, widened from
+ * strings alone. The direction (triage, recorded on #20502): *the published
+ * contract refuses any comparand against a declared `number` field that is
+ * neither a number nor a string the numeric grammar admits … with
+ * `INVALID_FILTER` / 400 naming the field; the string rule stays exactly as it
+ * was.* Split by what the comparand IS:
+ *
+ * - **A number** passes, and so does a `bigint` — a number too, which the
+ *   comparand-type door (`filter-comparand-type.ts`) narrows to its exact JS
+ *   number or refuses beyond ±2^53, one door later.
+ * - **`null`** passes: it is the null test (`{ amount: null }`,
+ *   `{ $ne: null }`), and its per-position legality is the comparand-shape
+ *   door's (a `null` under `$gt` is refused there).
+ * - **A string** is read by the grammar above: narrowed or refused.
+ * - **A boolean, a `Date`, an array** — refused ({@link NonNumericValueForm}).
+ *   Each is inside the comparand-type door's accepted set (an array outside
+ *   the list operators is left to the layers beneath it), so without this door
+ *   each reached the backends and was answered three ways. Measured on the
+ *   card, over rows 5, 12 and 30 of a `number` field: `$gt true` matched no
+ *   row on InMemoryDriver, every row on SQLite (numeric affinity reads `true`
+ *   as 1), and was a `DATABASE_ERROR` / 500 on PostgreSQL, which refuses to
+ *   bind a boolean or a timestamp against a numeric column; a `Date` matched
+ *   no row on the first two and was the same 500 on the third. The
+ *   per-aggregation `filter` and `having` are evaluated by the engine on every
+ *   driver, where JS coercion read `true` and `[1]` as 1 (`$gt true` counted
+ *   every row, and kept every group) and a `Date` matched nothing. ⛔ No
+ *   driver-side coercion of `true` to 1 answers this: one refusal, before any
+ *   read, on every driver and position.
+ * - **Everything else passes this verdict** — `undefined`, a plain object, a
+ *   `{ $field }` reference, a `Map` or class instance, a symbol, a function.
+ *   A `{ $field }` reference is not a literal. The rest are outside the
+ *   comparand-type door's accepted set, and that door refuses them with
+ *   `INVALID_FILTER` / 400 on EVERY field, at every position and on both
+ *   filter spellings, in words that name the set. The engine runs the two
+ *   doors in a different order per position (this door first on the object
+ *   spelling of `where` and on a per-aggregation `filter`, the comparand-type
+ *   door first on the `FilterArray` spelling and on `having`), so a second
+ *   refusal here would answer one mistake with two sets of words depending on
+ *   where it was written; passing it keeps the one refusal it already had.
+ *
+ * An array at an EQUALITY slot (implicit, `$eq`, `$ne`) is refused one door
+ * earlier still, by the comparand-shape door, whose remedy (`$in` /
+ * `$contains` / `$nin`) is the one for that slot; the verdict still answers
+ * `door-refusal` for it, and the case table places its array rows where the
+ * shape door does not speak (the ordering operators and the list members).
  *
  * ## A `{placeholder}` against a number field is refused, not stepped around
  *
@@ -179,6 +221,24 @@
  * Deliberately NOT a driver case-set (`*-conformance.ts`): drivers sit beneath
  * this door, so the file is named for the door it declares, as
  * `filter-text-operator-declared-type.ts` is.
+ *
+ * ## [#20510] A `having` column is not a declared field, and only `where` binds
+ *
+ * At `having` the door is handed the numeric CLASS the engine derived for an
+ * aggregated-row column (#20127's `aggregatedRowColumnClasses`) — an
+ * aggregation alias or a groupBy projection — never a real field declaration,
+ * so `numberComparandRefusalMessage` names it "a numeric aggregated column"
+ * when {@link NumberComparandRefusalSite.aggregated} is set. The
+ * per-aggregation `filter` is NOT this case: it narrows the object's RAW rows
+ * before any aggregation runs, against the object's real declared fields (the
+ * engine door's own header records this), so it keeps "a declared … field".
+ * And of the three positions this door judges, only `where` (both spellings)
+ * ever reaches a live driver bind — `having` and the per-aggregation `filter`
+ * are evaluated by the engine itself, on every driver, before any row is
+ * read — so the `not-a-number` / `boolean` / `date` clauses name PostgreSQL's
+ * server error only when {@link NumberComparandRefusalSite.boundByDriver} is
+ * true (the default, so a `where` site is unaffected). Both flags are the
+ * engine door's to set; this module only reads them.
  *
  * @see FILTER_COMPARAND_TYPE_CASES — the syntax door this one runs beside.
  * @see TEXT_OPERATOR_DOOR_CASES — the declared-type door this one is shaped after.
@@ -303,6 +363,50 @@ export function parseNumericString(value: string): number | undefined {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * The comparands that are not strings
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * [#20502] The NON-string comparands the verdict refuses against a judged
+ * field, by what they are — the module header says why each is here and why
+ * nothing else is:
+ *
+ * - `boolean` — `true` / `false`.
+ * - `date` — a `Date` instance, valid or not.
+ * - `array` — a list where one value belongs (a scalar operator's comparand,
+ *   or a member of a list operator's list).
+ */
+export const NON_NUMERIC_VALUE_FORMS = ['boolean', 'date', 'array'] as const;
+
+export type NonNumericValueForm = (typeof NON_NUMERIC_VALUE_FORMS)[number];
+
+/** Every reason the verdict refuses a comparand: a string's form, or a non-string's. */
+export type NonNumericComparandForm = NonNumericStringForm | NonNumericValueForm;
+
+/**
+ * The {@link NonNumericValueForm} a non-string comparand is, or `null` for one
+ * the verdict passes (a number, a `bigint`, `null`, and everything outside the
+ * comparand-type door's accepted set, which that door refuses itself).
+ */
+function nonNumericValueForm(comparand: unknown): NonNumericValueForm | null {
+  if (typeof comparand === 'boolean') return 'boolean';
+  if (comparand instanceof Date) return 'date';
+  if (Array.isArray(comparand)) return 'array';
+  return null;
+}
+
+/**
+ * The comparand as a refusal renders it: {@link shapePreview}, except that a
+ * `Date` is named as one — its JSON form is a quoted string, which would read
+ * as the string the grammar refuses rather than the instant it is.
+ */
+function comparandPreview(comparand: unknown): string {
+  if (!(comparand instanceof Date)) return shapePreview(comparand);
+  const time = comparand.getTime();
+  return `Date(${Number.isNaN(time) ? 'Invalid Date' : comparand.toISOString()})`;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  * The fields and positions the door judges
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -346,16 +450,19 @@ export function numberComparandFieldVerdict(
 /**
  * The door's four answers for ONE comparand at a judged position.
  *
- * - `door-refusal` — refused before any driver runs (`INVALID_FILTER` / 400).
+ * - `door-refusal` — refused before any driver runs (`INVALID_FILTER` / 400):
+ *   a string the grammar does not read as a number, a boolean, a `Date` or an
+ *   array ({@link NonNumericComparandForm}).
  * - `narrows` — a numeric string; the door replaces it with `value`.
  * - `passes` — not this door's subject (the field is not numeric, or the
- *   comparand is not a string); nothing changes.
+ *   comparand is a number, a `bigint`, `null`, or a value the comparand-type
+ *   door refuses itself — see the module header); nothing changes.
  * - `deferred` — a `formula` whose `returnType` is unreadable; nothing changes.
  */
 export type NumberComparandDoorVerdict =
   | {
       readonly verdict: 'door-refusal';
-      readonly form: NonNumericStringForm;
+      readonly form: NonNumericComparandForm;
       readonly code: 'INVALID_FILTER';
       readonly status: 400;
     }
@@ -373,7 +480,12 @@ export function numberComparandDoorVerdict(
 ): NumberComparandDoorVerdict {
   const judged = numberComparandFieldVerdict(field);
   if (judged === 'deferred') return { verdict: 'deferred' };
-  if (judged === 'not-judged' || typeof comparand !== 'string') return { verdict: 'passes' };
+  if (judged === 'not-judged') return { verdict: 'passes' };
+  if (typeof comparand !== 'string') {
+    const form = nonNumericValueForm(comparand);
+    if (form === null) return { verdict: 'passes' };
+    return { verdict: 'door-refusal', form, code: 'INVALID_FILTER', status: 400 };
+  }
   const reading = readNumericString(comparand);
   if (reading.numeric) return { verdict: 'narrows', value: reading.value };
   return { verdict: 'door-refusal', form: reading.form, code: 'INVALID_FILTER', status: 400 };
@@ -384,12 +496,23 @@ export function numberComparandDoorVerdict(
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * What is wrong with the string, per form — the clause after "which is not a
- * number:". Each clause states only what holds for its form: `"+5"` is
+ * What is wrong with the comparand, per form — the clause after "which is not
+ * a number:". Each clause states only what holds for its form: `"+5"` is
  * refused for its spelling alone, so its clause claims no divergence between
- * backends, while the card's `"abc"` names the one it measured.
+ * backends, while the card's `"abc"` names the one it measured, and so do the
+ * boolean and `Date` clauses (#20502's measurement).
+ *
+ * [#20510] Three forms — `not-a-number`, `boolean`, `date` — name PostgreSQL's
+ * own server error, which is a fact about a position the DRIVER binds
+ * (`where`, on both spellings): the comparand reaches a live bind and
+ * PostgreSQL refuses it there. At `having` and the per-aggregation `filter`
+ * the engine evaluates the clause itself, in JS, on every driver, before any
+ * row is read — no driver ever sees the comparand, so no driver ever answers
+ * it, and naming PostgreSQL there would describe a bind that never happens.
+ * Their entries are a function of {@link NumberComparandRefusalSite.boundByDriver}
+ * so the one clause serves both kinds of position honestly.
  */
-const FORM_SENTENCE: Readonly<Record<NonNumericStringForm, string>> = {
+const FORM_SENTENCE: Readonly<Record<NonNumericComparandForm, string | ((boundByDriver: boolean) => string)>> = {
   'empty': 'a blank string names no number (to match a missing value, write {"$eq": null}).',
   'padded': 'it carries surrounding whitespace.',
   'placeholder': 'a {placeholder} resolves to an id or a date, never to a number.',
@@ -397,7 +520,14 @@ const FORM_SENTENCE: Readonly<Record<NonNumericStringForm, string>> = {
   'non-finite': 'Infinity, NaN and out-of-range values name no finite number.',
   'digit-separator': 'digit grouping and decimal commas are a locale spelling, not a number.',
   'non-json-spelling': 'a leading "+" or zero, or a bare leading or trailing ".", is not a JSON number.',
-  'not-a-number': 'it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).',
+  'not-a-number': (boundByDriver) =>
+    `it has no numeric reading${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error).' : '.'}`,
+  'boolean': (boundByDriver) =>
+    `a boolean names no number (true is not 1)${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error).' : '.'}`,
+  'date': (boundByDriver) =>
+    `a Date is an instant, not a number${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error)' : ''}`
+    + '; compare a Date with a date or datetime field.',
+  'array': 'a list is not one number; to match any of several numbers use $in, and for a range $between, each member a number.',
 };
 
 /**
@@ -412,18 +542,42 @@ const NUMBER_COMPARAND_REFUSAL_TAIL =
 
 /** Where the refused comparand sits, and what the door read there. */
 export interface NumberComparandRefusalSite {
-  /** The filter key — a declared field of the object. */
+  /** The filter key — a declared field of the object, or (`aggregated`) an aggregated-row column. */
   readonly field: string;
-  /** Its declared `type`. */
+  /**
+   * Its declared `type` — or, when {@link NumberComparandRefusalSite.aggregated}
+   * is set, the member of the numeric class the engine derived for the column
+   * (`number`); an aggregated column has no declared `FieldType` of its own,
+   * and the message does not print this value for one.
+   */
   readonly declaredType: string;
   /** `formula` only — its declared `returnType`. */
   readonly returnType?: string;
   /** The key path of the comparand, e.g. `where.amount.$gt` or `where.amount.$in[1]`. */
   readonly path: string;
-  /** The refused comparand. */
-  readonly value: string;
+  /** The refused comparand — a string, a boolean, a `Date` or an array ({@link NonNumericComparandForm}). */
+  readonly value: unknown;
   /** Why it is not numeric — `door-refusal`'s `form`. */
-  readonly form: NonNumericStringForm;
+  readonly form: NonNumericComparandForm;
+  /**
+   * [#20510] `true` when `field` names an AGGREGATED-row column (`having`) —
+   * an aggregation alias or a groupBy projection — rather than a declared
+   * field of the object. The message then reads "a numeric aggregated
+   * column", never "a declared … field": at `having` the column is the
+   * engine's own projection, not the caller's record. Default `false`.
+   */
+  readonly aggregated?: boolean;
+  /**
+   * [#20510] `true` when this position is one the DRIVER binds directly
+   * (`where`, both spellings) — the only place an unrefused comparand could
+   * reach a live bind and provoke a driver's own error. `having` and the
+   * per-aggregation `filter` are evaluated by the engine itself, before any
+   * bind, on every driver alike, so the `not-a-number` / `boolean` / `date`
+   * clauses name PostgreSQL's server error only when this is `true`. Default
+   * `true`, so an existing `where` site (and a site built before this field
+   * existed) renders byte-for-byte as before.
+   */
+  readonly boundByDriver?: boolean;
 }
 
 /**
@@ -432,12 +586,14 @@ export interface NumberComparandRefusalSite {
  * `context` is the caller prefix the engine's refusals carry (`find('deal')`).
  */
 export function numberComparandRefusalMessage(site: NumberComparandRefusalSite, context?: string): string {
-  const declared = site.returnType === undefined
-    ? `${site.declaredType} field`
-    : `${site.declaredType} field returning ${site.returnType}`;
+  const subject = site.aggregated
+    ? 'a numeric aggregated column'
+    : `a declared ${site.returnType === undefined ? `${site.declaredType} field` : `${site.declaredType} field returning ${site.returnType}`}`;
+  const clause = FORM_SENTENCE[site.form];
+  const sentence = typeof clause === 'function' ? clause(site.boundByDriver ?? true) : clause;
   return (
-    `${context ? `${context}: ` : ''}filter on '${site.field}' compares a declared ${declared} against `
-    + `${shapePreview(site.value)} at ${site.path}, which is not a number: ${FORM_SENTENCE[site.form]}`
+    `${context ? `${context}: ` : ''}filter on '${site.field}' compares ${subject} against `
+    + `${comparandPreview(site.value)} at ${site.path}, which is not a number: ${sentence}`
     + NUMBER_COMPARAND_REFUSAL_TAIL
   );
 }
@@ -608,7 +764,7 @@ interface NumberComparandDoorCaseBase {
 /** A case the door must refuse — before any driver runs. */
 export interface NumberComparandDoorRefusalCase extends NumberComparandDoorCaseBase {
   readonly verdict: 'door-refusal';
-  readonly form: NonNumericStringForm;
+  readonly form: NonNumericComparandForm;
   /** The ADR-0112 code the refusal must carry … */
   readonly code: 'INVALID_FILTER';
   /** … beside this status. */
@@ -656,15 +812,33 @@ function slotPosition(key: string, slot: Slot): string {
   return `${key}.${slot.op}[${slot.index}]`;
 }
 
-function filterAt(key: string, slot: Slot, comparand: unknown): FilterCondition {
+/** A `Date` or an array is mutable: every filter gets its own, so no suite can move another's. */
+function freshComparand(comparand: unknown): unknown {
+  if (comparand instanceof Date) return new Date(comparand.getTime());
+  if (Array.isArray(comparand)) return comparand.map(freshComparand);
+  return comparand;
+}
+
+function filterAt(key: string, slot: Slot, given: unknown): FilterCondition {
+  const comparand = freshComparand(given);
   if (slot.kind === 'implicit') return { [key]: comparand } as FilterCondition;
   if (slot.kind === 'scalar') return { [key]: { [slot.op]: comparand } } as FilterCondition;
   const list = slot.index === 0 ? [comparand, LIST_NEIGHBOUR] : [LIST_NEIGHBOUR, comparand];
   return { [key]: { [slot.op]: list } } as FilterCondition;
 }
 
-/** The four groups of {@link NUMBER_COMPARAND_DOOR_CASES}, which also prefix each case name. */
-type CaseGroup = 'census' | 'position' | 'grammar' | 'unjudged';
+/** The five groups of {@link NUMBER_COMPARAND_DOOR_CASES}, which also prefix each case name. */
+type CaseGroup = 'census' | 'position' | 'grammar' | 'unjudged' | 'value';
+
+/**
+ * Does the door judge this slot at all? The verdict is defined for a JUDGED
+ * position only; a flag operator's comparand (`$null: true`) is never handed
+ * to it, so its row passes whatever the verdict would say of a boolean.
+ */
+function isJudgedSlot(slot: Slot): boolean {
+  if (slot.kind !== 'scalar') return true;
+  return (NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS as readonly string[]).includes(slot.op);
+}
 
 function caseFor(
   group: CaseGroup,
@@ -673,11 +847,13 @@ function caseFor(
   comparand: unknown,
   note?: string,
 ): NumberComparandDoorCase {
-  const verdict = numberComparandDoorVerdict(field, comparand);
+  const verdict: NumberComparandDoorVerdict = isJudgedSlot(slot)
+    ? numberComparandDoorVerdict(field, comparand)
+    : { verdict: 'passes' };
   const position = slotPosition(field.name, slot);
   const declared = field.returnType ? `${field.type} returning ${field.returnType}` : field.type;
   const base = {
-    name: `[${group}] ${position} = ${shapePreview(comparand)} over ${declared} — ${verdict.verdict}`,
+    name: `[${group}] ${position} = ${comparandPreview(comparand)} over ${declared} — ${verdict.verdict}`,
     key: field.name,
     declaredType: field.type,
     ...(field.returnType ? { returnType: field.returnType } : {}),
@@ -694,7 +870,7 @@ function caseFor(
         form: verdict.form,
         code: verdict.code,
         status: verdict.status,
-        mustMention: [field.name, field.type, shapePreview(comparand), position],
+        mustMention: [field.name, field.type, comparandPreview(comparand), position],
       };
     case 'narrows':
       return { ...base, verdict: 'narrows', value: verdict.value, expectedFilter: () => filterAt(field.name, slot, verdict.value) };
@@ -729,6 +905,16 @@ const JUDGED_SLOTS: readonly Slot[] = [
   ]),
 ];
 
+/** The `Date` the `value` rows compare with — any instant; a filter holds a copy of it. */
+const VALUE_DATE = new Date(Date.UTC(2026, 0, 1));
+
+/**
+ * The equality slots — implicit, `$eq`, `$ne` — where an array is the
+ * comparand-SHAPE door's refusal, one door before this one (module header).
+ */
+const isEqualitySlot = (slot: Slot): boolean =>
+  slot.kind === 'implicit' || (slot.kind === 'scalar' && (slot.op === '$eq' || slot.op === '$ne'));
+
 /**
  * The cases, derived rather than hand-kept:
  *
@@ -741,6 +927,12 @@ const JUDGED_SLOTS: readonly Slot[] = [
  *    on `f_number`.
  * 4. **The unjudged positions** — `$null`, `$exists`, `$empty` and a
  *    `{ $field }` reference on `f_number` pass.
+ * 5. **The non-string comparands** ([#20502]) — `false` at `$gt` on every
+ *    judged field; `true` and a `Date` at every judged position on
+ *    `f_number`, and an array at every one but the equality slots (the shape
+ *    door's); all refused. Beside them, what passes: `null` as the null test,
+ *    and a boolean or a `Date` against the field classes that hold one (a
+ *    `boolean` field, a `datetime` field) — not this door's subject.
  */
 export const NUMBER_COMPARAND_DOOR_CASES: readonly NumberComparandDoorCase[] = [
   ...NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.map((field) =>
@@ -760,4 +952,24 @@ export const NUMBER_COMPARAND_DOOR_CASES: readonly NumberComparandDoorCase[] = [
     'An emptiness test takes a boolean flag, not a value of the field.'),
   caseFor('unjudged', fixtureField('f_number'), { kind: 'scalar', op: '$gt' }, { $field: 'f_currency' },
     'A field reference is not a literal.'),
+  ...NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS
+    .filter((field) => numberComparandFieldVerdict(field) === 'judged')
+    .map((field) => caseFor('value', field, { kind: 'scalar', op: '$gt' }, false,
+      'A boolean names no number on any judged type.')),
+  ...JUDGED_SLOTS.flatMap((slot) => [
+    caseFor('value', fixtureField('f_number'), slot, true,
+      'The card: SQLite read true as 1, PostgreSQL answered a server error, the in-process evaluator coerced it.'),
+    caseFor('value', fixtureField('f_number'), slot, VALUE_DATE,
+      'The card: no rows on memory and SQLite, a server error on PostgreSQL.'),
+    ...(isEqualitySlot(slot) ? [] : [caseFor('value', fixtureField('f_number'), slot, [LIST_NEIGHBOUR],
+      'A list where one value belongs; the in-process evaluator read [10] as 10.')]),
+  ]),
+  caseFor('value', fixtureField('f_number'), { kind: 'implicit' }, null,
+    'A null comparand is the null test, not a value to read as a number.'),
+  caseFor('value', fixtureField('f_number'), { kind: 'scalar', op: '$ne' }, null,
+    'The negated null test.'),
+  caseFor('value', fixtureField('f_boolean'), { kind: 'scalar', op: '$eq' }, true,
+    'A boolean against a boolean field is not this door\'s subject.'),
+  caseFor('value', fixtureField('f_datetime'), { kind: 'scalar', op: '$gt' }, VALUE_DATE,
+    'A Date against a datetime field is the temporal door\'s subject, not this one\'s.'),
 ];

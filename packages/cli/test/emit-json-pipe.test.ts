@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const execFileP = promisify(execFile);
 
@@ -185,8 +186,11 @@ describe('os validate --json over a pipe', () => {
       join(configDir, 'objectstack.config.ts'),
       // #8687: no stray top-level `name` — it would add a 901st (unrecognized_keys)
       // error and break the exact-count assertion below.
-      `export default ${JSON.stringify({ objects }, null, 2)};\n`,
+      // `strict: false`: the 900 issues are the DOOR's parse to report — the
+      // strict producer would refuse at load (#20367 ruling B keeps the shape).
+      defineStackSource({ objects }, { strict: false }),
     );
+    linkSpec(configDir);
   });
 
   afterAll(() => {

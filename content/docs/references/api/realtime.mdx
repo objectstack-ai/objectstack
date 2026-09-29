@@ -37,7 +37,7 @@ const result = RealtimeConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique subscription identifier |
-| **events** | `{ type: Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
+| **events** | `{ type: Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| …>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
 | **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol to use |
 | **channel** | `string` | optional | Optional channel name for grouping subscriptions |
 
@@ -51,7 +51,7 @@ const result = RealtimeConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique event identifier |
-| **type** | `string` | ✅ | Event type (e.g., record.created, record.updated) |
+| **type** | `string` | ✅ | Event type (e.g., data.record.created, data.records.updated) |
 | **object** | `string` | optional | Object name the event relates to |
 | **action** | `Enum<'created' \| 'updated' \| 'deleted'>` | optional | Action performed |
 | **payload** | `Record<string, any>` | ✅ | Event payload data |
@@ -64,14 +64,15 @@ const result = RealtimeConfigSchema.parse(data);
 
 ## RealtimeEventType
 
-Realtime event type 
+Realtime event type: a record-change event name the runtime emits
 
 ### Allowed Values
 
-* `record.created`
-* `record.updated`
-* `record.deleted`
-* `field.changed`
+* `data.record.created`
+* `data.record.updated`
+* `data.record.deleted`
+* `data.records.updated`
+* `data.records.deleted`
 
 
 ---
@@ -97,7 +98,7 @@ Realtime event type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique subscription identifier |
-| **events** | `{ type: Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
+| **events** | `{ type: Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| …>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
 | **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol to use |
 | **channel** | `string` | optional | Optional channel name for grouping subscriptions |
 
@@ -105,7 +106,7 @@ Realtime event type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>` | ✅ | Type of event to subscribe to |
+| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| …>` | ✅ | Type of event to subscribe to |
 | **object** | `string` | optional | Object name to subscribe to |
 | **filters** | `any` | optional | Filter conditions |
 
@@ -118,7 +119,7 @@ Realtime event type
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>` | ✅ | Type of event to subscribe to |
+| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| 'data.records.updated' \| 'data.records.deleted'>` | ✅ | Type of event to subscribe to |
 | **object** | `string` | optional | Object name to subscribe to |
 | **filters** | `any` | optional | Filter conditions |
 

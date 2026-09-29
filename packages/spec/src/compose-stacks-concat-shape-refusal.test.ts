@@ -49,8 +49,15 @@ function refusal(fn: () => unknown): Envelope | null {
 
 const mf = (id: string) => ({ id, name: id.split('.').pop()!, version: '1.0.0', type: 'app' as const });
 
-/** A stack object nobody parsed. */
-const handBuilt = (overrides: Record<string, unknown>) => overrides as unknown as ObjectStackDefinition;
+/**
+ * A BUILT stack whose keys were rewritten after `defineStack` returned — the
+ * shape nothing parsed. Since #20367 ruling B a hand-built literal is refused
+ * at `composeStacks`' step 0 (no provenance mark), but the mark survives an
+ * in-place mutation of a built stack, so this is the route by which a malformed
+ * collection still reaches the step under test.
+ */
+const handBuilt = (overrides: Record<string, unknown>) =>
+  Object.assign(defineStack({} as never, { strict: false }), overrides) as unknown as ObjectStackDefinition;
 
 /** A stack through `defineStack`'s `strict: false` door, which skips the parse. */
 const unparsed = (overrides: Record<string, unknown>) => defineStack(overrides as never, { strict: false });

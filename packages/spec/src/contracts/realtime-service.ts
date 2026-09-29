@@ -17,7 +17,7 @@
  * A realtime event payload
  */
 export interface RealtimeEventPayload {
-    /** Event type (e.g. 'record.created', 'record.updated') */
+    /** Event type (e.g. 'data.record.created', 'data.records.updated', 'metadata.object.updated') */
     type: string;
     /** Object name the event relates to */
     object?: string;

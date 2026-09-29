@@ -815,7 +815,7 @@ const lifecycleDuration = (what: string) =>
   z.string().regex(LIFECYCLE_DURATION_REGEX, `${what} must be a duration literal like '6h', '14d', '12w' or '7y'`);
 
 /**
- * [#10165] The `onlyWhen` row-filter value union, shared by
+ * [commit 801296050] The `onlyWhen` row-filter value union, shared by
  * `retention.onlyWhen` and `ttl.onlyWhen` — ONE shape on purpose: the two
  * blocks are mirrors (maintainer ruling 2026-08-20, option A: give `ttl` an
  * `onlyWhen` mirroring `retention`'s), and the runtime enforces them through
@@ -1002,8 +1002,8 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: `lifecycle.archive.after ('${lc.archive.after}') must equal retention.maxAge ('${lc.retention.maxAge}') — the hot window ends where the archive begins`,
     });
   }
-  // [#10527] The retention + ttl + archive triple — the alignment above, one
-  // policy wider. Since [#10347] the Archiver selects the rows it moves by the
+  // [commit 5649efbf9] The retention + ttl + archive triple — the alignment above, one
+  // policy wider. Since [commit 530c1df65] the Archiver selects the rows it moves by the
   // ttl cutoff (`ttl.field` older than `ttl.expireAfter`) whenever `ttl` is
   // declared, and by `created_at`/`archive.after` only when it is not — so on
   // this triple the age bound (`retention.maxAge`, pinned equal to
@@ -1033,20 +1033,20 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: 'lifecycle.retention.onlyWhen cannot be combined with archive — the Archiver moves rows by age alone and would archive rows the filter protects',
     });
   }
-  // [#10165] ttl.onlyWhen mirrors both of retention.onlyWhen's conflicts, from
+  // [commit 801296050] ttl.onlyWhen mirrors both of retention.onlyWhen's conflicts, from
   // the Reaper's actual semantics rather than by symmetry alone:
   // - rotation: the Rotator DROPs whole physical shards; a shard is dropped by
   //   age with no row read, so rows the filter protects go down with it.
   // - archive: `reapObject` returns into `archiveObject` before the ttl reap
   //   ever runs, so with `archive` declared the filter guards a code path that
-  //   is never executed (declared ≠ enforced). Since [#10347] the Archiver does
+  //   is never executed (declared ≠ enforced). Since [commit 530c1df65] the Archiver does
   //   apply the declared ttl window itself — it selects candidates by
   //   `ttl.field` past `ttl.expireAfter` instead of `created_at` past
   //   `archive.after` — but its candidate read is that cutoff and nothing else
   //   (`where: { [ttl.field]: { $lt: cutoff } }`, no `onlyWhen` spread the way
   //   `reap()` spreads it into its scope), so every due row is copied and
   //   hot-deleted whether or not the filter names it. That is the whole of what
-  //   [#10347] changed here: the WINDOW an author declares now carries over to
+  //   [commit 530c1df65] changed here: the WINDOW an author declares now carries over to
   //   the Archiver, the FILTER still does not — so the refusal stands, on a
   //   narrower reason than the "moves rows by age alone" this bullet used to
   //   give. Whether `onlyWhen` should become meaningful under `archive` (the
@@ -1788,7 +1788,7 @@ const ObjectSchemaBase = strictObject(
       // `ui/view.zod.ts` declares its own `userActions` with a completely
       // disjoint vocabulary (sort/search/filter/refresh/rowHeight/group/
       // addRecordForm/editInline/hideFields/rowColor/buttons — the last three
-      // adopted at #11195), so an author who learned that block writes these
+      // adopted by commit b37231883), so an author who learned that block writes these
       // here. `group`/`hideFields`/`rowColor` were refused by name but without
       // a curated pointer until #11459 gave them one too, mirroring the other
       // four.
@@ -2186,7 +2186,7 @@ const ObjectSchemaBase = strictObject(
    * `recordFormNavigation.ts` branches on `editMode !== 'page'`, and
    * `AppContent`'s `handleEdit` dispatcher routes on it).
    *
-   * Declared here by the #11408 maintainer ruling (the measured residue of the
+   * Declared here by commit f11fc61c5's maintainer ruling (the measured residue of the
    * #10144 declare-or-rule-out census): objectui had published the key to
    * authors (CHANGELOG + live runtime read) while this strict parse rejected
    * it. objectui's `ObjectSchemaClientExtensions.editMode` mirror retires in a
@@ -2314,7 +2314,7 @@ const ObjectSchemaBase = strictObject(
     /**
      * Master switch — a STANDING policy held at every redemption, not a
      * mint-time check (#14033; the same shape as the `eligibility` predicate
-     * below, #13608).
+     * below, commit fc9ba76a5).
      *
      * When false (default), no share links can be issued for this object AND
      * no share link on it resolves: `resolveToken` re-reads this switch on
@@ -2351,7 +2351,7 @@ const ObjectSchemaBase = strictObject(
     /**
      * Optional CEL predicate over the candidate record. It is a STANDING
      * policy about which records may be reached anonymously, and the platform
-     * holds it at BOTH points in a link's life (#13608):
+     * holds it at BOTH points in a link's life (commit fc9ba76a5):
      *
      *   - **at mint** — `createLink` refuses with 422 when the predicate is
      *     false (e.g. "draft records cannot be shared") and writes no link row;
@@ -2363,7 +2363,7 @@ const ObjectSchemaBase = strictObject(
      * ⚠️ Tightening this policy therefore cuts off already-minted links, on
      * purpose — no revocation step, no grace period. That is the point of a
      * standing policy, and it is a behaviour change for deployments that
-     * shipped before #13608.
+     * shipped before commit fc9ba76a5.
      *
      * Fail-CLOSED at both points: a predicate that does not compile, that
      * faults on the record, or that answers anything other than `true` refuses
@@ -2715,7 +2715,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
 }
 
 /**
- * [#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055] Under
+ * [#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055] Under
  * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
  * on every `master_detail` reference, and REFUSES an explicit
  * `required: false` there, loudly.
@@ -2728,7 +2728,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * `masterFK IN (accessible master ids)` can never match null — the row is
  * invisible to everyone — and every later by-id write answers
  * `422 MISSING_REQUIRED_FIELD`. Today only the security gate
- * (`assertControlledByParentWrite`) closes that shape, and #8772 measured that
+ * (`assertControlledByParentWrite`) closes that shape, and commit 75b7c240a records that
  * the declaration and the enforcement disagree. This makes the unsafe shape
  * impossible to NEWLY declare:
  *
@@ -2741,7 +2741,7 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * Lives at `create()` — the authoring surface (ADR-0077) — beside
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
  * `.parse()`/`.safeParse()`: metadata already at rest must keep loading.
- * Runtime tolerance is the other half of the #8772 ruling — the security
+ * Runtime tolerance is the other half of commit 75b7c240a's ruling — the security
  * gate's fallbacks stay, and the lint rule stays `warning` until v18 — so
  * publish-time refuses new declarations while runtime tolerates old ones.
  *
@@ -2907,7 +2907,7 @@ export const ObjectSchema = lazySchema(() => {
     // declared can never resolve — refuse at the authoring seam, beside its
     // sibling assertions, rather than one error per seeded row at load time.
     assertReferenceViaSiblingDeclared(cfg.name, cfg.fields);
-    // [#9138 — #8772 ruling, Direction 2] A `controlled_by_parent` object's
+    // [#9138 — commit 75b7c240a, ruling Direction 2] A `controlled_by_parent` object's
     // `master_detail` reference is forced `required: true` (an explicit
     // `required: false` throws, loudly) so the unsafe shape cannot be newly
     // declared. Raw `.parse()`/`.safeParse()` stay tolerant for metadata at

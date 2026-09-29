@@ -1,5 +1,101 @@
 # @objectstack/sdui-parser
 
+## 17.5.0
+
+### Minor Changes
+
+- 2e0401a: Retire the zero-writer `binding: 'field'` arm from all three of this copy's declarations, so the save gate states the same one-word vocabulary the renderer already does (#16583)
+  
+  objectui retired the same arm from its copy of this package: the maintainer
+  ruling of 2026-09-07 on objectui#6950 (director decision batch #69) took the
+  serializer's input boundary, objectui#8315 took the two faces in `types.ts`,
+  both citing enforce-or-remove on a zero-writer measurement. That ruling names
+  coordinates in objectui only, and nothing propagates a retirement across the
+  two copies of `packages/sdui-parser` — so this one kept the arm on all three
+  declarations while the renderer that ships beside it no longer has it. This is
+  that port, measured here rather than inherited.
+  
+  - `RegistryConfigLike.inputs[].binding` — now `'object'`
+  - `ManifestInput.binding` — now `'object'`
+  - `ValidationResult.bindings[].kind` — now `'object'`
+  
+  **Breaking for TypeScript consumers, deliberately, and compile-time only.** A
+  registry config, a hand-written `Manifest` literal or a `bindings[]` entry that
+  spells `'field'` is now a `tsc` error. Runtime behaviour does not move: types
+  are erased, this package runs no validator over a `Manifest` it is handed, and
+  `validateTree` still forwards whatever the manifest says. A pin in
+  `src/__tests__/binding-field-retired.test.ts` states that limit outright, so the
+  narrowing is not mistaken for a runtime rejection, and it goes red in both
+  directions — a `@ts-expect-error` that stops being needed is itself `ts(2578)`,
+  so widening any of the three declarations back fails the package typecheck on
+  the very line that documents the retirement.
+  
+  **Nothing measured has to be rewritten, and the key was never author-writable
+  here.** `binding` is not a spec key, has no Zod schema and no stored
+  representation; it reaches this package only through the structural
+  `RegistryConfigLike` boundary, which exists so the package can be fed
+  objectui's `ComponentRegistry.getAllConfigs()` without depending on it. Four
+  readings on this tree, each with its control: `binding: 'field'` has zero
+  writers in this repository against a firing `binding: 'object'` control of 2
+  (both under `packages/sdui-parser/src/__tests__/`); the tracked
+  `sdui.manifest.json` — the only manifest this repo produces — carries zero
+  `binding` keys across all 339 of its inputs; nothing outside the package reads
+  `binding` or `bindings[].kind` at all, the package's single importer
+  (`@objectstack/lint`'s `validate-jsx-pages.ts`) destructuring `{ diagnostics }`
+  only; and no arm of the vocabulary is branched on anywhere, so no consumer
+  loses a case it was handling.
+  
+  **Why the reader face is narrowed too.** The counter-argument — producer to
+  reader is a subset relation, so a permissive reader is not wrong — was answered
+  rather than assumed away. `ManifestInput` is not a pure reader face
+  (`manifestFromConfigs` returns it), and `bindings[].kind` is a pure **producer**
+  face where the relation inverts: a wider union there accepts nothing extra, it
+  obliges every consumer to handle an arm this package cannot emit. The two are
+  coupled by `validateTree`'s `kind: input.binding` assignment, so narrowing one
+  alone would need a cast at the only conversion site — the lenient consumer-side
+  fallback Prime Directive #12 bans. The reasoning now lives on the declarations
+  themselves, where a later reader lands.
+  
+  The reopen route is the ruling's own: a measured need for field bindings is
+  filed as a widening with the vocabulary decided then, not pre-declared here for
+  a producer that does not exist.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The retired arm has no metadata surface for `objectstack migrate meta` to reach: `binding` is not a `packages/spec` key, has no Zod schema and no stored `sys_metadata` representation — it is a member of three published TypeScript interfaces in `packages/sdui-parser`, delivered to the only affected party (a TypeScript consumer) by the compiler at their own call site. There is consequently no stored shape to rewrite and no prescription to ship, which the body states rather than omits: the arm has zero writers in this repository (firing `binding: 'object'` control = 2), zero `binding` keys of any spelling in the tracked `sdui.manifest.json` (339 inputs), and zero readers outside the package. -->
+- fbc12be: The save gate now stamps `inert-quick-add` and `member-type-mismatch`, the two diagnostics that existed only in objectui's copy of this parser — so a page no longer saves clean here and renders with a different verdict there (#17645).
+  
+  The two copies of this parser owe each other one thing: byte agreement on the accepted grammar and on diagnostic codes. This copy runs the **save gate** and objectui's runs the **renderer**, so a code on one side only is a dialect — the author gets one reading when they save and another when the page draws, which is surface-dependent and therefore reaches them as intermittent. Measured at the ported revision: objectui stamped 26 codes, this copy stamped 24, and the missing two were exactly these.
+  
+  - **`inert-quick-add`** (warning) — `quickAdd` on `<object-kanban>` reaches no control. The Quick Add button is gated on **both** `quickAdd` and an `onQuickAdd` handler, and `onQuickAdd` takes a function, which no page on this tier can write (this tier parses, it never executes) and which the board substitutes none of its own for. It **replaces** the `unknown-prop` this copy used to emit for the key, which was false against the contract: `ComponentPropsMap['object-kanban']` publishes `quickAdd`, so an author who checked the spec found the warning contradicted and kept a key that will never do anything. Asked ahead of the declaration lookup on purpose — the claim is about the render path, so declaring the key must not silently disarm it. A falsy value and an unevaluated braced expression are deliberately untouched.
+  - **`member-type-mismatch`** (warning; `error` when an `enum` arm is present) — the coarse type check one level down, over the member kind an input declares. This brings the `ManifestInput.of` key and its three readers with it: the validator, the serializer's canonicalization, and the codegen's element type. `of: 'string'` on an array input now types the members `string[]` in the generated `.d.ts` instead of `unknown[]`, and a member no declared arm accepts draws **one** diagnostic naming every offending position rather than one per member.
+  
+  **Nothing published changes shape for an input that declares no `of`.** The key is absent-means-undeclared: the validator checks no member, the codegen emits the unnarrowed element type, and `manifestFromConfigs` publishes no `of` at all, so an entry written before the key existed serializes byte-identically. Measured on the tracked `sdui.manifest.json`: 0 of 339 inputs declare `of`, and the artefact regenerates to the same sha256 across this change.
+  
+  ⚠️ **Both new codes are diagnostics, not a new red gate.** Each is a warning, so `compile().ok` — the save gate's pass/fail — is unchanged, and a page that saves today still saves. Escalating an inert authored key to `error` is a separate question and belongs at the save gate, not here.
+
+### Patch Changes
+
+- 338feda: fix(sdui-parser): `not-a-container` is decided by the declared `children` input, not `isContainer`. This matches the renderer's copy of the parser (#19969)
+  
+  The save gate's `validateTree` now warns `not-a-container` on a child list only when the component's manifest entry declares no input named `children`. It never reads `isContainer`, which now means layout containment only, and it has no fallback to it. This is a port of objectui#9910 (objectui `5ea623ea`), which is already inside the pinned console build. Saving and rendering now reach the same verdict on every page again.
+  
+  Against the served `sdui.manifest.json`, five of its 59 components change:
+  
+  - `badge`, `alert`, `button` declare a `children` slot and are not flagged `isContainer`. A child list under them no longer draws a false `not-a-container` warning.
+  - `page:tabs`, `page:accordion` are flagged `isContainer` but declare no `children` input. They render `items[].children`, never `schema.children`, so a child list under them now draws the warning the flag used to silence.
+  
+  Clause-②: no
+  
+  `not-a-container` stays a `warning`, so the default save gate refuses no page it accepted before and accepts no page it refused. Only the two modes that treat warnings as errors see the five-component change: `os validate --strict` and `os lint --strict`. Both run `validateJsxPages`. The package's public entry adds no export.
+- f55922f: `dashboard-widget-options.ts` header: `stageOrder` is a `funnel`-only key, not `funnel` / `pyramid`
+  
+  The accepted-set census comment at the top of the module (carried into the
+  published `index.d.ts`) described `stageOrder` as "funnel/pyramid stage order".
+  There is no `pyramid` widget type: `ChartTypeSchema` refuses it, so an author
+  who copied the pair got a parse refusal. The line now says what the schema's
+  own `.describe()` says: `funnel` is the only widget type that reads the key.
+  Comment-only — the accepted set, the diagnostic code and the emitted JS are
+  unchanged.
+
 ## 17.4.0
 
 ## 17.3.0

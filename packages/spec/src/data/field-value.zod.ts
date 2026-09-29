@@ -122,8 +122,8 @@ export const CLOCK_TIME_TYPES: ReadonlySet<string> = new Set([
  * Measured on #15683, so the gap is a number rather than a caveat:
  * `driver-memory` canonicalises a declared temporal write to ISO TEXT (#4047),
  * for a `Date` input and a string input alike, so a positive text operator
- * MATCHES there — the exact complement of this set's answer (#17348, pinned as
- * a named divergence in that driver's conformance suite). `formula`'s
+ * MATCHES there — the exact complement of this set's answer (commit 51efbf116
+ * pinned it as a named divergence in that driver's conformance suite). `formula`'s
  * `matchesFilterCondition(record, filter)` takes a bare record and its own
  * docblock says it "has no schema to consult"; `having` filters AGGREGATED rows
  * whose columns carry no field declaration at all. Neither could key on the

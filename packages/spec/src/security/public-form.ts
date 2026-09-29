@@ -25,7 +25,7 @@
  * their existing semantics: a non-system insert has its static-`readonly`
  * columns stripped inside `engine.insert` (the 2026-09-03 ruling, #14147 —
  * the same `isSystem`-gated strip as UPDATE), so an import seeds read-only
- * columns only under a system context (`preserveAudit` is UPDATE-only, #6640);
+ * columns only under a system context (`preserveAudit` is UPDATE-only, commit 2ab1257c9);
  * `owner_id` transfers are governed by the transfer grant.
  */
 export const PUBLIC_FORM_SERVER_MANAGED_FIELDS: ReadonlySet<string> = new Set([

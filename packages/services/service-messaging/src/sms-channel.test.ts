@@ -139,7 +139,7 @@ describe('sms channel', () => {
 
         it('END TO END: one emit, one outbox, one dispatcher tick — the row lands `dead`, ⛔ not `success`', async () => {
             // What an operator reads off `sys_notification_delivery`. Before
-            // #18424 this row read `status: 'success'` — the silent half.
+            // commit 879b51270 this row read `status: 'success'` — the silent half.
             //
             // [#18567] The resolver is now present at emit and gone by dispatch.
             // Since this channel declares `isAvailable()`, a resolver that is

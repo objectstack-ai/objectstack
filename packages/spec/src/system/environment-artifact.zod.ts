@@ -133,8 +133,8 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
 
   /**
    * Install-time GRANTED permission set, per plugin, keyed by the plugin
-   * manifest `id` (#14865 — the artifact-contract half of #11333 option A
-   * and the #13457 batch ruling; ADR-0025 §3.5 step 2).
+   * manifest `id` (#14865, commit e58ea8b38 — the artifact-contract half of the
+   * option the #13457 batch ruling chose; ADR-0025 §3.5 step 2).
    *
    * - **Producer:** the cloud control plane's consent-compile step. The
    *   install-consent flow persists the consented four-class set

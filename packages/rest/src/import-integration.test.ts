@@ -361,6 +361,8 @@ describe('import route — real engine + protocol integration', () => {
     expect(String(one.due)).toContain('2026-06-30');
     const two = await engine.findOne('task', { where: { id: '2' } });
     expect(two).toMatchObject({ title: '测试', done: false, priority: 'low', score: 3, owner: 'u2' });
+    // [#20534] A year-first text cell (Excel's zh-CN short date) is read as its ISO day.
+    expect(two.due).toBe('2026-07-01');
   });
 
   it('reads xlsxBase64 without an explicit format and honors the sheet selector', async () => {

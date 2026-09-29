@@ -89,6 +89,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -151,7 +152,9 @@ const PLANTED_KEY = 'zzzUndeclaredProbeKey';
  */
 function stack(ns: string, requires: string[], extra = ''): string {
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
   objects: [
@@ -169,7 +172,7 @@ export default {
       },
     },
   ],${extra}
-};
+}, { strict: false });
 `;
 }
 
@@ -253,6 +256,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    linkSpec(dir);
     for (const [file, body] of docs) writeFileSync(join(dir, 'src', 'docs', file), body);
     dirs[name] = dir;
     return dir;
@@ -260,37 +264,43 @@ beforeAll(() => {
 
   // 2b — `--strict-body`, before any advisory has been computed.
   make('strictbody', `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.sbody', name: 'sbody', version: '1.0.0', type: 'app', namespace: 'sbody' },
   requires: ['${PLANTED_TOKEN}'],
   objects: [{ name: 'sb_ticket', label: 'Ticket', sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } } }],
   hooks: [{ name: 'sb_hook', object: 'sb_ticket', events: ['beforeInsert'],
     handler: async (ctx: any) => { const os = require('node:os'); return os.platform(); } }],
-};
+}, { strict: false });
 `);
 
   // 3 — the protocol parse itself fails, likewise before any advisory.
   make('zodfail', `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.zfail', name: 'zfail', version: '1.0.0', type: 'app', namespace: 'zfail' },
   requires: ['${PLANTED_TOKEN}'],
   objects: [{ name: 'zf_ticket', label: 'Ticket', sharingModel: 'private',
     fields: { title: { type: 'this_is_not_a_field_type', label: 'Title' } } }],
-};
+}, { strict: false });
 `);
 
   // 3b — an author-time rule ERROR (a `record.<field>` that does not resolve),
   //      raised alongside the bare-`unique` advisory.
   make('rulefail', `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.rfail', name: 'rfail', version: '1.0.0', type: 'app', namespace: 'rfail' },
   requires: ['${PLANTED_TOKEN}'],
   objects: [{ name: 'rf_ticket', label: 'Ticket', sharingModel: 'private',
     indexes: [{ name: 'rf_title_idx', fields: ['title'], unique: true }],
     fields: { title: { type: 'text', label: 'Title',
       visibleWhen: { dialect: 'cel', source: 'record.zzz_no_such_field' } } } }],
-};
+}, { strict: false });
 `);
 
   // 3c — one FATAL capability token beside the advisory one.

@@ -78,8 +78,8 @@ import { z } from 'zod';
  * history row was stamped from the record while the inbox and delivery rows
  * followed an acting context that could not exist there, so they were refused.
  * Filling the acting context from the record makes one run carry ONE
- * organization's opinion about who it belonged to — which is the defect #16659
- * opened on, read from the other side.
+ * organization's opinion about who it belonged to — which is the defect commit
+ * ecdfc9411 fixed, read from the other side.
  *
  * ⚠️ With ONE stated exception, so the sentence above is not read as a promise
  * it cannot keep. The two halves ask different questions and are answered by

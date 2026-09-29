@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineStack } from '@objectstack/spec';
+import { resolveInstalledSpecVersion } from '@objectstack/metadata-core';
 import { MetadataPlugin } from './plugin.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,14 @@ function fakeCtx() {
 
 function newPlugin(): any {
     return new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } });
+}
+
+/** Order two versions by their leading `x.y.z` (a prerelease tail is ignored). */
+function compareVersions(a: string, b: string): number {
+    const triple = (v: string) => v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10));
+    const [x, y] = [triple(a), triple(b)];
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! < y[i]! ? -1 : 1;
+    return 0;
 }
 
 /** The conversion summary lines the door logged, keyed by conversion id. */
@@ -111,10 +120,31 @@ describe('[#20390] artifact door — a 17.4.0-built artifact boots on unreleased
         expect(warns.get('dashboard-widget-chart-config-structure-removed')![0]).toContain('3 site(s)');
         expect(warns.get('page-assigned-profiles-removed')).toHaveLength(1);
         expect(warns.get('page-assigned-profiles-removed')![0]).toContain('1 site(s)');
-        // Under the per-entry half the floor is not below the runtime's label,
-        // so the line must not claim the artifact "predates" a runtime printed
-        // at the same version — it names the retirement that opened it instead.
-        for (const line of [...warns.values()].flat()) expect(line).not.toContain("predates this runtime's spec");
+        // WHICH half of the window opened is decided by the running spec's
+        // label, and the version pass moves that label — so the clause is
+        // pinned per half, never as one literal. Under the per-entry half
+        // (unreleased `main`, label still 17.4.0) the floor is not below the
+        // label, so the line must not claim the artifact "predates" a runtime
+        // printed at the same version — it names the retirement that opened it
+        // instead. Once the label is past the floor (the 17.5.0 version pass
+        // onward) the label half opened it, and "predates" is exactly the
+        // claim the line owes, beside a runtime version that bears it out.
+        const floor = String(loadFixture().manifest.engines.protocol).replace(/^\^/, '');
+        const installed = resolveInstalledSpecVersion();
+        expect(installed).toMatch(/^\d+\.\d+\.\d+/); // spec is always resolvable here
+        const labelPastFloor = compareVersions(installed!, floor) > 0;
+        const lines = [...warns.values()].flat();
+        expect(lines).toHaveLength(2);
+        for (const line of lines) {
+            if (labelPastFloor) {
+                expect(line).toContain(
+                    `predates this runtime's spec (authored engines.protocol floor ${floor}, runtime spec ${installed})`,
+                );
+            } else {
+                expect(line).not.toContain("predates this runtime's spec");
+                expect(line).toContain('was built on a surface that still accepted shapes this runtime has since retired');
+            }
+        }
     });
 
     /**

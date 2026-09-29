@@ -15,11 +15,11 @@ export const entry: SemanticMigration = {
     + 'with an `<object>.<view>` form-view target (`actionType` accepts the full action-type '
     + 'enum, so that shape reaches this surface too)',
   reason:
-    'Maintainer ruling objectstack#6739-A (2026-08-09): a `type: \'modal\'` string target names '
+    'Maintainer ruling A on modal targets (2026-08-09): a `type: \'modal\'` string target names '
     + 'a PAGE, only — the spec TSDoc, the published docs and `defineStack`\'s cross-reference '
     + 'walk already agreed, and the renderer\'s page-then-object leniency (self-labelled '
-    + 'Back-compat) was retired rather than codified. objectui#4764 deleted the object fallback '
-    + 'in the shared `useActionModal`; objectui#4782 deleted `DashboardView`\'s own second copy '
+    + 'Back-compat) was retired rather than codified. One objectui change deleted the object '
+    + 'fallback in the shared `useActionModal`; a second deleted `DashboardView`\'s own second copy '
     + 'of the prefix convention (which had no page resolution at all), after enumerating both '
     + 'repos\' corpora and finding zero producers of the prefix form. The `os validate` lint '
     + 'rule (`validateDashboardActionRefs`) then still pointed the other way: it accepted the '

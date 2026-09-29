@@ -1306,7 +1306,9 @@ describe('AutomationEngine - Execution History', () => {
     const simpleFlow = {
         name: 'test_flow',
         label: 'Test Flow',
-        type: 'api' as const,
+        // Started explicitly (`engine.execute`), never by an inbound post —
+        // an `api` flow is an inbound hook and needs a `config.secret` (ADR-0041).
+        type: 'autolaunched' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
             { id: 'end', type: 'end' as const, label: 'End' },

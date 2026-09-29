@@ -73,9 +73,9 @@
  * A 404 has at least four causes and the card refuses to let them merge, because
  * collapsing them reports `objectstack-ai/cloud` references as phantom numbers:
  *
- *   cross-repo-unjudged   the citation NAMES another repo (`owner/repo#N` or
- *                         `repo#N`). ⛔ Never resolved and never a finding: one
- *                         credential reads one board, exactly the call H19 makes.
+ *   cross-repo-unjudged   the citation NAMES another repo (`owner/repo#N`, or a
+ *                         `KNOWN_REPOSITORIES` name). ⛔ Never resolved, never a
+ *                         finding: one credential reads one board, as H19 does.
  *   never-issued          N is beyond this repo's allocation frontier, so the
  *                         number was never minted. Decided from the frontier.
  *   transferred           the number was minted and the WEB endpoint still
@@ -321,9 +321,129 @@ export const CITATION_MIN_DIGITS = 2;
 export const CITATION_MAX_DIGITS = 6;
 
 /**
+ * ⭐ THE QUALIFIER IS A CLOSED SET (#20330). A token joined to `#N` is a
+ * CANDIDATE, and it names a repository only when it is an `owner/repo` form or
+ * a name in this table; any other prefix is PROSE, and the `#N` after it is
+ * THIS repository's and is judged. Matched case-insensitively (GitHub's
+ * repository names are), so `Framework#N` and `OBJECTUI#N` read as their
+ * repositories.
+ *
+ * Why closed, measured on `288611e3e5` (2026-09-29) over the declared surfaces:
+ * the open grammar took every `word#N` as a repository, and 27 distinct
+ * candidates sat behind 1,655 sites. 306 of them were prose -- `pre-#N` 284,
+ * `post-#N` 12, and `Pre-`/`Post-`/`PRE-`/`POST-` 10 -- so a dead number spelled
+ * `pre-#12248` was classed cross-repo and never judged, the hole #20330 names.
+ * The rest were ordinals (`PD#12`, `OQ#10`, `Prime-Directive-#12`, `PKCS#11`),
+ * which `NON_CITATION_HEADS` now reads once the candidate is refused.
+ *
+ * ⛔ A name in this table is a measured citation population, never a guess.
+ * A repository the tree cites that is missing here reads as THIS repository:
+ * add its row, or write `owner/repo#N`, which is always a repository.
+ *
+ *   self     the name is THIS repository (the classifier judges it here).
+ *   joined   recognised only JOINED to its number (`ui#N`), never in the prose
+ *            form `REPO PR #N` below -- `UI #N` is ordinary English.
+ */
+export const KNOWN_REPOSITORIES = Object.freeze([
+  Object.freeze({
+    name: 'objectstack', slug: 'objectstack-ai/objectstack', self: true,
+    why: 'This repository. 111 `objectstack#N` sites, e.g. `packages/client/src/index.ts`.',
+  }),
+  Object.freeze({
+    name: 'framework', slug: 'objectstack-ai/objectstack', self: true,
+    why: "This repository's FORMER name: `git ls-remote https://github.com/objectstack-ai/framework` "
+      + 'answered this repository\'s refs (HEAD `288611e3e5` on both, 2026-09-29) while a nonexistent '
+      + 'control name exited 128 and `objectui` answered its own. 257 sites, `Framework#N` included.',
+  }),
+  Object.freeze({
+    name: 'objectui', slug: 'objectstack-ai/objectui',
+    why: 'The Studio/Console sibling. 684 sites across `objectui#N` and `objectstack-ai/objectui#N`.',
+  }),
+  Object.freeze({
+    name: 'ui', slug: 'objectstack-ai/objectui', joined: true,
+    why: 'A short alias for objectui, 11 sites: `ui#6837` / `ui#6206` / `ui#6207` measured as objectui\'s '
+      + 'records (`objectstack-ai/ui` does not exist). Joined only.',
+  }),
+  Object.freeze({
+    name: 'cloud', slug: 'objectstack-ai/cloud',
+    why: 'The commercial sibling (private: one credential cannot read it). 222 sites.',
+  }),
+  Object.freeze({
+    name: 'hotcrm', slug: 'objectstack-ai/hotcrm',
+    why: 'A public downstream application. 25 sites, `objectstack-ai/hotcrm#673` spelled in full once.',
+  }),
+  Object.freeze({
+    name: 'hotcrm-heimao', slug: null,
+    why: 'A downstream application repository; its owner is NOT MEASURED (not public under '
+      + 'objectstack-ai). 1 site, `packages/spec/src/data/field.zod.ts`.',
+  }),
+  Object.freeze({
+    name: 'os-tianshun-mtc', slug: null,
+    why: 'A downstream application repository; owner NOT MEASURED. 2 sites, '
+      + '`packages/lint/src/validate-security-posture.ts`.',
+  }),
+  Object.freeze({
+    name: 'os-project-titanwind-ehr', slug: null,
+    why: 'A downstream application repository; owner NOT MEASURED. 1 site, '
+      + '`packages/objectql/src/validation/rule-validator.ts`.',
+  }),
+]);
+
+const KNOWN_BY_NAME = new Map(KNOWN_REPOSITORIES.map((r) => [r.name, r]));
+const KNOWN_BY_SLUG = new Map(KNOWN_REPOSITORIES.filter((r) => r.slug)
+  .map((r) => [`${r.slug.split('/')[0]}/${r.name}`, r]));
+
+/**
+ * The repository a candidate qualifier NAMES, lower-cased -- its slug when
+ * known, a former name resolved to the current one -- or `null` when the
+ * candidate is prose. The ONE recogniser: extraction, the board's probe set and
+ * the classifier all ask it, so the three can never disagree about a token.
+ */
+export function repositoryOf(candidate) {
+  if (!candidate) return null;
+  const text = candidate.toLowerCase();
+  if (text.includes('/')) {
+    const known = KNOWN_BY_SLUG.get(text);
+    return known ? (known.slug ?? known.name) : text;
+  }
+  const known = KNOWN_BY_NAME.get(text);
+  return known ? (known.slug ?? known.name) : null;
+}
+
+/**
+ * Does this citation name the repository the board reads? A bare `#N` does, by
+ * convention; so does any qualifier that resolves to `ownerRepo` or its name.
+ */
+export function namesThisRepository(cite, ownerRepo) {
+  const repo = repositoryOf(cite.qualifier);
+  if (!repo) return true;
+  const own = ownerRepo.toLowerCase();
+  return repo === own || repo === own.split('/')[1];
+}
+
+/**
+ * The PROSE spelling of a qualifier, `objectui PR #10264` / `cloud #2937`,
+ * matched against the text that ENDS immediately before a bare `#`. Measured on
+ * `288611e3e5`: 27 sites, and on every one the named repository's record is the
+ * one the sentence describes (objectui's board read for each objectui number)
+ * while this repository's same number is unrelated -- 3 of them
+ * (`objectui PR #8758`) were census deaths here that are not deaths at all.
+ * ⛔ A qualifier does NOT carry across a pair: in `cloud#1013 and #10645` the
+ * second number is this repository's (measured over the 48 pair sites -- the
+ * `,` / `and` pairs name this repository's number, `/` ones mostly the
+ * qualifier's but not always), so each number of a pair is qualified on its own.
+ */
+const PROSE_QUALIFIER_RE = new RegExp(
+  `(?:^|[^\\w/-])(${KNOWN_REPOSITORIES.filter((r) => !r.joined).map((r) => r.name.replace(/[.-]/g, '\\$&')).join('|')})`
+  + '\\s+(?:(?:PR|issue)\\s+)?$',
+  'i',
+);
+
+/**
  * One citation. The leading group is CONTEXT (consumed so `a/b#12` and a bare
  * `#12` cannot both match the same characters), group 2 is the optional
- * repository qualifier and group 3 is the number.
+ * CANDIDATE qualifier -- `repositoryOf` decides whether it names a repository
+ * -- and group 3 is the number.
  */
 export const CITATION_RE = new RegExp(
   '(^|[^\\w#/-])(?:([A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?)#|#)'
@@ -345,11 +465,19 @@ export const NON_CITATION_HEADS = Object.freeze([
   Object.freeze({ re: /clause\s*$/i, why: 'clause ordinals' }),
   Object.freeze({ re: /option\s*$/i, why: 'option ordinals inside a ruling' }),
   Object.freeze({ re: /§\s*[\d.]*\s*$/, why: 'a section ordinal' }),
+  /* The two rows below came due when the qualifier closed (`KNOWN_REPOSITORIES`):
+   * both were read as repositories before, so they were never judged at all. */
+  Object.freeze({ re: /(?:^|[^a-z])oq\s*$/i, why: "an ADR's open-question ordinals (`ADR-0076 OQ#10`), 10 sites" }),
+  Object.freeze({ re: /(?:^|[^a-z])pkcs\s*$/i, why: "a standard's own numbering (`PKCS#11`), 1 site" }),
 ]);
 
-/** Which of `NON_CITATION_HEADS` excuses this match, or `null`. */
+/**
+ * Which of `NON_CITATION_HEADS` excuses this match, or `null`. A hyphen that
+ * joins a head to its `#` is the same head -- `Prime-Directive-#12`, 2 sites.
+ */
 export function nonCitationHead(before) {
-  for (const row of NON_CITATION_HEADS) if (row.re.test(before)) return row;
+  const head = before.replace(/-+$/, '');
+  for (const row of NON_CITATION_HEADS) if (row.re.test(head)) return row;
   return null;
 }
 
@@ -371,13 +499,19 @@ export function extractCitations(text, { projection = 'whole-file', onlyLines = 
     const re = new RegExp(CITATION_RE.source, 'g');
     let m;
     while ((m = re.exec(line)) !== null) {
-      const before = line.slice(0, m.index + m[1].length);
-      if (!m[2] && nonCitationHead(before)) continue;
+      /* Everything up to the `#`, a refused candidate included: `pre-` is prose,
+       * and `PD` in `PD#12` is the head `NON_CITATION_HEADS` reads. */
+      const before = line.slice(0, m.index + m[0].length - m[3].length - 1);
+      const joined = repositoryOf(m[2]) ? m[2] : null;
+      const prose = joined ? null : PROSE_QUALIFIER_RE.exec(before);
+      const qualifier = joined ?? prose?.[1] ?? null;
+      if (!qualifier && nonCitationHead(before)) continue;
+      const spelled = joined ?? (prose ? before.slice(prose.index + prose[0].indexOf(prose[1])) : '');
       out.push({
         number: Number(m[3]),
-        qualifier: m[2] ?? null,
+        qualifier,
         line: lineNo,
-        raw: `${m[2] ?? ''}#${m[3]}`,
+        raw: `${spelled}#${m[3]}`,
         context: (sourceLines[ix] ?? '').trim().slice(0, 160),
       });
     }
@@ -431,14 +565,13 @@ export function boardFromSets({ numbers, pulls = [], frontier, source }) {
  * @param {{ ownerRepo?: string, transferProbe?: (n:number) => ('transferred'|'absent'|null) }} [opts]
  */
 export function classifyCitation(cite, board, { ownerRepo = '', transferProbe = null } = {}) {
-  if (cite.qualifier) {
-    const [owner, name] = ownerRepo.split('/');
-    const namesThisRepo = cite.qualifier === ownerRepo || (name && cite.qualifier === name);
-    /* ⛔ A qualified citation is never resolved against this board. One
-     * credential reads one repository -- the call `check-half-states` makes for
-     * H19, and the reason the card refuses to let the cloud references be
-     * reported as phantom numbers. */
-    if (!namesThisRepo) return { cause: CAUSE.CROSS_REPO_UNJUDGED, detail: `names ${cite.qualifier}, a repository this credential does not read` };
+  /* ⛔ A citation naming ANOTHER repository is never resolved against this
+   * board. One credential reads one repository -- the call `check-half-states`
+   * makes for H19, and the reason the card refuses to let the cloud references
+   * be reported as phantom numbers. A qualifier that names no repository at all
+   * (`pre-`) is prose, and the number is this board's. */
+  if (!namesThisRepository(cite, ownerRepo)) {
+    return { cause: CAUSE.CROSS_REPO_UNJUDGED, detail: `names ${cite.qualifier}, a repository this credential does not read` };
   }
   if (board.has(cite.number)) {
     return board.isPull(cite.number)
@@ -725,16 +858,27 @@ const REMEDY = [
   '⛔ Do NOT guess a replacement number — 「guessing an upstream is exactly how a dangling',
   '   reference becomes a wrong one」. Either name a target that resolves, or keep the number',
   '   and say IN PROSE that it no longer resolves and what the live record is.',
-  '⛔ A number that names another repository is written `owner/repo#N`; a bare `#N` means',
-  '   THIS repository by convention and is judged as one.',
+  '⛔ A number that names another repository is written `owner/repo#N` (or `repo#N` for a name',
+  '   in KNOWN_REPOSITORIES), and each number of a pair carries its own: `objectui#1 + objectui#2`.',
+  '   A bare `#N` -- and one after any other prefix, `pre-#N` included -- means THIS repository.',
 ].join('\n');
 
 function renderFinding(f) {
   return `  [${f.cause}] ${f.path}:${f.line}  ${f.raw}\n      ${f.detail}\n      ${f.context}`;
 }
 
+/**
+ * The numbers the board must answer: every citation judged HERE, qualified or
+ * not. ⛔ Not "the unqualified ones" -- a probed board that never asked about
+ * `objectstack#20330` classes that live issue as unresolvable, a false red the
+ * diff-scoped verdict answered before this read `namesThisRepository`.
+ */
+export function boardWanted(rows, ownerRepo) {
+  return [...new Set(rows.filter((r) => namesThisRepository(r, ownerRepo)).map((r) => r.number))];
+}
+
 async function buildBoard({ rows, ownerRepo, token, strategy }) {
-  const wanted = [...new Set(rows.filter((r) => !r.qualifier).map((r) => r.number))];
+  const wanted = boardWanted(rows, ownerRepo);
   if (strategy === 'enumerate' || wanted.length > 400) return enumerateBoard({ ownerRepo, token });
   return probeBoard(wanted, { ownerRepo, token });
 }
@@ -832,7 +976,7 @@ export async function run({ root = process.cwd(), scope = 'diff', base = null, j
   const classified = [];
   for (const cite of rows) {
     let probed = null;
-    if (transferProbe && !cite.qualifier && !board.has(cite.number) && cite.number <= board.frontier) {
+    if (transferProbe && namesThisRepository(cite, ownerRepo) && !board.has(cite.number) && cite.number <= board.frontier) {
       probed = await transferProbe(cite.number);
     }
     const verdict = classifyCitation(cite, board, { ownerRepo, transferProbe: () => probed });
@@ -898,8 +1042,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   transport: 7,
   'scope-contract': 12,
   'diff-scope': 13,
-  'live-corpus': 3,
+  'live-corpus': 4,
   'proxy-rearm': 10,
+  qualifier: 40,
 });
 
 /** Deleting a roster entry silences its floor, so the roster's size is pinned too. */
@@ -1117,6 +1262,8 @@ export async function selfTest() {
     check(live.files.length > 100, `the declared surfaces must reach the tree, got ${live.files.length} file(s)`);
     check(live.rows.length > 1000, `the live corpus must yield its citations, got ${live.rows.length}`);
     check(live.rows.some((r) => r.qualifier), 'the live corpus must contain at least one cross-repo citation — the arm that must never be reported as a phantom');
+    check(live.rows.every((r) => !r.qualifier || repositoryOf(r.qualifier) !== null),
+      'every qualifier the live corpus keeps must name a repository — an unrecognised one kept is the open grammar back');
   }
 
   /* 7. THE LOCAL ROUTE. Offline, over the imported plan: the arms that decide
@@ -1148,6 +1295,72 @@ export async function selfTest() {
       'structural: the re-exec is taken by the LIVE modes only — never --self-test (offline, and pinned offline), never --list (no network at all)');
   }
 
+  /* 8. THE QUALIFIER (#20330). A candidate names a repository only when it is
+   *    `owner/repo` or a `KNOWN_REPOSITORIES` name; any other prefix is prose
+   *    and its number is judged HERE. Every spelling is pinned both ways: read
+   *    right on a live number, and a FINDING on a dead one. */
+  battery('qualifier');
+  {
+    const OWN = 'objectstack-ai/objectstack';
+    const board = boardFromSets({ numbers: [100, 20330], pulls: [], frontier: 30000, source: 'stub' });
+    const one = (t) => extractCitations(t);
+    const judge = (t) => one(t).map((c) => classifyCitation(c, board, { ownerRepo: OWN }).cause);
+    const lit = (t) => judge(t).join() === CAUSE.RESOLVES;
+    const red = (t) => { const causes = judge(t); return causes.length === 1 && FINDING_CAUSES.includes(causes[0]); };
+
+    for (const p of ['pre-', 'post-', 'Pre-', 'Post-', 'PRE-', 'POST-']) {
+      check(one(`the ${p}#12248 shape`).map((c) => `${c.qualifier}|${c.raw}`).join() === 'null|#12248',
+        `\`${p}\` is prose, not a repository: its number is extracted bare`);
+      check(lit(`the ${p}#100 shape`) && red(`the ${p}#12248 shape`),
+        `\`${p}#N\` is judged HERE: a live number resolves and a dead one is a FINDING`);
+    }
+
+    check(one('Framework#4443 / cloud#983').map((c) => repositoryOf(c.qualifier)).join() === `${OWN},objectstack-ai/cloud`,
+      '`Framework` is THIS repository (its former name, any case); `cloud` is not');
+    for (const q of ['framework', 'Framework', 'objectstack-ai/framework', 'objectstack']) {
+      check(lit(`${q}#100`) && red(`${q}#12248`), `\`${q}#N\` names THIS repository: judged, lit when live and red when dead`);
+    }
+    for (const q of ['objectui', 'OBJECTUI', 'ui', 'cloud', 'hotcrm', 'objectstack-ai/objectui', 'better-auth/better-auth']) {
+      check(judge(`${q}#12248`).join() === CAUSE.CROSS_REPO_UNJUDGED,
+        `\`${q}#N\` names another repository: never judged, so a number dead HERE is no finding`);
+    }
+    check(one('see foo#12248')[0]?.qualifier === null && red('see foo#12248'),
+      'an UNKNOWN word prefix is prose too — the set of repositories is closed, not a list of exceptions');
+    for (const t of ['which PD#12 rejects', 'ADR-0076 OQ#10 says', 'PKCS#11 HSMs', 'a Prime-Directive-#12 shape']) {
+      check(one(t).length === 0, `\`${t}\` is an ordinal once its candidate is refused, not a citation`);
+    }
+
+    check(one('(objectui PR #10264, merged)').map((c) => `${c.qualifier}|${c.raw}`).join() === 'objectui|objectui PR #10264',
+      'the prose spelling `objectui PR #N` names objectui');
+    check([judge('(objectui PR #12248)'), judge('cloud #12248 contract'), judge('objectui issue #12248')]
+      .every((c) => c.join() === CAUSE.CROSS_REPO_UNJUDGED), 'the prose form defers to its repository, dead here or not');
+    check(lit('framework #100') && red('framework #12248'), 'the prose form of THIS repository is judged here');
+    check(red('the PR #12248 landed') && red('Studio UI #12248'),
+      '⛔ a bare `PR #N`, and the joined-only alias in `UI #N`, are NOT the prose form: judged here, red when dead');
+
+    check(judge('objectui#6110 + #12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.ALLOCATED_BUT_ABSENT}`,
+      "⛔ a qualifier does NOT carry across a pair: the second number is this repository's, and red when dead");
+    check(judge('objectui#6110 + objectui#12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.CROSS_REPO_UNJUDGED}`,
+      'a pair qualified number by number defers both');
+
+    const rows = [{ number: 20330, qualifier: 'framework' }, { number: 11, qualifier: 'objectui' }, { number: 12, qualifier: null }];
+    check(boardWanted(rows, OWN).sort((a, b) => a - b).join() === '12,20330',
+      "the board's probe set is every citation judged HERE — a qualified this-repository number in, another repository's out");
+    const probed = await probeBoard(boardWanted([{ number: 20330, qualifier: 'objectstack' }], OWN), {
+      ownerRepo: OWN, token: '',
+      fetchImpl: stubFetch([[/per_page=1/, { body: [{ number: 30000 }] }], [/issues\/20330$/, { body: { number: 20330 } }]]),
+    });
+    check(classifyCitation({ number: 20330, qualifier: 'objectstack' }, probed, { ownerRepo: OWN }).cause === CAUSE.RESOLVES,
+      '⛔ a live `objectstack#N` RESOLVES on a probed board — probing only the unqualified numbers answered it allocated-but-absent, a false red');
+    check(/const wanted = boardWanted\(rows, ownerRepo\);/.test(readFileSync(SELF_PATH, 'utf8')),
+      'structural: the live board is built from `boardWanted`');
+
+    check(KNOWN_REPOSITORIES.every((r) => r.name === r.name.toLowerCase() && typeof r.why === 'string' && r.why.length > 40),
+      'every known repository is a lower-case name carrying the reading that put it in');
+    check(KNOWN_REPOSITORIES.filter((r) => r.self).every((r) => r.slug === OWN) && KNOWN_REPOSITORIES.some((r) => r.self),
+      'every name for THIS repository resolves to its slug');
+  }
+
   /* ── The floor: every declared battery RAN, and ran its cases ───────────── */
   const floorMessages = [];
   const floorFailure = (m) => { floorMessages.push(m); };
@@ -1176,7 +1389,7 @@ export async function selfTest() {
   assert(!breached, floorMessages.join('\n     '));
 
   const total = [...batterySeen.values()].reduce((a, b) => a + b, 0);
-  console.log(`✅ check-issue-citations --self-test: grammar narrowed, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
+  console.log(`✅ check-issue-citations --self-test: grammar narrowed, qualifier a closed set of repositories, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
   return SELF_TEST_VERDICT;
 }
 

@@ -64,11 +64,11 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   reports: 'report',
   datasets: 'dataset',
   actions: 'action',
-  // `themes: 'theme'` was removed at #10485 (ADR-0049; the carrier key is
+  // `themes: 'theme'` was removed by commit 35ad101bc (ADR-0049; the carrier key is
   // retired). Its absence here is load-bearing twice over: the generated
   // `META_URL_TO_SINGULAR` (gen:meta-url-spelling) loses the fold, so
   // `/meta/theme` gets `unrecognisedMetaTypeRefusal`'s loud verdict instead of
-  // the pre-#10194 store-anything branch; and `applyConversionsToStoredItem`
+  // the store-anything branch from before commit 2306a765c; and `applyConversionsToStoredItem`
   // passes legacy `theme` rows through untouched rather than manufacturing a
   // collection for them.
   flows: 'flow',

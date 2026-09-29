@@ -360,7 +360,11 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
         const { engine, reads } = await makeEngine(path, ROWS);
         const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { [column]: { $gt: 'not-a-date' } })));
         expect({ code: err?.code, status: err?.status }, `${column} ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
-        expect(err?.message, `${column} ${path}`).toContain(`compares a declared number field against "not-a-date" at having.${column}.$gt`);
+        // [#20510] `total` / `n` / `mean` are aggregation aliases — a numeric
+        // aggregated column, not a declared field — and `having` never binds
+        // to a driver, so the refusal carries no PostgreSQL clause.
+        expect(err?.message, `${column} ${path}`).toContain(`compares a numeric aggregated column against "not-a-date" at having.${column}.$gt`);
+        expect(err?.message, `${column} ${path}`).not.toContain('PostgreSQL');
         expect(reads, `${column} ${path}`).toEqual({ aggregate: 0, find: 0 });
       }
     }

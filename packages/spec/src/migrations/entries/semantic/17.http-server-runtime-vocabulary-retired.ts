@@ -18,8 +18,8 @@ export const entry: SemanticMigration = {
     + 'record can only disagree with them. Server-level configuration that IS authorable '
     + 'lives on `defineStack({ server })` / `StackServerConfigSchema`, which is unaffected)',
   reason:
-    'The second and final ADR-0049 pass over `system/http-server.zod.ts`. #4938 removed the '
-    + 'CONFIG half (`HttpServerConfigSchema`, nine keys, zero readers, zero authoring '
+    'The second and final ADR-0049 pass over `system/http-server.zod.ts`. The first removed '
+    + 'the CONFIG half (`HttpServerConfigSchema`, nine keys, zero readers, zero authoring '
     + 'entry); this removes the RUNTIME half — a 7-member lifecycle event union with a '
     + 'timestamped envelope, an eight-boolean capability report, and a five-state status '
     + 'record with connection and request counters. Nothing ever emitted, consumed or '
@@ -39,10 +39,12 @@ export const entry: SemanticMigration = {
     + 'this file when there was one. '
     + 'With no carrier key there is nothing to tombstone, and with no author there is no '
     + 'source or `sys_metadata` row for a D2 conversion to rewrite: RETIRED_DEFS_BY_MAJOR '
-    + 'plus this entry are the declaration — route 3, the same shape as #4938 in this very '
-    + 'file, #4834, #4988 and #5055. If host-implementer conformance becomes a real '
+    + 'plus this entry are the declaration — route 3, the same shape as the config half\'s '
+    + 'removal in this very file and the earlier removals of the dynamic plugin-loading family, '
+    + 'the `ui/` interaction configs and the widget / i18n shapes. If host-implementer '
+    + 'conformance becomes a real '
     + 'requirement it returns through the ENFORCE route: an adapter contract with a checker '
-    + 'behind it, vocabulary second. ADR-0049, #5295.',
+    + 'behind it, vocabulary second. ADR-0049.',
   acceptanceCriteria:
     'No source imports `ServerEvent`, `ServerEventType`, `ServerEventSchema`, '
     + '`ServerCapabilities`, `ServerCapabilitiesSchema`, `ServerCapabilitiesParsed`, '

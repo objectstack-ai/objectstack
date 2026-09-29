@@ -45,11 +45,12 @@ export function nextUtcCalendarDay(value: unknown): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (!m) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const start = new Date(Date.UTC(y, mo - 1, d));
-  // Reject a shape-valid but impossible day: `Date.UTC` rolls 2026-02-30 into
-  // March, so the round-trip is what proves the input was a real calendar day.
+  const start = utcMidnight(y, mo - 1, d);
+  // Reject a shape-valid but impossible day: the construction rolls 2026-02-30
+  // into March, so the round-trip is what proves the input was a real calendar
+  // day — in every year the four digits spell, 0001..0099 included.
   if (fmtUtcDay(start) !== day) return null;
-  return fmtUtcDay(new Date(Date.UTC(y, mo - 1, d + 1)));
+  return fmtUtcDay(utcMidnight(y, mo - 1, d + 1));
 }
 
 /**
@@ -101,6 +102,23 @@ export function utcInstantMs(value: unknown): number | null {
   if (!m) return null;
   const t = Date.parse(`${m[1]}T${m[2]}${m[3] ?? 'Z'}`);
   return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * Midnight UTC of a proleptic-Gregorian year, month index and day, with the
+ * month and day rolled over past their ends as `Date.UTC` rolls them.
+ *
+ * Not `Date.UTC(year, …)` itself: it reads a year from 0 to 99 as 1900 + year,
+ * so `0050-01-01` would be built as 1950-01-01, fail the round trip in
+ * {@link nextUtcCalendarDay}, and every day of the years 0001..0099 would come
+ * back `null` — a `$lte` or a `$between` maximum on such a day would then skip
+ * whole-day widening and miss that day's rows. `setUTCFullYear` takes the
+ * year as written.
+ */
+function utcMidnight(year: number, monthIndex: number, day: number): Date {
+  const dt = new Date(0);
+  dt.setUTCFullYear(year, monthIndex, day);
+  return dt;
 }
 
 /** `YYYY-MM-DD` of an instant's UTC calendar day. */

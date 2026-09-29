@@ -355,8 +355,8 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
             {
               name: 'orders',
               sql: 'SELECT * FROM orders',
-              measures: { total_revenue: { name: 'total_revenue', label: 'Total Revenue', type: 'sum', sql: 'amount' } },
-              dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+              measures: { total_revenue: { label: 'Total Revenue', type: 'sum', sql: 'amount' } },
+              dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
             },
           ],
         },

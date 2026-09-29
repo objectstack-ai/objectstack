@@ -35,7 +35,7 @@ export interface EmailSenderSurface {
         html?: string;
         text?: string;
         /**
-         * Structural mirror of `SendEmailInput.organizationId` (#11741) —
+         * Structural mirror of `SendEmailInput.organizationId` (commit b706af987) —
          * the tenant stamp for `sys_email.organization_id`, threaded from
          * `delivery.notification.organizationId` when the delivery holds
          * one. Optional: an org-less delivery sends without it.
@@ -56,7 +56,7 @@ export interface EmailSenderSurface {
         to: string | string[];
         data?: Record<string, unknown>;
         locale?: string;
-        /** Same tenant stamp as on `send` (#11741) — forwarded by the email service into the send it performs. */
+        /** Same tenant stamp as on `send` (commit b706af987) — forwarded by the email service into the send it performs. */
         organizationId?: string;
     }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
     /**
@@ -81,7 +81,7 @@ export interface EmailChannelOptions {
      * Resolve the email service; `undefined` ⇒ there is no transport, which
      * {@link MessagingChannel.isAvailable} reports as
      * `transport_not_configured` and {@link MessagingChannel.send} REFUSES with
-     * the same reason (#18424). ⛔ Not a no-op success: a delivery nothing was
+     * the same reason (commit 879b51270). ⛔ Not a no-op success: a delivery nothing was
      * sent for is never reported as delivered.
      */
     getEmail(): EmailSenderSurface | undefined;
@@ -112,7 +112,7 @@ export interface EmailChannelOptions {
 
 /**
  * The ONE token both members of this channel use for "there is no transport"
- * (#18424) — the reason `isAvailable()` already returns, reused verbatim so the
+ * (commit 879b51270) — the reason `isAvailable()` already returns, reused verbatim so the
  * refusal `send()` writes onto the delivery row and the suppression fan-out
  * records on `sys_notification.suppressed_channels` name the same condition.
  *
@@ -160,7 +160,7 @@ const EMAIL_SHAPE = (s: string): boolean => {
  * path) use that one resolution. A producer-set `payload.locale` — the
  * pre-ruling single value for the whole notification — is no longer consulted.
  *
- * Failure is always REPORTED, never absorbed (#18424): no email service ⇒ a
+ * Failure is always REPORTED, never absorbed (commit 879b51270): no email service ⇒ a
  * refusal carrying the declared `transport_not_configured` reason, graded
  * `permanent` so the row dead-letters on attempt one; a recipient with no
  * resolvable address ⇒ a reported failure. Either way the delivery row shows
@@ -273,7 +273,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const email = opts.getEmail();
             if (!email) {
-                // [#18424] The SAME condition `isAvailable()` answers above, so
+                // [commit 879b51270] The SAME condition `isAvailable()` answers above, so
                 // it gets the same answer — a refusal naming
                 // `transport_not_configured`, ⛔ never `{ ok: true }`.
                 //
@@ -340,7 +340,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                         to: address,
                         ...(data !== undefined ? { data } : {}),
                         ...(templateLocale ? { locale: templateLocale } : {}),
-                        // #11741 — this channel HOLDS the organization (the
+                        // Commit b706af987 — this channel HOLDS the organization (the
                         // tenant stamp the outbox snapshots per delivery), so
                         // it threads it for the sys_email.organization_id
                         // stamp. Absent stays absent — never fabricated.
@@ -380,7 +380,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     subject: rendered.subject,
                     ...(rendered.html !== undefined ? { html: rendered.html } : {}),
                     ...(rendered.text !== undefined ? { text: rendered.text } : {}),
-                    // #11741 — same threading as the template arm above.
+                    // Commit b706af987 — same threading as the template arm above.
                     ...(n.organizationId ? { organizationId: n.organizationId } : {}),
                 });
                 const id = result?.id;
@@ -399,7 +399,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // are `IEmailService.sendTemplate`'s own error codes plus this
             // channel's missing-capability refusal above.
             //
-            // [#18424] `transport_not_configured` joins them, and the grade is
+            // [commit 879b51270] `transport_not_configured` joins them, and the grade is
             // driven rather than assumed: in the shipping composition the same
             // condition already terminates a claimed row at once — the mount
             // gate unmounts the channel and the dispatcher acks

@@ -502,14 +502,16 @@ hyphen, an underscore, a leading digit) are folded away, so the exported symbol
 can differ from the name.
 
 \`\`\`typescript
+import { defineStack } from '@objectstack/spec';
 import { ${sanitizeIdentifier(name)}Plugin } from '${packageName}';
 
-// Use the plugin in your ObjectStack configuration
-export default {
+// Use the plugin in your ObjectStack configuration — always through
+// defineStack(): \`os validate\` / \`os build\` refuse any other default export.
+export default defineStack({
   plugins: [
     ${sanitizeIdentifier(name)}Plugin,
   ],
-};
+});
 \`\`\`
 
 ## License

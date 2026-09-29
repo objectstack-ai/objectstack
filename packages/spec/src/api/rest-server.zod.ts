@@ -325,11 +325,11 @@ export const CrudOperation = z.enum([
 
 export type CrudOperation = z.input<typeof CrudOperation>;
 
-// `CrudEndpointPatternSchema` — REMOVED (#14691)
+// `CrudEndpointPatternSchema` — REMOVED (commit b3a63d32c)
 //
 // The per-operation `{ method, path, summary, description }` pattern shape was
 // the value type of `crud.patterns`, retired below under ADR-0049
-// enforce-or-remove (the #14369 liveness census: every CRUD route is mounted
+// enforce-or-remove (the liveness census commit a3d5724c8 recorded: every CRUD route is mounted
 // from fixed method/path pairs in `packages/rest`'s `registerCrudEndpoints`,
 // so a custom pattern was validated and never read). With its carrier key
 // tombstoned the def had no consumer left, and an exported schema nothing
@@ -362,7 +362,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable operations'),
   
   /**
-   * [REMOVED in #14691] Per-operation custom URL patterns. Tombstoned rather
+   * [REMOVED in commit b3a63d32c] Per-operation custom URL patterns. Tombstoned rather
    * than deleted: this schema is not `.strict()`, so a plain deletion would
    * silently strip the key and an author would keep a config that "customizes"
    * routes the server mounts from fixed pairs (ADR-0104, #3733). The mounted
@@ -386,7 +386,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   dataPrefix: z.string().default('/data').describe('URL prefix for data endpoints'),
   
   /**
-   * [REMOVED in #14691] The object-name parameter style. Every CRUD route takes
+   * [REMOVED in commit b3a63d32c] The object-name parameter style. Every CRUD route takes
    * the object name as a PATH segment; `'query'` was validated against the enum
    * and mounted exactly what `'path'` mounts. Tombstoned, not deleted — the
    * schema is not `.strict()` (see `patterns` above).
@@ -445,7 +445,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
   enableCache: z.boolean().default(true).describe('Enable HTTP cache headers (ETag, Last-Modified)'),
   
   /**
-   * [REMOVED in #14691] The metadata cache TTL. `enableCache` selects the
+   * [REMOVED in commit b3a63d32c] The metadata cache TTL. `enableCache` selects the
    * protocol's `getMetaItemCached` read path, which takes no TTL, and no
    * `Cache-Control` / `ETag` / `Last-Modified` header was ever built from this
    * value — `cacheTtl: 60` changed no header and no cache lifetime (and, having
@@ -541,7 +541,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
         + '`GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door',
       ),
     /**
-     * [REMOVED in #14691] Gated a route that does not exist: the REST server
+     * [REMOVED in commit b3a63d32c] Gated a route that does not exist: the REST server
      * mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and
      * `true` added nothing. Its three siblings each gate a real mount.
      */
@@ -604,7 +604,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
     updateMany: z.boolean().default(true).describe('Enable POST /data/:object/updateMany'),
     deleteMany: z.boolean().default(true).describe('Enable POST /data/:object/deleteMany'),
     /**
-     * [REMOVED in #14691] Gated a route that was never built: there is no
+     * [REMOVED in commit b3a63d32c] Gated a route that was never built: there is no
      * `POST /data/:object/upsertMany` and no protocol member behind it (the
      * protocol carries `createManyData` / `updateManyData` / `deleteManyData`
      * and no upsert counterpart). Upsert is an operation TYPE of the generic
@@ -621,7 +621,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable specific batch operations'),
 
   /**
-   * [REMOVED in #14691] A server-side default for batch atomicity. No batch
+   * [REMOVED in commit b3a63d32c] A server-side default for batch atomicity. No batch
    * handler ever consulted it: atomicity is decided per request by
    * `options.atomic` in the batch body (`BatchOptionsSchema`, ADR-0119 D4 —
    * opt-in, default `false`, aligned to what every caller already gets). A
@@ -649,8 +649,8 @@ export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSche
 /**
  * Route Generation Configuration Schema
  *
- * [#14691] Every key of this sub-object is a `retiredKey()` tombstone: the
- * #14369 liveness census found the whole block parsed, defaulted and
+ * [commit b3a63d32c] Every key of this sub-object is a `retiredKey()` tombstone: the
+ * liveness census recorded in commit a3d5724c8 found the whole block parsed, defaulted and
  * normalized into the REST server's config and never read back —
  * `excludeObjects: ['sys_log']` excluded nothing, `nameTransform: 'plural'`
  * mounted every route under the raw object name, and the per-object
@@ -753,8 +753,8 @@ export type RouteGenerationConfigParsed = z.infer<typeof RouteGenerationConfigSc
  * }
  *
  * To keep an object off the REST data surface, declare it on the object
- * (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist) — the
- * `routes` sub-object's selectors were retired in #14691 because nothing read them.
+ * (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist) — the `routes`
+ * sub-object's selectors were retired by commit b3a63d32c because nothing read them.
  */
 export const RestServerConfigSchema = lazySchema(() => z.object({
   /**

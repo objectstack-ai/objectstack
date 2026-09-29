@@ -16,7 +16,7 @@
   "modulesRoot": ".cache/objectui-dd3f7e1be356/apps/console",
   "objectuiWorkspaceVersion": "17.6.0",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
-  "generatedAt": "2026-09-28",
-  "sha256": "4073897dcdc1cd68966f12f1868d37c2c25a750ea044760ce58e181fce6f21bc",
+  "generatedAt": "2026-09-29",
+  "sha256": "d0666ac585db8fa974471d9ebf33b906be776d77a170e7e5ecac774095d7b26a",
   "components": 107
 }

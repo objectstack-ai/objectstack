@@ -19,7 +19,8 @@ export const entry: SemanticMigration = {
     + 'it.',
   reason:
     'ADR-0049 enforce-or-remove, applied one level INSIDE the library the '
-    + '2026-08-25 #11825 ruling kept. That ruling retired the authorable '
+    + 'maintainer\'s 2026-08-25 ruling on the advanced plugin-lifecycle config '
+    + 'kept. That ruling retired the authorable '
     + 'lifecycle-config container and deliberately kept `HotReloadConfigSchema` as '
     + 'a host-driven library parameter type; this card measured the kept '
     + "vocabulary's own remainder and found the same defect in it. Measured at "
@@ -33,8 +34,10 @@ export const entry: SemanticMigration = {
     + 'configured to survive. `distributedConfig` had ZERO readers anywhere '
     + '(every reference inside `packages/spec` itself plus the generated reference '
     + 'page; nothing in objectui), so an author could name a Redis endpoint, a TTL '
-    + 'and a replication factor and nothing ever opened a connection — the #3950 '
-    + 'shape, sharpened by cluster-persistence vocabulary an AI author (ADR-0033) '
+    + 'and a replication factor and nothing ever opened a connection — the shape '
+    + 'of the plugin sandboxing / integrity / approval config that was never wired '
+    + 'to anything (an exported schema no runtime reads is read as a capability), '
+    + 'sharpened by cluster-persistence vocabulary an AI author (ADR-0033) '
     + 'reads as proof the capability exists. The key left with the enum value its '
     + 'own doc comment named it "required" for, and `DistributedStateConfig` was '
     + 'its orphan value schema. Two routes in one card because the surface has two '
@@ -47,7 +50,8 @@ export const entry: SemanticMigration = {
     + 'manifest embed ever carried it, and nothing in the tree parses '
     + '`HotReloadConfigSchema` outside its own unit test — so there is no authored '
     + 'document to rewrite and no one who could receive a parse-time '
-    + 'prescription. Route 3, the #4834 / #11825 shape: this entry IS the '
+    + 'prescription. Route 3, the shape of the dynamic plugin-loading family\'s '
+    + 'removal and of that lifecycle-config ruling: this entry IS the '
     + 'declaration.',
   acceptanceCriteria:
     "No host passes `stateStrategy: 'disk'` or `'distributed'` to "
@@ -67,7 +71,7 @@ export const entry: SemanticMigration = {
     + "'distributed' already stored to memory, so a host that migrates either to "
     + "'memory' keeps byte-identical behaviour — what changes is that the two "
     + 'spellings which never described what happened are now refused instead of '
-    + 'silently honoured. The #11825 keep itself stands: `HotReloadConfigSchema`, '
+    + 'silently honoured. That ruling\'s keep itself stands: `HotReloadConfigSchema`, '
     + '`PluginStateSnapshotSchema` and the health vocabularies still export from '
     + '`./kernel`, and `HotReloadManager` / `PluginHealthMonitor` still export '
     + 'from `@objectstack/core` with their tests green.',

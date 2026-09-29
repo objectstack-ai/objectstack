@@ -29,7 +29,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { composeStacks } from '@objectstack/spec';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { applyProtection } from '@objectstack/spec/shared';
 
 import { resolveArtifactCollections, packageOwnedCollectionKeys } from './artifact-collections';
@@ -402,8 +402,13 @@ describe('resolveArtifactCollections', () => {
             manifest: { id, name: id, version: '1.0.0', type: 'module' as const, namespace: 'probe' },
             objects: [{ name: 'probe_account', label: 'Account', fields: { [field]: { type: 'text' as const, label: field } } }],
         });
+        // Each input through `defineStack` — `composeStacks` refuses any other
+        // (#20367 ruling B); `strict: false` keeps the input as authored.
         const artifact = composeStacks(
-            [pkg('com.example.a', 'from_a'), pkg('com.example.b', 'from_b')] as never,
+            [
+                defineStack(pkg('com.example.a', 'from_a') as never, { strict: false }),
+                defineStack(pkg('com.example.b', 'from_b') as never, { strict: false }),
+            ],
             { manifest: 'preserve', objectConflict: 'merge' } as never,
         ) as Record<string, any>;
 
@@ -417,9 +422,9 @@ describe('resolveArtifactCollections', () => {
         // having quietly stopped stripping anything.
         const disjoint = composeStacks(
             [
-                { manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_a', label: 'A', fields: {} }] },
-                { manifest: { id: 'com.example.b', name: 'b', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_b', label: 'B', fields: {} }] },
-            ] as never,
+                defineStack({ manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_a', label: 'A', fields: {} }] } as never, { strict: false }),
+                defineStack({ manifest: { id: 'com.example.b', name: 'b', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_b', label: 'B', fields: {} }] } as never, { strict: false }),
+            ],
             { manifest: 'preserve' } as never,
         ) as Record<string, any>;
         expect(disjoint.objects).toBeUndefined();

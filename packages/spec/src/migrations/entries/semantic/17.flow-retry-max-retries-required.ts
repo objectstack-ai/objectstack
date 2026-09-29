@@ -19,7 +19,7 @@ export const entry: SemanticMigration = {
   reason:
     'maxRetries had two defaults — FlowSchema `.default(0)` and the engine\'s ' +
     '`maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 ' +
-    'times through a hand-built definition (#4247). With the engine\'s copy removed the ' +
+    'times through a hand-built definition. With the engine\'s copy removed the ' +
     'unstated count is unambiguously 0, and retrying zero times is exactly ' +
     "`strategy: 'fail'`, so the schema now refuses the combination instead of it silently " +
     'doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow ' +

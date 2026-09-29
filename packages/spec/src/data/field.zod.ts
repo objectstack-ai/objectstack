@@ -367,7 +367,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * Options resolve through `resolveCascadingOptions` against that scope
    * (ADR-0068 / objectui#2284), while field- and section-level rules go through
    * `evalFieldPredicate` — a different evaluator, but since objectui#6010 (field)
-   * and objectui#6110 + #6111 (section) it is handed the same host scope, so
+   * and objectui#6110 + objectui#6111 (section) it is handed the same host scope, so
    * `current_user` resolves on those surfaces too. What still separates this one
    * is ENFORCEMENT, not vocabulary: per-option `visibleWhen` is the only
    * VISIBILITY predicate the SERVER also evaluates — the rule validator refuses
@@ -971,7 +971,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
  * therefore a NESTED key, and `aliases` renames onto a flat one — the same
  * reason `currency` is answered in prose a few lines below.
  *
- * ## Why it may not rename onto `required` (#16867)
+ * ## Why it may not rename onto `required` (commit 0ee32edef)
  *
  * It used to: `notNull: 'required'` sat in the alias table beside `isRequired`
  * and `mandatory`, and because `aliases` is consulted only AFTER this channel
@@ -2075,7 +2075,7 @@ export const FieldSchema = lazySchema(() => {
   // `Field.masterDetail()` take the target as their first positional
   // argument, so helper-authored fields cannot miss it.
   //
-  // [#16126] The emptiness test is applied to the TRIMMED value, so a
+  // [commit 859ded3ec] The emptiness test is applied to the TRIMMED value, so a
   // whitespace-only `reference` joins `undefined` and `''` under this one
   // issue and this one message. It names no object either: the declared
   // grammar for an object name is `/^[a-z_][a-z0-9_]*$/` (`ObjectSchema`'s
@@ -2356,7 +2356,7 @@ export const FieldSchema = lazySchema(() => {
   // rows to be KEPT and gets them DELETED — data loss relative to the declared
   // intent, silently, at the moment the parent goes away. Honoring it is ruled
   // out (a detail row whose master reference is nulled becomes an unreachable
-  // orphan — the outcome #8772/#9138 exist to prevent). `field.deleteBehavior`
+  // orphan — the outcome commit 75b7c240a (#9138) prevents). `field.deleteBehavior`
   // here is pre-`.overwrite`, so `undefined` means "not authored" — a bare
   // `master_detail` (the overwhelmingly common spelling) never fires this.
   if (field.type === 'master_detail' && field.deleteBehavior === 'set_null') {

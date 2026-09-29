@@ -75,12 +75,11 @@ const CUBE: Cube = {
     title: 'Events',
     sql: 'events',
     measures: {
-        count: { name: 'count', label: 'Count', type: 'count', sql: 'id' },
+        count: { label: 'Count', type: 'count', sql: 'id' },
     },
     dimensions: {
-        probe: { name: 'probe', label: 'Probe', type: 'string', sql: 'probe' },
+        probe: { label: 'Probe', type: 'string', sql: 'probe' },
         createdAt: {
-            name: 'created_at',
             label: 'Created At',
             type: 'time',
             sql: 'created_at',

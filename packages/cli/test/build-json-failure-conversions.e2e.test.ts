@@ -1,6 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
+ * ⭐ The producer's record reaches every exit (#20476). Under the
+ * one-authoring-shape ruling (#20367) the command accepts only a default export
+ * `defineStack` built, and `defineStack` applies every ADR-0087 D2 conversion
+ * itself at load (either mode) — so the door's own step-2 pass has nothing of
+ * the default export left to convert, and these pins spent one release
+ * recording `conversions: []` beside the producer's stderr line. The producer
+ * now RECORDS what it applied on the stack it returns (`stackConversionsOf`,
+ * beside the provenance mark); `loadConfig` reads it off the default export and
+ * the command folds it into its one `conversions` sink at step 1b, right after
+ * load. So every exit below carries the notice again, asserted whole by
+ * identity (`expectTheOneNotice`), and the producer's stderr line is asserted
+ * to appear exactly ONCE — the payload now carries the notice, and the terminal
+ * gains no second stderr line for it.
+ *
  * #12125 — `os build --json`'s FAILURE payloads dropped the `conversions` field
  * the run had ALREADY COMPUTED, on all nine of its failure exits.
  *
@@ -50,12 +64,15 @@
  * the same exit with the canonical `kind: 'html'` and requires `[]`, which is
  * the negative whose positive is every other test here.
  *
- * ## Why no `dist/` sits on the measured path
+ * ## Which half of the measured path is `dist/`
  *
  * These run the CLI through `bin/run-dev.js`, the SOURCE entry point (src/ via
  * tsx), so `compile.ts` is loaded from source and an ablation of it is measured
  * without a rebuild. Its DEPENDENCY `@objectstack/spec` — which owns the
- * conversion — resolves through `exports` to `dist/`, and is untouched here.
+ * conversion AND the record (`stackConversionsOf`) — resolves through `exports`
+ * to `dist/`, in the child and in the fixture's own `defineStack` alike: an
+ * edit to the spec half is measured here only after
+ * `pnpm --filter @objectstack/spec build`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -66,6 +83,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -116,7 +134,9 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extraFields?: string; extraTop?: string } = {}): string {
   const { pageKind = 'jsx', requires = [], extraFields = '', extraTop = '' } = opts;
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
   pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
@@ -130,7 +150,7 @@ export default {
       },
     },
   ],${extraTop}
-};
+}, { strict: false });
 `;
 }
 
@@ -173,10 +193,29 @@ const THE_NOTICE = {
 };
 
 /** Asserts EXACTLY the one computed notice. `toEqual` is the "and NO MORE" half. */
-function expectTheOneNotice(payload: Record<string, unknown>, label: string): void {
-  expect(conversionsOf(payload), `${label}: expected exactly the one computed conversion notice`).toEqual([
-    expect.objectContaining(THE_NOTICE),
-  ]);
+function expectTheOneNotice(payload: Record<string, unknown>, label: string, run: Run): void {
+  // [#20476] The notice is computed by the PRODUCER — `defineStack` converts at
+  // load — and reaches this exit through the record it left on the default
+  // export, folded at step 1b. Asserted whole: exactly one entry, carrying the
+  // identity, the site, the direction and the expiry, so neither a different
+  // conversion nor a second copy of this one can satisfy it.
+  const entries = conversionsOf(payload) as Array<Record<string, unknown>>;
+  expect(
+    entries.map((n) => ({
+      conversionId: n.conversionId,
+      surface: n.surface,
+      from: n.from,
+      to: n.to,
+      path: n.path,
+    })),
+    `${label}: the producer's conversion reaches the payload, once`,
+  ).toEqual([THE_NOTICE]);
+  expect(entries[0].code, `${label}: the entry is the conversion layer's own notice`).toBe('OS_METADATA_CONVERTED');
+  expect(typeof entries[0].retiresIn, `${label}: the expiry rides the entry`).toBe('number');
+  // The producer's stderr line stays, and stays ONE line: the envelope now
+  // carries the notice, and nothing on the door's side repeats it on stderr.
+  const producerLine = `defineStack: ${THE_NOTICE.path}: '${THE_NOTICE.from}' → '${THE_NOTICE.to}' (converted at load; conversion '${THE_NOTICE.conversionId}'`;
+  expect(run.stderr.split(producerLine).length - 1, `${label}: one stderr line for the one conversion`).toBe(1);
 }
 
 const dirs: Record<string, string> = {};
@@ -188,6 +227,7 @@ beforeAll(() => {
     const dir = join(root, name);
     mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    linkSpec(dir);
     for (const [file, body] of docs) writeFileSync(join(dir, 'src', 'docs', file), body);
     dirs[name] = dir;
     return dir;
@@ -240,7 +280,9 @@ beforeAll(() => {
   // catch-all, AT LOAD — the config throws on import, ABOVE step 2.
   make('earlythrow', `
 throw new Error('zzz_config_module_threw');
-export default {};
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({}, { strict: false });
 `);
 
   // The control — the same shape, reaching SUCCESS.
@@ -258,8 +300,9 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the control to build:\n${run.stdout}${run.stderr}`).toBe(0);
     const payload = payloadOf(run, 'control');
     expect(payload.success).toBe(true);
-    expectTheOneNotice(payload, 'control');
-    expect(typeof (conversionsOf(payload)[0] as { retiresIn?: unknown }).retiresIn).toBe('number');
+    expectTheOneNotice(payload, 'control', run);
+    // The expiry rides the payload entry (`expectTheOneNotice`) and the producer's line.
+    expect(run.stderr).toMatch(/conversion 'page-kind-jsx-to-html', retires in protocol \d+\)/);
   }, 180_000);
 
   it('2b (--strict-body) — ⭐ carries the notice, where `warnings` is empty by construction', async () => {
@@ -272,7 +315,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(payload.success).toBe(false);
     expect(String(payload.error)).toContain('strict-body');
     expect(payload.warnings, 'no advisory is computed this early — the sibling pins this too').toEqual([]);
-    expectTheOneNotice(payload, 'strictbody');
+    expectTheOneNotice(payload, 'strictbody', run);
   }, 180_000);
 
   it('3 (protocol parse) — ⭐ carries the notice, where `warnings` is empty by construction', async () => {
@@ -282,7 +325,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(payload.success).toBe(false);
     expect(Array.isArray(payload.errors)).toBe(true);
     expect(payload.warnings).toEqual([]);
-    expectTheOneNotice(payload, 'zodfail');
+    expectTheOneNotice(payload, 'zodfail', run);
   }, 180_000);
 
   it('⭐ converts nothing — the SAME exit reports `[]`, so the field tracks the run', async () => {
@@ -292,6 +335,8 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(payload.success).toBe(false);
     expect('conversions' in payload, 'the field must be PRESENT even when empty').toBe(true);
     expect(payload.conversions, 'a canonical page kind converts nothing').toEqual([]);
+    // …and, since the producer is what converts now, raised no notice at load either.
+    expect(run.stderr).not.toContain("conversion 'page-kind-jsx-to-html'");
   }, 180_000);
 
   it('3b (author-time rules) — the notice rides the rule gate', async () => {
@@ -299,7 +344,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the rule gate to fail:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'rulefail');
     expect(String(payload.error)).toContain('author-time rules failed');
-    expectTheOneNotice(payload, 'rulefail');
+    expectTheOneNotice(payload, 'rulefail', run);
   }, 180_000);
 
   it('3c (capability preflight) — the notice rides the preflight gate', async () => {
@@ -307,7 +352,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the capability gate to fail:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'capfail');
     expect(String(payload.error)).toContain('capability provider preflight failed');
-    expectTheOneNotice(payload, 'capfail');
+    expectTheOneNotice(payload, 'capfail', run);
   }, 180_000);
 
   it('3e (access-matrix drift) — the notice rides the drift gate', async () => {
@@ -315,7 +360,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the drift gate to fail:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'amx');
     expect(String(payload.error)).toContain('access matrix drift');
-    expectTheOneNotice(payload, 'amx');
+    expectTheOneNotice(payload, 'amx', run);
   }, 180_000);
 
   it('3f (package docs) — the notice rides the docs gate', async () => {
@@ -323,7 +368,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the docs gate to fail:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'docsfail');
     expect(String(payload.error)).toContain('docs validation failed');
-    expectTheOneNotice(payload, 'docsfail');
+    expectTheOneNotice(payload, 'docsfail', run);
   }, 180_000);
 
   it('4b (--no-runtime-bundle) — a late exit past every step carries the notice', async () => {
@@ -331,7 +376,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected --no-runtime-bundle to fail:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'latefail');
     expect(String(payload.error)).toContain('--no-runtime-bundle');
-    expectTheOneNotice(payload, 'latefail');
+    expectTheOneNotice(payload, 'latefail', run);
   }, 180_000);
 
   it('the catch-all — a THROWN failure still reports the computed notice', async () => {
@@ -342,7 +387,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(run.code, `expected the artifact write to throw:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'thrown');
     expect(payload.success).toBe(false);
-    expectTheOneNotice(payload, 'thrown');
+    expectTheOneNotice(payload, 'thrown', run);
   }, 180_000);
 
   it('catch-all (throw at load) — `conversions` is PRESENT and empty, because step 2 never ran', async () => {

@@ -161,7 +161,7 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
  * `apiMethods`).
  *
  * [#6259] The `batch: 'bulk'` row was removed, and the line above no longer
- * calls `batch` a runtime `callData` action. It was the one entry with no
+ * calls `batch` a runtime `callData` action (both by commit 6968885ef). It was the one entry with no
  * producer on either side: `callData` branches on a closed set that has not
  * contained `batch` since that arm was retired (#5856), and every REST caller
  * of `apiAccessDenialFromEnable` passes a canonical literal — including the

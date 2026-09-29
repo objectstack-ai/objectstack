@@ -215,8 +215,8 @@ describe('#16203 (a) — a `min`/`max` over a non-numeric field is a VALUE of th
   it('a group whose operand is null throughout answers null, never 0 (`emptyGroupValueFor`)', () => {
     const CUBE = {
       name: 'e', sql: 'expense',
-      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
-      measures: { latest: { name: 'latest', type: 'max', sql: 'spent_on' } },
+      dimensions: { category: { type: 'string', sql: 'category' } },
+      measures: { latest: { type: 'max', sql: 'spent_on' } },
     } as unknown as Cube;
     const r = evaluateAnalyticsQueryOverRows(
       { measures: ['latest'], dimensions: ['category'] },
@@ -233,7 +233,7 @@ describe('#16203 (a) — a `min`/`max` over a non-numeric field is a VALUE of th
     const CUBE = {
       name: 'e', sql: 'expense',
       dimensions: {},
-      measures: { latest: { name: 'latest', type: 'max', sql: 'at' } },
+      measures: { latest: { type: 'max', sql: 'at' } },
     } as unknown as Cube;
     const early = new Date('2026-05-03T00:00:00.000Z');
     const late = new Date('2026-07-27T00:00:00.000Z');

@@ -26,7 +26,13 @@ import {
   derivePosture as deriveAdminPosture,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
-import { matchesFilterCondition } from '@objectstack/formula';
+import {
+  crossFieldClassRefusalCarriedBy,
+  findCrossFieldClassRefusal,
+  matchesFilterCondition,
+  type CrossFieldClassRefusal,
+  type MatchesFilterOptions,
+} from '@objectstack/formula';
 import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -41,7 +47,7 @@ import type {
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { ExplainObjectNotFoundError } from './errors.js';
-import { RLS_DENY_FILTER } from './rls-compiler.js';
+import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
 import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
@@ -553,15 +559,32 @@ async function collectGrantProvenance(
  * ({@link collectGrantProvenance}), and `hasPlatformAdminGrant`, which is now
  * READ OFF the resolver's own posture verdict instead of being recomputed from
  * the grant rows.
+ *
+ * [#20515] `tenantId` is the organization the user is resolved IN, handed to
+ * the resolver exactly as enforcement hands it — the resolver applies an
+ * organization-scoped grant only while its organization is the active tenant,
+ * and with no tenant only the global grants. There is no "every organization"
+ * reading: the explainer used to get one by passing no tenant, which is the
+ * very resolution that kept a removed member's grants. Each caller passes the
+ * organization it is explaining in — the live principal's for a delegator
+ * ({@link resolveDelegatorContext}), the caller's own for the explain API.
+ * Omitted, the context is the user with NO active organization. The returned
+ * context still carries no `tenantId` of its own; a caller that needs one sets
+ * it, as {@link resolveDelegatorContext} does.
  */
-export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
+export async function buildContextForUser(
+  ql: any,
+  userId: string,
+  nowMs: number = Date.now(),
+  tenantId?: string,
+): Promise<any> {
   // [#11971] ⭐ Ruled bypass of the #11633 leg-B grants cache (maintainer
   // acceptance 2026-08-25): the explainer is the tool an administrator uses to
   // VERIFY that a revocation took effect. An explainer answering from cache
   // would explain a state that no longer exists — and would do it at exactly
   // the moment someone is checking. `explain` therefore takes the force-fresh
   // path unconditionally, whatever `OS_AUTHZ_GRANTS_CACHE_TTL_MS` says.
-  const grants = await resolveUserAuthzGrants(ql, userId, { nowMs, bypassGrantsCache: true });
+  const grants = await resolveUserAuthzGrants(ql, userId, { tenantId, nowMs, bypassGrantsCache: true });
   const { droppedGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
   return {
     userId,
@@ -614,9 +637,12 @@ export type DelegatorResolution =
  *    in the same org, so `tenantId` / `org_user_ids` carry over — delegator-side
  *    RLS that substitutes them then compiles faithfully instead of collapsing to
  *    the deny sentinel. Since #6352, `buildContextForUser` returns the resolver's
- *    own `org_user_ids`, which without a known `tenantId` is the degenerate
- *    `[delegatorId]` seed — the live principal's real org peer set is the better
- *    answer, so the assignment below overwrites it exactly as before.
+ *    own `org_user_ids`; the live principal's org peer set is the answer the
+ *    delegated request runs under, so the assignment below overwrites it
+ *    exactly as before. The delegator's GRANTS are the one tenant-scoped thing
+ *    resolved rather than copied: since #20515 they are resolved IN the live
+ *    principal's organization, so a delegator grant scoped to that organization
+ *    applies and one scoped to any other does not.
  *    `accessible_org_ids` (ADR-0105 D2) is the exception: it is resolved from
  *    the DELEGATOR's own memberships by `buildContextForUser`, never inherited,
  *    because inheriting it would widen a delegated read past the organizations
@@ -654,7 +680,16 @@ export async function resolveDelegatorContext(
     user = null;
   }
   if (!user) return { kind: 'missing', userId: String(oboId) };
-  const dctx = await buildContextForUser(ql, oboId, nowMs);
+  // [#20515] The delegator's GRANTS are resolved in the live principal's
+  // organization — the organization the delegated request runs in, which this
+  // function already hands the delegator's context below. Resolved with no
+  // tenant, the delegator leg would hold only global grants (and before the
+  // resolver's no-tenant rule, every organization's), never the grants the
+  // delegator actually holds where the request runs.
+  const liveTenantId = typeof context?.tenantId === 'string' && context.tenantId !== ''
+    ? context.tenantId
+    : undefined;
+  const dctx = await buildContextForUser(ql, oboId, nowMs, liveTenantId);
   // Inherit tenant-scoped substitution bags from the live principal (same org).
   if (context?.tenantId != null) dctx.tenantId = context.tenantId;
   if (context?.org_user_ids != null) dctx.org_user_ids = context.org_user_ids;
@@ -815,6 +850,83 @@ function describeOwd(schema: any): { model: string; declared: boolean; effect: '
 }
 
 /**
+ * [#20431] The object's declared columns, handed to the record matcher so it
+ * applies the spec's cross-field comparison class (`crossFieldComparisonVerdict`)
+ * — the rule driver-sql applies when it compiles the find this report explains,
+ * and the rule the RLS write check applies to the same policy (`options.fields`
+ * of `matchesFilterCondition`, #20355).
+ *
+ * Read off `ql.getSchema`, the schema the engine already reads for the OWD: the
+ * ObjectQL registry is the declaration the find's driver compiles against. A
+ * schema that cannot be read hands over no columns, and the matcher then judges
+ * values only, as it did before — a missing schema never manufactures a refusal.
+ */
+function declaredColumnsOf(schema: any): MatchesFilterOptions | undefined {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return undefined;
+  return { fields };
+}
+
+/**
+ * [#20431] The names of the policies in a compiled business-RLS filter that
+ * carry a refused field-to-field comparison — the attribution the RLS write
+ * check logs for the same refusal. The composed filter is one policy's filter or
+ * `{ $or: [...] }` of them, and `compiledPolicyNameOf` recognises each by
+ * identity.
+ */
+function refusedPolicyNamesOf(
+  filter: Record<string, unknown>,
+  fields: NonNullable<MatchesFilterOptions['fields']>,
+): string[] {
+  const members =
+    compiledPolicyNameOf(filter) === undefined && Array.isArray((filter as { $or?: unknown }).$or)
+      ? ((filter as { $or: unknown[] }).$or)
+      : [filter];
+  const names = members
+    .filter((m) => findCrossFieldClassRefusal(m as Record<string, unknown>, fields) !== null)
+    .map((m) => compiledPolicyNameOf(m) ?? '(unnamed)');
+  return [...new Set(names)];
+}
+
+/**
+ * [#20431] What explain answers when the record matcher refuses a
+ * field-to-field comparison: enforcement's own refusal. The code and status
+ * are the matcher's (`INVALID_FILTER` / 400, the envelope the find answers),
+ * and the matcher's error rides as `cause`.
+ *
+ * The message names the policy and both columns, where the matcher's own
+ * message withholds them. The matcher withholds them because the caller of a
+ * refused find or write is usually not the policy's author. Explain is the tool
+ * that shows a principal the policy it runs under, and the report it gives the
+ * same caller for the same object publishes the same predicate: `readFilter`
+ * without a `recordId`, the `rls` layer's `rowFilter` with one. So naming the
+ * policy and its two columns here discloses nothing that report does not.
+ */
+function crossFieldRefusalForExplain(
+  cause: unknown,
+  refusal: CrossFieldClassRefusal,
+  object: string,
+  filter: unknown,
+  fields: NonNullable<MatchesFilterOptions['fields']>,
+): Error {
+  const policies = filter !== null && typeof filter === 'object'
+    ? refusedPolicyNamesOf(filter as Record<string, unknown>, fields)
+    : [];
+  const subject = policies.length === 0
+    ? `A row-level filter on '${object}'`
+    : `The row-level security ${policies.length === 1 ? 'policy' : 'policies'} ` +
+      `${policies.map((p) => `'${p}'`).join(', ')} on '${object}'`;
+  const err = new Error(
+    `${subject} cannot be evaluated: ${refusal.diagnostic}. Enforcement refuses every request this filter ` +
+      'scopes instead of judging a record (the find answers INVALID_FILTER / 400), so explain answers with the ' +
+      'same refusal and reports no record verdict. Compare a field only with a field of the same class, or fix ' +
+      'the declaration of the one that is declared with the wrong type.',
+  );
+  const { code, status } = cause as { code?: string; status?: number };
+  return Object.assign(err, { code, status, cause });
+}
+
+/**
  * [C2 / ADR-0095] Inputs the record-grained augmentation needs from the already
  * computed object-level pass — the row story is decomposed FROM the same facts,
  * never re-judged.
@@ -840,6 +952,8 @@ interface RecordAttributionContext {
   vamaEffective: boolean;
   /** [#4647] The sets that carry the bypass, for the row-level detail text. */
   vamaSets: string[];
+  /** [#20431] The object's declared columns ({@link declaredColumnsOf}); absent → values only. */
+  declaredColumns: MatchesFilterOptions | undefined;
 }
 
 /**
@@ -851,14 +965,18 @@ interface RecordAttributionContext {
  *   - Layer 0 / Layer 1 filters come from `computeLayeredRlsFilter` (the middleware's
  *     own `Layer0(tenant) AND Layer1(business)` split);
  *   - "does THIS record satisfy the filter?" is `matchesFilterCondition` — the
- *     third canonical backend for the same FilterCondition shape the query runs;
+ *     third canonical backend for the same FilterCondition shape the query runs —
+ *     handed the object's declared columns, so it refuses what the query refuses;
  *   - the write verdict is the sharing service's own `canEdit`.
  * So the record story is explained by construction, exactly like the object-level pass.
  */
 async function applyRecordAttribution(
   ra: RecordAttributionContext,
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
-  const { deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets } = ra;
+  const {
+    deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
+    declaredColumns,
+  } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
 
@@ -866,10 +984,28 @@ async function applyRecordAttribution(
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
     : null;
   const recordExists = record != null;
+  // [#20431] Given the declared columns, the matcher REFUSES a field-to-field
+  // comparison between two columns of no shared comparison class, with
+  // `INVALID_FILTER` / 400, for every record or for none. That is the
+  // comparison the find's driver refuses to compile. Without the columns, the
+  // matcher compared the two raw values, so the report answered `visible` true
+  // or false, depending on how they happened to compare, for a request
+  // enforcement refuses outright. Explain now answers with the refusal, the way
+  // it already answers the matcher's other `INVALID_FILTER` refusals: the
+  // explanation fails with the envelope the find fails with, and no record
+  // verdict is reported.
   const matches = (filter: unknown): boolean | undefined => {
     if (!recordExists) return undefined;
     if (filter == null) return true;
-    return matchesFilterCondition(record as Record<string, unknown>, filter as any);
+    try {
+      return matchesFilterCondition(record as Record<string, unknown>, filter as any, declaredColumns);
+    } catch (e) {
+      const refusal = crossFieldClassRefusalCarriedBy(e);
+      if (refusal && declaredColumns?.fields) {
+        throw crossFieldRefusalForExplain(e, refusal, object, filter, declaredColumns.fields);
+      }
+      throw e;
+    }
   };
 
   // The composition enforcement runs before the query: when it throws, neither
@@ -1599,7 +1735,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   if (input.recordId) {
     const out = await applyRecordAttribution({
       deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
-      vamaEffective, vamaSets,
+      vamaEffective, vamaSets, declaredColumns: declaredColumnsOf(schema),
     });
     recordVerdict = out.record;
     posture = out.posture;

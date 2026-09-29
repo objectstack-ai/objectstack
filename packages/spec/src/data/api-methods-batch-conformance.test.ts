@@ -95,7 +95,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `00d3f09c5` is the one that caught the previous record's OWN grid anchor as
   // wrong rather than merely shifted: `3790-3805` there is
   // `runBulkActionAggregate` and says nothing about selection. That is the
-  // #10274 class, and the reason a citation refresh re-READS instead of moving
+  // class commit d1ba685ec gates, and the reason a citation refresh re-READS instead of moving
   // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
   // describing the wrong function. The second claim,
   // `hooks/useBulkExecutor.ts:298-303`, sits in a file that is byte-identical

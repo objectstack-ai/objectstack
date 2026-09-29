@@ -33,9 +33,11 @@ export const entry: SemanticMigration = {
     + 'runtime-reserved and deliberately non-authorable (there is no `sys_queue` yet). Note '
     + 'the two neighbouring conversions cover DIFFERENT faces of this schema and not this '
     + 'one: `sharing-recipient-role-to-position` is the ADR-0090 role → position rename and '
-    + '`sharing-rule-access-level-full-to-edit` is the access-level vocabulary. Registered by '
-    + 'the #6350 stock reconciliation. ADR-0078 / ADR-0090 D3 / ADR-0087, #1878 (backfilled '
-    + '#6350).',
+    + '`sharing-rule-access-level-full-to-edit` is the access-level vocabulary. The change came '
+    + 'out of the metadata property liveness audit, which found security properties parsed but '
+    + 'never enforced, and was registered late, by the stock reconciliation that compared the '
+    + 'breaking changesets already on the v17 release train against this ledger. ADR-0078 / '
+    + 'ADR-0090 D3 / ADR-0087.',
   acceptanceCriteria:
     'No sharing rule names `group` or `guest`, and none carries `type: owner`; stale '
     + 'definitions now FAIL parse with the valid options listed, so the sweep is "fix until '

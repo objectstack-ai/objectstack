@@ -20,15 +20,17 @@ export const entry: SemanticMigration = {
     + 'scalar operator carrying an array, a string operator carrying a number, and a unary '
     + 'operator carrying an ignored value all still parse',
   reason:
-    'A publish-time gate catching up to a query-time one, not a new rule. #5869 / PR '
-    + '#6209 closed the RUNTIME half: `assertListComparandShapes` '
+    'A publish-time gate catching up to a query-time one, not a new rule. An earlier fix '
+    + 'closed the RUNTIME half: `assertListComparandShapes` '
     + '(@objectstack/objectql, filter-comparand-shape.ts) refuses a lowered '
     + '`{ stage: { $nin: "won" } }` with a named 400 INVALID_FILTER, and before that it '
     + 'was a 500. The authoring surface stayed silent, so the failure was two-stage: the '
     + 'view published cleanly and only broke when someone opened it. That file names this '
     + 'very schema as the reachable authoring source of the defect. The tightening MIRRORS '
     + 'that gate exactly — three constraints, one for one — and deliberately goes no '
-    + 'further, because #5685 already ruled on the opposite error: a schema stricter than '
+    + 'further, because an earlier fix already settled the opposite error (the ordering '
+    + 'operators\' comparand widened to the strings the platform itself produces): a schema '
+    + 'stricter than '
     + 'the runtime "in ways the runtime deliberately allows" was the WRONG side and was '
     + 'widened to match. So `in: []` is still accepted (a declared predicate both drivers '
     + 'implement), `equals: ["a","b"]` is still accepted (it lowers to a deep-equality '
@@ -58,7 +60,7 @@ export const entry: SemanticMigration = {
     + '`operator: "in", value: ""` is an UNFINISHED row, not a filter — decide what it was '
     + 'meant to select rather than mechanically rewriting it to [""], which is a real and '
     + 'different predicate. And a view that already carried one of these shapes was never '
-    + 'returning filtered rows: it answered 400 INVALID_FILTER on render (#5869), so '
+    + 'returning filtered rows: it answered 400 INVALID_FILTER on render, so '
     + 're-check what the view is supposed to show rather than assuming the old result set '
     + 'was correct.',
 };

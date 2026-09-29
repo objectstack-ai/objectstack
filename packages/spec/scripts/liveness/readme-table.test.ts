@@ -10,8 +10,12 @@
 // and from check-liveness.test.ts (the real gate, against a mutated copy of the
 // real README, reaching a real `process.exit(1)`).
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
+  LEGACY_STATE_COUNTS_FILE,
   README_ORPHAN_ROW_GUIDANCE,
   README_TABLE_GUIDANCE,
   STATE_COUNTS_GEN_COMMAND,
@@ -20,12 +24,16 @@ import {
   STATE_COUNTS_TOTALS_GUIDANCE,
   STATUS_COLUMNS,
   foldStateCounts,
+  formatStateCountsTotal,
   parseStateTable,
   reconcileReadmeTable,
   reconcileStateCountTotals,
   reconcileStateCounts,
-  renderStateCounts,
+  renderStateCountShard,
+  renderStateCountShards,
+  sumStateCounts,
 } from './readme-table.mts';
+import { readTextShardDir, writeTextShardDir } from '../lib/sharded-artifacts';
 
 /** A miniature README with the same section shape as the real one. */
 function readme({
@@ -228,6 +236,13 @@ const COUNTS = [
   { type: 'api', live: 25, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 2 },
 ];
 
+/** A shard's one table row, read back as numbers — test-side only; the gate compares bytes. */
+function parseShardRow(shard: string): number[] {
+  const rows = shard.split('\n').filter((l) => /^\| `[a-z_]+` \|/.test(l));
+  expect(rows).toHaveLength(1);
+  return rows[0].split('|').slice(2, -1).map((c) => Number(c.trim()));
+}
+
 /** The 2-column README the split produced — prose only, no numbers. */
 function proseReadme(rows = ['| object | notes |', '| field | notes |', '| api | notes |']) {
   return readme({ rows });
@@ -262,84 +277,162 @@ describe('foldStateCounts', () => {
   });
 });
 
-describe('renderStateCounts', () => {
-  it('publishes a row per type, a classified column, and a total', () => {
-    const out = renderStateCounts(COUNTS);
+describe('renderStateCountShard', () => {
+  it('publishes the type\'s own row and a classified column', () => {
+    const out = renderStateCountShard(COUNTS[0]);
     expect(out).toContain('| Type | live | exp | elsewhere | dead | planned | classified |');
     expect(out).toContain('| `object` | 49 | 0 | 0 | 0 | 1 | 50 |');
-    expect(out).toContain('| **total** | **140** | **0** | **0** | **0** | **3** | **143** |');
   });
 
   // The fifth column counts into `classified` like the other four (#13483) —
   // an elsewhere-verdict is a CLASSIFIED property, precisely not a gap.
-  it('counts live-elsewhere into the row and total classified sums', () => {
-    const out = renderStateCounts([
-      { type: 'manifest', live: 22, experimental: 0, 'live-elsewhere': 1, dead: 15, planned: 0 },
-    ]);
+  it('counts live-elsewhere into the row\'s classified sum', () => {
+    const out = renderStateCountShard({
+      type: 'manifest', live: 22, experimental: 0, 'live-elsewhere': 1, dead: 15, planned: 0,
+    });
     expect(out).toContain('| `manifest` | 22 | 0 | 1 | 15 | 0 | 38 |');
-    expect(out).toContain('| **total** | **22** | **0** | **1** | **15** | **0** | **38** |');
   });
 
   it('says it is generated and names the one command that rewrites it', () => {
-    const out = renderStateCounts(COUNTS);
+    const out = renderStateCountShard(COUNTS[0]);
     expect(out).toContain('GENERATED — DO NOT EDIT BY HAND');
     expect(out).toContain(STATE_COUNTS_GEN_COMMAND);
+  });
+
+  // THE LOCALITY CLAIM (#20361), asserted on the bytes rather than described.
+  // A shard that carried a total, a sibling's row or the governed-type count
+  // would carry a line that two PRs moving DIFFERENT types both rewrite — the
+  // exact conflict the split removes. So: exactly one table row, it is this
+  // type's, no total, and no line that differs between two shards except the
+  // lines naming the type itself or its numbers.
+  it('carries only its own row — no total, no sibling, nothing another type moves', () => {
+    const out = renderStateCountShard(COUNTS[1]);
+    const rows = out.split('\n').filter((l) => /^\| `[a-z_]+` \|/.test(l));
+    expect(rows).toEqual(['| `field` | 66 | 0 | 0 | 0 | 0 | 66 |']);
+    expect(out).not.toMatch(/total\*\*/);
+    expect(out).not.toContain('`object`');
+    expect(out).not.toContain('`api`');
+
+    const other = renderStateCountShard(COUNTS[2]).split('\n');
+    const differing = out.split('\n').filter((l, i) => l !== other[i]);
+    for (const line of differing) expect(line, line).toMatch(/`field`/);
   });
 
   // The whole scheme rests on the generator and the gate rendering the same
   // bytes from the same model. A renderer that varied by call would make the
   // freshness check fail on a file it had itself just written.
   it('is deterministic — the same model renders the same bytes', () => {
-    expect(renderStateCounts(COUNTS)).toBe(renderStateCounts(COUNTS));
+    expect(renderStateCountShards(COUNTS)).toEqual(renderStateCountShards(COUNTS));
+  });
+
+  it('keys one shard per type, in GOVERNED order, and refuses a type listed twice', () => {
+    expect([...renderStateCountShards(COUNTS).keys()]).toEqual(['object.md', 'field.md', 'api.md']);
+    expect(() => renderStateCountShards([COUNTS[0], COUNTS[0]])).toThrow(/twice/);
+  });
+});
+
+// The total the single file used to COMMIT (#20361). It is still a published
+// number — `check:liveness` prints it — so it is still pinned; what changed is
+// that it is summed where it is read, never written where two PRs both rewrite it.
+describe('sumStateCounts — the total, at read time', () => {
+  it('sums every column and the classified column', () => {
+    expect(sumStateCounts(COUNTS)).toEqual({
+      live: 140, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 3, classified: 143,
+    });
+    expect(formatStateCountsTotal(sumStateCounts(COUNTS))).toBe(
+      '140 live · 0 experimental · 0 live-elsewhere · 0 dead · 3 planned = 143 classified',
+    );
+  });
+
+  // PARITY, the pin the split owes: the number the shards add up to is the
+  // number the single file's `**total**` row published for the same model.
+  // Checked against the shards as RENDERED, parsed back by this test (the gate
+  // itself never parses a shard — it compares bytes).
+  it('equals the sum of the rendered shards\' own rows', () => {
+    const parsed = [...renderStateCountShards(COUNTS).values()].map(parseShardRow);
+    const summed = parsed.reduce((a, r) => a.map((n, i) => n + r[i]));
+    const t = sumStateCounts(COUNTS);
+    expect(summed).toEqual([t.live, t.experimental, t['live-elsewhere'], t.dead, t.planned, t.classified]);
   });
 });
 
 describe('reconcileStateCounts — what it must catch', () => {
-  const rendered = renderStateCounts(COUNTS);
+  const rendered = renderStateCountShards(COUNTS);
+  const table = () => parseStateTable(proseReadme());
+  const quiet = { artifactErrors: [], rowSetErrors: [], handCountErrors: [] };
 
-  it('is quiet when the artifact is current and the README carries prose only', () => {
-    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk: rendered });
-    expect(r).toEqual({ artifactErrors: [], rowSetErrors: [], handCountErrors: [] });
+  it('is quiet when every shard is current and the README carries prose only', () => {
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk: new Map(rendered), legacyOnDisk: false });
+    expect(r).toEqual(quiet);
   });
 
-  it('catches a MISSING artifact', () => {
-    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk: null });
+  it('catches a MISSING directory', () => {
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk: null, legacyOnDisk: false });
     expect(r.artifactErrors).toHaveLength(1);
     expect(r.artifactErrors[0]).toContain('MISSING');
     expect(r.artifactErrors[0]).toContain(STATE_COUNTS_PATH);
   });
 
+  it('catches ONE missing shard, and names it', () => {
+    const onDisk = new Map(rendered);
+    onDisk.delete('api.md');
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk, legacyOnDisk: false });
+    expect(r.artifactErrors).toEqual([expect.stringContaining(`${STATE_COUNTS_PATH}api.md is MISSING`)]);
+  });
+
   // The leg that replaces what the hand-edit used to buy: touching a schema
-  // forced you back through the table. A stale artifact must be loud, and it must
-  // point at the line that moved rather than at the file.
-  it('catches a SKEWED count and names the first differing line', () => {
-    const onDisk = rendered.replace('| `field` | 66 |', '| `field` | 67 |');
-    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk });
+  // forced you back through the table. A stale shard must be loud, and it must
+  // point at the line that moved rather than at the directory.
+  it('catches a SKEWED count, names the shard and the first differing line', () => {
+    const onDisk = new Map(rendered);
+    onDisk.set('field.md', rendered.get('field.md')!.replace('| `field` | 66 |', '| `field` | 67 |'));
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk, legacyOnDisk: false });
     expect(r.artifactErrors).toHaveLength(1);
-    expect(r.artifactErrors[0]).toContain('STALE');
+    expect(r.artifactErrors[0]).toContain(`${STATE_COUNTS_PATH}field.md is STALE`);
     expect(r.artifactErrors[0]).toContain('- | `field` | 67 |');
     expect(r.artifactErrors[0]).toContain('+ | `field` | 66 |');
   });
 
+  // A type that left GOVERNED would otherwise keep publishing its last counts
+  // beside rows that no longer include it, and nothing would re-render them.
+  it('catches a STRAY shard, and a stray subdirectory', () => {
+    const onDisk = new Map(rendered);
+    onDisk.set('ghost.md', renderStateCountShard({ ...COUNTS[0], type: 'ghost' }));
+    onDisk.set('nested/', '');
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk, legacyOnDisk: false });
+    expect(r.artifactErrors).toEqual([
+      expect.stringContaining(`${STATE_COUNTS_PATH}ghost.md is STRAY`),
+      expect.stringContaining(`${STATE_COUNTS_PATH}nested/ is STRAY`),
+    ]);
+  });
+
+  // A branch cut before the split meets the deletion as a modify/delete, and a
+  // resolution that keeps the file would publish a stale table and a stale total
+  // beside the shards, re-rendered by nothing.
+  it('catches the RETIRED single file coming back', () => {
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk: new Map(rendered), legacyOnDisk: true });
+    expect(r.artifactErrors).toEqual([expect.stringContaining(`${LEGACY_STATE_COUNTS_FILE} is RETIRED`)]);
+  });
+
   it('catches a type with counts and no README row', () => {
-    const table = parseStateTable(proseReadme(['| object | notes |', '| field | notes |']));
-    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
-    expect(r.rowSetErrors).toEqual([expect.stringContaining('api')]);
+    const t = parseStateTable(proseReadme(['| object | notes |', '| field | notes |']));
+    const r = reconcileStateCounts({ table: t, rendered, onDisk: new Map(rendered), legacyOnDisk: false });
+    expect(r.rowSetErrors).toEqual([expect.stringContaining('api — counted in state-counts/api.md')]);
   });
 
   it('catches the mirror — a README row with no counts', () => {
-    const table = parseStateTable(proseReadme([...['| object | n |', '| field | n |', '| api | n |'], '| ghost | n |']));
-    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    const t = parseStateTable(proseReadme([...['| object | n |', '| field | n |', '| api | n |'], '| ghost | n |']));
+    const r = reconcileStateCounts({ table: t, rendered, onDisk: new Map(rendered), legacyOnDisk: false });
     expect(r.rowSetErrors).toEqual([expect.stringContaining('ghost')]);
   });
 
   // The leg neither of the other two can see. A re-added column leaves the
-  // artifact fresh and the row sets equal, so the table would publish two sets of
+  // shards fresh and the row sets equal, so the table would publish two sets of
   // numbers with only one of them enforced — strictly worse than the drift #7377
   // started from.
   it('catches a count column coming back into the README', () => {
-    const table = parseStateTable(proseReadme(['| object | 49 | – | 0 | 1 | notes |', '| field | n |', '| api | n |']));
-    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    const t = parseStateTable(proseReadme(['| object | 49 | – | 0 | 1 | notes |', '| field | n |', '| api | n |']));
+    const r = reconcileStateCounts({ table: t, rendered, onDisk: new Map(rendered), legacyOnDisk: false });
     expect(r.handCountErrors).toHaveLength(1);
     expect(r.handCountErrors[0]).toContain('object');
     // `–` counts: it is the spelling the old table used for "none of these", so
@@ -353,27 +446,63 @@ describe('reconcileStateCounts — what it must catch', () => {
   // ("Dead 9 = the seven #4142 tombstones"). Only a cell that is NOTHING BUT a
   // number is a column; anything looser would make the pin unsatisfiable.
   it('stays quiet on a Notes cell that merely mentions numbers', () => {
-    const table = parseStateTable(proseReadme(['| object | Dead 9 = the seven #4142 tombstones + 2 | ', '| field | n |', '| api | n |']));
-    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    const t = parseStateTable(proseReadme(['| object | Dead 9 = the seven #4142 tombstones + 2 | ', '| field | n |', '| api | n |']));
+    const r = reconcileStateCounts({ table: t, rendered, onDisk: new Map(rendered), legacyOnDisk: false });
     expect(r.handCountErrors).toEqual([]);
   });
 
-  it('reconciles the row set against the RENDERED artifact, not the stale copy on disk', () => {
-    // Otherwise a stale artifact missing a row would report the same defect twice,
-    // under two headings, and the second one would be a lie about the row set.
-    const onDisk = rendered.split('\n').filter((l) => !l.startsWith('| `api` |')).join('\n');
-    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk });
+  it('reconciles the row set against the RENDERED shards, not the stale copies on disk', () => {
+    // Otherwise a missing shard would report the same defect twice, under two
+    // headings, and the second one would be a lie about the row set.
+    const onDisk = new Map(rendered);
+    onDisk.delete('api.md');
+    const r = reconcileStateCounts({ table: table(), rendered, onDisk, legacyOnDisk: false });
     expect(r.artifactErrors).toHaveLength(1);
     expect(r.rowSetErrors).toEqual([]);
   });
 });
 
+// The shard directory on a real disk: the writer the generator calls and the
+// reader the gate calls, round-tripped, so the two cannot disagree about what
+// "the directory" contains.
+describe('the shard directory on disk — writeTextShardDir / readTextShardDir', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'os-state-count-shards-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('reads a missing directory as null, never as an empty set', () => {
+    expect(readTextShardDir(path.join(dir, 'absent'))).toBeNull();
+  });
+
+  it('writes every shard once, then rewrites ONLY the shard whose bytes moved', () => {
+    const first = writeTextShardDir(dir, renderStateCountShards(COUNTS));
+    expect(first.written.sort()).toEqual(['api.md', 'field.md', 'object.md']);
+    expect(readTextShardDir(dir)).toEqual(renderStateCountShards(COUNTS));
+
+    const moved = COUNTS.map((r) => (r.type === 'field' ? { ...r, live: r.live - 1, dead: r.dead + 1 } : r));
+    const second = writeTextShardDir(dir, renderStateCountShards(moved));
+    expect(second).toEqual({ written: ['field.md'], removed: [] });
+  });
+
+  it('prunes a shard no type renders, and anything else in the directory', () => {
+    writeTextShardDir(dir, renderStateCountShards(COUNTS));
+    writeFileSync(path.join(dir, 'ghost.md'), 'stray');
+    mkdirSync(path.join(dir, 'nested'));
+    const r = writeTextShardDir(dir, renderStateCountShards(COUNTS.slice(0, 2)));
+    expect(r.removed.sort()).toEqual(['api.md', 'ghost.md', 'nested/']);
+    expect([...readTextShardDir(dir)!.keys()].sort()).toEqual(['field.md', 'object.md']);
+  });
+});
+
 describe('the counts prescription', () => {
-  it('names the generator and forbids both ways of hand-writing a number', () => {
+  it('names the generator and forbids every way of hand-writing a number', () => {
     const text = STATE_COUNTS_GUIDANCE.join('\n');
     expect(text).toContain(STATE_COUNTS_GEN_COMMAND);
     expect(text).toContain('Never hand-patch a number');
-    expect(text).toContain('never put a count column back');
+    expect(text).toContain('never commit a total');
+    expect(text).toContain('never put a');
   });
 
   // The half of the hand-edit worth keeping: a moved number means a Note beside
@@ -390,7 +519,7 @@ describe('the counts prescription', () => {
 // The fold's own blind spot (#13083)
 //
 // Every leg above reads the README or the artifact, and a fold that dropped a
-// status satisfies all of them: `renderStateCounts` computes `classified` as the
+// status satisfies all of them: `renderStateCountShard` computes `classified` as the
 // sum of the four columns beside it, the freshness leg re-renders the same fold
 // and compares bytes, and the README agrees with that. So the population these
 // cases describe is invisible to every test above this line, and the real gate

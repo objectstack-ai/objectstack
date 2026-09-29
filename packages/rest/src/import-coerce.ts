@@ -31,7 +31,7 @@
  * untouched, so an import stays byte-identical to the pre-coercion behaviour.
  */
 
-import { zonedWallClockToUtcMs, type WallClockParts } from '@objectstack/core';
+import { temporalStorageForm, zonedWallClockToUtcMs, type WallClockParts } from '@objectstack/core';
 import type { ExportFieldMeta } from './export-format.js';
 import {
   SINGLE_OPTION_TYPES as OPTION_TYPES,
@@ -273,36 +273,143 @@ function pad2(n: number): string {
 const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
 /**
- * A date-time cell carrying **no offset**: `YYYY-MM-DD HH:mm[:ss[.sss]]`, `T`
- * or space separated, `/` accepted for `-` like the date fast path. Anchored at
- * both ends, so a trailing `Z` or `+08:00` does NOT match — that cell already
- * names an instant and is left to `Date.parse` (#8485 ruling: an explicit offset
- * keeps being honoured exactly as written).
+ * [#20534] The text shapes a `date` / `datetime` / `time` cell is read in,
+ * after trimming — ISO 8601's extended calendar date and date-time, and the
+ * platform's own export shape:
+ *
+ * - `YYYY-MM-DD` — a calendar day;
+ * - `YYYY-MM-DDTHH:MM[:SS[.f…]]`, then `Z`, a `±HH:MM` / `±HHMM` offset, or
+ *   nothing (a zone-naive wall clock);
+ * - `YYYY-MM-DD HH:MM[:SS[.f…]]`, zone-naive only — the `YYYY-MM-DD HH:mm:ss`
+ *   the export writes for a `datetime` cell and an xlsx date cell is read as.
+ *
+ * A four-digit year, two-digit month, day, hour, minute and second, an
+ * upper-case `T` and `Z`: the spellings the write door admits for a `datetime`
+ * string (`@objectstack/objectql`'s `record-validator.ts`, #20525), each of
+ * which names one day and one clock whatever host reads it. Every other
+ * spelling is refused, never guessed: `07/15/2026` and `15 July 2026` went to
+ * `new Date(s)`, which reads them in the SERVER PROCESS's zone (the same cell
+ * stored as `2026-07-15T14:00Z` on a New York host and `…T02:00Z` on a
+ * Shanghai one, a `date` a day apart) and reads `07/08/2026` month-first. A
+ * space before a zone (`2026-07-15 10:00Z`) is refused as the write door
+ * refuses it. The one other text shape read at all is the year-first date,
+ * {@link YEAR_FIRST_CELL}.
  */
-const NAIVE_DATE_TIME =
-  /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T ](\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?:\.(\d{1,3})\d*)?$/;
+const ISO_TEMPORAL_CELL =
+  /^(\d{4})-(\d{2})-(\d{2})(?:(T| )(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 /**
- * Read an offset-free cell as the wall clock it is, or `undefined` when the
- * shape does not match (caller falls through to `Date.parse`). Out-of-range
- * components are rejected here rather than silently rolled over by `Date.UTC`.
+ * [#20534] Does `year-month-day` name a calendar day that exists — month
+ * 01..12, day 01 to that month's length, February 29 only in a leap year?
+ * Arithmetic, never a `Date` round trip: `Date.UTC` and `Date.parse` ROLL an
+ * impossible day over (`2026-02-30` is March 2), which is the defect this
+ * refuses, and `Date.UTC` reads a year 0..99 as 1900..1999. The same rule as
+ * the write door's `namesRealCalendarDay` (#20525), which is private there.
  */
-function parseNaiveWallClock(s: string): WallClockParts | undefined {
-  const m = NAIVE_DATE_TIME.exec(s);
+function namesRealCalendarDay(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const length = month === 2 ? (leap ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+  return day <= length;
+}
+
+/**
+ * A cell in one of the {@link ISO_TEMPORAL_CELL} shapes, on a day that exists.
+ * `day` is the cell's own `YYYY-MM-DD` text — the year keeps the four digits it
+ * was written with, so `0500-01-01` is never re-spelled `500-01-01`. Exactly
+ * one reading follows it: none (a bare day), `wall` (a zone-naive clock) or
+ * `instantMs` (the instant a zone-bearing cell names).
+ */
+interface IsoTemporalCell {
+  day: string;
+  wall?: WallClockParts & { hour: number; minute: number; second: number; millisecond: number };
+  instantMs?: number;
+}
+
+/**
+ * Read a trimmed cell as an {@link ISO_TEMPORAL_CELL} shape, or `undefined`.
+ * An impossible day, an out-of-range clock (`24:00` zone-naive, `10:60`) and a
+ * zone after a space are `undefined` too — refused, never rolled over and
+ * never handed to `new Date(s)`. A zone-bearing cell is read by `Date.parse`,
+ * which reads each of these ISO spellings as the same instant on every host
+ * (`T24:00Z` is the next day's midnight, as ISO 8601 has it).
+ */
+function readIsoTemporalCell(s: string): IsoTemporalCell | undefined {
+  const m = ISO_TEMPORAL_CELL.exec(s);
   if (!m) return undefined;
-  const parts: WallClockParts = {
-    year: Number(m[1]),
-    month: Number(m[2]),
-    day: Number(m[3]),
-    hour: Number(m[4]),
-    minute: Number(m[5]),
-    second: m[6] ? Number(m[6]) : 0,
-    millisecond: m[7] ? Number(m[7].padEnd(3, '0')) : 0,
+  const [, y, mo, d, sep, hh, mi, ss, frac, zone] = m;
+  if (!namesRealCalendarDay(Number(y), Number(mo), Number(d))) return undefined;
+  const day = `${y}-${mo}-${d}`;
+  if (sep === undefined) return { day };
+  if (zone !== undefined) {
+    if (sep !== 'T') return undefined;
+    const instantMs = Date.parse(s);
+    return Number.isNaN(instantMs) ? undefined : { day, instantMs };
+  }
+  const wall = {
+    year: Number(y),
+    month: Number(mo),
+    day: Number(d),
+    hour: Number(hh),
+    minute: Number(mi),
+    second: ss ? Number(ss) : 0,
+    millisecond: frac ? Number(frac.slice(0, 3).padEnd(3, '0')) : 0,
   };
-  if (parts.month < 1 || parts.month > 12) return undefined;
-  if (parts.day < 1 || parts.day > 31) return undefined;
-  if ((parts.hour ?? 0) > 23) return undefined;
-  return parts;
+  if (wall.hour > 23 || wall.minute > 59 || wall.second > 59) return undefined;
+  return { day, wall };
+}
+
+/**
+ * [#20534, maintainer ruling] The year-first date a spreadsheet writes, after
+ * trimming: `YYYY/M/D` or `YYYY-M-D` — a four-digit year, a one- or two-digit
+ * month and day, the SAME separator in both places — optionally followed by
+ * one space and a zone-naive `H:MM` or `H:MM:SS` with a one- or two-digit hour.
+ * `2026/7/15`, `2026/07/15`, `2026-7-15`, `2026/7/15 9:00`,
+ * `2026/08/01 06:00:00`, `2026-07-15 9:00`.
+ *
+ * It is Excel's default short date in zh-CN and ja-JP, and a CSV saved from
+ * Excel writes the text it displays. The year comes first, so there is no
+ * field order to guess and no zone to read: it names one day and one wall
+ * clock on every host. No zone, no fraction and no `T` separator are read in
+ * this form, and a mixed separator (`2026/7-15`) is not this form. A
+ * month-first or day-first date (`07/15/2026`, `15/07/2026`) and a two-digit
+ * year (`26/7/15`) stay refused.
+ */
+const YEAR_FIRST_CELL = /^(\d{4})([/-])(\d{1,2})\2(\d{1,2})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+
+/**
+ * Read a trimmed cell as a {@link YEAR_FIRST_CELL} shape, or `undefined`. The
+ * rules every other admitted cell keeps: the day must exist
+ * ({@link namesRealCalendarDay}, never rolled over), the hour runs 0..23 and
+ * the minute and second 00..59 (`24:00` is refused), and the day is the padded
+ * ISO `YYYY-MM-DD` (`2026/7/15` → `2026-07-15`). A clock is a wall clock, read
+ * exactly as the export shape's is.
+ */
+function readYearFirstCell(s: string): IsoTemporalCell | undefined {
+  const m = YEAR_FIRST_CELL.exec(s);
+  if (!m) return undefined;
+  const [, y, , mo, d, hh, mi, ss] = m;
+  const month = Number(mo);
+  const date = Number(d);
+  if (!namesRealCalendarDay(Number(y), month, date)) return undefined;
+  const day = `${y}-${pad2(month)}-${pad2(date)}`;
+  if (hh === undefined) return { day };
+  const wall = {
+    year: Number(y),
+    month,
+    day: date,
+    hour: Number(hh),
+    minute: Number(mi),
+    second: ss ? Number(ss) : 0,
+    millisecond: 0,
+  };
+  if (wall.hour > 23 || wall.minute > 59 || wall.second > 59) return undefined;
+  return { day, wall };
+}
+
+/** The `HH:MM:SS` UTC clock of an instant. */
+function utcClock(t: Date): string {
+  return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}`;
 }
 
 /**
@@ -310,16 +417,46 @@ function parseNaiveWallClock(s: string): WallClockParts | undefined {
  *   - `date`     → `YYYY-MM-DD`
  *   - `datetime` → full ISO-8601 (`toISOString`)
  *   - `time`     → `HH:MM` / `HH:MM:SS`
- * Returns `undefined` when the cell is not a recognisable date/time.
+ * Returns `undefined` when the cell is not a recognisable date/time, and the
+ * caller fails the row with `invalid_date` (`import_invalid_date` /
+ * `import_invalid_datetime` / `import_invalid_time`).
  *
- * Unambiguous `YYYY-MM-DD` / `YYYY/MM/DD` inputs are normalised directly to
- * avoid timezone drift; everything else falls back to `Date.parse` (which
- * covers ISO datetimes and locale-default `MM/DD/YYYY`).
+ * ## Which text is read at all (#20534)
+ *
+ * A text cell is read only in an {@link ISO_TEMPORAL_CELL} shape — ISO 8601,
+ * or the export's own `YYYY-MM-DD HH:mm:ss` — or as a year-first date
+ * ({@link YEAR_FIRST_CELL}: `2026/7/15`, `2026/7/15 9:00`, stored padded, the
+ * clock read exactly as the export shape's), and only on a calendar day that
+ * exists. A `time` cell may also be a bare `HH:MM` / `HH:MM:SS`. Every other
+ * cell is refused on every branch; nothing reaches `new Date(s)`:
+ *
+ *  - **an impossible day** (`2026-02-30`, `2026-02-29`, `2026-04-31`,
+ *    `2026/2/30`, in any of the shapes) — `Date.UTC` and `Date.parse` rolled it
+ *    into the next month, so a `datetime` was stored as March 2 and a `date`
+ *    given in the `T…Z` spelling likewise; never rolled over now;
+ *  - **a locale or prose spelling** (`07/15/2026 10:00`, `07/08/2026`,
+ *    `15 July 2026`) — `new Date(s)` read it in the server process's zone and
+ *    month-first, so the stored instant, and a `date`'s day, were properties
+ *    of the deployment host; no zone and no field order is guessed now;
+ *  - **a number** (`2026`, an Excel serial) — `new Date(String(n))` read it
+ *    as a year, in the process zone.
+ *
+ * An xlsx date cell is unaffected: `import-prepare.ts` renders it as the
+ * export shape before it gets here. A `Date` (a programmatic caller's) names
+ * an instant and is read as before, save that a `date`'s year is padded.
+ *
+ * The year is padded to four digits on every `date` branch: a text cell keeps
+ * the four digits it was written with, and an instant takes core's
+ * `temporalStorageForm` `date` rule, which pads 0001..0999. `0500-01-01` used
+ * to leave here as `500-01-01`, which the write door refuses, so the import
+ * refused a day the write door takes. A bare day read into a `datetime` is
+ * midnight UTC spelled from the day itself, never `Date.UTC(y, …)`, which read
+ * `0050-01-01` as 1950.
  *
  * ## Which clock an offset-free cell is read in (#8485)
  *
  * A spreadsheet cell like `2026-08-01 06:00:00` carries no offset, so it is a
- * **wall clock**, not an instant — and `new Date(s)` resolves it against the
+ * **wall clock**, not an instant — and `new Date(s)` resolved it against the
  * **process** `TZ`. That made the stored instant a property of the deployment
  * host: the same file, same tenant, same cell landed eight hours apart on two
  * hosts, decided by a setting nobody authoring the spreadsheet can see. Since
@@ -327,17 +464,17 @@ function parseNaiveWallClock(s: string): WallClockParts | undefined {
  * advertised export → edit → re-import round trip was lossless only where the
  * host `TZ` happened to equal that zone.
  *
- * So a naive **datetime** cell is now read in `timezone` — the caller's
+ * So a naive **datetime** cell is read in `timezone` — the caller's
  * `ExecutionContext.timezone`, the same value the export renders in — through
  * `@objectstack/core`'s `zonedWallClockToUtcMs` (DST-safe via the platform tz
  * database, and the primitive the date-bucket drill path already used in its
  * date-only form). Three things deliberately do NOT change:
  *
  *  - **an offset-bearing cell** (`…Z`, `…+08:00`) already names one instant and
- *    is honoured exactly as written — `NAIVE_DATE_TIME` cannot match it;
- *  - **the date-only fast path** stays UTC (ECMAScript reads a date-only form as
- *    UTC, and a `date` is a timezone-naive calendar day under ADR-0053 — moving
- *    it would re-time every date-only import to fix nothing);
+ *    is honoured exactly as written;
+ *  - **a bare day** stays UTC midnight for a `datetime` (a `date` is a
+ *    timezone-naive calendar day under ADR-0053 — moving it would re-time every
+ *    date-only import to fix nothing);
  *  - **no resolved timezone ⇒ UTC**, never the process clock. That is the
  *    fallback the export cell path takes when no zone resolves, so the round
  *    trip stays exact for deployments that configure none — and a process-`TZ`
@@ -346,8 +483,8 @@ function parseNaiveWallClock(s: string): WallClockParts | undefined {
  *
  * For a naive cell landing in a `date` or `time` field the typed components are
  * taken verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`), which is
- * both zone-free and host-`TZ`-free; previously those two branches also read the
- * cell through the process clock and could report the wrong calendar day.
+ * both zone-free and host-`TZ`-free. An offset-bearing cell landing in either
+ * takes the UTC calendar day or UTC clock of the instant it names.
  */
 export function parseDateCell(
   raw: unknown,
@@ -359,47 +496,30 @@ export function parseDateCell(
     // to re-interpret, so no zone question to answer.
     if (Number.isNaN(raw.getTime())) return undefined;
     if (kind === 'datetime') return raw.toISOString();
-    if (kind === 'date') return `${raw.getUTCFullYear()}-${pad2(raw.getUTCMonth() + 1)}-${pad2(raw.getUTCDate())}`;
-    return `${pad2(raw.getUTCHours())}:${pad2(raw.getUTCMinutes())}:${pad2(raw.getUTCSeconds())}`;
+    // [#20534] Core's `date` storage rule: the UTC calendar day, the year padded.
+    if (kind === 'date') return String(temporalStorageForm(raw, 'date'));
+    return utcClock(raw);
   }
   const s = String(raw).trim();
   if (s === '') return undefined;
 
-  const wall = parseNaiveWallClock(s);
+  if (kind === 'time' && TIME_OF_DAY.test(s)) return s.length === 5 ? `${s}:00` : s;
 
-  if (kind === 'time') {
-    if (TIME_OF_DAY.test(s)) return s.length === 5 ? `${s}:00` : s;
-    // A full datetime for a time field: take its clock component. Offset-free →
-    // the clock as typed; offset-bearing → the instant's UTC clock, as before.
-    if (wall) return `${pad2(wall.hour ?? 0)}:${pad2(wall.minute ?? 0)}:${pad2(wall.second ?? 0)}`;
-    const t = new Date(s);
-    if (!Number.isNaN(t.getTime())) return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}`;
-    return undefined;
-  }
+  const cell = readIsoTemporalCell(s) ?? readYearFirstCell(s);
+  if (!cell) return undefined;
 
-  // Fast path: bare calendar date, no timezone games.
-  const ymd = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (ymd) {
-    const y = Number(ymd[1]);
-    const mo = Number(ymd[2]);
-    const d = Number(ymd[3]);
-    if (mo < 1 || mo > 12 || d < 1 || d > 31) return undefined;
-    if (kind === 'date') return `${y}-${pad2(mo)}-${pad2(d)}`;
-    return new Date(Date.UTC(y, mo - 1, d)).toISOString();
-  }
-
-  if (wall) {
-    if (kind === 'date') return `${wall.year}-${pad2(wall.month)}-${pad2(wall.day)}`;
-    const ms = zonedWallClockToUtcMs(wall, timezone);
+  if (cell.wall) {
+    if (kind === 'date') return cell.day;
+    if (kind === 'time') return `${pad2(cell.wall.hour)}:${pad2(cell.wall.minute)}:${pad2(cell.wall.second)}`;
+    const ms = zonedWallClockToUtcMs(cell.wall, timezone);
     return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
   }
 
-  const parsed = new Date(s);
-  if (Number.isNaN(parsed.getTime())) return undefined;
-  if (kind === 'date') {
-    return `${parsed.getUTCFullYear()}-${pad2(parsed.getUTCMonth() + 1)}-${pad2(parsed.getUTCDate())}`;
-  }
-  return parsed.toISOString();
+  // A bare day is midnight UTC; a zone-bearing cell is the instant it names.
+  const instant = new Date(cell.instantMs ?? Date.parse(`${cell.day}T00:00:00.000Z`));
+  if (kind === 'datetime') return instant.toISOString();
+  if (kind === 'date') return cell.instantMs === undefined ? cell.day : String(temporalStorageForm(instant, 'date'));
+  return utcClock(instant);
 }
 
 // ── options (select / multiselect) ─────────────────────────────────

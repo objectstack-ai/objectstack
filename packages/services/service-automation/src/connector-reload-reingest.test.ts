@@ -107,7 +107,8 @@ async function bootWithRealRegistry(
                 // the registry read with the `sys_metadata` overlay rows a Studio
                 // publish promoted to active layered over it.
                 ctx.registerService('protocol', {
-                    getMetaItems: async ({ type }: { type: string }) => {
+                    // [#20552] The engine reads the protocol's EXECUTION face.
+                    getMetaItemsForExecution: async ({ type }: { type: string }) => {
                         if (type !== 'connector') return [];
                         const served = opts.served!();
                         // `undefined` stands for a read that FAILS (the

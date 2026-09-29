@@ -232,8 +232,8 @@ describe('[#10298] `/api/v1/analytics/query` compiles every per-measure `filter`
       cubes: [{
         name: 'crm_case', title: 'Cases', sql: 'crm_case', public: true,
         measures: {
-          count: { name: 'count', label: 'Count', type: 'count', sql: '*' },
-          amount_sum: { name: 'amount_sum', label: 'Amount', type: 'sum', sql: 'amount' },
+          count: { label: 'Count', type: 'count', sql: '*' },
+          amount_sum: { label: 'Amount', type: 'sum', sql: 'amount' },
         },
         dimensions: {},
       }],

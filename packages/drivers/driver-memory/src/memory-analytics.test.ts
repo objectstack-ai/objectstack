@@ -54,19 +54,16 @@ describe('MemoryAnalyticsService', () => {
         sql: 'orders',
         measures: {
           count: {
-            name: 'count',
             label: 'Order Count',
             type: 'count',
             sql: 'id'
           },
           totalAmount: {
-            name: 'total_amount',
             label: 'Total Amount',
             type: 'sum',
             sql: 'amount'
           },
           avgAmount: {
-            name: 'avg_amount',
             label: 'Average Amount',
             type: 'avg',
             sql: 'amount'
@@ -74,19 +71,16 @@ describe('MemoryAnalyticsService', () => {
         },
         dimensions: {
           customer: {
-            name: 'customer',
             label: 'Customer',
             type: 'string',
             sql: 'customer'
           },
           status: {
-            name: 'status',
             label: 'Status',
             type: 'string',
             sql: 'status'
           },
           createdAt: {
-            name: 'created_at',
             label: 'Created At',
             type: 'time',
             sql: 'created_at',
@@ -101,19 +95,16 @@ describe('MemoryAnalyticsService', () => {
         sql: 'products',
         measures: {
           count: {
-            name: 'count',
             label: 'Product Count',
             type: 'count',
             sql: 'id'
           },
           avgPrice: {
-            name: 'avg_price',
             label: 'Average Price',
             type: 'avg',
             sql: 'price'
           },
           totalStock: {
-            name: 'total_stock',
             label: 'Total Stock',
             type: 'sum',
             sql: 'stock'
@@ -121,13 +112,11 @@ describe('MemoryAnalyticsService', () => {
         },
         dimensions: {
           category: {
-            name: 'category',
             label: 'Category',
             type: 'string',
             sql: 'category'
           },
           name: {
-            name: 'name',
             label: 'Product Name',
             type: 'string',
             sql: 'name'
@@ -321,10 +310,10 @@ describe('MemoryAnalyticsService', () => {
         title: 'Opps',
         sql: 'orders',
         measures: {
-          amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' },
+          amount: { label: 'Amount', type: 'sum', sql: 'amount' },
         },
         dimensions: {
-          status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+          status: { label: 'Status', type: 'string', sql: 'status' },
         },
       });
       const aliasService = new MemoryAnalyticsService({ driver, cubes: [aliasCube] });

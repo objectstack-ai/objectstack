@@ -107,6 +107,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -237,13 +238,15 @@ interface Run {
 /**
  * One authoring command over one option-B project, as a shell sees it.
  *
- * A plain literal config with no imports, so it resolves with no `node_modules`
- * next to it — the `authoring-rule-command-parity.test.ts` pattern.
+ * A `defineStack(…, { strict: false })` config with spec linked in — the
+ * `authoring-rule-command-parity.test.ts` pattern since #20367 ruling B, where
+ * `os validate` / `os build` refuse any other default export.
  */
 function runCommand(command: string, stack: Record<string, unknown>): Run {
   const dir = mkdtempSync(join(tmpdir(), 'os-union-fold-'));
   try {
-    writeFileSync(join(dir, 'objectstack.config.mjs'), `export default ${JSON.stringify(stack, null, 2)};\n`);
+    writeFileSync(join(dir, 'objectstack.config.mjs'), defineStackSource(stack, { strict: false }));
+    linkSpec(dir);
     try {
       const stdout = execFileSync(process.execPath, [CLI, command], {
         cwd: dir,

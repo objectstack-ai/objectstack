@@ -215,11 +215,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       mentions: {
         label: "メンション",
-        help: "@メンションオブジェクトの JSON 配列"
+        help: "コメント内で @メンションされたユーザー ID の JSON 配列"
       },
       reactions: {
         label: "リアクション",
-        help: "絵文字リアクションオブジェクトの JSON 配列"
+        help: "各絵文字を、リアクションしたユーザー ID のリストに対応付ける JSON オブジェクト"
       },
       is_edited: {
         label: "編集済み"

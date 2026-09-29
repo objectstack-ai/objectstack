@@ -4,7 +4,7 @@
  * Aggregate × field-type compatibility — the ONE table saying which
  * `AggregationFunction` may be applied to a field of which `FieldType`
  * (#16353; director ruling, decision batch #59, 2026-09-06: "both legs, table
- * in spec"; the boolean rows by decision batch #80, 2026-09-08, #16685 — see
+ * in spec"; the boolean rows by decision batch #80, 2026-09-08, commit ed7243d52 — see
  * below). A `DatasetMeasure` pairs an `aggregate` with a `field`; this
  * table is the contract both consumer legs execute — the compile-time refusal
  * in the dataset compiler (#16099) and the authoring-time lint rule — so the
@@ -65,11 +65,11 @@
  *   aggregand to `int` on Postgres so that the one dialect storing a real
  *   `boolean` column answers the same numbers (#11635). Batch #59's "every
  *   other pair: refused" never named booleans — it was a blanket default —
- *   and the director ruling of decision batch #80 (2026-09-08, #16685,
+ *   and the director ruling of decision batch #80 (2026-09-08, commit ed7243d52,
  *   maintainer verbatim 「其他同意」, option A) holds that the specific ruling
  *   #11152 stands over that default: the four rows carry both members and
  *   nothing else moves. `avg(flag)` is the win-rate / SLA-violation-rate
- *   shape (#11065) — the reason `AGGREGATION_CASES` exists — so a table that
+ *   shape (commit 20950404c) — the reason `AGGREGATION_CASES` exists — so a table that
  *   refused it would refuse a pair every backend is REQUIRED to answer.
  * - **everything else** — the text family, option types, references, files,
  *   structured JSON, `vector`, and the computed `formula` / `autonumber` — is

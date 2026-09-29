@@ -1594,11 +1594,13 @@ const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'co
  * would widen the binary32 value (`0.1` → `0.10000000149011612`) where the
  * client reads `0.1`. MySQL's `CAST(… AS DOUBLE)` needs 8.0.17 or later.
  *
- * ⚠️ Residual, stated: the double sums are added in scan order, one after
- * another, as the rows path adds them. SQLite (3.43+) adds with compensated
- * (Kahan-Babuska-Neumaier) summation, so a group of three or more fractions can
- * still differ in the last place on SQLite's native face alone (`0.1 + 0.2 +
- * 0.3`: SQLite `0.6`, every other face `0.6000000000000001`). Two addends
+ * ⚠️ Residual, stated: on PostgreSQL and MySQL the double sums are added in
+ * scan order, one after another, without compensation. SQLite (3.43+) adds with
+ * compensated (Kahan-Babuska-Neumaier) summation, and since #20489 so does the
+ * engine's rows path (`in-memory-aggregation.ts`, `compensatedSum`), so a group
+ * of three or more fractions can still differ in the last place between the
+ * PostgreSQL / MySQL native faces and those two (`0.1 + 0.2 + 0.3`: PostgreSQL /
+ * MySQL `0.6000000000000001`, SQLite and the rows path `0.6`). Two addends
  * cannot differ, which is why the pin is `0.1 + 0.2`.
  *
  * A `Record` over `AggregationFunction` for the same reason as

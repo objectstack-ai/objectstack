@@ -2667,6 +2667,7 @@
     "h1": {
       "type": "h1",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2681,6 +2682,7 @@
     "h2": {
       "type": "h2",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2695,6 +2697,7 @@
     "h3": {
       "type": "h3",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2709,6 +2712,7 @@
     "h4": {
       "type": "h4",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2723,6 +2727,7 @@
     "h5": {
       "type": "h5",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2737,6 +2742,7 @@
     "h6": {
       "type": "h6",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2751,6 +2757,7 @@
     "p": {
       "type": "p",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2765,6 +2772,7 @@
     "a": {
       "type": "a",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2795,6 +2803,7 @@
     "blockquote": {
       "type": "blockquote",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2813,6 +2822,7 @@
     "pre": {
       "type": "pre",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2827,6 +2837,7 @@
     "code": {
       "type": "code",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2841,6 +2852,7 @@
     "strong": {
       "type": "strong",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2855,6 +2867,7 @@
     "em": {
       "type": "em",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2869,6 +2882,7 @@
     "b": {
       "type": "b",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2883,6 +2897,7 @@
     "i": {
       "type": "i",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2897,6 +2912,7 @@
     "u": {
       "type": "u",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2911,6 +2927,7 @@
     "small": {
       "type": "small",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2925,6 +2942,7 @@
     "mark": {
       "type": "mark",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2939,6 +2957,7 @@
     "sub": {
       "type": "sub",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2953,6 +2972,7 @@
     "sup": {
       "type": "sup",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2967,6 +2987,7 @@
     "del": {
       "type": "del",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2981,6 +3002,7 @@
     "ins": {
       "type": "ins",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -2995,6 +3017,7 @@
     "abbr": {
       "type": "abbr",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3013,6 +3036,7 @@
     "ul": {
       "type": "ul",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3027,6 +3051,7 @@
     "ol": {
       "type": "ol",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3041,6 +3066,7 @@
     "li": {
       "type": "li",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3055,6 +3081,7 @@
     "dl": {
       "type": "dl",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3069,6 +3096,7 @@
     "dt": {
       "type": "dt",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3083,6 +3111,7 @@
     "dd": {
       "type": "dd",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3097,6 +3126,7 @@
     "figure": {
       "type": "figure",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3111,6 +3141,7 @@
     "figcaption": {
       "type": "figcaption",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3125,6 +3156,7 @@
     "img": {
       "type": "img",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3155,6 +3187,7 @@
     "hr": {
       "type": "hr",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3165,6 +3198,7 @@
     "br": {
       "type": "br",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3175,6 +3209,7 @@
     "time": {
       "type": "time",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3193,6 +3228,7 @@
     "address": {
       "type": "address",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3207,6 +3243,7 @@
     "cite": {
       "type": "cite",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3221,6 +3258,7 @@
     "q": {
       "type": "q",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3239,6 +3277,7 @@
     "span": {
       "type": "span",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3254,6 +3293,7 @@
     "table": {
       "type": "table",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "caption",
@@ -3282,6 +3322,7 @@
     "label": {
       "type": "label",
       "namespace": "ui",
+      "tier": "html",
       "inputs": [
         {
           "name": "text",
@@ -3298,6 +3339,7 @@
       "type": "aside",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3313,6 +3355,7 @@
       "type": "main",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3328,6 +3371,7 @@
       "type": "header",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3343,6 +3387,7 @@
       "type": "nav",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3358,6 +3403,7 @@
       "type": "footer",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3373,6 +3419,7 @@
       "type": "section",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
@@ -3388,6 +3435,7 @@
       "type": "article",
       "namespace": "ui",
       "isContainer": true,
+      "tier": "html",
       "inputs": [
         {
           "name": "className",
