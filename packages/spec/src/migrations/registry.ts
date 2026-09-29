@@ -9365,7 +9365,7 @@ const step18: MigrationStep = {
         + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
         + 'equality position, or an AST `and` / `or` group. None of this depends on where a '
         + 'block\'s rows come from: a filter on a component whose rows are inline (`data: { '
-        + 'provider: \'value\' }`, a `data` array, or `staticData`) — the binding\'s included — is '
+        + 'provider: \'value\' }` or `staticData`) — the binding\'s included — is '
         + 'rewritten or left exactly as it would be on a block that queries an object, because the '
         + '`object-map`, `object-tree`, `object-calendar` and `object-gantt` blocks of the objectui '
         + 'version this release pins match a rule array against those rows and select the rows the '

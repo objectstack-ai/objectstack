@@ -11242,7 +11242,7 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
         declined: `has the key \`${field}\` set to null, and what that key selects depends on where `
           + 'the block\'s rows come from, so no one rule keeps it: where the block queries an object, '
           + 'the renderer skips a null-valued key, so it constrains nothing; where its rows are inline '
-          + '(`data: { provider: \'value\' }`, a `data` array or `staticData`), it selects the rows whose '
+          + '(`data: { provider: \'value\' }` or `staticData`), it selects the rows whose '
           + `\`${field}\` is null. Decide which rows it should select: the rows with no \`${field}\` `
           + `value are the rule \`${JSON.stringify({ field, operator: isNull })}\`, and a filter that `
           + `leaves \`${field}\` unconstrained has no rule for it`,
