@@ -8,7 +8,7 @@ import { SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { printServerReady, type ServerReadyOptions } from './format.js';
 
 /**
- * #17081 — the `🔑 Dev admin` line must say what that account SEES.
+ * Commit f721ef0ff — the `🔑 Dev admin` line must say what that account SEES.
  *
  * ## The defect this pins shut
  *
@@ -78,7 +78,7 @@ const SEEDED = { email: 'admin@objectos.ai', password: 'admin123' };
  * The credential block, verbatim, as a real render emits it under NO_COLOR.
  *
  * ⛔ Do not regenerate this from `format.ts`. The first three entries are
- * byte-identical to what shipped before #17081 — the change APPENDS, it does
+ * byte-identical to what shipped before commit f721ef0ff — the change APPENDS, it does
  * not restate — and that identity is asserted separately below.
  */
 const DEV_ADMIN_BLOCK = [

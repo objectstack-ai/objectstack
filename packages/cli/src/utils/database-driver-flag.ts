@@ -8,15 +8,15 @@
  *
  * `os start` and `os dev` each declared the flag with a hand-written literal
  * array — `options: ['sqlite', 'sqlite-wasm', 'turso', …]` — and each repeated
- * the same ids a second time inside the flag's `description:` prose. #6345 had
+ * the same ids a second time inside the flag's `description:` prose. Commit e2798fab7 had
  * just collapsed the platform's driver vocabulary into ONE table in
  * `@objectstack/spec`, so those four literals were a second, third, fourth and
- * fifth statement of it living one package away. That is the shape #6535 closed
+ * fifth statement of it living one package away. That is the shape commit a92b1793c closed
  * for `IMPORT_JOB_MAX_ROWS`, moved to another package.
  *
  * This is NOT a drift FIX: `commands/database-driver-allowlist.pin.test.ts`
  * (#6860) already asserts the flag agrees with what `resolveStorageDefinition`
- * resolves, and it caught a real regression the day #6345 landed. Nothing an
+ * resolves, and it caught a real regression the day commit e2798fab7 landed. Nothing an
  * operator can reach today is wrong. The point is narrower and structural — with
  * one definition, there is no second copy left to drift, so the pin guards an
  * agreement that can no longer be broken by editing one file and not the other.

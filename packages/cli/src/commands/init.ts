@@ -135,7 +135,7 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    the correct remedy, not pinning our own declaration back to 12.
  *
  *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
- *    on 1.7.1 (#10326) and was behavioural: better-auth's own Kysely dialect —
+ *    on 1.7.1 (commit 675ab574e) and was behavioural: better-auth's own Kysely dialect —
  *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
  *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
  *    structural instead of empirical: of the 464 files in the published
@@ -975,7 +975,7 @@ function printWarning(msg: string) {
  * files" list). Reuses `create-objectstack`'s `created-summary.ts` (see its
  * header for the reachability measurement that made a hand-accumulated
  * list untenable for that scaffolder) instead of a second copy of the same
- * renderer — the two scaffold paths already drifted once (#10499) from
+ * renderer — the two scaffold paths already drifted once (closed by commit 6d441e41f) from
  * carrying separate implementations of the same list.
  *
  * Called once, after the install attempt (success OR failure) has run its

@@ -77,7 +77,7 @@ describe('os environments commands', () => {
 });
 
 /**
- * Pin (#10967): every `examples` entry on EVERY CLI command source names a
+ * Pin (commit e4a71d418): every `examples` entry on EVERY CLI command source names a
  * command id THIS CLI ACTUALLY REGISTERS.
  *
  * ## The failure this exists to refuse
@@ -94,7 +94,7 @@ describe('os environments commands', () => {
  * exactly as before while any `examples` string spelling the OLD topic
  * silently stops being true — not a parse error, not a type error, nothing
  * a build catches. A user who copy-pastes the stale line hits `Error:
- * Command projects:bind not found.` (exit 2). That is the shape #10967
+ * Command projects:bind not found.` (exit 2). That is the shape commit e4a71d418
  * fixed under `environments/*.ts`; this pin targets the MECHANISM (an
  * example naming an id this CLI does not register), not the literal string
  * `os projects`, so it keeps working for a topic nobody has renamed yet —
@@ -123,7 +123,7 @@ describe('os environments commands', () => {
  * ## Population: EVERY command source, via AST — not via `import`
  *
  * The property is checked against every non-test file under
- * `packages/cli/src/commands/**`, not just the five #10967 touches — a
+ * `packages/cli/src/commands/**`, not just the five commit e4a71d418 touched — a
  * five-file population is exactly the set that is already correct, so it
  * cannot catch the defect class returning anywhere else (it did not catch
  * it in `register.ts`/`whoami.ts`/`logout.ts`, discovered by hand below).
@@ -157,9 +157,9 @@ describe('os environments commands', () => {
  * `examples` USED TO say `os auth register` / `os auth whoami` / `os auth
  * logout`, though no `auth` topic has ever existed for them (confirmed via
  * `--help`: `Error: Command auth:whoami not found.`) — the same defect
- * class as #10967, found by scanning the whole tree, but not #10967's to
- * fix (outside its dispatched file surface). Filed as #11221 and fixed
- * there, so `EXCLUDED` is now empty and all three are scanned by the main
+ * class commit e4a71d418 fixed, found by scanning the whole tree, but not that commit's to
+ * fix (outside its dispatched file surface). Fixed separately by commit e278a2970,
+ * so `EXCLUDED` is now empty and all three are scanned by the main
  * assertion like every other command source.
  *
  * The mechanism stays, because it is what made that handoff safe: a silent,
@@ -167,13 +167,13 @@ describe('os environments commands', () => {
  * checked by this pin forever, even after the excluded condition no longer
  * holds. So a second `it.each` re-runs the SAME predicate over the excluded
  * files and asserts it still finds an unresolved entry. That is not
- * hypothetical here: when #11221's fix removed the last unresolved entry,
+ * hypothetical here: when commit e278a2970 removed the last unresolved entry,
  * this assertion went red on purpose for all three files, and its message
  * ("remove it from EXCLUDED above") is what retired them. The pattern
  * (map-of-reason + filtered main assertion + a "still needs its exclusion"
  * retiring assertion) matches
  * `packages/create-objectstack/src/starter-comments-self-contained.test.ts`'s
- * `EXCLUDED`, which has retired this same way before (#11022).
+ * `EXCLUDED`, which has retired this same way before (commit 21756b325).
  */
 describe('#10967 pin: examples resolve to a real command id', () => {
   const ENVIRONMENTS_DIR = fileURLToPath(new URL('.', import.meta.url));
@@ -293,7 +293,7 @@ describe('#10967 pin: examples resolve to a real command id', () => {
   /**
    * Nothing is excluded — every command source is scanned. `register.ts` /
    * `whoami.ts` / `logout.ts` each carried a self-retiring entry here while
-   * their `os auth …` examples were #11221's to fix; that fix landed, the
+   * their `os auth …` examples awaited commit e278a2970's fix; that fix landed, the
    * retiring assertion below went red exactly as designed, and the map goes
    * back to empty rather than staying around as a silent exemption over three
    * root-level commands. The assertion stays, so the next entry added here is

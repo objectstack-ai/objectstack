@@ -35,7 +35,7 @@
  *                       until #10678, which is the whole defect that card names.
  *   `--strict-body`     the same recorded warnings become a hard failure (exit 1)
  *                       with a per-callable diagnostic, and nothing is bundled.
- *   `os lint`           (#13651) reads the REFUSAL KIND, not the exit code, and
+ *   `os lint`           (commit ada3834ad) reads the REFUSAL KIND, not the exit code, and
  *                       gives the two classes different verdicts: an accidental
  *                       scope leak (`free-identifiers`) is a lint `error`, so a
  *                       gate can fail on it; a structural one (`forbidden-token`)
@@ -54,7 +54,7 @@
  * `body.capabilities` automatically.
  *
  * ⛔ RETIRED — the `// @capabilities api.read api.write` hook-body directive was
- * removed in @objectstack/cli 17.1 (#10917, ADR-0049 enforce-or-remove). It was
+ * removed in @objectstack/cli 17.1 (commit 7940de5e0, ADR-0049 enforce-or-remove). It was
  * read off `String(fn)`, and `loadConfig` runs every config through
  * `bundle-require` -> esbuild, which strips `//` line comments before the
  * handler is ever a runtime function. Measured on all four ordinary authoring
@@ -92,7 +92,7 @@
 import { detectFreeIdentifiers } from './detect-free-identifiers.js';
 
 /**
- * WHY a refusal carries a machine-readable kind (#13651).
+ * WHY a refusal carries a machine-readable kind (commit ada3834ad).
  *
  * Every refusal below already KNOWS which rule refused — the rule is what
  * produced the sentence. Until this type existed, that knowledge was flattened
@@ -150,7 +150,7 @@ export class HookBodyExtractionError extends Error {
    *
    * Same discipline as `kind` above, one level finer: the refusing rule already
    * knows which half of the free list it is looking at, and a consumer that has
-   * to re-derive it from the message prose is back where #13651 started. The
+   * to re-derive it from the message prose is back where it was before commit ada3834ad. The
    * two halves have OPPOSITE remedies — a module-scope name is inlined into the
    * handler, a host-only global cannot be inlined at all — so a consumer that
    * prints one remedy for both prints a wrong one half the time.

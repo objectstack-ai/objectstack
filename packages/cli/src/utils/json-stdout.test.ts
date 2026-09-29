@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The stdout reservation `--json` is built on (#6217), at the unit level.
+ * The stdout reservation `--json` is built on (commit 2b641ddd4), at the unit level.
  *
  * `packages/cli/test/json-stdout-purity.e2e.test.ts` pins the contract this
  * serves — every `--json` command in the `bootSchemaStack` family emitting one

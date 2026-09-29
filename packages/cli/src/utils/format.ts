@@ -68,7 +68,7 @@ export interface EmitJsonOptions {
    * `test/login-json-ndjson.e2e.test.ts`.
    *
    * Everywhere else `--json` still means exactly one JSON document on stdout
-   * (#6217), so the remaining compact call sites are still only preserving
+   * (commit 2b641ddd4), so the remaining compact call sites are still only preserving
    * historical formatting and unifying them stays worth doing on its own.
    * New code should use the default.
    */
@@ -164,7 +164,7 @@ export function isReportedError(error: unknown): boolean {
 }
 
 /**
- * [#13347] The ADR-0112 carriers a `--format json` failure envelope adds
+ * [commit 098a08ffa] The ADR-0112 carriers a `--format json` failure envelope adds
  * beside its `error` sentence — `{ code, httpStatus }`, and only the ones the
  * thrown error actually carries.
  *
@@ -298,7 +298,7 @@ export function errorCodeFields(error: unknown): ErrorCodeFields {
 export async function emitText(text: string, exitCode: CliExitCode = 0): Promise<void> {
   // `writeStdoutDirect`, not `process.stdout.write`: a `--json` command that
   // boots a kernel reserves stdout so the kernel's INFO stream goes to stderr
-  // (#6217), and the payload is the one thing that must still reach the real
+  // (commit 2b641ddd4), and the payload is the one thing that must still reach the real
   // stdout. Outside a reservation this is `process.stdout.write` verbatim.
   await writeStdoutDirect(text + '\n');
   if (exitCode !== 0) process.exitCode = exitCode;
@@ -539,7 +539,7 @@ export function formatZodErrors(error: ZodError) {
 /**
  * Every field here is rendered by {@link printMetadataStats}.
  *
- * #11172 — `translations: number` used to sit in this interface, collected by
+ * Until commit 05181e8cc, `translations: number` sat in this interface, collected by
  * {@link collectMetadataStats} (`count(config.translations)`) on every
  * `os validate` / `os info` / `os compile` run and then read by nothing: the
  * printer had no `translations` fragment at any value, so a stack with 40
@@ -550,7 +550,7 @@ export function formatZodErrors(error: ZodError) {
  * The invariant that replaces it: this struct carries no metric the summary
  * does not print. It is enforced from both ends — TypeScript requires
  * `collectMetadataStats` to populate every field declared here, and the
- * `[#11172]` pin in `print-metadata-stats-zero-row.test.ts` requires every
+ * pin commit 05181e8cc added to `print-metadata-stats-zero-row.test.ts` requires every
  * collected field to reach the rendered output. A metric that is declared but
  * never rendered cannot satisfy both.
  */
@@ -778,7 +778,7 @@ export interface ServerReadyOptions {
    * When present, the banner surfaces them so backend debugging never has to
    * guess the login. Absent when nothing was seeded.
    *
-   * [#17081] The banner also says what this account SEES, because it is the
+   * [commit f721ef0ff] The banner also says what this account SEES, because it is the
    * only credential a first-run operator is given and it holds no app-declared
    * capability — in an app that gates navigation on `requiredPermissions` it is
    * the account that renders an empty menu. See the render site in
@@ -793,7 +793,7 @@ export interface ServerReadyOptions {
    * a first-run operator is handed, and it holds every platform capability and
    * no app-declared one — so in an application that gates navigation on
    * `requiredPermissions` it is by construction the account that renders an
-   * empty menu (#17081). Which of an application's audiences shows something is
+   * empty menu (disclosed since commit f721ef0ff). Which of an application's audiences shows something is
    * a fact only the application has, and this is the channel it hands it over
    * through.
    *
@@ -1088,7 +1088,7 @@ export function printServerReady(opts: ServerReadyOptions) {
       chalk.bold.green(`${opts.seededAdmin.email} / ${opts.seededAdmin.password}`),
     );
     console.error(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
-    // [#17081] Say what this account SEES. It is the only credential a
+    // [commit f721ef0ff] Say what this account SEES. It is the only credential a
     // first-run operator is handed, and the banner used to stop at the line
     // above — which asserts a login and says nothing about its audience. The
     // account's standing is `admin_full_access`
@@ -1129,8 +1129,8 @@ export function printServerReady(opts: ServerReadyOptions) {
     console.error(chalk.dim('      an app that gates navigation on requiredPermissions may show it an empty menu; grant'));
     console.error(chalk.dim('      it a permission set under Setup → Users, or sign in as an account your app seeds'));
   }
-  // [#17556] What the APPLICATION says about signing in — suggestion 1 of
-  // #17081, the half `packages/cli` structurally could not write for itself.
+  // [#17556 — commit 24d622b94] What the APPLICATION says about signing in — suggestion 1 of
+  // its parent card, the half `packages/cli` structurally could not write for itself.
   //
   // The block above describes the account the PLATFORM seeded; it is complete
   // about that account and silent about every other, because the platform does
@@ -1428,16 +1428,16 @@ export function printMetadataStats(stats: MetadataStats) {
     /**
      * The item(s) to force-print when EVERY item in the section is `0`.
      *
-     * #10504 — a section whose every item is `0` used to vanish from the
+     * Before commit ff5733e03, a section whose every item is `0` vanished from the
      * summary entirely, and that reads as "this summary does not report on
      * this section" rather than "this project has none of it" — exactly the
      * same output for a newcomer's freshly scaffolded project (intentionally
-     * zero apps) and for a summary that simply never covers UI. That card
+     * zero apps) and for a summary that simply never covers UI. That commit
      * measured the drop only through `UI:` and triage ruled narrowly on that
      * row, so the mechanism landed opt-in and `Data:`/`Logic:`/`Security:`
      * kept dropping.
      *
-     * #10952 measured the same drop on the other three rows, against the real
+     * Commit 0d4bd93e7 measured the same drop on the other three rows, against the real
      * CLI (`bin/run-dev.js validate`, `NO_COLOR=1`): on a stack with one
      * object, two fields and nothing else the entire summary was
      *
@@ -1446,7 +1446,7 @@ export function printMetadataStats(stats: MetadataStats) {
      *
      * with no `Logic:` and no `Security:` line present at all; on a stack that
      * also declares no objects it was the single line `UI: 0 Apps`. Both
-     * exited `0`. Triage generalised #10504's principle — a summary section is
+     * exited `0`. Triage generalised commit ff5733e03's principle — a summary section is
      * NEVER silently dropped; every section prints its zero state — so this is
      * no longer opt-in. The field is REQUIRED and typed non-empty, and that
      * typing is the enforcement: a section added to this array later cannot
@@ -1461,12 +1461,12 @@ export function printMetadataStats(stats: MetadataStats) {
     /**
      * How this section's surviving items become the printed line.
      *
-     * Omitted by every section that renders the shipped #10504 shape —
+     * Omitted by every section that renders the shape commit ff5733e03 shipped —
      * `<count> <Item>` with the count in white and the item name dim, joined
      * by two spaces (`Data: 1 Objects  2 Fields`). `Runtime:` is the one row
      * that has never rendered that way and still does not: it prints
      * `2 plugins, 1 devPlugins`, comma-joined and fully dim, with lowercase
-     * item names. That difference is pre-existing shipped output and #11172
+     * item names. That difference is pre-existing shipped output and commit 05181e8cc
      * deliberately did NOT change it — the ruling was about the row's
      * PRESENCE at zero, not its typography, and rewriting a user-visible row's
      * look while fixing its zero state would be an unruled widening.
@@ -1500,7 +1500,7 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Reports', stats.reports],
         ['Actions', stats.actions],
       ],
-      // The shipped shape (#10504): `UI: 0 Apps`. Unchanged.
+      // The shape commit ff5733e03 shipped: `UI: 0 Apps`. Unchanged.
       zeroFallback: ['Apps'],
     },
     {
@@ -1533,17 +1533,17 @@ export function printMetadataStats(stats: MetadataStats) {
       zeroFallback: ['Positions', 'Permissions'],
     },
     {
-      // #11172 — `Runtime:` used to be rendered OUTSIDE this loop, as a
+      // Until commit 05181e8cc, `Runtime:` was rendered OUTSIDE this loop, as a
       // standalone `if (stats.plugins > 0 || stats.devPlugins > 0)` after the
       // loop closed, so a stack with no plugins and no devPlugins printed no
       // `Runtime:` line at all. Same "reads as never asked, not as zero" defect
-      // #10504 and #10952 removed from the sections, and measured the same way
+      // commits ff5733e03 and 0d4bd93e7 removed from the sections, and measured the same way
       // (`bin/run-dev.js validate`, `NO_COLOR=1`, a stack declaring nothing).
       // The maintainer ruled it in (2026-08-23): `Runtime:` renders
       // unconditionally, joining the no-silent-drop invariant.
       //
       // Folded into the array rather than fixed in place. Being outside the
-      // loop was not incidental to the defect — it is why #10952's mechanism
+      // loop was not incidental to the defect — it is why commit 0d4bd93e7's mechanism
       // could not reach this row, and a hand-rolled zero case beside the loop
       // would have been a SECOND copy of the invariant, un-enforced by the
       // `zeroFallback` typing that stops the next row from being added without
@@ -1563,14 +1563,14 @@ export function printMetadataStats(stats: MetadataStats) {
     },
   ];
 
-  /** The shipped #10504 section shape — see `render` on the type above. */
+  /** The section shape commit ff5733e03 shipped — see `render` on the type above. */
   const countFragments = (shown: Array<[string, number]>) =>
     shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
 
   for (const section of sections) {
     let shown = section.items.filter(([, v]) => v > 0);
     if (shown.length === 0) {
-      // Never drop the row (#10504, #10952, #11172) — the row is what says
+      // Never drop the row (commits ff5733e03, 0d4bd93e7, 05181e8cc) — the row is what says
       // "this project has none of this"; its absence says nothing at all.
       shown = section.zeroFallback
         .map((key) => section.items.find(([itemKey]) => itemKey === key))
@@ -1690,7 +1690,7 @@ export const AUTHORING_ADVISORY_PRINT_LIMIT = 50;
  * notice is not merely incomplete — it is indistinguishable from complete, so
  * an author who reads it and sees their file is clean has read a list that
  * stopped early. That is the same shape as the dropped summary rows above
- * (#10504, #10952): output that cannot distinguish "none" from "not shown".
+ * (until commits ff5733e03, 0d4bd93e7): output that cannot distinguish "none" from "not shown".
  *
  * So the cap stays and the honesty line is added: over the limit, the exact
  * remainder is named; at or under it, no such line appears. The pointer is

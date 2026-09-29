@@ -218,7 +218,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'description', type: 'string', description: 'App description' },
       { name: 'navigation', type: 'NavItem[]', description: 'Menu tree. Every item needs `id` (snake_case) + `label` + a discriminant `type`, plus that type\'s own target key: object -> `objectName`, dashboard -> `dashboardName`, page -> `pageName`, url -> `url`, report -> `reportName`.' },
       // `theme` here described a key that is only an alias of `branding`; the
-      // `themes` metadata surface itself was retired at #10485 (ADR-0049) —
+      // `themes` metadata surface itself was retired by commit 35ad101bc (ADR-0049) —
       // `app.branding` is the one colour surface. `logo` and `defaultRoute`
       // were the same class of row: neither is an AppSchema key, and both are
       // now rejected by name (`logo` -> `branding`).

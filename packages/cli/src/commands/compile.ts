@@ -228,7 +228,7 @@ export default class Compile extends Command {
       // one. See `printAuthoringAdvisories` for the measurement.
       printAuthoringAdvisories(ruleAdvisories);
     };
-    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
     // notices were computed at step 2 (below) and reached the terminal SUCCESS
     // payload alone, so all nine failure exits dropped a list already in hand.

@@ -45,7 +45,7 @@ import { EmailServiceConfigSchema } from '@objectstack/spec/system';
 import type { EmailServiceConfig } from '@objectstack/spec/system';
 import { resolveEmailCapabilityArg } from './serve.js';
 // The repo's one comment/code separator (#9367). This file used to scan RAW
-// source with no separator at all (#10514): a docblock or a `// TODO: also
+// source with no separator at all (until commit 5359a9b4c): a docblock or a `// TODO: also
 // read cfgEmail.foo` line was indistinguishable from a real dot access. Typed
 // by the hand-written `scripts/js-comment-mask.d.mts` next to it (this
 // package's `tsconfig.json` includes `src`), so this import needs no
@@ -60,7 +60,7 @@ const SERVE_SOURCE = readFileSync(
 /**
  * `serve.ts` with every comment span blanked (offsets preserved, bytes
  * replaced with spaces) — see `keysReadFromConfigEmail` below for why the
- * scan reads this instead of `SERVE_SOURCE` directly (#10514).
+ * scan reads this instead of `SERVE_SOURCE` directly (since commit 5359a9b4c).
  */
 const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
 
@@ -76,7 +76,7 @@ const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
  * approximation. Should that ever stop being true, this comment is the place
  * the next reader learns the scan has to change with it.
  *
- * Takes `source` explicitly (default the real file's masked text, #10514)
+ * Takes `source` explicitly (default the real file's masked text, since commit 5359a9b4c)
  * rather than closing over `SERVE_SOURCE`/`MASKED_SERVE_SOURCE` directly, so
  * the vacuity-proof tests below can drive the exact same regex over a raw vs.
  * a masked variant of a shape and show the two disagree.
@@ -151,12 +151,12 @@ describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
 });
 
 /**
- * Vacuity proof (#10514): both directions the raw scan was one ordinary
+ * Vacuity proof (commit 5359a9b4c): both directions the raw scan was one ordinary
  * comment away from getting wrong, reproduced on synthetic sources shaped
  * like the real resolver so the two legs (raw vs. masked) can be compared
  * without waiting for `serve.ts` to actually regress. Each `it` shows the RAW
  * leg producing the wrong verdict — the verdict this file's scan would have
- * produced before #10514 — and the MASKED leg producing the right one.
+ * produced before commit 5359a9b4c — and the MASKED leg producing the right one.
  */
 describe('the key scan ignores prose that looks like a cfgEmail read (#10514)', () => {
   it('does not let a comment fabricate an undeclared key ("declares every key" direction)', () => {
@@ -168,11 +168,11 @@ describe('the key scan ignores prose that looks like a cfgEmail read (#10514)', 
       '}',
     ].join('\n');
 
-    // Pre-#10514 (raw): the comment's `cfgEmail.bogusKey` is indistinguishable
+    // Before commit 5359a9b4c (raw): the comment's `cfgEmail.bogusKey` is indistinguishable
     // from a real dot access — this is what would have made "declares every
     // config.email key the resolver reads" go RED over a comment alone.
     expect(keysReadFromConfigEmail(synthetic)).toEqual(['bogusKey', 'provider']);
-    // Post-#10514 (masked): the comment is blanked, so only the real read
+    // Since commit 5359a9b4c (masked): the comment is blanked, so only the real read
     // survives.
     expect(keysReadFromConfigEmail(maskComments(synthetic))).toEqual(['provider']);
   });
@@ -186,11 +186,11 @@ describe('the key scan ignores prose that looks like a cfgEmail read (#10514)', 
       '}',
     ].join('\n');
 
-    // Pre-#10514 (raw): the comment alone counts as a "read" of `persist` —
+    // Before commit 5359a9b4c (raw): the comment alone counts as a "read" of `persist` —
     // silently restoring the exact `DECLARED_BUT_UNREAD` exemption this
     // file's docblock (above) says was deleted for good after #5447/#5470.
     expect(keysReadFromConfigEmail(synthetic)).toContain('persist');
-    // Post-#10514 (masked): the comment does not count, so a schema key with
+    // Since commit 5359a9b4c (masked): the comment does not count, so a schema key with
     // no real reader still reads as unread here.
     expect(keysReadFromConfigEmail(maskComments(synthetic))).not.toContain('persist');
   });

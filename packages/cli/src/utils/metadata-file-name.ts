@@ -37,7 +37,7 @@ export function metadataFileInfix(type: string): string | null {
  * globbing that type's `filePatterns`. A scaffold whose name matches none of
  * those patterns is never primed, and nothing anywhere reports it: it still
  * type-checks, still passes `os validate` and still publishes — the
- * silent-strip shape ADR-0063's retirement of `os g agent` closed (#10359).
+ * silent-strip shape ADR-0063's retirement of `os g agent` closed (commit 15b63e85a).
  *
  * ### That mechanism has a precondition, and this tree never meets it (#12075)
  *
@@ -91,10 +91,10 @@ export function metadataFileInfix(type: string): string | null {
  * The harness used to write `NAME.ts` for every type, and that name matches
  * no pattern the registry declares for ANY type. Measured rather than
  * assumed: across the seven generators, `NAME.ts` matched zero `filePatterns`
- * entries and `NAME.TYPE.ts` matched exactly one, every time. #11025 closed
+ * entries and `NAME.TYPE.ts` matched exactly one, every time. Commit 1c3a46f87 closed
  * it for `skill` alone through a per-generator filename override and fenced
  * the repo-wide route as a decision of its own. This is that decision
- * (#11071), and it retires the override rather than growing it to six copies.
+ * (commit 50fb191dc), and it retires the override rather than growing it to six copies.
  *
  * ## Why it reads the pattern instead of interpolating the type name
  *

@@ -882,7 +882,7 @@ export default class MigrateDuplicates extends Command {
    * renderer, per the ruling's point 3: the report IS the deliverable, the
    * operator archives it, and a second renderer would be a second contract to
    * keep true. stdout is therefore reserved for the payload for the whole run
-   * (`jsonOutput: true`), so the boot's own log lines go to stderr (#6217).
+   * (`jsonOutput: true`), so the boot's own log lines go to stderr (commit 2b641ddd4).
    */
   async run(): Promise<void> {
     const { flags } = await this.parse(MigrateDuplicates);

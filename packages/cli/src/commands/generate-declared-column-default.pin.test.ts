@@ -10,7 +10,7 @@
  * band into a generated table got NULL where the platform's own table supplies
  * the declared value. Driven on live PostgreSQL 16.13 — one object, three
  * schemas, one producer each, `information_schema.columns` read back per schema
- * (the card's own six-column probe, re-run against `generate.ts` as #16887 and
+ * (the card's own six-column probe, re-run against `generate.ts` as commit 9cdffbe36 and
  * #17208 leave it):
  *
  * ```
@@ -49,7 +49,7 @@
  *
  * 1. **`f_required` stays out of the repair.** A `required: true` field with no
  *    `storage.notNull` is nullable on all three producers — which is agreement,
- *    not divergence, because #16887 already took both generators off `required`.
+ *    not divergence, because commit 9cdffbe36 already took both generators off `required`.
  *    Whether a SCAFFOLD should nonetheless preserve the author's declaration is
  *    an open decision (#17218) and ⛔ is not settled here or by this file.
  * 2. **`NOW()` on a `date` / `time` column is a PostgreSQL claim**, like every
