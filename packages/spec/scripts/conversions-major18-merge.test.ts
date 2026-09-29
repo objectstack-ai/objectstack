@@ -30,6 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { gitFreeEnv } from '../../../scripts/git-env.mjs';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
@@ -43,8 +44,8 @@ const OPEN = 'const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [\n';
 const CLOSE = '];\n';
 /** One entry, exactly as the registry spells it: the conversion's identifier, then its application order. */
 const ENTRY = /  \{ conversion: ([A-Za-z_$][\w$]*), order: (\d+(?:\.\d+)?) \},\n/y;
-/** A line comment between entries — it belongs to the entry below it. */
-const COMMENT = /  \/\/[^\n]*\n/y;
+/** A blank line — which is what a comment between entries is once `maskComments` has blanked it; it belongs to the entry below it. */
+const BLANK = /[ \t]*\n/y;
 /** A conversion definition and its id, which every definition in the file spells on the next line. */
 const DEFINITION = /^(?:export )?const ([A-Za-z_$][\w$]*): MetadataConversion = \{\n  id: '([^'\n]+)',$/gm;
 /** Where a conversion that sorts last is defined: directly above this declaration's doc comment. */
@@ -83,34 +84,38 @@ interface Entry {
   at: number;
 }
 
-/** The entries of `MAJOR_18_CONVERSIONS`, parsed from source text — every byte of the list accounted for. */
+/**
+ * The entries of `MAJOR_18_CONVERSIONS`, parsed from source text — every byte of the list accounted for.
+ * Read through the shared comment mask, which keeps offsets, so a comment between entries is a blank line here.
+ */
 function entriesOf(source: string): { entries: Entry[]; end: number } {
-  const start = source.indexOf(OPEN);
+  const text = maskComments(source);
+  const start = text.indexOf(OPEN);
   expect(start, 'the MAJOR_18_CONVERSIONS declaration').toBeGreaterThan(-1);
   const entries: Entry[] = [];
   let at = start + OPEN.length;
   let lead = at;
   for (;;) {
-    COMMENT.lastIndex = at;
-    if (COMMENT.exec(source)) {
-      at = COMMENT.lastIndex;
+    BLANK.lastIndex = at;
+    if (BLANK.exec(text)) {
+      at = BLANK.lastIndex;
       continue;
     }
     ENTRY.lastIndex = at;
-    const m = ENTRY.exec(source);
+    const m = ENTRY.exec(text);
     if (!m) break;
     entries.push({ ident: m[1]!, order: Number(m[2]), at: lead });
     at = lead = ENTRY.lastIndex;
   }
   // No residue: the list ends where the last entry does, so an entry spelled
   // any other way cannot hide from the checks below.
-  expect(source.slice(at, at + CLOSE.length), `unparsed text in MAJOR_18_CONVERSIONS at offset ${at}`).toBe(CLOSE);
+  expect(text.slice(at, at + CLOSE.length), `unparsed text in MAJOR_18_CONVERSIONS at offset ${at}`).toBe(CLOSE);
   return { entries, end: at };
 }
 
-/** Every conversion definition in the file, in file order. */
+/** Every conversion definition in the file, in file order — a commented-out one is not a definition. */
 function definitionsOf(source: string): { ident: string; id: string; at: number }[] {
-  return [...source.matchAll(DEFINITION)].map((m) => ({ ident: m[1]!, id: m[2]!, at: m.index! }));
+  return [...maskComments(source).matchAll(DEFINITION)].map((m) => ({ ident: m[1]!, id: m[2]!, at: m.index! }));
 }
 
 /** Rule 1, as findings: the entries are sorted strictly by identifier. */
