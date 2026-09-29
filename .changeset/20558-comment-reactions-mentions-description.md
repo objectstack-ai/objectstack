@@ -8,8 +8,8 @@ The two field descriptions are served metadata (field help in the console, and w
 
 | Field | Description was | Description is now | Stored value |
 | --- | --- | --- | --- |
-| `reactions` | JSON array of emoji reaction objects | JSON object mapping each emoji to the list of user ids who reacted | `{"👍":["usr_1","usr_2"]}` |
-| `mentions` | JSON array of @mention objects | JSON array of the user ids @mentioned in the comment | `["usr_1","usr_2"]` |
+| `reactions` | `JSON array of emoji reaction objects` | `JSON object mapping each emoji to the list of user ids who reacted` | `{"👍":["usr_1","usr_2"]}` |
+| `mentions` | `JSON array of @mention objects` | `JSON array of the user ids @mentioned in the comment` | `["usr_1","usr_2"]` |
 
 The console's record discussion panel reads and writes `reactions` as that map, and writes `mentions` as that list of ids; the `collab.mention` notification hook reads the ids.
 
