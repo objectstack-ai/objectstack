@@ -4,7 +4,7 @@
  * `metadata.prefix` is honoured by the SDK, not restated by it (#16675).
  *
  * THE CONTRACT. `metadata.prefix` is a live `RestServerConfig` key, the exact
- * sibling of the `crud.dataPrefix` #14879 fixed: REST mounts every metadata
+ * sibling of the `crud.dataPrefix` defect commit cf74a1128 fixed: REST mounts every metadata
  * route under `metaPath = ${basePath}${metadata.prefix}` and the discovery
  * handler advertises the same value as
  * `routes.metadata = ${realBase}${metadata.prefix}`. Three surfaces describe

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `crud.dataPrefix` is honoured by the SDK, not restated by it (#14879).
+ * `crud.dataPrefix` is honoured by the SDK, not restated by it (commit cf74a1128).
  *
  * THE CONTRACT. `crud.dataPrefix` is a live `RestServerConfig` key: REST mounts
  * every CRUD route under `dataPath = ${basePath}${crud.dataPrefix}` and the
