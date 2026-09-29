@@ -231,7 +231,8 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
 
 type Rig = Awaited<ReturnType<typeof boot>>;
 
-const sorted = (xs: readonly string[]) => [...xs].sort();
+/** Resolution order is not what is compared: the two faces build different contexts. */
+const sorted = (xs: readonly string[] | undefined) => [...(xs ?? [])].sort();
 const crudOf = (d: ExplainDecision) => d.layers.find((l) => l.layer === 'object_crud')?.verdict;
 const DENIED = { code: 'PERMISSION_DENIED', status: 403 };
 
@@ -242,7 +243,7 @@ const DENIED = { code: 'PERMISSION_DENIED', status: 403 };
  * precondition asserts.
  */
 function withRig(makeDriver: () => Driver, posture: TenancyPosture) {
-  const state: { rig?: Rig; warn?: ReturnType<typeof vi.spyOn> } = {};
+  const state: { rig?: Rig; warn?: { mock: { calls: unknown[][] }; mockRestore: () => void } } = {};
   beforeAll(async () => {
     state.warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     state.rig = await boot(makeDriver, posture);
@@ -255,8 +256,8 @@ function withRig(makeDriver: () => Driver, posture: TenancyPosture) {
     rig: () => state.rig!,
     droppedClaimLines: () =>
       (state.warn?.mock.calls ?? [])
-        .map((args) => String(args[0]))
-        .filter((line) => line.includes('Session organization claim dropped')),
+        .map((args: unknown[]) => String(args[0]))
+        .filter((line: string) => line.includes('Session organization claim dropped')),
   };
 }
 
@@ -268,7 +269,7 @@ describe.each(DRIVERS)('[#20580] %s', (_driver, makeDriver) => {
       const removed = await r.rig().enforce(USER_REMOVED);
       const member = await r.rig().enforce(USER_MEMBER);
       expect(removed.tenantId).toBeUndefined();
-      expect(r.droppedClaimLines().some((line) => line.includes(USER_REMOVED))).toBe(true);
+      expect(r.droppedClaimLines().some((line: string) => line.includes(USER_REMOVED))).toBe(true);
       expect(member.tenantId).toBe(ALPHA);
       // The set is resolvable at all: without this, the negative pins below
       // would pass for want of a grant, not because the claim was vetted.
