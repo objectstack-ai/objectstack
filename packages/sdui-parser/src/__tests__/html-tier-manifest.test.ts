@@ -8,8 +8,8 @@
  * `sdui.manifest.json` is serialised through THIS copy's `manifestFromConfigs`
  * (`scripts/gen-sdui-manifest-node.mjs`). Before the port this copy's
  * `RegistryConfigLike.tier` admitted only `'public' | 'internal'` and the
- * serializer dropped the key, so the manifest declared the 47 tags with no
- * marker at all. `check:sdui-lockstep` compares diagnostic codes, the grammar
+ * serializer dropped the key, so the manifest declared the html tier's tags
+ * with no marker at all. `check:sdui-lockstep` compares diagnostic codes, the grammar
  * region and the containment predicate — never a type union — so nothing
  * surfaced the drift.
  *
