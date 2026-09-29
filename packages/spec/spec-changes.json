@@ -226,7 +226,7 @@
       },
       {
         "surface": "datasource.driver",
-        "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+        "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used, so the id that selects a driver and the id that selects its config contract are one string with no mapping between them",
         "conversionId": "datasource-driver-mongo-to-mongodb",
         "toMajor": 17
       },
@@ -1118,7 +1118,7 @@
         },
         {
           "surface": "datasource.driver",
-          "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+          "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used, so the id that selects a driver and the id that selects its config contract are one string with no mapping between them",
           "conversionId": "datasource-driver-mongo-to-mongodb",
           "toMajor": 17
         },

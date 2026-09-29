@@ -2097,7 +2097,8 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
  * (ADR-0087's 2026-09-13 addendum names all three). Before setting that flag on a DEFAULT FLIP — as opposed to a
  * lossless delete or a rename — read that addendum, because the flag does not mean
- * what its name and every docblock around it say it means.
+ * what its name says: its own docblock (`RetiredConversionState` in `types.ts`) has
+ * stated the authoring-only reach since commit 29dd1a6dd.
  */
 
 /**
@@ -3525,7 +3526,8 @@ const datasourceDriverMongoToMongodb: MetadataConversion = {
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
-    + 'package and the published DRIVER_CATALOG already used (#6345)',
+    + 'package and the published DRIVER_CATALOG already used, so the id that selects a driver '
+    + 'and the id that selects its config contract are one string with no mapping between them',
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       // Only the exact legacy canon, trimmed and lower-cased the same way
@@ -7367,10 +7369,11 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'translation.pages.components.submitLabel',
   summary:
-    "translation component-copy key 'submitLabel' removed (#10926 — its only declared carrier, "
-    + "'element:form', retired whole in #9249, so the resolver no longer overlays it and a stored "
-    + "string was read by nothing; the live form surface's submit copy is 'object-form''s "
-    + "'submitText', localized at its own authoring site)",
+    "translation component-copy key 'submitLabel' removed (retired rather than re-anchored — its "
+    + "only declared carrier, 'element:form', retired whole in #9249, so the resolver no longer "
+    + "overlays it and a stored string was read by nothing; the live form surface's submit copy "
+    + "is 'object-form''s 'submitText', localized at its own authoring site, and re-anchoring the "
+    + 'key there would only have added a second place to translate one word)',
   apply(stack, emit) {
     const stripFromData = (data: Record<string, unknown>, path: string): Record<string, unknown> => {
       const pages = data.pages;
@@ -8383,10 +8386,11 @@ const mappingLookupParamsRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate',
   summary:
-    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (#10329, "
-    + 'ADR-0049 — the import path never read them: `lookup` copies the cell through and '
+    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (ADR-0049 — "
+    + 'the import path never read them: `lookup` copies the cell through and '
     + "reference resolution runs off the target field's own metadata. `autoCreate` never "
-    + 'created anything — an unresolved reference fails the row either way)',
+    + 'created anything — an unresolved reference fails the row either way. Implementing them '
+    + 'instead would have added a second reference-resolution dialect to the import path)',
   apply(stack, emit) {
     const RETIRED = ['object', 'fromField', 'toField', 'autoCreate'];
     return mapCollection(stack, 'mappings', (m, path) => {
@@ -9392,9 +9396,10 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   retiredAfter: '17.3.0',
   surface: 'connector.errorMapping',
   summary:
-    "connector key 'errorMapping' removed (#14676, ADR-0049 — no engine ever mapped an external "
+    "connector key 'errorMapping' removed (ADR-0049 — no engine ever mapped an external "
     + 'error through the rules, so the eleven nested keys configured nothing, and the rule-level '
-    + '`userMessage` shared its spelling with the live API-error channel while never being shown. '
+    + '`userMessage` shared its spelling with the live API-error channel while never being shown; '
+    + 'deleting the block resolves that collision without a rename. '
     + 'The whole ErrorMappingConfig / ErrorMappingRule shape and the ConnectorErrorCategory enum '
     + 'went with it)',
   apply(stack, emit) {
