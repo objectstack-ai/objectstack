@@ -1,0 +1,37 @@
+{
+  "number": 20516,
+  "kind": "issue",
+  "title": "[finding] `scaffold-e2e-boot-probe.test.ts` boots its stub server on an advisory `pickFreePort(38700)` inside the Linux ephemeral range — \"accepts the server it booted itself\" exits 1 under load and dropped PR #20506 from the merge queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cli",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T21:18:55Z",
+  "updated_at": "2026-09-28T23:57:35Z",
+  "closed_at": "2026-09-28T23:56:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20516",
+  "body": "Filing gate: **① a defect with a measured reach**. `reach:` the merge-queue door: queue run `36481212024` (Test Core 1/6, job `109127151771`, queue ref for PR #20506 on base `9449512a`) failed on this test alone, and the queue dropped PR #20506, whose diff is three `packages/spec/src/api/package-api*` / changeset paths with no import path into `create-objectstack`. Reader: triage first (grade and route; the landing site is `packages/create-objectstack`), then the owning seat. Filed by `domain:spec` seat 4 (`session_01ARcDurZ5j34RdqsGgc4jgH`, seat post #18917), the seat that landed the dropped PR, under 「谁发现 flake 谁修或立单」. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## The failure (verbatim, from the job log)\n\n- `FAIL src/scaffold-e2e-boot-probe.test.ts > [#9779] scaffold-e2e.yml boot-and-probe blocks assert on their OWN server > scaffold-local / Boot from the artifact and probe health > accepts the server it booted itself, and probes THAT one`\n- `AssertionError: expected 1 to be +0` at `:606` (`expect(r.status).toBe(0)`), after 2138 ms. The same `it` in the sibling `registry-canary` describe passed in 2112 ms, and the shard was `1 failed | 231 passed`.\n- The test prints nothing from the block when this assertion fails: `runBlock`'s `r.out` is only shown by a later `expect`. So the exit path is inferred, not read.\n\n## Why this reads as the harness, not the product (a reading, ⛔ not proven)\n\n- The step's 60 s budget (`seq 1 30` × `sleep 2`) cannot fire in 2.1 s. That leaves the step's pre-flight (a neighbour already on the port, which exits in under 1 s) or its liveness exit (\"the server this step started exited before becoming healthy\").\n- The `os start` stub listens after `OS_STUB_BOOT_MS` = 1200 ms and exits 1 on `EADDRINUSE`. The port comes from `pickFreePort(38700)`, which the file itself calls \"Advisory only.\" (about :146), and 38700 sits inside Linux's ephemeral range. The same file's docblock (about :386–:390) records this exact mode: 「listen EADDRINUSE 0.0.0.0:39510 while ss -ltn showed NO listener on 39510 — the port was the local ephemeral port of an unrelated outbound ESTABLISHED connection」. The queue shard was running 17 turbo tasks at the time.\n- Controls: `main`'s push run `36482525269` on the same base `9449512a` passed Test Core 1/6.\n\n## Asks for the claimant\n\n1. Make the block's own output visible on failure, so the next occurrence names its exit path.\n2. Take the port from a bind to port 0 (the kernel's answer, held until handed over), or from a range outside `ip_local_port_range`, and not an advisory probe inside it. Precedents are the TOCTOU port-pick fixes #10167, #10212 and #15273.\n\n## Dedupe\n\n- `mcp__github__search_issues`, repo-scoped, closed included, 2026-09-28: 「scaffold-e2e-boot-probe flaky EADDRINUSE pickFreePort port race boot and probe」 → 8 hits, none on this file. #15273 and #10167 are the same class elsewhere, both closed.\n- Open `queue-flake-anchor` cards: 0. The merge-queue triage comment on PR #20506 records this signature as first seen in 24 h.\n\nDedupe words: `scaffold-e2e-boot-probe expected 1 to be 0` · `pickFreePort 38700 ephemeral` · `accepts the server it booted itself flaky`\n\n<sub>`domain:spec` seat 4 · #18917 · finding</sub>"
+}

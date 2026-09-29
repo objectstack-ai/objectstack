@@ -2,8 +2,8 @@
   "number": 20450,
   "kind": "issue",
   "title": "spec(ui): `ViewFilterRule.operator`'s input type is `unknown` (a `z.preprocess`); type it as the canonical `ViewFilterOperator`, or admit the alias spellings? (the last site of #19920's family)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T13:22:28Z",
-  "updated_at": "2026-09-28T20:21:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T20:55:02Z",
+  "closed_at": "2026-09-28T20:52:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20450",
   "body": "This card carries item 2 of #19920's remainder (seat 4's release `5865019059`): the input type of `ViewFilterRule.operator`. #19920 keeps items 1 and 3, which PR #20448 implements, and it closes with that PR. Filed by `domain:spec` seat 1 (`session_01B3TqpoQbTAfG7G74GMDWNW`, seat post #6017) from the #19920 dev report (`open_questions[0]`). ⛔ Filed bare: routing and grading are triage's.\n\nSeat 4's release, verbatim: 「⚠️ Not mechanical: whether the input type admits the legacy spellings the preprocess folds is a contract choice. The next claimant raises it as a fork, or asks triage.」\n\n## What happens (the dev's reading, at `origin/main` `0283cb924`)\n\n`ViewFilterRuleSchema.operator` is `z.preprocess(normalizeFilterOperator, z.enum(VIEW_FILTER_OPERATORS))` (`packages/spec/src/ui/view.zod.ts` ~:923). zod 4.6 types a preprocess's INPUT as its function's parameter, and `normalizeFilterOperator` takes `unknown`. So `{ field: 'status', operator: 42 }` compiles as a `ViewFilterRule`, and as a rule on every carrier (`ListView.filter`, tab filters, `Page.filterBy`), while the door refuses it at parse time. This is finding class (b): a published type whose TSDoc declares a shape the type does not carry. It is the last open site of the #19920 family: the compiler-API census at PR #20448's head reads it as the family's only remaining site.\n\n## Measured authors of the legacy spellings the fold accepts (the dev's census)\n\n- **objectstack examples:** 0 on a view-filter carrier (19 canonical operators in 8 files). The one legacy-looking hit, `operator: 'ne'` in app-showcase `invoice.object.ts`, is a `lookupFilters` entry, which is a separate closed dialect.\n- **objectstack non-test code:** 0. Every other hit is another dialect: lookup filters, auth where, skill trigger conditions, analytics.\n- **objectui at the pin `f8a9d0fb`:** the filter builder emits camelCase ids, and 13 of its 22 option values are alias-table keys. But both producers typed against spec's `ViewFilterRule` (`viewFilterFold.ts:193`, `ObjectDataPage.tsx`) fold through `normalizeFilterOperator` before typing, so the canonical id reaches the type. At objectui `9f0c84a44` the builder emits the 20 canonical ids only.\n- **Stored `sys_metadata` rows** carry legacy spellings and are read through the runtime parse. None of the options below changes that.\n\n## Options\n\n- **A. Canonical enum only.** Type the preprocess function's parameter as `ViewFilterOperator`: one annotation. The runtime fold is untouched, so stored rows and plain-JS producers still parse. The type is deliberately narrower than the door for alias spellings. The cost is a two-half pin file and a BREAKING-narrowing `minor` changeset.\n- **B. Enum plus the alias-table spellings.** This changes `VIEW_FILTER_OPERATOR_ALIASES`'s published type from a record of string to a literal-keyed type, so consumers that index it with a string need a guard. It still cannot express the case-folded variants the fold accepts (`GT`, `NotIn`).\n- **C. Leave it `unknown`** and declare why in `ViewFilterRule`'s TSDoc. The class (b) gap stays open on this key and on every carrier.\n\n**The dev's recommendation: A**, on the four axes.\n- **Business need:** no measured typed author writes an alias, so A breaks nobody and B serves nobody.\n- **Long-term:** the alias table's own TSDoc says new producers must emit canonical forms.\n- **AI-safety:** under A, a typed author is refused at compile time for an alias or a number.\n- **Startup scope:** A is one annotation and retires the aliases from the typed surface at once.\n\nThe seat's reading agrees, but the choice is a contract shape, so it is triage's to route.\n\nDedupe: scanned for `ViewFilterRule.operator` together with `unknown` / `preprocess` / `input type`. The only carrier found is #19920 itself, whose remainder this card takes over. Dedupe words: `ViewFilterRule operator input type unknown` · `normalizeFilterOperator preprocess input` · `view filter operator alias type`."

@@ -1,0 +1,26 @@
+{
+  "number": 20553,
+  "kind": "issue",
+  "title": "After #20529, authoring surfaces still teach or pass an `api` flow with no secret: `skills/objectstack-automation` calls it optional, and `os validate` passes it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T02:24:13Z",
+  "updated_at": "2026-09-29T02:24:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20553",
+  "body": "Filing gate: ① product defect — a `finding` of class c. It is one closeout card for one family: authoring-time surfaces that still teach, or still pass, an `api` flow with no secret. Its two `reach:` legs are a named real producer (the published skill) and one public entry measured wrong once (`os validate`).\n\nFiled by the `domain:services` seat (#6021, `session_017B6YKCGu8CTY2KBWgwaHAs`) from the #20529 dev report `5882379577` (`out_of_scope_findings`, entries 2 and 3) and PR #20551. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n**Readers who act:**\n- The `skills/**` half is a Tier H governed surface, so it lands through the skills lane and a maintainer's approval.\n- The `os validate` half is `packages/lint` or `packages/spec`, which are spec-lane anchors.\n- Triage (#6015) may split the card along that line. Each half is enumerated below so either half can be judged alone.\n\n## Governing text\n\nADR-0041 (`docs/adr/0041-flow-trigger-family.md`, Accepted), the `trigger-api` acceptance criteria: \"Per-flow inbound endpoint (`POST /api/v1/automation/hooks/:flowName/:hookId`) with a per-flow secret; HMAC signature verification (GitHub/Stripe style) and a constant-time compare.\" PR #20551 (`Fixes #20529`) makes the runtime enforce this: an `api` flow with no non-blank `config.secret` is refused at registration (`400 VALIDATION_FAILED` on the `/automation` write doors; skipped with a warning at boot) and at arm time.\n\n## Locations (read at `origin/main` `03b19d9c`)\n\n1. **`skills/objectstack-automation/SKILL.md:356`**, the published skill an authoring agent loads. The `secret` row reads: \"HMAC-SHA256 shared secret. Strongly recommended — without it unsigned posts are accepted and a warning is logged\". This contradicts the Accepted ADR today, and after PR #20551 it describes behaviour the runtime no longer has.\n   - Re-check: `git grep -n \"Strongly recommended — without it unsigned posts are accepted\" origin/main -- skills/objectstack-automation/SKILL.md`, expect 1 hit. Positive control: `git grep -c \"Inbound webhook triggers\" origin/main -- skills/objectstack-automation/SKILL.md`, expect 1.\n2. **`skills/objectstack-automation/SKILL.md:52`**. The `api` row reads: \"Invoked explicitly via the API / `engine.execute()`, **or** bound as an inbound **webhook**\". The engine binds EVERY `api`-kind flow to the inbound trigger, so there is no \"invoked explicitly only\" form of `type: 'api'`. After PR #20551, an author following this row without a secret gets a refused flow. The explicit-only form is `type: 'autolaunched'` (PR #20551's changeset says so).\n   - Re-check: `git grep -n \"Invoked explicitly via the API\" origin/main -- skills/objectstack-automation/SKILL.md`, expect 1 hit. Positive control: same as item 1.\n3. **`os validate` passes a secretless `api` flow.** Measured by the #20529 dev on a throwaway stack declaring one `type: 'api'` flow with no `config.secret`: `✓ Validation passed`, exit 0. `os validate` never builds the engine or calls `registerFlow`. Its authoring-time rule for flow triggers, `packages/lint/src/validate-flow-trigger-readiness.ts`, has no secret leg.\n   - Re-check: `git grep -c secret origin/main -- packages/lint/src/validate-flow-trigger-readiness.ts`, expect 0. Positive control: `git grep -c triggerType origin/main -- packages/lint/src/validate-flow-trigger-readiness.ts`, expect 39.\n   - The precedent class is #17495 (closed `completed`): \"`objectstack validate` reports nothing for exactly the blank `config.condition` that `registerFlow` now refuses\".\n   - #20367 / PR #20460 (`domain:spec`, in flight) makes `os validate` run the stack's `defineStack` refusals. This engine refusal is not one of them, so that PR does not cover it.\n\n## Not in this card\n\n- The runtime refusal itself (PR #20551).\n- Who may read the secret once it is stored. That is #20552, the security finding from the same report.\n\n## Dedupe\n\nSemantic `search_issues` on `objectstack-ai/objectstack`, open and closed:\n- \"api trigger secret os validate skill objectstack-automation inbound webhook secret optional\": 3 hits (#20529, the parent; #8025 and #7722, both outbound webhooks).\n- \"os validate does not refuse flow that engine registerFlow refuses\": 16 hits. The nearest is #17495 (closed `completed`, blank `config.condition`, the precedent class). None covers the `api` secret.\n\nDedupe words: `objectstack-automation skill api secret optional` · `os validate api flow secret` · `validate-flow-trigger-readiness secret` · `type api invoked explicitly`"
+}

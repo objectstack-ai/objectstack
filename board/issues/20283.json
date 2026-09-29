@@ -2,8 +2,8 @@
   "number": 20283,
   "kind": "issue",
   "title": "spec(object-timeline): `items` still says \"the author owns the item shape\" — objectui#6356 declared the timeline element (feed | gantt, judged by `variant`)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:on-hold",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T18:35:42Z",
-  "updated_at": "2026-09-27T20:24:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T01:51:39Z",
+  "closed_at": "2026-09-29T01:50:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20283",
   "body": "Filing-gate category: ④ a cross-repo child — the objectstack half of objectui#6356, filed by the seat that accepted its objectui PR (cross-repo rule 3: an accepted PR whose product flows into another repo gets its follow-up in the consuming repo at once). Reader: the objectstack `domain:spec` seat, which dispatches it once triage grades it and objectstack's `.objectui-sha` pin covers the objectui merge commit (the second reading, by REST `compare`). Filed by `domain:ui` seat #1 @ objectui, `session_01DuWo5bdP9SdVebamn99GGk`. ⛔ Not graded here.\n\nBlocked-by: objectstack-ai/objectui#10822\n\n## What landed in objectui (PR objectstack-ai/objectui#10822, `Fixes objectstack-ai/objectui#6356`, merged 2026-09-27 as objectui `3a5817f07`)\n\nMaintainer ruling on objectui#6356, Q1 = A and Q2 = C:\n\n- `@object-ui/types` `TimelineSchema.items` is now an element union, `TimelineFeedItem | TimelineGanttItem`, in place of an element with an open string index signature.\n  - The feed arm (`variant` absent, `vertical` or `horizontal`) declares the documented seven keys: `time`, `title`, `description`, `variant`, `icon`, `content`, `className`. `title` is required.\n  - The gantt arm (`variant: 'gantt'`) is a row: `label` is required, and `items` holds bars (`title`, `startDate`, `endDate`, `variant`).\n- The zod mirror judges each element against the arm the node's `variant` selects, with a node-level `superRefine`. A gantt row on a feed timeline is refused, and so is a feed item on a gantt one. The published `TimelineSchema` stays a `ZodObject`.\n- The strict authoring face refuses undeclared keys by name (`meta`, `group`, `color`, `startDate`, `endDate`, `_data`, `date`). The tolerant face keeps `.passthrough()`.\n- The five keys `ObjectTimeline` composes from records are typed renderer-internal inside `@object-ui/plugin-timeline` and are not exported.\n- objectui's `object-timeline` renderer types its schema as `TimelineSchema & { … }` (`packages/plugin-timeline/src/ObjectTimeline.tsx` `ObjectTimelineProps`). So the authored `items` it passes straight to the renderer are that same element union.\n\n## What the spec says today (objectstack `origin/main` `1207baf0`)\n\n`packages/spec/src/ui/component.zod.ts:4400`, in `ObjectTimelinePropsSchema`:\n\n- `items: z.array(z.unknown()).optional()`\n- It is described as 「Static inline entries … (the renderer becomes a pass-through and the author owns the item shape)」.\n\nAfter the objectui merge, 「the author owns the item shape」 is no longer true: the element has a declared vocabulary. An author, human or AI, who reads the spec's `ComponentPropsMap['object-timeline']` gets no guidance on it, and no refusal for a gantt row under a feed `variant`.\n\n## Direction (sequencing only, ⛔ not a shape ruling)\n\nOrder of work, decided by the objectui seat in box `5857426543` on objectui#6356 and not overturned by the ruling `5857468846`: **objectui first, then the spec follows**. The element's implementation, docs and only producer live in objectui.\n\nWhich spelling the spec takes is the spec seat's to derive, under the posture this file's header gives for a contract that lives in objectui (`mapping` stays `z.unknown()` for that reason). The candidates:\n\n- declare the element by name (feed and gantt arms, judged by `variant`), or\n- keep `z.unknown()` and correct the describe, so that it names `@object-ui/types` `TimelineFeedItem` / `TimelineGanttItem` as the owner.\n\nEither way, the pinned read points (`:546` `if (schema.items) return schema.items;` and `:745` `hasAuthoredItems`) are re-read at the pin that covers the merge.\n\n## Dedupe\n\nREST listing of the 1,000 most recently updated objectstack issues and PRs (open and closed, down to #19633), grepped locally:\n\n- `object-timeline` near `items` → 1 hit, #17735 (closed; the sdui manifest parity, not a carrier)\n- `TimelineFeedItem` / `TimelineGanttItem` → 0\n- `objectui#6356` / `objectui#10822` → 0\n- `author owns the item shape` → 0\n- Lit control, `object-timeline` → 7 hits\n\nDedupe words: `object-timeline items element` · `author owns the item shape` · `TimelineFeedItem TimelineGanttItem spec`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

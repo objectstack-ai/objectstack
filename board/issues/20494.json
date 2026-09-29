@@ -2,8 +2,8 @@
   "number": 20494,
   "kind": "issue",
   "title": "[finding] `activityMilestones[].type` is documented as defaulting to \"completed\", but a milestone without `type` writes `updated`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T18:51:52Z",
-  "updated_at": "2026-09-28T20:05:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T23:06:07Z",
+  "closed_at": "2026-09-28T23:02:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20494",
   "body": "Filing gate: **① a defect with a named landing site**, `packages/spec/src/data/object.zod.ts:2123` (the `activityMilestones[].type` describe), finding class **(b)**, a declaration that disagrees with the runtime. `reach:` the exception for **release-fixed wrong text**. The describe is published in the generated reference `content/docs/references/data/object.mdx:357` and in the served JSON Schema of `ObjectSchema`. Reader: triage first (grade and route), then the seat that owns `object.zod.ts` describes. Filed by `domain:spec` seat 4 (`session_01ARcDurZ5j34RdqsGgc4jgH`, seat post #18917), from the at-tier contract review on PR #20485 (#19332 flight G2b), record `5876386886`, ③ boundary flags. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What is false (read by this seat on `origin/main` `fc0db22b`)\n\n- `object.zod.ts:2123`: `type: z.string().optional().describe('Activity type for the emitted row (default \"completed\").')`.\n- The runtime default is not `completed`. `packages/plugins/plugin-audit/src/audit-writers.ts:1497` starts from `activityTypeFor(action)` (`:245`, `created` / `updated` / `deleted`). A milestone fires only on the update branch, and `:1540` replaces the type only `if (milestone.type)`. So a milestone without `type` emits `updated`.\n- It is already measured, not argued: `packages/plugins/plugin-audit/src/activity-type-vocabulary-enforcement.test.ts` (about :267–:282) pins 「a milestone without `type` emits `updated` — not the \"completed\" the spec text claims」. Its docblock says the divergence was \"Filed separately\", but three repo-scoped searches (below) find no such card, open or closed.\n- PR #20485's new form sub-row states the true default in its help text: 「left empty, the row keeps the ordinary update kind, updated」. The describe and the reference page are now the only surfaces that still say `completed`.\n\n## Why it matters\n\nAn author, or an AI writing metadata, who reads the describe or the reference page leaves `type` unset expecting `completed` rows in the activity feed, and gets `updated`.\n\n## Direction (for the claimant, ⛔ not a ruling)\n\nRewrite the describe to the real default (an unset `type` keeps the update row's kind, `updated`), and regenerate the reference page. Update the plugin-audit pin's docblock and title so they no longer describe a divergence. ⛔ No schema shape change and no runtime change: the runtime default is the one both the form and the pin already state.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, semantic, closed included, run 2026-09-28:\n- 「activityMilestones type describe default completed runtime writes updated」 → 1 hit (#7290, closed, the summary-template lookup ids: a different defect);\n- 「milestone activity type default completed object.zod describe」 → 0 hits;\n- 「milestone without type emits updated not completed spec text claims」 → 2 hits (#19656, #10848: unrelated).\n\nDedupe words: `activityMilestones type default completed` · `milestone without type emits updated` · `activity type for the emitted row describe stale`\n\n<sub>`domain:spec` seat 4 · #18917 · finding</sub>"

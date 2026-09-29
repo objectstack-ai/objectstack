@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T17:52:28Z",
-  "updated_at": "2026-09-28T18:05:08Z",
+  "updated_at": "2026-09-29T02:15:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20489",
   "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**. `reach:` was measured at `engine.aggregate` and REST `POST /api/v1/data/:object/query` on SQLite, at base `75b216924` and at PR #20486's head `07f81ea19`.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20387 dev's report (`os-dev-report` 5875171240, `open_questions[0]` and `out_of_scope_findings[0]`). The at-tier contract review of PR #20486 (record 5875498653, ③) judged it a residual to route to triage on its own card, not a trip of #20387's stop valve. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA `number` column holds `0.1`, `0.2` and `0.3` in one group.\n\n| face | `sum` | `avg` | `having { s: { $eq: 0.6 } }` |\n|:--|:--|:--|:--|\n| SQLite native (better-sqlite3, SQLite 3.53.4) | `0.6` | `0.19999999999999998` | keeps the group |\n| the engine's rows path, every dialect (`in-memory-aggregation.ts`, a left fold) | `0.6000000000000001` | `0.20000000000000004` | keeps no group |\n| PostgreSQL / MySQL native, once PR #20486 lands (double accumulation) | `0.6000000000000001` | `0.20000000000000004` | keeps no group |\n\nThe rows path is forced here by a filtered sibling aggregation. One query gives two answers depending on the path, on SQLite alone.\n\n## Why\n\n- SQLite 3.43 and later sums with Kahan-Babuska-Neumaier compensation. The rows path's `reduce` adds naively, and after PR #20486 so do PostgreSQL and MySQL.\n- Two addends cannot differ: the compensated result of `a + b` equals the naive one. So #20387's pin (`0.1 + 0.2`) agrees on every face, and PR #20486 fixes it. Three or more can differ in the last place.\n- This is pre-existing: at base, SQLite's own two paths already disagreed. It is out of both of #20387's routes' reach, since no SQL spelling makes SQLite's `sum` naive or PostgreSQL / MySQL's compensated.\n- It lies inside the loss the one-double policy (#20335, PR #20372) declares (\"loss beyond double precision declared\"). Whether that declaration covers \"one query, two answers\" is the question here.\n\n**Same family, a note, not a separate finding** (PR #20486's review, ③): PostgreSQL's `sum(float8)` is parallel-safe. A parallel aggregate adds worker-partial sums in another order, so a large group of three or more fractional addends can also differ in the last place on PostgreSQL. This is not measured, and it is unreachable at #20387's pin.\n\n## Options, as the dev measured them (⛔ not a ruling)\n\n- **A. State it and stop.** The one-double policy's declared loss covers the last place, and PR #20486's changeset states the residual. Zero cost. \"One query, one answer\" stays unmet on SQLite for this shape. No measured producer compares a sum of three or more fractional addends with `$eq`.\n- **B. Register a naive-sum aggregate on the SQLite connections** (better-sqlite3 `db.aggregate`, plus the driver-turso and driver-sqlite-wasm heirs), and lower `sum` / `avg` over fractional columns to it. Every face then answers one double. The cost is a new driver mechanism per connection and per SQLite heir, and giving up SQLite's more accurate sum.\n- **C. Make the rows path add with compensation.** Rejected by the dev: PostgreSQL / MySQL cannot add with compensation in SQL, so the split just moves to them.\n\nThe dev recommends A, and revisits B only if a measured producer needs an exact `$eq` on fractional sums of three or more addends across dialects.\n\n## Dedupe\n\n`search_issues` \"sqlite native sum compensated summation kahan last place aggregate three addends rows path having $eq\" in `objectstack-ai/objectstack`, open and closed: 2 hits. #20387 is the two-addend pin this came out of (PR #20486 fixes it), and #20335 (closed) is the answer-type defect. Neither is this.\n\nDedupe words: `sqlite sum compensated summation kahan` · `sqlite native sum vs rows path 0.6000000000000001` · `aggregate sum three addends last place having $eq`"

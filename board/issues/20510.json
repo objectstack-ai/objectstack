@@ -1,0 +1,34 @@
+{
+  "number": 20510,
+  "kind": "issue",
+  "title": "spec: the number-comparand refusal says \"a declared number field\" and \"PostgreSQL with a server error\" at `having` and the per-aggregation `filter`, where the column is aggregated and the engine evaluates the clause on every driver",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T20:30:06Z",
+  "updated_at": "2026-09-29T02:27:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20510",
+  "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**, a FALSE sentence in a public 400 message. `reach:` is REST `POST /api/v1/data/:object/query` with `having: { total: { $gt: \"abc\" } }` on a numeric aggregated column, whose 400 message is pinned by PR #20501's REST suite (`data-number-comparand-door.test.ts`, SQLite cell) on `main` at `4a1df1965`.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the at-tier contract review of PR #20501 (#20351, record 5877522624, judgment 5 and deviation 5), which accepted the words for that PR because they live in `packages/spec`, and routed the fix there. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nAt `having`, the refusal for a non-numeric string reads:\n\n> filter on 'total' compares a declared number field against \"abc\" at having.total.$gt, which is not a number: it has no numeric reading, and backends answer it differently (PostgreSQL with a server error)\n\nTwo phrases are FALSE at that position:\n- `total` is an **aggregated column** (a `sum` / `count` / `avg`), not a declared field. The door hands the verdict `{ type: 'number' }`, because an aggregated column has no declared `FieldType`.\n- at `having`, as at the per-aggregation `filter`, the **engine evaluates the clause** on every driver, so PostgreSQL gave no server error there. The parenthetical is the `where` fact.\n\nThe column name, the comparand, the path and the remedy are TRUE.\n\n## Why\n\nThe words are the contract's: `numberComparandRefusalMessage` / `FORM_SENTENCE` in `packages/spec/src/data/filter-number-comparand-declared-type.ts` (PR #20414). `NumberComparandRefusalSite`'s only type slot is `declaredType`, so every position speaks as if it were a declared field at `where`.\n\n## Suggested shape (⛔ not a ruling)\n\n- A site kind for an aggregated column (\"a numeric aggregated column\").\n- A not-a-number clause that names PostgreSQL's server error only at a position the driver binds (`where`), not at `having` or the per-aggregation `filter`.\n- The engine door (#20351) passes the site kind it already knows. That is one engine line, beside the spec change.\n\n## Dedupe\n\n`search_issues` \"number comparand refusal message having aggregated column declared number field PostgreSQL server error wording\" in `objectstack-ai/objectstack`, open and closed: 7 hits. #20502 is the boolean / `Date` 500, #20351 is the door itself, and #20387, #20123, #19628 and #11541 are other `having` / aggregate defects. None is this.\n\nDedupe words: `number comparand message having aggregated column` · `declared number field wording having` · `PostgreSQL server error having refusal words`"
+}

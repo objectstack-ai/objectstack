@@ -1,0 +1,35 @@
+{
+  "number": 20515,
+  "kind": "issue",
+  "title": "[finding] `resolveUserAuthzGrants` keeps EVERY organization-scoped grant when no organization is active, so a member removed from an organization keeps that organization's capabilities (measured: `manage_metadata` passes on `DELETE /packages/:id`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T21:17:03Z",
+  "updated_at": "2026-09-29T02:12:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20515",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/core/src/security/resolve-authz-context.ts`, `resolveUserAuthzGrants`, in the organization filters of section 4 (`sys_user_position`, about :802) and section 6 (permission sets, about :829). Finding class **(a)**. `reach:` was measured at a public door by the #20492 dev (PR #20514, H0 arms a2 and a2b in the PR body), on unmodified `origin/main` `4a1df196`: `dispatch()` `DELETE /packages/:id` under an `isolated` posture, with real identity resolution.\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20492 round. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n`Seam: core:resolveUserAuthzGrants organization filter → runtime:requireManageMetadata (and every gate reading executionContext.systemPermissions)`\n\n## What happens (measured)\n\nA member removed from `org_alpha` keeps a session that still names it. The member also holds an operator-authored `manage_metadata` permission set granted **scoped to `org_alpha`**, which the removal did not revoke. That member **passes `requireManageMetadata`** (expected 403). On unmodified `main`, this member then took a package out of the live registry, with a 400. PR #20514 makes that door change nothing, but the capability gate still passes. The other environment-wide `/packages` doors this population reaches (`PATCH /:id/disable` and `/enable`, `POST /packages`, `PATCH /:id`) are **not measured**.\n\nWith the shipped default grants, the same removed member, and a fresh sign-up with no organization, are both refused 403. The org-admin auto-grant carries no `manage_metadata`, and it is reconciled on removal.\n\n## Why (`origin/main` `9449512a3`, read at source)\n\nRuling B on #15409 drops a session's unbacked organization claim, then re-resolves grants with no tenant. In `resolveUserAuthzGrants`, both organization filters read `org && tenantId && org !== tenantId`:\n- section 4: `if (org && tenantId && org !== tenantId) continue;`\n- section 6: `return !(org && tenantId && org !== tenantId);`\n\nWhen `tenantId` is undefined, the condition is false for every row, so **every organization-scoped position and permission set is kept**. A grant scoped to the organization the member has left becomes a grant with no organization boundary at all. The dev found no cleanup of custom organization-scoped grants on member removal in `plugin-security`, `organizations` or `plugin-auth`; only the org-admin auto-grant is reconciled. That search was not exhaustive.\n\n## Related\n\n- #8158 (closed): the same shape, seen from one consumer. An org-scoped `manage_sharing` holder with no active organization read every tenant's sharing rules. It was fixed in `plugin-sharing`'s `adminOrgScope`, not in this filter.\n- #15409 (closed, ruling B): the claim drop that creates the no-tenant resolution for a removed member.\n- #20492 / PR #20514 (in review): closes the half-applied uninstall this population could trigger.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「org-scoped grant no tenant」: 46 hits, none on this filter.\n- 「resolveUserAuthzGrants tenantId undefined」: 10 hits. #8158 is the consumer-side sibling above; #7279 and #15747 are closed and about other questions.\n- 「removed member retains permission set」: 12 hits, none on this filter.\n- 「dropped claim grants org-scoped」: 20 hits, none on this filter.\n\nQuery terms for later deduplication: `dropped claim keeps left organization grant`, `org-less resolution org-scoped permission set`, `removed member retains manage_metadata`, `resolveUserAuthzGrants no tenant org-scoped grant`."
+}

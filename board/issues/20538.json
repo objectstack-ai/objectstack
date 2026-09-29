@@ -1,0 +1,32 @@
+{
+  "number": 20538,
+  "kind": "issue",
+  "title": "docs(deployment): cli.mdx Index-drift table lacks the report-only `unbuildable_index` op (PR #20519), and its needs_confirm row lists one never-applied exception where there are now three",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T00:37:32Z",
+  "updated_at": "2026-09-29T02:04:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20538",
+  "body": "Filing gate: **① a docs defect with a named landing site**. Finding class **(b)**, a published page incomplete against its source. `reach:` is `content/docs/deployment/cli.mdx`, read on PR #20519's head `87f6c0bfd`. It applies once PR #20519 (#20432) lands; that PR is ACCEPTED and in the merge queue. The at-tier contract review of PR #20519 found it and marked it as drift by omission, not a falsehood (record 5881320756, ①.7 and ③ d).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What is incomplete\n\n- **The \"Index drift\" table** (about lines 858–867) lists `create_index`, `replace_unique_index`, `recreate_index` and `drop_index`. PR #20519 adds a fifth, report-only op, `unbuildable_index`: a declared index whose key column never materializes, such as a misspelt or a virtual `formula` column. It is `needs_confirm`, `error` for `unique` and `warning` otherwise, and `os migrate apply` reports it `skipped`.\n- **The `needs_confirm` row** (about line 855) says \"except `manual_widen_varchar_to_text`, which nothing applies\". This was already incomplete before PR #20519, because the page's own line 899 says `manual_column_type_change` is never applied. It now has a third exception, `unbuildable_index`.\n- **`os migrate apply`'s skip summary** names neither report-only reason. That is CLI source wording, noted here because a docs fix would describe the same summary.\n\nNeither sentence claims to be exhaustive, so nothing on the page is FALSE. It is incomplete.\n\n## Suggested shape (⛔ not a ruling)\n\n- Add the `unbuildable_index` row, with what it means and that apply never performs it.\n- Extend the never-applied list in the `needs_confirm` row to name all three.\n- Optional: a line in the skipped-index paragraph saying the sync logs it at error.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"docs cli.mdx index drift table unbuildable_index migrate plan needs_confirm never applied\" gives 16 hits. #19525 (cli.mdx ADR-0130 section) and #17723 (cli.mdx enumerations, closed) are other cli.mdx drifts. None names this table or op.\n\nDedupe words: `cli.mdx index drift table unbuildable_index` · `needs_confirm never applied manual_column_type_change` · `migrate apply skip summary report-only`"
+}

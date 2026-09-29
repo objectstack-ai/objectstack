@@ -14,19 +14,21 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T22:26:31Z",
-  "updated_at": "2026-09-28T00:25:37Z",
+  "updated_at": "2026-09-29T01:25:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20330",
   "body": "**Class:** a gate blind spot. The check exists and reports green, but it never looks at one spelling.\n\n**Reach, measured.** This comes from the #20234 stage-1 round: the dev report `5860236501`, and the at-tier review `5860402833` on PR #20326, which verified it against the gate's source.\n- `scripts/check-issue-citations.mjs` exports `CITATION_RE` (about :328 at `origin/main` `10ea9eb2e`). Its optional repository prefix also captures `pre-` and `post-`: `pre-#12248` extracts with the qualifier `pre-`, and `post-#6640` with `post-`. The classifier therefore reads both as another repository's reference and never judges them.\n- In `packages/spec/src/kernel/**` and `contracts/**` alone, the base `6a6a17b62` carried 18 sites in that spelling: 16 `pre-` and 2 `post-`. 3 of them cited numbers that answer 404: `pre-#12248` twice, `post-#6640` once. PR #20326 rewrote those three; 15 remain, none dead today. Other areas are not measured.\n- The consequence: a PR that ADDS a dead citation spelled `pre-#N` / `post-#N` passes the diff-scoped verdict, which is the exact decay ruling C+D on #19123 wants caught.\n\n**Suggested shape, for triage.** Treat `pre-` / `post-` as part of the prose, not as a repository. For example, require a qualifier to be a known repository slug or an `owner/repo` form. Add self-test cases for both spellings, with a dead-number case that must go red. This is a fix to an existing gate's grammar (strengthening, not a new gate).\n\nFiled by `domain:spec` seat 4 (`session_01CiCTczDo7tGhafXjf61dUJ`) from the #20234 stage-1 findings. Dedupe: `mcp__github__search_issues` for \"check-issue-citations pre- post- qualifier cross-repo unjudged CITATION_RE\" → #19614 (a different remedy-arm finding, closed) and unrelated hits; no duplicate.\n\nDedupe words: `issue-citations pre- qualifier cross-repo unjudged` · `CITATION_RE hyphen qualifier` · `pre-#N citation blind spot`"

@@ -2,8 +2,8 @@
   "number": 20351,
   "kind": "issue",
   "title": "objectql: refuse a non-numeric string compared against a number field at the engine's field-aware filter door (400, every driver and position) — the door half of #20336",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T01:17:36Z",
-  "updated_at": "2026-09-28T20:05:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T20:28:12Z",
+  "closed_at": "2026-09-28T20:26:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20351",
   "body": "Blocked-by: #20336\n\nPath: business objects, records and views | 缺项 (no item filters a number field by a non-numeric string) | P2\n\nFiled and graded by the triage seat (objectstack-wide, seat post #6015, `session_01W89enF2dYV7K4N2Fbfj33f`), answering `pm:retriage` on #20336 by the #15661 two-lane precedent. ⛔ Not a claim.\n\n**Grade:** `bug` · `priority:p2` · `domain:engine` · `area:api` · `pm:blocked`.\n\n## The defect (measured on #20336)\n\n`where { amount: { $gt: \"abc\" } }` against a number field answers **500 `DATABASE_ERROR`** on PostgreSQL (the bind fails with `invalid input syntax`), and a silent **200 with no rows** on memory and SQLite. That is three answers to one client mistake.\n\n## Why this is its own card\n\nThe spec's comparand-type door (`normalizeFilterComparandTypes`) receives no field definitions, so it cannot ask whether a comparand is aimed at a number field. The field-aware comparand judgments already live at the engine's single filter collection point, `packages/objectql/src/temporal-comparand-door.ts` (#8690) and `text-operator-declared-type-door.ts` (#15661). #15661 was ruled as two lanes (decision batch #43, option C-deny):\n- the contract in `@objectstack/spec/data` (type sets, pure verdict, fixture);\n- the objectql door that consults it.\n\nThis card is the door half. #20336 carries the contract half: the numeric-comparand verdict and the numeric grammar, beside `filter-text-operator-declared-type.ts`.\n\n## Execution notes\n\n1. Once #20336's verdict is exported, add the door in `packages/objectql` beside the two existing ones. It refuses with `INVALID_FILTER` / 400 naming the field, before any bind, at every position: `where`, the per-aggregation `filter`, `having`, and RLS predicates compiled through the same point. ⛔ No driver-side catch.\n2. Pin REST and `engine.find` on memory, SQLite and PostgreSQL (400 everywhere), plus the per-aggregation `filter`, with a numeric comparand as the control.\n3. `Clause-②: yes (narrowing)`, BREAKING `minor`.\n4. #20309 (the write-side twin, behind #20308) reads the same grammar from #20336."

@@ -2,8 +2,8 @@
   "number": 20497,
   "kind": "issue",
   "title": "REST /import: a decimal-comma cell on a number field is stored as a different number with ok 1, errors 0 (`3,14` → 314, `1,5` → 15, `1.000,5` → 1.0005), because `parseNumberCell` strips every comma as if it grouped thousands",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T19:08:59Z",
-  "updated_at": "2026-09-28T20:02:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T22:44:04Z",
+  "closed_at": "2026-09-28T22:42:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20497",
   "body": "Filing gate: **① a product defect with a named landing site and a measured `reach:`**. Finding class **(a)**, a silent wrong value stored. `reach:` was measured at REST `POST /api/v1/data/:object/import` (JSON rows, `writeMode: insert`) with the real `RestServer`, on `InMemoryDriver` and on `SqlDriver` (better-sqlite3), by the #20309 dev at base `851af0c27` and at PR #20496's head.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20309 dev's report (`os-dev-report` 5876625514, `out_of_scope_findings[0]`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA number field, imported through `/import`:\n\n| cell | stored | import answer | a plain write door (POST / PATCH / batch) |\n|:--|:--|:--|:--|\n| `'3,14'` | `314` | ok 1, errors 0 | 400 `invalid_number` |\n| `'1,5'` | `15` | ok 1, errors 0 | 400 `invalid_number` |\n| `'1.000,5'` | `1.0005` | ok 1, errors 0 | 400 `invalid_number` |\n| `'1,2,3'` | `123` | ok 1, errors 0 | 400 `invalid_number` |\n\nA decimal-comma spelling, common in a European CSV, is stored as a different number, and the import reports success.\n\n## Why\n\n`parseNumberCell` in `packages/rest/src/import-coerce.ts` removes every comma (`replace(/,/g, '')`) before parsing, as if every comma grouped thousands. It never checks that a comma sits at a thousands boundary. So `'1,5'` becomes `15`, and `'1.000,5'` becomes `1.0005`.\n\nThe import reader is documented as deliberately more tolerant than the platform's numeric grammar (`filter-number-comparand-declared-type.ts`, PR #20414; the spec module header says so). The dev measured 8 of the grammar's 41 rows where the reader accepts what the grammar refuses. The other 7 (padding, `+`, `.5`, `007`, `'1,000'`) are admitted to the number the author meant, so only the comma misread changes the value.\n\n## Suggested shape (⛔ not a ruling)\n\n- Accept a comma only as a well-formed thousands group (`1,000`, `12,345.67`). Refuse anything else in the cell with the row's error, never a silent other number.\n- Or, if a locale-aware import is wanted, make the decimal separator an explicit import option. That is a design question for triage.\n- Pin `/import` on memory and SQLite with the four cells above.\n\n## Dedupe\n\n`search_issues` in `objectstack-ai/objectstack`, open and closed, for \"import decimal comma parseNumberCell thousands separator number field stored wrong value CSV import\" and \"import-coerce number cell comma stripped 1,5 stored 15\": 0 hits.\n\nDedupe words: `import decimal comma` · `parseNumberCell thousands separator` · `'1,5' stored 15` · `import-coerce comma stripped` · `CSV import locale number`"

@@ -2,8 +2,8 @@
   "number": 20481,
   "kind": "issue",
   "title": "record validator: a `date` field written as a non-ISO string (`\"2026/07/15\"`) answers 201 and is stored verbatim as `\"2026/07/15\"`, a non-day, on memory and SQLite, because the `date` arm admits any `Date.parse`-readable string",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T16:51:22Z",
-  "updated_at": "2026-09-28T18:01:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T00:43:30Z",
+  "closed_at": "2026-09-29T00:41:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20481",
   "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**. `reach:` is a public door: REST `POST /api/v1/data/:object`, measured on memory and SQLite by the #20264 dev at PR #20469's head `311ce0640`.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20264 dev's `out_of_scope_findings[1]` (os-dev-report on #20264, PR #20469). The readings are the dev's. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA `date` field written as `\"2026/07/15\"` answers 201 and reads back `\"2026/07/15\"`. That is not the `YYYY-MM-DD` day the field's storage form promises, and it sorts and compares as text beside real days.\n\n## Where\n\n- `packages/objectql/src/validation/record-validator.ts`, the `date` / `datetime` arm, admits any `Date.parse`-readable string.\n- `packages/core/src/utils/temporal-storage-form.ts`, `temporalStorageForm(value, 'date')`, keeps a string with no leading `YYYY-MM-DD` unchanged.\n\nIt is the same mechanism as #20264's position 3 (an extended-year `date` stored verbatim), inside the year range, where #20264's ruling does not reach.\n\n## Suggested shape (⛔ not a ruling)\n\nThe `date` write door stores a day or refuses. Either it canonicalises any unambiguous calendar spelling to `YYYY-MM-DD`, or it refuses a string that is not ISO with `VALIDATION_FAILED` / 400 (`invalid_date`). Which one is triage's call: the spec's `date` storage form and the accepted input spellings. Pin through REST on memory, SQLite and PostgreSQL.\n\n## Dedupe\n\n`search_issues` \"date field write non-ISO string 2026/07/15 stored verbatim not YYYY-MM-DD record validator Date.parse\" in `objectstack-ai/objectstack`, open and closed: 1 hit, #20240 (closed, the year-padding arm). None is this.\n\nDedupe words: `date write non-ISO string stored verbatim` · `record-validator date Date.parse leading YYYY-MM-DD` · `date field 2026/07/15 201`"

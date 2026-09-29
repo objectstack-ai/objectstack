@@ -2,8 +2,8 @@
   "number": 20492,
   "kind": "issue",
   "title": "[finding] `DELETE /packages/:id` through the dispatcher removes the package from the live registry, then refuses with `TENANT_SCOPE_REQUIRED`: a 400 that leaves the uninstall half applied",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
-    "priority:p1",
+    "priority:p0",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T18:37:39Z",
-  "updated_at": "2026-09-28T20:01:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-28T23:03:38Z",
+  "closed_at": "2026-09-28T23:02:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20492",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/runtime/src/domains/packages.ts`, the `DELETE /packages/:id` branch of the dispatcher's `/packages` domain. Finding class **(a)**. `reach:` was measured at a public door, `dispatch()`, by the #20477 dev with a throwaway probe on PR #20491's head `1e0553b2`. The probe used a real `SchemaRegistry` and the real `ObjectStackProtocolImplementation`. That PR does not touch this branch.\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20477 round. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured)\n\nAn authenticated caller holding `manage_metadata`, with no active organization, sends `DELETE /api/v1/packages/:id` through `dispatch()`:\n- the answer is **400 `TENANT_SCOPE_REQUIRED`** (「Refusing to uninstall … with no organization scope」);\n- but the package is **already gone from the live registry**: `GET /packages/:id` answered 200 before and 404 `RESOURCE_NOT_FOUND` after, and the package list was empty;\n- and the stored rows are **kept**.\n\nSo a refused request left the running process without the package, while its persisted state says it is installed. The mismatch lasts until a restart re-seeds the registry.\n\n## Why (`origin/main` `fc0db22bc`, read at source)\n\nIn the `DELETE` branch, the ADR-0070 read-only gate (`requireWritablePackage`, #7560) runs first. Then `registry.uninstallPackage(id)` runs, which drops the package's objects, namespace, items and record. Only after that does `protocol.deletePackage` run its org-scope refusal. The refusal can fire after the registry mutation has already happened.\n\n## Who reaches it\n\nIt predates PR #20491, for every session with no active organization. PR #20491 (#20477, p0) makes the dispatcher read the vetted organization, which adds members removed from an organization to that population. The fix there is right: the ex-member no longer deletes the left organization's rows. This refusal path, though, now fires for them too.\n\n## Related, and why this is not a duplicate\n\n#7970 (closed, PR #8105) fixed the same shape INSIDE `SchemaRegistry.uninstallPackage`, where the namespace release sat before the verb that could refuse. This card is the door's own ordering: the whole registry uninstall runs before the persisted delete's org-scope refusal. #7560 (closed) put the read-only gate before `uninstallPackage`; the org-scope refusal was never moved there.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「uninstall TENANT_SCOPE_REQUIRED」: 4 hits. #20477 is the parent round; #9960, #7780 and #9846 are closed and about other questions.\n- 「uninstallPackage registry before」: 6 hits. #7970 is the registry-internal sibling above; #7221, #18877, #7560 and #7865 are closed and different.\n- 「uninstall half applied」: 31 hits, none on this ordering.\n\nQuery terms for later deduplication: `uninstall refused registry already removed`, `TENANT_SCOPE_REQUIRED half-applied uninstall`, `uninstallPackage before deletePackage`, `DELETE packages registry before persistence`."
