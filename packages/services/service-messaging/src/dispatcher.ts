@@ -194,7 +194,7 @@ export class NotificationDispatcher {
         //
         // No partition lock is needed, and none was ever in force: the reap only
         // moves rows already past their timeout, a claim only takes `pending`
-        // rows, and an ack whose claim was reaped matches nothing (#11859) — while
+        // rows, and an ack whose claim was reaped matches nothing (commit d9cf78eaa) — while
         // the per-claim reap, run under partition p's lock, was already rewriting
         // rows in every other partition.
         //
@@ -368,7 +368,7 @@ export class NotificationDispatcher {
     }
 
     /**
-     * [#11453] Record one attempt's outcome, tolerating the ONE refusal a
+     * [commit 1a47a5368] Record one attempt's outcome, tolerating the ONE refusal a
      * correct dispatcher can legitimately provoke.
      *
      * `ack()` now refuses a row that is not `in_flight`, and this loop can meet
@@ -389,7 +389,7 @@ export class NotificationDispatcher {
      */
     private async ackAttempt(row: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
         try {
-            // [#11859] The record is handed back WHOLE: its (claimedBy,
+            // [commit d9cf78eaa] The record is handed back WHOLE: its (claimedBy,
             // claimedAt) pair is the claim credential the store stamped, and
             // the ack's compare-and-set binds it — this loop never needs to
             // know or repeat its own nodeId.

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // Build-time guardrail: an L2 hook body that writes a field the target object
-// declares `readonly: true` THROUGH `ctx.api` is a SILENT NO-OP (#13653).
+// declares `readonly: true` THROUGH `ctx.api` is a SILENT NO-OP (commit 36d287803).
 //
 // `ctx.api` is a `ScopedContext` built over the TRIGGERING operation's
 // execution context (`buildHookApi` in packages/objectql/src/engine.ts), so a

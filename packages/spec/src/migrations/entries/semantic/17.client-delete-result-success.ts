@@ -29,10 +29,12 @@ export const entry: SemanticMigration = {
     + 'there is no constrained channel at all, which is why the ledger entry is the only '
     + 'notification that reaches them. ⛔ Do not write `r.success ?? r.deleted`: there is one '
     + 'producer shape, and a consumer accepting two spellings is what contract-first exists '
-    + 'to prevent (the same ruling #5581 applied on the producer side). No deprecated '
+    + 'to prevent (the same rule already moved the runtime\'s ObjectQL fallback from answering '
+    + '`deleted: true` to the declared `success`, on the producer side). No deprecated '
     + '`deleted?: boolean` transition key ships, for the same reason — a transition period is '
-    + 'for keys that WORKED, and this one never did. Registered by the #6350 stock '
-    + 'reconciliation. ADR-0087, #5638 (backfilled #6350).',
+    + 'for keys that WORKED, and this one never did. Registered by the stock reconciliation of '
+    + 'the v17 train\'s breaking changesets, which had never been compared against the ledger. '
+    + 'ADR-0087.',
   acceptanceCriteria:
     'No code reads `.deleted` off a `client.data.delete()` / `client.project(id).data.'
     + 'delete()` result; `tsc` names every site for a typed caller, and an untyped JS caller '

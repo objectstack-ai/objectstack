@@ -363,7 +363,7 @@ export type HttpAckResult = HttpAckSuccess | HttpAckFailure;
  * stamps on a row when {@link IHttpOutbox.claim} takes it — handed back to
  * {@link IHttpOutbox.ack} so the outcome is written only while that claim still
  * holds the row. It is exactly the pair the notification outbox's
- * `ClaimedDeliveryRecord` guarantees for `INotificationOutbox.ack` (#11859), with
+ * `ClaimedDeliveryRecord` guarantees for `INotificationOutbox.ack` (commit d9cf78eaa), with
  * the same meaning:
  *
  *  - ownership is proven by ROUND-TRIPPING what `claim()` returned, never by the
@@ -649,7 +649,7 @@ export interface IHttpOutbox {
      *
      * [#17634] **Pass `claimed`** — the claim credential on the row {@link claim}
      * returned (the row itself will do). With it, `ack` is the ownership-checked
-     * completion `INotificationOutbox.ack` performs (#11453, #11859):
+     * completion `INotificationOutbox.ack` performs (commits 1a47a5368, d9cf78eaa):
      *
      * ⛔ **Precondition: the row MUST still be held by that claim.** Two tests,
      * both re-stated IN the conditional write: the row is `in_flight`, AND its

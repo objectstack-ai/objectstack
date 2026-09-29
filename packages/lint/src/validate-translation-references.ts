@@ -231,7 +231,7 @@ function strName(v: unknown): string | undefined {
  * Add a validation rule's own `name` to the universe, then recurse into a
  * `conditional` rule's `then` / `otherwise` branch — each branch is itself a
  * full rule (with its own `name`, and possibly its own nested branches), and
- * mirrors the recursion `evaluateRule` performs at runtime (#14700). See the
+ * mirrors the recursion `evaluateRule` performs at runtime (commit de3c52beb). See the
  * call site in {@link buildUniverse} for why the wrapper's own name is kept
  * too, even though `then` / `otherwise` are what a caller actually reads.
  */
@@ -297,7 +297,7 @@ interface ObjectFacts {
    * (`objects[].validations[].name`, including a nested `conditional` rule's
    * `then` / `otherwise` branch — the branch is itself a full rule and is the
    * address `checkConditional` / `authoredRuleMessage` actually key on;
-   * #14700). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
+   * commit de3c52beb). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
    * that name, so a ghost here is a rule message that renders in the source
    * locale inside an otherwise translated refusal.
    */
@@ -547,7 +547,7 @@ function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectF
  * very same view `<object>.default` — so a container declaring only a default
  * `list` produced a registry entry keyed `default` and a lint fact set that
  * knew no such view. The CLI i18n walker demanded `_views.default.label`
- * (#6124, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
+ * (commit b3c1f3cd5, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
  * six instances on the showcase, and no author action could make both green.
  * Ruled 2026-08-06 (#5164): canonical = the runtime identity's bare key.
  * Leg 1's `defaultListViewKey` in `packages/cli/src/utils/i18n-extract.ts` is
@@ -980,7 +980,7 @@ function buildUniverse(stack: AnyRec): Universe {
     // #14253: `_validations.<rule>` is keyed by the rule's own `name`. A rule
     // without a name has no key and is not registered — the resolver cannot
     // address it either, so nothing is lost by skipping it here.
-    // #14700: a `conditional` rule's `then` / `otherwise` branch is itself a
+    // Commit de3c52beb: a `conditional` rule's `then` / `otherwise` branch is itself a
     // full rule, and its `name` — not the wrapper's — is the address
     // `checkConditional` delegates to and `authoredRuleMessage` keys on (see
     // `packages/objectql/src/validation/rule-validator.ts`). A flat walk over

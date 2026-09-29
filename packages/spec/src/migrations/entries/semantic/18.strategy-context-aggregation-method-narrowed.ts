@@ -14,10 +14,13 @@ export const entry: SemanticMigration = {
     + 'string-typed value narrows the value to the enum - typing it '
     + 'AggregationFunction, or parsing with the spec\'s own AggregationFunction zod '
     + 'enum where the value enters from data. Values outside the six were never '
-    + 'served: the bridge has parsed-and-refused them at runtime since #11833, and '
+    + 'served: the bridge has parsed-and-refused them at runtime since it stopped '
+    + 'declaring its own engine type and began parsing the method with the spec '
+    + 'enum, and '
     + 'that refusal stays as defence in depth',
   reason:
-    '#12776, maintainer ruling 2026-08-28 (option A, census-first). Two spec-declared '
+    'Maintainer ruling 2026-08-28 (option A, census-first): one slot, one declaration. '
+    + 'Two spec-declared '
     + 'surfaces described the same value and disagreed about its type: '
     + 'IDataEngine.aggregate\'s aggregations[].function is the closed six-value '
     + 'AggregationFunction enum while StrategyContext.executeAggregate declared the '
@@ -35,8 +38,9 @@ export const entry: SemanticMigration = {
     + 'is the channel that reaches them. In-repo census at the ruling (hard '
     + 'precondition, measured before the narrowing landed): every implementor and '
     + 'every call site filling method is legal under the enum - '
-    + 'ObjectQLStrategy.resolveMeasureAggregation emits only the six post-#12209 '
-    + 'refusal, the two literal producers write count, and every test fixture is '
+    + 'ObjectQLStrategy.resolveMeasureAggregation emits only the six once it refuses a '
+    + 'custom-SQL measure up front, the two literal '
+    + 'producers write count, and every test fixture is '
     + 'implementor-side and stays assignable by contravariance.',
   acceptanceCriteria:
     'External implementors of StrategyContext stay source-compatible: a handler '
@@ -45,7 +49,7 @@ export const entry: SemanticMigration = {
     + 'out-of-vocabulary value fail tsc at the executeAggregate call site on upgrade; '
     + 'the fix is narrowing the value\'s type to AggregationFunction (parsing with '
     + 'the spec enum where it enters from data), never widening a local mirror of '
-    + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
+    + 'the contract. Runtime behaviour is unchanged: the bridge\'s '
     + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
     + 'and no stored metadata or document needs editing.',
 };

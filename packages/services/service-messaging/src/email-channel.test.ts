@@ -144,7 +144,7 @@ describe('email channel', () => {
         it('END TO END: one emit, one outbox, one dispatcher tick — the row lands `dead`, ⛔ not `success`', async () => {
             // The unit assertions above are about a return value; THIS is the
             // reading the card is written against — what an operator sees on
-            // `sys_notification_delivery`. Before #18424 this row read
+            // `sys_notification_delivery`. Before commit 879b51270 this row read
             // `status: 'success'`, which is the silent half of the defect.
             const data = fakeData();
             const outbox = new MemoryNotificationOutbox(1);
@@ -580,7 +580,7 @@ describe('email channel', () => {
         });
     });
 
-    // ── #11741 — organization threading. This channel is the producer the
+    // ── Commit b706af987 — organization threading. This channel is the producer the
     // ruling names as HOLDING an organization (`delivery.notification
     // .organizationId`, the tenant stamp the outbox snapshots per delivery),
     // so it threads that value into the email service's input on BOTH of its

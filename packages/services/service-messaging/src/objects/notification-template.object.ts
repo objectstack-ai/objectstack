@@ -38,7 +38,7 @@ export const NotificationTemplate = ObjectSchema.create({
             label: 'Topic',
             required: true,
             searchable: true,
-            // [#12978] Sibling-declaration bound (#11374 route A): template
+            // [commit e4902d2b9] Sibling-declaration bound (route A, ruling 2026-08-24): template
             // topics are matched against the event's `sys_notification.topic`
             // (maxLength: 200 there).
             maxLength: 200,
@@ -48,7 +48,7 @@ export const NotificationTemplate = ObjectSchema.create({
             label: 'Channel',
             required: true,
             defaultValue: 'email',
-            // [#12978] Machine channel-id vocabulary (#11374 route A), same
+            // [commit e4902d2b9] Machine channel-id vocabulary (route A, ruling 2026-08-24), same
             // sourcing as `sys_notification_delivery.channel`: registered
             // `MessagingChannel.id`s, 64 per the landed machine-vocabulary
             // precedent (sys_session.revoke_reason, maxLength: 64).
@@ -60,7 +60,7 @@ export const NotificationTemplate = ObjectSchema.create({
             label: 'Locale',
             required: true,
             defaultValue: 'en',
-            // [#12978] Sibling-declaration bound (#11374 route A): the same
+            // [commit e4902d2b9] Sibling-declaration bound (route A, ruling 2026-08-24): the same
             // BCP-47 tag family `sys_email_template.locale` stores, bounded 16
             // there. The BOUND is shared; the RESOLUTION is not, and neither
             // side picks a "best-matching" locale. This object is loaded by

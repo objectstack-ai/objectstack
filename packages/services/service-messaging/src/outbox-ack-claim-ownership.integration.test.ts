@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11859 — `ack()` proves OWNERSHIP, not just "a claim exists": the claim
+ * Commit d9cf78eaa — `ack()` proves OWNERSHIP, not just "a claim exists": the claim
  * credential rides the record `claim()` returns, and the compare-and-set
  * binds it (ruling C on the card; option A's caller-supplied identity and
  * option B's required `nodeId` parameter were both refused).
@@ -12,7 +12,7 @@
  *  2. the send outruns `claimTtlMs`;
  *  3. another node's `claim()` reaps R back to `pending` and re-claims it —
  *     R is `in_flight` again, claimed by B;
- *  4. node A finishes and acks. Before #11859, `status = 'in_flight'` MATCHED
+ *  4. node A finishes and acks. Before commit d9cf78eaa, `status = 'in_flight'` MATCHED
  *     and A's outcome was written over B's live attempt.
  *
  * Every step is driven through the public contract (`claim` with an explicit
@@ -37,7 +37,7 @@
  *
  * ## Why both backends, one table
  *
- * Same warrant as the #11453 file beside this one: the guarantee is a
+ * Same warrant as `outbox-ack-precondition.integration.test.ts` beside this one: the guarantee is a
  * property of {@link INotificationOutbox}, the SQL leg runs on a REAL engine
  * (`ObjectQL` + `SqlDriver`, better-sqlite3 `:memory:` — the #5704 ruled test
  * backend) because the fix IS an atomic conditional UPDATE and a fake engine
@@ -142,7 +142,7 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() claim ownership 
 
         // 2.–3. The send outruns claimTtlMs; node B's claim() reaps R back to
         // pending and re-claims it in the same call. R is in_flight AGAIN —
-        // the state #11453's status-only predicate cannot tell from step 1.
+        // the state commit 1a47a5368's status-only predicate cannot tell from step 1.
         const claimedByB = await outbox.claim(claimOpts('node-b', T_AFTER_TTL));
         expect(claimedByB.map((r) => `${r.id}:${r.claimedBy}:${r.claimedAt}`)).toEqual([`${id}:node-b:${T_AFTER_TTL}`]);
 

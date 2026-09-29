@@ -99,7 +99,7 @@ export const NotificationDelivery = ObjectSchema.create({
             label: 'Notification Event',
             required: true,
             searchable: true,
-            // [#12978] Referenced-column bound (#11374 route A): FK to
+            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): FK to
             // `sys_notification.id`, whose physical column is the id column
             // driver-sql creates — `table.string('id').primary()`, knex's
             // varchar(255), spelled `DEFAULT_STRING_VARCHAR_CHARS`. 255 by
@@ -112,10 +112,10 @@ export const NotificationDelivery = ObjectSchema.create({
             label: 'Recipient User',
             required: true,
             searchable: true,
-            // [#12978] Referenced-column bound (#11374 route A): a resolved
+            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): a resolved
             // recipient is a `sys_user.id` (physical varchar(255), as above)
             // or an email-shaped value `RecipientResolver.resolveOne()` keeps
-            // verbatim (#9807) — RFC 5321 caps an address at 254 octets and
+            // verbatim (commit 44738f7af) — RFC 5321 caps an address at 254 octets and
             // `sys_user.email` stores one in a string-family varchar(255)
             // column. 255 admits both producers.
             maxLength: 255,
@@ -123,7 +123,7 @@ export const NotificationDelivery = ObjectSchema.create({
         channel: Field.text({
             label: 'Channel',
             required: true,
-            // [#12978] Machine channel-id vocabulary (#11374 route A): values
+            // [commit e4902d2b9] Machine channel-id vocabulary (route A, ruling 2026-08-24): values
             // are the `MessagingChannel.id`s the service fans out to —
             // `registerChannel` registers `inbox` / `email` / `sms` today, and
             // the spec's `NotificationChannelSchema` widest member is
@@ -141,7 +141,7 @@ export const NotificationDelivery = ObjectSchema.create({
         // digest pass collapses all same-key rows into ONE rendered message at
         // window time. Null ⇒ an ordinary (immediate / quiet-hours) delivery.
         digest_key: Field.text({ label: 'Digest Key', searchable: true,
-            // [#12978] Derived bound (#11374 route A): the one producer is
+            // [commit e4902d2b9] Derived bound (route A, ruling 2026-08-24): the one producer is
             // `enqueueDeliveries`' `${recipient}|${channel}|${digest.window}`
             // — recipient ≤ 255 (recipient_id above) + '|' + channel ≤ 64
             // (channel above) + '|' + window ≤ 10 (`digestDeferral` emits a

@@ -137,6 +137,9 @@ export {
   // surface that only knows a user id asks this instead of re-reading
   // `sys_*_permission_set` — the prohibition resolve-authz-context.ts states.
   hasPlatformAdminStanding,
+  // [#20580] The session arm's membership check (#15409 ruling B), so the
+  // permission explainer resolves the user it explains through the same one.
+  vetOrganizationClaim,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,

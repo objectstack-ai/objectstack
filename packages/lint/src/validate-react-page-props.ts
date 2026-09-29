@@ -124,7 +124,7 @@ interface BlockSpec {
   requiredBindings: string[];
   knownProps: Set<string>;
   /**
-   * [#11284] Deprecated overlay spellings, read from the contract rather than
+   * [commit 5383fa670] Deprecated overlay spellings, read from the contract rather than
    * restated: prop name → its canonical replacement + the authoring note the
    * warning quotes. A `required` prop that is deprecated is a required
    * BINDING, not a required spelling — the canonical `replacedBy` prop
@@ -312,7 +312,7 @@ function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribut
 export const REACT_PAGE_SOURCE_UNPARSEABLE = 'react-page-source-unparseable';
 
 /**
- * [#11284] A prop written in a deprecated react-tier spelling (maintainer
+ * [commit 5383fa670] A prop written in a deprecated react-tier spelling (maintainer
  * ruling 2026-08-23: the react tier converges on the metadata-tier
  * vocabulary, deprecate-first). Warning, never error: the old spelling keeps
  * working for the whole deprecation window — this is the loud half of
@@ -1145,7 +1145,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           if (!hasSpread) {
             for (const req of block.requiredBindings) {
               if (used.has(req)) continue;
-              // [#11284] A required prop that is DEPRECATED requires the
+              // [commit 5383fa670] A required prop that is DEPRECATED requires the
               // binding, not the spelling: the canonical replacement satisfies
               // it, so the new vocabulary is accepted without the old one.
               const dep = block.deprecated.get(req);
@@ -1186,7 +1186,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
               });
               continue;
             }
-            // [#11284] Deprecate-first: the old spelling keeps working, and
+            // [commit 5383fa670] Deprecate-first: the old spelling keeps working, and
             // every use says so — the contract's note names the canonical
             // metadata-tier spelling to write instead.
             const dep = block.deprecated.get(u);
@@ -1234,7 +1234,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 `${path} › searchableFields`,
                 'searchableFields',
                 // A `<ListView>` prop is a view-level narrowing — the checker's
-                // default, spelled out here because the #8404 provenance index
+                // default, spelled out here because the provenance index of commit b849e6911
                 // follows it positionally.
                 'narrowing',
                 unprovisionedAnchors,

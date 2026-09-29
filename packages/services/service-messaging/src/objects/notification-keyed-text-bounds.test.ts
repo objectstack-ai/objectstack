@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#12978] The VALUE half of the keyed-text-bounds contract for this package's
-// five `sys_notification_*` objects (#11374 route A). The class-level gate
-// (`scripts/check-keyed-text-bounds.mjs`, #12147) asks whether a bound EXISTS;
+// [commit e4902d2b9] The VALUE half of the keyed-text-bounds contract for this package's
+// five `sys_notification_*` objects (route A, ruling 2026-08-24). The class-level gate
+// (`scripts/check-keyed-text-bounds.mjs`, commit 945e91a13) asks whether a bound EXISTS;
 // it cannot ask whether the bound is the RIGHT one, because "right" here is a
 // RELATION to another declaration -- exactly what a later edit breaks without
 // noticing. Same division of labour the plugin-audit pin states for its
@@ -78,9 +78,9 @@ describe('sys_notification_* keyed-text bounds carry their producers’ widths (
 
   it('principal covers the widest declared selector arm: owner_of:<object>:<id>', () => {
     // 'owner_of:' (9) + object API name (<= 255, storage-owned by
-    // `sys_metadata.name`, #12144) + ':' (1) + record id (<= 255, the physical
-    // id width above). #9807: every other arm is narrower (an email is <= 254;
-    // 'user:' + id is 260).
+    // `sys_metadata.name`, commit 3a04b0125) + ':' (1) + record id (<= 255, the physical
+    // id width above). Every other arm of the grammar commit 44738f7af documented
+    // is narrower (an email is <= 254; 'user:' + id is 260).
     expect(bound(NotificationSubscription, 'principal')).toBe(9 + 255 + 1 + PHYSICAL_ID_WIDTH);
   });
 });
