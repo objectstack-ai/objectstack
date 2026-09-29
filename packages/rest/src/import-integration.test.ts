@@ -190,7 +190,7 @@ describe('import route — real engine + protocol integration', () => {
   it('coerces every special value type on insert (是→true, 高→high, name→id, date→ISO)', async () => {
     const csv = [
       'ID,标题,完成,优先级,分数,截止,负责人',
-      '1,写代码,是,高,"1,200",2026/06/30,张三',
+      '1,写代码,是,高,"1,200",2026-06-30,张三',
     ].join('\n');
     const res = await call(route, {
       format: 'csv', csv,
@@ -347,7 +347,7 @@ describe('import route — real engine + protocol integration', () => {
     const ws = wb.addWorksheet('Sheet1');
     ws.addRow(['ID', '标题', '完成', '优先级', '分数', '截止', '负责人']);
     ws.addRow(['1', '写代码', '是', '高', 1200, new Date('2026-06-30T00:00:00Z'), '张三']);
-    ws.addRow(['2', '测试', '否', '低', 3, '2026/07/01', '李四']);
+    ws.addRow(['2', '测试', '否', '低', 3, '2026-07-01', '李四']);
     const buf = await wb.xlsx.writeBuffer();
     const xlsxBase64 = Buffer.from(buf).toString('base64');
 

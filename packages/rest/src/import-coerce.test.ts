@@ -6,7 +6,7 @@
  * `coerceRow` driven by a fake reference resolver.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   parseBooleanCell,
   parseNumberCell,
@@ -84,7 +84,6 @@ describe('parseNumberCell', () => {
 describe('parseDateCell', () => {
   it('normalises bare calendar dates without timezone drift', () => {
     expect(parseDateCell('2026-06-30', 'date')).toBe('2026-06-30');
-    expect(parseDateCell('2026/6/3', 'date')).toBe('2026-06-03');
   });
   it('emits full ISO for datetime', () => {
     expect(parseDateCell('2026-06-30', 'datetime')).toBe('2026-06-30T00:00:00.000Z');
@@ -96,6 +95,102 @@ describe('parseDateCell', () => {
   it('rejects nonsense', () => {
     expect(parseDateCell('not-a-date', 'date')).toBeUndefined();
     expect(parseDateCell('2026-13-40', 'date')).toBeUndefined();
+  });
+});
+
+/**
+ * [#20534] A text cell is read only in ISO 8601 or the export's own
+ * `YYYY-MM-DD HH:mm:ss`, on a calendar day that exists; everything else is
+ * refused (`undefined`, so the row's `invalid_date`), never rolled over, never
+ * read in the host's zone and never read month-first. A `date`'s year keeps
+ * four digits. Every case runs under two host zones that disagree by twelve
+ * hours, and must answer the same under both — the host-zone reading this
+ * removes answered differently (`07/15/2026 10:00` was `…T14:00Z` in New York
+ * and `…T02:00Z` in Shanghai).
+ */
+describe('[#20534] parseDateCell — ISO 8601 or the export shape, on a real day', () => {
+  const HOST_ZONES = ['America/New_York', 'Asia/Shanghai'];
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
+  /** Run `fn` under each host zone; the answers must agree. */
+  function onBothHosts(fn: () => string | undefined): string | undefined {
+    const answers = HOST_ZONES.map((tz) => {
+      process.env.TZ = tz;
+      expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(tz);
+      return fn();
+    });
+    expect(answers[1]).toBe(answers[0]);
+    return answers[0];
+  }
+
+  type Kind = 'date' | 'datetime' | 'time';
+
+  const REFUSED: ReadonlyArray<readonly [cell: unknown, kind: Kind]> = [
+    // An impossible day, in every shape and on every branch — was rolled over.
+    ['2026-02-30', 'date'], ['2026-02-30', 'datetime'], ['2026-02-30', 'time'],
+    ['2026-02-29', 'datetime'], ['2026-04-31', 'datetime'],
+    ['2026-02-30 10:00', 'datetime'], ['2026-02-30 10:00', 'date'], ['2026-02-30 10:00', 'time'],
+    ['2026-02-30T10:00:00Z', 'datetime'], ['2026-02-30T10:00:00Z', 'date'], ['2026-02-30T10:00:00Z', 'time'],
+    // Locale and prose spellings — were read in the host zone, and month-first.
+    ['07/15/2026 10:00', 'datetime'], ['07/15/2026 10:00', 'date'], ['07/15/2026 10:00', 'time'],
+    ['07/08/2026', 'datetime'], ['07/08/2026', 'date'],
+    ['07/15/2026', 'date'], ['15 July 2026', 'date'], ['15 July 2026', 'datetime'],
+    ['Jul 15 2026 10:00', 'time'], ['Wed, 15 Jul 2026 10:00:00 GMT', 'datetime'],
+    // Year-first but not ISO 8601.
+    ['2026/6/3', 'date'], ['2026/07/15', 'date'], ['2026-7-15', 'date'],
+    ['2026/08/01 06:00:00', 'datetime'], ['2026-07-15 9:00', 'datetime'],
+    // Reduced / expanded forms, a zone after a space, lower-case `t` / `z`.
+    ['2026', 'date'], ['2026-07', 'datetime'], ['+002026-07-15', 'date'],
+    ['2026-07-15 10:00Z', 'datetime'], ['2026-07-15 10:00:00+08:00', 'datetime'],
+    ['2026-07-15t10:00:00z', 'datetime'],
+    // A zone-naive 24:00 — was handed to `new Date(s)`, in the host zone.
+    ['2026-07-15 24:00', 'datetime'], ['2026-07-15T24:00:00', 'date'],
+    // A number — `new Date(String(n))` read it as a year, in the host zone.
+    [2026, 'date'], [45000, 'datetime'], [45000, 'time'],
+  ];
+
+  it.each(REFUSED)('refuses %j as a %s cell on every host', (cell, kind) => {
+    expect(onBothHosts(() => parseDateCell(cell, kind))).toBeUndefined();
+  });
+
+  const ADMITTED: ReadonlyArray<readonly [cell: unknown, kind: Kind, stored: string]> = [
+    // ISO 8601 and the export shape keep their readings.
+    ['2026-07-15', 'date', '2026-07-15'],
+    ['2026-07-15', 'datetime', '2026-07-15T00:00:00.000Z'],
+    ['2028-02-29', 'date', '2028-02-29'],
+    ['2028-02-29T10:00:00Z', 'datetime', '2028-02-29T10:00:00.000Z'],
+    ['2026-07-15 10:00:00', 'datetime', '2026-07-15T10:00:00.000Z'],
+    ['2026-07-15 10:00:00', 'date', '2026-07-15'],
+    ['2026-07-15 10:00:00', 'time', '10:00:00'],
+    ['2026-07-15T10:00', 'datetime', '2026-07-15T10:00:00.000Z'],
+    ['2026-07-15 10:00:00.123', 'datetime', '2026-07-15T10:00:00.123Z'],
+    ['2026-07-15T10:00:00Z', 'datetime', '2026-07-15T10:00:00.000Z'],
+    ['2026-07-15T10:00:00+08:00', 'datetime', '2026-07-15T02:00:00.000Z'],
+    ['2026-07-15T10:00:00+0800', 'datetime', '2026-07-15T02:00:00.000Z'],
+    ['2026-07-15T02:00:00+08:00', 'date', '2026-07-14'],
+    ['2026-07-15T10:00:00+08:00', 'time', '02:00:00'],
+    ['2026-07-15T24:00:00Z', 'datetime', '2026-07-16T00:00:00.000Z'],
+    ['  2026-07-15  ', 'date', '2026-07-15'],
+    ['10:00', 'time', '10:00:00'],
+    // The year keeps four digits on every `date` branch.
+    ['0500-01-01', 'date', '0500-01-01'],
+    ['0001-01-01', 'date', '0001-01-01'],
+    ['0999-12-31 10:00:00', 'date', '0999-12-31'],
+    ['0050-01-01T10:00:00Z', 'date', '0050-01-01'],
+    [new Date('0500-01-01T00:00:00Z'), 'date', '0500-01-01'],
+    // A bare day into a `datetime` is spelled from the day, never `Date.UTC(y, …)`,
+    // which read years 0..99 as 1900..1999 (`0001-01-01` was stored as 1901).
+    ['0001-01-01', 'datetime', '0001-01-01T00:00:00.000Z'],
+    ['0050-01-01', 'datetime', '0050-01-01T00:00:00.000Z'],
+    ['0500-01-01', 'datetime', '0500-01-01T00:00:00.000Z'],
+  ];
+
+  it.each(ADMITTED)('reads %j as a %s cell as %j on every host', (cell, kind, stored) => {
+    expect(onBothHosts(() => parseDateCell(cell, kind))).toBe(stored);
   });
 });
 
@@ -139,7 +234,7 @@ describe('coerceRow', () => {
       note: { type: 'text' },
     });
     const { data, errors } = await coerceRow(
-      { done: '是', amount: '$1,200.50', priority: '高', tags: 'A, B', due: '2026/07/01', note: '  hi  ' },
+      { done: '是', amount: '$1,200.50', priority: '高', tags: 'A, B', due: '2026-07-01', note: '  hi  ' },
       metaMap,
       {},
     );

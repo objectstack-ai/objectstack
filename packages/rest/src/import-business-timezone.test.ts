@@ -109,17 +109,18 @@ describe('parseDateCell — an offset-free datetime cell reads in the business t
     expect(parseDateCell('2026-01-15 12:00:00', 'datetime', NEW_YORK)).toBe('2026-01-15T17:00:00.000Z');
   });
 
-  it('accepts the shapes a spreadsheet actually writes (T or space, optional seconds/millis, slashes)', () => {
+  it('accepts the ISO and export shapes (T or space, optional seconds/millis)', () => {
     process.env.TZ = 'America/Los_Angeles';
     expect(parseDateCell('2026-08-01T06:00:00', 'datetime', SHANGHAI)).toBe(CROSS_MONTH_UTC);
     expect(parseDateCell('2026-08-01 06:00', 'datetime', SHANGHAI)).toBe(CROSS_MONTH_UTC);
-    expect(parseDateCell('2026/08/01 06:00:00', 'datetime', SHANGHAI)).toBe(CROSS_MONTH_UTC);
     expect(parseDateCell('2026-08-01 06:00:00.123', 'datetime', SHANGHAI)).toBe('2026-07-31T22:00:00.123Z');
   });
 
   it('an unparseable cell is still a coercion failure, not an invalid instant', () => {
     expect(parseDateCell('not a date', 'datetime', SHANGHAI)).toBeUndefined();
     expect(parseDateCell('2026-13-45 99:00:00', 'datetime', SHANGHAI)).toBeUndefined();
+    // [#20534] Neither ISO 8601 nor the export shape: refused, not read.
+    expect(parseDateCell('2026/08/01 06:00:00', 'datetime', SHANGHAI)).toBeUndefined();
   });
 });
 
