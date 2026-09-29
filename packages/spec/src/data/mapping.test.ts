@@ -97,7 +97,7 @@ describe('ImportFieldMappingSchema', () => {
     expect(mapping.transform).toBe('lookup');
   });
 
-  // ── `params` lookup keys retired in the 17.x line (#10329, ADR-0049) ───────
+  // ── `params` lookup keys retired in the 17.x line (commit 15d58dbf1, ADR-0049) ──
   //
   // `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
   // reference-resolution dialect the import path never implemented: `lookup`
@@ -445,7 +445,7 @@ describe('MappingSchema', () => {
         },
         {
           // `lookup` is a pass-through: the import pipeline resolves the
-          // reference from the target field's own metadata (#10329).
+          // reference from the target field's own metadata (commit 15d58dbf1).
           source: 'account_name',
           target: 'account_id',
           transform: 'lookup'

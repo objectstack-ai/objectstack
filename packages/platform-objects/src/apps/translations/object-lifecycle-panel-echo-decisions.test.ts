@@ -1291,29 +1291,22 @@ describe('#19403 round 10 — ⚠️⚠️ the phantom-translation trap, asserte
     }
   });
 
-  it('⭐ the near-twin that was LOOKED UP AND REFUSED is asserted to be a fill, not a decision', () => {
+  it('⭐ the near-twin that was LOOKED UP AND REFUSED is authored in every locale, never a standing echo', () => {
     // `Access Token TTL` was byte-identical in all three locales and read like a
     // standing decision to keep TTL verbatim. It was an unauthored fill in every
     // locale, and the provenance tables said so. Asserted so that no later round
-    // leans on it. #20462 then AUTHORED the zh-CN leaf (访问令牌 TTL): the
-    // concept is rendered and the initialism survives, the same treatment the
-    // lifecycle rows give TTL. ja-JP and es-ES are still fills.
+    // leans on it. #20462 then AUTHORED the zh-CN leaf (访问令牌 TTL) and #20493
+    // the ja-JP (アクセストークン TTL) and es-ES (TTL del token de acceso) ones:
+    // the concept is rendered and the initialism survives, the same treatment
+    // the lifecycle rows give TTL.
     const key = 'sys_oauth_resource.fields.access_token_ttl.label';
     const en = FLAT_OBJECTS.get('en')!.get(key);
     expect(en).toBe('Access Token TTL');
     for (const [locale, table] of PROVENANCE) {
       const value = FLAT_OBJECTS.get(locale)!.get(key);
-      if (locale === 'zh-CN') {
-        expect(value, `${locale} ${key} reads its en source again`).not.toBe(en);
-        expect(carriesToken(value!, 'TTL'), `${locale} dropped the machine token`).toBe(true);
-        expect(table[`objects.${key}`], `${locale} still records the authored ${key} as a fill`).toBeUndefined();
-        continue;
-      }
-      expect(value, `${locale} ${key}`).toBe(en);
-      expect(
-        table[`objects.${key}`],
-        `${locale} no longer records ${key} as a fill — if a translator authored it, this ledger note is stale`,
-      ).toBeTypeOf('string');
+      expect(value, `${locale} ${key} reads its en source again`).not.toBe(en);
+      expect(carriesToken(value!, 'TTL'), `${locale} dropped the machine token`).toBe(true);
+      expect(table[`objects.${key}`], `${locale} still records the authored ${key} as a fill`).toBeUndefined();
     }
   });
 });

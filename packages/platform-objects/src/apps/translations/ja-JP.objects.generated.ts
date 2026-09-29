@@ -97,11 +97,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "マネージャー",
-        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
+        help: "このユーザーの直属のマネージャー。`own_and_reports` 階層スコープがたどるレポートラインを形成します（ADR-0057 / @objectstack/security-enterprise）。"
       },
       primary_business_unit_id: {
         label: "主所属ビジネスユニット",
-        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
+        help: "ユーザーの主所属ビジネスユニット — sys_business_unit_member.is_primary を非正規化した投影で、plugin-sharing が管理します（ADR-0057 補遺 D12）。ユーザー参照の候補を、メンバーシップの中間テーブルをたどらずにビジネスユニットで絞り込めるようにします。直接編集せず、ビジネスユニットのメンバーシップで設定してください。"
       },
       source: {
         label: "ID ソース",
@@ -334,16 +334,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "有効期限"
       },
       last_activity_at: {
-        label: "Last Activity At",
-        help: "Timestamp of the last request on this session; drives idle-timeout. System-managed."
+        label: "最終アクティビティ日時",
+        help: "このセッションで最後にリクエストがあった日時。アイドルタイムアウトの判定に使われます。システム管理。"
       },
       revoked_at: {
-        label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
+        label: "失効日時",
+        help: "設定されている場合、このセッションは失効しています（アイドル / 絶対上限 / 同時セッション上限 / 管理者 / 組織メンバーシップの終了）。システム管理。"
       },
       revoke_reason: {
-        label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
+        label: "失効理由",
+        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended など）。"
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -431,15 +431,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "アクセストークン",
-        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
+        help: "プロバイダーが発行した有効な OAuth アクセストークン — データ API では決して返されません（#7987）。better-auth はエンジンの特権的な内部フィールドアクセサーを通じてこれを読み戻します"
       },
       refresh_token: {
         label: "リフレッシュトークン",
-        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
+        help: "有効な OAuth リフレッシュトークン — 長期間有効で、ObjectStack セッションを失効しても失効しません。データ API では決して返されません（#7987）"
       },
       id_token: {
         label: "ID トークン",
-        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
+        help: "プロバイダーが発行した OIDC ID トークン — データ API では決して返されません（#7987）"
       },
       access_token_expires_at: {
         label: "アクセストークン有効期限"
@@ -455,8 +455,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "メール/パスワードプロバイダー用のハッシュ化パスワード"
       },
       previous_password_hashes: {
-        label: "Previous Password Hashes",
-        help: "JSON array of prior password hashes (bounded by password_history_count); reuse-prevention only. System-managed."
+        label: "過去のパスワードハッシュ",
+        help: "過去のパスワードハッシュの JSON 配列（password_history_count が上限）。再利用防止専用。システム管理。"
       }
     },
     _views: {
@@ -554,12 +554,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "この組織で日付の境界を計算する IANA タイムゾーン（例: UTC、Asia/Shanghai）。独自のタイムゾーンを持たないすべてのビジネスユニットが継承するルートの既定値です。未設定の場合は UTC です。"
       },
       parent_organization_id: {
-        label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+        label: "親組織",
+        help: "レポート／グループ化のための親。何の権限も付与しません — 組織をまたぐ可視性はメンバーシップから生じ、この参照からは決して生じません（ADR-0105 D6）。"
       },
       sort_order: {
-        label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        label: "並び順",
+        help: "兄弟組織の間での表示順。表示専用です。"
       },
       id: {
         label: "組織 ID"
@@ -633,17 +633,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理者",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "委任管理者",
           member: "メンバー"
         }
       }
     },
     _views: {
       mine: {
-        label: "My Memberships",
+        label: "所属組織",
         emptyState: {
-          title: "No organizations yet",
-          message: "You haven't joined any organizations."
+          title: "まだ組織がありません",
+          message: "まだどの組織にも参加していません。"
         }
       }
     },
@@ -700,7 +700,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "所有者",
           admin: "管理者",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "委任管理者",
           member: "メンバー"
         }
       },
@@ -726,12 +726,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "承認時に割り当てるオプションのチーム"
       },
       business_unit_id: {
-        label: "Placement Business Unit",
-        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+        label: "配属先ビジネスユニット",
+        help: "承認時に招待されたユーザーが配属されるビジネスユニット（ADR-0105 D8）。発行者の委任されたサブツリー内にある必要があります。"
       },
       positions: {
-        label: "Placement Positions",
-        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        label: "配属先ポジション",
+        help: "承認時に割り当てられる sys_position 名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
       }
     },
     _views: {
@@ -786,8 +786,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "このチームの親組織"
       },
       member_count: {
-        label: "Member Count",
-        help: "Seat counter maintained by better-auth; do not write directly."
+        label: "メンバー数",
+        help: "better-auth が管理する人数カウンター。直接書き込まないでください。"
       },
       id: {
         label: "チーム ID"
@@ -845,8 +845,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ユーザー"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership digest maintained by better-auth; do not write directly."
+        label: "メンバーシップキー",
+        help: "better-auth が管理する派生メンバーシップダイジェスト。直接書き込まないでください。"
       }
     },
     _actions: {
@@ -1007,8 +1007,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "この API キーを所有するユーザー"
       },
       active_organization_id: {
-        label: "Active Organization",
-        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+        label: "アクティブ組織",
+        help: "このキーが認証する組織 — 作成時に発行者から継承され、リクエストのアクティブ組織として確立されます"
       },
       scopes: {
         label: "スコープ",
@@ -1095,16 +1095,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON シリアライズされたバックアップ回復コード"
       },
       verified: {
-        label: "Verified",
-        help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+        label: "確認済み",
+        help: "登録が有効な TOTP コードで確認されたかどうか（better-auth が管理）"
       },
       failed_verification_count: {
-        label: "Failed Verification Count",
-        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+        label: "検証失敗回数",
+        help: "連続した 2FA 検証の失敗回数。成功するとリセットされます。better-auth が管理します。"
       },
       locked_until: {
-        label: "Locked Until",
-        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
+        label: "ロック解除日時",
+        help: "2FA 検証の失敗がロックアウトのしきい値を超えたときに設定されます。better-auth が管理します。"
       }
     },
     _views: {
@@ -1291,8 +1291,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "公開 OAuth クライアント識別子"
       },
       client_discovery_id: {
-        label: "Client Discovery ID",
-        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+        label: "クライアントディスカバリ ID",
+        help: "プロバイダーがディスカバリパスでこのクライアントを検索するために使う不透明な識別子。公開の `client_id` とは区別されます"
       },
       client_secret: {
         label: "クライアントシークレット",
@@ -1339,8 +1339,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "クライアントがリクエスト可能なスコープの JSON シリアライズリスト"
       },
       client_credentials_scopes: {
-        label: "Client-Credentials Scopes",
-        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
+        label: "クライアントクレデンシャルスコープ",
+        help: "同意するユーザーが存在しない client_credentials グラントでクライアントがリクエストできるスコープの JSON シリアライズリスト — ユーザー委任グラントを管理する `scopes` とは区別されます"
       },
       subject_type: {
         label: "サブジェクトタイプ",
@@ -1348,15 +1348,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       jwks: {
         label: "JWKS",
-        help: "Client JSON Web Key Set (for private_key_jwt / signed-request verification)"
+        help: "クライアントの JSON Web Key Set（private_key_jwt／署名付きリクエストの検証用）"
       },
       jwks_uri: {
         label: "JWKS URI",
-        help: "URL of the client JSON Web Key Set"
+        help: "クライアントの JSON Web Key Set の URL"
       },
       dpop_bound_access_tokens: {
-        label: "DPoP-bound Access Tokens",
-        help: "Require access tokens issued to this client to be DPoP-bound (RFC 9449)"
+        label: "DPoP バインドアクセストークン",
+        help: "このクライアントに発行されるアクセストークンに DPoP バインドを必須にします（RFC 9449）"
       },
       disabled: {
         label: "無効"
@@ -1370,12 +1370,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "クライアントが OIDC エンドセッションエンドポイントを呼び出せるようにします"
       },
       backchannel_logout_uri: {
-        label: "Back-channel Logout URI",
-        help: "OIDC back-channel logout endpoint of the client"
+        label: "バックチャネルログアウト URI",
+        help: "クライアントの OIDC バックチャネルログアウトエンドポイント"
       },
       backchannel_logout_session_required: {
-        label: "Back-channel Logout Session Required",
-        help: "Whether the back-channel logout token must include a sid claim"
+        label: "バックチャネルログアウトのセッション必須",
+        help: "バックチャネルログアウトトークンに sid クレームを含める必要があるかどうか"
       },
       software_id: {
         label: "ソフトウェア ID"
@@ -1404,7 +1404,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       mine: {
-        label: "My Applications"
+        label: "自分のアプリケーション"
       },
       active: {
         label: "有効"
@@ -1509,16 +1509,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "呼び出し元が指定した相関識別子"
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token originates from"
+        label: "認可コード ID",
+        help: "このトークンの発行元である認可コードグラントの ID"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "リソース",
+        help: "このトークンにバインドされた RFC 8707 リソースインジケーターの JSON シリアライズリスト"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "要求された UserInfo クレーム",
+        help: "userinfo エンドポイント向けに要求された OIDC クレームの JSON シリアライズリスト"
       },
       scopes: {
         label: "スコープ",
@@ -1531,12 +1531,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "作成日時"
       },
       revoked: {
-        label: "Revoked At",
-        help: "Timestamp at which this access token was revoked"
+        label: "失効日時",
+        help: "このアクセストークンが失効したタイムスタンプ"
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "確認情報",
+        help: "このトークンを鍵にバインドする JSON 形式の RFC 7800 cnf クレーム（例: DPoP 鍵のサムプリント）"
       }
     }
   },
@@ -1569,16 +1569,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "呼び出し元が指定した相関識別子"
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token chain originates from"
+        label: "認可コード ID",
+        help: "このトークンチェーンの発行元である認可コードグラントの ID"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "リソース",
+        help: "このトークンにバインドされた RFC 8707 リソースインジケーターの JSON シリアライズリスト"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "要求された UserInfo クレーム",
+        help: "userinfo エンドポイント向けに要求された OIDC クレームの JSON シリアライズリスト"
       },
       scopes: {
         label: "スコープ",
@@ -1595,24 +1595,24 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "このリフレッシュトークンが失効したタイムスタンプ"
       },
       rotated_at: {
-        label: "Rotated At",
-        help: "Timestamp at which this token was rotated (superseded by a new row)"
+        label: "ローテーション日時",
+        help: "このトークンがローテーションされた（新しい行に置き換えられた）タイムスタンプ"
       },
       rotation_replay_response: {
-        label: "Rotation Replay Response",
-        help: "Cached token response replayed when the old token is re-presented within the reuse interval"
+        label: "ローテーションリプレイ応答",
+        help: "再利用猶予期間内に古いトークンが再提示されたときに再送される、キャッシュ済みのトークン応答"
       },
       rotation_replay_expires_at: {
-        label: "Rotation Replay Expires At",
-        help: "End of the post-rotation reuse interval during which the replay response is served"
+        label: "ローテーションリプレイ有効期限",
+        help: "リプレイ応答が返される、ローテーション後の再利用猶予期間の終了日時"
       },
       auth_time: {
         label: "認証日時",
         help: "このトークンチェーンのためにユーザーが最初に認証した日時"
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "確認情報",
+        help: "このトークンを鍵にバインドする JSON 形式の RFC 7800 cnf クレーム（例: DPoP 鍵のサムプリント）"
       }
     }
   },
@@ -1637,12 +1637,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "呼び出し元が指定した相関識別子"
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators the consent covers"
+        label: "リソース",
+        help: "この同意が対象とする RFC 8707 リソースインジケーターの JSON シリアライズリスト"
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims the user consented to expose"
+        label: "要求された UserInfo クレーム",
+        help: "ユーザーが開示に同意した OIDC クレームの JSON シリアライズリスト"
       },
       scopes: {
         label: "スコープ",
@@ -1657,103 +1657,103 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_oauth_resource: {
-    label: "OAuth Resource",
-    pluralLabel: "OAuth Resources",
-    description: "Registered OAuth protected resources (RFC 8707 resource indicators)",
+    label: "OAuth リソース",
+    pluralLabel: "OAuth リソース",
+    description: "登録済みの OAuth 保護リソース（RFC 8707 リソースインジケーター）",
     fields: {
       id: {
         label: "ID"
       },
       identifier: {
-        label: "Identifier",
-        help: "Resource indicator URI presented in the RFC 8707 resource parameter"
+        label: "識別子",
+        help: "RFC 8707 の resource パラメーターで提示されるリソースインジケーター URI"
       },
       name: {
-        label: "Name"
+        label: "名前"
       },
       access_token_ttl: {
-        label: "Access Token TTL",
-        help: "Access-token lifetime in seconds for this resource (overrides the server default)"
+        label: "アクセストークン TTL",
+        help: "このリソースのアクセストークンの有効期間（秒）。サーバーの既定値を上書きします"
       },
       refresh_token_ttl: {
-        label: "Refresh Token TTL",
-        help: "Refresh-token lifetime in seconds for this resource (overrides the server default)"
+        label: "リフレッシュトークン TTL",
+        help: "このリソースのリフレッシュトークンの有効期間（秒）。サーバーの既定値を上書きします"
       },
       signing_algorithm: {
-        label: "Signing Algorithm",
-        help: "JWS algorithm used to sign access tokens for this resource"
+        label: "署名アルゴリズム",
+        help: "このリソースのアクセストークンの署名に使用する JWS アルゴリズム"
       },
       signing_key_id: {
-        label: "Signing Key ID",
-        help: "Key id (kid) used to sign access tokens for this resource"
+        label: "署名キー ID",
+        help: "このリソースのアクセストークンの署名に使用するキー ID（kid）"
       },
       allowed_scopes: {
-        label: "Allowed Scopes",
-        help: "JSON-serialized list of scopes clients may request for this resource"
+        label: "許可スコープ",
+        help: "クライアントがこのリソースに対してリクエストできるスコープの JSON シリアライズリスト"
       },
       custom_claims: {
-        label: "Custom Claims",
-        help: "JSON object of extra claims stamped on access tokens for this resource"
+        label: "カスタムクレーム",
+        help: "このリソースのアクセストークンに付与される追加クレームの JSON オブジェクト"
       },
       dpop_bound_access_tokens_required: {
-        label: "DPoP Required",
-        help: "Require access tokens for this resource to be DPoP-bound (RFC 9449)"
+        label: "DPoP 必須",
+        help: "このリソースのアクセストークンに DPoP バインドを必須にします（RFC 9449）"
       },
       disabled: {
-        label: "Disabled"
+        label: "無効"
       },
       policy_version: {
-        label: "Policy Version",
-        help: "Monotonic version of the resource token policy"
+        label: "ポリシーバージョン",
+        help: "リソーストークンポリシーの単調増加するバージョン"
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional resource metadata"
+        label: "メタデータ",
+        help: "追加のリソースメタデータの JSON オブジェクト"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     }
   },
   sys_oauth_client_resource: {
-    label: "OAuth Client Resource",
-    pluralLabel: "OAuth Client Resources",
-    description: "Grants allowing an OAuth client to request tokens for a protected resource",
+    label: "OAuth クライアントリソース",
+    pluralLabel: "OAuth クライアントリソース",
+    description: "OAuth クライアントが保護リソースのトークンをリクエストすることを許可する付与",
     fields: {
       id: {
         label: "ID"
       },
       client_id: {
-        label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        label: "クライアント ID",
+        help: "sys_oauth_application.client_id への外部キー"
       },
       resource_id: {
-        label: "Resource ID",
-        help: "Foreign key to sys_oauth_resource.identifier"
+        label: "リソース ID",
+        help: "sys_oauth_resource.identifier への外部キー"
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional grant metadata"
+        label: "メタデータ",
+        help: "追加の付与メタデータの JSON オブジェクト"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       }
     }
   },
   sys_oauth_client_assertion: {
-    label: "OAuth Client Assertion",
-    pluralLabel: "OAuth Client Assertions",
-    description: "Consumed OAuth client-assertion JTIs (RFC 7523 replay prevention)",
+    label: "OAuth クライアントアサーション",
+    pluralLabel: "OAuth クライアントアサーション",
+    description: "使用済みの OAuth クライアントアサーション JTI（RFC 7523 のリプレイ防止）",
     fields: {
       id: {
         label: "ID"
       },
       expires_at: {
-        label: "Expires At",
-        help: "Assertion expiry — rows past this instant are safe to prune"
+        label: "有効期限",
+        help: "アサーションの有効期限 — この時刻を過ぎた行は安全に削除できます"
       }
     }
   },
@@ -1947,174 +1947,174 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_scim_connection_binding: {
-    label: "SCIM Connection Binding",
-    pluralLabel: "SCIM Connection Bindings",
-    description: "Lifecycle state for a SCIM provisioning connection, including its decommission state machine",
+    label: "SCIM 接続バインディング",
+    pluralLabel: "SCIM 接続バインディング",
+    description: "SCIM プロビジョニング接続のライフサイクル状態（廃止ステートマシンを含む）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "Immutable SCIM connection identifier that scopes every provisioned resource"
+        label: "接続 ID",
+        help: "プロビジョニングされるすべてのリソースのスコープとなる、変更不可の SCIM 接続識別子"
       },
       connection_key: {
-        label: "Connection Key",
-        help: "Derived connection uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "接続キー",
+        help: "@better-auth/scim が管理する派生接続一意性キー。直接書き込まないでください。"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary that receives provisioned resources (defaults to the connection id)"
+        label: "プロビジョニングドメイン",
+        help: "プロビジョニングされたリソースを受け取る、アプリケーション所有の境界（既定は接続 ID）"
       },
       decommission_status: {
-        label: "Decommission Status",
-        help: "Connection lifecycle state: active | reconciling | complete"
+        label: "廃止ステータス",
+        help: "接続のライフサイクル状態: active | reconciling | complete"
       },
       decommissioned_at: {
-        label: "Decommissioned At"
+        label: "廃止日時"
       },
       decommission_cursor_user_id: {
-        label: "Decommission Cursor User",
-        help: "Resumable reconciliation cursor maintained by the library"
+        label: "廃止カーソルユーザー",
+        help: "ライブラリが管理する再開可能な照合カーソル"
       },
       decommission_reconciled_user_count: {
-        label: "Reconciled Users"
+        label: "照合済みユーザー数"
       },
       decommission_batch_count: {
-        label: "Decommission Batches"
+        label: "廃止バッチ数"
       },
       decommission_revision: {
-        label: "Decommission Revision",
-        help: "Optimistic-concurrency revision for the decommission state machine"
+        label: "廃止リビジョン",
+        help: "廃止ステートマシンの楽観的同時実行制御リビジョン"
       },
       decommission_completed_at: {
-        label: "Decommission Completed At"
+        label: "廃止完了日時"
       },
       decommission_lease_id: {
-        label: "Decommission Lease",
-        help: "Single-worker reconciliation lease maintained by the library"
+        label: "廃止リース",
+        help: "ライブラリが管理する単一ワーカーの照合リース"
       },
       decommission_lease_expires_at: {
-        label: "Decommission Lease Expires At"
+        label: "廃止リース有効期限"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_connection_credential: {
-    label: "SCIM Connection Credential",
-    pluralLabel: "SCIM Connection Credentials",
-    description: "Bearer credentials (one-way digests) that authenticate SCIM provisioning connections",
+    label: "SCIM 接続資格情報",
+    pluralLabel: "SCIM 接続資格情報",
+    description: "SCIM プロビジョニング接続を認証するベアラー資格情報（一方向ダイジェスト）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "The SCIM connection this credential authenticates (e.g. \"okta-prod\"); scopes every resource the IdP provisions with it"
+        label: "接続 ID",
+        help: "この資格情報が認証する SCIM 接続（例: 「okta-prod」）。IdP がこれを使ってプロビジョニングするすべてのリソースのスコープとなります"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary receiving provisioned resources; defaults to the connection id when absent"
+        label: "プロビジョニングドメイン",
+        help: "プロビジョニングされたリソースを受け取る、アプリケーション所有の境界。未指定の場合は接続 ID が既定です"
       },
       organization_id: {
-        label: "Organization",
-        help: "Organization scope of this connection, when provisioning is org-scoped"
+        label: "組織",
+        help: "プロビジョニングが組織スコープの場合の、この接続の組織スコープ"
       },
       label: {
-        label: "Label",
-        help: "Operator-facing name for this credential (e.g. \"rotation 2026-Q3\")"
+        label: "ラベル",
+        help: "運用者向けのこの資格情報の名前（例: 「rotation 2026-Q3」）"
       },
       token_digest: {
-        label: "Token Digest",
-        help: "HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored."
+        label: "トークンダイジェスト",
+        help: "デプロイメントの認証シークレットを鍵とする、ベアラーの HMAC-SHA-256（base64url）— 一方向。平文は発行時に一度だけ表示され、保存されません。"
       },
       active: {
-        label: "Active",
-        help: "Revocation switch — an inactive credential is refused at verification"
+        label: "有効",
+        help: "失効スイッチ — 無効な資格情報は検証時に拒否されます"
       },
       expires_at: {
-        label: "Expires At",
-        help: "Optional hard expiry for staged credential rotation; an expired credential is refused"
+        label: "有効期限",
+        help: "段階的な資格情報ローテーションのための任意の強制有効期限。期限切れの資格情報は拒否されます"
       },
       user_id: {
-        label: "Minted By",
-        help: "User who minted this credential"
+        label: "発行者",
+        help: "この資格情報を発行したユーザー"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_group: {
-    label: "SCIM Group",
-    pluralLabel: "SCIM Groups",
-    description: "IdP-pushed SCIM 2.0 groups, scoped per provisioning connection",
+    label: "SCIM グループ",
+    pluralLabel: "SCIM グループ",
+    description: "IdP からプッシュされた SCIM 2.0 グループ（プロビジョニング接続ごとにスコープ）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "接続 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "プロビジョニングドメイン"
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "リビジョン",
+        help: "@better-auth/scim が管理する楽観的同時実行制御リビジョン"
       },
       display_name: {
-        label: "Display Name",
-        help: "SCIM displayName as sent by the IdP"
+        label: "表示名",
+        help: "IdP から送信された SCIM displayName"
       },
       display_name_key: {
-        label: "Display Name Key",
-        help: "Derived case-folded displayName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "表示名キー",
+        help: "@better-auth/scim が管理する、大文字小文字を正規化した派生 displayName 一意性キー。直接書き込まないでください。"
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "外部 ID",
+        help: "IdP が割り当てた externalId（IdP が送信した場合）"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID キー",
+        help: "@better-auth/scim が管理する派生 externalId 一意性キー。直接書き込まないでください。"
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "並び順キー",
+        help: "@better-auth/scim が管理する、安定したページネーションのための派生キー。直接書き込まないでください。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_group_member: {
-    label: "SCIM Group Member",
-    pluralLabel: "SCIM Group Members",
-    description: "SCIM group membership rows pushed by the IdP (group ↔ provisioned user)",
+    label: "SCIM グループメンバー",
+    pluralLabel: "SCIM グループメンバー",
+    description: "IdP からプッシュされた SCIM グループメンバーシップの行（グループ ↔ プロビジョニングされたユーザー）",
     fields: {
       id: {
         label: "ID"
@@ -2124,72 +2124,72 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "レコードタイトル：プロビジョニングされたユーザーとグループ（読み取り時に計算）"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "接続 ID"
       },
       group_id: {
-        label: "Group"
+        label: "グループ"
       },
       scim_user_id: {
-        label: "SCIM User"
+        label: "SCIM ユーザー"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "メンバーシップキー",
+        help: "@better-auth/scim が管理する派生メンバーシップ一意性キー。直接書き込まないでください。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_identity_tombstone: {
-    label: "SCIM Identity Tombstone",
-    pluralLabel: "SCIM Identity Tombstones",
-    description: "Tombstones of IdP-deleted SCIM identities, kept so a re-provision is recognized",
+    label: "SCIM ID トゥームストーン",
+    pluralLabel: "SCIM ID トゥームストーン",
+    description: "IdP で削除された SCIM ID のトゥームストーン。再プロビジョニングを認識できるよう保持されます",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "接続 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "プロビジョニングドメイン"
       },
       external_id: {
-        label: "External ID",
-        help: "The IdP-assigned externalId of the deleted identity"
+        label: "外部 ID",
+        help: "削除された ID の、IdP が割り当てた externalId"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID キー",
+        help: "@better-auth/scim が管理する派生 externalId 一意性キー。直接書き込まないでください。"
       },
       user_id: {
-        label: "User",
-        help: "The platform user the deleted identity was linked to"
+        label: "ユーザー",
+        help: "削除された ID がリンクされていたプラットフォームユーザー"
       },
       profile: {
-        label: "Final Profile",
-        help: "Serialized final SCIM profile at deletion time, maintained by @better-auth/scim"
+        label: "最終プロファイル",
+        help: "削除時点の SCIM 最終プロファイルのシリアライズ値（@better-auth/scim が管理）"
       },
       deleted_at: {
-        label: "Deleted At"
+        label: "削除日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_projection_grant: {
-    label: "SCIM Projection Grant",
-    pluralLabel: "SCIM Projection Grants",
-    description: "Role/entitlement grants projected onto platform users by SCIM provisioning",
+    label: "SCIM 投影付与",
+    pluralLabel: "SCIM 投影付与",
+    description: "SCIM プロビジョニングによってプラットフォームユーザーに投影されるロール／エンタイトルメントの付与",
     fields: {
       id: {
         label: "ID"
@@ -2199,173 +2199,173 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "レコードタイトル：投影されたロールと、その付与先のユーザー（読み取り時に計算）"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "接続 ID"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "プロビジョニングドメイン"
       },
       scim_user_id: {
-        label: "SCIM User",
-        help: "The per-connection user projection this grant belongs to"
+        label: "SCIM ユーザー",
+        help: "この付与が属する、接続ごとのユーザー投影"
       },
       user_id: {
-        label: "User",
-        help: "The platform user the grant is projected onto"
+        label: "ユーザー",
+        help: "この付与が投影されるプラットフォームユーザー"
       },
       source_kind: {
-        label: "Source Kind",
-        help: "What projected the grant (e.g. group, entitlement, attribute)"
+        label: "ソース種別",
+        help: "付与を投影したもの（例: group、entitlement、attribute）"
       },
       source_id: {
-        label: "Source ID",
-        help: "Identifier of the projecting source (e.g. the SCIM group id)"
+        label: "ソース ID",
+        help: "投影元ソースの識別子（例: SCIM グループ ID）"
       },
       source_value: {
-        label: "Source Value",
-        help: "Source attribute value, when the source kind carries one"
+        label: "ソース値",
+        help: "ソース種別が値を持つ場合のソース属性値"
       },
       role: {
-        label: "Role",
-        help: "The role/entitlement projected onto the user"
+        label: "ロール",
+        help: "ユーザーに投影されるロール／エンタイトルメント"
       },
       grant_key: {
-        label: "Grant Key",
-        help: "Derived grant uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "付与キー",
+        help: "@better-auth/scim が管理する派生付与一意性キー。直接書き込まないでください。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_subject: {
-    label: "SCIM Subject",
-    pluralLabel: "SCIM Subjects",
-    description: "Per-user SCIM provisioning link — one row per user any SCIM connection provisions",
+    label: "SCIM サブジェクト",
+    pluralLabel: "SCIM サブジェクト",
+    description: "ユーザーごとの SCIM プロビジョニングリンク — いずれかの SCIM 接続がプロビジョニングするユーザーごとに 1 行",
     fields: {
       id: {
         label: "ID"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this subject row tracks (unique — one row per user)"
+        label: "ユーザー",
+        help: "このサブジェクト行が追跡するプラットフォームユーザー（一意 — ユーザーごとに 1 行）"
       },
       profile_source_id: {
-        label: "Profile Source",
-        help: "The sys_scim_user projection currently sourcing this user's profile"
+        label: "プロファイルソース",
+        help: "このユーザーのプロファイルの現在のソースである sys_scim_user 投影"
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "リビジョン",
+        help: "@better-auth/scim が管理する楽観的同時実行制御リビジョン"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
   sys_scim_user: {
-    label: "SCIM User",
-    pluralLabel: "SCIM Users",
-    description: "Per-connection projection of an IdP-provisioned user (SCIM 2.0 /Users)",
+    label: "SCIM ユーザー",
+    pluralLabel: "SCIM ユーザー",
+    description: "IdP によってプロビジョニングされたユーザーの、接続ごとの投影（SCIM 2.0 /Users）",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "SCIM connection that provisioned this user"
+        label: "接続 ID",
+        help: "このユーザーをプロビジョニングした SCIM 接続"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "プロビジョニングドメイン"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this projection materialized as"
+        label: "ユーザー",
+        help: "この投影が実体化されたプラットフォームユーザー"
       },
       connection_user_key: {
-        label: "Connection User Key",
-        help: "Derived (connection, user) uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "接続ユーザーキー",
+        help: "@better-auth/scim が管理する（接続、ユーザー）の派生一意性キー。直接書き込まないでください。"
       },
       user_name: {
-        label: "User Name",
-        help: "SCIM userName as sent by the IdP"
+        label: "ユーザー名",
+        help: "IdP から送信された SCIM userName"
       },
       user_name_key: {
-        label: "User Name Key",
-        help: "Derived case-folded userName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "ユーザー名キー",
+        help: "@better-auth/scim が管理する、大文字小文字を正規化した派生 userName 一意性キー。直接書き込まないでください。"
       },
       primary_email: {
-        label: "Primary Email"
+        label: "プライマリメールアドレス"
       },
       work_email_value_index: {
-        label: "Work Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "勤務先メールインデックス",
+        help: "@better-auth/scim が管理する派生検索インデックス。直接書き込まないでください。"
       },
       email_value_index: {
-        label: "Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "メールインデックス",
+        help: "@better-auth/scim が管理する派生検索インデックス。直接書き込まないでください。"
       },
       display_name: {
-        label: "Display Name"
+        label: "表示名"
       },
       formatted_name: {
-        label: "Formatted Name"
+        label: "フォーマット済み氏名"
       },
       given_name: {
-        label: "Given Name"
+        label: "名"
       },
       family_name: {
-        label: "Family Name"
+        label: "姓"
       },
       serialized_emails: {
-        label: "Emails (serialized)",
-        help: "Canonical serialized SCIM emails list maintained by @better-auth/scim; do not write directly."
+        label: "メールアドレス（シリアライズ済み）",
+        help: "@better-auth/scim が管理する、正規化された SCIM emails リストのシリアライズ値。直接書き込まないでください。"
       },
       serialized_attributes: {
-        label: "Attributes (serialized)",
-        help: "Canonical serialized SCIM attributes maintained by @better-auth/scim; do not write directly."
+        label: "属性（シリアライズ済み）",
+        help: "@better-auth/scim が管理する、正規化された SCIM 属性のシリアライズ値。直接書き込まないでください。"
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "外部 ID",
+        help: "IdP が割り当てた externalId（IdP が送信した場合）"
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "外部 ID キー",
+        help: "@better-auth/scim が管理する派生 externalId 一意性キー。直接書き込まないでください。"
       },
       active: {
-        label: "Active",
-        help: "SCIM active flag — false means the IdP deactivated this user"
+        label: "有効",
+        help: "SCIM の active フラグ — false は IdP がこのユーザーを無効化したことを示します"
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "並び順キー",
+        help: "@better-auth/scim が管理する、安定したページネーションのための派生キー。直接書き込まないでください。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "すべて"
       }
     }
   },
@@ -2378,29 +2378,29 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "通知 ID"
       },
       topic: {
-        label: "Topic",
-        help: "Notification topic, e.g. task.assigned, collab.mention"
+        label: "トピック",
+        help: "通知トピック（例: task.assigned、collab.mention）"
       },
       payload: {
-        label: "Payload",
-        help: "Template inputs carried to channels (title/body/url/actor/source/…)"
+        label: "ペイロード",
+        help: "チャネルに渡されるテンプレート入力（title/body/url/actor/source など）"
       },
       severity: {
-        label: "Severity",
-        help: "Severity hint for rendering / filtering",
+        label: "重大度",
+        help: "表示／フィルタリング用の重大度ヒント",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "情報",
+          warning: "警告",
+          critical: "重大"
         }
       },
       suppressed_channels: {
-        label: "Suppressed Channels",
-        help: "Channels fan-out skipped because they are unavailable for this tenant, as [{channel, reason}]; reason is the closed set: transport_not_configured"
+        label: "抑止されたチャネル",
+        help: "このテナントで利用できないためにファンアウトでスキップされたチャネル（[{channel, reason}] 形式）。reason は閉じた集合: transport_not_configured"
       },
       dedup_key: {
-        label: "Dedup Key",
-        help: "Idempotency key within a topic window; a repeat emit is a no-op"
+        label: "重複排除キー",
+        help: "トピックウィンドウ内の冪等キー。同じ内容を再度発行しても何も起こりません"
       },
       source_object: {
         label: "ソースオブジェクト",
@@ -2420,14 +2420,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent",
+        label: "最近",
         emptyState: {
-          title: "No events",
-          message: "No notification events have been emitted."
+          title: "イベントはありません",
+          message: "通知イベントはまだ発行されていません。"
         }
       },
       by_topic: {
-        label: "By Topic"
+        label: "トピック別"
       }
     }
   },
@@ -2501,7 +2501,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Bcc"
       },
       reply_to: {
-        label: "Reply-To"
+        label: "返信先"
       },
       subject: {
         label: "件名"
@@ -2612,7 +2612,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "送信者アドレス"
       },
       reply_to: {
-        label: "Reply-To"
+        label: "返信先"
       },
       active: {
         label: "有効"
@@ -2626,17 +2626,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "{name,type,required,description} の JSON 配列"
       },
       managed_by: {
-        label: "Managed By",
-        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from declared email_template metadata) / admin = created in Studio.",
+        label: "管理者",
+        help: "レコードの出所: platform = フレームワーク組み込み / package = アプリ／パッケージで宣言（宣言された email_template メタデータから起動時にシード）/ admin = Studio で作成。",
         options: {
-          platform: "platform",
-          package: "package",
-          admin: "admin"
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
         }
       },
       customized: {
-        label: "Customized",
-        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+        label: "カスタマイズ済み",
+        help: "管理者がパッケージで宣言されたテンプレートを編集すると設定されます。以後、起動時のシードはこの行を上書きしません（文面を変えたパスワードリセットメールは再デプロイ後も残ります）。admin 行では意味を持ちません。"
       },
       created_at: {
         label: "作成日時"
@@ -3100,7 +3100,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       recorded_by: {
         label: "記録者",
-        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
+        help: "この変更を行ったユーザー。NULL = システムによる変更（起動時の同期、マイグレーション、スケジュールジョブ）— センチネル文字列は使いません。"
       },
       recorded_at: {
         label: "記録日時"
@@ -3232,8 +3232,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ロック状態",
         options: {
           none: "なし",
-          nooverlay: "no-overlay",
-          nodelete: "no-delete",
+          nooverlay: "オーバーレイ禁止",
+          nodelete: "削除禁止",
           full: "完全ロック"
         }
       },
@@ -3367,7 +3367,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "All Secrets"
+        label: "すべてのシークレット"
       }
     }
   },
@@ -3447,60 +3447,60 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent"
+        label: "最近"
       }
     }
   },
   sys_migration: {
-    label: "Data Migration",
-    pluralLabel: "Data Migrations",
-    description: "Deployment-level data-migration flags: which gated data migrations ran here and whether their self-check passed.",
+    label: "データマイグレーション",
+    pluralLabel: "データマイグレーション",
+    description: "デプロイメント単位のデータマイグレーションフラグ: ゲート付きのどのデータマイグレーションがここで実行され、そのセルフチェックに合格したかを示します。",
     fields: {
       id: {
-        label: "Migration ID",
-        help: "Well-known migration id (e.g. adr-0104-file-references). One row per migration."
+        label: "マイグレーション ID",
+        help: "既知のマイグレーション ID（例: adr-0104-file-references）。マイグレーションごとに 1 行。"
       },
       last_run_at: {
-        label: "Last Run At",
-        help: "When this migration last completed a gated (apply-mode) run on this deployment."
+        label: "最終実行日時",
+        help: "このデプロイメントで、このマイグレーションがゲート付き（適用モード）の実行を最後に完了した日時。"
       },
       verified_at: {
-        label: "Verified At",
-        help: "When the self-check last PASSED. Null until it does, and cleared again by a later failing run — a regression closes the gate. Consumers require this to be set AND blocking = 0."
+        label: "検証日時",
+        help: "セルフチェックに最後に合格した日時。合格するまでは null で、後の実行が失敗すると再びクリアされます — 退行はゲートを閉じます。利用側は、これが設定されていて、かつ blocking = 0 であることを要求します。"
       },
       applied_at: {
-        label: "Applied At",
-        help: "When the backfill last ran in apply mode (writes enabled)."
+        label: "適用日時",
+        help: "バックフィルが最後に適用モード（書き込み有効）で実行された日時。"
       },
       blocking: {
-        label: "Blocking Discrepancies",
-        help: "Blocking discrepancies reported by the last self-check. The gate requires 0."
+        label: "ブロッキング不整合",
+        help: "直近のセルフチェックが報告したブロッキング不整合。ゲートは 0 を要求します。"
       },
       advisory: {
-        label: "Advisory Findings",
-        help: "Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate."
+        label: "参考指摘",
+        help: "直近の実行による参考指摘（外部 URL、古い所有者など）— ストレージを消費したりモデリング上の判断が必要になったりしますが、ゲートをブロックすることはありません。"
       },
       details: {
-        label: "Details (JSON)",
-        help: "JSON-encoded counts from the last run, for diagnostics."
+        label: "詳細（JSON）",
+        help: "診断用の、直近の実行による JSON エンコードされたカウント。"
       },
       deviation_observed_at: {
-        label: "Deviation Observed At",
-        help: "When this deployment last ADMITTED a value its own verified contract rejects, through an OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the irreversible half of what the certificate authorises — byte deletion stops, validation and tombstoning continue. Cleared by the next apply-mode run."
+        label: "逸脱検出日時",
+        help: "このデプロイメントが、自身の検証済みコントラクトが拒否する値を OS_ALLOW_LAX_* エスケープハッチ経由で最後に受け入れた日時。意図的に verified_at はクリアしません。証明書が認める内容のうち不可逆な半分だけを取り下げます — バイトの削除は停止し、検証とトゥームストーン化は継続します。次の適用モードの実行でクリアされます。"
       },
       deviation_detail: {
-        label: "Deviation Detail (JSON)",
-        help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
+        label: "逸脱の詳細（JSON）",
+        help: "deviation_observed_at の原因となった最初の反例を JSON エンコードしたもの（オブジェクト、フィールド、型、パースの問題）。運用者が不可逆ゲートを閉じた値を見つけられるようにします。"
       },
       columns_moved_at: {
-        label: "Columns Moved At",
-        help: "When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume."
+        label: "カラム移行日時",
+        help: "このデプロイメントが、このマイグレーションのカラム移行（移行対象カラムの型を変更し、保持する値を新しいエンコーディングに書き換える手順）を最後に完了した日時。バックフィルとそのセルフチェックだけを証明する applied_at および verified_at とは別の証拠です。デプロイメントは両方を持ちながら、なおレガシーエンコーディングを保存していることがあります。null はまさにその状態を示し、エラーではなく想定された定常状態です — このフィールドを読めない利用側はそう想定しなければなりません。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     }
   }

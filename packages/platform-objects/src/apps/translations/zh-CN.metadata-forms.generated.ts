@@ -327,7 +327,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.fields": {
         label: "字段",
-        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存时不会检查它们；发布和 os validate 会拒绝不是本对象字段的名称。若某个字段不是已存储的列（例如公式字段），SQL 驱动会跳过整个索引，并在服务器日志中记录一条警告。"
+        helpText: "本对象的列名，按键的顺序排列（例如 status、owner）。保存时不会检查它们；发布和 os validate 会拒绝不是本对象字段的名称。若某个字段不是已存储的列（例如公式字段），SQL 驱动会跳过整个索引，并在服务器日志中记录一条错误。"
       },
       "indexes.unique": {
         label: "唯一",

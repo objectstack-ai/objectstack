@@ -134,7 +134,7 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
 
 /**
  * Secret-bearing paths inside a driver's passthrough `config` slot — the
- * FOURTH spelling of the stored credential (#9040).
+ * FOURTH spelling of the stored credential (commit 24206416a).
  *
  * Since the nested-position finding this table is a RESIDUE, not the nested
  * judgment: the credential-name scrub runs at every object depth (see
@@ -150,16 +150,16 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
  * Only mongo declares a passthrough today (`options`, spread verbatim into
  * `MongoClientOptions`); postgres/mysql/turso/sqlite/memory have closed
  * strict-object contracts with no client-bound record slot (measured for
- * #9040 — memory's `initialData` is seed DATA, deliberately not judged here:
+ * commit 24206416a — memory's `initialData` is seed DATA, deliberately not judged here:
  * redacting a seeded row's own `password` FIELD would corrupt data the driver
  * serves, which is not this module's question). Every path is measured against
  * `mongodb@7.5.0`, the client the driver spreads `options` into:
  *
  *  - `options.auth.password` — resolved into `MongoCredentials`; the login
  *    secret itself, and the one path the WRITE door also refuses
- *    (`MONGO_OPTIONS_CREDENTIAL_PATHS` in `driver/common.zod.ts`; #8696
+ *    (`MONGO_OPTIONS_CREDENTIAL_PATHS` in `driver/common.zod.ts`; commit 90a12fb18
  *    measured a bound secret outranking it at connect). `auth.username` is
- *    deliberately not here — a username is not credential material (#8876).
+ *    deliberately not here — a username is not credential material (commit d634e665b).
  *  - `options.proxyPassword` — SOCKS5 proxy password, honoured
  *    (`c.options.proxyPassword`, measured).
  *  - `options.tlsCertificateKeyFilePassword`, `options.key`,
@@ -189,7 +189,7 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
  *    one slot is the login password, the proxyPassword posture — but never
  *    SERVED. The same families' identity halves (`aws.accessKeyId`,
  *    `azure.tenantId` / `clientId`, `gcp.email`) are read by the client too
- *    but are not credential material (#8876's asymmetry), and the unmeasured
+ *    but are not credential material (commit d634e665b's asymmetry), and the unmeasured
  *    neighbours (`kmip.endpoint`, `keyVaultNamespace`, `schemaMap`) mirror no
  *    credential spelling — deliberately not here: entries land on this table
  *    with a measurement quoted, never by name-shape.
@@ -218,7 +218,7 @@ const PASSTHROUGH_SECRET_PATHS: Readonly<Record<string, readonly (readonly strin
  * The nested config paths this module hides for `driver`, dotted-path-ready —
  * the passthrough sibling of {@link redactableConfigKeys}, exported so the
  * write-path inverse (`service-datasource`'s `restoreRedactedConfig`) mirrors
- * exactly the set the read path hides (#9040): a nested redaction the restore
+ * exactly the set the read path hides (commit 24206416a): a nested redaction the restore
  * side did not mirror would turn an untouched "Save" on an affected legacy row
  * into silent credential deletion.
  */
@@ -229,7 +229,7 @@ export function passthroughSecretPaths(driver: unknown): readonly (readonly stri
 
 /**
  * The config-relative subset of {@link passthroughSecretPaths} the WRITE door
- * also refuses (#9040) — today `options.auth.password` on mongo, projected
+ * also refuses (commit 24206416a) — today `options.auth.password` on mongo, projected
  * from the write door's own closed list (`MONGO_OPTIONS_CREDENTIAL_PATHS`) so
  * the two doors cannot drift. What the credential-migration planner consults:
  * a stored row carrying one of these holds a LIVE login credential the binder
@@ -492,7 +492,7 @@ export interface RedactedDatasourceConfig {
  *     shapes inside a driver contract whose leaf is `z.never()`. None exist
  *     today; the walk is what keeps "reading the schema is reading the
  *     refusal list" true at depth the day one lands.
- *  4. The passthrough spellings (#9040, {@link passthroughSecretPaths}): the
+ *  4. The passthrough spellings (commit 24206416a, {@link passthroughSecretPaths}): the
  *     CLIENT-MEASURED secret names (`proxyPassword`, `key`, `passphrase`, …)
  *     that mirror no top-level key, so neither the schema nor the name set can
  *     derive them. The table is the residue for exactly that class — an entry

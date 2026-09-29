@@ -56,14 +56,14 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * datasource against nothing while building it as postgres — so the factory now
  * imports {@link resolveDriverId} instead of keeping a second list.
  *
- * ## The HOSTS read it too, since #6345 — and that is what closed the last fork
+ * ## The HOSTS read it too, since commit e2798fab7 — and that is what closed the last fork
  *
  * #4410 unified the two tables *inside* the metadata path. It did not reach the
  * two BOOT HOSTS, which kept answering the same question differently about the
  * same `OS_DATABASE_DRIVER`: the CLI (`packages/cli/src/utils/storage-driver.ts`)
  * hand-wrote its spellings into `if` arms, and the standalone stack
  * (`packages/runtime/src/standalone-stack.ts`) hand-wrote a zod enum of canonical
- * spellings only. Measured on `main` before #6345: **10 of 21 spellings disagreed**
+ * spellings only. Measured on `main` before commit e2798fab7: **10 of 21 spellings disagreed**
  * — `OS_DATABASE_DRIVER=pg` booted under `os start` and was refused by
  * `os migrate`, and `libsql` was accepted by the CLI alone. Both hosts now resolve
  * through {@link resolveDatabaseDriverId}, so the vocabulary is this table and
@@ -71,7 +71,7 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  *
  * ## Two faces, one table (the part a flat `Record` could not express)
  *
- * A driver id answers three separate questions, and #6345's measurement is that
+ * A driver id answers three separate questions, and commit e2798fab7's measurement is that
  * they are NOT the same set:
  *
  *  1. **Selection** — may an operator write this spelling as
@@ -87,7 +87,7 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  *     `mongodb://localhost:27017/objectstack`; the standalone side handed all
  *     of them a `file:` DSN).
  *
- * The maintainer's #6345 ruling fixes the selection face as **the union of what
+ * The maintainer's ruling (commit e2798fab7) fixes the selection face as **the union of what
  * the two hosts accepted the day the ruling was written**. `sql` and `wasm` are
  * in it because the CLI accepted them; `sqlite3`, `better-sqlite3`, `mariadb`
  * and `inmemory` are NOT, because neither host did — they are
@@ -96,7 +96,7 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * before this table existed while refusing to widen a boot flag nobody asked to
  * widen.
  *
- * ## `mongo` → `mongodb`, and turso becoming a real builtin (#6345)
+ * ## `mongo` → `mongodb`, and turso becoming a real builtin (commit e2798fab7)
  *
  * The old canon was `mongo` while both hosts, the npm package
  * (`@objectstack/driver-mongodb`) and every URL scheme said `mongodb`. The
@@ -121,14 +121,14 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
 export interface DriverVocabularyEntry {
   /**
    * The canonical id, for BOTH selection and config contract. `mongodb`, not
-   * `mongo` (#6345).
+   * `mongo` (commit e2798fab7).
    */
   readonly id: string;
   /**
    * Spellings an operator or author may SELECT this driver by, matched
    * case-insensitively. Includes {@link id}. This is the face both boot hosts
    * accept, and the ruling fixes it as the union of what they accepted before
-   * #6345 — never widened by accident.
+   * commit e2798fab7 — never widened by accident.
    */
   readonly aliases: readonly string[];
   /**
@@ -146,7 +146,7 @@ export interface DriverVocabularyEntry {
    * sqlite kinds fall back to `:memory:` / the unified default file). `false`
    * for every kind whose target is a server or an endpoint — there is nothing
    * truthful to guess, so both hosts refuse with a typed error naming what to
-   * set (#6345 fork 2).
+   * set (commit e2798fab7's fork 2).
    */
   readonly hasLocalDefault: boolean;
 }
@@ -155,7 +155,7 @@ export interface DriverVocabularyEntry {
  * THE table. Everything else in this module is a projection of it.
  *
  * Row order is the order {@link BUILTIN_DRIVER_IDS} publishes, which is the
- * order the pre-#6345 tuple used, plus `turso` appended.
+ * order the tuple used before commit e2798fab7, plus `turso` appended.
  */
 const DRIVER_VOCABULARY = [
   { id: 'memory', aliases: ['memory', 'mingo', 'in-memory'], contractOnlyAliases: ['inmemory'], hasLocalDefault: true },
@@ -181,7 +181,7 @@ type VocabularyIds<T extends readonly { readonly id: string }[]> = { -readonly [
 
 /**
  * Canonical driver ids the platform ships a config contract for — and, since
- * #6345, exactly the ids both boot hosts dispatch.
+ * commit e2798fab7, exactly the ids both boot hosts dispatch.
  *
  * Projected through {@link VocabularyIds} rather than a plain `.map()` so the
  * published shape stays the same TUPLE it was before the table existed: a
@@ -245,7 +245,7 @@ export const DATABASE_DRIVER_SELECTION_ALIASES: readonly string[] = Object.freez
  * That signal has consumers that are not plain-JS callers. The CLI's
  * `resolveStorageDriver` (`packages/cli/src/utils/storage-driver.ts`) refuses an
  * unclaimed operator selection with `if (driverType && !kind)`, so
- * `OS_DATABASE_DRIVER=constructor` walked PAST the refusal #6345 fork 1 exists
+ * `OS_DATABASE_DRIVER=constructor` walked PAST the refusal commit e2798fab7's fork 1 exists
  * to be — a truthy `kind` that is not a driver id. {@link driverHasLocalDefault}
  * failed the same way from the other end: a truthy non-id indexed
  * `DRIVER_LOCAL_DEFAULT` to `undefined`, so a function DECLARED `boolean`
@@ -303,7 +303,7 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Objec
  *
  * Deliberately narrower than {@link resolveDriverId}: it refuses the
  * contract-only aliases ({@link DriverVocabularyEntry.contractOnlyAliases}),
- * because neither host accepted `OS_DATABASE_DRIVER=sqlite3` before #6345 and
+ * because neither host accepted `OS_DATABASE_DRIVER=sqlite3` before commit e2798fab7 and
  * converging the two hosts is not a licence to widen the flag for both.
  */
 export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | undefined {
@@ -318,7 +318,7 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  * ## Which question this answers, and why it is not {@link BUILTIN_DRIVER_IDS}
  *
  * The two have equal contents today and answer different questions, which is the
- * distinction #6345 was written to keep visible:
+ * distinction commit e2798fab7 was written to keep visible:
  *
  *  - {@link BUILTIN_DRIVER_IDS} — "which ids does the platform ship a CONFIG
  *    CONTRACT for". That is what {@link DRIVER_CONFIG_SCHEMAS} is keyed by, and
@@ -345,7 +345,7 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  * out, but because they never enter the array this reads. Deriving a boot flag from
  * {@link DRIVER_ID_ALIASES} instead would have offered all four, which is a
  * WIDENING of what both hosts accept, dressed as a refactor: neither host has ever
- * accepted `--database-driver sqlite3`, and #6345's ruling fixes the selection face
+ * accepted `--database-driver sqlite3`, and commit e2798fab7's ruling fixes the selection face
  * as the union of what they accepted the day it was written.
  *
  * ## Order

@@ -6295,10 +6295,28 @@ export class RestServer {
                         // `Deprecation` + RFC 8288 `Link` to the successor) are the
                         // ones the runtime dispatcher's item read asks too, so the
                         // deprecated spelling is one answer on both transports.
+                        //
+                        // [#20508] The `Link` names the path THIS request arrived
+                        // on (`IHttpRequest.path`), read the way the dispatcher
+                        // reads its request URL (`requestedItemPath`, runtime
+                        // `domains/meta.ts`): parsed as a URL path, without its
+                        // trailing slash. ⛔ Never `metaPath` — on the
+                        // environment-scoped mount that is the route TEMPLATE, and
+                        // the successor read `/environments/:environmentId/…/layers`,
+                        // a path no client can request. The parse is what keeps the
+                        // path a valid URI reference: the Hono adapter hands over a
+                        // `decodeURI`'d path (`lead%20all` arrives as `lead all`),
+                        // and the parse percent-encodes it again. A request with no
+                        // path names no successor: `Deprecation` alone, as the
+                        // helper prescribes for a transport that cannot say where
+                        // it serves the item.
                         const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
+                            const requestPath: unknown = req.path;
                             const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
-                                `${metaPath}/${req.params.type}/${req.params.name}`,
+                                typeof requestPath === 'string' && requestPath.startsWith('/')
+                                    ? new URL(`http://rest-server.invalid${requestPath}`).pathname.replace(/\/+$/, '') || undefined
+                                    : undefined,
                             );
                             for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
                             await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);

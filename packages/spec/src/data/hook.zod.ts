@@ -1063,7 +1063,7 @@ export const HookContextSchema = lazySchema(() => z.object({
    * lookup removing the deleted member). Absent on every other dispatch; read
    * it as `ctx.referentialFieldClear === true`.
    *
-   * ## Why a declared key (#13644)
+   * ## Why a declared key (commit 34ce8e7db)
    *
    * The engine builds the cleanup write's context by INHERITING the caller's
    * envelope (`{ ...callerContext, transaction, __referentialFieldClear: true }`),

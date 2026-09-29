@@ -124,13 +124,13 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
    * (`replicaSet`, `tls`, timeouts, …). Placeholder-free since #8336, judged
    * DEEP: every nested string value reaches the client, and this passthrough
    * is exactly where a refusal on `url`/`host` would otherwise displace the
-   * placeholder to. Credential-free since #9040 — `auth.password` was the
+   * placeholder to. Credential-free since commit 24206416a — `auth.password` was the
    * FOURTH spelling of the inline secret (after the top-level key #7990, URL
    * userinfo #8082 and URL query params #8337): the client resolves the block
    * into `MongoCredentials`, so a passthrough password authenticated for real
    * while sitting cleartext in `sys_metadata`. A non-empty `auth.password` is
    * refused with the binder prescription; `auth.username` stays writable
-   * (#8876's asymmetry — a username is not credential material). The
+   * (commit d634e665b's asymmetry — a username is not credential material). The
    * nested-position finding widened the walk: a non-empty string under a
    * credential-SPELLED key (`password`, `authToken`, and the former aliases)
    * is refused at ANY object depth of the passthrough, so a nested position
@@ -181,7 +181,7 @@ export const getMongoConfigJsonSchema = driverConfigJsonSchema(MongoConfigSchema
  * described.
  */
 export const MongoDriverSpec = {
-  // `mongodb`, not `mongo`, since #6345: the canonical driver id was renamed to
+  // `mongodb`, not `mongo`, since commit e2798fab7: the canonical driver id was renamed to
   // the spelling both boot hosts, the `@objectstack/driver-mongodb` package and
   // every URL scheme already used, so driver selection and config-contract
   // selection are one string. `mongo` remains an accepted alias.

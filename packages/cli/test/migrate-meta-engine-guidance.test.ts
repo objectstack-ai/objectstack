@@ -5,7 +5,9 @@
  * of the COVERED families (`engine-*`, `ui-*`, `plugin-*`, `driver-*`,
  * `kernel-*`, `system-*`, `datasource-*`, `filter-*`, `action-*`, `data-*`,
  * `element-*`, `field-*`, `export-*`, `api-*`, `dataset-*`, `hook-*`,
- * `metadata-*`) states each lesson in words and carries no tracker number.
+ * `metadata-*`, `rest-*`, `analytics-*`, `view-*`, `package-*`, `object-*`,
+ * `sharing-*`, `audit-*`, `flow-*`, `http-*`, `inline-*`) states each lesson in
+ * words and carries no tracker number.
  *
  * ## What this pins
  *
@@ -78,6 +80,8 @@ const COVERED_PREFIXES = [
   'engine-', 'ui-', 'plugin-', 'driver-', 'kernel-', 'system-',
   'datasource-', 'filter-', 'action-', 'data-', 'element-',
   'field-', 'export-', 'api-', 'dataset-', 'hook-', 'metadata-',
+  'rest-', 'analytics-', 'view-', 'package-', 'object-', 'sharing-',
+  'audit-', 'flow-', 'http-', 'inline-',
 ];
 
 /**
@@ -91,10 +95,16 @@ const REWRITTEN = [
   'action-descriptor-resume-authority-default-flip',
   'action-engine-facade-find-query-envelope',
   'action-session-roles-to-positions',
+  'analytics-authorable-unknown-keys-refused',
+  'analytics-date-range-array-two-bounds-required',
+  'analytics-query-request-envelope-retired',
+  'analytics-time-dimension-date-range-vocabulary-closed',
   'api-assembled-entry-split',
   'api-error-retry-after-unit-in-key',
   'api-runtime-config-durations-unit-in-key',
   'api-runtime-create-withdrawn',
+  'audit-log-action-enum-retired',
+  'audit-log-action-restore-retired',
   'data-driver-find-stream-retired',
   'data-driver-query-omit-object',
   'data-engine-batch-retired',
@@ -148,9 +158,17 @@ const REWRITTEN = [
   'filter-query-face-comparands-refused-at-save',
   'filter-regex-options-retired',
   'filter-text-operator-declared-type-refused',
+  'flow-decision-branch-expression-absent-refused',
+  'flow-decision-edge-branching-first-match',
+  'flow-edge-condition-evaluated-slot-source-required',
+  'flow-predicate-slot-blank-string-refused',
+  'flow-retry-max-retries-required',
   'hook-context-session-roles-retired',
   'hook-register-empty-object-target-refused',
   'hook-register-undispatched-lifecycle-event-refused',
+  'http-request-errors-total-retired',
+  'http-server-runtime-vocabulary-retired',
+  'inline-grid-column-currency-scale-refused',
   'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
   'kernel-context-preview-mode-retired',
   'kernel-event-bus-retention-unit-in-key',
@@ -165,6 +183,14 @@ const REWRITTEN = [
   'metadata-manager-config-cache-ttl-unit-in-key',
   'metadata-manager-config-inert-cache-keys-retired',
   'metadata-plugin-additional-types-retired',
+  'object-block-sort-item-array',
+  'object-grid-data-view-data-converged',
+  'object-grid-default-filters-rule-array',
+  'object-index-unknown-keys-refused',
+  'package-api-contracts-unmounted-entries-retired',
+  'package-install-request-unknown-keys-refused',
+  'package-rollback-response-retired',
+  'package-uninstall-explicit-all-tenants',
   'plugin-activation-events-retired',
   'plugin-auto-restart-never-reinitialised',
   'plugin-manifest-contributes-dead-members-retired',
@@ -175,6 +201,12 @@ const REWRITTEN = [
   'plugin-runtime-family-retired',
   'plugin-security-scan-result-surface-retired',
   'plugin-security-scanner-retired',
+  'rest-api-endpoint-handler-status-retired',
+  'rest-api-plugin-durations-unit-in-key',
+  'rest-server-config-dead-keys-retired',
+  'rest-server-openapi31-block-removed',
+  'sharing-execution-context-retired',
+  'sharing-rule-recipient-reconcile',
   'system-cache-durations-unit-in-key',
   'system-collaboration-durations-unit-in-key',
   'system-failover-health-check-interval-unit-in-key',
@@ -199,6 +231,12 @@ const REWRITTEN = [
   'ui-record-blocks-unknown-keys-refused',
   'ui-reference-rail-unknown-keys-refused',
   'ui-widget-i18n-family-retired',
+  'view-filter-rule-absent-value-refused',
+  'view-filter-rule-scalar-operator-array-refused',
+  'view-filter-rule-value-shaped-by-operator',
+  'view-management-protocol-retired',
+  'view-overlay-options-bag-judged',
+  'view-pagination-page-size-default-50',
 ];
 
 interface FamilyEntry {

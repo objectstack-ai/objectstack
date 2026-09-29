@@ -26,7 +26,8 @@ export const entry: SemanticMigration = {
     + 'row is deleted. The list operators (in / not_in) and the range operator (between) '
     + 'refused an absent value before this change and still do, in their own words',
   reason:
-    '#19751. The value key\'s own published description has declared since #6227 that every '
+    'The value key\'s own published description has declared, since the value was first shaped '
+    + 'by its operator, that every '
     + 'operator outside the list, range and unary sets takes a scalar, and that only the unary '
     + 'operators ignore the key; the refinement implementing the coupling returned early on an '
     + 'absent value for every operator, so a rule with no value parsed green on all thirteen '

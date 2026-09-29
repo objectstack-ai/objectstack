@@ -42,7 +42,7 @@ import { parse as parsePostgresUrl } from 'pg-connection-string';
  * (`postgresql://[user@][host][:port][/dbname][?params]`) that nothing
  * enforced. The shared `credentialFreeUrl` / `placeholderFree` checks are
  * string-boundary scans by design — their refusal to parse is load-bearing
- * for mongo's multi-host and `+srv` forms (#8696), so the parse question is
+ * for mongo's multi-host and `+srv` forms (commit 90a12fb18), so the parse question is
  * asked HERE, per-driver, of the postgres client's own grammar: `parse` from
  * `pg-connection-string@2.14.0`, the parser `pg@8.22.0` itself runs a
  * connection string through (`ConnectionParameters`). What that parser
@@ -50,7 +50,7 @@ import { parse as parsePostgresUrl } from 'pg-connection-string';
  * `ERR_INVALID_URL`; a non-numeric port; a malformed percent-escape) used to
  * parse green at publish and then fail at connect with a bare `Invalid URL`
  * whose own `input` field `pg` redacts — an error naming neither the value
- * nor the datasource. Same posture as #8873's runtime arm: ask `pg`'s
+ * nor the datasource. Same posture as commit 096106522's runtime arm: ask `pg`'s
  * grammar, never re-model it.
  */
 const PG_UNPARSEABLE_URL_REFUSED = (key: string, detail: string): string =>

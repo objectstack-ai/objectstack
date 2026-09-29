@@ -268,7 +268,7 @@ const NOT_APPLIED =
  * and at `$gt` / `$gte` / `$lt` / `$lte` — or an `$in` / `$nin` / `$between`
  * member — "write null" produced exactly the null shapes refused one door over
  * (2026-08-31, 2026-09-01). Position-safe means following it never lands in a
- * refusal, whatever position it was emitted at (#14426).
+ * refusal, whatever position it was emitted at (commit 40a44b91b).
  */
 function undefinedComparandRefusal(context: string | undefined, path: string): Error {
   return invalidComparandError(
