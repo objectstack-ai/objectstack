@@ -5269,6 +5269,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`filter`.',
   },
   {
+    id: 'cube-refresh-key-retired',
+    order: 49,
+    text:
+      'It also retires a cube\'s `refreshKey` whole — the refresh cadence `every` and the '
+      + 'data-change probe `sql` (ADR-0049 enforce-or-remove). Nothing read either key, and no '
+      + 'analytics result is cached, so a declared cadence refreshed nothing and every query was '
+      + 'computed when it was asked, as it still is. The key is a retiredKey tombstone on '
+      + '`CubeSchema`, and the D2 conversion `cube-refresh-key-removed` strips the whole block from '
+      + 'every cube as a pure lossless delete, retired from the load path. Its D3 record is the '
+      + 'semantic entry `cube-refresh-key-retired`. A refresh cadence is declared again when a '
+      + 'result cache exists.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:
@@ -6342,9 +6355,11 @@ const step18: MigrationStep = {
       // `Metric.filters[]` item, but `Metric.filters` was REMOVED outright later
       // in this same unpublished major (retired-key entry `data/Metric:filters`,
       // conversion `metric-filters-removed`), so this entry no longer names a
-      // surface an 18.x author can reach.
+      // surface an 18.x author can reach. The same holds for the cube's
+      // `refreshKey` block, which batch D closed and #20637 then retired whole
+      // (conversion `cube-refresh-key-removed`).
       surface: 'analytics cube definitions (`defineCube` / `defineStack({ analyticsCubes })`: the '
-        + 'cube, its `refreshKey`, each metric, each dimension, each '
+        + 'cube, each metric, each dimension, each '
         + 'join) and the `/analytics/query` body\'s nested `timeDimensions[]` items — undeclared keys',
       replacement: 'the declared key the rejection names. Every rejection carries the surface, the '
         + 'offending key and a rename suggestion (`title` → `label` on a metric/dimension, `label` → '
@@ -6363,12 +6378,13 @@ const step18: MigrationStep = {
         + 'top-level strictness does not recurse — `timeDimensions: [{ dimension, granuarity: '
         + '\'day\' }]` rode through the strict wrapper with the typo stripped, bucketing the whole '
         + 'range as one group under an ordinary 200. Undeclared keys on all eight sites are now '
-        + 'refused at parse time with a prescriptive message. (One of the eight — the nested metric '
-        + '`filters[]` item — was itself removed later in this major, because nothing ever read it: '
-        + '`metric-filters-removed`.)',
+        + 'refused at parse time with a prescriptive message. (Two of the eight were themselves '
+        + 'removed later in this major, because nothing ever read them: the nested metric '
+        + '`filters[]` item, by `metric-filters-removed`, and the cube\'s `refreshKey` block, by '
+        + '`cube-refresh-key-removed`.)',
       acceptanceCriteria:
         'Every cube in `defineStack({ analyticsCubes })` / `defineCube` parses with only declared '
-        + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
+        + 'keys at every level (cube, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
     },
@@ -8148,6 +8164,30 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+    },
+    // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C) — the D3
+    // entry of the `cube-refresh-key-removed` family (one D3 entry per retirement
+    // family, even when D2 is lossless). Registered key: `data/Cube:refreshKey`.
+    // The strip changes no query answer; what it cannot decide is whether anything
+    // the author built assumed that cube results were cached or refreshed.
+    {
+      id: 'cube-refresh-key-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'analyticsCubes[].refreshKey (every, sql) — a cube\'s declared refresh cadence and data-change probe',
+      replacement:
+        'Nothing: delete the key. No analytics result is cached, so every query against a cube is computed '
+        + 'when it is asked. A refresh cadence is declared again when a result cache exists.',
+      reason:
+        'The D2 conversion `cube-refresh-key-removed` deletes `refreshKey` from every cube, and the delete is '
+        + 'lossless: nothing read `every` or `sql`, and no analytics result was ever cached for them to '
+        + 'refresh, so no query answers differently. What the conversion cannot check is whether anything the '
+        + 'author built assumed that cube results were cached or refreshed on a schedule. They never were.',
+      acceptanceCriteria:
+        'No cube carries `refreshKey`, and the parse refuses one with the prescription. Every analytics '
+        + 'query answers as it did before the upgrade. Nothing the author maintains relies on cube results '
+        + 'being cached or refreshed on a schedule.',
     },
     // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
     // on #19910: 「a currency's decimal places are the currency's, not a
@@ -19451,6 +19491,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
     // arms in one pass.
     'data/AutoPersistenceConfig:autoSaveInterval',
+    // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C: retire
+    // whole, no cache built). `Cube.refreshKey` — the refresh cadence `every` and
+    // the data-change probe `sql` — was read by nothing, and no analytics result
+    // is cached for it to key on. Measured: `git grep refreshKey` over the non-test
+    // sources of `packages/services`, `packages/drivers` and `packages/rest`
+    // answered 0 lines (4 for the neighbouring `.public` in the same pathspec).
+    //
+    // `retiredKey()` on a `strictObject`, for the prescription and the `tsc`
+    // channel (the `data/Metric:name` precedent). One row, not three: the nested
+    // `every` and `sql` left with the block, and a dotted row under a tombstoned
+    // parent names a path this build no longer emits (check (b3)). The D2
+    // conversion `cube-refresh-key-removed` strips the block wherever the chain is
+    // replayed; the D3 record is `cube-refresh-key-retired`.
+    'data/Cube:refreshKey',
     // #18612 — ADR-0049 enforce-or-remove, the same ruling and the same diff as
     // `data/CubeJoin:sql`. `CubeJoin.relationship` carried a
     // `.default('many_to_one')` and nothing dispatched on the cardinality, so

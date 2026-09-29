@@ -413,6 +413,43 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * A cube's `refreshKey` — the refresh cadence (`every`) and the data-change
+ * probe (`sql`) of a pre-aggregation cache — RETIRED whole (#20637, ADR-0049
+ * enforce-or-remove; maintainer ruling 5890724395, letter C).
+ *
+ * Measured before removal: no reader. `git grep refreshKey` over the non-test
+ * sources of `packages/services`, `packages/drivers` and `packages/rest`
+ * answered 0 lines, against 4 for the neighbouring `.public` in the same
+ * pathspec; repo-wide the key appeared only in this schema, its generated
+ * surfaces, the migration notes and one author (`examples/app-showcase`,
+ * `every: '1 hour'`). And nothing for it to key on: `service-analytics`
+ * references no cache or job service — its one cache is the request-scoped
+ * `packages/services/service-analytics/src/dimension-labels.ts#withLabelFetchCache`
+ * — so every analytics query is computed when it is asked. `sql` was security-adjacent as well: raw SQL run on
+ * a schedule, outside the read-scope machinery every other cube `sql` goes
+ * through.
+ *
+ * The mainstream capability (a result cache keyed by cube, normalized query,
+ * read scope and tenant — Cube.dev, Looker) is not lost from the plan: the
+ * ruling re-declares a cadence the day such a cache exists, with its own design,
+ * rather than carrying a key that does nothing until then.
+ *
+ * A `retiredKey()` tombstone on the `strictObject` below rather than a strict
+ * deletion, so the refusal carries this prescription instead of a bare
+ * unknown-key verdict and a typed authoring site fails `tsc` first (the members'
+ * inner `name` precedent). The nested `strictObject` the key carried is gone
+ * with it. The ADR-0087 D2 conversion `cube-refresh-key-removed` strips the
+ * block wherever the chain is replayed, and the D3 entry
+ * `cube-refresh-key-retired` carries what the author still owes.
+ */
+const CUBE_REFRESH_KEY_REMOVED =
+  '`analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed '
+  + 'anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence '
+  + 'is declared again when a result cache exists. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Cube Schema
  * A logical data model representing a business entity or process for analysis.
  * Maps physical tables to business metrics and dimensions.
@@ -468,18 +505,10 @@ export const CubeSchema = lazySchema(() => strictObject(
     /** Relationships */
     joins: z.record(z.string(), CubeJoinSchema).optional(),
 
-    /** Pre-aggregations / Caching */
-    refreshKey: strictObject(
-      {
-        surface: 'this cube refreshKey block',
-        history: 'Until this shape was closed, an undeclared refreshKey key was silently dropped — '
-          + 'a typo\'d `sql` probe left the cube refreshing on nothing.',
-      },
-      {
-        every: z.string().optional().describe('Refresh interval (e.g. "1 hour")'),
-        sql: z.string().optional().describe('SQL to check for data changes'),
-      },
-    ).optional(),
+    // `refreshKey` REMOVED (#20637, ADR-0049 enforce-or-remove) — `every` and
+    // `sql` with it. No analytics result is cached, so nothing read either. See
+    // the note above `CUBE_REFRESH_KEY_REMOVED`.
+    refreshKey: retiredKey(CUBE_REFRESH_KEY_REMOVED),
 
     /**
      * Visibility on the analytics API (the Cube.dev `public` semantics).
