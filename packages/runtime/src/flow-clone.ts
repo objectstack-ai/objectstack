@@ -18,7 +18,7 @@
  * to `FlowSchema` must never require an edit here.
  *
  * That is not stylistic. The permission-set clone this is shaped on assembles
- * its payload from an enumerated param list, and #11703 measured what an
+ * its payload from an enumerated param list, and commit 5cb62d88b records what an
  * enumerated list costs: three of the six facets (`system_permissions`,
  * `row_level_security`, `tab_permissions`) were simply not listed, so cloning a
  * set carrying system permissions or RLS produced a clone with NONE of them —
@@ -31,7 +31,7 @@
  * grows next — so the enumerated shape is not merely riskier here, it is
  * unmaintainable. ADR-0126 §7.1 rules it out by name.
  *
- * `flow-clone.test.ts` asserts this as the #11703 counter-example: deep
+ * `flow-clone.test.ts` asserts this as the counter-example of commit 5cb62d88b: deep
  * equality of the cloned definition against the source, minus the three
  * mutated fields. A dropped facet fails that test rather than shipping.
  *
@@ -110,7 +110,7 @@ export const FLOW_CLONE_STATUS = 'draft' as const;
  *
  * Exported so the test asserts the mutation set from the same constant the
  * implementation applies, rather than restating it (a second list here is the
- * #11703 mechanism in miniature).
+ * facet-drop mechanism of commit 5cb62d88b in miniature).
  */
 export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
 

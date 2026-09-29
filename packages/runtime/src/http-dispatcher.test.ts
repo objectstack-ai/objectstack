@@ -179,8 +179,8 @@ describe('HttpDispatcher', () => {
             // name='views/all_leads' — the dispatcher's own compound arity,
             // folding every trailing segment into one slash-bearing key.
             //
-            // #12176 retired compound metadata item names (maintainer ruling
-            // 2026-08-25); #12194 refuses every slash-bearing name at the
+            // Commit 7986d973f retired compound metadata item names (maintainer ruling
+            // 2026-08-25); commit 311433f6b refuses every slash-bearing name at the
             // publish door, so the fold could only address names that can no
             // longer be created; #12195 removes it. The domain now DECLINES,
             // and nothing is written.
@@ -202,7 +202,7 @@ describe('HttpDispatcher', () => {
             // nothing decodes for it, so `%2F` keeps the path at two segments
             // and `decodeMetaNameSegment` restores the stored key — which is
             // what keeps a pre-grammar residue row addressable here, per
-            // #12194's "any stored junk name remains listable and clearable".
+            // commit 311433f6b: any stored junk name stays listable and clearable.
             const result = await dispatcher.handleMetadata('/lead/views%2Fall_leads', context, 'PUT', body);
 
             expect(result.handled).toBe(true);

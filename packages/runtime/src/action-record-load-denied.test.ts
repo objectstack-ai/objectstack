@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14143] A handler must be able to tell "the caller cannot read this row"
+ * [commit f19475c0a] A handler must be able to tell "the caller cannot read this row"
  * from "this action legitimately has no record".
  *
  * ## The defect
@@ -493,7 +493,7 @@ describe('[#15168] the FLOW door and its verdict — MCP run_action', () => {
  * `AutomationContext.recordLoadDenied` is a declared spec key
  * (`contracts/automation-service.ts`, pinned in `packages/spec`), the
  * dispatcher is its ONE populator, and a populator that quietly stopped
- * populating would be exactly the inert-signal shape #14143 was filed for. So
+ * populating would be exactly the inert-signal shape commit f19475c0a fixed. So
  * the assertions #15168 wrote at the doors are re-pinned HERE, on the
  * dispatcher itself, where a denied subject can still be constructed.
  *
@@ -556,8 +556,8 @@ describe('[#15168] dispatchFlowAction derives the verdict from the subject load'
 
 /**
  * [#15168] The convergence itself. A per-door assertion is satisfied by two
- * copies of a rule, and two copies drifting apart is the defect #14143 was
- * filed for and the reason this card had to move both doors in one stroke — so
+ * copies of a rule, and two copies drifting apart is the defect commit f19475c0a
+ * fixed, and the reason this card had to move both doors in one stroke — so
  * the SAME caller against the SAME row is driven through both doors and the
  * signal is compared as a set.
  */

@@ -638,7 +638,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
 
     // Load the record (best-effort) so handlers can rely on `ctx.record`.
-    // [#14143] Through the ONE shared producer `loadActionSubjectRecord`, which
+    // [commit f19475c0a] Through the ONE shared producer `loadActionSubjectRecord`, which
     // also reports whether the CALLER's own scope actually delivered the row.
     // This door and the MCP `run_action` door must emit the same signal: a
     // documented guard (`if (ctx.recordLoadDenied) …`) that only one of two
@@ -707,7 +707,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // #15079 wrote into the declarative executor, now read by the flow door
         // and the script/body door as well. A signal only one of three doors
         // consumed is an authorization rule silently inert on the other two,
-        // which is the #14143 / #15168 failure class on this exact seam.
+        // which is the commit f19475c0a / #15168 failure class on this exact seam.
         //
         // Inside the `try`, like the declarative branch above, so the 404 takes
         // the ONE catch this door already has and is served with its `.status` /
@@ -719,7 +719,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
         const actionContext: any = {
             record,
-            // [#14143] The caller-scope load's verdict — see
+            // [commit f19475c0a] The caller-scope load's verdict — see
             // `loadActionSubjectRecord`. `ctx.record.id` is stamped either way, so
             // this is the only channel that distinguishes "the caller cannot read
             // this row" from "this action legitimately has no record".
@@ -756,7 +756,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                     // the flow context's `record` AND its `recordLoadDenied`
                     // sibling from the same load outcome, so this door and the
                     // MCP one cannot diverge on the signal the way the two
-                    // doors diverged before #14143.
+                    // doors diverged before commit f19475c0a.
                     subject,
                     params: reqParams,
                     recordId,

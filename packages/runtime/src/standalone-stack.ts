@@ -96,7 +96,7 @@ export function resolveObjectStackHome(): string {
 
 /**
  * The driver kinds a standalone boot can dispatch — the ONE list, and the only
- * one (#6265), now shared with the CLI rather than merely singular here (#6345).
+ * one (#6265), now shared with the CLI rather than merely singular here (commit e2798fab7).
  *
  * Three consumers read it and every one of them used to carry its own answer:
  * the `databaseDriver` config key (a zod enum that rejected loudly), the
@@ -121,7 +121,7 @@ export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
 
 /**
  * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
- * {@link StandaloneDatabaseDriverSchema} (#6345).
+ * {@link StandaloneDatabaseDriverSchema} (commit e2798fab7).
  *
  * `databaseDriver` and `OS_DATABASE_DRIVER` are two spellings of one decision,
  * so accepting `pg` from the environment and refusing it from a programmatic
@@ -380,7 +380,7 @@ function resolveExplicitDriver(
     if (cfg.databaseDriver) return cfg.databaseDriver;
     const raw = process.env.OS_DATABASE_DRIVER?.trim();
     if (!raw) return undefined;
-    // #6345: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
+    // Commit e2798fab7: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
     // this file's canonical list. Lower-casing stays for the reason #6265 gave —
     // the CLI's reader of this same variable lower-cases — and is now redundant
     // with `resolveDatabaseDriverId`'s own normalization rather than the only
@@ -392,7 +392,7 @@ function resolveExplicitDriver(
 
 /**
  * Refuse a driver whose database lives somewhere this process cannot guess when
- * nothing named where that is (#6345 fork 2).
+ * nothing named where that is (fork 2 of commit e2798fab7).
  *
  * The URL ladder always produces SOMETHING — its last rung is the unified
  * default file — so before this check a `postgres`/`mysql`/`mongodb`/`turso`
@@ -517,7 +517,7 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
     const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
-    // Fork 2 (#6345) — refuse before deriving a sqlite filename from a URL the
+    // Fork 2 (commit e2798fab7) — refuse before deriving a sqlite filename from a URL the
     // selected driver was never going to open.
     assertUrlNamedForRemoteDriver(driver, resolution.source);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';

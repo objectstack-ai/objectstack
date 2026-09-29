@@ -1125,7 +1125,7 @@ export class HttpDispatcher {
         // and parses the body against `ApiErrorSchema`, which now PASSES for
         // every body this door emits — the "parse every body it emits" half.
         const declaredCode = demotedDeclaredCode(thrown);
-        // [#9934] The producer-side user-facing marking rides as a declared
+        // [commit 79c46da90] The producer-side user-facing marking rides as a declared
         // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
         // like `declaredCode` — the shared resolver already answered whether
         // the throw declared one (`declaredUserMessage`'s non-empty-string
@@ -2821,7 +2821,7 @@ export class HttpDispatcher {
                 // FOR the caller, platform and driver code never set it, and it
                 // lands as a declared top-level sibling of `code`/`message`
                 // (`ApiErrorSchema.userMessage`), never inside `details`.
-                // The mark never moves the status or the `code` (#9934).
+                // The mark never moves the status or the `code` (commit 79c46da90).
                 const userMessage = declaredUserMessage(e);
                 return {
                     handled: true,

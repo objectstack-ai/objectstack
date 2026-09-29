@@ -187,14 +187,14 @@ export type CodeStampShape =
 export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
 /**
- * [#16649] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
+ * [commit 44c917a47] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
  * before any HTTP boundary exists — the CLI rethrows it and aborts — and until
  * #16404 the ledger ratified that class as not owed a row
  * (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 on "host boot
  * matching is not wire vocabulary"). #16404 deleted the exemption (the ledger
  * is the published face, door or no door), which left the verdict meaning only
  * "a registration this tree still owes" — #16449 discharged nine of those,
- * #16649's first half the remaining fourteen, and the second half widened
+ * commit 613bfbd3d the remaining fourteen, and commit 44c917a47 widened
  * `check-dispatcher-error-vocabulary`'s face refusal from `packages/spec/src/`
  * to every published package's `src/`, which is what makes the verdict
  * unwritable: a row carrying it inside that face is now a
@@ -308,7 +308,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `check:dispatcher-error-vocabulary` refuses any verdict there but
     // `foreign-vocabulary` / `runtime-pinned`. ──
     //
-    // ── [#16649] Fourth cycle, the rest of that class: the fourteen
+    // ── [commit 613bfbd3d] Fourth cycle, the rest of that class: the fourteen
     // `boot-refusal` rows that remained after #16449 — the nine
     // `@objectstack/core` refusals (the three ADR-0130 D4 artifact-package
     // refusals, the four `MigrationJournalRefusal` codes,
@@ -321,7 +321,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (`stale-row`), the reachability each row recorded now carried on its
     // ledger row.
     //
-    // ── [#16649, second half] The class is now closed MECHANICALLY rather than
+    // ── [commit 44c917a47, second half] The class is now closed MECHANICALLY rather than
     // by having been emptied once. `check-dispatcher-error-vocabulary`'s face
     // refusal, which #16449 could only afford over `packages/spec/src/`, covers
     // every published package's `src/` — the whole of this scan's population on

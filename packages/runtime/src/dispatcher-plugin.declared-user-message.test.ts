@@ -32,7 +32,7 @@
  * The 2026-08-27 ruling on #12509 (option D), propagated to #12281, made this
  * exit withhold the message of every **declared** 5xx:
  *
- * > the author-facing text channel is `userMessage` (#9934), never the raw
+ * > the author-facing text channel is `userMessage` [commit 79c46da90], never the raw
  * > message.
  *
  * That sentence only holds if the channel exists here. Before this change a
@@ -43,7 +43,7 @@
  *
  * ## ⚠️ Status-agnostic, which is wider than the card's framing
  *
- * #9934 made the mark status-agnostic on purpose ("a 400, 403, 409 or 503
+ * Commit 79c46da90 made the mark status-agnostic on purpose ("a 400, 403, 409 or 503
  * refusal may all carry it"), so the gap here was never confined to the
  * declared-5xx band that motivated it: a marked **4xx** refusal reaching this
  * exit lost the field too, with no withhold anywhere in the picture. `§2` drives
@@ -201,7 +201,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             // …and the author's channel now survives it.
             expect(res.body.error.userMessage).toBe('Reporting is briefly offline. Try again in a few minutes.');
 
-            // The mark never MOVES the status or the code (#9934's third
+            // The mark never MOVES the status or the code (commit 79c46da90, the ruling's third
             // constraint) — a marked fault is still the sanitised fault.
             expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
         });
@@ -299,7 +299,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             expect(res.statusCode).toBe(403);
             expect(res.body.error.code).toBe('PERMISSION_DENIED');
             // The half this card repaired: the author's channel now survives
-            // the denial door too (#9934 is status-agnostic, and 403 is the
+            // the denial door too (commit 79c46da90's mark is status-agnostic, and 403 is the
             // refusal class most likely to carry authored text).
             expect(res.body.error.userMessage).toBe('Ask an admin for the Reporting role.');
             // …verbatim, and never in place of the diagnostic channel.

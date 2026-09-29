@@ -481,19 +481,19 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   //     parse and the KEY assertion (⊆, not =) cannot see it either.
   //
   // Both were pinned here as the measured behaviour of `origin/main`, on the
-  // note that whichever way #6361 / #6363 were ruled, these assertions are the
+  // note that whichever way the two cards were ruled (landed as commits 90bbf2510 / 17d095413), these assertions are the
   // ones that must flip. BOTH have now been ruled (2026-08-07, Option A, and
   // ruled JOINTLY — one capability's two halves are never half-deleted), and
   // both assertions have flipped:
   //
-  //   * #6363 made the declaration true — `unreadCount` really is the total;
-  //   * #6361 removed the declaration instead — `cursor` is gone from the
+  //   * commit 17d095413 made the declaration true — `unreadCount` really is the total;
+  //   * commit 90bbf2510 removed the declaration instead — `cursor` is gone from the
   //     request half, the response half and the SDK producer, because there was
   //     no implementation to make it true ABOUT. Opposite repairs, same rule:
   //     declared must equal enforced.
   //
   // The two directions are why the pair is worth keeping side by side. Note the
-  // #6361 assertion below now pins something subtler than the #6363 one: the
+  // `cursor` assertion below (commit 90bbf2510) now pins something subtler than the `unreadCount` one (commit 17d095413): the
   // WIRE did not change (an unknown `?cursor=` was ignored before and is
   // ignored now), so what it proves is that the CONTRACT stopped promising the
   // thing the wire never delivered. A test that only checked "page2 === page1"
@@ -515,7 +515,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
       // The LIST is still windowed — that half never changed.
       expect(windowed.notifications).toHaveLength(1);
       // The BADGE is not: declared 'Total number of unread notifications', and
-      // now delivered as one. Before #6363 this read `1` — the window's size,
+      // now delivered as one. Before commit 17d095413 this read `1` — the window's size,
       // which is what a user with more unread than the page size was told
       // forever. The parse was green either way; only this assertion can tell.
       expect(windowed.unreadCount).toBe(all.unreadCount);

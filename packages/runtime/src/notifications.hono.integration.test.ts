@@ -409,7 +409,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     //   POST /api/v1/notifications/read/all  →  { readCount: 200 }
     //   GET  /api/v1/notifications           →  { unreadCount: 150 }
     //
-    // #6363 did not cause that — it removed the cover. While `unreadCount` was
+    // Commit 17d095413 did not cause that — it removed the cover. While `unreadCount` was
     // window-scoped the shortfall was self-consistent and invisible; once the
     // badge became a true total the same request pair states it out loud, which
     // is why this pin lives at the wire and not only under the service.
@@ -433,7 +433,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     }
 
     const before = await (await as(BULK_USER, '/api/v1/notifications')).json();
-    expect(before.data.unreadCount).toBe(TOTAL); // the true total (#6363)
+    expect(before.data.unreadCount).toBe(TOTAL); // the true total (commit 17d095413)
     expect(before.data.notifications).toHaveLength(50); // the list is still one window
 
     const readAll = await (await as(BULK_USER, '/api/v1/notifications/read/all', { method: 'POST' })).json();

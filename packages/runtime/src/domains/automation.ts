@@ -1517,7 +1517,7 @@ function flowDefinitionRefusal(err: any): unknown {
  * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
  * stamps `'FLOW_NO_START_NODE'`, and the arms below read those. #10025
  * repeated the same shape for the definition-level input-schema refusal —
- * spec seat first (#11504 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
+ * spec seat first (commit f90e82024 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
  * engine's non-retryable short-circuit stamps it — so its 422 is read here
  * through the same shared table, again never minted at this call site.
  *
@@ -2370,7 +2370,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // name (ADR-0126 §7.1). The copy itself, the fields it mutates, the
         // keys it must not carry forward and the notice it returns all live in
         // `../flow-clone.ts` — see that module's header for the ADR and for
-        // #11703, the measurement that decides the copy's SHAPE.
+        // commit 5cb62d88b, the measurement that decides the copy's SHAPE.
         //
         // Built out of `getFlow` + `registerFlow`, not a new contract method:
         // `IAutomationService` lives in `packages/spec`, and this door needs

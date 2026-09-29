@@ -196,7 +196,7 @@ describe('#8848 — an unsupported verb on /metadata/:type/:name', () => {
             const stack = boot();
 
             // This drove `/meta/lead/views/all_leads`, the compound arity. It
-            // is retired (#12176 stage 3), so the same name is addressed
+            // is retired (stage 3, commit 7986d973f), so the same name is addressed
             // percent-encoded — two segments, same verb dispatch.
             const res = await stack.dispatcher.dispatch(
                 'DELETE', '/meta/lead/views%2Fall_leads', undefined, {}, SESSION(),

@@ -15,7 +15,7 @@
 // through the binding record alone — the binding record is what this module
 // says it did, the enforcer is what actually happened.
 //
-// ⛔ VERB DISCIPLINE (#17147). Every case here reads a permission BAG and
+// ⛔ VERB DISCIPLINE (commit aaacf1d5c). Every case here reads a permission BAG and
 // asserts what it ANSWERS. None of them asserts that anything was refused, and
 // none of them could: nothing on this tree queries the registry these entries
 // land in — `SecurePluginContext` has no production construction site, and the

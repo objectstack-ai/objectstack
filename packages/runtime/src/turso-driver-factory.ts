@@ -32,7 +32,7 @@
  * because the dependency direction forbids the reverse import (cli → runtime,
  * never runtime → cli) and each of the two rulings that created them had a
  * single-package file face. Hand alignment had already started to fail — the CLI
- * half moved onto `@objectstack/spec`'s shared driver vocabulary in #6345 while
+ * half moved onto `@objectstack/spec`'s shared driver vocabulary in commit e2798fab7 while
  * this half still carried a private `Set(['turso', 'libsql'])` — which is the
  * #3741 → #3758 shape: one decision, two implementations, one of them fixed.
  *

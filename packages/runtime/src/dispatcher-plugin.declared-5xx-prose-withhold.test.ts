@@ -10,7 +10,7 @@
  *
  * > `errorResponseBase` adopts the **structural withhold for every declared 5xx
  * > message**, aligning to `/data`'s rule; the author-facing text channel is
- * > `userMessage` (#9934), never the raw message.
+ * > `userMessage` [commit 79c46da90], never the raw message.
  *
  * ## The two axes it closes
  *

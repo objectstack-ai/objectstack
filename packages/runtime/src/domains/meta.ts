@@ -100,7 +100,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled,
  * and so did a misspelt VERB.
@@ -828,7 +828,7 @@ async function answerMetaLayered(
  * (`parts.slice(1).join('/')`) is what let a slash-bearing name be addressed
  * on this transport at all — unencoded, across segments. Retiring the fold
  * without decoding would leave a pre-grammar residue row addressable through
- * `packages/rest` and NOT through the dispatcher, breaking #12194's landed
+ * `packages/rest` and NOT through the dispatcher, breaking the landed (commit 311433f6b)
  * acceptance criterion that "reads and `deleteMetaItem` still answer for
  * pre-grammar residue rows, so any stored junk name remains listable and
  * clearable". Decoding makes ONE spelling — percent-encoded, the spelling the
@@ -1047,7 +1047,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // `parts.length >= 3` with `parts.slice(1, -1).join('/')`, which re-joined
     // every middle segment into one slash-bearing key so
     // `lead/views/all_leads/published` resolved as name `views/all_leads`.
-    // Stage 1 (#12194) refuses every slash-bearing name at the publish door,
+    // Stage 1 (commit 311433f6b) refuses every slash-bearing name at the publish door,
     // so that fold could only ever address a name that can no longer be
     // written.
     if (parts.length === 3 && parts[2] === 'published' && (!method || method === 'GET')) {
@@ -1170,7 +1170,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // segment after the type was re-joined into one slash-bearing lookup key,
     // so `/metadata/lead/views/all_leads` resolved as name `views/all_leads`.
     // That fold WAS compound-name addressing on this transport, and stage 1
-    // (#12194) made every name it could reach unwritable at the publish door.
+    // (commit 311433f6b) made every name it could reach unwritable at the publish door.
     //
     // ⚠️ The `>=` also swallowed three-segment paths that were never compound
     // names at all — `/metadata/object/foo/references` folded to name

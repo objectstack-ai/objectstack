@@ -712,7 +712,7 @@ function errorResponseBase(
     // goes through the heuristic alone. A naive `httpStatus >= 500` test would
     // silently delete that, which is the one way this change could do harm.
     //
-    // The author-facing text channel is `userMessage` (#9934), never the raw
+    // The author-facing text channel is `userMessage` (commit 79c46da90), never the raw
     // message — a producer whose 5xx prose is addressed to a human declares it
     // there and it survives the withhold on its own channel.
     //
@@ -771,7 +771,7 @@ function errorResponseBase(
     // stop, which is why the shared resolver's field is read rather than
     // `err.userMessage` probed inline.
     //
-    // ⚠️ Status-agnostic on purpose (#9934's second constraint) — a 400, 403 or
+    // ⚠️ Status-agnostic on purpose (the ruling's second constraint, commit 79c46da90) — a 400, 403 or
     // 409 refusal may carry the mark too, so this is NOT gated on the 5xx limb
     // above. The withhold touches only the diagnostic `message`; the marked
     // channel is text an author deliberately addressed to the end user, so it

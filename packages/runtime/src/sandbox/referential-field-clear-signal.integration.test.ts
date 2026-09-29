@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13644] The declared referential-cleanup marker, OBSERVED FROM INSIDE A
+ * [commit 34ce8e7db] The declared referential-cleanup marker, OBSERVED FROM INSIDE A
  * SHIPPED BODY — the sandbox-reachability mandate of the adoption ruling.
  *
  * ## What is pinned, and why a kernel rig could not pin it
@@ -124,7 +124,7 @@ describe('#13644 — a shipped body observes ctx.referentialFieldClear across th
       body: { language: 'js', source: PROBE_SOURCE, capabilities: ['log'] },
     } as any], { packageId: 'probe' });
 
-    // The REST-shaped caller envelope — the corrected #13644 measurement's
+    // The REST-shaped caller envelope — the corrected measurement's (commit 34ce8e7db)
     // row 1, on which every other context member is identical between the
     // engine's cascade and the user's hand-clear.
     const CALLER = { userId: 'u_probe', isSystem: true };

@@ -21,7 +21,7 @@
  *
  * ## Why THIS door matters more than its size suggests
  *
- * #9934 made the mark **status-agnostic** precisely so a 403 could carry it,
+ * Commit 79c46da90 made the mark **status-agnostic** precisely so a 403 could carry it,
  * and a 403 is the refusal class most likely to carry deliberately-authored
  * text: *"You do not have access to this report; ask an admin for the Reporting
  * role"* is exactly the sentence a producer marks. The one door that swallowed
@@ -41,7 +41,7 @@
  *
  * That same ruling is also why the change is owed: it makes REST's shape the
  * contract for BOTH transports, and REST's shape has carried the mark on this
- * identical denial since #9934 (`mapDataError` = `withDeclaredUserMessage` over
+ * identical denial since commit 79c46da90 (`mapDataError` = `withDeclaredUserMessage` over
  * `classifyDataError`, pinned in
  * `packages/rest/src/rest-user-facing-refusal-marking.test.ts`). The
  * dispatcher's 403 was the one that differed. `§6` pins the parity.

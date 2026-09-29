@@ -360,7 +360,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(declaresOrgOverride('flows')).toBe(declaresOrgOverride('flow'));
         // A runtime-registered type with no registry entry has no per-org read
         // channel either, so it is env-wide too. (`webhook` took this slot
-        // from `theme` at #10485 — the retired kind left the contract.)
+        // from `theme` at commit 35ad101bc — the retired kind left the contract.)
         expect(declaresOrgOverride('webhook')).toBe(false);
         // No active org in, no org out — for every type.
         expect(organizationIdForMetaWrite('view', undefined)).toBeUndefined();
@@ -580,7 +580,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             plural: 'translations',
             singular: 'translation',
             item: {
-                // [#12194] The addressing name is snake_case — the item-name
+                // [commit 311433f6b] The addressing name is snake_case — the item-name
                 // grammar refuses `zh-CN` as an ADDRESSING key (uppercase +
                 // dash). The BCP-47 spelling lives in `locale`, which is this
                 // type's required identity; the name was always free to choose.

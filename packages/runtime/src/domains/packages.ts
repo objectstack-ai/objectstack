@@ -135,7 +135,7 @@ import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectst
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled.
  *
@@ -1546,7 +1546,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // `request.type` itself, and the predicate answers
                     // `undefined` for every type the registry declares
                     // non-overridable — `app` among them, rolled back to
-                    // `allowOrgOverride: false` in #6483. The `organizationId`
+                    // `allowOrgOverride: false` in commit ee58392e1. The `organizationId`
                     // this route still hands that call is dropped at the gate.
                     //
                     // ⛔ Dropping it is the REPAIR, not an oversight to undo.

@@ -533,7 +533,7 @@ describe('an unsupported declaration gets a structured 501, never invented seman
         expect(execute).not.toHaveBeenCalled();
     });
 
-    // [#10338] `target` is OPTIONAL in the vocabulary now, so a flow endpoint
+    // [commit d2619fd0c] `target` is OPTIONAL in the vocabulary now, so a flow endpoint
     // with the key OMITTED is a parseable declaration — the publish gate
     // refuses it (`apis-publish-gates.test.ts`), and this is the runtime
     // counterpart that gate mirrors (`planEndpointTarget`), for a declaration

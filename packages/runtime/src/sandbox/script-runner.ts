@@ -224,7 +224,7 @@ export interface ScriptContext {
   dispatch?: { mode: 'record' | 'per-row'; index: number };
   /**
    * The engine's referential-cleanup marker, marshalled for the HOOK face
-   * (#13644) — `true` exactly when this write is the engine's own reference
+   * (commit 34ce8e7db) — `true` exactly when this write is the engine's own reference
    * cleanup (the `set_null` cascade UPDATE clearing, or on a `multiple: true`
    * lookup member-removing, a lookup that references a record being deleted).
    * Mirrors the declared `HookContextSchema.referentialFieldClear`
@@ -305,7 +305,7 @@ export interface ScriptContext {
   /**
    * Action only: `true` exactly when the dispatcher ATTEMPTED to load the
    * subject row in the CALLER's own scope and that load did not deliver it
-   * (#14143). Absent otherwise — including on every record-less / new-record
+   * (commit f19475c0a). Absent otherwise — including on every record-less / new-record
    * action, which never attempts a load — so read it as
    * `ctx.recordLoadDenied === true`, the same absence semantics as
    * {@link referentialFieldClear}.

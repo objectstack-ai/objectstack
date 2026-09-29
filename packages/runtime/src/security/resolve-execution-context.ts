@@ -221,7 +221,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     tenancyPosture,
   });
 
-  // [#6216 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
+  // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
   // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,
   // @objectstack/core), shared with the REST face. Everything above is
   // transport-specific plumbing; the field set is closed by type over there, so
@@ -273,7 +273,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // the Chinese label of the very field it names. The PRECEDENCE lives in the
     // shared assembler so the two faces cannot disagree about it.
     requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
-    // A NAMED divergence (#6216): this face has always carried the session
+    // A NAMED divergence (commit f586f1a89): this face has always carried the session
     // bearer down to hooks (`session.accessToken`); the REST face never has.
     // Both are preserved — see the assembler's `accessToken` doc.
     accessToken: authz.accessToken,

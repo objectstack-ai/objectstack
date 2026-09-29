@@ -280,7 +280,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         // idempotent batch writer branches on — it was `INTERNAL_ERROR` with no
         // status while the sentence was withheld.
         //
-        // ── [#14723] …and the row speaks the WIRE spelling ─────────────────
+        // ── [commit 65846bc46] …and the row speaks the WIRE spelling ───────
         // The engine's envelope is `code: 'DUPLICATE_RECORD'` in-process (the
         // objectql pins on `insert` / `insertMany` hold that), and this row
         // used to relay it verbatim while the whole-request failure on the
