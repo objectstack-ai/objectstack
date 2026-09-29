@@ -11585,10 +11585,14 @@ function describeBlock(component: Dict): string {
  * `staticData`) is rewritten exactly as a block that queries an object:
  * measured at the `.objectui-sha` pin `dd3f7e1be356`, the renderers that match
  * inline rows in memory (`object-map`, `object-tree`, `object-calendar`,
- * `object-gantt`, through `ValueDataSource.find`) lower a rule array through
+ * `object-gantt`, through `ValueDataSource.find`) take those rows from
+ * `data: { provider: 'value' }` or `staticData`, lower a rule array through
  * the grid's own sink before matching, and select the same rows for it as for
  * the stored form — every mapped operator, against a control where the
- * lowering is absent and the rule array selects none.
+ * lowering is absent and the rule array selects none. A bare `data` array
+ * reaches none of them: `object-calendar` draws it as pre-fetched rows with no
+ * filter applied, and `object-map` / `object-gantt` do not take it as a record
+ * source.
  *
  * ## Why `retiredFromLoadPath`
  *
