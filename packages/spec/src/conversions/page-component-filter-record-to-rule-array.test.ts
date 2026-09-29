@@ -32,6 +32,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { StandardErrorCode } from '../api/errors.zod.js';
 import {
   FILTER_OPERATORS,
   VALID_AST_OPERATORS,
@@ -358,7 +359,7 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
   });
 
   it('all-or-nothing: a declined key keeps the mappable keys beside it from converting', () => {
-    // Converting `stage` alone would drop `owner_id: null` from an AND list — a wider filter.
+    // Converting `stage` alone would drop `deleted_at: { $null: true }` from an AND list — a wider filter.
     const { value } = gridFilter({ stage: 'open', deleted_at: { $null: true } });
     expect(value).toEqual({ stage: 'open', deleted_at: { $null: true } });
   });
@@ -671,6 +672,25 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     expect(atFilter({ objectName: 'deal', filter: [rule] })).toBe(0);
     // Control: the door really judges this key — the stored record is refused there.
     expect(atFilter({ objectName: 'deal', filter: { owner_id: null } })).toBeGreaterThan(0);
+  });
+
+  it('an empty operator object is a TODO in the same words on an inline-row node and an object-bound one, naming the refusal the renderer answers', () => {
+    // At the objectui pin the renderer refuses `{ amount: {} }` rather than
+    // ignoring it — `INVALID_FILTER` where the block queries an object, no rows
+    // where its rows are inline — and the one reason says so on either block.
+    const inline = convert(
+      pageWith({ type: 'object-map', properties: { staticData: [], filter: { amount: {} } } }),
+    );
+    const bound = convert(
+      pageWith({ type: 'object-map', properties: { objectName: 'deal', filter: { amount: {} } } }),
+    );
+    expect((componentOf(inline.stack).properties as Dict).filter).toEqual({ amount: {} });
+    expect(inline.todos).toHaveLength(1);
+    expect(inline.todos[0]!.reason).toBe(bound.todos[0]!.reason);
+    const code = 'INVALID_FILTER';
+    // The code it names is one the platform declares.
+    expect(StandardErrorCode.options).toContain(code);
+    expect(inline.todos[0]!.reason).toContain(`\`${code}\``);
   });
 
   it('names the block by its type, and by its `id` when it has one', () => {

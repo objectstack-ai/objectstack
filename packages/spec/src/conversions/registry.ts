@@ -11213,7 +11213,13 @@ function dollarKeysReason(keys: readonly string[]): string {
  * block's rows come from, so its reason states both and advises neither
  * rewrite: it names the `is_null` rule for the rows with no value, and leaves
  * which rows the filter should select to the author. An empty operator object
- * is declined as well — it constrains nothing, and no rule says "nothing".
+ * is declined for a different reason: it names a field and no operator, so no
+ * rule spells it. At the same pin the renderer refuses it rather than ignoring
+ * it — where a block queries an object, `convertFiltersToAST` throws through
+ * `refuseEmptyOperatorMap` (`INVALID_FILTER`, 400); where a block's rows are
+ * inline, `ValueDataSource.find` answers no rows through
+ * `zeroKeyConditionRefusal`. Its reason says both and keeps the renderer's own
+ * remedy, dropping the key.
  *
  * Every top-level `$` key is judged before any field key, so the reason names
  * the combinator even when a field key beside it would decline as well. The
@@ -11252,8 +11258,10 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
     const operators = Object.entries(value);
     if (operators.length === 0) {
       return {
-        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
-          + 'nothing — and no rule says "nothing". Drop the key',
+        declined: `has the key \`${field}\` set to an empty operator object, which names the field `
+          + 'and no operator, so no rule spells it. The renderer does not ignore it today: where the '
+          + 'block queries an object, it refuses the filter (`INVALID_FILTER`, 400); where its rows '
+          + 'are inline, it answers no rows. Drop the key',
       };
     }
     for (const [op, comparand] of operators) {

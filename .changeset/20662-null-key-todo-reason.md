@@ -8,6 +8,8 @@ The ADR-0087 D2 conversion `page-component-filter-record-to-rule-array` leaves a
 
 The reason now states both behaviours, says no one rule keeps both, and leaves the choice to the operator. For a stored `{ owner_id: null }` it names the rule `{"field":"owner_id","operator":"is_null"}` for the rows with no `owner_id` value, and says that a filter leaving `owner_id` unconstrained has no rule for it. The protocol-18 migration entry `element-data-source-and-object-block-filter-rule-array` says the same.
 
-Nothing else changes. The filter is still left exactly as stored and still reported as a TODO, on any block. No schema, conversion verdict or exit code moves.
+The TODO for a key set to an empty operator object (`{ amount: {} }`) also said it "constrains nothing". The renderer refuses it instead: where the block queries an object it refuses the filter with `INVALID_FILTER` (400), and where the block's rows are inline it shows no rows. The reason now says that, and keeps its advice to drop the key, which is the renderer's own remedy.
+
+Nothing else changes. Both filters are still left exactly as stored and still reported as a TODO, on any block. No schema, conversion verdict or exit code moves.
 
 Clause-②: no
