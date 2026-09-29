@@ -279,3 +279,61 @@ describe('#5922 — write path end to end: no dirty row reaches the driver', () 
     expect(rows.get('rec_1')).toMatchObject({ title: 'renamed', n: 7 });
   });
 });
+
+/**
+ * [#20446] N1 — the narrowing the changeset declares on the write door.
+ *
+ * `$empty` joined `FILTER_OPERATORS`, so it is in `ALL_OPERATORS` and therefore
+ * in this rule's derived key set — refused as a VALUE the day it joined, which is
+ * the #5922 rule working as written. Before #20446 `{ title: { $empty: true } }`
+ * was not recognised as a filter: a text field stored it (driver-memory kept the
+ * object, driver-sql the string `{"$empty":true}`). The prescription is the
+ * rule's own: write the value itself; a filter belongs in the query `where`.
+ */
+describe('#20446 N1 — a `{ $empty: … }` written as a field value is refused as a filter', () => {
+  it('validateRecord names $empty and prescribes the where clause, on insert and update', () => {
+    for (const mode of ['insert', 'update'] as const) {
+      for (const flag of [true, false]) {
+        const errs = errorsOf({ title: { $empty: flag } }, mode);
+        expect(errs, `${mode} ${flag}`).toHaveLength(1);
+        expect(errs[0].field).toBe('title');
+        expect(errs[0].code).toBe('invalid_type');
+        expect(errs[0].message).toContain('$empty is a filter operator, not a value');
+        expect(errs[0].message).toContain("a filter belongs in the query 'where', not in the write payload");
+      }
+    }
+  });
+
+  it('the engine refuses it end to end in the VALIDATION_FAILED envelope, and the driver is never written', async () => {
+    const engine = new ObjectQL();
+    const writes: unknown[] = [];
+    engine.registerDriver({
+      name: 'recording', version: '0.0.0', supports: {},
+      async connect() {}, async disconnect() {}, async checkHealth() { return true; },
+      async execute() { return null; }, async find() { return []; }, async findOne() { return null; },
+      async create(_o: string, data: Record<string, unknown>) { writes.push(data); return { ...data, id: 'x' }; },
+      async update(_o: string, id: string, data: Record<string, unknown>) { writes.push(data); return { ...data, id }; },
+      async updateMany(_o: unknown, _a: unknown, data: unknown) { writes.push(data); return 0; },
+      async delete() { return true; }, async count() { return 0; },
+      async bulkCreate() { return []; }, async bulkUpdate() { return []; }, async bulkDelete() {},
+      async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+      async commit() {}, async rollback() {},
+    } as any, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'empty_task', label: 'Task',
+      fields: { title: { name: 'title', label: 'Title', type: 'text' } },
+    } as any);
+    for (const run of [
+      () => engine.insert('empty_task', { title: { $empty: true } } as any),
+      () => engine.update('empty_task', { title: { $empty: false } } as any, { multi: true } as any),
+    ]) {
+      const err = await run().then(() => null, (e: unknown) => e as ValidationError);
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err!.code).toBe('VALIDATION_FAILED');
+      expect(err!.fields.map((f) => [f.field, f.code])).toEqual([['title', 'invalid_type']]);
+      expect(err!.message).toContain("a filter belongs in the query 'where'");
+    }
+    expect(writes).toEqual([]);
+  });
+});
