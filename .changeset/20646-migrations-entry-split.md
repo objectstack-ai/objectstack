@@ -8,13 +8,13 @@ feat(spec)!: the ADR-0087 migration chain leaves the package root for the new `@
 
 A `major`-class change — an existing import path stops resolving for these names — recorded as `minor` under the launch-window convention.
 
-**Why.** The migration registry is mostly the guidance text `objectstack migrate meta` prints, and the root re-exported it. The registry does work when its module loads (the list of majors and each step's rationale are computed then), so no bundler could prove it unused, and all of that text rode in every bundle of the root, whatever the consumer imported. This is the source-side payback of the Studio console's first-screen ceiling raise that the maintainer ruled on the 17.5.0 upgrade. Measured on the splitting PR (tsup build, gzip -9):
+**Why.** The migration registry is mostly the guidance text `objectstack migrate meta` prints, and the root re-exported it. The registry does work when its module loads (the list of majors and each step's rationale are computed then), so no bundler could prove it unused, and all of that text rode in every bundle of the root, whatever the consumer imported. This is the source-side payback of the Studio console's first-screen ceiling raise that the maintainer ruled on the 17.5.0 upgrade. Measured on the splitting PR against its merge base `1a75e39d4a` (tsup build, gzip -9):
 
 | | before | after |
 | --- | --- | --- |
-| `dist/index.js` (CommonJS root) | 3,775,445 B / 1,066,456 B gzip | 2,008,899 B / 565,285 B gzip |
-| `dist/browser/index.mjs` (the ESM root a browser bundler pulls) | 3,759,705 B / 1,064,775 B gzip | 1,993,837 B / 563,676 B gzip |
-| a browser bundle of the ten names the Studio console imports from the root (rolldown, minified) | 700,438 B gzip | 301,204 B gzip |
+| `dist/index.js` (CommonJS root) | 3,780,033 B / 1,067,061 B gzip | 2,009,810 B / 565,386 B gzip |
+| `dist/browser/index.mjs` (the ESM root a browser bundler pulls) | 3,764,293 B / 1,065,388 B gzip | 1,994,748 B / 563,787 B gzip |
+| a browser bundle of the ten names the Studio console imports from the root (rolldown, minified) | 700,884 B gzip | 301,287 B gzip |
 
 The ADR-0087 **conversion layer stays on the root**: `defineStack` and `normalizeStackInput` read it at run time, so its names (`ALL_CONVERSIONS`, `CONVERSIONS_BY_MAJOR`, `applyConversions`, `applyConversionsToFlow`, `applyConversionsToStoredItem`, `collectConversionNotices`, the `CONVERSION_*_CODE` constants and their types) import from `@objectstack/spec` exactly as before.
 

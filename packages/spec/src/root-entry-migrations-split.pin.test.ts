@@ -9,7 +9,7 @@
  * step's rationale are computed then). A consumer's bundler therefore cannot
  * prove it unused, so whichever entry's module graph reaches it carries ALL of
  * it into every bundle of that entry. While the root re-exported it, that was
- * 1,758,310 of the root ESM bundle's 3,761,633 bytes, downloaded by every
+ * 1,761,987 of the root ESM bundle's 3,766,221 bytes, downloaded by every
  * browser first screen that imports any root name. It moved to its own subpath;
  * the conversion layer (ADR-0087 D2) stays on the root, because `defineStack` /
  * `normalizeStackInput` read it at run time.
