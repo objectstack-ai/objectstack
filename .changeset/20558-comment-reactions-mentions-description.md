@@ -13,4 +13,4 @@ The two field descriptions are served metadata (field help in the console, and w
 
 The console's record discussion panel reads and writes `reactions` as that map, and writes `mentions` as that list of ids; the `collab.mention` notification hook reads the ids.
 
-Description text only: no stored value, validation rule or hook changes, and nothing to migrate. The English translation bundle is regenerated from the source description.
+Description text only: no stored value, validation rule or hook changes, and nothing to migrate. The English translation bundle is regenerated from the source description, and the zh-CN, ja-JP and es-ES help texts for both fields are rewritten to match (values only, no key added or dropped).
