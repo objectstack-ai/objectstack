@@ -126,12 +126,14 @@ export type { ManagedApiMethodFinding } from './validate-managed-api-methods.js'
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 export {
   validateFlowTriggerReadiness,
+  validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
+  FLOW_API_TRIGGER_SECRET_MISSING,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,

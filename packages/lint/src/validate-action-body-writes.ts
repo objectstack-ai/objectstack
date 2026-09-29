@@ -132,7 +132,7 @@ export const ACTION_RECORD_WRITE_DISCARDED = 'action-record-write-discarded';
 export const ACTION_BODY_SOURCE_UNPARSEABLE = 'action-body-source-unparseable';
 
 /**
- * [#8663] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
+ * [commit 192213f66] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
  * Same question, same wording, same `warning` severity — this rule and the hook
  * rule share {@link IMPLICIT_FIELDS}, so they shared its blind spot too.
  */
@@ -314,7 +314,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
   // Built lazily: only the unknown-field check needs it, so a stack whose
   // action bodies never reach `ctx.api` never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
-  // [#8663] Non-empty only for a stack carrying an ADR-0015 `external` object.
+  // [commit 192213f66] Non-empty only for a stack carrying an ADR-0015 `external` object.
   let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   for (const site of sites) {
@@ -399,7 +399,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
       // (it maps a remote column they vouch for) — never either finding.
       if (known.has(w.field)) continue;
       if (IMPLICIT_FIELDS.has(w.field)) {
-        // [#8663] Implicitly writable SOMEWHERE is not provisioned HERE.
+        // [commit 192213f66] Implicitly writable SOMEWHERE is not provisioned HERE.
         if (!anchors.get(w.object)?.has(w.field)) continue;
         reported.add(dedupeKey);
         findings.push({

@@ -24,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'objectui, driving `--primary`, `--accent` and their derived CSS variables). A palette '
     + 'value your own stylesheet consumed has no spec slot any more: move it into your own CSS.',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-21 on #10485 (disposition B: '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-21 (disposition B: '
     + '退役授权面 — objectui engine code and its unit tests are retained). The pipeline was '
     + 'live from the authoring gate (`ObjectStackDefinitionSchema.themes`, `defineTheme`) '
     + 'through artifact ingest (`ARTIFACT_FIELD_TO_TYPE.themes`) and stopped there, measured: '
@@ -38,9 +38,11 @@ export const entry: SemanticMigration = {
     + 'is `app.branding`, and that path is live and untouched.',
   acceptanceCriteria:
     'No stack source authors `themes:`; a stack that still does is refused at parse with the '
-    + 'prescription (unrecognized_keys carrying the #10485 guidance — pinned in '
-    + '`stack-top-level-strict.test.ts`). `PUT /meta/theme/:name` gets the #8421 '
-    + 'unrecognised-type refusal instead of the pre-#10194 store-anything branch (pinned in '
+    + 'prescription (unrecognized_keys carrying the retirement\'s guidance — pinned in '
+    + '`stack-top-level-strict.test.ts`). `PUT /meta/theme/:name` gets the unrecognised-type '
+    + 'refusal (a `/meta` type name the platform does not have is refused, never minted as a '
+    + 'namespace) instead of the store-anything branch '
+    + 'it had before `theme` was validated at the `/meta` write door (pinned in '
     + '`protocol.unrecognised-meta-type.test.ts`). Legacy stored `theme` rows are untouched: '
     + '`applyConversionsToStoredItem` passes them through, reads still answer, and DELETE '
     + 'still works, so the residue is removable. ⚠️ On-screen behaviour is deliberately '

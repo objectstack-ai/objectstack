@@ -525,7 +525,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * ## Why this is a rule of its own rather than a missing root
  *
- * Until #6290 the same rejection fell out of `@objectstack/formula`'s
+ * Until commit e9b526597 the same rejection fell out of `@objectstack/formula`'s
  * `SCOPE_ROOTS` not listing `current_user` — a global baseline, doing a
  * per-surface job by accident. Two things were wrong with that:
  *
@@ -568,7 +568,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * A denylist cannot track `SCOPE_ROOTS`: every root added there is unreported
  * here until somebody remembers to copy it across (`current_user` itself
- * arrived in #6290 and needed #6584 to be noticed). The allowlist inverts the
+ * arrived in commit e9b526597, and needed that same change (#6584) to be noticed). The allowlist inverts the
  * maintenance burden onto the three roots that are pinned by three anchors and
  * change only when the evaluators do.
  *
@@ -767,7 +767,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * `SCOPE_ROOTS`' own docblock made the original widening measurable rather than
  * a matter of taste: its `current_user` entry claims to be "the last one this
- * list was missing (#6290)". `app` is that sentence's second counterexample —
+ * list was missing" (commit e9b526597 wrote it). `app` is that sentence's second counterexample —
  * the same mechanism (#6713's point: a hand-maintained list doing a per-surface
  * job drifts), a second sighting, not an analogy to the first.
  *
@@ -1890,7 +1890,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
         }
       }
-      // [#6290] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
+      // [commit e9b526597] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
       // option's own predicate (`SelectOptionSchema.visibleWhen`,
       // `field.zod.ts:143`). It had no traversal here at all, so the whole
       // option surface reached compile, validate and run time unvalidated:
@@ -1900,7 +1900,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       //
       // Deliberately checked on the SAME `record` scope as the field-level
       // slots, and that is the whole of the difference between the two faces
-      // after #6290: `current_user` is a declared root platform-wide (ADR-0068
+      // after commit e9b526597: `current_user` is a declared root platform-wide (ADR-0068
       // D1), so it passes here — options resolve through
       // `resolveCascadingOptions` against the host's predicate scope, which
       // binds it (ADR-0068 / objectui#2284), and the showcase's

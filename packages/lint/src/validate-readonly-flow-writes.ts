@@ -115,7 +115,7 @@ export interface FieldReadonlyMeta {
  * neither flag is recorded as `{false, false}` so callers can distinguish a
  * "known-writable field" from an "unknown field" (absent from the map).
  *
- * Exported for `validate-readonly-hook-writes.ts` (#13653), which asks the
+ * Exported for `validate-readonly-hook-writes.ts` (commit 36d287803), which asks the
  * IDENTICAL question one surface over — "is this declared field writable
  * through this channel?" — about a hook body's `ctx.api` update instead of a
  * flow node's `config.fields`. Shared rather than copied for the reason #4330
