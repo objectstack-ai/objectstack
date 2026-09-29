@@ -8,7 +8,7 @@
  * ## Why it lives here rather than where it was written
  *
  * It was declared in `@objectstack/runtime`
- * (`turso-driver-factory.ts`) under #6268, which converged the two HOST-injected
+ * (`turso-driver-factory.ts`) under commit 68f5eccb1, which converged the two HOST-injected
  * libSQL loaders (CLI + standalone stack) onto one owner. That convergence was
  * complete for the hosts and could not reach the third loader: the open-core
  * `createDefaultDatasourceDriverFactory` in THIS package, which serves every
@@ -18,7 +18,7 @@
  * `@objectstack/runtime` depends on `@objectstack/service-datasource`, never the
  * reverse, so the open-core arm could not import the class and raised a plain
  * `Error` instead. The two legal ways out were "declare a second same-named
- * class here" — precisely the identity hazard #6268 closed — or move the one
+ * class here" — precisely the identity hazard commit 68f5eccb1 closed — or move the one
  * class DOWN to where both sides can reach it. This is the move. `runtime`
  * RE-EXPORTS it from its old home, so every existing importer
  * (`@objectstack/runtime`, `@objectstack/cli`'s `storage-driver.ts`, and

@@ -129,7 +129,7 @@ export type PoolUnsupportedDriverId = (typeof POOL_UNSUPPORTED_DRIVER_IDS)[numbe
  * every declared key lands.
  *
  * `turso` answered `true` until #7243, first via the unknown-id branch and,
- * after #6345 made it a builtin, via "not in the rejected set" — both wrong the
+ * after commit e2798fab7 made it a builtin, via "not in the rejected set" — both wrong the
  * same way: the arm never reads `spec.pool`. The 2026-08-11 ruling folds it in
  * whole-arm, so this now answers `false` for every spelling of it.
  */

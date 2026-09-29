@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8873 — a bound `external.credentialsRef` reaches the SERVER on the postgres
+ * Commit 096106522 — a bound `external.credentialsRef` reaches the SERVER on the postgres
  * arm's DSN branch, not merely the knex config.
  *
  * ## The defect, and why it survived a passing sibling pin
@@ -220,7 +220,7 @@ describe('#8873 — postgres: a bound secret reaches the CLIENT on the DSN branc
     // password only when the server asks for one — so injecting cannot break a
     // datasource that connects today, and refusing would silently drop a
     // credential the operator bound. Making the contradictory pair loud belongs
-    // at the authoring door (#9041), which this card lands before.
+    // at the authoring door (commit d491625c1), which landed after this pin.
     const resolved = await pgResolved({
       name: 'anonymous-url',
       config: { url: 'postgresql://db.internal:5432/app' },
