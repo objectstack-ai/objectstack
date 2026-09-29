@@ -15,7 +15,7 @@ export const entry: SemanticMigration = {
     + 'through a new ADR — carrier key and renderer first, vocabulary second)',
   reason:
     'Both shapes were published `@objectstack/spec/ui` vocabulary with NO AUTHORING DOOR. '
-    + 'The v17 unknown-key strictness sweep (its ui/ batch 14), which measured each ui/ '
+    + 'The v17 unknown-key strictness sweep, which measured each ui/ '
     + 'file for an authoring door before closing any shape, measured them three ways on '
     + '2026-08-03 and this retirement re-ran all '
     + 'three against `origin/main` before removing anything, each with a positive control '
@@ -36,7 +36,7 @@ export const entry: SemanticMigration = {
     + 'ADR-0033 trap where an AI author takes `EmbedConfigSchema` in the published bundle '
     + 'as proof the platform serves iframes. Neither is stored metadata and neither has a '
     + 'carrier, so no `sys_metadata` row can hold one and there is no source for the D2 '
-    + 'chain to rewrite; this entry is the D3 record. That batch deliberately did NOT close '
+    + 'chain to rewrite; this entry is the D3 record. The sweep deliberately did NOT close '
     + 'them with `.strict()` — strictness is a property of a PARSE, and closing a shape nothing '
     + 'parses buys only "a precisely-validated dead slot, the more convincing lie" (the lesson '
     + 'of the datasource capability flags, whose `readOnly` was precisely validated and read '

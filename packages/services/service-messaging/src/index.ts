@@ -173,7 +173,10 @@ export {
     newDeliveryId as newHttpDeliveryId,
     DEFAULT_HTTP_TIMEOUT_MS,
     // The signing pair (#7722) — exported so a receiver-side verifier (or a
-    // test) recomputes the HMAC over exactly the bytes the sender signed.
+    // test) recomputes the HMAC over exactly the bytes the sender signed. The
+    // signer and the header are `@objectstack/core`'s own bindings
+    // (`signHttpBody` / `HTTP_SIGNATURE_HEADER`), re-exported under the same
+    // names: one scheme for the outbox and the flow `http` node's inline arm.
     deliveryBody as httpDeliveryBody,
     signBody as signHttpBody,
     SIGNATURE_HEADER as HTTP_SIGNATURE_HEADER,
