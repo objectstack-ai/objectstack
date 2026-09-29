@@ -9,10 +9,12 @@ import {
   ObjectStackDefinitionSchema,
   applyMetaMigrations,
   composeSpecChanges,
+  formatZodIssue,
   normalizeStackInput,
   MigrationFloorError,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
+  type MigrationChainResult,
 } from '@objectstack/spec';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
@@ -107,7 +109,7 @@ export function storedOnlyFlagsIn(argv: readonly string[]): string[] {
   return typed;
 }
 
-interface PendingDataMigration {
+export interface PendingDataMigration {
   /** `sys_migration` row id the run records. */
   id: string;
   command: string;
@@ -223,7 +225,7 @@ function printEmptyRangeAnswer(
 }
 
 /** Print the data-migration advice — the last thing a crossing upgrade sees. */
-function printPendingDataMigrations(pending: PendingDataMigration[]): void {
+function printPendingDataMigrations(pending: readonly PendingDataMigration[]): void {
   if (pending.length === 0) return;
   console.log(chalk.bold('  Then, against each deployment\'s database:'));
   for (const m of pending) {
@@ -237,6 +239,157 @@ function printPendingDataMigrations(pending: PendingDataMigration[]): void {
     ),
   );
   console.log('');
+}
+
+/** One schema refusal of the migrated stack, in the shape `formatZodIssue` renders. */
+export type MigrationRefusal = Parameters<typeof formatZodIssue>[0];
+
+/** Everything the human report prints after the `Config:` / `Chain:` preamble. */
+export interface MigrationReport {
+  /** The chain's result. Every group prints in chain order — never re-sorted, filtered or merged. */
+  result: MigrationChainResult;
+  /** The stack the chain started from — the empty-range answer replays a wider chain over it. */
+  normalized: Record<string, unknown>;
+  /** Whether the migrated stack parses under the installed schema (`--json`'s `schemaValid`). */
+  schemaValid: boolean;
+  /** The migrated stack's schema refusals, in parse order; empty when it parses. */
+  refusals: readonly MigrationRefusal[];
+  dataMigrations: readonly PendingDataMigration[];
+  /** `--step`: a checkpoint per hop, between the applied edits and the semantic notices. */
+  step: boolean;
+  /** `--out`, resolved — the snapshot is written here so its line keeps its place. */
+  out?: string;
+  /** Printed beside a schema-valid verdict. */
+  elapsed: string;
+}
+
+/**
+ * Group ① — the verdict, and every refusal that blocks the migrated stack.
+ *
+ * One header line carries the verdict and counts the group. The refusals are
+ * the MIGRATED stack's, read off the same parse `--json` reports as
+ * `schemaValid`, and rendered by `formatZodIssue` — the renderer behind the
+ * loader's own `defineX() validation failed` block, so a refusal reads the same
+ * here as everywhere else. They are not the loader's list: that one is printed
+ * while the config is evaluated, of the stack as AUTHORED, and still names every
+ * key the chain goes on to convert.
+ */
+function printSchemaVerdict(report: MigrationReport): void {
+  if (report.schemaValid) {
+    printSuccess(`Migrated stack is schema-valid ${chalk.dim(`(${report.elapsed})`)}`);
+    console.log('');
+    return;
+  }
+  const count = report.refusals.length;
+  const counted = `${count} refusal${count === 1 ? '' : 's'}`;
+  printWarning(
+    report.result.hops.length === 0
+      // The range held no step, so this run rewrote nothing: the refusals are
+      // exactly the ones the source had before it (#17134).
+      ? 'Stack does not pass schema validation, and this run replayed no conversion — nothing here '
+        + `has been fixed; ${counted}, exactly as the source has them:`
+      : `Migrated stack does not yet pass schema validation — ${counted} left after the chain. `
+        + 'Resolve them, then run `os validate`:',
+  );
+  for (const refusal of report.refusals) {
+    for (const line of formatZodIssue(refusal).split('\n')) console.log(chalk.red(`  ${line}`));
+  }
+  console.log('');
+}
+
+/**
+ * The human report of an authored-source run, in the order an upgrader acts on
+ * it, each group under one header line that counts it (ADR-0087 D3):
+ *
+ *  ① the VERDICT and the REFUSALS — whether the migrated stack parses and, when
+ *    it does not, every refusal left after the chain: what still blocks it;
+ *  ② the APPLIED mechanical edits — the diff the chain has already made;
+ *  ③ the SEMANTIC notices — every semantic entry of every hop crossed.
+ *
+ * ## Why this order
+ *
+ * The chain hands the printer every semantic entry of every hop it crosses,
+ * whatever the stack holds — `SemanticMigration` carries no predicate over the
+ * stack — so ③ is the whole catalogue of each major crossed, 242 notices for
+ * protocol 18. It used to be printed first and the verdict last, where it told
+ * the author to "resolve the manual changes above"; and the refusals that block
+ * the stack were printed nowhere. Measured on a real upgrade: 874 lines, whose
+ * 41 refusals were buried under 240 notices about surfaces the stack never used.
+ *
+ * ## What it must not do
+ *
+ * ⛔ Drop, filter, collapse or summarise a notice. ADR-0087 D3 is "never
+ * silence": an entry may leave ③ only on a structured, stack-derived proof that
+ * its surface is absent, and matching the prose of `surface` against the stack
+ * is not one. So the groups MOVE and nothing else does: every line ② and ③
+ * printed before is printed after, byte-identical and in chain order.
+ * `--json` is untouched — its keys, its values and the order of its arrays.
+ */
+export function printMigrationReport(report: MigrationReport): void {
+  const { result } = report;
+
+  // ① The verdict and the refusals — first, whatever else the run found.
+  printSchemaVerdict(report);
+
+  if (result.applied.length === 0 && result.todos.length === 0) {
+    // ⚠️ Two different facts wear the same empty result, and only one of them
+    // is good news (#17134). A range that CONTAINS steps and rewrote nothing
+    // is a finding about the metadata. A range that contains no step at all
+    // replayed nothing and therefore found nothing — saying "already
+    // canonical" over it is a claim about a check that never ran.
+    if (result.hops.length === 0) {
+      printEmptyRangeAnswer(report.normalized, result.fromMajor, result.toMajor);
+    } else {
+      printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
+    }
+    // Still advertise: metadata needing no rewrite says nothing about whether
+    // this deployment's DATA has been migrated.
+    console.log('');
+    printPendingDataMigrations(report.dataMigrations);
+    // Returning is safe only because ① has already printed: the schema verdict
+    // is the one line that can contradict a "nothing to do" answer, and
+    // returning past it was the second half of #17134 — on a stack authoring a
+    // tombstoned key, `--json` reported `schemaValid: false` while the human
+    // output said the metadata was canonical and stopped.
+    return;
+  }
+
+  // ② The mechanical rewrites (auto-applied).
+  if (result.applied.length > 0) {
+    console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
+    for (const a of result.applied) {
+      console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
+    }
+    console.log('');
+  }
+
+  // Per-hop checkpoints.
+  if (report.step) {
+    for (const hop of result.hops) {
+      console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
+      console.log(chalk.dim(`     ${hop.rationale}`));
+      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
+    }
+    console.log('');
+  }
+
+  // ③ The semantic TODOs (delegated to the agent — never auto-applied).
+  if (result.todos.length > 0) {
+    console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
+    for (const t of result.todos) {
+      console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
+      console.log(chalk.dim(`        why:    ${t.reason}`));
+      console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
+    }
+    console.log('');
+  }
+
+  if (report.out) {
+    writeFileSync(report.out, JSON.stringify(result.stack, null, 2));
+    printInfo(`Wrote migrated stack snapshot → ${chalk.white(report.out)}`);
+  }
+
+  printPendingDataMigrations(report.dataMigrations);
 }
 
 /**
@@ -476,82 +629,19 @@ export default class MigrateMeta extends Command {
       printInfo(`Chain:  protocol ${fromMajor} → ${toMajor} (this runtime implements protocol ${PROTOCOL_MAJOR})`);
       console.log('');
 
-      if (result.applied.length === 0 && result.todos.length === 0) {
-        // ⚠️ Two different facts wear the same empty result, and only one of
-        // them is good news (#17134). A range that CONTAINS steps and rewrote
-        // nothing is a finding about the metadata. A range that contains no
-        // step at all replayed nothing and therefore found nothing — saying
-        // "already canonical" over it is a claim about a check that never ran.
-        if (result.hops.length === 0) {
-          printEmptyRangeAnswer(normalized, fromMajor, toMajor);
-        } else {
-          printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
-        }
-        // Still advertise: metadata needing no rewrite says nothing about
-        // whether this deployment's DATA has been migrated.
-        console.log('');
-        printPendingDataMigrations(dataMigrations);
-        // ⛔ NOT a `return`. The schema verdict at the end of this block is the
-        // only line that can contradict a "nothing to do" answer, and returning
-        // past it was the second half of #17134: on a stack authoring a
-        // tombstoned key the same run reported `schemaValid: false` in `--json`
-        // while the human output said the metadata was canonical and stopped.
-      } else {
-        // Mechanical rewrites (auto-applied).
-        if (result.applied.length > 0) {
-          console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
-          for (const a of result.applied) {
-            console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
-          }
-          console.log('');
-        }
-
-        // Per-hop checkpoints.
-        if (flags.step) {
-          for (const hop of result.hops) {
-            console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
-            console.log(chalk.dim(`     ${hop.rationale}`));
-            console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
-          }
-          console.log('');
-        }
-
-        // Semantic TODOs (delegated to the agent — never auto-applied).
-        if (result.todos.length > 0) {
-          console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
-          for (const t of result.todos) {
-            console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
-            console.log(chalk.dim(`        why:    ${t.reason}`));
-            console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
-          }
-          console.log('');
-        }
-
-        if (flags.out) {
-          writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
-          printInfo(`Wrote migrated stack snapshot → ${chalk.white(resolve(flags.out))}`);
-        }
-
-        printPendingDataMigrations(dataMigrations);
-      }
-
-      if (parsed.success) {
-        printSuccess(`Migrated stack is schema-valid ${chalk.dim(`(${timer.display()})`)}`);
-      } else if (result.hops.length === 0) {
-        // "Resolve the changes above" has nothing to point at when the range
-        // held no step: this run rewrote nothing, so the refusals are exactly
-        // the ones the source had before it (#17134).
-        printWarning(
-          'Stack does not pass schema validation, and this run replayed no conversion — nothing '
-            + 'here has been fixed. Widen the range above, or run `os validate` for the refusals.',
-        );
-      } else {
-        printWarning(
-          'Migrated stack does not yet pass schema validation — resolve the manual changes above, ' +
-            'then run `os validate`.',
-        );
-      }
-      console.log('');
+      // The verdict and the refusals lead, then the applied edits, then the
+      // semantic notices — see printMigrationReport for why, and for what it
+      // must never do to a notice.
+      printMigrationReport({
+        result,
+        normalized,
+        schemaValid: parsed.success,
+        refusals: parsed.success ? [] : parsed.error.issues,
+        dataMigrations,
+        step: flags.step,
+        ...(flags.out ? { out: resolve(flags.out) } : {}),
+        elapsed: timer.display(),
+      });
     } catch (error: any) {
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
