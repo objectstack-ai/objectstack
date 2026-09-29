@@ -29,7 +29,11 @@ import {
 } from '@objectstack/spec/automation';
 import { AutomationEngine } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
-import { redactFlowCredentials } from './flow-credential-projection.js';
+import {
+    FLOW_CREDENTIAL_CLEARED,
+    FLOW_NODE_CREDENTIAL_KEYS,
+    redactFlowCredentials,
+} from './flow-credential-projection.js';
 
 function silentLogger(): any {
     return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -187,6 +191,12 @@ describe('#20590 — the enumeration: every declared credential position is with
         expect(positions.map(([t, k]) => `${t}.${k}`)).toContain('http.signingSecret');
     });
 
+    it('the projection covers exactly the declared positions — no fewer, and none that is no longer declared', () => {
+        const declared = positions.map(([t, k]) => `${t}.${k}`).sort();
+        const covered = [...FLOW_NODE_CREDENTIAL_KEYS].flatMap(([t, keys]) => keys.map((k) => `${t}.${k}`)).sort();
+        expect(covered).toEqual(declared);
+    });
+
     for (const [nodeType, configKey] of credentialPositions()) {
         for (const { where, flow } of placements(nodeType, configKey)) {
             it(`withholds ${nodeType}.config.${configKey} at ${where}`, () => {
@@ -199,4 +209,75 @@ describe('#20590 — the enumeration: every declared credential position is with
             });
         }
     }
+});
+
+describe('#20590 — what the projection answers, position by position', () => {
+    it('names each withheld path, through every region kind, by the index in the body it was handed', () => {
+        const flow = {
+            name: 'nested',
+            label: 'Nested',
+            nodes: [
+                { id: 'begin', type: 'start', label: 'Start', config: { secret: 'hook' } },
+                {
+                    id: 'each', type: 'loop', label: 'Each',
+                    config: {
+                        collection: '{rows}',
+                        body: { nodes: [{ id: 'call', type: 'http', label: 'Call', config: { url: 'https://x', signingSecret: 'sign-1' } }], edges: [] },
+                    },
+                },
+                {
+                    id: 'fan', type: 'parallel', label: 'Fan',
+                    config: {
+                        branches: [
+                            { name: 'a', nodes: [{ id: 'noop', type: 'assignment', label: 'Noop', config: {} }] },
+                            { name: 'b', nodes: [{ id: 'push', type: 'http', label: 'Push', config: { url: 'https://y', signingSecret: 'sign-2' } }] },
+                        ],
+                    },
+                },
+            ],
+            edges: [],
+        };
+        const { item, redactedKeys } = redactFlowCredentials(flow);
+        expect(redactedKeys).toEqual([
+            'nodes.0.config.secret',
+            'nodes.1.config.body.nodes.0.config.signingSecret',
+            'nodes.2.config.branches.1.nodes.0.config.signingSecret',
+        ]);
+        const text = JSON.stringify(item);
+        for (const s of ['hook', 'sign-1', 'sign-2']) expect(text).not.toContain(`"${s}"`);
+        // Everything that is not a credential survives, and untouched subtrees are shared.
+        const nodes = item.nodes as any[];
+        expect(nodes[1].config.body.nodes[0].config).toEqual({ url: 'https://x' });
+        expect(nodes[2].config.branches[0]).toBe((flow.nodes[2] as any).config.branches[0]);
+    });
+
+    it('serves the cleared form as written — the empty string holds no credential', () => {
+        const flow = {
+            name: 'cleared',
+            label: 'Cleared',
+            nodes: [
+                { id: 'begin', type: 'start', label: 'Start', config: { secret: FLOW_CREDENTIAL_CLEARED } },
+                { id: 'call', type: 'http', label: 'Call', config: { url: 'https://x', signingSecret: FLOW_CREDENTIAL_CLEARED } },
+            ],
+            edges: [],
+        };
+        const result = redactFlowCredentials(flow);
+        expect(result.redactedKeys).toEqual([]);
+        expect(result.item).toBe(flow);
+        // A blank that is not empty is still a value somebody typed: withheld.
+        const spaced = { ...flow, nodes: [flow.nodes[0], { ...flow.nodes[1], config: { url: 'https://x', signingSecret: ' ' } }] };
+        expect(redactFlowCredentials(spaced).redactedKeys).toEqual(['nodes.1.config.signingSecret']);
+    });
+
+    it('withholds nothing from a key of the same name on a kind that does not hold that credential', () => {
+        const flow = {
+            name: 'lookalike',
+            label: 'Lookalike',
+            nodes: [{ id: 'n', type: 'assignment', label: 'N', config: { signingSecret: 'not-a-position', secret: 'nor-this' } }],
+            edges: [],
+        };
+        const result = redactFlowCredentials(flow);
+        expect(result.redactedKeys).toEqual([]);
+        expect(result.item).toBe(flow);
+    });
 });

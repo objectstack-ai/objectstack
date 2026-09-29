@@ -1874,8 +1874,20 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
-            } catch {
-                // Protocol doesn't know this type, fall through
+            } catch (e: any) {
+                // [#20590] A throw here is a FAULT, answered as itself — never a
+                // cue to serve the metadata service's list below, which holds
+                // the stored bodies and applies no per-type read-path redaction
+                // (a flow's hook secret, a datasource's password). The protocol
+                // answers a type it holds nothing for with an empty list — it
+                // merges the metadata service's runtime-registered items (agents,
+                // tools) into its own answer — so it never signals "unknown
+                // type" by throwing. What it throws is a failed store read
+                // (503), a metadata app's marked refusal, a redactor failing
+                // closed, or a refused spelling (400). `RestServer`'s list route
+                // answers the same throw the same way ("prefer failing to
+                // falling back", AGENTS.md).
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
         // [ADR-0106 D5(2)] The dispatcher's list read is the same outlet as
@@ -1883,6 +1895,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (listed !== undefined) return answerList(listed);
 
         // Try MetadataService directly for runtime-registered metadata (agents, tools, etc.)
+        // — reached only by a host whose protocol slot has no list verb, or
+        // whose protocol answered no list at all; never on a protocol fault.
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).list === 'function') {
             let items: any;
