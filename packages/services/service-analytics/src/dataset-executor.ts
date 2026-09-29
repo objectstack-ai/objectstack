@@ -336,6 +336,41 @@ export function resolveDimensionGranularity(
   return selection.dateGranularity ?? (datasetDefault as DateGranularityValue | undefined);
 }
 
+/**
+ * The bucket size a cube dimension DECLARES as its default — the one reading of
+ * `analytics_cube.dimensions.granularities` there is, whoever produced the cube.
+ *
+ * A `time` dimension whose `granularities` lists exactly ONE interval defaults
+ * to it; any other shape states no default. That is the reading the dataset
+ * compiler's output was built for: it lowers an explicit
+ * `dataset.dimensions[].dateGranularity` to a single-entry list and writes the
+ * five-entry "all intervals" list when the dataset stated none, and
+ * `CubeRegistry.inferFromObject` / the ad-hoc inference mint the same five. A
+ * multi-entry list therefore offers several and chooses none.
+ *
+ * The default is the LOWEST rung of the precedence
+ * {@link resolveDimensionGranularity} states: a granularity the request states
+ * is never overridden, and nothing here refuses one the list does not name —
+ * the compiled-dataset path has never compared a requested granularity against
+ * the list, so this reading does not either.
+ *
+ * Two callers, one rule: {@link DatasetExecutor}'s `granularityOf` for a
+ * compiled dataset, and `AnalyticsService`'s query doors for every other cube —
+ * an authored one (`AnalyticsServiceConfig.cubes`) included, which is the
+ * producer this key is authored on and which never becomes a
+ * `CompiledDataset`.
+ */
+export function declaredDefaultGranularity(
+  dimension: { type?: string; granularities?: readonly unknown[] } | undefined,
+): DateGranularityValue | undefined {
+  if (dimension?.type !== 'time') return undefined;
+  // Typed as bare strings by the cube layer (Cube.js heritage); the values are
+  // `TimeUpdateInterval`, which is `DateGranularity`'s own member list.
+  return dimension.granularities?.length === 1
+    ? (String(dimension.granularities[0]) as DateGranularityValue)
+    : undefined;
+}
+
 // ── ordering + windowing (#3588) ─────────────────────────────────────────────
 
 /**
@@ -1326,8 +1361,7 @@ export class DatasetExecutor {
   ): DateGranularityValue | undefined {
     const cd = compiled.cube.dimensions[name];
     if (cd?.type !== 'time') return undefined;
-    const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
-    return resolveDimensionGranularity(selection, name, datasetDefault);
+    return resolveDimensionGranularity(selection, name, declaredDefaultGranularity(cd));
   }
 
   private buildQuery(

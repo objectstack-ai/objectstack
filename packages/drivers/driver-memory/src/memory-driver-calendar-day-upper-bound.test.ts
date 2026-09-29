@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import type { Cube } from '@objectstack/spec/data';
@@ -151,5 +151,105 @@ describe('MemoryAnalyticsService — dateRange window (#4042)', () => {
     // 4 rows inside the window (2 per storage form, both final-day rows kept);
     // the two next-day-midnight rows and the pre-window Date row are out.
     expect(result.rows[0]?.count).toBe(4);
+  });
+});
+
+/**
+ * [#20600] `9999-12-31`, the last supported day, has no next day: every
+ * supported value is inside its whole-day bound, so the whole-day widening
+ * compiles NO upper bound — `$lte` / `<=` ask only for a value (`$ne: null`), a
+ * `$between` / `between` / `dateRange` keeps its minimum. The spec's helper
+ * used to answer the five-digit `'10000-01-01'`, and every ISO-string row
+ * sorts above it, so each of those answered no rows. `9999-12-30` is the
+ * control: an ordinary bound.
+ */
+describe('[#20600] InMemoryDriver — a bare-day upper bound on the last supported day', () => {
+  let driver: InMemoryDriver;
+
+  beforeEach(async () => {
+    driver = new InMemoryDriver({
+      initialData: {
+        task: [
+          { id: 'c26', title: 'c26', created_at: '2026-07-15T14:00:00.000Z' },
+          { id: 'prev', title: 'prev', created_at: '9999-12-30T10:00:00.000Z' },
+          { id: 'open', title: 'open', created_at: '9999-12-31T00:00:00.000Z' },
+          { id: 'mid', title: 'mid', created_at: '9999-12-31T10:00:00.000Z' },
+          { id: 'last', title: 'last', created_at: '9999-12-31T23:59:59.999Z' },
+          { id: 'none', title: 'none', created_at: null },
+        ],
+      },
+    });
+    await driver.connect();
+  });
+
+  /** `where` · the ids it answers, sorted. */
+  const CASES: ReadonlyArray<readonly [string, () => FilterCondition | undefined, readonly string[]]> = [
+    ["$lte '9999-12-31'", () => ({ created_at: { $lte: '9999-12-31' } }), ['c26', 'last', 'mid', 'open', 'prev']],
+    ["$between ['2026-01-01', '9999-12-31']", () => ({ created_at: { $between: ['2026-01-01', '9999-12-31'] } }), ['c26', 'last', 'mid', 'open', 'prev']],
+    ["$between ['9999-12-31', '9999-12-31']", () => ({ created_at: { $between: ['9999-12-31', '9999-12-31'] } }), ['last', 'mid', 'open']],
+    ["$not $lte '9999-12-31'", () => ({ $not: { created_at: { $lte: '9999-12-31' } } }), ['none']],
+    // The lowered `$ne` shares a key an author can write: both constraints survive (#13524).
+    ["$lte '9999-12-31' beside an author's $ne", () => ({ created_at: { $lte: '9999-12-31', $ne: '9999-12-31T10:00:00.000Z' } }), ['c26', 'last', 'open', 'prev']],
+    ["the AST spelling <= '9999-12-31'", () => parseFilterAST([['created_at', '<=', '9999-12-31']]), ['c26', 'last', 'mid', 'open', 'prev']],
+    ["the AST spelling between max '9999-12-31'", () => parseFilterAST([['created_at', 'between', ['9999-12-31', '9999-12-31']]]), ['last', 'mid', 'open']],
+    ["$lte '9999-12-30' (control)", () => ({ created_at: { $lte: '9999-12-30' } }), ['c26', 'prev']],
+    ["$between ['2026-01-01', '9999-12-30'] (control)", () => ({ created_at: { $between: ['2026-01-01', '9999-12-30'] } }), ['c26', 'prev']],
+    ["$gte '9999-12-31' (unchanged)", () => ({ created_at: { $gte: '9999-12-31' } }), ['last', 'mid', 'open']],
+    ["$lt '9999-12-31' (unchanged)", () => ({ created_at: { $lt: '9999-12-31' } }), ['c26', 'prev']],
+  ];
+
+  it('compiles no upper bound on 9999-12-31; 9999-12-30 is a bound; the lower-bound operators do not move', async () => {
+    const got: Record<string, string[]> = {};
+    for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: where() }));
+    expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
+  });
+
+  it('the analytics face: a dateRange ending 9999-12-31 keeps its start alone, for BOTH stored forms', async () => {
+    const analytics = new InMemoryDriver({
+      initialData: {
+        task: [
+          { id: 's_before', created_at: '2026-06-30T23:00:00.000Z' },
+          { id: 's_in', created_at: '2026-07-10T08:00:00.000Z' },
+          { id: 's_last_day', created_at: '9999-12-31T21:40:00.000Z' },
+          { id: 'd_in', created_at: new Date('2026-07-10T12:00:00Z') },
+          { id: 'd_last_day', created_at: new Date('9999-12-31T09:15:00Z') },
+          { id: 'd_before', created_at: new Date('2026-04-19T10:00:00Z') },
+        ],
+      },
+    });
+    await analytics.connect();
+    const service = new MemoryAnalyticsService({
+      driver: analytics,
+      cubes: [{
+        name: 'tasks', title: 'Tasks', sql: 'task',
+        measures: { count: { label: 'Count', type: 'count', sql: 'id' } },
+        dimensions: { created_at: { label: 'Created', type: 'time', sql: 'created_at' } },
+      } as unknown as Cube],
+    });
+    const count = async (dateRange: [string, string]) =>
+      (await service.query({ cube: 'tasks', measures: ['count'], timeDimensions: [{ dimension: 'created_at', dateRange }] } as any)).rows[0]?.count;
+
+    expect(await count(['2026-07-01', '9999-12-31'])).toBe(4); // s_in, s_last_day, d_in, d_last_day
+    expect(await count(['2026-07-01', '9999-12-30'])).toBe(2); // the control: the last day is out
+  });
+
+  it('the analytics face: a cube-filter lte on 9999-12-31 asks only for a value, in the pipeline and the echo', async () => {
+    const service = new MemoryAnalyticsService({
+      driver,
+      cubes: [{
+        name: 'tasks', title: 'Tasks', sql: 'task',
+        measures: { count: { label: 'Count', type: 'count', sql: 'id' } },
+        dimensions: {
+          id: { label: 'Id', type: 'string', sql: 'id' },
+          created_at: { label: 'Created', type: 'time', sql: 'created_at' },
+        },
+      } as unknown as Cube],
+    });
+    const q = (day: string) => ({ cube: 'tasks', measures: ['count'], dimensions: ['id'], where: { created_at: { $lte: day } } } as any);
+
+    expect(ids((await service.query(q('9999-12-31'))).rows)).toEqual(['c26', 'last', 'mid', 'open', 'prev']);
+    expect(ids((await service.query(q('9999-12-30'))).rows)).toEqual(['c26', 'prev']);
+    expect((await service.generateSql(q('9999-12-31'))).sql).toContain('created_at IS NOT NULL');
+    expect((await service.generateSql(q('9999-12-30'))).sql).toContain("created_at < '9999-12-31'");
   });
 });

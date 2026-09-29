@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Suscripción saliente de Webhook HTTP. Se crea mediante defineWebhook() en código o con el editor de Studio; la ejecuta el plugin del conector HTTP.",
+    description: "Suscripción saliente de Webhook HTTP. Se declara en código mediante defineStack({ webhooks }) / defineWebhook() (materializada en filas al arrancar) o se crea directamente con el editor de Studio; el encolador automático de webhooks la despacha al outbox HTTP compartido.",
     fields: {
       id: {
         label: "ID de webhook"
@@ -69,7 +69,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       definition_json: {
         label: "Definición",
-        help: "JSON serializado de Webhook (consulte @objectstack/spec/automation/webhook): configuración completa de cabeceras/auth/reintentos/payload."
+        help: "JSON serializado de Webhook (consulte @objectstack/spec/automation/webhook): el tiempo de espera y el resto del envelope definido. Las credenciales NO se almacenan aquí: el secreto de firma se guarda en el campo cifrado `signing_secret` y las cabeceras personalizadas, en el campo cifrado `headers_secret`."
       },
       headers_secret: {
         label: "Cabeceras personalizadas",

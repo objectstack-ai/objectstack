@@ -316,8 +316,10 @@ describe('#17341 — the END of every calendar window is one CALENDAR day after 
                     const where = `${preset} @ ${tz ?? 'UTC'} @ ${now.toISOString()}`;
                     const lastDay = String(resolveFilterToken(prescribedEnd, { now, timezone: tz }));
                     const stopsBefore = nextUtcCalendarDay(lastDay);
-                    expect(stopsBefore, where).not.toBeNull();
-                    const expected = new Date(zonedDateStartToUtcMs(stopsBefore!, tz)).toISOString();
+                    // A day: never `null`, and never `UNBOUNDED_ABOVE` — the
+                    // sweep's instants sit nowhere near 9999-12-31 (#20600).
+                    expect(typeof stopsBefore, where).toBe('string');
+                    const expected = new Date(zonedDateStartToUtcMs(stopsBefore as string, tz)).toISOString();
                     expect(resolveAnalyticsDateRangePreset(preset, { now, timezone: tz }).end, where)
                         .toBe(expected);
                 }

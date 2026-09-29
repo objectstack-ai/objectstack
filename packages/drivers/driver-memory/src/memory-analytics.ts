@@ -11,6 +11,7 @@ import {
   Logger,
   createLogger,
   nextUtcCalendarDay,
+  isUnboundedAbove,
   // [#16322] The ONE lowering of the closed `dateRange` preset vocabulary and
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
@@ -266,8 +267,11 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // A bare-day `lte` bound means "through that whole day" (#4042; the SQL twin
   // is #3777): compile half-open so timestamp values on the final day stay in.
   // Order-equivalent to `$lte` for plain `YYYY-MM-DD` values.
+  // [#20600] On the last supported day there is no next day: every value is
+  // inside the bound, so what `lte` still asks is a value (the `set` row below).
   lte: ({ comparands }) => {
     const nextDay = nextUtcCalendarDay(comparands[0]);
+    if (isUnboundedAbove(nextDay)) return { $ne: null };
     return nextDay != null ? { $lt: nextDay } : { $lte: comparands[0] };
   },
   // The list operators take the WHOLE list. An empty one is a real predicate —
@@ -458,8 +462,11 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
   // Half-open on a bare-day bound, exactly as the mingo row above is (#4042; the
   // SQL twin is #3777). `<= '2026-01-02'` drops that day's timestamped rows,
   // which is measurable as an echo one row NARROWER than the chart it describes.
+  // [#20600] …and `IS NOT NULL` on the last supported day, as the mingo row
+  // above answers `$ne: null` there.
   lte: ({ column, comparands, literal }) => {
     const nextDay = nextUtcCalendarDay(comparands[0]);
+    if (isUnboundedAbove(nextDay)) return `${column} IS NOT NULL`;
     return nextDay != null
       ? `${column} < ${literal(nextDay)}`
       : `${column} <= ${literal(comparands[0])}`;
@@ -991,17 +998,27 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           //
           // Anything else -- a full timestamp the CALLER wrote -- keeps
           // instant semantics and stays INCLUSIVE, byte for byte as before.
-          const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+          //
+          // [#20600] A caller's bare end on the last supported day has no next
+          // day to stop before: every value is inside it, so the window keeps
+          // its start alone, in both spellings.
+          const widened = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+          const unbounded = isUnboundedAbove(widened);
+          const widenedDay = isUnboundedAbove(widened) ? null : widened;
           const upperString = resolved.endExclusive ? end : widenedDay;
           const upperDate = widenedDay != null
             ? new Date(`${widenedDay}T00:00:00.000Z`)
             : (resolved.endExclusive ? new Date(end) : null);
-          const stringBounds = upperString != null
-            ? { $gte: start, $lt: upperString }
-            : { $gte: start, $lte: end };
-          const dateBounds = upperDate != null
-            ? { $gte: new Date(start), $lt: upperDate }
-            : { $gte: new Date(start), $lte: new Date(end) };
+          const stringBounds = unbounded
+            ? { $gte: start }
+            : upperString != null
+              ? { $gte: start, $lt: upperString }
+              : { $gte: start, $lte: end };
+          const dateBounds = unbounded
+            ? { $gte: new Date(start) }
+            : upperDate != null
+              ? { $gte: new Date(start), $lt: upperDate }
+              : { $gte: new Date(start), $lte: new Date(end) };
           pipeline.push({
             $match: {
               $or: [

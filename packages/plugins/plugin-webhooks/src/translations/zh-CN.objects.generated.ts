@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhook",
-    description: "外发 HTTP Webhook 订阅。可在代码中通过 defineWebhook() 编写，或在 Studio 编辑器中维护；由 HTTP 连接器插件执行。",
+    description: "外发 HTTP Webhook 订阅。可在代码中通过 defineStack({ webhooks }) / defineWebhook() 声明（启动时物化为数据行），或直接在 Studio 编辑器中编写；由 Webhook 自动入队器分发到共享的 HTTP 发件箱。",
     fields: {
       id: {
         label: "Webhook ID"
@@ -69,7 +69,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       definition_json: {
         label: "定义",
-        help: "序列化的 Webhook JSON（参见 @objectstack/spec/automation/webhook）——包含完整的 headers/auth/retry/payload 配置"
+        help: "序列化的 Webhook JSON（参见 @objectstack/spec/automation/webhook）——超时及所编写信封的其余配置。凭据不存储在此处：签名密钥保存在加密的 `signing_secret` 字段中，自定义请求头保存在加密的 `headers_secret` 字段中。"
       },
       headers_secret: {
         label: "自定义请求头",

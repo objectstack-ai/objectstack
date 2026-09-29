@@ -6415,6 +6415,68 @@ const step18: MigrationStep = {
         + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
         + '`os compile` from this release or later.',
     },
+    // An inert key made real, and the request class that goes from answered to
+    // refused because of it: the engine aggregate path's whole refusal set, which a
+    // newly bucketed query reaches by leaving the raw-SQL path. The shape of
+    // `analytics-cube-public-default-visible-enforced`. There is no D2 conversion:
+    // no spelling moves, and whether a one-interval list means "bucket by this by
+    // default" or "the one interval I happened to list" is the author's intent,
+    // which the chain cannot read. The protocol-18 conversion
+    // `cube-sub-day-granularities-removed` is why the entry is owed even to an
+    // author who never wrote a one-interval list. No backticks in `surface`: the
+    // upgrade guide renders it inside a code span and a table cell.
+    {
+      id: 'analytics-cube-single-granularity-default-enforced',
+      surface:
+        'data.Cube.dimensions.granularities — an analytics cube time dimension whose granularities '
+        + 'list holds exactly one interval, whether an author wrote it that way or the protocol 18 '
+        + 'conversion cube-sub-day-granularities-removed reduced a longer list to it',
+      replacement:
+        'nothing, when that one interval is the bucket the dimension should be grouped at by default. '
+        + 'When it is not, list every interval the dimension serves (two or more state no default) or '
+        + 'omit the key. A dashboard or report whose query the engine aggregate path cannot evaluate '
+        + '(a custom-SQL measure, or a member of a cube with `joins` that resolves through one) either '
+        + 'stops grouping by such a dimension or groups by one that declares no single interval',
+      reason:
+        'An inert key made real. A cube time dimension\'s `granularities` was read only for a cube the '
+        + 'dataset compiler minted, where a one-interval list is the dataset\'s default bucket. A cube '
+        + 'authored with `defineCube()` or `defineStack({ analyticsCubes })` never reached that reader, '
+        + 'so grouping by its time dimension grouped raw timestamps, one group per distinct instant, '
+        + 'whatever the list said. The analytics service now reads every cube by the compiled-dataset '
+        + 'rule: on `/analytics/query` and on the `/analytics/sql` dry run, a time dimension the query '
+        + 'groups by without stating a granularity is bucketed at the one interval its list declares. '
+        + 'A granularity the query states still wins, one the list does not name is not refused, and a '
+        + 'list of two or more states no default. Two holdings change on upgrade. A query grouping by '
+        + 'such a dimension answers one row per bucket where it answered one row per timestamp. And a '
+        + 'bucketed query leaves the raw-SQL path, which declines every bucketed query, for the engine '
+        + 'aggregate path, which answers 400 `INVALID_FIELD` for every member it cannot evaluate — the '
+        + 'same refusal, byte for byte, that the same query already got with that granularity stated by '
+        + 'hand. Those members are: a custom-SQL measure (a `number`, `string` or `boolean` measure '
+        + 'whose `sql` is an expression); and, on a cube whose members resolve through its `joins`, a '
+        + 'measure or a `where` field over a joined object, a `timeDimensions` entry over a joined object '
+        + '(bucketed or a window, so grouping by a one-interval time dimension over a joined object is '
+        + 'refused too), a dimension that traverses more than one relationship, and an `avg` or '
+        + '`count_distinct` measure beside any dimension over a joined object. The raw-SQL path serves '
+        + 'every one of these, so each such query grouped by such a dimension goes from answered to '
+        + 'refused. On a host whose `queryCapabilities` offers raw SQL with no engine aggregate bridge '
+        + '(a hand override: the analytics plugin wires both), no strategy remains for a bucketed '
+        + 'query, so every newly bucketed query, a plain count included, goes from answered to "No '
+        + 'strategy can handle query". The protocol-18 conversion `cube-sub-day-granularities-removed` strips the retired '
+        + 'sub-day intervals from every authored and stored cube, so a dimension that offered one '
+        + 'sub-day interval and one coarser interval now holds a one-interval list: a default bucket its '
+        + 'author never wrote.',
+      acceptanceCriteria:
+        'Every cube time dimension whose `granularities` lists exactly one interval is one you mean to '
+        + 'bucket at that interval by default: a query that groups by it on `/analytics/query` answers '
+        + 'one row per bucket, and `/analytics/sql` shows the bucketed statement. Every time dimension '
+        + 'that should have no default lists two or more intervals or omits the key. No dashboard or '
+        + 'report groups by a one-interval dimension a query the engine aggregate path refuses — a '
+        + 'custom-SQL measure; a measure, `where` field or `timeDimensions` entry over a joined object; '
+        + 'a dimension that traverses more than one relationship; an `avg` or `count_distinct` measure '
+        + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
+        + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
+        + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
+    },
     {
       id: 'analytics-date-range-array-two-bounds-required',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
@@ -16980,6 +17042,56 @@ const step18: MigrationStep = {
         + 'is wrong or missing for your locale, correct it in the platform bundle '
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
+    },
+    // A forced local mode beside a remote to replicate from, refused at both doors
+    // together: the datasource contract (on mode) and the turso driver's
+    // constructor, in one message. The driver used to label it local and run it as
+    // an embedded replica anyway. The twin of
+    // turso-config-forced-replica-without-sync-url-refused, the other way round. A
+    // structured TODO, not a D2 conversion: whether the author meant an embedded
+    // replica of that remote or a plain local file is intent no artifact records.
+    {
+      id: 'turso-config-forced-local-with-sync-url-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.TursoConfig (a turso / libsql datasource.config) and the TursoDriver constructor of '
+        + '@objectstack/driver-turso — mode local beside a non-empty syncUrl is now refused, on mode at '
+        + 'authoring and at construction. The published TursoConfigSchema mirror of '
+        + '@objectstack/driver-turso carries the same text for parity but declares no mode key and strips '
+        + 'an authored one, so it cannot see a forced mode and still accepts the config as a replica',
+      replacement:
+        'the configuration the author meant. An embedded replica drops mode: keep the file: url and '
+        + 'syncUrl, for example url file:./data/replica.db with syncUrl naming the remote, and the url '
+        + 'and syncUrl select the replica. A plain local database drops syncUrl and sync: a file: url '
+        + '(or :memory:) with no syncUrl is a local database, with or without mode local',
+      reason:
+        'A syncUrl names the remote an embedded replica syncs with, and the turso driver syncs whenever '
+        + 'it is set on a local engine, whatever mode says. The triage ruling of 2026-09-29 weighed '
+        + 'refusing this shape against honouring mode local by skipping the sync, and refused it: '
+        + 'honouring it would ignore a declared syncUrl, the same defect with the keys swapped, and a '
+        + 'loud contradiction is the author\'s to resolve. A forced mode local beside a syncUrl parsed '
+        + 'clean at authoring, and the driver built it with a local transport label and then ran it as '
+        + 'a replica: it synced on connect, started the sync interval and answered true to the '
+        + 'sync-enabled check, exactly as the same config with no mode did (measured on the driver '
+        + 'source). A declared mode the runtime ignores is the declared-but-not-enforced shape ADR-0049 '
+        + 'does not ship, so the datasource contract and the constructor now refuse it together, with '
+        + 'one message, which names both ways out. The sibling refusals keep their order: a forced '
+        + 'local mode on a remote url or a bare path meets its url refusal first. An empty syncUrl is '
+        + 'unset and is not refused. Stored datasource rows are not re-parsed when they load, so a '
+        + 'stored row in this shape now fails when its driver is built: the connection service records '
+        + 'it as failed-degraded, a test connection answers ok false, and under ADR-0062 D5 the boot '
+        + 'fails fast when objects bind to that datasource, unless OS_ALLOW_DRIVER_CONNECT_FAILURE is '
+        + 'set. Measured on this tree at the change: no example, template, published skill or '
+        + 'hand-written doc authors the shape, and no host default or environment variable sets mode '
+        + 'or syncUrl. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every turso datasource: os validate or defineStack, and a '
+        + 'save or test connection through the datasource admin service, report a forced local mode '
+        + 'beside a syncUrl at config.mode with both ways out. Decide per datasource whether it is an '
+        + 'embedded replica (drop mode) or a local file (drop syncUrl and sync). Done when every turso '
+        + 'datasource parses, the driver builds from it, and no datasource that declares mode local '
+        + 'carries a syncUrl.',
     },
     // A forced embedded replica with no remote to replicate from, refused at both
     // doors together: the datasource contract (on mode) and the turso driver's

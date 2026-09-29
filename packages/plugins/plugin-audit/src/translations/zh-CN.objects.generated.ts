@@ -39,7 +39,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "执行人",
+        label: "用户",
         help: "执行该操作的用户（系统操作时为 null）"
       },
       actor: {
@@ -175,8 +175,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "指向活动目标的可选深度链接"
       },
       environment_id: {
-        label: "项目",
-        help: "项目上下文（多项目部署）"
+        label: "环境",
+        help: "环境上下文（多环境部署）"
       },
       metadata: {
         label: "元数据",

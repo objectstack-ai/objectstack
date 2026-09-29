@@ -28,7 +28,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
   rebucketCrossObject,
@@ -546,6 +546,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the final day's rows and cannot reproduce the result.
     for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
       const nextDay = nextUtcCalendarDay(bounds.$lte);
+      // [#20600] A bare end on the last supported day renders no upper bound,
+      // because the driver compiles none for it.
+      if (isUnboundedAbove(nextDay)) {
+        params.push(bounds.$gte);
+        whereParts.push(`(${field} >= $${params.length})`);
+        continue;
+      }
       params.push(bounds.$gte, nextDay ?? bounds.$lte);
       whereParts.push(
         `(${field} >= $${params.length - 1} AND ${field} ${nextDay ? '<' : '<='} $${params.length})`,

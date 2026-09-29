@@ -83,6 +83,37 @@ describe('MongoDB Filter Translator', () => {
         created_at: { $lte: '2026-07-28T12:00:00.000Z' },
       });
     });
+
+    // [#20600] 9999-12-31, the last supported day, has no next day: every value
+    // is inside its whole-day bound, so no upper bound is compiled. The helper
+    // answered the five-digit '10000-01-01', a bound below every stored value.
+    it('a bare-day $lte on the last supported day asks only for a value', () => {
+      expect(translateFilter({ created_at: { $lte: '9999-12-31' } })).toEqual({
+        created_at: { $ne: null },
+      });
+      // The control: the day before is an ordinary half-open bound.
+      expect(translateFilter({ created_at: { $lte: '9999-12-30' } })).toEqual({
+        created_at: { $lt: '9999-12-31' },
+      });
+    });
+
+    it('a $between whose max is the last supported day keeps its min alone', () => {
+      expect(translateFilter({ created_at: { $between: ['2026-04-29', '9999-12-31'] } })).toEqual({
+        created_at: { $gte: '2026-04-29' },
+      });
+      expect(translateFilter({ created_at: { $between: ['2026-04-29', '9999-12-30'] } })).toEqual({
+        created_at: { $gte: '2026-04-29', $lt: '9999-12-31' },
+      });
+    });
+
+    it("the lowered $ne beside an author's own $ne keeps both (#13524)", () => {
+      expect(translateFilter({ created_at: { $lte: '9999-12-31', $ne: '9999-12-31T10:00:00.000Z' } })).toEqual({
+        $and: [
+          { created_at: { $ne: '9999-12-31T10:00:00.000Z' } },
+          { created_at: { $ne: null } },
+        ],
+      });
+    });
   });
 
   /**
