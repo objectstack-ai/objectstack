@@ -84,6 +84,7 @@ describe('parseNumberCell', () => {
 describe('parseDateCell', () => {
   it('normalises bare calendar dates without timezone drift', () => {
     expect(parseDateCell('2026-06-30', 'date')).toBe('2026-06-30');
+    expect(parseDateCell('2026/6/3', 'date')).toBe('2026-06-03');
   });
   it('emits full ISO for datetime', () => {
     expect(parseDateCell('2026-06-30', 'datetime')).toBe('2026-06-30T00:00:00.000Z');
@@ -99,16 +100,17 @@ describe('parseDateCell', () => {
 });
 
 /**
- * [#20534] A text cell is read only in ISO 8601 or the export's own
- * `YYYY-MM-DD HH:mm:ss`, on a calendar day that exists; everything else is
- * refused (`undefined`, so the row's `invalid_date`), never rolled over, never
+ * [#20534] A text cell is read only in ISO 8601, the export's own
+ * `YYYY-MM-DD HH:mm:ss` or a year-first date (`2026/7/15`, `2026/7/15 9:00`,
+ * by the maintainer ruling on the card), on a calendar day that exists;
+ * everything else is refused (`undefined`, so the row's `invalid_date`), never rolled over, never
  * read in the host's zone and never read month-first. A `date`'s year keeps
  * four digits. Every case runs under two host zones that disagree by twelve
  * hours, and must answer the same under both — the host-zone reading this
  * removes answered differently (`07/15/2026 10:00` was `…T14:00Z` in New York
  * and `…T02:00Z` in Shanghai).
  */
-describe('[#20534] parseDateCell — ISO 8601 or the export shape, on a real day', () => {
+describe('[#20534] parseDateCell — ISO 8601, the export shape or a year-first date, on a real day', () => {
   const HOST_ZONES = ['America/New_York', 'Asia/Shanghai'];
   const originalTz = process.env.TZ;
   afterEach(() => {
@@ -140,9 +142,12 @@ describe('[#20534] parseDateCell — ISO 8601 or the export shape, on a real day
     ['07/08/2026', 'datetime'], ['07/08/2026', 'date'],
     ['07/15/2026', 'date'], ['15 July 2026', 'date'], ['15 July 2026', 'datetime'],
     ['Jul 15 2026 10:00', 'time'], ['Wed, 15 Jul 2026 10:00:00 GMT', 'datetime'],
-    // Year-first but not ISO 8601.
-    ['2026/6/3', 'date'], ['2026/07/15', 'date'], ['2026-7-15', 'date'],
-    ['2026/08/01 06:00:00', 'datetime'], ['2026-07-15 9:00', 'datetime'],
+    // Year-first, outside its one form: an impossible day, a mixed separator,
+    // a clock out of range, a `T`, a zone, a fraction, a two-digit year.
+    ['2026/2/30', 'date'], ['2026/2/30', 'datetime'], ['2026/7-15', 'date'],
+    ['2026/7/15 24:00', 'datetime'], ['2026/7/15 9:60', 'datetime'],
+    ['2026/7/15T9:00', 'datetime'], ['2026/7/15 9:00Z', 'datetime'],
+    ['2026/7/15 9:00:00.5', 'datetime'], ['26/7/15', 'date'], ['07/15/2026', 'datetime'],
     // Reduced / expanded forms, a zone after a space, lower-case `t` / `z`.
     ['2026', 'date'], ['2026-07', 'datetime'], ['+002026-07-15', 'date'],
     ['2026-07-15 10:00Z', 'datetime'], ['2026-07-15 10:00:00+08:00', 'datetime'],
@@ -176,6 +181,19 @@ describe('[#20534] parseDateCell — ISO 8601 or the export shape, on a real day
     ['2026-07-15T24:00:00Z', 'datetime', '2026-07-16T00:00:00.000Z'],
     ['  2026-07-15  ', 'date', '2026-07-15'],
     ['10:00', 'time', '10:00:00'],
+    // A year-first date (Excel's zh-CN / ja-JP short date): the padded ISO day,
+    // and a clock read as a wall clock exactly as the export shape's is.
+    ['2026/6/3', 'date', '2026-06-03'],
+    ['2026/07/15', 'date', '2026-07-15'],
+    ['2026-7-15', 'date', '2026-07-15'],
+    ['2026/7/15', 'datetime', '2026-07-15T00:00:00.000Z'],
+    ['2026/7/15 9:00', 'datetime', '2026-07-15T09:00:00.000Z'],
+    ['2026/7/15 9:00', 'date', '2026-07-15'],
+    ['2026/7/15 9:00', 'time', '09:00:00'],
+    ['2026/08/01 06:00:00', 'datetime', '2026-08-01T06:00:00.000Z'],
+    ['2026-07-15 9:00', 'datetime', '2026-07-15T09:00:00.000Z'],
+    ['2028/2/29', 'date', '2028-02-29'],
+    ['0500/1/1', 'date', '0500-01-01'],
     // The year keeps four digits on every `date` branch.
     ['0500-01-01', 'date', '0500-01-01'],
     ['0001-01-01', 'date', '0001-01-01'],
@@ -234,7 +252,7 @@ describe('coerceRow', () => {
       note: { type: 'text' },
     });
     const { data, errors } = await coerceRow(
-      { done: '是', amount: '$1,200.50', priority: '高', tags: 'A, B', due: '2026-07-01', note: '  hi  ' },
+      { done: '是', amount: '$1,200.50', priority: '高', tags: 'A, B', due: '2026/07/01', note: '  hi  ' },
       metaMap,
       {},
     );

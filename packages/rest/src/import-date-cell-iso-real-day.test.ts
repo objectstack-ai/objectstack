@@ -2,9 +2,10 @@
 
 /**
  * [#20534] `POST /api/v1/data/:object/import` reads a `date`, `datetime` or
- * `time` text cell only in ISO 8601 or the platform's own export shape
- * (`YYYY-MM-DD HH:mm:ss`), on a calendar day that exists, and pads a `date`'s
- * year to four digits — through the real route over a real `SqlDriver`
+ * `time` text cell only in ISO 8601, the platform's own export shape
+ * (`YYYY-MM-DD HH:mm:ss`) or a year-first date (`2026/7/15`, `2026/7/15 9:00`,
+ * by the maintainer ruling on the card), on a calendar day that exists, and
+ * pads a `date`'s year to four digits — through the real route over a real `SqlDriver`
  * (better-sqlite3 `:memory:`), under two host zones twelve hours apart.
  *
  * Measured through this route, JSON rows, `writeMode: 'insert'`, no business
@@ -24,6 +25,9 @@
  * | `2026-07-15 24:00` | datetime | `2026-07-16T04:00Z` · `2026-07-15T16:00Z` | row refused |
  * | `0500-01-01` / `0001-01-01` | date | row refused (`500-01-01` reached the write door) | `0500-01-01` / `0001-01-01` |
  * | `0001-01-01` | datetime | `1901-01-01T00:00:00.000Z` | `0001-01-01T00:00:00.000Z` |
+ * | `2026/7/15` | date | `2026-07-15` | unchanged |
+ * | `2026/7/15 9:00` | datetime | `2026-07-15T09:00:00.000Z` | unchanged |
+ * | `2026/2/30` | date | refused (`2026-02-30` reached the write door) | row refused by the reader |
  *
  * The `InMemoryDriver` column is this file's by construction, not by a second
  * arm: every cell is judged by the import's own reader (`parseDateCell`) before
@@ -69,6 +73,7 @@ const REFUSED: ReadonlyArray<readonly [field: Field, cell: string]> = [
   ['d', '15 July 2026'],
   ['t', '07/15/2026 10:00'],
   ['dt', '2026-07-15 24:00'],
+  ['d', '2026/2/30'],
 ];
 
 /** Admitted cells and what they store — the padding, the ISO control and the export shape. */
@@ -81,6 +86,9 @@ const ADMITTED: ReadonlyArray<readonly [field: Field, cell: string, stored: stri
   ['dt', '2026-07-15T10:00:00+08:00', '2026-07-15T02:00:00.000Z'],
   ['dt', '2026-07-15 10:00:00', '2026-07-15T10:00:00.000Z'],
   ['t', '10:00', '10:00:00'],
+  // A year-first date (Excel's zh-CN / ja-JP short date) stays admitted, padded.
+  ['d', '2026/7/15', '2026-07-15'],
+  ['dt', '2026/7/15 9:00', '2026-07-15T09:00:00.000Z'],
 ];
 
 function makeSqliteDriver() {
@@ -207,6 +215,17 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
       expect(await stored(ctx.engine, `i${i}`, 'd')).toBe(await stored(ctx.engine, `w${i}`, 'd'));
       expect(await stored(ctx.engine, `i${i}`, 'd')).toBe(day);
     }
+  });
+
+  it('stores a year-first date-time as the same instant the export shape stores', async () => {
+    const res = await ctx.importRows({
+      format: 'json', writeMode: 'insert',
+      rows: [{ id: 'yf', dt: '2026/7/15 9:00' }, { id: 'ex', dt: '2026-07-15 09:00:00' }],
+    });
+    expect(res._json).toMatchObject({ total: 2, ok: 2, errors: 0, created: 2 });
+    const yearFirst = await stored(ctx.engine, 'yf', 'dt');
+    expect(yearFirst).toBe(await stored(ctx.engine, 'ex', 'dt'));
+    expect(yearFirst).toBe('2026-07-15T09:00:00.000Z');
   });
 
   it('round-trips the export shape: an exported row re-imports as the same day and instant', async () => {
