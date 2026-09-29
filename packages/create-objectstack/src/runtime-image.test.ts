@@ -44,21 +44,66 @@ function cliRange(dir: string): string {
 }
 
 /**
+ * semver precedence of two prerelease tails (`rc.2` vs `rc.10`); `undefined`
+ * is a release, which outranks every prerelease of the same `X.Y.Z`.
+ */
+function comparePrerelease(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  const as = a.split('.');
+  const bs = b.split('.');
+  for (let i = 0; i < Math.max(as.length, bs.length); i++) {
+    if (as[i] === undefined) return -1;
+    if (bs[i] === undefined) return 1;
+    if (as[i] === bs[i]) continue;
+    const aNum = /^\d+$/.test(as[i]);
+    const bNum = /^\d+$/.test(bs[i]);
+    if (aNum && bNum) return Number(as[i]) - Number(bs[i]);
+    if (aNum !== bNum) return aNum ? -1 : 1;
+    return as[i] < bs[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
  * Does `version` satisfy the caret `range` the scaffolder writes? Deliberately
  * a satisfies-check and not an equality one: the emitted package.json carries
  * `^X.Y.Z` and the tag names the version npm RESOLVED inside that range, so
  * equality would be the wrong agreement predicate and would pass only by
  * accident on a freshly published major.
+ *
+ * The floor may carry a prerelease tail. The scaffolder writes `^<its own
+ * version>`, and a `cut-rc` version pass in pre mode makes that version
+ * `18.0.0-rc.N`, so the range becomes `^18.0.0-rc.N`. Caret semantics are
+ * semver's: the same major and at or above the floor, where a release outranks
+ * its own prereleases, so `18.1.2` satisfies `^18.0.0-rc.1`. A prerelease
+ * VERSION is admitted only on a prerelease floor's own `X.Y.Z`, so
+ * `18.1.0-rc.1` does not.
+ *
+ * A range it cannot read THROWS rather than answering `false`: a `false` here
+ * reads as the scaffolder's or the fixture's fault, which is how a range shape
+ * this helper did not model once failed on the release PR. Majors of 1 and up
+ * only; the scaffolder writes no range for a `0.x` version.
  */
 function satisfiesCaret(range: string, version: string): boolean {
-  const r = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range);
-  const v = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
-  if (!r || !v) return false;
-  const [rMaj, rMin, rPat] = r.slice(1).map(Number);
-  const [vMaj, vMin, vPat] = v.slice(1).map(Number);
+  const r = /^\^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(range);
+  if (!r || r[1] === '0') {
+    throw new Error(
+      `satisfiesCaret reads ^MAJOR.MINOR.PATCH[-PRERELEASE] with MAJOR >= 1, got "${range}"`,
+    );
+  }
+  const v = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  if (!v) return false;
+  const [rMaj, rMin, rPat] = r.slice(1, 4).map(Number);
+  const [vMaj, vMin, vPat] = v.slice(1, 4).map(Number);
+  const rPre = r[4];
+  const vPre = v[4];
   if (vMaj !== rMaj) return false;
+  if (vPre !== undefined && (rPre === undefined || vMin !== rMin || vPat !== rPat)) return false;
   if (vMin !== rMin) return vMin > rMin;
-  return vPat >= rPat;
+  if (vPat !== rPat) return vPat > rPat;
+  return comparePrerelease(vPre, rPre) >= 0;
 }
 
 /** Scaffold the blank template the way index.ts does, up to the install. */
@@ -258,6 +303,42 @@ describe('scaffolded Dockerfile runtime image tag (#9017)', () => {
       // after a FAILED install would silently do nothing while the comment
       // still promised it had happened.
       expect(source).toMatch(/if \(installed\)[\s\S]{0,400}pinRuntimeImage/);
+    });
+  });
+
+  // The agreement predicate on its own. The tests above call it only with the
+  // version this checkout carries, so a range shape the NEXT version pass
+  // produces is exercised nowhere else until that pass lands. A `cut-rc` pass
+  // in pre mode is the case: the scaffolder writes `^18.0.0-rc.N`.
+  describe('satisfiesCaret', () => {
+    it.each([
+      ['^18.0.0-rc.1', '18.0.0-rc.2', true],
+      ['^18.0.0-rc.1', '18.1.2', true],
+      ['^18.0.0-rc.1', '18.0.0', true],
+      ['^18.0.0-rc.1', '17.9.0', false],
+      ['^18.0.0-rc.1', '19.0.0', false],
+      ['^18.0.0-rc.1', '18.0.0-rc.0', false],
+      ['^18.0.0-rc.1', '18.1.0-rc.1', false],
+    ])('reads a prerelease floor: %s admits %s is %s', (range, version, admits) => {
+      expect(satisfiesCaret(range, version)).toBe(admits);
+    });
+
+    it.each([
+      ['^17.4.0', '17.4.0', true],
+      ['^17.4.0', '17.5.2', true],
+      ['^17.4.0', '17.3.9', false],
+      ['^17.4.0', '18.0.0', false],
+    ])('keeps the plain floor: %s admits %s is %s', (range, version, admits) => {
+      expect(satisfiesCaret(range, version)).toBe(admits);
+    });
+
+    it('admits a prerelease version only on a prerelease floor', () => {
+      expect(satisfiesCaret('^17.4.0', '17.5.0-rc.1')).toBe(false);
+    });
+
+    it('refuses a range it cannot read instead of answering false', () => {
+      expect(() => satisfiesCaret('~18.0.0', '18.0.1')).toThrow('"~18.0.0"');
+      expect(() => satisfiesCaret('^0.2.3', '0.2.4')).toThrow('"^0.2.3"');
     });
   });
 

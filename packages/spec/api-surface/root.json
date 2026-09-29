@@ -230,6 +230,7 @@
     "objectStackErrorMap (const)",
     "partitionAssembledViewArtifacts (function)",
     "safeParsePretty (function)",
+    "stackConversionsOf (function)",
     "suggestFieldType (function)",
     "tmpl (function)"
   ]

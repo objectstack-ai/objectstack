@@ -53,13 +53,19 @@ export interface InMemoryRealtimeAdapterOptions {
  *
  * const subId = await realtime.subscribe('records', (event) => {
  *   console.log('Received:', event.type, event.payload);
- * }, { object: 'account', eventTypes: ['record.created'] });
+ * }, { object: 'account', eventTypes: ['data.record.created'] });
  *
+ * // The shape the ObjectQL engine publishes for an insert: the envelope's
+ * // `payload` is the spec's `DataEvent`, and the row itself is `payload.after`.
+ * const timestamp = new Date().toISOString();
  * await realtime.publish({
- *   type: 'record.created',
+ *   type: 'data.record.created',
  *   object: 'account',
- *   payload: { id: 'acc-1', name: 'Acme' },
- *   timestamp: new Date().toISOString(),
+ *   payload: {
+ *     id: crypto.randomUUID(), type: 'data.record.created', object: 'account',
+ *     recordId: 'acc-1', after: { id: 'acc-1', name: 'Acme' }, timestamp,
+ *   },
+ *   timestamp,
  * });
  *
  * await realtime.unsubscribe(subId);

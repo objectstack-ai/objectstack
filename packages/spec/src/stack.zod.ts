@@ -13,7 +13,7 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
-import { markStackProvenance, hasStackProvenance } from './stack-provenance';
+import { markStackProvenance, hasStackProvenance, stackConversionsOf } from './stack-provenance';
 import {
   normalizeStackInput,
   MAP_SUPPORTED_FIELDS,
@@ -3596,8 +3596,21 @@ export function defineStack(
   // warning below this runs in BOTH modes: a conversion happens whether or not
   // we go on to parse, so `strict: false` does not make the old shape any less
   // retiring.
+  //
+  // Each notice is also RECORDED on the stack returned below, beside the
+  // provenance mark (`stackConversionsOf`, `stack-provenance.ts`): the stack
+  // leaves here already canonical, so a door that reports conversions — the
+  // `--json` `conversions` field, `os validate --strict` — can learn what was
+  // converted only from this producer. The record starts from the input's own
+  // record, so a built stack handed straight back here keeps what its first
+  // build applied (the pass below finds nothing left to convert on it); it
+  // is not subject to the stderr warn-once.
+  const appliedConversions: ConversionNotice[] = [...stackConversionsOf(config)];
   const normalized = normalizeStackInput(config as Record<string, unknown>, {
-    onConversionNotice: warnConversionNotice,
+    onConversionNotice: (notice) => {
+      appliedConversions.push(notice);
+      warnConversionNotice(notice);
+    },
   });
 
   // Pre-parse: the parse below is what strips an undeclared key, so this is the
@@ -3609,7 +3622,11 @@ export function defineStack(
     // still this producer's, so it carries the provenance mark — `strict: false`
     // is an explicit authoring choice made INSIDE the producer, which is what
     // the doors check for (`stack-provenance.ts`).
-    return markStackProvenance(mergeActionsIntoObjects(normalized as ObjectStackDefinition), 'defineStack');
+    return markStackProvenance(
+      mergeActionsIntoObjects(normalized as ObjectStackDefinition),
+      'defineStack',
+      appliedConversions,
+    );
   }
 
 
@@ -3699,16 +3716,19 @@ export function defineStack(
 
   // [#20367 ruling B] The mark the author-time doors and `composeStacks` check:
   // this value went through the judgement above. Non-enumerable, so it reaches
-  // neither the schema nor the compiled artifact (`stack-provenance.ts`).
-  return markStackProvenance(mergeActionsIntoObjects(data), 'defineStack');
+  // neither the schema nor the compiled artifact (`stack-provenance.ts`). The
+  // conversion record rides beside it, stamped in the same act.
+  return markStackProvenance(mergeActionsIntoObjects(data), 'defineStack', appliedConversions);
 }
 
 /**
- * [#20367 ruling B] The one published half of stack provenance — see
- * `stack-provenance.ts`. `os validate` / `os build` read it off the config's
- * default export and refuse an unmarked one (`STACK_PROVENANCE_MISSING`).
+ * [#20367 ruling B] The published halves of stack provenance — see
+ * `stack-provenance.ts`. `os validate` / `os build` read the mark off the
+ * config's default export and refuse an unmarked one
+ * (`STACK_PROVENANCE_MISSING`), and fold the conversion record into their
+ * `conversions` field and the `--strict` gate.
  */
-export { hasStackProvenance };
+export { hasStackProvenance, stackConversionsOf };
 
 
 // ─── composeStacks ──────────────────────────────────────────────────
@@ -5312,5 +5332,13 @@ export function composeStacks(
   // [#20367 ruling B] Built from built inputs only (step 0), so the artifact is
   // a producer's output too: a nested `composeStacks` or an author-time door
   // accepts it.
-  return markStackProvenance(artifact, 'composeStacks') as ObjectStackDefinition;
+  //
+  // Its conversion record is its inputs' records, concatenated in input order.
+  // Composition converts nothing itself — every input arrived canonical from
+  // its own `defineStack` — so this is the whole of what was applied to build
+  // the artifact. A `Set` over the (frozen, identity-kept) notices counts one
+  // application once when the same built stack is passed twice; each notice's
+  // `path` stays relative to the `defineStack` call that applied it.
+  const conversions = [...new Set(stacks.flatMap((stack) => stackConversionsOf(stack)))];
+  return markStackProvenance(artifact, 'composeStacks', conversions) as ObjectStackDefinition;
 }
