@@ -1042,8 +1042,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   transport: 7,
   'scope-contract': 12,
   'diff-scope': 13,
-  'live-corpus': 3,
+  'live-corpus': 4,
   'proxy-rearm': 10,
+  qualifier: 40,
 });
 
 /** Deleting a roster entry silences its floor, so the roster's size is pinned too. */
@@ -1261,6 +1262,8 @@ export async function selfTest() {
     check(live.files.length > 100, `the declared surfaces must reach the tree, got ${live.files.length} file(s)`);
     check(live.rows.length > 1000, `the live corpus must yield its citations, got ${live.rows.length}`);
     check(live.rows.some((r) => r.qualifier), 'the live corpus must contain at least one cross-repo citation — the arm that must never be reported as a phantom');
+    check(live.rows.every((r) => !r.qualifier || repositoryOf(r.qualifier) !== null),
+      'every qualifier the live corpus keeps must name a repository — an unrecognised one kept is the open grammar back');
   }
 
   /* 7. THE LOCAL ROUTE. Offline, over the imported plan: the arms that decide
@@ -1292,6 +1295,72 @@ export async function selfTest() {
       'structural: the re-exec is taken by the LIVE modes only — never --self-test (offline, and pinned offline), never --list (no network at all)');
   }
 
+  /* 8. THE QUALIFIER (#20330). A candidate names a repository only when it is
+   *    `owner/repo` or a `KNOWN_REPOSITORIES` name; any other prefix is prose
+   *    and its number is judged HERE. Every spelling is pinned both ways: read
+   *    right on a live number, and a FINDING on a dead one. */
+  battery('qualifier');
+  {
+    const OWN = 'objectstack-ai/objectstack';
+    const board = boardFromSets({ numbers: [100, 20330], pulls: [], frontier: 30000, source: 'stub' });
+    const one = (t) => extractCitations(t);
+    const judge = (t) => one(t).map((c) => classifyCitation(c, board, { ownerRepo: OWN }).cause);
+    const lit = (t) => judge(t).join() === CAUSE.RESOLVES;
+    const red = (t) => { const causes = judge(t); return causes.length === 1 && FINDING_CAUSES.includes(causes[0]); };
+
+    for (const p of ['pre-', 'post-', 'Pre-', 'Post-', 'PRE-', 'POST-']) {
+      check(one(`the ${p}#12248 shape`).map((c) => `${c.qualifier}|${c.raw}`).join() === 'null|#12248',
+        `\`${p}\` is prose, not a repository: its number is extracted bare`);
+      check(lit(`the ${p}#100 shape`) && red(`the ${p}#12248 shape`),
+        `\`${p}#N\` is judged HERE: a live number resolves and a dead one is a FINDING`);
+    }
+
+    check(one('Framework#4443 / cloud#983').map((c) => repositoryOf(c.qualifier)).join() === `${OWN},objectstack-ai/cloud`,
+      '`Framework` is THIS repository (its former name, any case); `cloud` is not');
+    for (const q of ['framework', 'Framework', 'objectstack-ai/framework', 'objectstack']) {
+      check(lit(`${q}#100`) && red(`${q}#12248`), `\`${q}#N\` names THIS repository: judged, lit when live and red when dead`);
+    }
+    for (const q of ['objectui', 'OBJECTUI', 'ui', 'cloud', 'hotcrm', 'objectstack-ai/objectui', 'better-auth/better-auth']) {
+      check(judge(`${q}#12248`).join() === CAUSE.CROSS_REPO_UNJUDGED,
+        `\`${q}#N\` names another repository: never judged, so a number dead HERE is no finding`);
+    }
+    check(one('see foo#12248')[0]?.qualifier === null && red('see foo#12248'),
+      'an UNKNOWN word prefix is prose too — the set of repositories is closed, not a list of exceptions');
+    for (const t of ['which PD#12 rejects', 'ADR-0076 OQ#10 says', 'PKCS#11 HSMs', 'a Prime-Directive-#12 shape']) {
+      check(one(t).length === 0, `\`${t}\` is an ordinal once its candidate is refused, not a citation`);
+    }
+
+    check(one('(objectui PR #10264, merged)').map((c) => `${c.qualifier}|${c.raw}`).join() === 'objectui|objectui PR #10264',
+      'the prose spelling `objectui PR #N` names objectui');
+    check([judge('(objectui PR #12248)'), judge('cloud #12248 contract'), judge('objectui issue #12248')]
+      .every((c) => c.join() === CAUSE.CROSS_REPO_UNJUDGED), 'the prose form defers to its repository, dead here or not');
+    check(lit('framework #100') && red('framework #12248'), 'the prose form of THIS repository is judged here');
+    check(red('the PR #12248 landed') && red('Studio UI #12248'),
+      '⛔ a bare `PR #N`, and the joined-only alias in `UI #N`, are NOT the prose form: judged here, red when dead');
+
+    check(judge('objectui#6110 + #12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.ALLOCATED_BUT_ABSENT}`,
+      "⛔ a qualifier does NOT carry across a pair: the second number is this repository's, and red when dead");
+    check(judge('objectui#6110 + objectui#12248').join() === `${CAUSE.CROSS_REPO_UNJUDGED},${CAUSE.CROSS_REPO_UNJUDGED}`,
+      'a pair qualified number by number defers both');
+
+    const rows = [{ number: 20330, qualifier: 'framework' }, { number: 11, qualifier: 'objectui' }, { number: 12, qualifier: null }];
+    check(boardWanted(rows, OWN).sort((a, b) => a - b).join() === '12,20330',
+      "the board's probe set is every citation judged HERE — a qualified this-repository number in, another repository's out");
+    const probed = await probeBoard(boardWanted([{ number: 20330, qualifier: 'objectstack' }], OWN), {
+      ownerRepo: OWN, token: '',
+      fetchImpl: stubFetch([[/per_page=1/, { body: [{ number: 30000 }] }], [/issues\/20330$/, { body: { number: 20330 } }]]),
+    });
+    check(classifyCitation({ number: 20330, qualifier: 'objectstack' }, probed, { ownerRepo: OWN }).cause === CAUSE.RESOLVES,
+      '⛔ a live `objectstack#N` RESOLVES on a probed board — probing only the unqualified numbers answered it allocated-but-absent, a false red');
+    check(/const wanted = boardWanted\(rows, ownerRepo\);/.test(readFileSync(SELF_PATH, 'utf8')),
+      'structural: the live board is built from `boardWanted`');
+
+    check(KNOWN_REPOSITORIES.every((r) => r.name === r.name.toLowerCase() && typeof r.why === 'string' && r.why.length > 40),
+      'every known repository is a lower-case name carrying the reading that put it in');
+    check(KNOWN_REPOSITORIES.filter((r) => r.self).every((r) => r.slug === OWN) && KNOWN_REPOSITORIES.some((r) => r.self),
+      'every name for THIS repository resolves to its slug');
+  }
+
   /* ── The floor: every declared battery RAN, and ran its cases ───────────── */
   const floorMessages = [];
   const floorFailure = (m) => { floorMessages.push(m); };
@@ -1320,7 +1389,7 @@ export async function selfTest() {
   assert(!breached, floorMessages.join('\n     '));
 
   const total = [...batterySeen.values()].reduce((a, b) => a + b, 0);
-  console.log(`✅ check-issue-citations --self-test: grammar narrowed, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
+  console.log(`✅ check-issue-citations --self-test: grammar narrowed, qualifier a closed set of repositories, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
   return SELF_TEST_VERDICT;
 }
 
