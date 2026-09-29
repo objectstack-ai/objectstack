@@ -148,7 +148,7 @@ Type: `[string, string]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or field reference |
-| **format** | `string` | optional |  |
+| **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results; not published by GET /analytics/meta. |
 
 ### Nested Shape: `Cube.dimensions[string]`
 
@@ -159,7 +159,7 @@ Type: `[string, string]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 ### Nested Shape: `Cube.joins[string]`
 
@@ -199,7 +199,7 @@ Type: `[string, string]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 
 ---
@@ -228,7 +228,7 @@ Type: `[string, string]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or field reference |
-| **format** | `string` | optional |  |
+| **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results; not published by GET /analytics/meta. |
 
 
 ---

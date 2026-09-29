@@ -23,4 +23,4 @@ What to expect after upgrading:
 - **A cube time dimension that declares several, or none**, behaves exactly as before.
 - **Compiled datasets** (`POST /api/v1/analytics/dataset/query`) answer exactly as before: the value read off their cube is the one the dataset door already used.
 
-In `@objectstack/spec`, the liveness ledger rows `analytics_cube.measures.format` and `analytics_cube.dimensions.granularities` move from `dead` to `live`, citing the new readers.
+In `@objectstack/spec`, `MetricSchema.format` and `DimensionSchema.granularities` now carry descriptions that state what the analytics service does with them (the metric's example values move from the names "currency" / "percent" to numeral patterns, the vocabulary the `fields[].format` slot documents), and the liveness ledger rows `analytics_cube.measures.format` and `analytics_cube.dimensions.granularities` move from `dead` to `live`, citing the new readers.

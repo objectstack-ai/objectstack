@@ -256,8 +256,17 @@ export const MetricSchema = lazySchema(() => strictObject(
     // re-targeted per driver dialect, or walked by the lint rules
     // (`packages/lint/src/filter-walk.ts` deliberately never enumerated it).
 
-    /** Format for display (e.g. "currency", "percent") */
-    format: z.string().optional(),
+    /**
+     * Display format for this measure's result column. The analytics service
+     * relays it as `fields[].format` on `POST /analytics/query` results, the
+     * slot the dataset door fills from a dataset measure's own `format`, so its
+     * vocabulary is that slot's: a numeral pattern. It is not part of the
+     * `GET /analytics/meta` projection.
+     */
+    format: z.string().optional().describe(
+      'Display format for this measure\'s result column: a numeral pattern such as "$0,0.00" or "0.0%". '
+      + 'Relayed verbatim as fields[].format on POST /analytics/query results; not published by GET /analytics/meta.',
+    ),
   },
 ));
 
@@ -295,8 +304,19 @@ export const DimensionSchema = lazySchema(() => strictObject(
     /** Source Column */
     sql: z.string().describe('SQL expression or column reference'),
 
-    /** For Time Dimensions: Supported Granularities */
-    granularities: z.array(TimeUpdateInterval).optional(),
+    /**
+     * For a time dimension: the intervals it is bucketed at. A SINGLE interval
+     * is the dimension's default bucket — a query that groups by it without
+     * stating a granularity is bucketed at that interval, on
+     * `POST /analytics/query` and `POST /analytics/sql` alike, the reading a
+     * compiled dataset's `dateGranularity` gets. Two or more state no default.
+     * A granularity the query states always wins, listed or not.
+     */
+    granularities: z.array(TimeUpdateInterval).optional().describe(
+      'For a time dimension. A single interval is its default bucket: a query that groups by this dimension '
+      + 'without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity '
+      + 'the query states always wins, listed or not.',
+    ),
   },
 ));
 
