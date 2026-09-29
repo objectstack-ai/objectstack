@@ -24,6 +24,10 @@ keeps it cleared.
 longer carries that node's stored credential onto it. The credential belonged to the
 old kind; a start node that needs a secret asks for one again at registration.
 
+**Moving a node.** A node moved into or out of a `loop` body, a `parallel` branch or a
+`try_catch` region keeps its stored credential across the round trip, as long as its
+`id` and kind are unchanged and no other node in the definition carries the same `id`.
+
 **The `/meta` list read on a dispatcher host.** When the metadata protocol's list read
 fails, the list answers that failure (`503 SERVICE_UNAVAILABLE` for a store outage, or
 the protocol's own refusal) instead of serving the metadata service's stored list,
