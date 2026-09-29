@@ -222,6 +222,24 @@
  * this door, so the file is named for the door it declares, as
  * `filter-text-operator-declared-type.ts` is.
  *
+ * ## [#20510] A `having` column is not a declared field, and only `where` binds
+ *
+ * At `having` the door is handed the numeric CLASS the engine derived for an
+ * aggregated-row column (#20127's `aggregatedRowColumnClasses`) — an
+ * aggregation alias or a groupBy projection — never a real field declaration,
+ * so `numberComparandRefusalMessage` names it "a numeric aggregated column"
+ * when {@link NumberComparandRefusalSite.aggregated} is set. The
+ * per-aggregation `filter` is NOT this case: it narrows the object's RAW rows
+ * before any aggregation runs, against the object's real declared fields (the
+ * engine door's own header records this), so it keeps "a declared … field".
+ * And of the three positions this door judges, only `where` (both spellings)
+ * ever reaches a live driver bind — `having` and the per-aggregation `filter`
+ * are evaluated by the engine itself, on every driver, before any row is
+ * read — so the `not-a-number` / `boolean` / `date` clauses name PostgreSQL's
+ * server error only when {@link NumberComparandRefusalSite.boundByDriver} is
+ * true (the default, so a `where` site is unaffected). Both flags are the
+ * engine door's to set; this module only reads them.
+ *
  * @see FILTER_COMPARAND_TYPE_CASES — the syntax door this one runs beside.
  * @see TEXT_OPERATOR_DOOR_CASES — the declared-type door this one is shaped after.
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (this contract)
@@ -483,8 +501,18 @@ export function numberComparandDoorVerdict(
  * refused for its spelling alone, so its clause claims no divergence between
  * backends, while the card's `"abc"` names the one it measured, and so do the
  * boolean and `Date` clauses (#20502's measurement).
+ *
+ * [#20510] Three forms — `not-a-number`, `boolean`, `date` — name PostgreSQL's
+ * own server error, which is a fact about a position the DRIVER binds
+ * (`where`, on both spellings): the comparand reaches a live bind and
+ * PostgreSQL refuses it there. At `having` and the per-aggregation `filter`
+ * the engine evaluates the clause itself, in JS, on every driver, before any
+ * row is read — no driver ever sees the comparand, so no driver ever answers
+ * it, and naming PostgreSQL there would describe a bind that never happens.
+ * Their entries are a function of {@link NumberComparandRefusalSite.boundByDriver}
+ * so the one clause serves both kinds of position honestly.
  */
-const FORM_SENTENCE: Readonly<Record<NonNumericComparandForm, string>> = {
+const FORM_SENTENCE: Readonly<Record<NonNumericComparandForm, string | ((boundByDriver: boolean) => string)>> = {
   'empty': 'a blank string names no number (to match a missing value, write {"$eq": null}).',
   'padded': 'it carries surrounding whitespace.',
   'placeholder': 'a {placeholder} resolves to an id or a date, never to a number.',
@@ -492,9 +520,13 @@ const FORM_SENTENCE: Readonly<Record<NonNumericComparandForm, string>> = {
   'non-finite': 'Infinity, NaN and out-of-range values name no finite number.',
   'digit-separator': 'digit grouping and decimal commas are a locale spelling, not a number.',
   'non-json-spelling': 'a leading "+" or zero, or a bare leading or trailing ".", is not a JSON number.',
-  'not-a-number': 'it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).',
-  'boolean': 'a boolean names no number (true is not 1), and backends answer it differently (PostgreSQL with a server error).',
-  'date': 'a Date is an instant, not a number, and backends answer it differently (PostgreSQL with a server error); compare a Date with a date or datetime field.',
+  'not-a-number': (boundByDriver) =>
+    `it has no numeric reading${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error).' : '.'}`,
+  'boolean': (boundByDriver) =>
+    `a boolean names no number (true is not 1)${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error).' : '.'}`,
+  'date': (boundByDriver) =>
+    `a Date is an instant, not a number${boundByDriver ? ', and backends answer it differently (PostgreSQL with a server error)' : ''}`
+    + '; compare a Date with a date or datetime field.',
   'array': 'a list is not one number; to match any of several numbers use $in, and for a range $between, each member a number.',
 };
 
@@ -510,9 +542,14 @@ const NUMBER_COMPARAND_REFUSAL_TAIL =
 
 /** Where the refused comparand sits, and what the door read there. */
 export interface NumberComparandRefusalSite {
-  /** The filter key — a declared field of the object. */
+  /** The filter key — a declared field of the object, or (`aggregated`) an aggregated-row column. */
   readonly field: string;
-  /** Its declared `type`. */
+  /**
+   * Its declared `type` — or, when {@link NumberComparandRefusalSite.aggregated}
+   * is set, the member of the numeric class the engine derived for the column
+   * (`number`); an aggregated column has no declared `FieldType` of its own,
+   * and the message does not print this value for one.
+   */
   readonly declaredType: string;
   /** `formula` only — its declared `returnType`. */
   readonly returnType?: string;
@@ -522,6 +559,25 @@ export interface NumberComparandRefusalSite {
   readonly value: unknown;
   /** Why it is not numeric — `door-refusal`'s `form`. */
   readonly form: NonNumericComparandForm;
+  /**
+   * [#20510] `true` when `field` names an AGGREGATED-row column (`having`) —
+   * an aggregation alias or a groupBy projection — rather than a declared
+   * field of the object. The message then reads "a numeric aggregated
+   * column", never "a declared … field": at `having` the column is the
+   * engine's own projection, not the caller's record. Default `false`.
+   */
+  readonly aggregated?: boolean;
+  /**
+   * [#20510] `true` when this position is one the DRIVER binds directly
+   * (`where`, both spellings) — the only place an unrefused comparand could
+   * reach a live bind and provoke a driver's own error. `having` and the
+   * per-aggregation `filter` are evaluated by the engine itself, before any
+   * bind, on every driver alike, so the `not-a-number` / `boolean` / `date`
+   * clauses name PostgreSQL's server error only when this is `true`. Default
+   * `true`, so an existing `where` site (and a site built before this field
+   * existed) renders byte-for-byte as before.
+   */
+  readonly boundByDriver?: boolean;
 }
 
 /**
@@ -530,12 +586,14 @@ export interface NumberComparandRefusalSite {
  * `context` is the caller prefix the engine's refusals carry (`find('deal')`).
  */
 export function numberComparandRefusalMessage(site: NumberComparandRefusalSite, context?: string): string {
-  const declared = site.returnType === undefined
-    ? `${site.declaredType} field`
-    : `${site.declaredType} field returning ${site.returnType}`;
+  const subject = site.aggregated
+    ? 'a numeric aggregated column'
+    : `a declared ${site.returnType === undefined ? `${site.declaredType} field` : `${site.declaredType} field returning ${site.returnType}`}`;
+  const clause = FORM_SENTENCE[site.form];
+  const sentence = typeof clause === 'function' ? clause(site.boundByDriver ?? true) : clause;
   return (
-    `${context ? `${context}: ` : ''}filter on '${site.field}' compares a declared ${declared} against `
-    + `${comparandPreview(site.value)} at ${site.path}, which is not a number: ${FORM_SENTENCE[site.form]}`
+    `${context ? `${context}: ` : ''}filter on '${site.field}' compares ${subject} against `
+    + `${comparandPreview(site.value)} at ${site.path}, which is not a number: ${sentence}`
     + NUMBER_COMPARAND_REFUSAL_TAIL
   );
 }
