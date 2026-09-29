@@ -463,7 +463,7 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (#13031). **Live window**: the protocol-15 loader accepts the deprecated
+ * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
@@ -2095,8 +2095,8 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  *
  * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
  * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
- * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
- * lossless delete or a rename — read that card, because the flag does not mean
+ * (ADR-0087's 2026-09-13 addendum names all three). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that addendum, because the flag does not mean
  * what its name and every docblock around it say it means.
  */
 
@@ -3368,7 +3368,7 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // `mongodb` since commit e2798fab7 — the canonical id was renamed from `mongo` so the
   // contract canon matches what both boot hosts, the driver package and every
   // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
   // returns, so a stored `driver: 'mongo'` still lands here through the alias.
@@ -3473,14 +3473,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
  *
  * ## Why a stored value has to move at all
  *
  * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
  * still are — this conversion does NOT rescue a broken boot, and a deployment
  * that never runs it keeps connecting exactly as before. What moved is the
- * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
  * its config contract are one string with no mapping layer between them.
@@ -7341,12 +7341,12 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
 
 /**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
- * key retired with its only declarer (protocol 18, #10926, ADR-0049).
+ * key retired with its only declarer (protocol 18, commit d173125fb, ADR-0049).
  *
  * The face is measured, not mirrored: each copy key exists because some
  * component in `ComponentPropsMap` declares it, and `submitLabel`'s only
  * declarer was `element:form` — retired whole by #9249 (`element-form-removed`
- * above). The maintainer ruled retire over re-anchor (#10926): the live form
+ * above). The maintainer ruled retire over re-anchor (2026-08-22, landed as commit d173125fb): the live form
  * surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`),
  * localizable at its own authoring site, so re-anchoring would have widened
  * the face for one word. The key, its `submit` alias and its
@@ -8243,7 +8243,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
 };
 
 /**
- * `mapping.fieldMapping[].params` lookup keys removed (#10329, ADR-0049
+ * `mapping.fieldMapping[].params` lookup keys removed (commit 15d58dbf1, ADR-0049
  * enforce-or-remove — the sub-walk half of the 17.0.0 #4509 mapping cleanup).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
@@ -8253,7 +8253,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
  * `import-coerce.ts` off the TARGET FIELD's own metadata — never off these
  * keys. Implementing them (a second reference-resolution dialect on the import
  * path) is what the code comment in `packages/rest/src/import-mapping.ts`
- * declines to build, and the #10329 triage ruling confirms that posture.
+ * declines to build, and the triage ruling commit 15d58dbf1 landed confirms that posture.
  *
  * `autoCreate` was the one with teeth: it read as "create the referenced
  * record when nothing matches", and nothing was ever created — with or without
@@ -8933,7 +8933,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
 };
 
 /**
- * [#12868] The per-option `default` key leaves the FORM-VIEW options
+ * [commit c459da6bc] The per-option `default` key leaves the FORM-VIEW options
  * vocabulary (protocol 18; maintainer-ruled narrowing 2026-08-28 on the
  * objectui#6263 analysis, disposition 甲).
  *
@@ -8951,7 +8951,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
  *
  * Walks the same payloads as `view-visibleOn-to-visibleWhen` — every FORM
  * payload {@link mapViewPayloads} reaches, in all three persisted spellings
- * (#13031) — through `sections[]`/`groups[]` and top-level
+ * (commit b799ac553) — through `sections[]`/`groups[]` and top-level
  * `fields[]`, recursing into nested `fields` (composite/repeater/record rows
  * carry their own option lists). Only the exact key `default` is stripped —
  * the alias spellings `isDefault`/`selected` were never accepted on this
@@ -9242,7 +9242,7 @@ const fieldReferenceToAlias: MetadataConversion = {
 };
 
 /**
- * `connector.errorMapping` removed (protocol 18, #14676 — ADR-0049
+ * `connector.errorMapping` removed (protocol 18, commit 13c48c2a5 — ADR-0049
  * enforce-or-remove; triage ruling 2026-09-02, route: removal via the
  * `spec-property-retirement` playbook; the split condition — a downstream
  * consumer in objectui or a customer stack — measured empty at objectui
