@@ -590,7 +590,7 @@
       "negative": [
         "an unreachable receiver must surface as failed/dead sys_http_delivery rows (and retry per the outbox schedule) — a dropped delivery with no durable trace is a FAIL",
         "a stored row whose triggers contain an unknown value must be dropped LOUDLY by the dispatcher (the #3196 drift-guard warn: 'dead while looking armed in Setup') — silent armed-looking deadness is a FAIL",
-        "connector-attached `webhooks`/`triggers` (integration/connector.zod.ts) are NOT dispatched by anything (#3197, said in-schema) — a run must not tick them as live, and a delivery appearing from one would be a spec-contract FAIL"
+        "connector-attached `webhooks`/`triggers` (integration/connector.zod.ts) are RETIRED `retiredKey()` tombstones (ADR-0049) — nothing ever dispatched either, and the parse now refuses both with a prescription; a connector entry carrying one must fail publish, never be accepted and ticked as live, and a delivery or flow run appearing from one would be a spec-contract FAIL"
       ],
       "traps": [
         "seed-data-thin",
