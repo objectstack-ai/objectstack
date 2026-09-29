@@ -1,4 +1,4 @@
-// #11992 — `ActionParamSchema.carryOver`, the #11753 ruling's spec half
+// #11992 — `ActionParamSchema.carryOver` (commit 0e4e51b0a), the carry-over ruling's spec half
 // (maintainer 2026-08-25, recommendation A): a declared carry-over param is
 // seeded from the row, rendered as a NON-EDITABLE summary, and submitted
 // VERBATIM. These pins hold the ruled shape: the accept set (key + parsed
@@ -9,8 +9,8 @@
 //
 // Measured constraint restated from the parent card, because it is the reason
 // the key exists at all: `visible: false` is NOT this contract — it omits the
-// param from the dialog AND from the submission, which is the #11703
-// silent-drop shape. `carryOver` must keep the param in the submission.
+// param from the dialog AND from the submission, which is the silent-drop
+// shape commit 5cb62d88b fixed. `carryOver` must keep the param in the submission.
 import { describe, it, expect } from 'vitest';
 import { ActionParamSchema } from './action.zod';
 

@@ -63,7 +63,7 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
   default: 'defaultValue',
   // The words an author borrows from `FieldSchema` (`readonly`) or widget
   // vocabulary (`disabled`) for "the user must not edit this". On a param the
-  // declared contract is `carryOver` (#11753): non-editable AND still
+  // declared contract is `carryOver` (commit 0e4e51b0a): non-editable AND still
   // submitted verbatim — which is the half `readonly`'s field semantics
   // (write-path strip) would get exactly wrong here.
   readonly: 'carryOver',
@@ -387,7 +387,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    */
   defaultFromRow: z.boolean().optional().meta({ title: 'Default From Row' }),
   /**
-   * Carry-over declaration (#11753 ruling, 2026-08-25): the param's value is
+   * Carry-over declaration (maintainer ruling 2026-08-25, commit 0e4e51b0a): the param's value is
    * carried through the dialog rather than collected from the user — seeded
    * from the current row (`defaultFromRow` is required alongside), rendered as
    * a NON-EDITABLE summary, and submitted VERBATIM in the request body.
@@ -395,9 +395,9 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * The knob exists because neither neighbour expresses this contract:
    *
    * - `visible: false` omits the param from the dialog AND from the submission
-   *   — measured on #11753; a clone action that hid its facet params this way
-   *   would silently stop copying them, which is exactly the #11703 defect
-   *   shape.
+   *   — the measurement commit 0e4e51b0a records; a clone action that hid its facet params this way
+   *   would silently stop copying them, which is exactly the defect shape
+   *   commit 5cb62d88b fixed in `clone_permission_set`.
    * - Leaving the param editable invites the failure the ruling names: the
    *   clone dialog offered `member_default`'s `row_level_security` — a JSON
    *   array of 17+ policy objects — as a prefilled textarea on the platform's
@@ -406,7 +406,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   (`PermissionSetSchema` validates shape, not intent).
    *
    * "Not editable" is expressed by contract and enforced by the renderer
-   * (maintainer ruling on #11753, recommendation A): objectui's
+   * (maintainer ruling 2026-08-25, recommendation A, commit 0e4e51b0a): objectui's
    * `ActionParamDialog` renders a declared carry-over as a read-only summary
    * while keeping the seeded value in its submit state, so what is declared is
    * what is sent. Requiring `defaultFromRow: true` is the declared = enforced
@@ -457,7 +457,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   // A carry-over param must have its row seed declared. The pair is checked at
   // parse time because the failure it prevents is silent at runtime: a
   // `carryOver: true` param with no `defaultFromRow` would render an empty
-  // read-only control and submit `undefined` — the #11703 silent-drop shape,
+  // read-only control and submit `undefined` — the silent-drop shape commit 5cb62d88b fixed,
   // reintroduced through the very key added to close it.
   (p) => !p.carryOver || p.defaultFromRow === true,
   {
@@ -816,7 +816,7 @@ export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
  * | `string` | `disabled: "record.status == 'closed'"` | CEL shorthand, normalized to the envelope at parse time |
  * | `{ dialect, source }` | `{ dialect: 'cel', source: '…', meta: { rationale } }` | the full envelope, for authorship metadata or a non-default dialect |
  *
- * The two keys were asymmetric until #5970 — `visible` had no `boolean` arm, so
+ * The two keys were asymmetric until commit 97e7e3caa — `visible` had no `boolean` arm, so
  * the very common `visible: true` was a parse error on the spec side while
  * objectui's `ActionDef` accepted it and stored metadata was already written
  * that way. An asymmetry between two keys that mean the same *kind* of thing is

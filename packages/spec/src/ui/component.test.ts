@@ -305,7 +305,7 @@ describe('PageAccordionProps variant (#6776)', () => {
 // declares `of: 'object'`, carries a longer description and no `label` —
 // while the member list this pin cites stayed unchanged.) Identity preserves a
 // wrong anchor as faithfully as a right one, which is why neither was carried
-// (#10274).
+// (commit d1ba685ec).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -379,7 +379,7 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
   });
 });
 
-// #9972 — the accept-pin for `page:tabs` items[].icon, the exact sibling of the
+// Commit 60e0f900a — the accept-pin for `page:tabs` items[].icon, the exact sibling of the
 // #9881 accordion key: same file, same renderer, same `LazyIcon` slot, and the
 // same bare declaration a liveness sweep reads as declared-but-unenforced.
 // objectui's `PageTabsRenderer` renders `{item.icon && <LazyIcon
@@ -402,7 +402,7 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // the same. (The hop before, off `53ded82bf`, moved them from
 // `730-736` and `789` and rewrote the input LINE — `of: 'object'`, a longer
 // description, no `label` — while the member list this pin cites stayed
-// unchanged.) Never inferred (#10274).
+// unchanged.) Never inferred (commit d1ba685ec).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -2123,7 +2123,7 @@ describe('Interactive Elements — element:record_picker', () => {
       .toThrow(/`targetVariable`.*removed.*Delete the key/s);
   });
 
-  // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
+  // ── commit 78f0be872 — the flat `sort` / `limit` shorthands ──────────────
   // The renderer resolves four keys through one pattern
   // (`ds.<k> ?? props.<k>`); after #5775 two of the four flat spellings were
   // declared and two were not. These pin the other two, in BOTH halves of what
@@ -2333,7 +2333,7 @@ describe('the seven `object-*` `filter` doors — one filter orthography platfor
     // hand it verbatim to `$filter`, where `convertQueryParams` lowers it; the
     // metric's aggregate path lowers it through `translateFilterArray` and
     // `parseFilterAST` before `POST /analytics/query` (objectui#7754 — the
-    // door the family was sequenced behind, #15828 / #16626). Re-measured at
+    // door the family was sequenced behind, #15828 / the pin bump commit 30b099078). Re-measured at
     // the same pin for the three #18305 doors: `ObjectMap.tsx:742`,
     // `ObjectGantt.tsx:738` and `ObjectTree.tsx:474` each hand `schema.filter`
     // verbatim to `$filter`, the kanban/calendar shape.
@@ -2722,8 +2722,8 @@ describe('RecordActivityProps (enhanced)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // `types` is an OPEN vocabulary (#11658, executing the 2026-08-24 maintainer
-  // ruling on #11507: `sys_activity.type` is author-extensible, and "every
+  // `types` is an OPEN vocabulary (commit 1a6a19c31, executing the 2026-08-24 maintainer
+  // ruling commit 88b9d749a declared: `sys_activity.type` is author-extensible, and "every
   // closed map over this vocabulary is now the bug"). The closed-enum pin that
   // used to live here ("should reject invalid feed item type",
   // `types: ['invalid_type']` throwing) pinned exactly the branch the ruling
@@ -3562,7 +3562,7 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // the `page:header` `icon` retired in #6946 *because nothing reads it*, so the
 // prose could not separate a live key from a refused one — the same absence
 // that sent #9397 on a full dispatch cycle re-deriving the accordion read point.
-// #9881 and #9972 recorded the accordion and tab items; these two close the set.
+// #9881 and commit 60e0f900a recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
 // `.objectui-sha` = `dd3f7e1be`, re-derived there 2026-09-28: `button.tsx` and
@@ -3588,7 +3588,7 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // the hop onto `62597c588`. The hop before that,
 // onto `87af769e9` (re-derived 2026-09-20), moved both files in this chain —
 // `resolve-icon.ts` +203/-7 and `button.tsx` +6/-11 against `53ded82bf` — so
-// no anchor below was carried there and every one was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
+// no anchor below was carried there and every one was re-READ (commit d1ba685ec). ⚠️ `resolveIcon` itself was rewritten: its tail no
 // longer indexes `lucide-react`'s `icons` record, it asks `recordIconName`
 // for the kebab-case name and hands the pair to `lazyIconComponent`, so the
 // glyph arrives lazily. What an author may write did not change with it. The
@@ -3600,7 +3600,7 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // splits on hyphen, underscore AND whitespace (`/[-_\s]+/`), where this record
 // used to say "splits on `-` only". That sentence was true when written and
 // was false by then, which is exactly why a citation refresh re-READS instead
-// of moving numbers (#10274).
+// of moving numbers (commit d1ba685ec).
 // The one move that changed the button READ POINT and not merely its line
 // numbers was the one onto `9602dc820`: objectui#5993 deleted `button.tsx`'s
 // file-local `toPascalCase` + `iconNameMap` + `icons` index and routed the
@@ -3609,7 +3609,7 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // What an author sees did not move with it: an unknown name still resolves to
 // `null` and draws nothing, which is still the `LazyIcon` contrast the third
 // test below pins. The moves before that were line-number drift only — #10137
-// moved the pin while #9881/#9972 still cited `82a94170c`, #10274 re-measured
+// moved the pin while the #9881 / commit 60e0f900a records still cited `82a94170c`, commit d1ba685ec re-measured
 // those four onto `9a3daf8d3`, and `button.tsx` was byte-identical at
 // `9a3daf8d3` and `190fbd01d`.
 describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
