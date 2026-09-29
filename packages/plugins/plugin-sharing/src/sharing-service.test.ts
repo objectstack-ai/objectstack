@@ -1167,7 +1167,7 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
 // [#5859 / #5852] The hierarchy resolver's tenancy authority.
 //
 // `HierarchyScopeContext.organizationId` is the AUTHORITATIVE tenancy field
-// (#5858 / PR #5973) and the only one an enterprise resolver scopes its owner
+// (#5858 / commit abeb3751f) and the only one an enterprise resolver scopes its owner
 // query by. This producer used to fill it from `(context as any).organizationId`
 // — a key NO transport ever sets — so every resolver ran unscoped and the whole
 // DEPTH tenant isolation was inert: in #5852 an ordinary member of org_a
@@ -1788,7 +1788,7 @@ describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// [#14484] Every sys_record_share write carries organization_id
+// [commit 3f64fe6c6] Every sys_record_share write carries organization_id
 // ─────────────────────────────────────────────────────────────────────
 //
 // Ruled 2026-09-02 (decision batch #11 item 3, A adopted): a rule-materialised

@@ -10,7 +10,7 @@ import type {
   ShareLinkAudience,
 } from '@objectstack/spec/contracts';
 /**
- * [#6206 / #6430 — maintainer ruling A] Every method here that adjudicates
+ * [commit 8e13ca876 / #6430 — maintainer ruling A] Every method here that adjudicates
  * access takes the FULL envelope. The route-local `ShareLinkExecutionContext`
  * is the HTTP layer's 401 vocabulary and is deliberately not named in this
  * file: the contexts this file receives are forwarded into `engine.find`, where
@@ -259,7 +259,7 @@ async function defaultVerifyPassword(password: string, hash: string): Promise<bo
  * verdict is about THIS record (it does not qualify yet), while an unevaluable
  * predicate is broken for every record of the object until its author fixes it.
  *
- * ## [#13608] Both seams call THIS function
+ * ## [commit fc9ba76a5] Both seams call THIS function
  *
  * `createLink` calls it to refuse the MINT; `resolveToken` calls it again
  * before SERVING, through `stillEligible`. One implementation, so the two
@@ -372,7 +372,7 @@ export interface ShareLinkServiceOptions {
    * creator. Absent → only the creator (and system) may revoke, the pre-D8
    * behaviour, so a deployment without the sharing service degrades safely.
    *
-   * [#6206] An ENFORCEMENT probe — it decides a 403, and resolves ownership /
+   * [commit 8e13ca876] An ENFORCEMENT probe — it decides a 403, and resolves ownership /
    * hierarchy scope under the context it is given — so it receives the caller's
    * COMPLETE envelope, exactly like the visibility read in `createLink`.
    */
@@ -493,7 +493,7 @@ export class ShareLinkService implements IShareLinkService {
     // publicSharing-enabled object it cannot see. Internal (isSystem) callers
     // read under the system context as before.
     //
-    // [#6206] `context` is passed through UNCHANGED — it is the caller's whole
+    // [commit 8e13ca876] `context` is passed through UNCHANGED — it is the caller's whole
     // resolved envelope and every dimension of it is an input to this read:
     // Layer 0 reads `accessible_org_ids` under the `group` posture (ADR-0105
     // D2, where an absent set denies), Layer 1 reads positions / permissions /
@@ -653,7 +653,7 @@ export class ShareLinkService implements IShareLinkService {
       if (!ok) return null;
     }
 
-    // [#13608] The object's policy is read HERE, before the record probe,
+    // [commit fc9ba76a5] The object's policy is read HERE, before the record probe,
     // because it decides that probe's projection. `redactFields` is still
     // computed from it below, unchanged.
     const schema = this.engine.getSchema?.(row.object_name);
@@ -674,7 +674,7 @@ export class ShareLinkService implements IShareLinkService {
     // serving the record in full after the block was turned off. The
     // maintainer ruled (2026-09-01, on #14033) that the switch is a standing
     // policy: re-read on every redemption, a block that is off stops every
-    // existing token on it — retroactively, on deploy, as #13608 was — and
+    // existing token on it — retroactively, on deploy, as commit fc9ba76a5 was — and
     // re-enabling the block restores them. Not a revocation: no row moves.
     //
     // ## What the gate does NOT ask
@@ -738,7 +738,7 @@ export class ShareLinkService implements IShareLinkService {
     // no query) and BEFORE the usage stamp, so a dead record never bumps
     // `use_count` / `last_used_at` either.
     //
-    // [#13608] It is ONE read either way: when the object declares an
+    // [commit fc9ba76a5] It is ONE read either way: when the object declares an
     // eligibility predicate the projection widens from `['id']` to the whole
     // row instead of a second query being issued — the same shape, for the
     // same reason, as the widening in `createLink`.
@@ -749,7 +749,7 @@ export class ShareLinkService implements IShareLinkService {
     );
     if (!record) return null;
 
-    // [#13608] Re-evaluate `publicSharing.eligibility` BEFORE serving.
+    // [commit fc9ba76a5] Re-evaluate `publicSharing.eligibility` BEFORE serving.
     //
     // ## Why a mint-time gate was not enough
     //
@@ -838,7 +838,7 @@ export class ShareLinkService implements IShareLinkService {
    * other request under flapping storage, i.e. the per-request flood again.
    * Later refusals are silent BY DESIGN, and the one line says so.
    *
-   * ## The sink, and why `error` is reachable here (#13398 class ruling)
+   * ## The sink, and why `error` is reachable here (published-sink level ruling, commit 953a81f4a)
    *
    * `ShareLinkServiceOptions['logger']` is the `{ info?, warn, error? }` shape
    * — `error` optional, `warn` required and guaranteed (#9754 / #10556) — the
@@ -871,7 +871,7 @@ export class ShareLinkService implements IShareLinkService {
   }
 
   /**
-   * [#5190 / #13608] Read the shared record at redemption time: the existence
+   * [#5190 / commit fc9ba76a5] Read the shared record at redemption time: the existence
    * probe, and — when the object declares an eligibility predicate — the row
    * that predicate is judged on. `null` means "do not serve".
    *
@@ -887,7 +887,7 @@ export class ShareLinkService implements IShareLinkService {
    * fails — and for the same principle. Neither acts on an unanswered question;
    * for a grant the safe direction is "deny", for a deletion it is "keep".
    *
-   * [#13608] `withRecord` widens the projection from `['id']` to the whole row
+   * [commit fc9ba76a5] `withRecord` widens the projection from `['id']` to the whole row
    * rather than issuing a second query, and it widens ONLY when a predicate is
    * there to read it: an object with no `eligibility` key keeps the exact
    * `id`-only probe it has always had.
@@ -913,7 +913,7 @@ export class ShareLinkService implements IShareLinkService {
   }
 
   /**
-   * [#13608] The redemption half of the eligibility gate.
+   * [commit fc9ba76a5] The redemption half of the eligibility gate.
    *
    * ## It is the MINT gate, called again
    *

@@ -60,7 +60,7 @@ export interface ShareLinkRoutesOptions {
    * trusted `x-user-id` / `x-tenant-id`, which let a client forge attribution
    * and enumerate/revoke other users' links.
    *
-   * [#6206 / #6430] It returns the FULL {@link ExecutionContext} — the whole
+   * [commit 8e13ca876 / #6430] It returns the FULL {@link ExecutionContext} — the whole
    * `resolveAuthzContext` envelope — because this module forwards it unchanged
    * into `createLink` / `listLinks` / `revokeLink`, every one of which
    * ADJUDICATES access. A resolver that rebuilds a subset here silently changes
@@ -78,7 +78,7 @@ export interface ShareLinkRoutesOptions {
 const defaultContext = (_req: IHttpRequest): ExecutionContext => ({});
 
 /**
- * [#6206] The routes' own 401 gate — authenticated vs anonymous, and nothing
+ * [commit 8e13ca876, full-envelope ruling] The routes' own 401 gate — authenticated vs anonymous, and nothing
  * more.
  *
  * Typed to {@link ShareLinkExecutionContext} deliberately: that is the shape

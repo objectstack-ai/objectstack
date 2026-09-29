@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14484] Every `sys_record_share` row carries `organization_id` — on a REAL
+ * [commit 3f64fe6c6] Every `sys_record_share` row carries `organization_id` — on a REAL
  * engine over a REAL driver, both write paths, plus the backfill and the
  * engine rule the ledger flip switches on.
  *
