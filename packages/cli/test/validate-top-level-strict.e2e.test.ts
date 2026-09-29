@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -38,7 +39,9 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** The card's failure shape: a valid stack plus ONE stray top-level key. */
 const CONFIG_WITH_STRAY_KEY = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.straykey', name: 'straykey', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'sk_ticket',
@@ -48,11 +51,13 @@ export default {
   }],
   // One character off 'flows' — the family-dropping typo the card measured.
   flow: [],
-};
+}, { strict: false });
 `;
 
 const CONFIG_CLEAN = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.straykey', name: 'straykey', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'sk_ticket',
@@ -61,7 +66,7 @@ export default {
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   flows: [],
-};
+}, { strict: false });
 `;
 
 interface Run {
@@ -93,8 +98,10 @@ let cleanDir: string;
 beforeAll(() => {
   strayDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-e2e-stray-'));
   writeFileSync(join(strayDir, 'objectstack.config.ts'), CONFIG_WITH_STRAY_KEY);
+  linkSpec(strayDir);
   cleanDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-e2e-clean-'));
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CONFIG_CLEAN);
+  linkSpec(cleanDir);
 });
 
 afterAll(() => {

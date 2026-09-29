@@ -605,7 +605,16 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `field :: accept | currencyConfig | dependsOn | lookupColumns |
     // lookupFilters | relatedListColumns`, plus `action :: patch` and
     // `action :: bodyExtra`. The other eight rows carry no predicate.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(81);
+    // It is 82 today, an ADDITION of ONE: #19332 (flight G2b) gave four live
+    // structured keys a form row each, and one of them carries a meaningfulness
+    // gate — the field form's `inlineColumns` repeater, read only on a
+    // `master_detail` field, like its `inlineTitle` / `inlineAmountField`
+    // siblings. Measured, not inferred: the shipped corpus was differenced
+    // against the merge base `e956924e` by `<form>::<field>::<source>`,
+    // 81 → 82, `field :: inlineColumns :: data.type == 'master_detail'` added
+    // and NONE removed. The other three rows and all their sub-rows carry no
+    // predicate.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(82);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -701,7 +710,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type == 'currency'`, `action :: patch` on
     // `data.operation == 'update'`, `action :: bodyExtra` on
     // `data.type == 'api'`); the other five are `in`-list gates.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(56);
+    // It is 57 today: #19332 G2b's one new predicate, `field :: inlineColumns`
+    // on `data.type == 'master_detail'`, compares against a single-quoted
+    // literal.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(57);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

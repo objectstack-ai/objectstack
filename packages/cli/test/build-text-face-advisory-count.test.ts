@@ -82,6 +82,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run {
   code: number;
@@ -196,7 +197,9 @@ const ordersViews = [
   },
 ];
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: coreManifest,
   objects: [...ordersObjects, ...coreObjects],
   apps: [...coreApps],
@@ -205,7 +208,7 @@ export default {
     { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
-};
+}, { strict: false });
 `;
 
 /**
@@ -215,7 +218,9 @@ export default {
  * through the defect.
  */
 const CONFIG_SINGLE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: {
     id: 'com.example.bcsingle', name: 'bcsingle', namespace: 'bs',
     version: '1.0.0', type: 'app', engines: { protocol: '^17' },
@@ -231,7 +236,7 @@ export default {
     name: 'bs_app', label: 'BS App',
     navigation: [{ id: 'nav_things', type: 'object', objectName: 'bs_thing', label: 'Things' }],
   }],
-};
+}, { strict: false });
 `;
 
 const dirs = { multi: '', single: '' };
@@ -240,6 +245,7 @@ function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-bcount-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, 'objectstack.config.ts'), config, 'utf8');
+  linkSpec(dir);
   writeFileSync(
     join(dir, 'package.json'),
     JSON.stringify({ name: 'bcount-fixture', private: true, type: 'module' }, null, 2),

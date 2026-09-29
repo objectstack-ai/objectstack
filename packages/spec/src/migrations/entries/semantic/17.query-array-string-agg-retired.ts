@@ -21,10 +21,11 @@ export const entry: SemanticMigration = {
     + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
     + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
     + 'that worked on one backend and failed on another is exactly the unpredictability the '
-    + 'ruling ended, and #5499 had both of those backends frozen at the time (that freeze '
+    + 'ruling ended, and the maintainer\'s 2026-08-05 investment freeze on driver-memory and '
+    + 'driver-mongodb had both of those backends frozen at the time (that freeze '
     + 'was lifted on 2026-08-11). `count_distinct` was '
     + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
-    + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
+    + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049.',
   acceptanceCriteria:
     'No caller sends `array_agg` or `string_agg` in `aggregations[].function`; list-style '
     + 'roll-ups are assembled by the caller from an ordinary `fields` query, or materialised '

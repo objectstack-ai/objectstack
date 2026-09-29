@@ -15,11 +15,18 @@
  * (`Object.is`), so for a number what the arm judged is what the driver
  * receives. Memory and MongoDB store exactly this payload. The SQL physical
  * column is pinned in `packages/rest/src/rest-data-number-value.test.ts`.
- * A string is not judged differently here: that half waits on #20336.
+ *
+ * The string half (#20309, second part): a string the spec's numeric grammar
+ * reads (`parseNumericString`) reaches the driver as the NUMBER it denotes on
+ * every door, and every stage between the door and the driver (a `before*`
+ * hook, the dry run) sees that number. Measured on `origin/main` 851af0c27
+ * before it: memory stored `'12'` as the string `'12'` and read it back as a
+ * string, and `'0x10'` / `' 12 '` / `'+5'` were accepted and stored as sent. A
+ * string the grammar does not read is refused and never reaches the driver.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { COMPUTED_VALUE_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { COMPUTED_VALUE_TYPES, NUMERIC_STRING_GRAMMAR_CASES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { ValidationError } from './validation/record-validator.js';
 
@@ -153,5 +160,82 @@ describe('engine write doors: the number arm judges what the driver receives (#2
         for (const g of got) expect(Object.is(g, v), `${type} ${v}`).toBe(true);
       }
     }
+  });
+});
+
+/** The spec grammar's own verdicts (#20336): admitted strings with their number, and refused non-blank strings. */
+const ADMITTED = NUMERIC_STRING_GRAMMAR_CASES.flatMap((c) => (c.numeric ? [[JSON.stringify(c.input), c.input, c.value] as const] : []));
+const REFUSED_STRINGS = NUMERIC_STRING_GRAMMAR_CASES.flatMap((c) => (!c.numeric && c.form !== 'empty' ? [[JSON.stringify(c.input), c.input] as const] : []));
+
+describe('engine write doors: a numeric string reaches the driver as its number (#20309, the string half)', () => {
+  let engine: ObjectQL;
+  let stub: ReturnType<typeof makeStubDriver>;
+
+  beforeEach(async () => {
+    stub = makeStubDriver();
+    engine = new ObjectQL();
+    engine.registerDriver(stub.driver, true);
+    await engine.init();
+    engine.registry.registerObject(OBJ as any);
+  });
+
+  const written = (field: string) =>
+    stub.calls.flatMap((c) => c.rows).filter((r) => field in r).map((r) => r[field]);
+
+  it('CONTROL: the grammar table has both halves', () => {
+    expect(ADMITTED.length).toBeGreaterThanOrEqual(10);
+    expect(REFUSED_STRINGS.length).toBeGreaterThanOrEqual(20);
+  });
+
+  describe.each(JUDGED)('%s', (type) => {
+    it.each(ADMITTED)('%s arrives as the number on insert, insert([...]), insertMany, update by id and update by predicate', async (_l, input, value) => {
+      await engine.insert('num_door', { id: 'seed', [f(type)]: 1 });
+      stub.calls.length = 0;
+      const caller = { id: 'a', [f(type)]: input };
+      await engine.insert('num_door', caller);
+      await engine.insert('num_door', [{ id: 'b', [f(type)]: input }]);
+      const outcomes = await engine.insertMany('num_door', [{ id: 'm', [f(type)]: input }]);
+      expect(outcomes.map((o) => o.ok)).toEqual([true]);
+      await engine.update('num_door', { id: 'seed', [f(type)]: input });
+      await engine.update('num_door', { [f(type)]: input }, { where: { id: { $in: ['seed'] } }, multi: true } as any);
+
+      const got = written(f(type));
+      expect(got).toHaveLength(5);
+      for (const g of got) expect(Object.is(g, value), `${JSON.stringify(input)} -> ${String(g)}`).toBe(true);
+      // The rewrite is copy-on-write: the caller's object still holds its string.
+      expect(caller[f(type)]).toBe(input);
+    });
+
+    it.each(REFUSED_STRINGS)('%s is refused on every door and never reaches the driver', async (_l, input) => {
+      await engine.insert('num_door', { id: 'seed', [f(type)]: 1 });
+      stub.calls.length = 0;
+      const expected = { code: 'VALIDATION_FAILED', fields: [[f(type), 'invalid_number']] };
+
+      expect(await refusal(() => engine.insert('num_door', { id: 'a', [f(type)]: input }))).toEqual(expected);
+      expect(await refusal(() => engine.insert('num_door', [{ id: 'b', [f(type)]: input }]))).toEqual(expected);
+      expect(await refusal(() => engine.update('num_door', { id: 'seed', [f(type)]: input }))).toEqual(expected);
+      expect(await refusal(() => engine.update('num_door', { [f(type)]: input }, { where: { id: { $in: ['seed'] } }, multi: true } as any))).toEqual(expected);
+      const outcomes = await engine.insertMany('num_door', [{ id: 'm', [f(type)]: input }]);
+      expect(outcomes.map((o) => o.ok)).toEqual([false]);
+
+      expect(written(f(type))).toEqual([]);
+    });
+  });
+
+  it('a before-hook sees the number, on insert and on update: every stage after the door reads one image', async () => {
+    const seen: Array<[string, unknown]> = [];
+    engine.registerHook('beforeInsert', async (ctx: any) => { seen.push(['insert', ctx.input.data.f_number]); }, { object: 'num_door' });
+    engine.registerHook('beforeUpdate', async (ctx: any) => { seen.push(['update', ctx.input.data.f_number]); }, { object: 'num_door' });
+    await engine.insert('num_door', { id: 'h1', f_number: '12.5' });
+    await engine.update('num_door', { id: 'h1', f_number: '-3' });
+    expect(seen).toEqual([['insert', 12.5], ['update', -3]]);
+  });
+
+  it('the dry run agrees with the write on a string', async () => {
+    const refused = await engine.validate('num_door', { id: 'p1', f_number: '0x10' });
+    expect(refused.valid).toBe(false);
+    expect(refused.results?.[0]?.errors.map((e: any) => [e.field, e.code])).toEqual([['f_number', 'invalid_number']]);
+    expect((await engine.validate('num_door', { id: 'p2', f_number: '12' })).valid).toBe(true);
+    expect((await engine.validate('num_door', { id: 'p3', f_number: ' 12 ' })).valid).toBe(false);
   });
 });

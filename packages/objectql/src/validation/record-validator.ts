@@ -26,9 +26,11 @@
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
  *  - number types   an array, boolean or object is `invalid_number`, never
- *                   coerced (#20309); a number, or a string by `Number()`,
- *                   must be finite
- *  - `min` / `max`                        (number/currency/percent/rating/slider)
+ *                   coerced (#20309); a number must be finite, and a string
+ *                   must be one the spec's numeric grammar reads
+ *                   (`parseNumericString`) — stored as that number
+ *  - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
+ *                   since #20386; it takes neither `scale` nor `precision`)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
  *                   maintainer ruling 2026-08-11), on `number` / `percent` /
@@ -52,7 +54,10 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
- *  - date / datetime: must be ISO-parsable
+ *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999;
+ *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481);
+ *                   a string's leading day exists, and a `datetime` string is
+ *                   an ISO 8601 spelling (#20525) — refused, never rolled over
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -80,8 +85,10 @@ import {
   COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
+  parseNumericString,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isOutsideTemporalYearRange, isUninterpretableTemporalComparand } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -658,6 +665,96 @@ function normalizeBlankTypedRow(fields: Record<string, FieldDef>, row: unknown):
 }
 
 /**
+ * [#20309] The declared types the record validator's number arm judges: the
+ * spec's numeric class minus its server-computed class, both read as constants.
+ * One predicate for the arm and for {@link normalizeNumericStringValues}, so
+ * what is judged and what is rewritten cannot drift apart.
+ */
+function isJudgedNumberType(type: string): boolean {
+  return NUMERIC_VALUE_TYPES.has(type) && !COMPUTED_VALUE_TYPES.has(type);
+}
+
+/**
+ * [#20309] A STRING on a number-typed field that the platform's numeric grammar
+ * reads is written as the NUMBER it denotes — so what the record validator's
+ * number arm judges is what the driver stores.
+ *
+ * The grammar is the spec's one, `parseNumericString` (`@objectstack/spec/data`,
+ * #20336): a JSON number literal naming a finite double. The filter door
+ * narrows a comparand by the same reading. ⛔ No second grammar here: its case
+ * table (`NUMERIC_STRING_GRAMMAR_CASES`) decides hex, padded, exponent and
+ * every other form, and this function pre-decides none of them.
+ *
+ * "Number-typed" is exactly what the arm judges ({@link isJudgedNumberType}),
+ * on exactly the fields `validateRecord` walks: never a `SKIP_FIELDS` name, a
+ * `system` or a `readonly` field. A value nobody judges is not rewritten.
+ *
+ * ## Why the door has to say it
+ *
+ * The arm judged `Number(value)` while the write carried `value`, so an
+ * accepted string reached the driver as sent: memory stored `'12'` and read it
+ * back as the string `'12'`, while SQLite's column affinity stored the plain
+ * forms as numbers but kept `'0x10'` as TEXT (read back as 16). One write, two
+ * stored shapes. A shipped producer sends numeric strings — objectui's CSV
+ * import legacy per-row fallback posts the raw cell — so the census answer on
+ * #20309 accepts the grammar's strings and stores their number rather than
+ * refusing every string.
+ *
+ * ## What it does NOT touch
+ *
+ * ⛔ A string the grammar does not read: it stays as sent, and the number arm
+ * refuses it with `invalid_number`. (A blank never reaches here as a string on
+ * these types: {@link normalizeBlankTypedValues} made it `null` first.) ⛔ Every
+ * non-string value, of any type. ⛔ `summary` and the other computed types,
+ * whose value's shape is their producer's (the seat ruling on #20308).
+ *
+ * ## Where it runs
+ *
+ * Beside {@link normalizeBlankTypedValues}, at the same three points of
+ * `ObjectQL` — `insert()`, `update()` and `validate()` (the dry run) — before
+ * anything reads the payload, so the middleware, the caller snapshots, the
+ * hooks, the `readonlyWhen` locks and the validator all see the number. Every
+ * REST, batch and import door reaches the engine through those methods. ⛔ No
+ * driver copy. A value a `before*` hook writes after the door is the hook's
+ * own and is not rewritten; the arm still judges it by the same grammar.
+ *
+ * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
+ * them, pure — the same reference comes back when nothing changed, else a
+ * shallow copy (per row, and a copied array).
+ */
+export function normalizeNumericStringValues<T>(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: T,
+): T {
+  const fields = objectSchema?.fields;
+  if (!fields || !data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    let rows: unknown[] | undefined;
+    for (let i = 0; i < data.length; i++) {
+      const row = normalizeNumericStringRow(fields, data[i]);
+      if (row !== data[i]) (rows ??= data.slice())[i] = row;
+    }
+    return (rows ?? data) as T;
+  }
+  return normalizeNumericStringRow(fields, data) as T;
+}
+
+function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknown): unknown {
+  if (!isPlainRecord(row)) return row;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(row)) {
+    if (typeof value !== 'string' || SKIP_FIELDS.has(name)) continue;
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+    if (!def || def.system || def.readonly || !isJudgedNumberType(def.type)) continue;
+    const n = parseNumericString(value);
+    if (n === undefined) continue;
+    (out ??= { ...row })[name] = n;
+  }
+  return out ?? row;
+}
+
+/**
  * Coerce `boolean`-typed fields from their SQL storage form (integer `0`/`1`,
  * or the strings `'0'`/`'1'`/`'true'`/`'false'`) into real JS booleans, on a
  * SHALLOW COPY of `row`. SQLite/libsql have no native boolean, so a driver
@@ -741,6 +838,62 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
 function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message: string }> }): string {
   const { issues } = error;
   return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
+}
+
+/**
+ * [#20525] The ISO 8601 spellings a `datetime` STRING is written in, after
+ * trimming — the ones the platform itself writes, each read the same on every
+ * host by the `datetime` storage rule (`@objectstack/core`'s
+ * `temporalStorageForm`):
+ *
+ * - `YYYY-MM-DD` — midnight UTC;
+ * - `YYYY-MM-DDTHH:MM[:SS[.f…]]`, then `Z`, a `±HH:MM` / `±HHMM` offset, or
+ *   nothing — a zone-naive wall clock is read AS UTC (ADR-0074);
+ * - `YYYY-MM-DD HH:MM[:SS[.f…]]`, zone-naive only — read AS UTC the same way.
+ *
+ * Every other spelling is refused. `Date.parse` reads `"2026/07/15 10:00"`,
+ * `"07/15/2026 10:00"` or `"15 July 2026 10:00"` in the SERVER PROCESS's zone
+ * and `"07/08/2026"` month-first, so the stored instant was a property of the
+ * deployment host; it reads `"2026"` as a year, which the storage rule then
+ * stores as 2026 epoch milliseconds (`1970-01-01T00:00:02.026Z`). A space
+ * separator carries no zone because the storage rule hands such a string to
+ * `Date.parse` whole, and its non-ISO reading moves `"0050-01-01 10:00+01:00"`
+ * to 1950. `T` and `Z` are upper case: a zone-naive `"…t10:00"` is not the
+ * form the storage rule reads as UTC.
+ */
+const ISO_DATETIME_WRITE_FORM =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?| \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/;
+
+/**
+ * [#20525] Does the string's leading `YYYY-MM-DD` name a calendar day that
+ * exists — month 01..12, day 01 to that month's length, February 29 only in a
+ * leap year? Arithmetic, never a `Date` round trip: `Date.UTC` reads a year
+ * 0..99 as 1900..1999, and `Date.parse` ROLLS an impossible day over
+ * (`"2026-02-30"` is March 2), which is the defect this answers. A string with
+ * no leading day answers `false`.
+ */
+function namesRealCalendarDay(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const length = month === 2 ? (leap ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+  return day <= length;
+}
+
+/**
+ * [#20525] Is a `date` / `datetime` STRING written in a form its storage rule
+ * stores as written? A real leading calendar day for both kinds, and for a
+ * `datetime` an {@link ISO_DATETIME_WRITE_FORM} spelling. A `date`'s other
+ * spelling question is the #20481 one, asked beside this.
+ */
+function writesAsIsoTemporal(value: string, kind: 'date' | 'datetime'): boolean {
+  const s = value.trim();
+  if (kind === 'datetime' && !ISO_DATETIME_WRITE_FORM.test(s)) return false;
+  return namesRealCalendarDay(s);
 }
 
 function validateOne(
@@ -929,32 +1082,47 @@ function validateOne(
   // to parse, so the arm refuses it and never silently alters it (the #7501
   // posture). A number is judged as itself and written as itself.
   //
-  // ⛔ A STRING is still judged by `Number()` and written as sent, exactly as
-  // before this change. Which strings a number field accepts is a separate
-  // decision: it waits on the producer census and on the platform's one
-  // numeric grammar, which belongs to `@objectstack/spec` (#20336), never to a
-  // second copy here.
-  if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
+  // [#20309] A STRING is judged by the platform's one numeric grammar,
+  // `parseNumericString` (`@objectstack/spec/data`, #20336), never by
+  // `Number()` and ⛔ never by a second grammar here. `Number()` also read a
+  // radix literal (`'0x10'`), a whitespace-padded one (`' 12 '`) and the
+  // non-JSON spellings `'+5'` / `'.5'` / `'5.'` / `'007'` as finite, so those
+  // were accepted and are now `invalid_number`; the grammar's case table
+  // decides every form. An admitted string is judged as the number it denotes,
+  // and `normalizeNumericStringValues` has already written that number into
+  // the payload at the door, so the driver stores what was judged. `min`,
+  // `max`, `scale` and `precision` below read that number, as they read a
+  // number.
+  if (isJudgedNumberType(t)) {
     if (typeof value !== 'number' && typeof value !== 'string') {
       return fail('invalid_number');
     }
-    const n = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(n)) {
+    const n = typeof value === 'number' ? value : parseNumericString(value);
+    if (n === undefined || !Number.isFinite(n)) {
       return fail('invalid_number');
     }
-    // [#20308] `progress` joined the TYPE check above, and only that. The
-    // bounds and `scale` below keep the five types they always read: `scale`'s
-    // own contract names the types it is enforced on (`number`, `percent`,
-    // `rating`, `slider`), and `min` / `max` on `progress` were never enforced;
-    // starting to enforce either would narrow what a caller may write, which is
-    // a separate decision from "a numeric column holds a number".
-    if (t === 'progress') return null;
+    // `min` / `max` bind on every type through this door, `progress` included.
+    // [#20386] `progress` joined the TYPE check above in #20308 and, with this
+    // change, the bounds: `FieldSchema.min` / `max` declare 「Checked on the
+    // WRITTEN value only」 with no type exclusion, and triage 5865053231 ruled
+    // ENFORCE — a `progress` field that declares `max: 100` stored `150` (and
+    // `min: 0` stored `-5`) with 201 on memory and SQLite while `number`
+    // refused both. It answers the `number` field's codes, `min_value` /
+    // `max_value`. A narrowing of what a caller may write, shipped BREAKING.
     if (def.min !== undefined && n < def.min) {
       return fail('min_value', { min: def.min });
     }
     if (def.max !== undefined && n > def.max) {
       return fail('max_value', { max: def.max });
     }
+    // ⛔ …and only the bounds. `scale` and `precision` below keep the five
+    // types they always read, because each key's own contract names them:
+    // `scale` 「Applies to `number`, `percent`, `rating` and `slider` fields」,
+    // `precision` 「Enforced on writes of `number`, `currency`, `percent`,
+    // `rating` and `slider` fields … Not read on any other field type」.
+    // Starting either on `progress` would narrow a write that no contract
+    // names, so this return stays below the bounds and above both.
+    if (t === 'progress') return null;
     // ── `scale` — enforced by REJECTION, never rounding (#7501) ──
     // Maintainer ruling 2026-08-11: an over-scale value is refused the way an
     // out-of-range one is; silent rounding is silently altering data. Applies
@@ -1102,8 +1270,50 @@ function validateOne(
 
   // ── date/datetime ───────────────────────────────────────────────
   if (t === 'date' || t === 'datetime') {
-    if (value instanceof Date) return null;
-    if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return null;
+    const readable = value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+    // [#20264] …and names a year from 0001 to 9999, the range the
+    // temporal-comparand door holds a comparand to — one function,
+    // `@objectstack/core`'s `isOutsideTemporalYearRange`, answers both doors.
+    // A date written as `+010000-01-01T00:00:00.000Z` has no leading
+    // `YYYY-MM-DD`, so the storage rule kept it verbatim (a stored non-day,
+    // 201 on memory and SQLite) and PostgreSQL refused it with a 500; year 0
+    // is a 500 on PostgreSQL on both kinds. Same code and words as any other
+    // value that is not a valid date.
+    //
+    // [#20481] …and a `date` STRING is one the `date` storage rule reads: a
+    // leading `YYYY-MM-DD` (after trimming), which `temporalStorageForm`
+    // collapses to that day. The rule hands every other string back unchanged,
+    // so `"2026/07/15"`, `"07/15/2026"`, `"15 July 2026"` or `"2026-7-15"` —
+    // each `Date.parse`-readable — was stored verbatim on memory and SQLite, a
+    // non-day that sorts and compares as text beside real days, while
+    // PostgreSQL read it by its `DateStyle` (`07/08/2026` is July 8 under
+    // MDY and August 7 under DMY). No other spelling is canonicalised, on
+    // purpose: `07/08/2026` names two days, and a guess stores the wrong one
+    // silently. The question is asked of `@objectstack/core`'s
+    // `isUninterpretableTemporalComparand` — the temporal-comparand door's
+    // reading of the same rule, never a second copy of it here — so every
+    // `date` string that door refuses as a comparand is refused as a written
+    // value too; the `Date.parse` check above still applies on top of it
+    // (`2026-13-45` has a leading day shape and no reading). Its two
+    // comparand-only exemptions never reach here: a blank is missing before
+    // this arm, and a `{placeholder}` is not `Date.parse`-readable. A `Date`
+    // is not a string and keeps its UTC calendar day; a `datetime` is
+    // untouched.
+    const readsAsDay =
+      t !== 'date' || typeof value !== 'string' || !isUninterpretableTemporalComparand('date', value);
+    // [#20525] …and a STRING names a calendar day that exists, for a `date`
+    // and for the day part of a `datetime`, and a `datetime` string is one of
+    // the ISO spellings `ISO_DATETIME_WRITE_FORM` names. `Date.parse` rolled
+    // an impossible day over (`"2026-02-30T10:00:00Z"` was stored as March 2
+    // on every backend) and a `date` kept it verbatim (`"2026-02-30"`, a day
+    // that does not exist, on memory and SQLite; a 500 on PostgreSQL); it read
+    // a non-ISO `datetime` in the server process's zone. Refused, never rolled
+    // over and never re-read: the same `invalid_date` wire code as every other
+    // value that is not a valid date, naming the field. A `Date` names a real
+    // instant and is not a string, so it keeps its answer; a number stays
+    // refused by `readable`.
+    const writtenAsIso = typeof value !== 'string' || writesAsIsoTemporal(value, t);
+    if (readable && readsAsDay && writtenAsIso && !isOutsideTemporalYearRange(value, t)) return null;
     // Same wire code, two sentences: "a valid date" vs "a valid datetime".
     return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }

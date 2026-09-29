@@ -36,6 +36,21 @@
  * `ObjectStackProtocolImplementation` and the real routes — booted exactly as
  * `meta-draft-read-builder-gate.test.ts` boots it. The stubs are the auth
  * boundary (`resolveExecCtx`) and the service probe that says `tenancy` is off.
+ *
+ * ## [#20441] `/audit` is the third authoring door
+ *
+ * `saveMetaItem` appends a success row to `sys_metadata_audit` for every save,
+ * a draft save included, and `auditMetaItem` serves its `note: 'draft'`, its
+ * actor and its time. Measured on this harness before the fix (`main` at
+ * `acd009521e`): the member read `note: 'draft'` and `actor: 'u_author'` for
+ * `app/atlas` and `view/opportunity.pipeline`, and for the never-published
+ * `app/beacon` and `view/opportunity.forecast`, whose plain read answers them
+ * `404`, it read that event while a missing name read `{ events: [] }` — an
+ * existence oracle. Triage's grade 5871509797 carried ruling 5865708652's
+ * letter to this door: the same refusal, before any read. The three doors share
+ * one refusal (`refuseNonAuthoringCaller`), and every pin below runs over all
+ * three. The draft saves here are made by the `author` caller, so the actor a
+ * refusal must never carry is a real one.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -140,7 +155,7 @@ function makeRes() {
 const META = '/api/v1/meta';
 
 /** The protocol members a refused caller must never reach. */
-const READS = ['getMetaItem', 'getMetaItemLayered', 'historyMetaItem', 'diffMetaItem'] as const;
+const READS = ['getMetaItem', 'getMetaItemLayered', 'historyMetaItem', 'diffMetaItem', 'auditMetaItem'] as const;
 
 async function boot() {
     const engine = new ObjectQL();
@@ -189,19 +204,21 @@ async function boot() {
         as(who, 'GET', `${META}/:type/:name${suffix}`, { path: `${META}/${type}/${name}${suffix}`, params: { type, name }, query });
     /** `GET /meta/_drafts` — the door whose refusal these two now give. */
     const drafts = (who: CallerName) => as(who, 'GET', `${META}/_drafts`, { path: `${META}/_drafts` });
-    const save = async (type: string, item: { name: string }, query: Record<string, string>) => {
-        const res = await as('system', 'PUT', `${META}/:type/:name`, {
+    const save = async (type: string, item: { name: string }, query: Record<string, string>, who: CallerName = 'system') => {
+        const res = await as(who, 'PUT', `${META}/:type/:name`, {
             path: `${META}/${type}/${item.name}`, params: { type, name: item.name }, query, body: item,
         });
         if (res.statusCode !== 200) throw new Error(`seeding ${type}/${item.name} failed: ${JSON.stringify(res.body)}`);
     };
 
+    // The published rows are machine writes; every draft is an AUTHOR's save
+    // (#20441: the actor `/audit` records, which a refusal must never carry).
     await save('app', ATLAS, {});
-    await save('app', ATLAS_DRAFT, { mode: 'draft' });
-    await save('app', BEACON_DRAFT, { mode: 'draft' });
+    await save('app', ATLAS_DRAFT, { mode: 'draft' }, 'author');
+    await save('app', BEACON_DRAFT, { mode: 'draft' }, 'author');
     await save('view', PIPELINE, {});
-    await save('view', PIPELINE_DRAFT, { mode: 'draft' });
-    await save('view', FORECAST_DRAFT, { mode: 'draft' });
+    await save('view', PIPELINE_DRAFT, { mode: 'draft' }, 'author');
+    await save('view', FORECAST_DRAFT, { mode: 'draft' }, 'author');
 
     /** Spies on every protocol read a refused caller must never reach, armed AFTER seeding. */
     const spies = Object.fromEntries(READS.map((m) => [m, vi.spyOn(protocol, m)])) as Record<(typeof READS)[number], ReturnType<typeof vi.spyOn>>;
@@ -222,9 +239,13 @@ const navIds = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e
 /** The keys of a body and of its nested `error` — the envelope's SHAPE, never its prose. */
 const shape = (res: any) => ({ top: Object.keys(res.body ?? {}).sort(), error: Object.keys(res.body?.error ?? {}).sort() });
 
-const AUTHORING_DOORS = ['/diff', '/history'] as const;
+const AUTHORING_DOORS = ['/diff', '/history', '/audit'] as const;
+/** The protocol read each authoring door makes for a caller it admits — the live-spy control. */
+const DOOR_READ = { '/diff': 'diffMetaItem', '/history': 'historyMetaItem', '/audit': 'auditMetaItem' } as const;
+/** What an event or version answer carries, and a refusal never does. */
+const ANSWER_KEYS = ['fromVersion', 'toVersion', 'events', 'added', 'changed', 'note', 'actor', 'occurredAt', 'u_author'];
 
-describe('[#20378] a member without an authoring capability is refused /diff and /history — the /meta/_drafts refusal, before any read', () => {
+describe('[#20378 · #20441] a member without an authoring capability is refused /diff, /history and /audit — the /meta/_drafts refusal, before any read', () => {
     for (const suffix of AUTHORING_DOORS) {
         for (const type of Object.keys(SUBJECTS) as SubjectType[]) {
             it(`${suffix} ${type}: 403 FORBIDDEN in the /meta/_drafts envelope — one answer for a published item, a draft-only one and a missing name, and nothing read`, async () => {
@@ -245,10 +266,10 @@ describe('[#20378] a member without an authoring capability is refused /diff and
                     // `error` with a code and a message, and nothing beside it.
                     expect(shape(res)).toEqual(shape(listing));
                     // No item or version detail: not the name, not a draft
-                    // string, not a version, not an event.
+                    // string, not a version, not an event, not its actor.
                     for (const name of Object.values(names)) expect(text(res)).not.toContain(name);
                     for (const s of DRAFT_ONLY_TEXT) expect(text(res)).not.toContain(s);
-                    for (const k of ['fromVersion', 'toVersion', 'events', 'added', 'changed']) expect(text(res)).not.toContain(k);
+                    for (const k of ANSWER_KEYS) expect(text(res)).not.toContain(k);
                 }
                 // No existence oracle: the three answers are byte-identical.
                 expect(answers[1].body).toEqual(answers[0].body);
@@ -260,7 +281,7 @@ describe('[#20378] a member without an authoring capability is refused /diff and
                 // reading, not a harness that never sees a call.
                 const builder = await door('author', suffix, type, names.published);
                 expect(builder.statusCode).toBe(200);
-                expect(spies[suffix === '/diff' ? 'diffMetaItem' : 'historyMetaItem']).toHaveBeenCalled();
+                expect(spies[DOOR_READ[suffix]]).toHaveBeenCalled();
             }, 60_000);
         }
     }
@@ -281,18 +302,20 @@ describe('[#20378] a member without an authoring capability is refused /diff and
         expect(builder.statusCode).toBe(400);
     }, 60_000);
 
-    it('/history: an unparseable `limit` answers the member the same refusal — decided before the query parse', async () => {
-        const { door } = await boot();
-        const plain = await door('member', '/history', 'app', 'atlas');
-        const res = await door('member', '/history', 'app', 'atlas', { limit: 'abc' });
-        expect(envelope(res)).toEqual({ status: 403, code: 'FORBIDDEN' });
-        expect(res.body).toEqual(plain.body);
-        const builder = await door('studioBuilder', '/history', 'app', 'atlas', { limit: 'abc' });
-        expect(builder.statusCode).toBe(400);
-    }, 60_000);
+    for (const suffix of ['/history', '/audit'] as const) {
+        it(`${suffix}: an unparseable \`limit\` answers the member the same refusal — decided before the query parse`, async () => {
+            const { door } = await boot();
+            const plain = await door('member', suffix, 'app', 'atlas');
+            const res = await door('member', suffix, 'app', 'atlas', { limit: 'abc' });
+            expect(envelope(res)).toEqual({ status: 403, code: 'FORBIDDEN' });
+            expect(res.body).toEqual(plain.body);
+            const builder = await door('studioBuilder', suffix, 'app', 'atlas', { limit: 'abc' });
+            expect(builder.statusCode).toBe(400);
+        }, 60_000);
+    }
 });
 
-describe('[#20378] builders read /diff and /history as before — the control', () => {
+describe('[#20378 · #20441] builders read /diff, /history and /audit as before — the control', () => {
     it('/diff app: every builder reads the draft version; the author reads it whole, every other builder pruned as the plain read prunes', async () => {
         const { door, draftVersion } = await boot();
         const v = await draftVersion('app', 'atlas');
@@ -334,6 +357,26 @@ describe('[#20378] builders read /diff and /history as before — the control', 
             }
         }
     }, 60_000);
+
+    it('/audit: every builder reads the audit trail of an app and a view, the author\'s draft save included, and of a draft-only item', async () => {
+        const { door } = await boot();
+        for (const who of BUILDERS) {
+            for (const [type, name] of [['app', 'atlas'], ['view', 'opportunity.pipeline']] as const) {
+                const res = await door(who, '/audit', type, name);
+                expect(res.statusCode, `${who} ${type}`).toBe(200);
+                // The published save and the draft save, each `allowed`.
+                const notes = (res.body?.events ?? []).map((e: any) => `${e.operation}:${e.outcome}:${e.note}`).sort();
+                expect(notes, `${who} ${type}`).toEqual(['save:allowed:active', 'save:allowed:draft']);
+                const draft = res.body.events.find((e: any) => e.note === 'draft');
+                expect(draft?.actor, `${who} ${type}`).toBe('u_author');
+            }
+            for (const [type, name] of [['app', 'beacon'], ['view', 'opportunity.forecast']] as const) {
+                const res = await door(who, '/audit', type, name);
+                expect(res.statusCode, `${who} ${type}`).toBe(200);
+                expect(res.body?.events?.map((e: any) => e.note), `${who} ${type}`).toEqual(['draft']);
+            }
+        }
+    }, 60_000);
 });
 
 describe('[#20378] /layers and ?layers=true are unchanged for the member — the lit control', () => {
@@ -363,8 +406,8 @@ describe('[#20378] /layers and ?layers=true are unchanged for the member — the
     }, 60_000);
 });
 
-describe('[#20378] one predicate: /diff and /history refuse exactly the callers /meta/_drafts refuses', () => {
-    it('for each caller, the three doors agree', async () => {
+describe('[#20378 · #20441] one predicate: /diff, /history and /audit refuse exactly the callers /meta/_drafts refuses', () => {
+    it('for each caller, the four doors agree', async () => {
         const { door, drafts } = await boot();
         for (const who of ['member', ...BUILDERS] as const) {
             const refused = (await drafts(who)).statusCode === 403;

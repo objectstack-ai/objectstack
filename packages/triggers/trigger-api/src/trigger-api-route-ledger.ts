@@ -121,7 +121,7 @@ export const TRIGGER_API_ROUTE_LEDGER: readonly TriggerApiRouteLedgerEntry[] = [
             + '`automation` namespace targets the dispatcher domain `/api/v1/automation`, and no client method builds a '
             + '`/automation/hooks/*` URL. Not `public` either — that disposition means an anonymous BROWSER surface (public '
             + 'forms, share-link resolution); this is machine-to-machine, the shape `service-storage` ledgers its HMAC-token '
-            + '`_local/raw/:token` routes with. A flow that declares no `secret` accepts unsigned posts (warned at arm time): '
-            + 'that is a flow-authoring posture, not an SDK disposition.',
+            + '`_local/raw/:token` routes with. Every hook this door serves is signed: a flow that declares no `secret` is '
+            + 'refused at arm time and at registration (ADR-0041), so there is no unsigned posture for this row to record.',
     },
 ];

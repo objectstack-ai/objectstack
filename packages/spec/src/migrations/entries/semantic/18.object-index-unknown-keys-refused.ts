@@ -7,14 +7,17 @@ export const entry: SemanticMigration = {
   surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
   replacement: 'the declared surface: `name` / `fields` / `unique` (ADR-0120 scope). A key that '
     + 'names no declared capability is simply removed. `where` — the console fallback editor\'s '
-    + 'drifted spelling for a partial-index predicate, removed from the editor by objectui#4772 — '
+    + 'drifted spelling for a partial-index predicate, removed when objectui converged that editor '
+    + 'onto `IndexSchema` — '
     + 'gets a curated prescription: partial indexes are built at the database layer '
     + '(`CREATE [UNIQUE] INDEX … WHERE` from a runtime migration), never declared here',
   reason:
-    'The #4001 strictness campaign\'s 批 20 held site 14 open on a measured #5114-class risk: '
+    'The unknown-key strictness campaign held this site open on a measured risk, the kind that '
+    + 'had already made a console save answer 422 (a strict schema refusing a key the console '
+    + 'itself writes): '
     + 'objectui\'s embedded index editor shipped a drifted hand-copied schema offering `where` '
     + 'and `brin`, spliced its output into `object.indexes[]` and PUT the whole object, so '
-    + 'closing the shape would have 422\'d a control the console itself rendered. objectui#4772 '
+    + 'closing the shape would have 422\'d a control the console itself rendered. objectui then '
     + 'converged that editor to the declared surface, spending the hold\'s evidence. Before this '
     + 'close an undeclared key on an index parsed clean and was silently dropped — an admin '
     + 'filling the old "Partial-index predicate" control got a green save while no driver ever '

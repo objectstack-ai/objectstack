@@ -14,6 +14,11 @@
  * (`rest-sub-config-parse-not-cast.test.ts` §E), NOT `requireAuth`'s
  * warn-and-ignore `.omit()`.
  *
+ * [#20294] `api.documentation.version` joined them (ruling B on #20359): the
+ * block's identity members are enforced now — they overlay the served OpenAPI
+ * `info` — and `version` is the one member retired, because the served
+ * `info.version` is the protocol version (#11646).
+ *
  * ⛔ ANTI-VACUITY — the same rule as `rest-config-parse-not-cast.test.ts`: a pin
  * asking the SCHEMA whether it refuses is `packages/spec`'s job
  * (`rest-api-config-dead-keys-retirement.test.ts`). Every case below drives the
@@ -94,6 +99,8 @@ const RESPONSE_FORMAT_PRESCRIPTION =
     /`api\.responseFormat` was removed in @objectstack\/spec 17\.5\.0.*Delete the key\..*Response shapes are fixed/s;
 const DOCS_ENABLED_PRESCRIPTION =
     /`api\.documentation\.enabled` was removed in @objectstack\/spec 17\.5\.0.*Delete the key; `api\.enableOpenApi: false` is the switch/s;
+const DOCS_VERSION_PRESCRIPTION =
+    /`api\.documentation\.version` was removed in @objectstack\/spec 17\.5\.0.*`info\.version` has one source: the protocol version.*Delete the key\. To publish your app's own release number, write it into `api\.documentation\.description`/s;
 
 describe('[#20295] RestServer construction refuses the retired `api` keys', () => {
     it('refuses `api.responseFormat` — every former spelling, the old defaults and the empty block included', () => {
@@ -136,6 +143,39 @@ describe('[#20295] RestServer construction refuses the retired `api` keys', () =
         await expect(
             createRestApiPlugin({ api: { api: { documentation: { enabled: false } } } } as never).start!(bootCtx()),
         ).rejects.toThrow(/api\.documentation\.enabled.*was removed/s);
+    });
+});
+
+describe('[#20294] RestServer construction refuses the retired `api.documentation.version`', () => {
+    // Ruling B on #20359: the identity members of `documentation` are enforced
+    // (they overlay the served `info` — `rest-openapi-info-overlay.test.ts`),
+    // `version` is retired because the served `info.version` is the protocol
+    // version (#11646). An authored one used to be accepted and ignored.
+    it('refuses it — with the enforced siblings beside it undiagnosed', () => {
+        const message = refusal({ documentation: { title: 'Acme Orders API', description: 'd', version: '2.3.0' } });
+        expect(message).toContain('  - api.documentation.version: ');
+        expect(message).toContain('RestApiConfigSchema');
+        expect(message).toMatch(DOCS_VERSION_PRESCRIPTION);
+        // Only the retired member is diagnosed — no issue line locates an
+        // enforced sibling (the prescription itself NAMES
+        // `api.documentation.description`, as the place a release number
+        // goes, so the check is on the located-issue line, not the word).
+        expect(message).not.toContain('  - api.documentation.title: ');
+        expect(message).not.toContain('  - api.documentation.description: ');
+        // Not the route identifier either: `api.version` is a different key.
+        expect(message).not.toContain('  - api.version: ');
+    });
+
+    it('the plugin path refuses it too', async () => {
+        await expect(
+            createRestApiPlugin({ api: { api: { documentation: { version: '2.3.0' } } } } as never).start!(bootCtx()),
+        ).rejects.toThrow(/api\.documentation\.version.*was removed/s);
+    });
+
+    it('CONTROL: the same block without `version` constructs, and the enforced members pass through', () => {
+        expect(refusal({ documentation: { title: 'Acme Orders API', description: 'd' } })).toBe('');
+        const api = normalizedApi(construct({ documentation: { title: 'Acme Orders API', description: 'd' } }));
+        expect(api.documentation).toEqual({ title: 'Acme Orders API', description: 'd' });
     });
 });
 

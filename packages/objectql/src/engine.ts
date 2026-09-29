@@ -48,6 +48,7 @@ import {
   assertTemporalComparandsInterpretable,
 } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
+import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -219,7 +220,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -525,7 +526,7 @@ const ENGINE_DRIVER_PASSTHROUGH_KEYS = [
  * the `retiredKey` tombstones `cursor`/`distinct`/`upsert` (#8057), which get
  * their tombstone quoted instead of a generic rejection — the schema keeps them
  * ONLY to carry that message, and this runtime path never parses); `searchFields` (read by
- * `find` at the `$search` expansion, sent by the protocol layer);
+ * `find` and `aggregate` at the `$search` expansion, sent by the protocol layer);
  * `onFieldsDropped` and `strictReadonlyWrites` (`WriteObservabilityOptions` —
  * contract-declared, deliberately outside the serializable Zod schema: the
  * first because a function is unrepresentable in JSON Schema, the second
@@ -552,8 +553,14 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where']);
+// `search` / `searchFields` are READ by `aggregate` through the same ADR-0061
+// expander `find` uses ({@link ObjectQL.expandSearchOnAggregateOptions}), so a
+// grouped answer under a search is the grouping of the searched rows. Before
+// `EngineAggregateOptionsSchema` declared them they were refused here, and the
+// one wire path to this verb left them out — the unsearched groups answered.
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
+  'search', 'searchFields',
 ]);
 
 /**
@@ -1007,6 +1014,14 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // hence the door steps around `{placeholder}` strings rather than judging
     // them; the token resolver refuses the unknown ones a moment later, loudly.
     assertTemporalComparandsInterpretable(object, operation, schema, where);
+    // [#20351] The NUMBER-comparand declared-type door, fifth on the same seam
+    // and fifth question about the same predicate: is this string a number the
+    // declared numeric column can be compared with. It refuses a non-numeric
+    // string (`INVALID_FILTER` / 400) and narrows a numeric one to its number,
+    // copy-on-write, by `@objectstack/spec/data`'s grammar and verdict. Before
+    // the token resolver, like the temporal door: a `{placeholder}` resolves to
+    // an id or a date, never a number, so it is refused here unresolved.
+    const numeric = narrowNumberComparands(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -1016,7 +1031,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // its pinned wording for the list-operator shapes), type door second;
     // the walk is copy-on-write, so the common path allocates nothing and a
     // narrowed bigint replaces the bag rather than editing the caller's.
-    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    const normalized = normalizeFilterComparandTypes(numeric, `${operation}('${object}')`);
     if (normalized !== where) {
       return { ...(bag as Record<string, unknown>), where: normalized } as T;
     }
@@ -1090,7 +1105,9 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // a gate on one branch would answer one mistake two ways depending on the
   // spelling.
   assertTemporalComparandsInterpretable(object, operation, schema, condition);
-  lowered.where = condition;
+  // [#20351] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['amount','>','abc']]`) names numeric fields too.
+  lowered.where = narrowNumberComparands(object, operation, schema, condition);
   return lowered as T;
 }
 
@@ -1147,9 +1164,10 @@ function admissionRefusalOf(
  * 1. {@link lowerWhereFilterArray}: the shape gate, then (object form)
  *    `assertListComparandShapes` → `assertFilterIsMaterializable` (the dotted,
  *    then the virtual-field verdict) → `assertTextOperatorTargetsAreStringCapable`
- *    → `assertTemporalComparandsInterpretable` → `normalizeFilterComparandTypes`,
- *    or (array form) `isFilterAST` → `parseFilterAST` → the same three
- *    field-map doors on the lowered condition.
+ *    → `assertTemporalComparandsInterpretable` → `narrowNumberComparands`
+ *    (#20351) → `normalizeFilterComparandTypes`, or (array form) `isFilterAST`
+ *    → `parseFilterAST` → the same four field-map doors on the lowered
+ *    condition.
  * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
  *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
@@ -11060,6 +11078,34 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The aggregate verb's door into {@link expandSearchOnAst} — ⛔ not a second
+   * expander. `QuerySchema.search` (ADR-0061 D1) is declared beside `groupBy` /
+   * `aggregations` with no carve-out, so a grouped read under a search groups
+   * the SEARCHED rows: the same cross-field `$or`, resolved from the same
+   * server-side searchable set and the same `searchFields` narrowing, ANDed
+   * with `where` exactly as on `find` — before the security middlewares run,
+   * so an injected RLS predicate composes with it the same way on both verbs.
+   *
+   * The expansion runs on a carrier AST holding only the three keys it reads,
+   * and the result is a COPY of `query` with `where` replaced and the two
+   * search keys gone: the bag belongs to the caller (view metadata and flow
+   * node config are reused), and a search key left on it would ride to
+   * `opCtx.options` unexpanded. The common path — no search key — returns the
+   * same reference and allocates nothing.
+   */
+  private expandSearchOnAggregateOptions(
+    object: string,
+    query: EngineAggregateOptions,
+  ): EngineAggregateOptions {
+    if (query.search === undefined && query.searchFields === undefined) return query;
+    const { search, searchFields, ...rest } = query;
+    const carrier = { object, where: rest.where, search, searchFields } as QueryAST;
+    this.expandSearchOnAst(carrier, this._registry.getObject(object));
+    if (carrier.where === undefined) return rest;
+    return { ...rest, where: carrier.where };
+  }
+
+  /**
    * [#6300] Fill the author-state defaults the query schemas declare, so the
    * AST handed to middlewares, hooks and drivers is the PARSED state
    * `QueryAST` (a `z.infer` type) promises.
@@ -11742,8 +11788,12 @@ export class ObjectQL implements IObjectQLEngine {
     // [#20308] The write doors read a blank on a non-string-typed column as
     // `null` before anything else; the preview does the same at the same point,
     // or a blank on a required field with a `defaultValue` would preview
-    // `required` while the write takes the default.
-    const rawRows = normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]);
+    // `required` while the write takes the default. [#20309] Likewise a
+    // numeric string on a number field is its number here, as on the write.
+    const rawRows = normalizeNumericStringValues(
+      schemaForValidation,
+      normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]),
+    );
     const nowSnapshot = new Date();
     // [#20082] The preview's ONE permission resolution, shared by its CEL
     // defaults and its option gates below, exactly as the write shares one. A
@@ -11914,8 +11964,11 @@ export class ObjectQL implements IObjectQLEngine {
     // validation read the payload, so all of them see one image (a blank then
     // takes a `defaultValue` exactly as `null` does). See
     // `normalizeBlankTypedValues` for the scope; it never mutates the caller's
-    // rows.
+    // rows. [#20309] At the same point, a string on a number field that the
+    // spec's numeric grammar reads becomes that number, so the validator judges
+    // the value the driver stores (`normalizeNumericStringValues`).
     data = normalizeBlankTypedValues(this._registry.getObject(object), data);
+    data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
     const opCtx: OperationContext = {
       object,
@@ -12959,8 +13012,11 @@ export class ObjectQL implements IObjectQLEngine {
      // non-string-typed column is `null` before the middleware, the
      // caller-value snapshot (`suppliedValues`), the hooks, the read-only
      // strips and validation read the payload — so a `readonlyWhen` lock judges
-     // the value it snapshotted. See `normalizeBlankTypedValues`.
+     // the value it snapshotted. See `normalizeBlankTypedValues`. [#20309] The
+     // insert door's numeric-string rewrite, same place and same reason (see
+     // `normalizeNumericStringValues`).
      data = normalizeBlankTypedValues(this._registry.getObject(object), data);
+     data = normalizeNumericStringValues(this._registry.getObject(object), data);
 
      // 1. Extract ID from data or where if it's a single update by ID.
      //    Only a SCALAR `where.id` means "update one row by primary key". An
@@ -16207,6 +16263,10 @@ export class ObjectQL implements IObjectQLEngine {
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object));
+      // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
+      // the one expander `find` runs, at the same point in the sequence (after
+      // the `where` doors above, before the AST is built and tokens resolve).
+      query = this.expandSearchOnAggregateOptions(object, query);
       this.rejectCredentialAggregation(object, query);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
@@ -16293,6 +16353,15 @@ export class ObjectQL implements IObjectQLEngine {
               assertTemporalComparandsInterpretable(
                   object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
               );
+              // [#20351] …and the NUMBER-comparand door, fifth here as it is
+              // fifth on `where`'s seam: a non-numeric string against a declared
+              // numeric field counted no row (every row under `$ne`) where its
+              // `where` twin was a 500 on PostgreSQL, and a numeric string is
+              // narrowed to its number, copy-on-write, before the in-memory
+              // evaluator compares it. Rooted at this position.
+              const numeric = narrowNumberComparands(
+                  object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
+              );
               // [#20122] …and the two doors `having` took at its own entry
               // (#20099), so a refusal here is the FILTER's, never the data's:
               //  1. the comparand-TYPE door `where` takes in
@@ -16315,7 +16384,7 @@ export class ObjectQL implements IObjectQLEngine {
               //     refused. Refused in `where`'s words for that comparison, which
               //     withhold the fields, the operator and the reason; the
               //     withheld half goes to this log, as the driver writes its own.
-              const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
+              const typed = normalizeFilterComparandTypes(numeric, `aggregate('${object}')`, `aggregations[${i}].filter`);
               assertAggregationFilterIsEvaluable(typed, i, {
                   object,
                   fields: (this._registry.getObject(object) as { fields?: unknown } | undefined)?.fields,
@@ -16417,7 +16486,14 @@ export class ObjectQL implements IObjectQLEngine {
           // that refusal's words; on the caller's own clause, before the
           // bigint narrowing, which is what `where`'s object form judges.
           assertHavingTemporalComparandsInterpretable(object, query.having, havingColumnClasses, query);
-          if (having !== query.having) query = { ...query, having };
+          // [#20351] …then the NUMBER-comparand door `where` and the
+          // per-aggregation `filter` take, over the columns #20127 classes
+          // `numeric`: a non-numeric string kept no group (every group under
+          // `$ne`) on both `applyHaving` doors, and a numeric string is narrowed
+          // to its number. On the bigint-narrowed clause, so the two
+          // narrowings compose.
+          const numeric = narrowHavingNumberComparands(object, having, havingColumnClasses);
+          if (numeric !== query.having) query = { ...query, having: numeric };
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);

@@ -15,20 +15,21 @@ export const entry: SemanticMigration = {
     + '`ViewDataSchema` semantics; `staticData` (the deprecated bare-array shortcut the '
     + 'renderer still reads) keeps its shape but is not the prescription',
   reason:
-    'Two entries of one contract disagreed on the KIND (objectui#6207, contract-vs-'
-    + "contract): `ComponentPropsMap['object-grid'].data` said bare array ('Static inline "
+    'Two entries of one contract disagreed on the KIND (contract-vs-contract, found by '
+    + "objectui's declared-arm parity gate): `ComponentPropsMap['object-grid'].data` said bare "
+    + "array ('Static inline "
     + "rows — bypasses the object query') while `ViewDataSchema` — the authority "
-    + 'objectui#5090 ruled the registry declaration against, pinned by '
+    + 'objectui aligned the grid\'s registry declaration to, pinned by '
     + '`gridDataInputContract.test.ts`, and what `ObjectGridSchema.data` resolves to — is '
     + "an object discriminated on `provider`. Measured on @objectstack/spec@17.2.0: "
     + "`{ provider: 'value', items: [] }` — the pinned-legal form — was REFUSED by the "
     + 'props-map entry (`expected array, received object`) while the bare array parsed. '
     + 'Whichever authority a value satisfied, the other refused it, and the objectui '
     + 'parity gate had to carry the reasoned exemption `object-grid.data:object` to look '
-    + 'away. The maintainer ruling (2026-08-25, batch adjudication batch 4; verbatim: '
-    + '「同意」, Option A) converged the props-map entry onto `ViewDataSchema`; the '
-    + 'bare-array form is the deprecated `staticData` shortcut the objectui#4648 '
-    + 'carve-out already refuses to publish. The ruled migration check ran with the '
+    + 'away. The maintainer\'s ruling of 2026-08-25 (option A) converged the props-map entry '
+    + 'onto `ViewDataSchema`; the bare-array form is the deprecated `staticData` shortcut that '
+    + 'objectui\'s deprecated-alias carve-out already refuses to publish as authoring surface. '
+    + 'The ruled migration check ran with the '
     + 'change: the sweep of generated artifacts, templates and first-party corpora '
     + '(examples/, skills/, create-objectstack, spec fixtures) found ZERO bare-array '
     + '`data` authors, so no rewrite ships — this entry carries the prescription for '
@@ -40,6 +41,6 @@ export const entry: SemanticMigration = {
     + "`data: [...]` writes `data: { provider: 'value', items: [...] }` — same rows, "
     + 'one wrapping object. Downstream (objectui, after a released spec version reaches '
     + 'the pin): the `object-grid.data:object` exemption entry in '
-    + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes '
-    + 'objectui#6207.',
+    + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes the '
+    + 'objectui finding that the two authorities disagreed.',
 };

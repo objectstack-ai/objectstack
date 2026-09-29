@@ -93,7 +93,7 @@ function pgFileReadingQueryParams(value: string): string[] {
 /**
  * Attach the #9091 pg-grammar refusal to the postgres `url` key — per-driver
  * by design (see `pg-url-grammar.server.ts`; the shared helpers must
- * keep refusing to parse for mongo's sake, #8696). Composes with
+ * keep refusing to parse for mongo's sake, commit 90a12fb18). Composes with
  * `credentialFreeUrl` (#8082/#8337) and `placeholderFree` (#8336) the same
  * way those compose with each other: independent `superRefine`s judging one
  * value, each reporting its own finding.

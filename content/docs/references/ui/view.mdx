@@ -581,7 +581,7 @@ Gallery/card view configuration
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
-| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; a datetime value is still written as the real instant, and a date value as the calendar day it was dropped on in this zone's calendar (YYYY-MM-DD). An invalid name falls back to the browser zone with a console warning |
 | **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
 | **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
 | **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
@@ -979,7 +979,7 @@ View filter rule
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
-| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; a datetime value is still written as the real instant, and a date value as the calendar day it was dropped on in this zone's calendar (YYYY-MM-DD). An invalid name falls back to the browser zone with a console warning |
 | **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
 | **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
 | **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
@@ -1362,7 +1362,7 @@ View filter rule
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
-| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; a datetime value is still written as the real instant, and a date value as the calendar day it was dropped on in this zone's calendar (YYYY-MM-DD). An invalid name falls back to the browser zone with a console warning |
 | **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
 | **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
 | **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
@@ -2256,9 +2256,10 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
-| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored) |
+| **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
+| **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
+| **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
@@ -2327,8 +2328,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 
@@ -2356,9 +2357,10 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
-| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored) |
+| **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
+| **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
+| **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
+| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
 
@@ -2402,8 +2404,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 

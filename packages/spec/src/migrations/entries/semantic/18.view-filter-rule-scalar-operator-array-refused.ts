@@ -26,12 +26,14 @@ export const entry: SemanticMigration = {
     + 'discarded, so whatever sits there still parses, array included. An omitted value is '
     + 'still an omitted value',
   reason:
-    '#19514, closing the protocol half of objectui#9050 ruling C-prime (maintainer '
-    + '2026-09-20, verbatim, untranslated): 「the differences are the protocol\'s to close」. '
-    + 'The value key\'s own published description has declared this rule since #6227 — '
+    'Closing the protocol half of the maintainer\'s ruling C-prime of 2026-09-20 on objectui\'s '
+    + 'render-time filter converter — the protocol is the only refusal set, so a document it '
+    + 'accepts never throws at render time — verbatim, untranslated: 「the differences are the '
+    + 'protocol\'s to close」. The value key\'s own published description has declared this rule '
+    + 'since the value was first shaped by its operator — '
     + '「every other operator takes a scalar」 — and the refinement that implements the '
     + 'coupling returned early for every operator that is neither a list operator nor '
-    + 'between, so the entire scalar class was declared and, from #6227 until this change, '
+    + 'between, so the entire scalar class was declared and, from then until this change, '
     + 'not judged. '
     + '⚠️ This REVERSES a reading recorded in the sibling entry '
     + 'view-filter-rule-value-shaped-by-operator, which listed a scalar operator carrying an '

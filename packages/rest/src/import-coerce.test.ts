@@ -49,6 +49,36 @@ describe('parseNumberCell', () => {
     expect(parseNumberCell('12x3')).toBeUndefined();
     expect(parseNumberCell('')).toBeUndefined();
   });
+
+  // [#20497] A comma is read only where it groups thousands: 1 to 3 leading
+  // digits, then groups of exactly three, and only before any `.`.
+  it.each([
+    ['1,000', 1000],
+    ['12,345.67', 12345.67],
+    ['1,234,567.89', 1234567.89],
+    ['-1,234', -1234],
+    ['(1,234)', -1234],
+    ['$1,000', 1000],
+    ['1,234%', 1234],
+    ['1,000e3', 1_000_000],
+  ])('admits the well-formed thousands grouping %j as %s', (cell, n) => {
+    expect(parseNumberCell(cell)).toBe(n);
+  });
+
+  it.each([
+    // The card's four cells: stored as 314, 15, 1.0005 and 123 before.
+    '3,14', '1,5', '1.000,5', '1,2,3',
+    // A decimal comma, however it is dressed.
+    '0,5', '(3,14)', '$1,5', '1,5%',
+    // A group that is not exactly three digits, or a comma out of place.
+    '1,23', '1,0000', '1234,567', ',123', '-,123', '1,000,', '.5,000',
+    // A comma after the `.`.
+    '12,345.6,7',
+    // A grouping other than thousands — no locale is guessed.
+    '12,34,567', '1,00,000',
+  ])('refuses %j rather than reading it as some other number', (cell) => {
+    expect(parseNumberCell(cell)).toBeUndefined();
+  });
 });
 
 describe('parseDateCell', () => {

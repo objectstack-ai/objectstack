@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20397] `GET /meta/:type/:name/diff` with no `from` / `to` compares the
- * previous version with the CURRENT one, and labels each side with the version
+ * [#20397] `GET /meta/:type/:name/diff` with no `from` / `to` compares an
+ * earlier version with the CURRENT one, and labels each side with the version
  * whose body it is.
  *
  * ## The defect
@@ -19,9 +19,10 @@
  *
  * The to side is the active row, labelled with that row's own `version` (the
  * column `SysMetadataRepository.put` stamps with the version of the history row
- * it appends), and the from side is the history row immediately preceding that
- * label. With no active row the to side is absent and so is its label: `null`
- * on both sides, as `DiffMetaItemResponseSchema` declares.
+ * it appends). With no active row the to side is absent and so is its label:
+ * `null` on both sides, as `DiffMetaItemResponseSchema` declares. The from side
+ * is the nearest earlier history row whose body differs from the to side's
+ * (#20451, the second `describe` below).
  *
  * ## Why this file boots the real stack
  *
@@ -127,16 +128,40 @@ async function boot() {
         });
         if (res.statusCode !== 200) throw new Error(`seeding ${type}/${body.name} failed: ${JSON.stringify(res.body)}`);
     };
+    const publish = async (type: string, name: string) => {
+        const res = await as('system', 'POST', `${META}/:type/:name/publish`, {
+            path: `${META}/${type}/${name}/publish`,
+            params: { type, name },
+        });
+        if (res.statusCode !== 200) throw new Error(`publishing ${type}/${name} failed: ${JSON.stringify(res.body)}`);
+    };
+    const remove = async (type: string, name: string) => {
+        const res = await as('system', 'DELETE', `${META}/:type/:name`, {
+            path: `${META}/${type}/${name}`,
+            params: { type, name },
+        });
+        if (res.statusCode !== 200) throw new Error(`deleting ${type}/${name} failed: ${JSON.stringify(res.body)}`);
+    };
     const diff = (type: string, name: string, query: Record<string, string> = {}) =>
         as('author', 'GET', `${META}/:type/:name/diff`, { path: `${META}/${type}/${name}/diff`, params: { type, name }, query });
     /** The stored rows, read past every door: the fixture proof each assertion leans on. */
     const storedRow = async (type: string, name: string, state: 'active' | 'draft') =>
-        (await engine.find('sys_metadata', { where: { type, name, state } }))[0] as { version?: unknown } | undefined;
+        (await engine.find('sys_metadata', { where: { type, name, state } }))[0] as { version?: unknown; metadata?: unknown } | undefined;
     const historyVersions = async (type: string, name: string) =>
         ((await engine.find('sys_metadata_history', { where: { type, name } })) as Array<{ version: number }>)
             .map((r) => r.version)
             .sort((a, b) => a - b);
-    return { save, diff, storedRow, historyVersions };
+    /** Each history row's version, operation and label: which rows repeat a body, and which carry none. */
+    const historyRows = async (type: string, name: string) =>
+        ((await engine.find('sys_metadata_history', { where: { type, name } })) as Array<{
+            version: number; operation_type: string; metadata: unknown;
+        }>)
+            .map((r) => {
+                const body = r.metadata == null ? null : (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata);
+                return { version: r.version, op: r.operation_type, label: body == null ? null : body.label };
+            })
+            .sort((a, b) => a.version - b.version);
+    return { save, publish, remove, diff, storedRow, historyVersions, historyRows };
 }
 
 const view = (label: string, columns: string[] = ['name']) =>
@@ -244,5 +269,166 @@ describe('[#20397] GET /meta/:type/:name/diff — the default range labels the t
         expect(res.body?.fromVersion).toBe(1);
         expect(res.body?.toVersion).toBe(2);
         expect(res.body?.changed).toEqual([{ path: 'label', from: 'A', to: 'B' }]);
+    }, 60_000);
+});
+
+/**
+ * [#20451] With no `from`, the from side is the nearest earlier history row
+ * whose body DIFFERS from the to side's, by the diff's own equality: all three
+ * buckets empty means equal, and a body-less row (a delete's) compares as `{}`.
+ *
+ * Every draft save appends a history row, and a publish appends the promoted
+ * body again as the next one, so the row immediately before a published
+ * version is usually the draft save it came from, carrying the same body. The
+ * default range used to take that row and answered "no changes" right after
+ * every publish. Measured on this stack before the change: v1 active, a v2 draft
+ * save, a v3 publish answered `2 → 3` with empty buckets, and create, delete,
+ * draft save, publish answered `3 → 4` with empty buckets.
+ *
+ * An explicit `?from=` / `?to=` still names exactly its versions.
+ */
+describe('[#20451] GET /meta/:type/:name/diff — the default from side is the nearest earlier version whose body differs', () => {
+    /** The stored active body, parsed: the "everything added" arm's expected entries, in the diff's key order. */
+    const allAdded = (row: { metadata?: unknown } | undefined) => {
+        const body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+        return Object.entries(body as Record<string, unknown>).map(([path, value]) => ({ path, value }));
+    };
+
+    it('view: v1 active, a v2 draft save and a v3 publish answer 1 → 3, the change the publish carried, and still do with a v4 draft pending', async () => {
+        const b = await boot();
+        await b.save('view', view('A'), 'active');
+        await b.save('view', view('B', ['name', 'owner']), 'draft');
+        await b.publish('view', 'lead_all');
+
+        // Fixture proof: the publish repeated the draft save's body as the next row.
+        expect(await b.historyRows('view', 'lead_all')).toEqual([
+            { version: 1, op: 'create', label: 'A' },
+            { version: 2, op: 'create', label: 'B' },
+            { version: 3, op: 'publish', label: 'B' },
+        ]);
+        expect((await b.storedRow('view', 'lead_all', 'active'))?.version).toBe(3);
+
+        const res = await b.diff('view', 'lead_all');
+        const explicit = await b.diff('view', 'lead_all', { from: '1', to: '3' });
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body?.fromVersion).toBe(1);
+        expect(res.body?.toVersion).toBe(3);
+        expect(res.body?.changed).toEqual([
+            { path: 'label', from: 'A', to: 'B' },
+            { path: 'columns', from: ['name'], to: ['name', 'owner'] },
+        ]);
+        expect(res.body).toEqual(explicit.body);
+
+        await b.save('view', view('C pending', ['name', 'owner', 'stage']), 'draft');
+        expect(await b.historyVersions('view', 'lead_all')).toEqual([1, 2, 3, 4]);
+
+        const pending = await b.diff('view', 'lead_all');
+
+        expect(pending.statusCode, text(pending)).toBe(200);
+        expect(pending.body).toEqual(explicit.body);
+        expect(text(pending)).not.toContain('C pending');
+    }, 60_000);
+
+    it('view: an explicit range still names exactly its versions — ?from=2&to=3 answers the draft save against its publish, "no changes"', async () => {
+        const b = await boot();
+        await b.save('view', view('A'), 'active');
+        await b.save('view', view('B', ['name', 'owner']), 'draft');
+        await b.publish('view', 'lead_all');
+
+        const res = await b.diff('view', 'lead_all', { from: '2', to: '3' });
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body).toEqual({
+            type: 'view', name: 'lead_all', fromVersion: 2, toVersion: 3, added: [], removed: [], changed: [],
+        });
+    }, 60_000);
+
+    it('view: create, delete, draft save and publish answer 2 → 4, everything added — the walk stops on the body-less delete row', async () => {
+        const b = await boot();
+        await b.save('view', view('A'), 'active');
+        await b.remove('view', 'lead_all');
+        await b.save('view', view('A2', ['name', 'owner']), 'draft');
+        await b.publish('view', 'lead_all');
+
+        expect(await b.historyRows('view', 'lead_all')).toEqual([
+            { version: 1, op: 'create', label: 'A' },
+            { version: 2, op: 'delete', label: null },
+            { version: 3, op: 'create', label: 'A2' },
+            { version: 4, op: 'publish', label: 'A2' },
+        ]);
+        const active = await b.storedRow('view', 'lead_all', 'active');
+        expect(active?.version).toBe(4);
+
+        const res = await b.diff('view', 'lead_all');
+        const explicit = await b.diff('view', 'lead_all', { from: '2', to: '4' });
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body?.fromVersion).toBe(2);
+        expect(res.body?.toVersion).toBe(4);
+        expect(res.body?.removed).toEqual([]);
+        expect(res.body?.changed).toEqual([]);
+        expect(res.body?.added).toEqual(allAdded(active));
+        expect(res.body?.added).toContainEqual({ path: 'label', value: 'A2' });
+        expect(res.body).toEqual(explicit.body);
+    }, 60_000);
+
+    it('view: create, delete and an active recreate answer 2 → 3, everything added — the answer the rule before #20451 gave', async () => {
+        const b = await boot();
+        await b.save('view', view('A'), 'active');
+        await b.remove('view', 'lead_all');
+        await b.save('view', view('B', ['name', 'owner']), 'active');
+
+        expect(await b.historyRows('view', 'lead_all')).toEqual([
+            { version: 1, op: 'create', label: 'A' },
+            { version: 2, op: 'delete', label: null },
+            { version: 3, op: 'create', label: 'B' },
+        ]);
+        const active = await b.storedRow('view', 'lead_all', 'active');
+
+        const res = await b.diff('view', 'lead_all');
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body).toEqual({
+            type: 'view',
+            name: 'lead_all',
+            fromVersion: 2,
+            toVersion: 3,
+            added: allAdded(active),
+            removed: [],
+            changed: [],
+        });
+    }, 60_000);
+
+    it('view: a brand-new item draft-saved and then published answers null → 2, everything added — no earlier row differs', async () => {
+        const b = await boot();
+        await b.save('view', view('New'), 'draft');
+        await b.publish('view', 'lead_all');
+
+        expect(await b.historyRows('view', 'lead_all')).toEqual([
+            { version: 1, op: 'create', label: 'New' },
+            { version: 2, op: 'publish', label: 'New' },
+        ]);
+        const active = await b.storedRow('view', 'lead_all', 'active');
+
+        const res = await b.diff('view', 'lead_all');
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body).toEqual({
+            type: 'view', name: 'lead_all', fromVersion: null, toVersion: 2, added: allAdded(active), removed: [], changed: [],
+        });
+    }, 60_000);
+
+    it('view: a single version answers null → 1, everything added', async () => {
+        const b = await boot();
+        await b.save('view', view('Only'), 'active');
+        const active = await b.storedRow('view', 'lead_all', 'active');
+
+        const res = await b.diff('view', 'lead_all');
+
+        expect(res.statusCode, text(res)).toBe(200);
+        expect(res.body).toEqual({
+            type: 'view', name: 'lead_all', fromVersion: null, toVersion: 1, added: allAdded(active), removed: [], changed: [],
+        });
     }, 60_000);
 });

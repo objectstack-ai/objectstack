@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 781 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 780 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -792,7 +792,6 @@ export type Iso_data_dataEngine__DataEngineInsertRequestSchema = Assert<Eq< z.in
 export type Iso_data_dataEngine__DataEngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineUpdateOptionsSchema >, z.infer< typeof M56.DataEngineUpdateOptionsSchema > >>;
 export type Iso_data_dataEngine__DataEngineVectorFindRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
 export type Iso_data_dataEngine__DroppedFieldsEventSchema = Assert<Eq< z.input< typeof M56.DroppedFieldsEventSchema >, z.infer< typeof M56.DroppedFieldsEventSchema > >>;
-export type Iso_data_dataEngine__EngineAggregateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineAggregateOptionsSchema >, z.infer< typeof M56.EngineAggregateOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.EngineCountOptionsSchema >, z.infer< typeof M56.EngineCountOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
@@ -1667,7 +1666,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 781 isomorphic pins', () => {
+  it('still declares all 780 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2353,7 +2352,19 @@ describe('ADR-0122 type-alias convention', () => {
     // then the connector resilience retirement's 783 -> 780 — so this entry's
     // arrow starts from 780. The count below was re-derived from the merged
     // file, not added up.
-    expect(pins).toHaveLength(781);
+    //
+    // 781 -> 780 is the aggregate verb honouring ADR-0061 `search`:
+    // `EngineAggregateOptionsSchema` gained `search` / `searchFields`, declared
+    // exactly as on `EngineQueryOptionsSchema`, and the structured
+    // `FullTextSearchSchema` arm carries flag defaults, so input !== infer —
+    // the same reason `EngineQueryOptions` has always had its `XParsed`.
+    // Iso_data_dataEngine__EngineAggregateOptionsSchema leaves and
+    // `EngineAggregateOptionsParsed` is declared. -1 removed.
+    // Authored off 780 (as 780 -> 779) and re-derived on the merge of the
+    // `ElementDefinitionListPropsSchema` pin above, so this entry's arrow
+    // starts from 781. The count below was re-derived from the merged file,
+    // not added up.
+    expect(pins).toHaveLength(780);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

@@ -219,11 +219,32 @@ export function parseBooleanCell(raw: unknown): boolean | undefined {
 // ── numbers ────────────────────────────────────────────────────────
 
 /**
+ * The one comma placement a numeric cell may carry: a thousands grouping of the
+ * integer part — an optional sign, 1 to 3 leading digits, then one or more
+ * groups of exactly three digits, ending the integer part (end of cell, `.` or
+ * the exponent marker follows) — and no comma anywhere after it. `1,000`,
+ * `12,345.67`, `-1,234,567` match; `3,14`, `1,5`, `1.000,5`, `1,2,3`,
+ * `1234,567`, `1,0000` and `12,345.6,7` do not.
+ */
+const THOUSANDS_GROUPED_INTEGER = /^[+-]?\d{1,3}(?:,\d{3})+(?![\d,])[^,]*$/;
+
+/**
  * Parse a numeric cell, tolerating the punctuation spreadsheets add: thousands
  * separators (`1,234`), a leading currency symbol (`$` `¥` `€` `£` `￥`), a
  * trailing percent sign (`25%` → `25`), and accounting-style parenthesised
  * negatives (`(1,234)` → `-1234`). Returns `undefined` when the residue is not
  * a finite number.
+ *
+ * A comma is a thousands separator and nothing else, and only where it groups
+ * thousands (#20497): 1 to 3 leading digits, then groups of exactly three,
+ * and only before any `.` (`1,000`, `12,345.67`) — see
+ * {@link THOUSANDS_GROUPED_INTEGER}. Any other comma makes the cell
+ * unparseable (`undefined`, so the row's `invalid_number` error), never a
+ * different number: a decimal-comma spelling (`3,14`, `1,5`, `1.000,5`) or a
+ * stray comma (`1,2,3`) used to have every comma stripped and was stored as
+ * `314`, `15`, `1.0005`, `123`. No locale is guessed — `1,500` is always one
+ * thousand five hundred, never 1.5 — so a file written with a decimal comma is
+ * refused cell by cell rather than read as some other value.
  */
 export function parseNumberCell(raw: unknown): number | undefined {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
@@ -233,7 +254,10 @@ export function parseNumberCell(raw: unknown): number | undefined {
   if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1).trim(); }
   s = s.replace(/^[$¥€£￥]\s*/, '');   // leading currency symbol
   s = s.replace(/%$/, '').trim();       // trailing percent
-  s = s.replace(/,/g, '');              // thousands separators
+  if (s.includes(',')) {
+    if (!THOUSANDS_GROUPED_INTEGER.test(s)) return undefined;
+    s = s.replace(/,/g, '');            // a well-formed thousands grouping
+  }
   if (s === '' || !/^[+-]?\d*\.?\d+(e[+-]?\d+)?$/i.test(s)) return undefined;
   const n = Number(s);
   if (!Number.isFinite(n)) return undefined;

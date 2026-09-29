@@ -70,7 +70,7 @@ describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
     expect(message).toContain('{30_days_ago}');   // the spelling that works
     expect(message).toContain('2026-01-15');      // the ISO alternative
     // Attributable from the error alone by the customer-resolvable sentence —
-    // never by a tracker id (#13156's strip).
+    // never by a tracker id (commit fd289be45's strip).
     expect(message).toContain('Refused at authoring time so the error surfaces where the filter is written.');
     expect(message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     // A calendar preset prescribes its window pair.
@@ -92,7 +92,7 @@ describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
  * pin then asks whether `DATE_RANGE_PRESET_MACRO_WINDOWS` joins them, which is
  * the only question it exists to answer — and the question a membership check
  * over the token vocabulary cannot reach, because both a right and a wrong end
- * token are perfectly good members (#17014).
+ * token are perfectly good members (commit 80aef8032).
  */
 const REFERENCE_DAY = '2026-07-15'; // a Wednesday, mid-week / mid-month / mid-quarter
 

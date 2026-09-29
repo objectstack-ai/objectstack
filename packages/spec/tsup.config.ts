@@ -176,26 +176,67 @@ const swapServerOnlyGrammarArm: Plugin = {
  * dependency — so this pass meets the container's limit ALONE, with no
  * parallelism to cap.
  *
- * Measured on this package's DTS pass, inside a cgroup capped at 8192 MB
- * (peak anonymous RSS of the whole process tree):
+ * 6144 is the largest ceiling whose WORST case still fits: V8 cannot exceed
+ * it, and the pass's non-heap overhead measures ~250 MB, so the bound is
+ * ~6.4 GB inside an 8 GB container.
  *
- *     ceiling   result                        peak RSS   wall
- *     12288     ok, but only ~0.9 GB spare     7290 MB    132s
- *      6144     ok                             5794 MB    134s
- *      5120     ok                             5328 MB    148s
- *      4096     ERR_WORKER_OUT_OF_MEMORY          —       113s
+ * ONE `ts.Program` FOR ALL ENTRIES — held by a patch, not by tsup. tsup 8.5.1
+ * runs this pass through its bundled rollup-plugin-dts 6.1.1, whose
+ * `createPrograms` groups entries by a directory key. tsup always passes the
+ * tsconfig path, and on that path every entry after the first was keyed by its
+ * OWN directory (the same code is in rollup-plugin-dts 6.5.1). So each entry
+ * above got its own program, which parsed, bound and emitted its whole
+ * reachable graph again: the peak grew with entries × graph, not with the
+ * graph. `patches/tsup@8.5.1.patch` (wired in `pnpm-workspace.yaml`'s
+ * `patchedDependencies`) keys every entry by the tsconfig's directory, so the
+ * 18 entries share one program. The patch names the exact tsup version, and
+ * `pnpm install` refuses a patch that matches no installed package, so a tsup
+ * bump cannot drop it silently. ⇒ On a tsup bump, re-derive the patch or
+ * retire it, then re-measure this table. If this pass ever shows 18 programs
+ * again, the entries are back to one program each.
  *
- * 6144 is chosen as the largest ceiling whose WORST case still fits: V8 cannot
- * exceed it, and the pass's non-heap overhead measured ~250 MB, so the bound is
- * ~6.4 GB inside an 8 GB container. Every completing ceiling emitted a
- * byte-identical declaration tree (122 files, one sha256 over all of them), so
- * this number buys headroom and costs nothing but GC time.
+ * `noCheck`: rollup-plugin-dts forces `noEmitOnError`, which makes the program
+ * also semantically CHECK each file it emits — a type check
+ * the `typecheck` script (`tsc --noEmit` over this same tsconfig, run by the
+ * required `TypeScript Type Check` job) already performs once. `noCheck` drops
+ * only that duplicate. Syntactic, option, global and declaration diagnostics
+ * still fail the pass, so a declaration that cannot be emitted still stops the
+ * build; a plain type error in `src/` is `typecheck`'s to report, not this
+ * pass's.
+ *
+ * Measured on 8113763026's source, DTS pass alone at the 6144 ceiling, inside a
+ * cgroup capped at 8192 MB. Live heap is the largest heap V8 kept after a
+ * mark-compact (`--trace-gc`); peak RSS is the peak anonymous RSS of the whole
+ * process tree; wall times are shared-box readings:
+ *
+ *     pass (both with noCheck)            programs   live heap   peak RSS   wall
+ *     one program per entry (unpatched)      18       4997 MB    5694 MB    153s
+ *     one program (patched, this tree)        1        882 MB    3537 MB     41s
+ *
+ * The patched run did only 4 mark-compacts, so its live-heap figure is a
+ * lower bound; its largest heap before a mark-compact was 1677 MB. The whole
+ * `build` script went 189s → 87s. For scale, `tsc --noEmit` over the whole
+ * package peaked at 1103 MB live on 8cdbe0c6e5.
+ *
+ * NOT BYTE-STABLE: this pass does not emit the same bytes twice. TypeScript
+ * prints union members, and the members of object types derived from them, in
+ * type-creation order, and that order follows emit order. Three runs of one
+ * commit gave three different trees, and rollup's content-hashed chunk names
+ * moved with them. The one-program pass also reorders top-level statements
+ * and `import`/`export` specifiers, and names one shared chunk after a
+ * different module (`data-engine` → `analytics.zod`). Normalise all of those
+ * (sort union and property-only type-literal members, statements and
+ * specifiers; strip chunk hashes; pair chunks by content), and the unpatched
+ * and patched trees are the same tree: 130 files, 0 differing. ⇒ Compare two
+ * declaration trees in that order-insensitive form, never by a byte digest.
  *
  * If this pass starts failing with `ERR_WORKER_OUT_OF_MEMORY`, the live type
  * graph has outgrown 6144 — that is a loud, actionable failure and the point of
  * the ceiling. ⛔ Do not "fix" it by raising the number past what the build
- * container has; that trades this error back for the silent exit 137. Shrink
- * the graph, or split the pass across entries.
+ * container has; that trades this error back for the silent exit 137. First
+ * check that the pass still builds ONE program (above). Then shrink the graph,
+ * or split the pass across entries. A split redraws the shared chunks and
+ * changes what publishes, so it needs that reviewed first.
  */
 const isDts = process.env.BUILD_DTS === 'true';
 
@@ -204,7 +245,8 @@ const mainConfig: Options = {
   splitting: false,
   sourcemap: true,
   clean: !isDts, // Only clean on main build, not on DTS pass
-  dts: !isDts ? false : { only: true }, // Only generate DTS on explicit pass, without JS
+  // Only generate DTS on the explicit pass, without JS; `noCheck` per the docblock above.
+  dts: !isDts ? false : { only: true, compilerOptions: { noCheck: true } },
   format: ['esm', 'cjs'],
   target: 'es2020',
   treeshake: true,

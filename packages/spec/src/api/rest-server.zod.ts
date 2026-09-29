@@ -201,7 +201,19 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   ),
 
   /**
-   * API documentation configuration
+   * The publisher's identity on the served OpenAPI document (#20294, ruling B
+   * on #20359; ADR-0049 enforce-or-remove). Each member an author sets
+   * overlays the document's `info` on BOTH doors that serve it —
+   * `{apiPath}/openapi.json` and its environment-scoped twin — in
+   * `packages/rest`'s `registerOpenApiEndpoints`; a member left unset keeps
+   * the bundled artifact's value, so nothing authored serves `info`
+   * byte-identical to `@objectstack/spec/openapi.json` (the #11646 invariant,
+   * now the unset case). `contact` and `license` replace the bundled object
+   * WHOLE, never member by member: a document must not state one party's
+   * licence name at another party's licence URL. `info.version` is not
+   * publisher identity — it is the protocol version, owned here (#11646) — so
+   * `version` is a tombstone, and neither `api.version` nor the runtime
+   * version ever reaches it.
    */
   documentation: z.object({
     /**
@@ -212,8 +224,9 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
      * `enableOpenApi` at the mount (`registerRoutes`). Tombstoned rather than
      * deleted: this inline object is a non-strict `z.object()`, so a bare
      * deletion would strip `enabled: false` in silence and the author would
-     * keep believing the document is off (ADR-0104). Only this key retires
-     * here; the block's other members are a separate decision.
+     * keep believing the document is off (ADR-0104). Only this key retired
+     * then; the block's other members were decided by #20294 (the identity
+     * members enforced, `version` retired below).
      */
     enabled: retiredKey(
       '`api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
@@ -222,20 +235,49 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
       + '`api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` '
       + 'viewer unmounted.',
     ),
-    title: z.string().default('ObjectStack API').describe('API documentation title'),
-    description: z.string().optional().describe('API description'),
-    version: z.string().optional().describe('Documentation version'),
-    termsOfService: z.string().optional().describe('Terms of service URL'),
+    // [#20294] `.optional()`, no longer `.default('ObjectStack API')`: that
+    // default was materialized into every present block and never served
+    // (the served title was, and unset still is, the bundled artifact's
+    // 'ObjectStack REST API'), so reading it would have retitled the document
+    // of an author who wrote only, say, `description`.
+    title: z.string().optional()
+      .describe('Title of the served OpenAPI document (`info.title`); unset keeps the bundled title'),
+    description: z.string().optional()
+      .describe('Description of the served OpenAPI document (`info.description`); unset keeps the bundled description. Your app\'s own release number belongs here'),
+    /**
+     * [REMOVED in #20294] Retired by ruling B on #20359 (ADR-0049
+     * enforce-or-remove): the served `info.version` is the protocol version —
+     * `SPEC_VERSION`, written by `build-openapi.ts` — as the #11646 ruling
+     * settled it, so a publisher-set version would give the field a third
+     * meaning after the route identifier and the runtime version.
+     * `normalizeConfig` copied this key into the server's config and nothing
+     * read it back. Tombstoned rather than deleted: this inline object is a non-strict
+     * `z.object()`, so a bare deletion would strip `version: '2.3.0'` in
+     * silence and the author would keep believing the document carries it
+     * (ADR-0104).
+     */
+    version: retiredKey(
+      '`api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
+      + 'nothing ever read it, and the served OpenAPI document\'s `info.version` has one source: the '
+      + 'protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, '
+      + 'which no deployment configuration overrides. Delete the key. To publish your app\'s own release '
+      + 'number, write it into `api.documentation.description`, which the served `info.description` carries.',
+    ),
+    termsOfService: z.string().optional()
+      .describe('Terms-of-service URL of the served OpenAPI document (`info.termsOfService`); unset serves none'),
     contact: z.object({
-      name: z.string().optional(),
-      url: z.string().optional(),
-      email: z.string().optional(),
-    }).optional(),
+      name: z.string().optional().describe('Contact name (`info.contact.name`)'),
+      url: z.string().optional().describe('Contact URL (`info.contact.url`)'),
+      email: z.string().optional().describe('Contact email (`info.contact.email`)'),
+    }).optional()
+      .describe('Contact of the served OpenAPI document; replaces the bundled `info.contact` whole, so a member left out is absent rather than inherited. Unset keeps the bundled contact'),
     license: z.object({
-      name: z.string(),
-      url: z.string().optional(),
-    }).optional(),
-  }).optional().describe('OpenAPI/Swagger documentation config'),
+      name: z.string().describe('License name (`info.license.name`)'),
+      url: z.string().optional().describe('License URL (`info.license.url`)'),
+    }).optional()
+      .describe('License of the served OpenAPI document; replaces the bundled `info.license` whole, so a license without `url` serves no URL. Unset keeps the bundled license'),
+  }).optional()
+    .describe('Publisher identity of the served OpenAPI document: each member set here overlays its `info` on both /openapi.json doors, and nothing set serves the bundled `info` unchanged. `info.version` is always the protocol version'),
   
   /**
    * [REMOVED in #20295] Server-wide toggles for the response envelope

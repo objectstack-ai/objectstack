@@ -32,7 +32,8 @@ export const entry: SemanticMigration = {
     + 'A read through `previous` or `parent` has no hydrated seam at all, a validation rule included: '
     + 'read a column the bound record declares instead',
   reason:
-    'Card #20078, triage remedy A (5825661201). The field level is never hydrated: '
+    'Triage routed this on 2026-09-25 to remedy A: refuse the traversal at authoring, with a '
+    + 'prescription. The field level is never hydrated: '
     + '`rule-validator.ts` evaluates `requiredWhen` / `readonlyWhen` / an option\'s `visibleWhen` '
     + 'against the record alone, so a reference there holds the related record\'s bare id and every '
     + 'read through it faults, on every row. Measured on the engine before this change: a traversing '
@@ -41,8 +42,8 @@ export const entry: SemanticMigration = {
     + 'gated through a reference was admitted whatever the related record said (option visibility is '
     + 'fail-open) — while `objectstack validate` passed a stack carrying all three, exit 0. ADR-0137 D2 '
     + 'made the runtime fail closed; the defect was that authoring did not say so first (NORTH-STAR '
-    + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served (#18682) '
-    + 'and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
+    + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served, one hop '
+    + 'deep, and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
     + 'moving a field predicate into a validation rule turns a condition into a FAILURE condition, '
     + 'moves an option from hidden to offered-then-refused, and the right `events` scope depends on '
     + 'what the author meant — none of it mechanical. Hydrating the field level instead is a '

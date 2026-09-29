@@ -4,22 +4,20 @@
  * A RETIRED `requires` token reads as its retirement prescription at the
  * `os validate` / `os build` door — never as "check for a typo".
  *
- * Both commands accept a PLAIN-OBJECT config (`export default { … }`, no
- * `defineStack` call). That config is parsed with
- * `ObjectStackDefinitionSchema.safeParse`, whose `requires` is a bare string
- * array — the `defineStack` vocabulary check never runs — and the only text
- * the author sees for a `requires` token is the capability preflight's
- * `renderCapabilityMessage`. For a word that USED to be a capability (the
- * saved-report stack's `reports`), the typo advice is wrong in a way that
- * sends the author hunting for a spelling instead of deleting the token.
+ * [#20367 ruling B] Re-judged. This pin used to hold the PLAIN-OBJECT posture:
+ * `export default { … }` skipped `defineStack`, so the vocabulary check never
+ * ran and an unknown token was an ADVISORY at the door (exit 0, a
+ * `{ token, message }` record in `warnings`). Both doors now refuse a default
+ * export no stack producer built (`STACK_PROVENANCE_MISSING`), so the config is
+ * authored in the one legal shape — `defineStack({ … })` — and an unknown token
+ * is the producer's refusal at load: `STACK_CAPABILITY_UNKNOWN`, exit 1, on
+ * both doors, through the same `--json` envelope (`error` + `code`).
  *
- * Posture is unchanged: an unknown token is an ADVISORY at this door (exit 0,
- * a `{ token, message }` record in `warnings`); only its TEXT is asserted
- * here, and it is asserted EQUAL to the spec-owned prescription — the same
- * string `defineStack` refuses the token with and `os serve` warns with.
- *
- * A misspelled token rides in the same fixture as the control, so "the
- * prescription is shown" cannot pass against a renderer that shows it for
+ * What stays pinned is the TEXT the author reads, now in that refusal: the
+ * retired token carries the spec-owned prescription verbatim (the same string
+ * `os serve` warns with), and only the misspelled token carries the typo
+ * advice. The misspelled token rides in the same fixture as the control, so
+ * "the prescription is shown" cannot pass against a renderer that shows it for
  * every unknown token.
  */
 
@@ -31,6 +29,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -59,29 +58,29 @@ function runCli(args: string[], cwd: string): Promise<Run> {
   });
 }
 
-function capabilityHints(run: Run, label: string): Map<string, string> {
-  let payload: { warnings?: unknown };
+interface Refusal {
+  valid?: unknown;
+  success?: unknown;
+  error?: unknown;
+  code?: unknown;
+}
+
+function refusalPayload(run: Run, label: string): Refusal {
   try {
-    payload = JSON.parse(run.stdout) as { warnings?: unknown };
+    return JSON.parse(run.stdout) as Refusal;
   } catch {
     throw new Error(`${label}: stdout was not one JSON document (exit ${run.code})\n${run.stdout}\n${run.stderr}`);
   }
-  const hints = new Map<string, string>();
-  for (const w of Array.isArray(payload.warnings) ? payload.warnings : []) {
-    if (typeof w === 'object' && w !== null && 'token' in w) {
-      const r = w as { token: unknown; message: unknown };
-      hints.set(String(r.token), String(r.message));
-    }
-  }
-  return hints;
 }
 
 const RETIRED_TOKEN = 'reports';
 const TYPO_TOKEN = 'reportz';
 
-/** A plain-object config: no `defineStack`, so no parse-time vocabulary check. */
+/** The one legal shape: `defineStack` runs the vocabulary check at load. */
 const CONFIG = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.retiredcap', name: 'retiredcap', version: '1.0.0', type: 'app', namespace: 'retiredcap' },
   requires: ['${RETIRED_TOKEN}', '${TYPO_TOKEN}'],
   objects: [
@@ -92,7 +91,7 @@ export default {
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
-};
+});
 `;
 
 let dir = '';
@@ -100,13 +99,14 @@ let dir = '';
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'os-retired-cap-'));
   writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG);
+  linkSpec(dir);
 });
 
 afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-describe('a retired `requires` token at the `os validate` / `os build` door (plain-object config)', () => {
+describe('a retired `requires` token at the `os validate` / `os build` door (defineStack config)', () => {
   const prescription = RETIRED_PLATFORM_CAPABILITY_GUIDANCE[RETIRED_TOKEN];
 
   it('the spec carries a prescription for the token under test', () => {
@@ -114,14 +114,19 @@ describe('a retired `requires` token at the `os validate` / `os build` door (pla
   });
 
   for (const command of ['validate', 'build'] as const) {
-    it(`os ${command} --json: advisory posture, the retired token carries the prescription, the typo keeps the typo hint`, async () => {
+    it(`os ${command} --json: STACK_CAPABILITY_UNKNOWN, exit 1 — the retired token carries the prescription, the typo keeps the typo hint`, async () => {
       const run = await runCli([command, '--json'], dir);
-      expect(run.code, `os ${command} --json failed:\n${run.stdout}${run.stderr}`).toBe(0);
-      const hints = capabilityHints(run, `os ${command} --json`);
-      expect([...hints.keys()].sort()).toEqual([RETIRED_TOKEN, TYPO_TOKEN].sort());
-      expect(hints.get(RETIRED_TOKEN)).toBe(prescription);
-      expect(hints.get(RETIRED_TOKEN)).not.toContain('check for a typo');
-      expect(hints.get(TYPO_TOKEN)).toContain('check for a typo');
+      const payload = refusalPayload(run, `os ${command} --json`);
+      expect(run.code, `os ${command} --json:\n${run.stdout}${run.stderr}`).toBe(1);
+      expect(payload.code).toBe('STACK_CAPABILITY_UNKNOWN');
+      expect(command === 'validate' ? payload.valid : payload.success).toBe(false);
+      const message = String(payload.error);
+      // The retired token: its prescription, verbatim — and it is not typo advice.
+      expect(message).toContain(prescription);
+      expect(prescription).not.toContain('check for a typo');
+      // The misspelled token: the typo advice, naming it — and only it.
+      expect(message).toContain(`requires: '${TYPO_TOKEN}' is not a known platform capability — check for a typo`);
+      expect(message.split('check for a typo').length - 1).toBe(1);
     }, 180_000);
   }
 });

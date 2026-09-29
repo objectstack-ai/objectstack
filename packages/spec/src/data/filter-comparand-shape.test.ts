@@ -261,7 +261,7 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       // row, and a trim here would re-open the split in the other direction.
       ["['   ', 'M']", ['   ', 'M']],
       // The 2026-08-11 `{ $field }` carve-out (#7596), reaching this door
-      // under #19377 — the same two-door question, one endpoint spelling over.
+      // by commit a60c913de — the same two-door question, one endpoint spelling over.
       ["[{ $field }, 'M']", [{ $field: 'a' }, 'M']],
       ["['A', { $field }]", ['A', { $field: 'b' }]],
       ['[{ $field }, { $field }]', [{ $field: 'a' }, { $field: 'b' }]],
@@ -294,7 +294,7 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
   // The ruling is the oldest of the four and the last to reach this door: it
   // removed `FieldReferenceSchema` from both endpoint unions and published the
   // sentence "A { $field } reference is NOT an endpoint shape", while this door
-  // went on lowering such a range unchanged (#19377).
+  // went on lowering such a range unchanged (until commit a60c913de).
 
   it.each([
     ['a reference as the MIN bound', { at: { $between: [{ $field: 'a' }, 'M'] } }],
@@ -409,7 +409,7 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
 
   // ⚠️ `$in` / `$nin` MEMBERS carrying a `{ $field }` reference are the SAME
   // #7596 ruling one position over, published by `SET_MEMBER_DESCRIPTION`, and
-  // this door still lowers them unchanged — measured under #19377 and filed
+  // this door still lowers them unchanged — measured for commit a60c913de and filed
   // separately. ⛔ Deliberately NOT pinned here in either direction: pinning a
   // measured defect green reads as a ruling nobody made, and refusing it would
   // be a narrowing of a published face this card was never given.

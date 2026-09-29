@@ -32,7 +32,8 @@ export const entry: SemanticMigration = {
     + 'What makes this worth a removal rather than a note is that the cost is already '
     + 'measured. A declared surface that is name-identical and semantics-adjacent to a real '
     + 'one is an attractive nuisance in every grep, and it mis-directed a decision once: '
-    + '#5948\'s issue body AND its 2026-08-07 maintainer ruling both read '
+    + 'The issue asking what `GET /ui/view/:object/:type` answers AND its 2026-08-07 maintainer '
+    + 'ruling both read '
     + '`GetViewResponseSchema` (zero implementations) as the contract of '
     + '`GET /ui/view/:object/:type`, whose declared response is `GetUiViewResponseSchema` — '
     + 'one word apart, 250 lines up. That ruling\'s reasoning happened to survive the '
@@ -42,7 +43,7 @@ export const entry: SemanticMigration = {
     + 'there is no tombstone and no D2 conversion — RETIRED_DEFS_BY_MAJOR plus this entry '
     + 'are the declaration. If reading and writing ONE view by id becomes a real '
     + 'requirement it returns implementation-first. ADR-0049, ADR-0087, maintainer ruling '
-    + '2026-08-07, #6239.',
+    + '2026-08-07.',
   acceptanceCriteria:
     'No source imports `ListViewsRequest(Schema)`, `ListViewsResponse(Schema)`, '
     + '`GetViewRequest(Schema)`, `GetViewResponse(Schema)`, `CreateViewRequest(Schema)`, '
@@ -53,5 +54,5 @@ export const entry: SemanticMigration = {
     + 'surfaces that were always the live ones: `GET /api/v1/meta/view/:name` returns the '
     + 'stored definition and `GET /api/v1/ui/view/:object/:type` returns the resolved view, '
     + 'both unchanged by this removal. `GetUiViewRequestSchema` / `GetUiViewResponseSchema` '
-    + 'still resolve — they are the shapes #5948 meant.',
+    + 'still resolve — they are the shapes that ruling meant.',
 };

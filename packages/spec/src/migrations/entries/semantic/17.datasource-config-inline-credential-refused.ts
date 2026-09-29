@@ -11,8 +11,10 @@ export const entry: SemanticMigration = {
     'or a direct `external.credentialsRef` secrets-store reference',
   reason:
     'A datasource artefact is persisted whole into `sys_metadata`, which is served back by ' +
-    'the ordinary data API — an inline credential is cleartext at rest (#7990, maintainer-' +
-    'ruled per-artefact contract closure, 2026-08-12). There is no mechanical rewrite: ' +
+    'the ordinary data API — an inline credential is cleartext at rest. The maintainer ruled ' +
+    'on 2026-08-12 to close that per artefact: each schema that admitted an inline credential ' +
+    'refuses it at publish and points at the secret mechanism the artefact already had, rather ' +
+    'than a heuristic guard at the `sys_metadata` write. There is no mechanical rewrite: ' +
     'moving the value requires ENCRYPTING it into a `sys_secret` row through a running ' +
     "secret binder and deleting the cleartext, which a source-file transform cannot do — " +
     'auto-deleting the key alone would silently drop a live credential instead.',

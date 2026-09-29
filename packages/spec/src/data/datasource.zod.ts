@@ -330,11 +330,11 @@ export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasource
 
 /**
  * Refusal for the contradictory pair "`external.credentialsRef` bound + a
- * mongo `config.url` whose userinfo names NO user" (#9041) — the "absence must
- * be loud" half of the #8696 family, refused at the one door that sees both
- * halves at once.
+ * mongo `config.url` whose userinfo names NO user" (commit d491625c1) — the
+ * "absence must be loud" half of commit 90a12fb18's bound-secret injection,
+ * refused at the one door that sees both halves at once.
  *
- * Why the pair cannot work as written, all measured (on the #9041 card and
+ * Why the pair cannot work as written, all measured (for commit d491625c1 and
  * re-verified against `buildMongoAuth` in service-datasource's driver
  * factory): `MongoClient` credentials need a username as well as a password,
  * and with `url` present the discrete `username` field is ignored
@@ -349,15 +349,15 @@ export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasource
  * into a guaranteed handshake failure. And refusing at CONNECT would
  * contradict `MongoConfigSchema.url`'s published contract ("bind the secret …
  * and it is injected at connect time") while planting a per-branch asymmetry
- * inside the factory — the defect class #8696 closed. Hence this door.
+ * inside the factory — the defect class commit 90a12fb18 closed for mongo. Hence this door.
  *
- * Scope fences, each deliberate (#9041's triage, adopted verbatim):
+ * Scope fences, each deliberate (the triage's, as commit d491625c1 landed them):
  *
  *  - **mongo arm ONLY** (judged through {@link resolveDriverId}, so a stored
  *    legacy `driver: 'mongo'` row is judged identically to `'mongodb'` — the
- *    same alias mechanism the #9040 read-path redaction uses). The postgres
+ *    same alias mechanism commit 24206416a's read-path redaction uses). The postgres
  *    arm injects on a user-less DSN by a different, measured mechanism
- *    (#8873: `pg` sends a password only when the server asks) and is NOT
+ *    (commit 096106522: `pg` sends a password only when the server asks) and is NOT
  *    assumed to share this defect.
  *  - **"names no user" means {@link urlUserinfoUsername} answers
  *    `undefined`** — no userinfo at all. The present-but-empty forms
@@ -372,7 +372,7 @@ export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasource
  *    #9147 — see {@link CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED}. It is a
  *    separate message because the remedy differs: there the discrete
  *    `username` field is live, so the fix is `config.username`, not the URL's
- *    userinfo. #9041 fenced it out; #9147 widened the same refinement into it.
+ *    userinfo. Commit d491625c1 fenced it out; #9147 widened the same refinement into it.
  */
 const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
   'this mongo `config.url` names no user in its userinfo while `external.credentialsRef` binds '
@@ -394,7 +394,7 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
  * bound while the mongo `config` authors no `url` AND names no `username`.
  *
  * Same defect, one branch over, and the branches were measured to agree on this
- * input before either was refused — which is why this inherits #9041's ruling
+ * input before either was refused — which is why this inherits commit d491625c1's ruling
  * rather than re-opening it (the standing meta-rule: a sibling spelling of an
  * already-ruled silent discard defaults into the existing refusal set).
  *
@@ -416,7 +416,7 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
  * same measured asymmetry that made the URL branch's refusal the right answer
  * rather than an unconditional injection.
  *
- * ## Why a SEPARATE message, and not #9041's
+ * ## Why a SEPARATE message, and not commit d491625c1's
  *
  * The remedy differs, and a refusal naming a remedy that does not apply is
  * worse than no refusal — the failure mode this module's own history section
@@ -430,8 +430,8 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
  * ## Scope fences
  *
  *  - **mongo arm ONLY**, judged through {@link resolveDriverId} — identical to
- *    #9041's fence, so a stored legacy `driver: 'mongo'` row is judged the
- *    same. The postgres arm is NOT widened to (#8873 measured `pg` receiving
+ *    commit d491625c1's fence, so a stored legacy `driver: 'mongo'` row is judged the
+ *    same. The postgres arm is NOT widened to (commit 096106522 measured `pg` receiving
  *    the bound password regardless of the DSN naming a user), and neither is
  *    any other driver.
  *  - **"names no username" is `undefined` or `''`** — the two spellings that
@@ -442,14 +442,14 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
  *    would leave this refusal prescribing `config.username` while the platform
  *    still accepted the one spelling of `config.username` that keeps the
  *    binding silent — the prescription must land somewhere enforced. Note the
- *    deliberate asymmetry with #9041's fence, which DOES exclude its
+ *    deliberate asymmetry with commit d491625c1's fence, which DOES exclude its
  *    present-but-empty forms: there `MongoClient` itself throws on them
  *    (`URI contained empty userinfo section`), so only the `undefined` case is
  *    silent. Here nothing throws — `username: ''` connects, anonymously — so
  *    the silent set is the falsy set. Each fence follows the measurement on
  *    its own branch rather than the other branch's shape.
  *  - **A non-string `username` is the config gate's finding, not this one** —
- *    same posture as #9041 takes toward a non-string `url`.
+ *    same posture as commit d491625c1 takes toward a non-string `url`.
  *  - **"bound" mirrors the connect path's truthy check**, exactly as above: an
  *    empty-string `credentialsRef` is not a binding.
  */
@@ -692,7 +692,7 @@ export const DatasourceSchema = lazySchema(() => strictObject(
   // author's trust on a slot that cannot pay it back.
   reportDriverConfigIssues(ctx, ds.driver, ds.config, ['config']);
 
-  // #9041 (url branch) + #9147 (composed branch) — see
+  // commit d491625c1 (url branch) + #9147 (composed branch) — see
   // CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED and
   // CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED. Neither can live in
   // `MongoConfigSchema` (a config-level refinement sees only `config`;

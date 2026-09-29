@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     + '`registerMetadataTypeSchema(type, schema)` from the plugin\'s `init(ctx)` so '
     + '`GET /api/v1/meta` serves a real JSON Schema for it',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-14 on #8586. The key was '
+    'ADR-0049 enforce-or-remove; maintainer ruling of 2026-08-14: remove the key, jointly with '
+    + 'refusing unknown types at the `/meta` boundary by the static registry. The key was '
     + 'declared, authorable, on the published authorable surface, and documented on four '
     + 'docs pages as THE way a plugin registers a custom metadata type — and read by '
     + 'NOTHING. The only production writer of the manager\'s type registry is '
@@ -23,9 +24,9 @@ export const entry: SemanticMigration = {
     + '`MetadataManager`: declared count == live count (27 == 27), '
     + '`getRegisteredTypes()` sorted equals the built-in registry sorted. So an author '
     + 'who followed the published instructions wrote the key, got no error, and nothing '
-    + 'happened — the same silence trap as #4212\'s `onInstall` (a documented hook with '
-    + 'no invocation site), one level down, in exactly the AI-authoring path (ADR-0033). '
-    + 'Joint consequence recorded with #8421: with this plugin-declared channel removed, '
+    + 'happened — the same silence trap as the plugin lifecycle\'s `onInstall` (a documented '
+    + 'hook with no invocation site), one level down, in exactly the AI-authoring path (ADR-0033). '
+    + 'The joint consequence: with this plugin-declared channel removed, '
     + 'the static registry is the total universe of legal metadata kinds, which makes '
     + 'refuse-by-static-registry at the /meta boundary safe by construction. '
     + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '

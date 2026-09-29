@@ -33,7 +33,7 @@ import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/regist
 // `kernel/MetadataPluginConfig:additionalTypes` precedent) — the registration
 // is two `RETIRED_KEYS_BY_MAJOR[18]` entries plus one D3 semantic entry.
 //
-// On the assertion set (the #8586 / #14676 / #14477 precedent): a schema
+// On the assertion set (the #8586 / commit 13c48c2a5 / #14477 precedent): a schema
 // refusal raises a `ZodError` whose issues carry `code` and `path` but no
 // ADR-0112 `status` — that envelope belongs to the API error surface. So these
 // pins assert the strongest set this surface really has: refusal, the issue

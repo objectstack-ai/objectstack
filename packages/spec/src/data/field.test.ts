@@ -2017,7 +2017,7 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
 });
 
 /**
- * #16867 — the flattened column-constraint spellings must not be renamed onto
+ * Commit 0ee32edef — the flattened column-constraint spellings must not be renamed onto
  * `required`.
  *
  * The defect these pin against was not a silent one: the refusal fired, loudly,
@@ -2604,7 +2604,7 @@ describe('Relationship target — `reference` required on lookup/master_detail (
     },
   );
 
-  // [#16126] A whitespace-only target is the same hole a third way: it names
+  // [commit 859ded3ec] A whitespace-only target is the same hole a third way: it names
   // no object either (no whitespace-bearing string can match the declared
   // object-name grammar), and it is what a cleared target picker emits when
   // the value round-trips through an input. The notion of blank is `.trim()`,

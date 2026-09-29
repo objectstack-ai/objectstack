@@ -114,10 +114,11 @@ describe('RestApiConfigSchema', () => {
   });
 
   describe('Documentation Configuration', () => {
-    // `documentation.enabled` is a retiredKey() tombstone since #20295 — its
-    // refusal, prescription and tsc pins live in
-    // `rest-api-config-dead-keys-retirement.test.ts`. The block's other
-    // members are live-parsed here, unchanged.
+    // `documentation.enabled` (#20295) and `documentation.version` (#20294) are
+    // retiredKey() tombstones — their refusal, prescription and tsc pins live
+    // in `rest-api-config-dead-keys-retirement.test.ts`. The block's other
+    // members are live-parsed here; since #20294 they overlay the served
+    // OpenAPI `info` (`packages/rest`, `rest-openapi-info-overlay.test.ts`).
     it('should accept basic documentation config', () => {
       const config = RestApiConfigSchema.parse({
         documentation: {
@@ -135,7 +136,9 @@ describe('RestApiConfigSchema', () => {
         documentation: {
           title: 'ObjectStack API',
           description: 'Complete API for ObjectStack platform',
-          version: '1.0.0',
+          // No `version`: it is a retiredKey() tombstone since #20294 — the
+          // served `info.version` is the protocol version. Its refusal pins
+          // live in `rest-api-config-dead-keys-retirement.test.ts`.
           termsOfService: 'https://example.com/terms',
           contact: {
             name: 'API Support',
@@ -645,7 +648,6 @@ describe('Integration Tests', () => {
         documentation: {
           title: 'ObjectStack API',
           description: 'REST API for ObjectStack platform',
-          version: '1.0.0',
         },
       },
       crud: {

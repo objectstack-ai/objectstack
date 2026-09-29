@@ -495,14 +495,56 @@ export function buildCounts(
 
 /* ------------------------------------------------------------------ rendering */
 
-/** Where the generated artifact lives, relative to the repo root. */
-export const COUNTS_PATH = 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md';
+/**
+ * Where the generated counts live, relative to the repo root: a DIRECTORY with
+ * one `<dir>.md` shard per directory of `packages/spec/src` that has object
+ * sites, triaged or not (#20361).
+ *
+ * ## Why a directory, and why no file carries a total
+ *
+ * #5107 moved the numbers out of the ledger into ONE generated file, and
+ * `merge=os-regen` made a LOCAL merge of it regenerate instead of text-merge.
+ * GitHub's server-side merge — the one that decides a PR's `mergeable` state and
+ * builds the ref CI runs on — runs no custom driver. That file carried a global
+ * section and a posture `**total**` row that every schema-touching PR rewrote,
+ * so two PRs that added sites in different directories conflicted on them, and
+ * the moment one landed the other went `dirty` with no CI run. Measured on
+ * `2b24b8b823` in a bare probe clone with no driver: one strict site in `ui/`
+ * against two in `data/`, each regenerated, CONFLICT (content) on the counts
+ * file while both source files merged clean.
+ *
+ * So each directory's numbers are their own file, carrying only that
+ * directory's rows, and the cross-directory totals — the global measures, the
+ * posture total, the global bucket split — are summed where they are read
+ * (`check:strictness-ledger` and `gen:strictness-ledger` print them; see
+ * `formatGlobalCounts`) and committed nowhere. Two PRs touching different
+ * directories now touch disjoint files; a same-directory pair still meets on
+ * that directory's rows, which is the residue the local driver still owns.
+ */
+export const COUNTS_DIR = 'docs/audits/2026-07-unknown-key-strictness-ledger.counts';
+
+/**
+ * The single file the shards replaced (#20361). Named for one live reason: a
+ * branch cut before the split meets its deletion as a modify/delete on its next
+ * base merge, and keeping it would publish a stale table and stale totals beside
+ * the shards, re-rendered by nothing. Its presence is a gate failure and the
+ * generator deletes it.
+ */
+export const LEGACY_COUNTS_PATH = 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md';
 
 /** The ledger it belongs to, relative to the repo root. */
 export const LEDGER_PATH = 'docs/audits/2026-07-unknown-key-strictness-ledger.md';
 
 /** The command that rewrites the artifact. */
 export const GEN_COMMAND = 'pnpm --filter @objectstack/spec gen:strictness-ledger';
+
+/** The shard carrying one source directory's numbers. */
+export function countsShardName(dir: string): string {
+  if (!/^[a-z][a-z0-9-]*$/.test(dir)) {
+    throw new Error(`cannot shard the strictness counts for "${dir}/": not a plain directory name`);
+  }
+  return `${dir}.md`;
+}
 
 const BUCKET_LABEL: Record<Bucket, string> = {
   authorable: 'authorable — the ruling\'s forced scope',
@@ -515,53 +557,38 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 };
 
 /**
- * Render the artifact. Pure function of the model, so `check:strictness-ledger`
- * proves freshness by rendering and comparing bytes — there is no second parser
- * to disagree with this writer.
+ * The lines every shard opens with. Everything here names only the shard's own
+ * directory: a line that named a sibling directory, the triaged-directory count
+ * or a total would be a line two PRs touching different directories both
+ * rewrite — the conflict the shard exists to remove.
  */
-export function renderCounts(model: CountsModel): string {
-  const L: string[] = [];
-  const g = model.global;
+function shardHeader(dir: string, lead: string[]): string[] {
+  return [
+    '<!-- GENERATED — DO NOT EDIT BY HAND. -->',
+    `<!-- Regenerate: ${GEN_COMMAND} -->`,
+    '',
+    `# \`${dir}/\` — unknown-key strictness counts (generated)`,
+    '',
+    ...lead,
+    '',
+    'The verdicts, the evidence and the exemption rationales live in',
+    `[the ledger itself](../${path.basename(LEDGER_PATH)}) and are`,
+    'hand-written; **this file has no prose to preserve** and is regenerated whole.',
+    'One file per directory, and no total across directories is committed anywhere:',
+    '`check:strictness-ledger` sums the shards when it reads them. **Never',
+    'hand-patch a number here** — fix the code or the verdict and regenerate.',
+    '',
+  ];
+}
 
-  L.push('<!-- GENERATED — DO NOT EDIT BY HAND. -->');
-  L.push(`<!-- Regenerate: ${GEN_COMMAND} -->`);
-  L.push('');
-  L.push('# Unknown-key strictness ledger — the counts (generated)');
-  L.push('');
-  L.push('Every number the #4001 strictness ledger publishes, computed from the AST');
-  L.push(`(\`packages/spec/scripts/lib/strictness-ledger.ts\`). The verdicts, the evidence and`);
-  L.push(`the exemption rationales live in [the ledger itself](./${path.basename(LEDGER_PATH)}) and`);
-  L.push('are hand-written; **this file has no prose to preserve** and is regenerated whole.');
-  L.push('');
-  L.push('Split out at #5107. These numbers were the ledger\'s entire merge-conflict surface:');
-  L.push('two batches each decrement a header by their own delta, git merges the rows cleanly,');
-  L.push('and the subtotal — which conflicts with nothing — merges clean and wrong. Seven cases');
-  L.push('in one day. The correct resolution was always "recompute from the merged tree", so the');
-  L.push('path carries `merge=os-regen` (#4675) and the recomputation is now mandatory rather');
-  L.push('than remembered. **Never hand-patch a number here** — fix the code or the verdict and');
-  L.push('regenerate.');
-  L.push('');
+/** One triaged directory's shard: its posture row, its per-file sites, its open files and buckets. */
+function renderTriagedShard(t: TriagedDirCounts): string {
+  const L = shardHeader(t.dir, [
+    `Every number the #4001 strictness ledger publishes about \`packages/spec/src/${t.dir}/\`,`,
+    'computed from the AST (`packages/spec/scripts/lib/strictness-ledger.ts`).',
+  ]);
 
-  L.push('## Global');
-  L.push('');
-  L.push('| Measure | Value |');
-  L.push('|---|---|');
-  L.push(`| Triaged directories | ${g.dirs} |`);
-  L.push(`| Object sites in them | ${g.sites} |`);
-  L.push(`| Still-open (strip) sites | ${g.strip} |`);
-  L.push(`| Files carrying at least one | ${g.openFiles} |`);
-  L.push('');
-  L.push('Remaining strip sites by class:');
-  L.push('');
-  L.push('| Bucket | Sites |');
-  L.push('|---|---|');
-  for (const b of BUCKETS) {
-    if (!g.buckets[b] && b === 'unclassified') continue;
-    L.push(`| ${BUCKET_LABEL[b]} | ${g.buckets[b]} |`);
-  }
-  L.push('');
-
-  L.push('## Posture, per triaged directory');
+  L.push('## Posture');
   L.push('');
   L.push('The `strict` column is the one the campaign schedules against; it counts both the');
   L.push('`strictObject(` helper and the older `z.object(…).strict()` spelling, and — since');
@@ -569,78 +596,107 @@ export function renderCounts(model: CountsModel): string {
   L.push('');
   L.push('| Dir | Sites | strict | passthrough | catchall | strip |');
   L.push('|---|---|---|---|---|---|');
-  for (const t of model.triaged) {
-    L.push(
-      `| \`${t.dir}/\` | ${t.sites} | ${t.posture.strict} | ${t.posture.passthrough} | ` +
-        `${t.posture.catchall} | ${t.posture.strip} |`,
-    );
-  }
   L.push(
-    `| **total** | **${g.sites}** | **${g.posture.strict}** | **${g.posture.passthrough}** | ` +
-      `**${g.posture.catchall}** | **${g.posture.strip}** |`,
+    `| \`${t.dir}/\` | ${t.sites} | ${t.posture.strict} | ${t.posture.passthrough} | ` +
+      `${t.posture.catchall} | ${t.posture.strip} |`,
   );
   L.push('');
 
-  L.push('## File-level triage — site counts');
+  // Headers carry no numbers, so their anchors are stable across every batch —
+  // the ledger links into these files, and a link that breaks whenever a count
+  // moves is a link that will be wrong exactly when someone follows it.
+  L.push(`## \`${t.dir}/\` — sites`);
   L.push('');
   L.push('Object sites per file: every `z.object(` / `strictObject(` / `z.strictObject(` /');
   L.push('`z.looseObject(` CALL, read from the AST. A file with zero sites has nothing to');
   L.push('classify and is not listed (it becomes reportable the day it grows its first site).');
   L.push('');
-  for (const t of model.triaged) {
-    // Headers carry no numbers, so their anchors are stable across every batch —
-    // the ledger links into this file, and a link that breaks whenever a count
-    // moves is a link that will be wrong exactly when someone follows it.
-    L.push(`### \`${t.dir}/\` — sites`);
-    L.push('');
-    L.push('| File | Sites |');
-    L.push('|---|---|');
-    for (const f of t.files) L.push(`| \`${f.file}\` | ${f.sites} |`);
-    L.push(`| **total** | **${t.sites}** |`);
-    L.push('');
-  }
+  L.push('| File | Sites |');
+  L.push('|---|---|');
+  for (const f of t.files) L.push(`| \`${f.file}\` | ${f.sites} |`);
+  L.push(`| **total** | **${t.sites}** |`);
+  L.push('');
 
-  L.push('## Remaining strip sites — the batch-planning map');
+  L.push(`## \`${t.dir}/\` — open`);
   L.push('');
   L.push('Per file, how many of its sites still silently discard unknown keys. The `Class`');
   L.push('column that decides the bucket split is hand-written in the ledger; the arithmetic');
   L.push('over it is here.');
   L.push('');
-  for (const t of model.triaged) {
-    L.push(`### \`${t.dir}/\` — open`);
-    L.push('');
-    L.push(`**${t.strip} strip of ${t.sites}**, in ${t.openFiles.length} file(s).`);
-    L.push('');
-    if (!t.openFiles.length) {
-      L.push('This directory is closed.');
-      L.push('');
-      continue;
-    }
-    L.push('| File | Strip | Sites |');
-    L.push('|---|---|---|');
-    for (const f of t.openFiles) L.push(`| \`${f.file}\` | ${f.strip} | ${f.sites} |`);
-    L.push(`| **total** | **${t.strip}** | **${t.sites}** |`);
-    L.push('');
-    L.push('| Bucket | Sites |');
-    L.push('|---|---|');
-    for (const b of BUCKETS) {
-      if (!t.buckets[b] && b === 'unclassified') continue;
-      L.push(`| ${BUCKET_LABEL[b]} | ${t.buckets[b]} |`);
-    }
-    L.push('');
-  }
-
-  L.push('## Other directories (untriaged)');
+  L.push(`**${t.strip} strip of ${t.sites}**, in ${t.openFiles.length} file(s).`);
   L.push('');
-  L.push('Site totals only — these directories are classified coarsely in the ledger, per');
-  L.push('directory rather than per file.');
+  if (!t.openFiles.length) {
+    L.push('This directory is closed.');
+    L.push('');
+    return L.join('\n');
+  }
+  L.push('| File | Strip | Sites |');
+  L.push('|---|---|---|');
+  for (const f of t.openFiles) L.push(`| \`${f.file}\` | ${f.strip} | ${f.sites} |`);
+  L.push(`| **total** | **${t.strip}** | **${t.sites}** |`);
+  L.push('');
+  L.push('| Bucket | Sites |');
+  L.push('|---|---|');
+  for (const b of BUCKETS) {
+    if (!t.buckets[b] && b === 'unclassified') continue;
+    L.push(`| ${BUCKET_LABEL[b]} | ${t.buckets[b]} |`);
+  }
+  L.push('');
+  return L.join('\n');
+}
+
+/** One untriaged directory's shard: its site total, which is all the ledger measures of it. */
+function renderUntriagedShard(o: { dir: string; sites: number }): string {
+  const L = shardHeader(o.dir, [
+    `The object-site total of \`packages/spec/src/${o.dir}/\`, computed from the AST`,
+    '(`packages/spec/scripts/lib/strictness-ledger.ts`). The directory is untriaged:',
+    'the ledger classifies it coarsely, per directory rather than per file, so this',
+    'total is the one number measured here.',
+  ]);
+  L.push('## Site total (untriaged)');
   L.push('');
   L.push('| Dir | Sites |');
   L.push('|---|---|');
-  for (const o of model.other) L.push(`| \`${o.dir}/\` | ${o.sites} |`);
+  L.push(`| \`${o.dir}/\` | ${o.sites} |`);
   L.push('');
+  return L.join('\n');
+}
 
-  return `${L.join('\n')}`;
+/**
+ * Render every shard, keyed by file name: triaged directories in the ledger's
+ * order, then the untriaged ones. Pure function of the model, so
+ * `check:strictness-ledger` proves freshness by rendering and comparing bytes —
+ * there is no second parser to disagree with this writer.
+ */
+export function renderCountShards(model: CountsModel): Map<string, string> {
+  const out = new Map<string, string>();
+  const put = (dir: string, text: string) => {
+    const name = countsShardName(dir);
+    if (out.has(name)) throw new Error(`two directories render the same strictness shard ${name}`);
+    out.set(name, text);
+  };
+  for (const t of model.triaged) put(t.dir, renderTriagedShard(t));
+  for (const o of model.other) put(o.dir, renderUntriagedShard(o));
+  return out;
+}
+
+/**
+ * The cross-directory totals, summed at READ time (#20361). These are the
+ * numbers the single file committed as its `## Global` section and its posture
+ * `**total**` row — the lines every schema-touching PR rewrote. They are printed
+ * by whoever reads the model (`gen:` and `check:`) and written nowhere.
+ */
+export function formatGlobalCounts(model: CountsModel): string[] {
+  const g = model.global;
+  const buckets = BUCKETS.filter((b) => b !== 'unclassified' || g.buckets[b])
+    .map((b) => `${b} ${g.buckets[b]}`)
+    .join(' · ');
+  return [
+    `${g.dirs} triaged director(ies), ${g.sites} object site(s): strict ${g.posture.strict} · ` +
+      `passthrough ${g.posture.passthrough} · catchall ${g.posture.catchall} · strip ${g.posture.strip}`,
+    `${g.strip} strip site(s) in ${g.openFiles} file(s), by class: ${buckets}`,
+    `untriaged: ${model.other.reduce((a, o) => a + o.sites, 0)} object site(s) across ${model.other.length} director(ies)`,
+  ];
 }
 
 /* ------------------------------------------------------------------ plumbing */
@@ -648,15 +704,17 @@ export function renderCounts(model: CountsModel): string {
 export interface LoadedLedger {
   /** Absolute path of the hand-written ledger. */
   ledgerPath: string;
-  /** Absolute path of the generated counts artifact. */
-  countsPath: string;
+  /** Absolute path of the generated counts directory — one shard per source directory. */
+  countsDir: string;
+  /** Absolute path of the retired single-file artifact, which must not exist. */
+  legacyCountsPath: string;
   ledgerText: string;
   parsed: ParsedLedger;
   model: CountsModel;
   /** Ledger defects found while computing the model (bad `Class` cells). */
   problems: string[];
-  /** The artifact as it SHOULD be on disk right now. */
-  rendered: string;
+  /** Every shard as it SHOULD be on disk right now, keyed by file name. */
+  shards: Map<string, string>;
 }
 
 /**
@@ -669,7 +727,8 @@ export interface LoadedLedger {
  */
 export function loadLedger(repoRoot: string, specSrc: string): LoadedLedger {
   const ledgerPath = path.join(repoRoot, LEDGER_PATH);
-  const countsPath = path.join(repoRoot, COUNTS_PATH);
+  const countsDir = path.join(repoRoot, COUNTS_DIR);
+  const legacyCountsPath = path.join(repoRoot, LEGACY_COUNTS_PATH);
   const ledgerText = fs.readFileSync(ledgerPath, 'utf-8');
   const parsed = parseLedger(ledgerText);
 
@@ -686,5 +745,14 @@ export function loadLedger(repoRoot: string, specSrc: string): LoadedLedger {
     allDirs,
   );
 
-  return { ledgerPath, countsPath, ledgerText, parsed, model, problems, rendered: renderCounts(model) };
+  return {
+    ledgerPath,
+    countsDir,
+    legacyCountsPath,
+    ledgerText,
+    parsed,
+    model,
+    problems,
+    shards: renderCountShards(model),
+  };
 }

@@ -650,7 +650,7 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
- * The endpoint contract shared by both of `$between`'s bounds (#6571).
+ * The endpoint contract shared by both of `$between`'s bounds (commit 2f3e79351).
  *
  * Module-private on purpose, exactly like {@link ORDERING_COMPARAND_DESCRIPTION}:
  * it is documentation attached to a slot, not an authorable surface of its own,
@@ -704,7 +704,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * writes the two bounds separately (`{ $gte: { $field: 'a' }, $lte: { $field: 'b' } }`),
  * which every face already answers.
  *
- * ## Why `string` is in BOTH endpoint unions (#6571)
+ * ## Why `string` is in BOTH endpoint unions (commit 2f3e79351)
  *
  * This is the same contradiction {@link ComparisonOperatorSchema} carried until
  * #5685, in the one slot where it bites hardest. Until this was written down
@@ -740,7 +740,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * reach for with the resolver's own output in hand, and the old declaration
  * told them that output was invalid.
  *
- * ## Why a BARE string, and not an ISO-shaped refinement (#6571 rider ①)
+ * ## Why a BARE string, and not an ISO-shaped refinement (commit 2f3e79351, rider ①)
  *
  * Identical to {@link ComparisonOperatorSchema}'s finding, and re-measured for
  * the tuple: this schema is field-**agnostic** (it never sees which column the
@@ -763,7 +763,7 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * nothing, at every backend.
  */
 /**
- * [#18012] The author-facing refusal for a BLANK `$between` endpoint — the
+ * [commit 176b03582] The author-facing refusal for a BLANK `$between` endpoint — the
  * empty string and `undefined`, at either bound. Ruled 2026-09-17 (decision
  * batch #146 item 5, letter A): both endpoints present and non-empty.
  *
@@ -799,7 +799,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
 
 /**
  * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out — and,
- * since the 2026-09-17 ruling (#18012), the BLANK endpoint likewise.
+ * since the 2026-09-17 ruling (commit 176b03582), the BLANK endpoint likewise.
  *
  * ## Why the union's `error` carries three of the four refusals
  *
@@ -818,7 +818,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
  *
  * `null`, `undefined` and `{ $field }` never passed the union; for all three
  * the ruling adds only a POINTED SENTENCE. `''` is a string and the union
- * ACCEPTS it, so the empty-string arm is the one place where #18012 changes
+ * ACCEPTS it, so the empty-string arm is the one place where commit 176b03582 changes
  * what parses. It rides an ELEMENT-level `superRefine` — not the tuple-level
  * one the paragraph above rules out — which runs exactly when this endpoint
  * passed the union, i.e. precisely when there is an `''` to report.
@@ -836,7 +836,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
       // mechanism the `{ $field }` shape uses one line down.
       issue.input === null
         ? nullListComparandMemberMessage(`$between endpoint at index ${index}`)
-        // [#18012] `undefined` never passed it either — an absent bound is the
+        // [commit 176b03582] `undefined` never passed it either — an absent bound is the
         // same replace-only substitution, pointed at the side that is missing.
         : issue.input === undefined
           ? blankRangeBoundMessage(index)
@@ -844,7 +844,7 @@ const rangeEndpointSchema = (index: 0 | 1) =>
             ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
             : undefined,
   }).superRefine((endpoint, ctx) => {
-    // [#18012] The empty string is the one blank spelling the union accepts.
+    // [commit 176b03582] The empty string is the one blank spelling the union accepts.
     // ⛔ Not a trim and not a whitespace rule: the ruling is the empty string,
     // and widening it here would narrow a published face further than ruled.
     if (endpoint !== '') return;
@@ -971,7 +971,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * driver-conformance ledger is empty. Read the open set from a run of that gate
  * rather than from this paragraph.
  *
- * ### A JSON-stored column changes what `$contains` ASKS (#17590, maintainer ruling via the director seat, 2026-09-12)
+ * ### A JSON-stored column changes what `$contains` ASKS (commit e04a0aff2, maintainer ruling via the director seat, 2026-09-12)
  *
  * **On a `multiple: true` field or a `JSON_COLUMN_TYPES` member, `$contains: v`
  * is a MEMBERSHIP test — `v` is a member of the stored array — answered
@@ -1018,11 +1018,11 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *   `$contains: 'red'`, the same over-match the SQL family just lost) and
  *   answers NOTHING at all for a `multiple: true` NUMBER, while its reference
  *   matcher answers no array at all. That whole axis — every non-equality arm
- *   over a stored array, in both directions — is measured and owned by #17286,
- *   which recorded the semantics as undecided; this ruling is the decision it
+ *   over a stored array, in both directions — was measured on a tracking card
+ *   that recorded the semantics as undecided; this ruling is the decision it
  *   was missing. ⚠️ So an application whose tests run on the in-memory double
  *   and whose production runs SQL still gets two answers from one filter here.
- *   Read the open set from that card, ⛔ not from this paragraph.
+ *   That card is gone: measure `driver-memory` for the open set, ⛔ not this text.
  *
  * The comparand stays a STRING on every column ({@link CONTAINS_DESCRIPTION}),
  * so a member that is stored as a JSON number or boolean is named by its text:
@@ -1537,7 +1537,43 @@ const EXISTS_PREDICATE_DESCRIPTION =
   + '`{ $eq: null }` (false) on MongoDB.';
 
 /**
- * Special check operators for null and existence.
+ * [#20311] The `describe()` `$empty` carries in both copies — and it IS the
+ * operator's meaning, not a gloss on it.
+ *
+ * Ruling B on #20311 (record 5861435168) set what 「is empty」 means once, per
+ * field type; ruling A on #20399 (record 5865693155) spelled it as this
+ * operator, "whose describe IS the per-type table". So this string is the
+ * table, and `filter-empty-operator.test.ts` pins it to the ruled text and
+ * pins each type list it names to the set `expandEmptyOperator`
+ * (`./filter-empty-operator.ts`) reads — `STRING_VALUE_TYPES`,
+ * `MULTI_OPTION_TYPES`, `MULTI_CAPABLE_TYPES` in `field-value.zod.ts` — so the
+ * prose and the function cannot drift apart. The lists are spelled out rather
+ * than joined from those sets on purpose: this module takes no import from
+ * `field-value.zod` (the two meet in the `field.zod` import cycle, where a
+ * module-scope read of a set is not safe under `OS_EAGER_SCHEMAS=1`), and the
+ * expansion lives in its own module for the same reason.
+ *
+ * The last sentences are load-bearing too: the operator is STAGED (the
+ * maintainer's amendment of ruling A, record 5868169573, 「照 $like 先例分阶段」),
+ * so an author reading this description is told that no face answers it yet —
+ * the query executors refuse it, and `@objectstack/formula`'s write-side
+ * matcher answers its fail-closed `false` — rather than discovering either
+ * at run time. The measured per-face table is on {@link FILTER_OPERATORS}.
+ */
+const EMPTY_PREDICATE_DESCRIPTION =
+  'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
+  + '`false` is its exact complement. What counts as empty: text-like types (text, textarea, '
+  + 'email, url, phone, password, secret, markdown, html, richtext, code, color, signature, '
+  + 'qrcode) = null or \'\' (the empty string); multi-value types (multiselect, checkboxes, '
+  + 'tags, and select, radio, lookup, user, file or image with multiple: true) = null or [] '
+  + '(the empty list); every other type = null only. A face that holds no field declaration '
+  + 'judges by the value: null, \'\' and [] are empty. STAGED: declared ahead of its '
+  + 'backends and absent from FILTER_OPERATORS. Until each face has its arm, the query '
+  + 'executors refuse it and the write-side check matcher matches no record; the view '
+  + 'operators is_empty / is_not_empty still lower to $null.';
+
+/**
+ * Special check operators for null, existence and emptiness.
  */
 export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
@@ -1549,6 +1585,14 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
    * `{$ne: null}` / `{$eq: null}` on MongoDB.
    */
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+
+  /**
+   * [#20311] Field IS EMPTY by its declared type — the per-type table
+   * {@link EMPTY_PREDICATE_DESCRIPTION} carries, expanded per field by
+   * `expandEmptyOperator` (`./filter-empty-operator.ts`). STAGED: not in
+   * {@link FILTER_OPERATORS}.
+   */
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1590,7 +1634,7 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $in: setMembershipSchema('$in').optional().describe(SET_MEMBER_DESCRIPTION),
   $nin: setMembershipSchema('$nin').optional().describe(SET_MEMBER_DESCRIPTION),
   // Range. `string` is in BOTH endpoint unions for the reason
-  // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
+  // {@link RangeOperatorSchema} gives at length (commit 2f3e79351): the date-macro resolver
   // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
   // this package's own `temporal-conformance.ts` corpus spells that shape.
   // `FieldReferenceSchema` is NOT in them, for the reason the same docblock
@@ -1620,6 +1664,11 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // Special
   $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
   $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
+  // [#20311] Emptiness by the field's declared type — the ruled per-type table
+  // IS the description. STAGED like `$like` (#7536): declared here and in
+  // `SpecialOperatorSchema`, deliberately ABSENT from `FILTER_OPERATORS` until
+  // every face has its arm — see the `$empty` paragraph there.
+  $empty: z.boolean().optional().describe(EMPTY_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -2133,7 +2182,7 @@ export type Filter<T = any> = {
         $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
-        // Range (#6571). The TYPED half of what {@link RangeOperatorSchema}
+        // Range (commit 2f3e79351). The TYPED half of what {@link RangeOperatorSchema}
         // declares, and the exact mirror of the ordering guard above — a range
         // IS its two ordering bounds, so the two must agree slot for slot:
         //   - a `Date` field also takes the ISO STRINGS the date-macro resolver
@@ -2640,6 +2689,11 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Null / empty predicates — direction comes from the operator NAME, not the
   // (filler) value: the ObjectUI client sends a truthy placeholder value for
   // both `isnull` and `isnotnull`, so keying off `value` would collapse them.
+  // [#20311] The empty pair still lowers to `$null`, on purpose: its ruled
+  // spelling `$empty` is staged out of `FILTER_OPERATORS`, so emitting it here
+  // would turn every stored 「is empty」 into a refusal. The flip card moves
+  // both this branch and `canonicalAstOperator`'s fold once every face answers
+  // `$empty`.
   if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
     return { [field]: { $null: true } } as FilterCondition;
   }
@@ -3015,6 +3069,44 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * quietly answers a different question is strictly worse than one that
  * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
  * the #6520 direction — tracked as the follow-up filed on #7536.
+ *
+ * ## `$empty` is STAGED here too (#20311)
+ *
+ * Declared by {@link SpecialOperatorSchema} and {@link FieldOperatorsSchema},
+ * its description the ruled per-type 「is empty」 table (ruling B on #20311,
+ * record 5861435168; the spelling is ruling A on #20399, record 5865693155),
+ * with `expandEmptyOperator` / `isEmptyFilterValue`
+ * (`./filter-empty-operator.ts`) as the one expansion every face calls — and
+ * deliberately ABSENT from this array (the maintainer's amendment of ruling A,
+ * record 5868169573: 「照 $like 先例分阶段」),
+ * for the mechanism measured above: membership is what `driver-memory`'s gate
+ * accepts, and its matcher's `default:` arm lets the row pass.
+ *
+ * No face answers it yet. Measured with this declaration built, a hand-authored
+ * `{ f: { $empty: true } }` (and `false`, and nested under `$and`):
+ *
+ * | face | `$empty` today |
+ * |---|---|
+ * | `driver-sql` — measured on it; `driver-sqlite-wasm` and `driver-turso`'s local transport inherit its compiler | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-turso` remote transport | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-memory` — query path and reference matcher | REFUSES — `INVALID_FILTER` / 400 |
+ * | `driver-mongodb` | REFUSES — `INVALID_FILTER` / 400 |
+ * | objectql `having` | REFUSES — `INVALID_FILTER` / 400 |
+ * | `service-analytics` — the `where` lowering passes it on, the compile after it | REFUSES — `INVALID_FILTER` / 400 |
+ * | `service-analytics` — the read-scope SQL compiler | REFUSES, fail-closed — `READ_SCOPE_COMPILE_FAILED` / 500 |
+ * | `@objectstack/formula` `matchesFilterCondition` | answers `false` for every record, flag `true` or `false` — its decided fail-closed posture for an operator it has no arm for, the same answer an undeclared name gets |
+ *
+ * Nothing DROPS it, which is what the staging exists to guarantee. The formula
+ * row is the one that is not loud, and it is not a widening: that face judges
+ * a write-side `check`, where `false` denies the write. It is still the thing
+ * its own docblock calls "the same defect under a new name" for a DECLARED
+ * operator, so its arm is owed by its lane card like every other face's.
+ *
+ * Clearing the staging is the FLIP CARD's — the last card of ruling A's
+ * sequence, after one compile-surface lane card per face has given that face
+ * its arm: it adds `$empty` here, empties it out of
+ * `filter-operator-vocabulary.test.ts`' `STAGED_AHEAD_OF_BACKENDS`, and flips
+ * the `is_empty` / `is_not_empty` lowering from `$null` to `$empty`.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.

@@ -187,7 +187,7 @@ describe('validateRecord — `precision` on `currency` and `percent` (#19992)', 
 });
 
 describe('validateRecord — where `precision` binds, and where it does not (#19992)', () => {
-  it('binds on number, currency, percent, rating and slider; ⛔ not on progress, whose bounds the numeric branch never reads', () => {
+  it('binds on number, currency, percent, rating and slider; ⛔ not on progress, which takes only `min` / `max` (#20386)', () => {
     for (const type of ['number', 'currency', 'percent', 'rating', 'slider']) {
       const s = { fields: { v: { type, label: 'V', precision: 1, ...(type === 'percent' ? { max: 100 } : {}) } } };
       expect(fieldsOf(s, { v: 12 })?.[0], type).toMatchObject({ field: 'v', code: 'max_precision' });

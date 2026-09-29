@@ -11,7 +11,7 @@ import type { Document } from 'mongodb';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { DateGranularityValue, GroupByNode } from '@objectstack/spec/data';
-import { translateFilter } from './mongodb-filter.js';
+import { translateFilter, type ValueShapeResolver } from './mongodb-filter.js';
 import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
 
 /**
@@ -542,12 +542,18 @@ export function buildAggregationPipeline(opts: {
    * on which one the caller took.
    */
   temporalKind?: TemporalFieldKindResolver;
+  /**
+   * [#20444] Declared value shapes of the aggregated object, so a `$match`
+   * carrying `$empty` translates the field's declared row — the answer
+   * `find()` gives the same filter.
+   */
+  valueShape?: ValueShapeResolver;
 }): Document[] {
   const pipeline: Document[] = [];
 
   // $match stage
   if (opts.where) {
-    const matchFilter = translateFilter(opts.where, opts.temporalKind);
+    const matchFilter = translateFilter(opts.where, opts.temporalKind, opts.valueShape);
     if (Object.keys(matchFilter).length > 0) {
       pipeline.push({ $match: matchFilter });
     }

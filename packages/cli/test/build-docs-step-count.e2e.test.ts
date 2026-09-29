@@ -58,6 +58,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -112,7 +113,9 @@ function artifactDocCount(dir: string): number {
  * aborted run.
  */
 const config = (ns: string) => `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [],
   objects: [
@@ -123,7 +126,7 @@ export default {
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
-};
+}, { strict: false });
 `;
 
 const doc = (title: string) => `---
@@ -145,14 +148,17 @@ beforeAll(() => {
   dirs.absent = join(root, 'absent');
   mkdirSync(join(dirs.absent, 'src'), { recursive: true });
   writeFileSync(join(dirs.absent, 'objectstack.config.ts'), config('dsabsent'));
+  linkSpec(dirs.absent);
 
   dirs.empty = join(root, 'empty');
   mkdirSync(join(dirs.empty, 'src', 'docs'), { recursive: true });
   writeFileSync(join(dirs.empty, 'objectstack.config.ts'), config('dsempty'));
+  linkSpec(dirs.empty);
 
   dirs.two = join(root, 'two');
   mkdirSync(join(dirs.two, 'src', 'docs'), { recursive: true });
   writeFileSync(join(dirs.two, 'objectstack.config.ts'), config('dstwo'));
+  linkSpec(dirs.two);
   writeFileSync(join(dirs.two, 'src', 'docs', 'dstwo_intro.md'), doc('Intro'));
   writeFileSync(join(dirs.two, 'src', 'docs', 'dstwo_guide.md'), doc('Guide'));
 });

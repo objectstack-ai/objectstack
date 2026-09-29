@@ -397,3 +397,58 @@ describe('[#7848] auth and impersonation headers still ride along', () => {
     expect(call.headers['X-Run-As']).toBe('alice');
   });
 });
+
+describe('[#20289] readTargetServices hands the runner the SAME probe\'s `services` map', () => {
+  const SERVICES = {
+    data: { enabled: true, status: 'available', route: '/api/v1/data' },
+    ai: { enabled: false, status: 'unavailable' },
+  };
+
+  it('reads `services` off the discovery document the record actions already probe — one request for both', async () => {
+    discoveryReply = () => jsonResponse({ version: 'v1', routes: { data: ADVERTISED_DATA_PATH }, services: SERVICES });
+    const adapter = new HttpTestAdapter(BASE_URL);
+    const target = await adapter.readTargetServices();
+    await adapter.execute(action('create_record', 'crm_account', { name: 'Acme' }), {});
+
+    expect(target.services).toEqual(SERVICES);
+    expect(target.source).toContain(EXPECTED_DISCOVERY_URL);
+    expect(calls.filter((c) => c.url === EXPECTED_DISCOVERY_URL)).toHaveLength(1);
+    // The record action still addresses the mount the same document advertised.
+    expect(actionCalls()[0]!.url).toBe(`${BASE_URL}${ADVERTISED_DATA_PATH}/crm_account`);
+    expect(warnings).toEqual([]);
+  });
+
+  it('reads the dispatcher bridge\'s `{ data: … }` envelope as well as the bare document', async () => {
+    discoveryReply = () => jsonResponse({ success: true, data: { routes: { data: '/api/v1/data' }, services: SERVICES } });
+    const target = await new HttpTestAdapter(BASE_URL).readTargetServices();
+    expect(target.services).toEqual(SERVICES);
+  });
+
+  it('sends the bearer token — a host that gates discovery still answers', async () => {
+    discoveryReply = () => jsonResponse({ routes: {}, services: SERVICES });
+    await new HttpTestAdapter(BASE_URL, 'tok_123').readTargetServices();
+    expect(calls.find((c) => c.url === EXPECTED_DISCOVERY_URL)!.headers['Authorization']).toBe('Bearer tok_123');
+  });
+
+  /** Each row is a way the probe yields no services map; `services` is then absent and `source` says why. */
+  const failures: Array<[label: string, reply: () => Response, evidence: RegExp]> = [
+    ['discovery is not mounted (404)', () => jsonResponse({ error: 'Not found' }, 404), /answered 404/],
+    ['the document carries no services map', () => discoveryDocument({ data: ADVERTISED_DATA_PATH }), /answered 200 but carried no services map/],
+    ['the host cannot be reached', () => { throw new Error('ECONNREFUSED'); }, /could not be reached \(ECONNREFUSED\)/],
+  ];
+  for (const [label, reply, evidence] of failures) {
+    it(`reports no services, and why, when ${label}`, async () => {
+      discoveryReply = reply;
+      const target = await new HttpTestAdapter(BASE_URL).readTargetServices();
+      expect(target.services).toBeUndefined();
+      expect(target.source).toMatch(evidence);
+      expect(target.source).toContain(EXPECTED_DISCOVERY_URL);
+    });
+  }
+
+  it('reading services alone does not print the data-mount warning — no record action asked for a mount', async () => {
+    discoveryReply = () => jsonResponse({ error: 'Not found' }, 404);
+    await new HttpTestAdapter(BASE_URL).readTargetServices();
+    expect(warnings).toEqual([]);
+  });
+});

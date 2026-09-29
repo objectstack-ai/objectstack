@@ -1,6 +1,7 @@
 [
   "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
+  "scripts/count-shards-merge.test.ts",
   "scripts/def-key-collisions.test.ts",
   "scripts/dist-freshness-adoption.test.ts",
   "scripts/dist-freshness.test.ts",
@@ -30,6 +31,7 @@
   "src/identity/position-delegatable-enforcer.pin.test.ts",
   "src/integration/connector-connection-timeout-retirement.test.ts",
   "src/integration/connector-resilience-keys-retirement.test.ts",
+  "src/qa/requires-plugins-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",
   "src/system/compliance-families-retirement.test.ts",

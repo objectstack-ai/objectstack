@@ -258,8 +258,9 @@ export const PackageInstallRequestSchema = lazySchema(() => strictObject({
    *
    * ⭐ 「缺省 = 保持，有旗 = 设置」 — ruled in maintainer batch #157 item 5
    * letter C and implemented at the door (`packages/runtime/src/domains/packages.ts`),
-   * which reads the raw body and makes NO lifecycle call when the key is
-   * absent. The declaration followed in batch #210 item 4 letter A.
+   * which reads the key off the PARSED wrapped request — the body passes
+   * {@link PackageInstallBodySchema} first — and makes NO lifecycle call when
+   * the key is absent. The declaration followed in batch #210 item 4 letter A.
    *
    * ⛔ `.default(true)` is what this key may never go back to, and the reason
    * is mechanical rather than stylistic: a default RESOLVES absence at parse
@@ -360,18 +361,21 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * contract naming only the wrapped form would refuse bodies this door answers
  * `201` to, which is the defect this declaration exists to stop repeating.
  *
- * ⚠️ What those two drives post is NOT covered by this branch, and saying so
- * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
- * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }` are both refused
- * here (`invalid_union`) on `type` alone, and the door answers both `201` (the
- * second on the `?overwrite=true` limb of its duplicate-id case). The second
- * was repaired twice, each time by the PR that made the door parse the leg it
- * broke: PR #19326 gave it the `version` it lacked (clause 1a below), and
- * PR #19473 replaced its id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The
- * door answers that old body `400` now, so it is no part of the residual. They
- * are bare in FORM and incomplete in CONTENT — the form is declared, the
- * content is part of the residual below, and they are pinned as REFUSED in
- * `package-api.test.ts` rather than dressed up as green fixtures.
+ * What those two drives post IS covered by this branch now — because the
+ * drives were completed, ⛔ not because this branch was relaxed. Both used to
+ * post a manifest with no `type`, refused here (`invalid_union`) on `type`
+ * alone while the door answered it `201`, until PR #20218 made the door parse
+ * the whole body and gave each drive the `type: 'app'` it lacked. That was the
+ * last key repaired by the PR that made the door parse it: the duplicate-id
+ * drive already had its `version` from PR #19326 and its id
+ * `com.example.pkg-a` from PR #19473, in place of `pkg-a`, which
+ * `MANIFEST_ID_PATTERN` refuses. So
+ * `{ id, name: id, namespace, version: '1.0.0', type: 'app' }` and
+ * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0', type: 'app' }`
+ * parse green through this branch, and the door answers both `201` (the
+ * second on the `?overwrite=true` limb of its duplicate-id case).
+ * `package-api.test.ts` transcribes them as the bodies they post, and pins the
+ * bodies they used to post as refused.
  *
  * ## The two branches are disjoint — and BOTH are closed
  *
@@ -406,35 +410,51 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * `packages/runtime/src/domains/packages-install-body-contract.test.ts` (the
  * install door).
  *
- * ## What this declaration does NOT describe — the measured residual
+ * ## The measured residual — CLOSED on the answer; what remains is what is stored
  *
- * This is a SUBSET description of the live door, deliberately. Measured
- * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
- * to five classes this schema refuses — class 1 in its `type` half only,
- * since PR #19326:
+ * This section used to describe the declaration as a SUBSET of the live door:
+ * measured through `HttpDispatcher.handlePackages`, the door answered five
+ * classes differently from this schema. Every one is closed: the door refuses
+ * each class as this union does — `400` / `VALIDATION_ERROR`, nothing
+ * installed, ahead of its duplicate-id `409` — and every refusal the door
+ * makes on a body's shape alone is this union's:
  *
- * 1. a manifest missing `type` or `version` — recorded as one class until
- *    PR #19326, split since, because its two halves no longer answer alike:
- *    - 1a. missing `version` — ✅ CLOSED by PR #19326, no longer residual: the
- *      door parses `ManifestSchema.shape.version` by reference and answers
- *      `400` / `VALIDATION_ERROR` without installing, so declaration and door
- *      agree (door-side pin:
- *      `packages/runtime/src/domains/packages-install-manifest-version.test.ts`);
- *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
- *      above);
- * 2. unknown keys on either form — refused by name on the bare branch and,
- *    since ruling record `5856869656` (decision batch #227 item 3), on the
- *    wrapped one too, `201` either way;
- * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
- *    against `true`/`false` and `'true'`, so `'false'` installs ENABLED and a
- *    body-side `'true'` overwrite is treated as ABSENT;
- * 4. install options spelled on the BARE form — ignored, never honoured;
- * 5. and it answers `400` in the OPPOSITE direction, to a whitespace-only `id`
- *    this declaration admits (the door trims before keying).
+ * 1. a manifest missing `version` (1a) or `type` (1b) — answered `201`. 1a
+ *    closed with PR #19326, which made the door parse
+ *    `ManifestSchema.shape.version` by reference; 1b closed with the
+ *    whole-body parse (`c02fa1276`, PR #20218);
+ * 2. unknown keys on either form — answered `201`. Inside the manifest and on
+ *    the bare form they closed with the whole-body parse; at the wrapped top
+ *    level, with ruling record `5856869656` (decision batch #227 item 3),
+ *    which closed that branch;
+ * 3. a string-typed `enableOnInstall` / `overwrite` — `'false'` installed
+ *    ENABLED and a body-side `'true'` overwrite was read as ABSENT. Both keys
+ *    are `z.boolean()`, so the whole-body parse refuses either string;
+ * 4. install options spelled on the BARE form — the door honoured or ignored
+ *    them key by key. `ManifestSchema`'s strict close refuses them, and the
+ *    door's refusal names the wrapped form;
+ * 5. and one class ran the OPPOSITE way: a whitespace-only `id`, which this
+ *    declaration admitted while the door trimmed it and answered `400`.
+ *    `ManifestSchema.id` carries `MANIFEST_ID_PATTERN` since #17534, which no
+ *    whitespace-only string matches, so both faces refuse it.
  *
- * ⛔ None of these is a licence to relax `ManifestSchema` or either branch —
- * the residual is RECORDED here so a reader is not told the declaration is the
- * door, and closing it is its own decision with its own card.
+ * The door-side pins are in `packages/runtime/src/domains/`:
+ * `packages-install-body-contract.test.ts` (1b, 2, 3 and 4),
+ * `packages-install-manifest-version.test.ts` (1a) and
+ * `packages-install-manifest-id.test.ts` (5).
+ *
+ * What the PARSED value of this declaration still does not describe is what
+ * the door STORES. The parse is a gate, not a normaliser: the door hands the
+ * install writer the manifest it was SENT, never the parsed copy. So a
+ * default this declaration applies at parse time (`scope`,
+ * `defaultDatasource`) is not stored. And an unknown key nested in a block
+ * the declaration leaves in strip mode — the only kind of position where it
+ * still drops such a key rather than refusing it — parses green and is gone from
+ * the parsed value, while inside the manifest the door stores it as sent.
+ *
+ * ⛔ None of this is a licence to relax `ManifestSchema` or either branch, nor
+ * to make the door answer a body differently from this declaration: which
+ * keys a body may carry is this declaration's decision, and the door asks it.
  *
  * ⚠️ The bare form carries NO install options: `settings`, `enableOnInstall`
  * and `overwrite` are not manifest keys and `ManifestSchema`'s strict close

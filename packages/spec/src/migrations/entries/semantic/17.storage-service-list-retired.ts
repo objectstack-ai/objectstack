@@ -9,7 +9,8 @@ export const entry: SemanticMigration = {
     'track the keys you wrote (sys_file / file-reference records, queryable through '
     + 'ObjectQL with real pagination) instead of enumerating the bucket — and where no '
     + 'such record exists, the cursor-shaped `list(prefix, { cursor, limit })` this '
-    + 'entry reserved, restored in #6781',
+    + 'entry reserved, restored since, once cloud proved to be the first-party caller this '
+    + 'repository could not see',
   reason:
     '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
     + 'directory/prefix", and the two shipped adapters answered the same call with two '
@@ -23,14 +24,16 @@ export const entry: SemanticMigration = {
     + 'caller received was the first page, with no signal. One contract method, two '
     + 'dialects, both quietly incomplete — and the first feature that genuinely needed to '
     + 'enumerate a prefix (backup, orphan sweep, migration audit) would have got two '
-    + 'different answers on two deployments without an error on either. #5172 was nearly '
-    + 'that feature: it planned to drive attachment reclamation off '
+    + 'different answers on two deployments without an error on either. The email plugin\'s '
+    + 'large-attachment storage work was nearly that feature: it planned to drive attachment '
+    + 'reclamation off '
     + '`list(EMAIL_ATTACHMENT_KEY_PREFIX)`, found the local adapter could not see one '
     + 'level down, and switched to queue-driven deferred work instead. Nothing consumed '
     + 'it afterwards: the only in-repo call site was the `SwappableStorageService` '
     + 'pass-through (which itself rejects when the active adapter has no `list`), and '
     + 'REST, CLI and the storage routes never called it. Remove was chosen over '
-    + 'align-and-tighten (maintainer ruling, 2026-08-05, #5266): aligning would grow a '
+    + 'align-and-tighten (maintainer ruling, 2026-08-05, on the finding that measured the two '
+    + 'dialects): aligning would grow a '
     + 'conformance surface nobody walks, while a prefix listing that cannot paginate is '
     + 'the wrong signature to inherit — when a real caller needs enumeration it returns '
     + 'cursor-shaped, `list(prefix, { cursor, limit })`, with adapter-conformance cases '
@@ -40,8 +43,7 @@ export const entry: SemanticMigration = {
     + 'tombstone: nothing ever ran an adapter through a `.parse()`, so a prescription '
     + 'there would reach no one. The enforced channel is tsc, and it reports at the call '
     + 'site. Same disposition, and the same reason, as '
-    + '`data-driver-find-stream-retired` (#4484). ADR-0049 / ADR-0087, #5540 '
-    + '(analysis #5266).',
+    + '`data-driver-find-stream-retired`. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No code calls `storage.list(...)` on the `file-storage` service or on any '
     + '`IStorageService` value. Code that needed "which files are under this prefix" '
@@ -53,8 +55,11 @@ export const entry: SemanticMigration = {
     + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
     + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
     + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
-    + 'one in `@objectstack/service-storage` goes with the adapters (#5541). '
-    + '⚠️ AMENDED 2026-08-09 (#6781, maintainer ruling on cloud#1203, option B): the '
+    + 'one in `@objectstack/service-storage` goes with the adapters\' own `list` '
+    + 'implementations, removed in the retirement\'s implementation half. '
+    + '⚠️ AMENDED 2026-08-09, under the maintainer\'s 2026-08-08 ruling on cloud\'s '
+    + 'storage-enumeration callers (option B: restore enumeration upstream, correctly shaped, '
+    + 'rather than hand-roll S3 pagination one repository over): the '
     + 'RESERVED route in the paragraph above was taken. `list` exists again on the '
     + 'contract, cursor-shaped — `list(prefix, { cursor, limit })` returning '
     + '`{ items, nextCursor }` — because cloud had two first-party callers this repo '

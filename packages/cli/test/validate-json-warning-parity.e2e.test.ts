@@ -63,6 +63,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -89,10 +90,12 @@ const FIXTURES: readonly Fixture[] = [
     // `manifest` is present, so a config that merely omits the id fails the
     // parse and exits long before any warning is computed.
     source: `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   objects: [],
   apps: [],
-};
+}, { strict: false });
 `,
     floor: 4,
   },
@@ -106,7 +109,9 @@ export default {
     // string ones. `externalSharingModel` is ledger-marked `authorWarn`, which
     // is what raises the registry-side advisory.
     source: `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.parity', name: 'parity', version: '1.0.0', type: 'app', namespace: 'parity' },
   objects: [{
     name: 'parity_ticket',
@@ -115,7 +120,7 @@ export default {
     externalSharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
-};
+}, { strict: false });
 `,
     floor: 2,
   },
@@ -123,7 +128,9 @@ export default {
 
 /** The zero-warning control — see the test that uses it. */
 const CLEAN_SOURCE = `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.clean', name: 'clean', version: '1.0.0', type: 'app', namespace: 'clean' },
   objects: [{
     name: 'clean_ticket',
@@ -132,7 +139,7 @@ export default {
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   apps: [{ name: 'clean_app', label: 'Clean App' }],
-};
+}, { strict: false });
 `;
 
 interface Run {
@@ -217,10 +224,12 @@ beforeAll(() => {
   for (const f of FIXTURES) {
     const dir = mkdtempSync(join(tmpdir(), `os-validate-parity-${f.name}-`));
     writeFileSync(join(dir, 'objectstack.config.ts'), f.source);
+    linkSpec(dir);
     dirs.set(f.name, dir);
   }
   const cleanDir = mkdtempSync(join(tmpdir(), 'os-validate-parity-clean-'));
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
+  linkSpec(cleanDir);
   dirs.set('clean', cleanDir);
 });
 

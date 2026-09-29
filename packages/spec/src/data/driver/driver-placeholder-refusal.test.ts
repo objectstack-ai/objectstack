@@ -172,7 +172,7 @@ describe('mongo `options` passthrough — the deep judgement (#8336)', () => {
 });
 
 /**
- * #8495 — the #8336 shape one surface over: memory `persistence.path` (file
+ * Commit 4bfe1a539 — the #8336 shape one surface over: memory `persistence.path` (file
  * persistence and the `auto` override) and `persistence.key` (localStorage)
  * are config-material, not record data. A `${DATA_DIR}` written there is
  * resolved by nothing — the driver would create and write a literal
@@ -236,7 +236,7 @@ describe('memory `initialData` stays UNJUDGED — the deliberate #8336 exclusion
     // The mother ruling's memory-driver exclusion was argued from exactly this:
     // `initialData` carries arbitrary record values, where `${…}` may be the
     // real payload (a template string a downstream renderer consumes). The
-    // #8495 refusal covers `persistence.path`/`persistence.key` ONLY.
+    // commit 4bfe1a539's refusal covers `persistence.path`/`persistence.key` ONLY.
     const config = {
       initialData: {
         templates: [{ id: '1', body: 'Hello ${name}, your order ${order_id} shipped.' }],

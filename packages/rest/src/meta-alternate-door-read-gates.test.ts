@@ -60,6 +60,11 @@
  *    refuses — 403 `FORBIDDEN`, before any read. Everything this census says
  *    about them holds for the callers they admit. `/layers` and
  *    `?layers=true` keep the pruned plain-read answer for everyone.
+ *
+ *    [#20441] **`/audit` is the third** (triage's grade 5871509797 carrying
+ *    ruling 5865708652 to it): `sys_metadata_audit` records a draft save with
+ *    `note: 'draft'`, its actor and its time, so it takes the same refusal
+ *    before any read.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
  *    items that point at this one, never a member of this item's document.
  *
@@ -358,9 +363,10 @@ type DoorKind = 'document' | 'stored' | 'events' | 'exempt';
  * envelope (its `item`).
  */
 /**
- * `authoring` — [#20378] ruling 5865708652: the door refuses a caller who may
- * not read drafts (`readsDrafts`) with the `GET /meta/_drafts` 403, before any
- * read; the rest of its row holds for the callers it admits.
+ * `authoring` — [#20378] ruling 5865708652 (and [#20441] its carriage to
+ * `/audit`): the door refuses a caller who may not read drafts (`readsDrafts`)
+ * with the `GET /meta/_drafts` 403, before any read; the rest of its row holds
+ * for the callers it admits.
  */
 interface Door { kind: DoorKind; suffix: string; query?: Record<string, string>; reason?: string; serves?: 'layers' | 'diff' | 'draft'; authoring?: true }
 
@@ -373,7 +379,7 @@ const DOORS: Record<string, Door> = {
     '/published': { kind: 'document', suffix: '/published' },
     '/diff': { kind: 'stored', suffix: '/diff', serves: 'diff', authoring: true },
     '/history': { kind: 'events', suffix: '/history', authoring: true },
-    '/audit': { kind: 'events', suffix: '/audit' },
+    '/audit': { kind: 'events', suffix: '/audit', authoring: true },
     '/references': {
         kind: 'exempt',
         suffix: '/references',
@@ -669,6 +675,7 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                             expect(protocol.getMetaItem).not.toHaveBeenCalled();
                             expect(protocol.diffMetaItem).not.toHaveBeenCalled();
                             expect(protocol.historyMetaItem).not.toHaveBeenCalled();
+                            expect(protocol.auditMetaItem).not.toHaveBeenCalled();
                             return;
                         }
                         if (door.serves === 'draft' && CALLERS[callerName].ctx) {

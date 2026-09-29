@@ -67,14 +67,24 @@
 # cleanly because they do not overlap, and the subtotal merges clean and WRONG
 # (seven cases in one day). Note it is the counts file, not the ledger — the
 # ledger's prose is hand-written and must never be resolved by regenerating.
+# #20361 sharded it into `….counts/`, one file per source directory, and stopped
+# committing its cross-directory totals — the same measured conflict as the
+# liveness counts below, in the same driver-less server-side merge.
 #
 # The liveness state table's counts joined at #7377 for the same reason, one file
 # over — 9 of its 30 rows had drifted from the gate before anyone re-ran the
-# documented snippet. Same split and the same caveat: `liveness/state-counts.md`
-# is the numbers and is driver-managed; `liveness/README.md` is the Notes prose —
+# documented snippet. Same split and the same caveat: `liveness/state-counts/` is
+# the numbers and is driver-managed; `liveness/README.md` is the Notes prose —
 # hand-written measurement of how each type got where it is — and is NOT.
 # Regenerating a Note would fabricate a verdict, which that README calls worse
 # than a missing row.
+#
+# #20361 then SHARDED those counts, one file per governed type, and stopped
+# committing a total: the single file's shared total row was rewritten by every
+# liveness PR, so in the driver-less server-side merge any two of them conflicted
+# and each landing left every other one `dirty`, with no CI run until a
+# merge-and-regenerate round. The cure is the one the header above records for
+# the three hottest artifacts; each gate sums its shards when it reads them.
 #
 # The elevation census page joined at #13646 — a generated `file:line` anchor
 # table whose correct merged values are on NEITHER side of a conflict (measured on
@@ -138,7 +148,7 @@
 # neither side.
 
 packages/spec/spec-changes.json                              merge=os-regen
-packages/spec/liveness/state-counts.md                       merge=os-regen
+packages/spec/liveness/state-counts/**                       merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
 packages/spec/authorable-defaults/**                         merge=os-regen
@@ -149,7 +159,7 @@ packages/spec/export-origins/**                              merge=os-regen
 packages/spec/declaration-map/**                             merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
-docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
+docs/audits/2026-07-unknown-key-strictness-ledger.counts/**  merge=os-regen
 content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen
 skills/*/references/_index.md                                merge=os-regen

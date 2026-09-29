@@ -32,6 +32,12 @@ import { numericColumnFor } from '@objectstack/spec/data';
 // the write check `@objectstack/formula` evaluates judge one comparison by one
 // rule.
 import { crossFieldColumnVerdict, type CrossFieldComparisonClass } from '@objectstack/spec/data';
+// [#20444] The `$empty` operator's ONE expansion (ruling A on #20399, record
+// 5865693155): the field's declared row of the ruled 「is empty」 table, asked
+// of the spec at compile time by {@link SqlDriver.applyEmptyOperator} against
+// the declaration {@link SqlDriver.valueShapeFields} recorded. This driver keeps
+// no copy of the table.
+import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -88,8 +94,10 @@ import { nextUtcCalendarDay, temporalStorageForm } from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
+  describeMissingIndexColumns,
   diffManagedIndexes,
   diffManagedTable,
+  diffUnbuildableIndexes,
   driftKey,
   expectedIndexes,
   fieldHasColumn,
@@ -320,6 +328,15 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
   ...NUMERIC_VALUE_TYPES,
   'integer', 'int', 'float',
 ]);
+
+/**
+ * [#20387] Whether a numeric field type's column holds FRACTIONS rather than
+ * integers: the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION` and
+ * the driver's `float` alias. Read into {@link SqlDriver.fractionalNumericFields}.
+ */
+function isFractionalNumericType(type: string): boolean {
+  return type === 'float' || numericColumnFor(type)?.kind === 'exact';
+}
 
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
@@ -1541,6 +1558,67 @@ const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'co
 };
 
 /**
+ * [#20387] What each declared aggregate function ACCUMULATES IN on PostgreSQL
+ * and MySQL — the arithmetic half of the one-double policy
+ * {@link AGGREGATE_ANSWER_KIND} states for the answer's type.
+ *
+ * - `'double'` — `avg`, over every declared numeric or boolean aggregand.
+ * - `'double-over-fractional'` — `sum`, over a declared column whose values are
+ *   fractions (`fractionalNumericFields`: the exact-decimal family and the
+ *   driver's `float` alias). A `sum` over an integer-valued column (`rating`,
+ *   the `integer` / `int` aliases, a boolean) stays the database's exact
+ *   integer total, rounded once to the double by the presenter.
+ * - `'as-stored'` — `count` / `count_distinct` (a count is an exact integer)
+ *   and `min` / `max` (a value OF the column; no arithmetic happens).
+ *
+ * Why: the engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and
+ * SQLite add JS doubles, while PostgreSQL's `numeric` and MySQL's `DECIMAL`
+ * add exact decimals. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 over
+ * a `number` column holding `0.1` and `0.2`: `sum` answered `0.3` natively and
+ * `0.30000000000000004` on SQLite and every rows path, so
+ * `having { s: { $eq: 0.3 } }` kept the group on those two native faces only.
+ * `avg` over an INTEGER column diverged too, which is why `avg` is `'double'`
+ * whatever the column holds: MySQL rounds a `DECIMAL` average to
+ * `div_precision_increment` (4) places (`avg` of 1, 2, 2 answered `1.6667`),
+ * and PostgreSQL's `numeric` average rounds to 16 places before the presenter
+ * rounds again (`11 / 9` answered `1.2222222222222222`, JS
+ * `1.2222222222222223`; 10 of 27,962 integer pairs measured).
+ *
+ * The operand is the column's TEXT, parsed as a double —
+ * `cast(cast(x as text) as double precision)` on PostgreSQL,
+ * `cast(cast(x as char) as double)` on MySQL — because that is the value the
+ * SQL client hands `find()`, and so the value the rows path adds. For an
+ * exact-decimal column it is the plain cast (both servers convert a decimal to
+ * a double through its text); for a binary `real` / `FLOAT` column, which a
+ * table created before the exact-decimal columns still carries, the plain cast
+ * would widen the binary32 value (`0.1` → `0.10000000149011612`) where the
+ * client reads `0.1`. MySQL's `CAST(… AS DOUBLE)` needs 8.0.17 or later.
+ *
+ * ⚠️ Residual, stated: on PostgreSQL and MySQL the double sums are added in
+ * scan order, one after another, without compensation. SQLite (3.43+) adds with
+ * compensated (Kahan-Babuska-Neumaier) summation, and since #20489 so does the
+ * engine's rows path (`in-memory-aggregation.ts`, `compensatedSum`), so a group
+ * of three or more fractions can still differ in the last place between the
+ * PostgreSQL / MySQL native faces and those two (`0.1 + 0.2 + 0.3`: PostgreSQL /
+ * MySQL `0.6000000000000001`, SQLite and the rows path `0.6`). Two addends
+ * cannot differ, which is why the pin is `0.1 + 0.2`.
+ *
+ * A `Record` over `AggregationFunction` for the same reason as
+ * {@link AGGREGATE_ANSWER_KIND}: a function added to the vocabulary without an
+ * answer here fails `tsc`.
+ */
+const AGGREGATE_ACCUMULATION: Readonly<
+  Record<AggregationFunction, 'double' | 'double-over-fractional' | 'as-stored'>
+> = {
+  count: 'as-stored',
+  count_distinct: 'as-stored',
+  sum: 'double-over-fractional',
+  avg: 'double',
+  min: 'as-stored',
+  max: 'as-stored',
+};
+
+/**
  * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
  * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
  * "declared" has exactly one definition and this driver cannot drift from it.
@@ -1893,6 +1971,24 @@ function isDeclaredFieldType(field: { type?: unknown }): boolean {
  */
 function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
   return isMultiValueField({ type, multiple: field?.multiple === true });
+}
+
+/**
+ * [#20444] The declared value shape of every field that declares a `type` —
+ * the {@link SqlDriver.valueShapeFields} entry for one object. Reads the RAW
+ * `type`, deliberately not the `field.type || 'string'` default the column
+ * registries apply: a field with no type has no row of the ruled 「is empty」
+ * table, and inventing `'string'` for it here would answer `$empty` with a row
+ * nobody declared.
+ */
+function declaredValueShapes(fields: Record<string, unknown> | undefined): Record<string, ValueShapeFieldDef> {
+  const shapes: Record<string, ValueShapeFieldDef> = {};
+  for (const [name, field] of Object.entries(fields ?? {})) {
+    const type = (field as { type?: unknown } | null | undefined)?.type;
+    if (typeof type !== 'string' || type === '') continue;
+    shapes[name] = { type, multiple: (field as { multiple?: unknown }).multiple === true };
+  }
+  return shapes;
 }
 
 /**
@@ -2373,7 +2469,7 @@ function retiredFilterOperatorError(
  */
 const SUPPORTED_FILTER_OPERATORS_SENTENCE =
   'Supported operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, ' +
-  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.';
+  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists, $empty.';
 
 /**
  * An operator outside the emitter's vocabulary and outside the retired table.
@@ -4338,6 +4434,135 @@ function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
   );
 }
 
+// ── [#20444] The `$empty` operator ───────────────────────────────────────────
+
+/**
+ * [#20444] A non-boolean `$empty` comparand. `FieldOperatorsSchema` declares
+ * `$empty: z.boolean()`, and the spec's save door already refuses anything else
+ * (`filter-save-door-refusals.ts` counts it among the boolean flags beside
+ * `$null` / `$exists`). Refused here on the validating walk for the reason its
+ * two siblings are: a two-branch emitter has a DEFAULT side, and a third value
+ * would silently land on it.
+ */
+function nonBooleanEmptyComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    'Operator "$empty" in this filter requires a boolean comparand (true or false). ' +
+      '@objectstack/spec FieldOperatorsSchema declares $empty as a boolean, and a non-boolean is ' +
+      'refused rather than coerced: true asks for the empty rows, false for their exact ' +
+      'complement, and any other value would land on whichever side a compiler defaults to. The ' +
+      'field it was aimed at and the value it received are withheld from the message; the full ' +
+      'diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true asks for the ` +
+      `empty rows, false for their exact complement.`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] `$empty` aimed at a column whose DECLARATION this driver does not
+ * hold — a table created outside `initObjects` / `registerObjectMetadata` /
+ * `registerExternalObject`, a builtin column no field declares (`id`), or a
+ * field declared with no `type`.
+ *
+ * What counts as empty is the field's declared row of the ruled table (null or
+ * `''` for a text-like type, null or `[]` for a multi-value field, null only
+ * for every other type), so without the declaration there is no answer to
+ * compile. The spec's by-value reading — the one it gives the faces that hold
+ * NO field declarations — has no SQL form here: `amount = ''` is a type error
+ * on PostgreSQL, and an empty list is only recognisable as JSON. So the filter
+ * is refused rather than guessed.
+ */
+function undeclaredEmptyOperatorFieldError(field: string, subtree?: unknown): Error {
+  const why =
+    "What counts as empty is the field's DECLARED row of the ruled table — null or '' for a " +
+    'text-like type, null or [] for a multi-value field, null only for every other type — so ' +
+    'the operator is refused rather than guessed. Filter on a declared field, or use "$null" for ' +
+    '"has no value".';
+  return withheldFilterError(
+    'Operator "$empty" in this filter targets a field whose declaration this driver does not ' +
+      `hold (no declared type). ${why} The field is withheld from the message; the full ` +
+      'diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" targets a field whose declaration this driver does not ` +
+      `hold (no declared type). ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] `$empty` on a multi-value field, over a knex client whose dialect
+ * this driver does not model (`dialectName === 'unknown'`). The empty list is
+ * tested with a JSON function that differs per dialect and none of the three
+ * this driver speaks parses everywhere, so the multi-value row has no construct
+ * there. The text and null-only rows need no dialect and compile everywhere.
+ */
+function emptyListUnsupportedDialectError(field: string, subtree?: unknown): Error {
+  const why =
+    'a multi-value field, whose empty list is tested with a JSON function that differs per SQL ' +
+    'dialect, and this connection\'s dialect is not one this driver models (SQLite, PostgreSQL, ' +
+    'MySQL). It is refused rather than guessed; "$null" answers "has no value" on every dialect.';
+  return withheldFilterError(
+    `Operator "$empty" in this filter targets ${why} The field is withheld from the message; the ` +
+      'full diagnostic is in the server log.',
+    `Operator "$empty" on field "${field}" targets ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * [#20444] "Is this stored JSON value the empty list?", as ONE boolean SQL
+ * expression that is FALSE — never NULL, never an error — for every other
+ * stored JSON value, or `null` for a dialect with no construct.
+ *
+ * A multi-value field is a JSON column here ({@link SqlDriver.jsonColumn}: TEXT
+ * on SQLite, `json` on PostgreSQL and MySQL — {@link isMultiValuedColumn} keys
+ * the DDL), so the question is asked of the stored JSON, never as a `$eq: []`
+ * comparand (ruling 乙 on #19757 refuses an empty list in the equality slot, and
+ * this operator does not reopen it).
+ *
+ * - **SQLite** — the column is TEXT, so bytes that are not JSON are physically
+ *   storable (the legacy form {@link jsonMembershipPredicate} guards the same
+ *   way). `json_valid` is asked first, inside a `CASE` whose branches are
+ *   evaluated lazily, so a malformed cell answers FALSE rather than failing the
+ *   statement; `json_type` keeps a non-array JSON value (for which
+ *   `json_array_length` answers 0) from counting as an empty list.
+ * - **PostgreSQL** — `json` has no equality operator, so the value is compared
+ *   as `jsonb`, whose equality is structural (`[ ]` equals `[]`).
+ * - **MySQL** — `JSON_LENGTH` answers 0 for an empty OBJECT too, so the type is
+ *   asked beside it.
+ *
+ * The same three constructs `service-analytics`' SQL compilers emit for the
+ * same row (`empty-operator-sql.ts`); that package depends on no driver, so
+ * the construct is restated rather than imported, and both are held to the
+ * ruled table by their own suites.
+ */
+function emptyJsonListPredicate(
+  dialect: SqlDialectName,
+  field: string,
+): { sql: string; bindings: string[] } | null {
+  switch (dialect) {
+    case 'sqlite':
+      return {
+        sql:
+          "(CASE WHEN json_valid(??) THEN json_type(??) = 'array' AND json_array_length(??) = 0 " +
+          'ELSE 0 END)',
+        bindings: [field, field, field],
+      };
+    case 'postgres':
+      return { sql: "(CAST(?? AS jsonb) = CAST('[]' AS jsonb))", bindings: [field] };
+    case 'mysql':
+      return { sql: "(JSON_TYPE(??) = 'ARRAY' AND JSON_LENGTH(??) = 0)", bindings: [field, field] };
+    default:
+      return null;
+  }
+}
+
 /**
  * [#6050] `undefined` in a COMPARAND position.
  *
@@ -4734,6 +4959,17 @@ function classifyFilterKey(
     throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`, value);
   }
 
+  // [#20444] `$empty`'s comparand is a boolean by the same declaration, refused
+  // on the same walk for the same evaluation-order reason — its own `if`, not a
+  // loop over a flag list, for the reason the `$exists` gate above gives.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$empty') &&
+    typeof value.$empty !== 'boolean'
+  ) {
+    throw nonBooleanEmptyComparandError(key, value.$empty, `${here}.$empty`, value);
+  }
+
   // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
   // refused on this walk for the same evaluation-order reason as the two gates
   // above: an empty comparand makes the predicate match every row, and a gate
@@ -4852,6 +5088,10 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // made #5347 rewrite the `$null` arm does not exist here, because both
     // spellings agree on both surviving values.
     case '$exists': return value === false;
+    // [#20444] Null counts as empty on EVERY row of the ruled table, so a NULL
+    // column satisfies `$empty: true` and fails its complement. The walk refuses
+    // a non-boolean before this table is consulted.
+    case '$empty': return value === true;
     // Negative-polarity set/substring tests: "not among" / "does not contain"
     // hold vacuously for a value that is absent.
     case '$nin': return true;
@@ -4881,6 +5121,11 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
     case '$null':
     case '$exists':
+    // [#20444] `$empty` spells its NULL case out in both polarities —
+    // `(col IS NULL OR …)` / `(col IS NOT NULL AND NOT …)`, the `…` FALSE and
+    // never NULL for a stored value ({@link emptyJsonListPredicate}) — so it
+    // is TRUE or FALSE for every row and `NOT` over it is the exact complement.
+    case '$empty':
       return true;
     // A null comparand makes these null PREDICATES too (see the `$eq`/`$ne`
     // arms of the emitter below), not comparisons.
@@ -5554,6 +5799,29 @@ export class SqlDriver implements IDataDriver {
   protected config: Knex.Config;
   protected jsonFields: Record<string, string[]> = {};
   /**
+   * [#20444] Each field's DECLARED value shape — its `type` and `multiple`, the
+   * slice {@link expandEmptyOperator} reads — per table, filled at the same
+   * three places {@link jsonFields} is ({@link registerManagedObjectMetadata},
+   * {@link registerExternalObject} and the shard alias), from the declaration
+   * and nothing else.
+   *
+   * It is the one input the `$empty` operator needs that no other registry
+   * holds: `jsonFields` cannot say it, because a structured JSON type (`json`,
+   * `address`, …) is a JSON column whose row of the ruled table is null-only,
+   * while a multi-value field is a JSON column whose row counts `[]`; and no
+   * registry here names the text-like types at all.
+   *
+   * A field declared with no `type` is not recorded, and neither is a column no
+   * field declares (`id`, a table built outside this driver's registration), so
+   * `$empty` on either is refused ({@link undeclaredEmptyOperatorFieldError})
+   * rather than answered by a guessed row. A declared type the spec does not
+   * list among the text-like or multi-value types — including the
+   * driver-internal aliases an introspected or test object carries (`string`,
+   * `object`, `array`) — takes the row the spec's expansion gives it, which is
+   * null-only.
+   */
+  protected valueShapeFields: Record<string, Record<string, ValueShapeFieldDef>> = {};
+  /**
    * SINGLE-VALUE file-family columns per table (`image` / `file` / `avatar` /
    * `video` / `audio`), filled at the same two registration sites as
    * {@link jsonFields} and on BOTH arms of the ADR-0104 window.
@@ -5660,6 +5928,20 @@ export class SqlDriver implements IDataDriver {
    * originally written for actually lives.
    */
   protected numericValueFields: Record<string, string[]> = {};
+  /**
+   * [#20387] The subset of {@link numericFields} whose declared type holds
+   * FRACTIONS — the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION`
+   * (`numericColumnFor(type).kind === 'exact'`) and the driver's `float` alias,
+   * which is how an introspected decimal / floating column reaches it. What is
+   * left out is integer-valued: `rating`, and the `integer` / `int` aliases (an
+   * introspected `bigint` among them).
+   *
+   * Read by {@link SqlDriver.aggregate} only: a `sum` over one of these columns
+   * accumulates in double on PostgreSQL and MySQL, and a `sum` over an
+   * integer-valued column keeps the database's exact integer total. See
+   * `AGGREGATE_ACCUMULATION`.
+   */
+  protected fractionalNumericFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -10145,7 +10427,14 @@ export class SqlDriver implements IDataDriver {
           fieldExpr !== '*' &&
           table !== null &&
           (this.booleanFields[table]?.includes(fieldExpr) ?? false);
-        const argExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        const columnExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        // [#20387] `sum` / `avg` accumulate in double on PostgreSQL and MySQL,
+        // the arithmetic SQLite and the engine's rows path already use, so one
+        // query answers one number on every face (`AGGREGATE_ACCUMULATION`).
+        // Still one `??` binding: the wrap is SQL text around it.
+        const argExpr = fieldExpr !== '*' && this.accumulatesInDouble(funcName, table, fieldExpr)
+          ? this.doubleAccumulationOperand(columnExpr)
+          : columnExpr;
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;
@@ -10264,6 +10553,40 @@ export class SqlDriver implements IDataDriver {
       throw this.aggregateBackendFault(object, query, error);
     }
     return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
+  }
+
+  /**
+   * [#20387] Whether {@link aggregate} accumulates this aggregation's operand in
+   * double — `AGGREGATE_ACCUMULATION` read against the column's declaration.
+   *
+   * PostgreSQL and MySQL only. SQLite stores the fractional family as REAL
+   * (`ColumnCompiler_SQLite3.prototype.decimal` is `'float'`), so its `sum` /
+   * `avg` already add doubles. A column this driver has no numeric or boolean
+   * declaration for keeps the database's own arithmetic, as before.
+   */
+  protected accumulatesInDouble(func: AggregationFunction, table: string | null, field: string): boolean {
+    if (table === null || !(this.isPostgres || this.isMysql)) return false;
+    switch (AGGREGATE_ACCUMULATION[func]) {
+      case 'double':
+        return (this.numericFields[table]?.includes(field) ?? false)
+          || (this.booleanFields[table]?.includes(field) ?? false);
+      case 'double-over-fractional':
+        return this.fractionalNumericFields[table]?.includes(field) ?? false;
+      case 'as-stored':
+        return false;
+    }
+  }
+
+  /**
+   * [#20387] The operand of a double-accumulated `sum` / `avg`: the column's
+   * text, parsed as a double — the value the SQL client hands `find()`, and so
+   * the value the rows path adds. See `AGGREGATE_ACCUMULATION` for why the text
+   * and not a plain cast.
+   */
+  protected doubleAccumulationOperand(operand: string): string {
+    return this.isPostgres
+      ? `cast(cast(${operand} as text) as double precision)`
+      : `cast(cast(${operand} as char) as double)`;
   }
 
   /**
@@ -11351,6 +11674,7 @@ export class SqlDriver implements IDataDriver {
         perShard,
         new Set(Object.keys(colInfo)),
         this.computeAndRecordTenantField(baseTable, obj),
+        obj.fields ?? {},
       );
     }
   }
@@ -11370,10 +11694,12 @@ export class SqlDriver implements IDataDriver {
    */
   protected aliasShardBookkeeping(base: string, shard: string): void {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
+    this.valueShapeFields[shard] = this.valueShapeFields[base] ?? {};
     this.mediaFields[shard] = this.mediaFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
     this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
+    this.fractionalNumericFields[shard] = this.fractionalNumericFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -11502,6 +11828,7 @@ export class SqlDriver implements IDataDriver {
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
+    const fractionalCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -11526,6 +11853,8 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
+        // [#20387] See {@link fractionalNumericFields}.
+        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) fractionalCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -11536,10 +11865,13 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[key] = jsonCols;
+    // [#20444] The declared value shapes `$empty` expands — see {@link valueShapeFields}.
+    this.valueShapeFields[key] = declaredValueShapes(schema.fields);
     this.mediaFields[key] = mediaCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
     this.numericValueFields[key] = numericValueCols;
+    this.fractionalNumericFields[key] = fractionalCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -11588,6 +11920,7 @@ export class SqlDriver implements IDataDriver {
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
+    const fractionalCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -11625,6 +11958,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericValueCols.push(name);
         }
+        // [#20387] See {@link fractionalNumericFields}.
+        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) {
+          fractionalCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -11645,10 +11982,13 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[tableName] = jsonCols;
+    // [#20444] The declared value shapes `$empty` expands — see {@link valueShapeFields}.
+    this.valueShapeFields[tableName] = declaredValueShapes(obj.fields);
     this.mediaFields[tableName] = mediaCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
+    this.fractionalNumericFields[tableName] = fractionalCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry
@@ -13088,6 +13428,12 @@ export class SqlDriver implements IDataDriver {
     // (dev autoMigrate may apply it); duplicates block the op with a row
     // report. Data-dependent, so it runs HERE, not in the pure differ.
     await this.applyNullSafeUniquePreflight(entries);
+    // The declared indexes `expectedIndexes` leaves out because a key column
+    // will never materialize (a misspelt name, a virtual `formula` field).
+    // `syncDeclaredIndexes` skips each one at `error` on every sync, and this
+    // is its plan-side face: a report-only entry, so `os migrate plan` shows
+    // the unenforced declaration instead of reporting nothing.
+    entries.push(...diffUnbuildableIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }));
     return entries;
   }
 
@@ -13531,6 +13877,11 @@ export class SqlDriver implements IDataDriver {
    * neither `ALTER COLUMN` nor the SQLite table rebuild that column ops do.
    */
   protected async applyIndexDriftOp(op: DriftOp): Promise<boolean> {
+    // REPORT ONLY: there is no column to build the index over, so no DDL can
+    // apply it and the remedy is a metadata edit. Answered before any read, and
+    // on every dialect, so `applyMigrationEntries` reports it `skipped`. The
+    // `default` arm below would say the same; this names the reason.
+    if (op.type === 'unbuildable_index') return false;
     const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
     const ensure = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
       this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns);
@@ -14220,7 +14571,7 @@ export class SqlDriver implements IDataDriver {
     // re-resolve it: every caller of this method already holds the value the
     // registration recorded, and a declared `unique: 'organization'` index
     // (ADR-0120 D1) must scope against exactly that column.
-    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField);
+    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField, fields);
   }
 
   /**
@@ -14247,8 +14598,17 @@ export class SqlDriver implements IDataDriver {
    *   sync CREATES and what the differ EXPECTS cannot drift apart.
    * - Idempotent: indexes already present (by deterministic name) are
    *   skipped, and an "already exists" race is absorbed.
-   * - Indexes referencing a column that wasn't materialized (e.g. a virtual
-   *   `formula` field) are skipped with a warning rather than failing sync.
+   * - An index referencing a column that is not materialized (a misspelt name
+   *   the Studio save door admits, or a virtual `formula` field) is skipped
+   *   rather than failing the sync. The skip is logged at `error` through
+   *   {@link logDurabilityFailure}; it used to be a `warn`. A declared UNIQUE
+   *   that is never created is exactly the durability-degradation rule's case:
+   *   the constraint is not enforced while everything looks normal. The
+   *   duplicate-row arms below already answer their version of it at `error`.
+   *   A plain index is DDL that was supposed to run and did not, so it takes
+   *   the same channel, and the line says which of the two it is. The drift
+   *   report carries the same index as a report-only `unbuildable_index` entry
+   *   (`diffUnbuildableIndexes`), so `os migrate plan` shows it too.
    * - A NULL-safe unique whose data already violates it (legacy duplicates the
    *   void constraint admitted, #5030) is NOT created; the failure is logged
    *   at `error` (a declared constraint is not enforced — the
@@ -14271,6 +14631,12 @@ export class SqlDriver implements IDataDriver {
     indexes: DeclaredIndexInput[],
     physicalColumns: Set<string>,
     tenantField?: string | null,
+    /**
+     * The object's fields, when the caller holds them. They only tell the
+     * skip line WHY a column is missing (not a field, or a virtual `formula`).
+     * The drift-op apply paths re-feed already-normalized shapes and pass none.
+     */
+    fields?: Record<string, any>,
   ): Promise<void> {
     const existing = await this.getExistingIndexNames(tableName);
     const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
@@ -14283,9 +14649,23 @@ export class SqlDriver implements IDataDriver {
 
       const missing = columns.filter((f) => !physicalColumns.has(f));
       if (missing.length > 0) {
-        this.logger.warn(
-          `[sql-driver] skipping declared index on "${tableName}" — column(s) not materialized: ${missing.join(', ')}`,
-          { tableName, fields: columns },
+        // Durability, not function (AGENTS.md "Degradation log levels"): the
+        // sync goes on and the object serves normally, while DDL the metadata
+        // declares did not run. For a UNIQUE index, that means duplicate rows
+        // are accepted. So this goes on the durability channel, like the
+        // duplicate-row arms further down this loop. One line per skipped index
+        // per sync. It states the consequence and the fix, and says whether
+        // the index was UNIQUE (the prose, and `unique` in the meta).
+        this.logDurabilityFailure(
+          `[sql-driver] declared ${unique ? 'UNIQUE ' : ''}index '${name}' on "${tableName}" was NOT created: ` +
+            `no column for ${describeMissingIndexColumns(missing, fields)}. ` +
+            (unique
+              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and the object keeps ` +
+                `working as if the constraint existed. `
+              : `The index does not exist, and the object keeps working as if it did. `) +
+            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
+            `remove the index ("os validate" refuses a name that is not a field).`,
+          { tableName, index: name, fields: columns, missing, unique },
         );
         continue;
       }
@@ -15780,6 +16160,100 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#20444] The field's DECLARED value shape, or `undefined` when this driver
+   * holds no declaration for it — see {@link valueShapeFields}. Keyed like
+   * {@link isJsonColumn}: the registry key the builder's table resolves to and
+   * the LOCAL field name. `driver-turso`'s remote transport asks the same
+   * question through this method, so its two faces read one registry.
+   */
+  protected declaredValueShape(table: string | null | undefined, localField: string): ValueShapeFieldDef | undefined {
+    if (!table) return undefined;
+    const shapes = this.valueShapeFields[table];
+    return shapes && Object.prototype.hasOwnProperty.call(shapes, localField) ? shapes[localField] : undefined;
+  }
+
+  /**
+   * [#20444] Compile `{ field: { $empty: true | false } }` — the staged
+   * emptiness operator, answered by the field's DECLARED row of the ruled
+   * 「is empty」 table (ruling B on #20311, record 5861435168; spelled as this
+   * operator by ruling A on #20399, record 5865693155), through the spec's one
+   * expansion, {@link expandEmptyOperator}:
+   *
+   * | declared row | `$empty: true` | `$empty: false` — the exact complement |
+   * |---|---|---|
+   * | `null_only` (every other type) | `col IS NULL` | `col IS NOT NULL` |
+   * | `text` (the text-like types) | `(col IS NULL OR col = '')` | `(col IS NOT NULL AND col <> '')` |
+   * | `multi_value` (a list-valued field) | `(col IS NULL OR L)` | `(col IS NOT NULL AND NOT L)` |
+   *
+   * `L` is {@link emptyJsonListPredicate}, the dialect's test for "this stored
+   * JSON value is the empty list". An empty list is tested as a STORED VALUE,
+   * never bound as a `$eq: []` comparand (ruling 乙 on #19757 still refuses an
+   * empty list there).
+   *
+   * Every predicate is TOTAL — TRUE or FALSE on every row, never UNKNOWN —
+   * because both polarities spell the NULL case out and `L` is never NULL for a
+   * stored value. So a `$not` over `$empty` needs no guard
+   * ({@link operatorIsNullTotal} answers `true` for it) and `NOT (…)` is the
+   * exact complement, with no three-valued-logic hole. Each predicate is one
+   * knex group, so its `OR` can never re-associate with a sibling conjunct.
+   *
+   * Refused, before anything is emitted: a field with no declaration here
+   * ({@link undeclaredEmptyOperatorFieldError}), and the multi-value row on a
+   * dialect this driver does not model ({@link emptyListUnsupportedDialectError}).
+   *
+   * ⚠️ Staged: `$empty` is not in `FILTER_OPERATORS` yet (the maintainer's
+   * amendment of ruling A, record 5868169573: 「照 $like 先例分阶段」), so the
+   * engine's front door still refuses it; this arm answers a caller that
+   * reaches the driver directly, and it is what the flip card turns on.
+   */
+  private applyEmptyOperator(
+    builder: any,
+    logicalOp: 'and' | 'or',
+    table: string | null | undefined,
+    localField: string,
+    field: string,
+    empty: boolean,
+    // The field's operator map — the node a refusal is resolved against (#8220).
+    subtree: unknown,
+  ): void {
+    const shape = this.declaredValueShape(table, localField);
+    if (!shape) throw undeclaredEmptyOperatorFieldError(field, subtree);
+    const expansion = expandEmptyOperator(shape);
+    const method = logicalOp === 'or' ? 'orWhere' : 'where';
+    switch (expansion.arm) {
+      case 'null_only':
+        builder[
+          empty
+            ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
+            : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')
+        ](field);
+        return;
+      case 'text':
+        builder[method]((qb: any) => {
+          if (empty) qb.whereNull(field).orWhere(field, '');
+          else qb.whereNotNull(field).andWhere(field, '<>', '');
+        });
+        return;
+      case 'multi_value': {
+        const list = emptyJsonListPredicate(this.dialectName, field);
+        if (!list) throw emptyListUnsupportedDialectError(field, subtree);
+        builder[method]((qb: any) => {
+          if (empty) qb.whereNull(field).orWhereRaw(list.sql, list.bindings);
+          else qb.whereNotNull(field).andWhereRaw(`NOT ${list.sql}`, list.bindings);
+        });
+        return;
+      }
+      default: {
+        // The spec's `EmptyOperatorArm` is a closed union of the three rows
+        // above; a fourth reaching here is a spec change this driver was not
+        // taught, and it must fail loudly rather than answer for it.
+        const unknownArm: never = expansion.arm;
+        throw new Error(`[sql-driver] no $empty arm for the declared row ${JSON.stringify(unknownArm)}`);
+      }
+    }
+  }
+
+  /**
    * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
    * that the column it was aimed at cannot give a meaningful answer for.
    *
@@ -16458,6 +16932,15 @@ export class SqlDriver implements IDataDriver {
           // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
           if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
             this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
+            continue;
+          }
+          // [#20444] `$empty` — answered by the field's DECLARED row of the
+          // ruled table, AFTER every refusal above (its non-boolean comparand
+          // was refused on the walk) and BEFORE the calendar-day rewrites,
+          // the comparand coercion and the normalised-column emitter: its
+          // flag is not a value of the column, so none of them applies.
+          if (rawOp === '$empty') {
+            this.applyEmptyOperator(builder, logicalOp, table, localField, field, opValue === true, value);
             continue;
           }
           // Calendar-day upper bounds first (#3777): `$lte` on a bare

@@ -163,6 +163,15 @@ function metaProtocol(doc: any) {
             if (k === 'getMetaItems') return vi.fn(async () => [doc]);
             if (k === 'getMetaItem') return vi.fn(async () => ({ type: doc.type, name: doc.name, item: doc }));
             if (k === 'getMetaItemCached') return undefined;
+            // [#20507] The layered read in its own shape, `doc` at the code
+            // layer. The generic answer below carries no layer at all, which
+            // the layered chain answers as the name's absence (404), so the
+            // `/layers` row would stop reaching the answer it measures.
+            if (k === 'getMetaItemLayered') {
+                return vi.fn(async () => ({
+                    type: doc.type, name: doc.name, code: doc, overlay: null, overlayScope: null, effective: doc,
+                }));
+            }
             return vi.fn(async () => ({ ok: true, rows: [], data: [], items: [doc], total: 1 }));
         },
     });
@@ -542,7 +551,7 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
         }
     }, 180_000);
 
-    it('⭐ with the umbrella ISOLATED, six of the inner sites do NOT refuse on their own reading', async () => {
+    it('⭐ with the umbrella ISOLATED, four of the inner sites do NOT refuse on their own reading', async () => {
         // ⛔ Counterfactual, not a production posture — production mounts the
         // umbrella, and section 4's first case measures that it refuses. What
         // this separates is DOUBLE-guarded from SINGLE-guarded: an absent
@@ -560,12 +569,16 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
             'DELETE /api/v1/meta/:type/:name',
             'POST /api/v1/meta/:type/:name/publish',
             'POST /api/v1/meta/:type/:name/rollback',
+            // [#20441] An authoring door now, like `_drafts`: the authoring
+            // capability is asked at its head, so an absent context is refused
+            // there even with the umbrella isolated. It moved from the list
+            // below, whose length the title states.
+            'GET /api/v1/meta/:type/:name/audit',
         ];
         const SERVES_ON_ITS_OWN = [
             'GET /api/v1/meta/:type',                      // list — org scope only
             'GET /api/v1/meta/:type/:name',                // item read — org scope only
             'GET /api/v1/meta/:type/:name/layers',
-            'GET /api/v1/meta/:type/:name/audit',
             'GET /api/v1/meta/:type/:name/published',
         ];
 

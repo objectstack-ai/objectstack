@@ -1,0 +1,16 @@
+diff --git a/dist/rollup.js b/dist/rollup.js
+index e128b61b9558318b9f86dc11d72c31f09a8eb7db..35f85e39c2af6c645fb2d3da115742df445d2343 100644
+--- a/dist/rollup.js
++++ b/dist/rollup.js
+@@ -4915,6 +4915,11 @@ var require_rollup_plugin_dts = _chunkTWFEYLU4js.__commonJS.call(void 0, {
+       } else {
+         logCache("HIT", cacheKey);
+       }
++      if (overrideConfigPath) {
++        // objectstack patch: a cache HIT kept dirname(input), so each entry
++        // got its own ts.Program. One tsconfig for all entries => one key.
++        dirName = path__namespace.dirname(path__namespace.resolve(process.cwd(), overrideConfigPath));
++      }
+       const { fileNames, options, errors } = configByPath.get(cacheKey);
+       dtsFiles = fileNames.filter((name) => DTS_EXTENSIONS.test(name));
+       if (errors.length) {

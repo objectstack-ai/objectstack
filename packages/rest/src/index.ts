@@ -90,24 +90,59 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // [#20320] …and everything else the two transports' `/meta` reads must answer
 // alike: the list route's whole post-read chain (`createMetaListAnswer` — the
 // `api` served-set face, the list gate, `?id=`, `?object=`, the doc locale
-// collapse and slim, the transport's object mask, the translation
+// collapse and slim, the object mask over the transport's masker, the translation
 // `translateMetaList`), the one locale parse it reads (`metaRequestLocale`),
 // the anonymous gates'
 // `public`-audience predicate (`isPublicAudienceRead`) and the stored-version
 // doors' policy (`STORED_VERSION_DOOR_POLICY`, which `?state=draft` runs).
+//
+// [#20408] …and the item read's and the book tree's: the item route's whole
+// post-read chain (`createMetaItemAnswer` — absence, the item gate, the doc
+// locale collapse, the object mask and its `private, no-store`, and the body
+// `translateMetaEnvelope` builds: the translation and `sortability`), the one
+// projection every object-schema exit applies (`projectMetaObjectSchema`), the
+// `GET /meta/book/:name/tree` answer (`createMetaBookTreeAnswer`), the list's
+// unknown-type refusal (`refuseUnknownMetaListType`) and the organization a
+// caller's `/meta` request is scoped to — the VETTED one on its execution
+// context (`metaCallerOrganizationId`, and `metaReadOrganizationId` for a read
+// of one type).
+//
+// [#20478] …and the layered view's, on both of its spellings: its post-read
+// chain (`createMetaLayeredAnswer` — the per-caller gate on every layer under
+// the stored-version doors' policy, the object mask and its cache posture), the
+// deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
+// is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
+// transport's, scoped by `metaReadOrganizationId`.
 export {
+    createMetaBookTreeAnswer,
+    createMetaItemAnswer,
     createMetaItemReadGate,
+    createMetaLayeredAnswer,
     createMetaListReadGate,
     createMetaListAnswer,
     isPublicAudienceRead,
+    metaCallerOrganizationId,
+    metaItemLayersDeprecationHeaders,
+    metaReadOrganizationId,
     metaRequestLocale,
+    projectMetaObjectSchema,
+    refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
+    translateMetaEnvelope,
     translateMetaList,
+    wantsMetaItemLayers,
 } from './meta-item-read-gate.js';
 export type {
+    MetaBookTreeAnswer,
+    MetaBookTreeSources,
+    MetaItemAnswer,
+    MetaItemAnswerSources,
     MetaItemReadGateSources,
     MetaItemReadRefusal,
     MetaItemReadVerdict,
+    MetaItemRequest,
+    MetaLayeredAnswer,
+    MetaLayeredRequest,
     MetaListAnswer,
     MetaListAnswerSources,
     MetaListRequest,

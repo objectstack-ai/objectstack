@@ -11,7 +11,9 @@ export const entry: SemanticMigration = {
     + '`{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset '
     + 'path — the spec\'s single author-facing analytics shape — `{ offset }` was forwarded '
     + 'verbatim into that contract and threw `compareTo requires a timeDimension "undefined"`, '
-    + 'taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). '
+    + 'taking the widget down; the arm ever only ran on the legacy inline chart path (measured '
+    + 'when all three declared arms were found dead on the dataset path: two silently dropped, '
+    + 'this one throwing). '
     + "The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every "
     + 'other duration has NO faithful target: `previousPeriod` shifts by the length of whatever '
     + "window the widget's filter resolves to, which equals `7d` only when that window happens "

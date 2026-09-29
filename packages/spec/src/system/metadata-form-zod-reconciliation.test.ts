@@ -75,8 +75,7 @@
  *
  * ## The coordinates include the root, and the overlay is not surface
  *
- * Two instruments the top-level direction (#19188) needs, neither of them
- * wired to an assertion here:
+ * Two instruments the top-level direction (#19188) needs:
  *
  * - **The ledger had no top-level coordinate.** Every `path` was a
  *   `nestedLists` path, so a deliberate omission at the *top* level could not
@@ -86,17 +85,28 @@
  *   `['']` and not `[]`. `ROOT_PATH` is that missing coordinate and
  *   `resolveCoordinate` is the single place that knows both spellings.
  * - **The ADR-0010 provenance/lock overlay is not authoring surface.** 132 of
- *   the 274 top-level keys no form offers are that overlay — 119 of them the
- *   seven `_`-prefixed envelope keys on all 17 forms, plus `protection` on 13
- *   — so a top-level zod-only direction without a skip is half overlay noise,
- *   and 132 ledger rows for one overlay with one reason is the wrong shape.
+ *   the 274 top-level keys no form offered when the skip was written were that
+ *   overlay — 119 of them the seven `_`-prefixed envelope keys on all 17 forms,
+ *   plus `protection` on 13 — so a top-level zod-only direction without a skip
+ *   would have been half overlay noise, and 132 ledger rows for one overlay
+ *   with one reason is the wrong shape.
  *   `FRAMEWORK_FIELDS` skips it, mirroring the liveness gate, which grades the
  *   same set auto-live (`FRAMEWORK_FIELDS` in `scripts/liveness/`).
  *
- * Neither changes what this gate asserts: the top-level zod-only direction
- * stays unwired, and the skip is kept off every nested coordinate — where a
- * leg is asserting today, over a sub-schema that really does carry the
- * overlay.
+ * The skip is kept off every nested coordinate, where a leg asserts over a
+ * sub-schema that really does carry the overlay.
+ *
+ * ## The top-level zod-only direction is wired (#19188, #19333)
+ *
+ * The per-type top level used to assert only form-only and retired, so "the
+ * schema declares this key and no form row offers it" had no reader there.
+ * Now it does: on every object-rooted type, a key the author may write at the
+ * top level is either offered by the form or excused by a root ledger row that
+ * carries its reason, and any other key fails the gate by name. The overlay
+ * and tombstones need no row, for the reasons above. `view` is the one type
+ * outside the direction, recorded by name with its reason in
+ * `TOP_LEVEL_DEFERRED`: its root is a union, and it is reconciled per arm once
+ * an arm form exists (the #19330 ruling, letter A).
  *
  * @see control-flow-form-zod-ledger.test.ts — same pattern for the flow designer
  */
@@ -144,7 +154,8 @@ const ROOT_PATH = '(root)';
  * the loader, never authored in a form. The liveness gate grades exactly this
  * set auto-live (`FRAMEWORK_FIELDS`, `scripts/liveness/check-liveness.mts`);
  * this is the reconciliation gate's equivalent, and it exists because the
- * overlay is 132 of the 274 top-level keys the forms do not offer.
+ * overlay was 132 of the 274 top-level keys the forms did not offer when it
+ * was written.
  *
  * **Derived, not hand-copied.** The seven `_`-prefixed keys ARE
  * `MetadataProtectionFields` — the one raw shape every metadata schema spreads
@@ -258,6 +269,19 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'collapsed',
     why: "`[DEPRECATED → collapse]` UI-dialect alias (ADR-0085), the other half of the `collapsible` / `collapsed` pair, deliberately not offered to new authors (ruling record 5861442317, #19332): the parse maps it onto `collapse` only when `collapse` is absent (`true` → 'collapsed' on its own), and this repeater offers the canonical `collapse` select",
   },
+  // ── The `inlineColumns` repeater (ruling record 5861442317, #19332) ──
+  //
+  // The `object.fields` subset precedent at the top of this ledger, on the
+  // field form: a curated repeater over four of `InlineGridColumnSchema`'s
+  // twenty keys. Unlike `object.fields` there is no fuller editor to defer to,
+  // so the long tail is authored in source, and the reason says why that is
+  // the right place for each group of keys left out.
+  {
+    kind: 'subset',
+    type: 'field',
+    path: 'inlineColumns',
+    why: "a curated inline-grid column (ruling record 5861442317, #19332): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+  },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
   // Three reasons, each read off the key's own `describe()` or its liveness
@@ -304,21 +328,21 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'view',
     path: ROOT_PATH,
     key: 'columnState',
-    why: "platform-written, never authored — `Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
+    why: "platform-written, never authored — `Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
   {
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
     key: 'isPinned',
-    why: "platform-written, never authored — `Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name",
+    why: "platform-written, never authored — `Console round-trip: the view is pinned in the object's view switcher. … Not authored.`; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
   {
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
     key: 'sortOrder',
-    why: "platform-written, never authored — `Studio round-trip: position within the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
+    why: "platform-written, never authored — `Console round-trip: the view's position among the object's saved views in the switcher … Not authored`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
   },
 
   // Deprecated or legacy alias — deliberately not offered to new authors, the
@@ -836,6 +860,38 @@ function reconcileNestedLists(type: string, form: any, root: unknown, ledger: Le
   });
 }
 
+/**
+ * The top-level zod-only predicate: the keys an author may write at the root
+ * that the form does not offer and no root ledger row excuses. It is the
+ * nested predicate's `zodOnly` at {@link ROOT_PATH}, resolved through the same
+ * `resolveCoordinate` / `offerableKeysAt` pair the resolve test uses, so a
+ * tombstone and the ADR-0010 overlay are left out without a row. `null` when
+ * the root is not key-bearing.
+ */
+function reconcileRoot(type: string, form: any, root: unknown, ledger: Ledger): string[] | null {
+  const at = resolveCoordinate(form, root, ROOT_PATH)!;
+  const offerable = offerableKeysAt(at.sub, ROOT_PATH);
+  if (!offerable) return null;
+  if (isSubset(ledger, type, ROOT_PATH)) return [];
+  const excused = omittedAt(ledger, type, ROOT_PATH);
+  return offerable.filter((k) => !at.offered.includes(k) && !excused.includes(k));
+}
+
+/**
+ * The registered types outside the top-level zod-only direction, each with its
+ * reason. A union root answers `keysOf` with the union of its arms' keys: the
+ * safe side for form-only, and the unsafe side here, because one form would be
+ * asked to offer mutually exclusive arms. The test below holds this map equal
+ * to the union-rooted registered types, so it cannot excuse an object-rooted
+ * type, and a union-rooted one cannot slip into the direction unexcused.
+ */
+const TOP_LEVEL_DEFERRED: Readonly<Record<string, string>> = {
+  view: "union-rooted: its four arms declare mutually exclusive keys, so the one registered view form cannot offer them all. It is reconciled per arm, each arm against its own registered form (the #19330 ruling, letter A); until the first arm form exists, the top-level direction covers the object-rooted types only",
+};
+
+/** The types the top-level zod-only direction judges. */
+const TOP_LEVEL_TYPES = TYPES.filter((type) => !(type in TOP_LEVEL_DEFERRED));
+
 describe('metadata form ↔ Zod reconciliation (#3786)', () => {
   it('the registry is non-empty and every form resolves a schema', () => {
     // Without this the per-type assertions below would pass over an empty set —
@@ -866,6 +922,32 @@ describe('metadata form ↔ Zod reconciliation (#3786)', () => {
       offered.filter((f) => isRetiredAt(root, f)),
       `${type}: offered by the form but RETIRED in the Zod (retiredKey tombstone — filling the control hard-fails the save). Delete the form entry and leave a comment naming the retirement`,
     ).toEqual([]);
+  });
+
+  it.each(TOP_LEVEL_TYPES)('%s: every top-level key the author may write is offered, or its omission is recorded', (type) => {
+    // The cell that had no reader: a key the schema declares that no form row
+    // offers is unauthorable in the Studio, and every gate stayed green over it.
+    const zodOnly = reconcileRoot(type, METADATA_FORM_REGISTRY[type], getMetadataTypeSchema(type), LEDGER);
+    expect(zodOnly, `${type}: root schema is not key-bearing`).not.toBeNull();
+    expect(
+      zodOnly,
+      `${type}.${ROOT_PATH}: accepted by the Zod but unauthorable in the form — offer it, or add a root ledger entry that records why it is not offered`,
+    ).toEqual([]);
+  });
+
+  it('the types outside the top-level direction are exactly the union-rooted ones, each with its reason', () => {
+    const unionRooted = TYPES.filter((type) => {
+      const u = unwrap(getMetadataTypeSchema(type));
+      const kind = (u?.def ?? u?._def)?.type;
+      return kind === 'union' || kind === 'discriminated_union';
+    });
+    expect(Object.keys(TOP_LEVEL_DEFERRED).sort(), 'the deferred types are not the union-rooted types').toEqual(unionRooted.sort());
+    for (const [type, why] of Object.entries(TOP_LEVEL_DEFERRED)) {
+      expect(why.length, `${type} needs a reason a reader can act on`).toBeGreaterThan(20);
+    }
+    // Not vacuous: the direction judges every registered type but the deferred ones.
+    expect(TOP_LEVEL_TYPES.length).toBeGreaterThan(10);
+    expect(TOP_LEVEL_TYPES.length).toBe(TYPES.length - unionRooted.length);
   });
 
   it.each(TYPES)('%s: every hand-written nested list matches its sub-schema', (type) => {
@@ -1157,9 +1239,12 @@ describe('the nested walk reaches every depth (#14327)', () => {
 // root entry can be recorded" and "the overlay is skipped at the root and
 // nowhere else" are measured facts rather than assumptions.
 //
-// What is deliberately NOT here: an assertion that the top-level zod-only set
-// is empty. It is not — 274 keys across the 17 forms, 132 of them this overlay
-// — and wiring that direction is #19188's work, not this instrument's.
+// The direction itself is asserted over the live registry in the first block
+// of this file. Here the same `reconcileRoot` is driven over the synthetic
+// pair, so the predicate is shown to name an unexcused key (positive control)
+// and to stay quiet over an excused key, the overlay and a tombstone (negative
+// control): a direction observed only green would otherwise be
+// indistinguishable from one that matches nothing.
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('the ledger has a root coordinate, and the overlay is not surface', () => {
@@ -1275,6 +1360,34 @@ describe('the ledger has a root coordinate, and the overlay is not surface', () 
     expect(isFrameworkField('_lock')).toBe(true);
     expect(isFrameworkField('protection')).toBe(true);
     expect(offerable).not.toContain('_lock');
+  });
+
+  it('positive control: the top-level direction names an unoffered, unexcused key', () => {
+    // `tags` is authorable and no section offers it. The overlay, `protection`
+    // and the tombstone `gone` are not reported, and neither is the offered
+    // composite `nested`.
+    expect(reconcileRoot('probe', form, schema, [])).toEqual(['tags']);
+  });
+
+  it('negative control: a root row excuses the key, and a row at any other coordinate does not', () => {
+    expect(
+      reconcileRoot('probe', form, schema, [
+        { kind: 'omit', type: 'probe', path: ROOT_PATH, key: 'tags', why: 'synthetic: tags is deliberately not offered' },
+      ]),
+    ).toEqual([]);
+    expect(
+      reconcileRoot('probe', form, schema, [
+        { kind: 'subset', type: 'probe', path: ROOT_PATH, why: 'synthetic: the probe form is a curated subset' },
+      ]),
+    ).toEqual([]);
+    // Keyed by coordinate: the same key at a nested path, or a root row for
+    // another type, excuses nothing at this root.
+    expect(
+      reconcileRoot('probe', form, schema, [
+        { kind: 'omit', type: 'probe', path: 'nested', key: 'tags', why: 'synthetic: filed at the nested coordinate' },
+        { kind: 'omit', type: 'other', path: ROOT_PATH, key: 'tags', why: 'synthetic: filed against another type' },
+      ]),
+    ).toEqual(['tags']);
   });
 });
 

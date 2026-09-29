@@ -59,7 +59,7 @@
  *   verbatim 「12745 A回，其他同意。」, superseding #11249's `false`/`true`)
  *   pins that **booleans aggregate as numbers on every face, with no
  *   per-aggregate exception** — `min(flag)`/`max(flag)` answer `0`/`1`, the
- *   same numeric domain `sum`/`avg` already answer in (#11065). So a boolean
+ *   same numeric domain `sum`/`avg` already answer in (commit 20950404c). So a boolean
  *   aggregand takes NO boolean read-presentation on any face, and
  *   {@link AggregationExpectation.value} stays a `number` for every case.
  *
@@ -224,7 +224,7 @@ export interface AggregationRow {
   /**
    * [#11152] The non-null BOOLEAN aggregand — 3 true / 3 false, so `sum` and
    * `avg` cannot agree with a face that dropped the booleans (`0` / `null`,
-   * the #11065/#11151 defect) or that counted rows instead of trues.
+   * the commit 20950404c / #11151 defect) or that counted rows instead of trues.
    *
    * The distribution is the `FLAG_BY_ID` the #11635 suite landed, adopted here
    * verbatim so the two never disagree on grouped values: `west` holds
@@ -383,7 +383,7 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
   // ── [#11152] the boolean aggregand: numbers on every face, by ruling ──────
   //
   // The whole vocabulary over `flag` (3 true / 3 false). Two rulings pin the
-  // values: #11065 settled `sum`/`avg` (a boolean is an aggregand worth 1 or
+  // values: commit 20950404c settled `sum`/`avg` (a boolean is an aggregand worth 1 or
   // 0 — driver-memory answered `0`/`null` while SQLite answered `2`/`0.4`,
   // found from an application because no conformance cell could see it), and
   // #11152 (maintainer 2026-08-28, superseding #11249's `false`/`true`)

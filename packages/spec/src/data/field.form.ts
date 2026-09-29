@@ -244,6 +244,41 @@ export const fieldForm = defineForm({
         // reads a catalog from the field draft.
         { field: 'relatedListColumns', widget: 'string-tags', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Columns of this relationship's related list on the parent's detail page, as field names of this (the child) object, e.g. name, status. Unset: derived from the child object. Names only — labels, cell types and formatting come from the child's field definitions." },
         { field: 'inlineTitle', visibleWhen: "data.type == 'master_detail'", helpText: 'Title for the inline master-detail grid on the parent record.' },
+        // #19332 (flight G2b of ruling record 5861442317) — the inline grid's
+        // explicit columns, between the grid's title and its total and behind the
+        // same gate. A repeater with declared sub-rows, the `object.form.ts`
+        // `fieldGroups` repeater's face, over a CURATED SUBSET of the twenty
+        // keys `InlineGridColumnSchema` accepts; the reconciliation ledger
+        // records the `subset` row and names what is left out and why.
+        //
+        // The subset is the entry the key's own contract recommends: `name`
+        // alone, which objectui's `hydrateColumns` completes from the child
+        // field (type, options, lookup target, rules, computed expression), plus
+        // the three keys that apply to a column of any type (`label`, `width`,
+        // `defaultHidden`). `type` is not offered because declaring it opts the
+        // column out of that hydration. The keys that apply to one cell type
+        // only are not offered because a column takes its type from the child
+        // field at render, which no sub-row `visibleWhen` here can see, so each
+        // would be offered on every column. The rules (`required`,
+        // `readonlyWhen`, `requiredWhen`) are copies of the child field's own.
+        //
+        // `name` names a field of THIS (the child) object, like
+        // `relatedListColumns` above, and no authoring door judges it: not the
+        // parse, not the publish door, not `os validate`. At render an unknown
+        // name is left unhydrated, a plain text column, which is what the help
+        // text claims.
+        {
+          field: 'inlineColumns',
+          type: 'repeater',
+          visibleWhen: "data.type == 'master_detail'",
+          helpText: 'Columns of the inline grid on the parent\'s form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
+          fields: [
+            { field: 'name', label: 'Name', type: 'text', required: true, helpText: 'Field of this (the child) object that the column shows and edits (e.g. quantity). Nothing checks it when you save or publish: a name that is not a field of this object renders a plain text column.' },
+            { field: 'label', label: 'Label', type: 'text', helpText: 'Column header. Unset: the field\'s own label.' },
+            { field: 'width', label: 'Width', type: 'number', helpText: 'Fixed column width in pixels. Unset: sized by the cell type, with text columns flexing and number, date and select columns staying narrow.' },
+            { field: 'defaultHidden', label: 'Default Hidden', type: 'boolean', helpText: 'Start the column in the grid\'s column chooser instead of on screen; the user can show it. A column whose field is required is always shown.' },
+          ],
+        },
         { field: 'inlineAmountField', visibleWhen: "data.type == 'master_detail'", helpText: 'Numeric child field summed for the inline grid total.' },
       ],
     },

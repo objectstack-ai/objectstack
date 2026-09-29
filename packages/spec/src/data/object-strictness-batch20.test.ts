@@ -411,7 +411,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
     it('`userActions.sort` names the VIEW block it belongs to — same key NAME, disjoint vocabulary', () => {
       // `ui/view.zod.ts`'s UserActionsConfigSchema declares sort/search/filter/
       // refresh/rowHeight/group/addRecordForm/editInline/hideFields/rowColor/
-      // buttons (group/hideFields/rowColor adopted at #11195, ruled A on
+      // buttons (group/hideFields/rowColor adopted by commit b37231883, ruled A on
       // objectui#5435); the object block declares create/import/edit/delete/
       // exportCsv. Nothing overlaps, which is exactly why an author who
       // learned one writes it on the other.
@@ -437,7 +437,7 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
     });
 
     it('`userActions.group` / `.hideFields` / `.rowColor` name the VIEW block, same as `sort` (#11459)', () => {
-      // The three keys adopted onto the view's vocabulary at #11195 got only
+      // The three keys adopted onto the view's vocabulary by commit b37231883 got only
       // the generic unknown-key rejection on the object block — no curated
       // pointer — until this card added one, mirroring `sort`/`search`/
       // `filter`/`editInline` above.

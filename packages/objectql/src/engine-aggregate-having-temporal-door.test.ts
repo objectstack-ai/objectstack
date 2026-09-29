@@ -191,10 +191,19 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
       ['"+010000-01-01T00:00:00.000Z"', 'not a date value']],
     ['the number for 10000-01-01 on max(date), in the year class\'s own words',
       () => ({ last_placed: { $gt: Y10000 } }), { placed_on: { $gt: Y10000 } },
-      ['253402300800000', 'outside the years 0000 to 9999', 'keep the wrong groups']],
+      ['253402300800000', 'outside the years 0001 to 9999', 'keep the wrong groups']],
     ['the Date for 10000-01-01 on max(date)',
       () => ({ last_placed: { $lt: new Date(Y10000) } }), { placed_on: { $lt: new Date(Y10000) } },
-      ['Date +010000-01-01T00:00:00.000Z', 'outside the years 0000 to 9999']],
+      ['Date +010000-01-01T00:00:00.000Z', 'outside the years 0001 to 9999']],
+    // [#20264] A datetime year outside 0001..9999 is the year class too, on
+    // `having` with no edit here: the predicate asks core's one range. At the
+    // base this `$lt` kept no group — the extended text sorts below every year.
+    ['an extended-year ISO string on min(datetime), in the year class\'s words',
+      () => ({ first_opened: { $lt: '+010000-01-01T00:00:00.000Z' } }), { opened_at: { $lt: '+010000-01-01T00:00:00.000Z' } },
+      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 0001 to 9999', 'keep the wrong groups']],
+    ['the number for year 0 on max(date) — [#20264] year 0 joins the refused years',
+      () => ({ last_placed: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } }), { placed_on: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } },
+      ['outside the years 0001 to 9999']],
     ['"not-a-date" on min(datetime)',
       () => ({ first_opened: { $lt: 'not-a-date' } }), { opened_at: { $lt: 'not-a-date' } },
       ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'not a datetime value']],
@@ -317,17 +326,11 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['an in-range Date on max(date)', { last_placed: { $gt: new Date(1769940000000) } }, ['c2']],
     ['a 2026 instant on min(datetime)', { first_opened: { $gt: '2026-02-01T00:00:00.000Z' } }, ['c2', 'c3', 'c4']],
     ['a bare day as the upper bound of min(datetime)', { first_opened: { $lte: '2026-02-01' } }, ['c1', 'c2']],
-    // The `datetime` rule reads an extended-year instant, so the predicate calls
-    // it interpretable and its `where` twin is not refused by the door either.
-    // Its text orders below every four-digit year, so `$lt` keeps no group, on
-    // `having` as before; which years a comparand may name is #20264's to
-    // decide, in the predicate, and `having` follows it with no second edit.
-    ['an extended-year ISO on min(datetime) — read by the datetime rule', { first_opened: { $lt: '+010000-01-01T00:00:00.000Z' } }, []],
+    // [#20264] An extended-year instant on min(datetime) is refused now (see
+    // the REFUSED table); the first instant of year 1 is read, as before.
+    ['the first instant of year 1 on min(datetime) — inside the range', { first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
     ['a wall clock on max(time)', { last_slot: { $gte: '12:00' } }, ['c2', 'c3', 'c4']],
     ['the number for 10000-01-01 on max(time) — not judged on time', { last_slot: { $gt: Y10000 } }, []],
-    ['a string on sum — not temporal', { total: { $gt: 'not-a-date' } }, []],
-    ['a string on count — not temporal', { n: { $gt: 'not-a-date' } }, []],
-    ['a string on avg — not temporal', { mean: { $gt: 'not-a-date' } }, []],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],
@@ -346,6 +349,22 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
       expect(await keptGroups(having)).toEqual(kept);
     });
   }
+
+  // [#20351] A string on a NUMERIC column is not this door's either, and it is
+  // no longer compared as written: the number-comparand door, which runs after
+  // this one, refuses it in its own words, before any read. (It kept no group,
+  // with a 200, before that door existed.)
+  it('a string on sum, count or avg is not this door\'s: the number-comparand door refuses it, before any read', async () => {
+    for (const column of ['total', 'n', 'mean']) {
+      for (const path of ['native', 'rows'] as const) {
+        const { engine, reads } = await makeEngine(path, ROWS);
+        const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { [column]: { $gt: 'not-a-date' } })));
+        expect({ code: err?.code, status: err?.status }, `${column} ${path}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err?.message, `${column} ${path}`).toContain(`compares a declared number field against "not-a-date" at having.${column}.$gt`);
+        expect(reads, `${column} ${path}`).toEqual({ aggregate: 0, find: 0 });
+      }
+    }
+  });
 
   // [#20334] An unknown one is stepped around by this door too, and is then
   // refused one layer down by the token resolver, in its own code, as on

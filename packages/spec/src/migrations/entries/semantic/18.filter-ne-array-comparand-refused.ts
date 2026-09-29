@@ -28,9 +28,9 @@ export const entry: SemanticMigration = {
     + 'has-a-value predicate), every scalar, a Date and a { $field } reference are untouched, and '
     + 'the list operators ($in / $nin / $between) keep their arrays, empty lists included',
   reason:
-    'Ruling A on #19886 (record 5805254639, the director seat, class 1): the shared '
-    + 'comparand-shape face refuses an array under $ne for every driver, and FieldOperatorsSchema.$ne '
-    + 'refuses it at parse, with one remedy text naming the declared list-negation operator by its '
+    'Ruled on 2026-09-24 by the director seat, on the standing contract text (option A): '
+    + 'the shared comparand-shape face refuses an array under $ne for every driver, and '
+    + 'FieldOperatorsSchema.$ne refuses it at parse, with one remedy text naming the declared list-negation operator by its '
     + 'spec spelling — no alias, no window. The governing text is $ne\'s own published describe: '
     + 'the comparand is a literal, or a { $field } reference to another column of the same table. '
     + 'An array is neither, so the refusal pulls the doors back to what $ne already declared. '
