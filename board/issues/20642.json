@@ -1,0 +1,36 @@
+{
+  "number": 20642,
+  "kind": "pull_request",
+  "title": "fix(spec): os migrate meta guidance states the contract-first rule in words and drops a sweep batch ordinal (stage 10, the last)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T12:39:54Z",
+  "updated_at": "2026-09-29T13:29:46Z",
+  "closed_at": "2026-09-29T13:29:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T13:29:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20642",
+  "body": "Fixes #20233\nStage 10, the last: the two dangling contributor-guide rule references and one sweep batch ordinal left in the author-shown text of the ADR-0087 semantic entries.\n\nClause-②: no\n\n`os migrate meta` prints each semantic entry's `surface`, `replacement`, `reason` and `acceptanceCriteria` to the author. Stage 9 left every entry at 0 tracker ids in those fields. Three sentences still sent the reader to something they would have to look up:\n\n- `ui-list-view-grouping-field-padded-refused` and `ui-list-view-groupbyfield-padded-refused` said a trimming schema is \"the consumer-tolerance direction `AGENTS.md #0.1` refuses\". That number is rule 0.1 of the renderer repository's contributor guide, \"Fix the metadata, not the renderer (contract-first)\", which the ruling behind these entries cited as its governing text: fix the producer, do not teach the renderer to tolerate. It names nothing in this repository's AGENTS.md, and an author's project has neither guide. Both `reason` fields now state the rule itself: fix the metadata, not the renderer; off-spec metadata is refused where it is authored, never coerced into working.\n- `ui-notification-action-embed-config-retired` named \"its ui/ batch 14\" of the v17 unknown-key strictness sweep. The same sentence already says what that batch measured (each ui/ file checked for an authoring door first; these two shapes three ways on 2026-08-03) and what it decided (not to close them with `.strict()`, and to leave the disposition to ADR-0049's enforce-or-remove). So the ordinal only pointed at a row of the campaign's plan. It is dropped, and the later \"That batch\" now reads \"The sweep\". Stage 6 dropped the same campaign's other batch labels the same way.\n\n- **Text only:** a base-vs-head AST comparison over the 3 entry files and `registry.ts` finds 0 non-prose changes. 6 `reason` fields changed (3 per copy), with no `id`, `surface`, `replacement`, `acceptanceCriteria`, `from` / `to`, matcher, import, comment or token-skeleton change. Its self-test detects an id, comment, surface, skeleton and import mutation, and stays dark on a prose-only one.\n- **Census (stage 9's AST instrument, whole tree, 318 entries):** base `a918fe7fd0` has 0 prose sites, 0 surface sites and 10 short numbers. Head has 0 / 0 / 8. The 8 left are references to this repository's Prime Directives 2, 10 and 12, which stay. Before it was trusted, the instrument reproduced all 7 recorded readings from stages 5 to 9. Comment lines with a tracker id: 126 in `semantic/` and 838 across `entries/`, the same at base and head.\n- **Generated:** `registry.ts`, `spec-changes.json` and `docs/protocol-upgrade-guide.md`, by their generators. A second fresh regeneration leaves the tree clean. The two protocol-18 entries are not in the two projections, which carry released majors only. `patch` changeset.\n\n## Verification (head `fa949a84f2`)\n\n- **Build:** `turbo run build --concurrency=2 --filter=@objectstack/cli^...`: 58 of 58 tasks succeeded, and the tree was clean afterwards.\n- **Tests (one lock turn at this head):**\n  - spec `--project local`: 575 of 575 files passed (16915 tests passed, 1 todo).\n  - spec `--project repo`: 43 of 43 files passed (761 tests).\n  - CLI `--project integration`, three files: the guidance pin `test/migrate-meta-engine-guidance.test.ts`, `test/migrate-meta-default-range.test.ts`, and `src/commands/migrate/meta.stored-flow-resolution.integration.test.ts`. All 3 files passed (13 tests passed, 1 skipped by the default-range file's own `skipIf`).\n  - spec typecheck: exit 0, and the test-layer debt held (53 files, 251 errors).\n  - The guidance pin, run again alone with the verbose reporter: all 3 of its tests passed.\n- **Gates:** `dispatch-gates.mjs --commands` derives 83 families, and all 83 ran after the last commit. 82 exit 0. Among them: `check:doc-authoring` (16803 customer-facing strings clean), `check:generated` (all 15 artifacts up to date), `check:migration-registry`, `check:spec-changes`, `check:upgrade-guide`, `check:issue-citations`, `check:nul-bytes`, `check:api-surface` (unchanged), `check:authorable-surface` and `check:adr-0087-registration` (no declared-breaking changeset).\n  - `check:dual-build-cjs-loads` is NOT MEASURED. Its prerequisite is not met: 9 packages outside the CLI closure have no `dist/`. Build Core runs it.\n  - `--ran` reconciliation: 83 accounted for, 82 run, 1 NOT MEASURED, 0 unrun.\n- **Lint:** eslint `--no-inline-config --format json` over the 4 changed `.ts` files: 4 files read, with 0 errors and 0 warnings. The population comes from `eslint.config.mjs`. The config enables no type-aware rules, so this diff cannot change the verdict for any file it does not touch.\n- **Mergeability:** a driver-free `merge-tree` onto `origin/main` `3f45b6cc13` is clean. The one commit on main since the base touches none of these paths.\n\nThe dev report on #20233 has the sources each sentence was read from, the census readings and the AST-comparison record.\n\n## Acceptance notes\n\n- This is the last stage, so the PR says `Fixes #20233`. After it, the card's population is 0: no tracker id and no dangling rule number in any semantic entry's printed fields.\n- `AGENTS.md #0.1` also appears outside this card's positions: in code comments (two docblocks in `ui/view.zod.ts`, one in `ui/component.zod.ts`, and two comments in `ui/view.test.ts`), and in four released `packages/spec/CHANGELOG.md` entries. Comments are form C, under #20234. The changelog is release-owned and never edited in a code PR. None of these is printed by `os migrate meta`.\n- The pin's detector reads `#` plus four or five digits. A batch ordinal with no `#`, like the one removed here, is held by review, not by the pin.\n- Two more `batch` tokens appear in printed prose, and both are file names, not plan ordinals. `authoring-schemas-strict-unknown-keys` lists the changeset file names its batches shipped under. `ui-widget-i18n-family-retired` names a test file. Both are outside this claim and untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014EJ1ED8X4MMrT18BhVx4tx)_\n"
+}

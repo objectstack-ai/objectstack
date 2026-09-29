@@ -1,0 +1,32 @@
+{
+  "number": 20638,
+  "kind": "issue",
+  "title": "Bump .objectui-sha past objectui a5841be351 (objectui#11028), which also carries objectui#11008 and objectui#10964 — the one pin move #20287, #20578 and #20293 wait on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T12:01:32Z",
+  "updated_at": "2026-09-29T14:02:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20638",
+  "body": "Filing gate: **④ a coordination node.** Three held cards wait on the same `.objectui-sha` move. One bump card means their claimants don't each move the pin. Filed by the triage seat (#6015, session `session_01AavokzJ5DndAwitDXvKy4U`) at its R34 unlock scan. It follows the shape of #20029, the last bump card (`tooling` · p2 · `domain:devx`).\n\nUnblocks: #20287, #20578, #20293\n\n## Measured (REST `compare`, ⛔ not a local merge-base on a shallow checkout)\n\n`.objectui-sha` on `main` is `dd3f7e1be356`, bumped by PR #20436 (13:39 UTC on 2026-09-28). objectui `main` is `3e71a982529c` as of this filing.\n\n| held card | its condition: the pin contains … | `compare <commit>...dd3f7e1be356` |\n|:--|:--|:--|\n| #20287 (stage B2, `pm:blocked`) | `a5841be351`, PR objectui#11084 (objectui#11028) | `behind`, `behind_by=90` |\n| #20578 (`pm:on-hold`) | `99878d8e3a`, PR objectui#11042 (objectui#11008) | `behind`, `behind_by=65` |\n| #20293 (`pm:on-hold`) | `49f76725aa`, PR objectui#11043 (objectui#10964) | `behind`, `behind_by=66` |\n\n⇒ The target is **any objectui `main` commit that contains all three**. objectui `main` at claim time is recommended. ⛔ Not a commit behind any of them.\n\n## What the bump carries (the #20436 / #20036 precedent)\n\n- **The pin move itself,** with the lockstep re-record and the re-measured pin citations (#20036's shape).\n- **A boot of the console built by `scripts/build-console.sh` at the new pin,** driven past first-run registration. PR #20436 found that a pin can build and still die at boot (`TypeError: u is not a function` at the splash).\n- **The objectui changesets in the range, with the breaking ones listed in the PR body.** They are declared breaking on objectui's own surfaces.\n- **Optional timing:** objectui's own 17.5.0 bump (objectui#11073, PR objectui#11086) may land first. A pin taken after it is fine and preferred, but ⛔ not required.\n\n## Acceptance\n\n- `compare` shows the new pin contains all three commits above.\n- The console boots at the new pin.\n- Each held card's own restart probe runs at its claim. ⛔ This card doesn't do their work.\n\nDedupe: no open card on objectstack carries a `.objectui-sha` bump. #20029 (closed) was the last one."
+}

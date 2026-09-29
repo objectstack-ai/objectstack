@@ -1,0 +1,32 @@
+{
+  "number": 20655,
+  "kind": "issue",
+  "title": "docs(automation): the flows guide routes an `http` node's outbound credential to a connector's `credentialRef`, and replaces its secret-bearing webhook-url example (the docs half of #20590)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T14:00:54Z",
+  "updated_at": "2026-09-29T14:05:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20655",
+  "body": "**This card carries the `content/docs` half of #20590.** Filing gate: **④ a coordination node**, a per-layer child in the #20618 pattern.\n- Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`).\n- ⛔ Filed bare: triage routes it (its lane split names `domain:devx`). ⛔ Not a claim.\n\n## Why this is owed\n\nTriage's direction on #20590 (`5891721503`) is **A, taken whole**. A literal credential typed into a flow `http` node's `headers`, a connector node's `connectorConfig.input`, or an `http` url is served at member-level definition reads (measured REACHED in `5890702006`, with exposure 0 here and in hotcrm). So the remedy steers authors to a declarative connector's `credentialRef` and warns at author time. ⛔ Nothing is withheld. `Clause-②: no` for the guidance faces.\n\n## The deliverable (triage's text, point 1)\n\n- `content/docs/automation/flows.mdx`, the `http` section, says that a flow definition is served to every member who can read flows, and routes an outbound credential to a declarative connector's `credentialRef`. That page already links `credentialRef` only from the connector paragraph.\n- Its secret-bearing incoming-webhook url example (about `:266` on `main`) is replaced by the connector route, or says plainly that the url is served. That is position 6's guidance half.\n- `content/docs/automation/connectors.mdx`'s `rest` provider `request` action accepts `headers` in its input with no word about credentials. One line there, pointing to `auth.credentialRef`, closes the same gap.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"flows docs webhook url secret example http credential\": 4 results. #8025, #7799, #8118 and #7722 are all closed; they are webhook-object storage decisions (#8025 ruled a webhook url can BE the credential, for webhook objects), not the flows guide.\n\nDedupe words: `flows.mdx http credential` · `webhook url secret docs example`"
+}

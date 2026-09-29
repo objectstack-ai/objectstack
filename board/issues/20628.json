@@ -1,0 +1,36 @@
+{
+  "number": 20628,
+  "kind": "issue",
+  "title": "service-automation: a flow `http` node that sets `signingSecret` sends its request unsigned on the inline arm (and on the durable arm's no-outbox fallback), while the published contract promises `X-Objectstack-Signature`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T10:28:14Z",
+  "updated_at": "2026-09-29T13:21:55Z",
+  "closed_at": "2026-09-29T13:20:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20628",
+  "body": "Filing gate: **① a product defect with a named landing site.**\n- **Class:** (b) a declared capability not honoured, and (c) an authored key silently ignored.\n- **`reach:`** measured at the executor seam every flow run takes, with a real request to a local receiver. The measurement was taken by the #20590 dev in patch round 1 of PR #20615, and is recorded in its `os-dev-report` on #20590.\n  - The flow's `http` node sets `signingSecret`, `method: POST` and a control header.\n  - **Non-durable (the default):** the request arrives with the control header and with no `X-Objectstack-Signature`, and no signature-like header at all. The run reports `success: true`.\n  - **`durable: true` with no messaging outbox wired** (the documented degrade to the inline arm): the same result, unsigned and `success: true`. The only log line is the existing inline-fallback warning, which does not say the signature was dropped.\n\n**Reader who acts:** the triage seat (#6015) grades and routes it. It then goes to the `domain:services` seat. The fix lands in `packages/services/service-automation/src/builtin/http-nodes.ts`, the request/response arm below the durable branch.\n\nFiled by the `domain:services` seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`). It comes from the at-tier contract review of PR #20615 (record `5886643746`, escalation R2), measured in that PR's patch round 1. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n## What is declared, and what runs\n\n- **Declared, published:** `HttpConfigSchema.signingSecret` in `packages/spec/src/automation/io-node-config.zod.ts` reads `.describe('HMAC-SHA256 secret → X-Objectstack-Signature')`. The `http` descriptor's `configSchema` in `builtin/http-nodes.ts` says the same. Neither says \"durable only\".\n- **Runs:** only the durable arm hands `signingSecret` to the messaging outbox (`enqueueHttp`), which signs. The inline arm builds its `fetch` from `cfg.headers` and never reads `signingSecret`.\n- **So an author, human or AI, who sets the key on the default arm gets a request the receiving endpoint cannot authenticate, and no signal that the key did nothing.** The same happens to a durable node on a host with no outbox.\n\n## Direction (a suggestion, not a ruling)\n\n- Per the enforce-or-remove principle, a declared key that runs nowhere is an implementation gap: enforce it or retire it. ⛔ Do not narrow the description at the consumer.\n- **Enforce:** the inline arm signs with the outbox's scheme, the same header and the same HMAC input, so one key means one thing on both arms. The durable no-outbox fallback then signs too.\n- If signing cannot be honoured on a path, that path refuses loudly, never \"unsigned and `success: true`\". This is the answer the webhook precedents took: #8542 refused to deliver unsigned when a stored secret did not resolve, and #8558 did the same for its headers.\n- Retiring the key or making it durable-only would be a contract change, which is the spec lane's work and moves `Clause-②`. That route is for the maintainer to choose, not the implementer.\n- **A pin:** for each arm, with a `signingSecret` set, the received request carries a signature that verifies, or the node refuses.\n\n## Related, not the same\n\n- #20590 / PR #20615: the same key's *serving* position (withheld from definition reads). This card is about its *execution*.\n- #8542 and #8558 (closed): `plugin-webhooks`' own signing path, a different executor.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"http node signingSecret inline request unsigned X-Objectstack-Signature\": 1 (#8542, closed, `plugin-webhooks`).\n- \"durable http callout fallback inline drops signature outbox not wired\": 1 (#8069, closed, webhook redeliver).\n- \"flow http node signing secret not honoured non-durable request\": 3 (#20590, #8558, #8542).\n- \"HttpConfigSchema signingSecret describe declared not enforced\": 2 (#8075, #8542).\n- None covers the flow `http` node's inline arm.\n\nDedupe words: `http node signingSecret inline unsigned` · `durable fallback inline drops signature` · `X-Objectstack-Signature inline request`"
+}

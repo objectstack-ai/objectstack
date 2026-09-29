@@ -14,18 +14,20 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T16:50:59Z",
-  "updated_at": "2026-09-28T18:04:12Z",
+  "updated_at": "2026-09-29T13:05:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20480",
   "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**. `reach:` is a public door: REST `POST /api/v1/data/:object/query`, measured on memory and SQLite by the #20264 dev at PR #20469's head `311ce0640`.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) from the #20264 dev's `out_of_scope_findings[0]` (os-dev-report on #20264, PR #20469). The readings are the dev's. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA `time` field holds rows `09:00:00`, `10:30:00` and `12:00:00`:\n- `where t $gt '+010000-01-01T10:00:00Z'` answers 200 with 3 of 3 rows, and `$lt` answers 0: a text comparison.\n- The same wall clock spelled as a 2026 instant (`2026-…T10:00:00Z`) answers 2 / 1.\n\n## Where\n\nIn `packages/core/src/utils/`, the two halves of the one temporal rule disagree on the `time` kind for an extended-year spelling:\n- `isUninterpretableTemporalComparand('time', s)` reads the string through `readsAsInstant` (`Date.parse`, which accepts extended years), so the comparand passes the door;\n- `temporalStorageForm(s, 'time')` → `canonicalTimeOfDay` hands it back unchanged, because its canonical-ISO check (four leading year digits) rejects the extended spelling;\n- so the driver compares the raw string with the stored `HH:MM:SS` text.\n\nPR #20469 (#20264) closes the year range for `date` and `datetime` only. Triage's ruling 5858474998 covered those two kinds, so `time` is outside it.\n\n## Suggested shape (⛔ not a ruling)\n\nThe `time` door reads a comparand's wall clock the same way whatever the year spelling, or refuses an extended-year instant spelling (`INVALID_FILTER` / 400), as #20264 now does for `date` / `datetime`. Pin on memory, SQLite and PostgreSQL with a 2026 control.\n\n## Dedupe\n\n`search_issues` \"time field comparand extended ISO year +010000 compared as text canonicalTimeOfDay\" in `objectstack-ai/objectstack`, open and closed: 2 hits, #20264 (the `date` / `datetime` range) and #20240 (closed, `date` padding). Neither is the `time` kind.\n\nDedupe words: `time comparand extended year instant compared verbatim` · `canonicalTimeOfDay +010000 unchanged` · `time where having extended ISO text order`"

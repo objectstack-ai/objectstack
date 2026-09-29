@@ -1,0 +1,37 @@
+{
+  "number": 20630,
+  "kind": "pull_request",
+  "title": "fix(spec): os migrate meta guidance for the remaining migration-entry families states each lesson in words, not tracker numbers (stage 9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T10:50:51Z",
+  "updated_at": "2026-09-29T11:37:00Z",
+  "closed_at": "2026-09-29T11:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T11:36:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20630",
+  "body": "Part of #20233\nStage 9: the remaining semantic-entry families, meaning every ADR-0087 semantic entry that still cited a tracker number.\n\nClause-②: no\n\n`os migrate meta` prints each ADR-0087 semantic entry's `surface`, `replacement`, `reason` and `acceptanceCriteria` to the author. This stage covers the 44 entries that still cited a tracker, pull-request, decision-batch or cross-repository number: 39 with a four- or five-digit id, and 5 with a decision-batch number only. In each of them, every sentence now says what the cited ruling, measurement or fix decided (form D). ADR ids stay, and so do the contributor-guide rule references, which are not tracker ids. The `address-location-value-unknown-keys-refused` replacement cited `AGENTS.md #0.1`, which names nothing in AGENTS.md today. It now states the rule it copied from the 2026-09-01 ruling: a consumer-side alias for an off-spec key stays forbidden.\n\n- **Text only:** a base-vs-head AST comparison over the 45 changed entry files and `registry.ts` finds no change outside `replacement` / `reason` / `acceptanceCriteria`. That is 48 prose fields per copy, and no `surface`, id, comment, import or token-skeleton change.\n- **Census (AST instrument, whole tree):** base `682873f201` has 76 prose sites in 39 entries (replacement 3 / reason 73 / acceptanceCriteria 0), 0 surface sites and 28 short numbers. Head has 0 / 0 / 10. The 10 short numbers left are contributor-guide rule references.\n- **Pin:** `packages/cli/test/migrate-meta-engine-guidance.test.ts` now holds every semantic entry instead of a prefix list, so an entry added later in any family is held on arrival. `REWRITTEN` goes from 203 to 247. Ablation: putting one removed id back into the `turso-` entry (a family the pin did not cover before) turned the pin red; restoring it turned the pin green.\n- **Generated:** `registry.ts`, `spec-changes.json` and `docs/protocol-upgrade-guide.md`, by their generators. `patch` changeset.\n\n## Verification (head `96b994e472`)\n\n- **Tests:**\n  - spec `--project local`: 575/575 files (16917 passed, 1 todo).\n  - spec `--project repo`: 42/42 files (745 passed).\n  - CLI `--project unit`: 234/234 files (3342 passed).\n  - CLI `--project integration`, the three migrate-meta files: 3/3 (13 passed, 1 skipped by the default-range file's own `skipIf`).\n  - spec and CLI typecheck: exit 0, test-layer debt held.\n- **Gates:** `dispatch-gates.mjs --commands` derives 89 families. 88 exit 0, among them `check:doc-authoring`, `check:generated`, `check:migration-registry`, `check:spec-changes`, `check:upgrade-guide`, `check:issue-citations`, `check:nul-bytes`, `check:api-surface` and `check:authorable-surface`.\n  - `check:dual-build-cjs-loads` is NOT MEASURED: its prerequisite is not met, because packages outside the CLI closure have no `dist/`. Build Core runs it.\n  - `--ran` reconciliation: 89 accounted, 88 run, 1 NOT MEASURED.\n- **Lint:** eslint over the 47 changed source files: 0 errors, 0 warnings.\n- **Mergeability:** a driver-free `merge-tree` onto `origin/main` `b80ab579d8` is clean. Main's new commits touch none of these paths.\n\nThe census method and controls, the source of every citation, and the ablation record are in the dev report on #20233.\n\n## Acceptance notes\n\n- Four verbatim ruling quotes carried a card or batch number: 「217 同意」, 「9266 同意 A」, 「146 同意」, and one reply that also answered another card. Each now keeps only its operative words, or states the decision instead.\n- The claim fenced off four entries. Two of them are not on `main`: they arrive with PR #20570 and PR #20587. The two on `main` carry no site. PR #20570's incoming `filter-is-empty-lowers-to-empty-operator` carries six tracker ids in `reason`, and the `filter-` family was already held by this pin before this stage.\n- `ui-list-view-groupbyfield-padded-refused` and `ui-list-view-grouping-field-padded-refused` still cite `AGENTS.md #0.1` in `reason`. That is the same dangling number the `address-` entry had. Both entries are outside this stage's claim and are untouched.\n- `ui-notification-action-embed-config-retired` names \"its ui/ batch 14\" of the strictness sweep, a batch number without `#`. It is outside this stage and untouched.\n- Comment and docblock lines of the entries still cite tracker ids: 127 lines in `semantic/`, 839 across `entries/`. They are form C's, under #20234, and are untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014EJ1ED8X4MMrT18BhVx4tx)_"
+}

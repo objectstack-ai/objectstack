@@ -1,0 +1,32 @@
+{
+  "number": 20649,
+  "kind": "issue",
+  "title": "[finding] spec(migrations): the ui-html-page-div-refused entry's why text says dev and start run compile first; they do only when the artifact is missing or --compile is passed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T13:27:44Z",
+  "updated_at": "2026-09-29T13:59:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20649",
+  "body": "Filing gate: **① a product defect with a measured `reach:`**, class **(a)**, one location. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #19922 dev's round-2 report on PR #20589. ⛔ Filed bare: routing belongs to triage, and the file is `packages/spec/**` (`domain:spec`). ⛔ Not a claim.\n\n## The defect\n\nThe semantic ledger entry `ui-html-page-div-refused` (PR #20610 for #20592, on `main` from `7510663c87`), in `packages/spec/src/migrations/entries/semantic/18.ui-html-page-div-refused.ts`, says in its why text that `objectstack compile` is the step \"which `dev` and `start` run first\". They do not always run it:\n- `packages/cli/src/commands/dev.ts:319` compiles only on `flags.compile` or a missing `dist/objectstack.json`, and `dev.ts:383` re-runs it in watch mode;\n- `packages/cli/src/commands/start.ts:228-232` has the same condition.\n\nSo an upgrader who reads the entry and runs `os start` on a project with a built artifact is told the refusal will meet them, and it does not until they recompile.\n\n- **`reach:`** the public door `objectstack migrate meta`. The #19922 dev measured `--from 17` on a stack with a `div` page at PR #20589's head `77338a7186`: the entry is listed among the manual changes, headed \"⚠ [protocol 18] kind:'html' page source …\", and its why text carries the sentence.\n- **When it ships:** Version Packages PR #20639 (open) carries `.changeset/20592-ui-html-page-div-refused.md`, so the next release publishes this text in `@objectstack/spec`.\n- **Already flagged, not filed:** the at-tier review of PR #20610 (`5885908398`) flagged the same phrase, and the spec seat relayed it on #19922 (`5886241963`). PR #20589's changeset has corrected its own copy of the phrase. The ledger entry's copy is the one left.\n\n## The fix shape\n\nReword the why text to the exact condition: compile runs on `os compile` / `os build`, and on `os dev` / `os start` when the artifact is missing or `--compile` is passed (and on each rebuild in `dev`'s watch mode). One file. Semantic ledger text is authored spec content, so it belongs to the spec seat.\n\n## Re-check\n\n`git grep -n \"which \\`dev\\` and \\`start\\` run first\" origin/main -- packages/spec/src/migrations` answers 1 hit today, and 0 once fixed.\n\nDedupe: a search for the phrase finds only PR #20589, #19922 and PR #20610 (no card). Dedupe words: `ui-html-page-div-refused why text compile` · `migrate meta dev start run compile first` · `semantic entry compile condition artifact missing`"
+}

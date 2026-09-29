@@ -15,18 +15,20 @@
     "bug",
     "domain:engine",
     "i18n",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T00:38:05Z",
-  "updated_at": "2026-09-29T02:00:37Z",
+  "updated_at": "2026-09-29T14:04:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20539",
   "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**, a false help text shown to a customer. `reach:` is the Setup record page for `sys_two_factor` on a ja-JP or es-ES console, where the `backup_codes` field's help reads the bundle leaf. **Measured by reading** `ja-JP.objects.generated.ts` / `es-ES.objects.generated.ts` against `en.objects.generated.ts` at `397572ed5` and at PR #20530's head `d616c8cc3`, not driven in a browser.\n- The #20493 dev reported it (`os-dev-report` 5881052776, `out_of_scope_findings[1]`).\n- The at-tier contract review of PR #20530 measured it TRUE in both locales at base and head, and recommended filing it (record 5881349451, ③.8).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nSome ja-JP and es-ES leaves were translated by hand (authored), and their `en` source changed afterwards. The translation still says what the old source said:\n- `sys_two_factor.fields.backup_codes.help`: `en` now says the codes are stored as an **opaque ciphertext**. The ja-JP and es-ES leaves still say they are **JSON-serialized**, which is the opposite of the source, on a security field.\n- `sys_notification.description` is the dev's second named example, and it is also stale.\n\n## Why nothing catches it\n\nThe provenance design trusts an authored leaf by design. `os i18n extract --merge` fills gaps only, and a present-but-stale string is not a gap. The file header says: \"Re-translate it by hand when its source changes; nothing here or in `os i18n check` tells a leaf a translator updated on purpose from one nobody has looked at since the source moved.\"\n\nThe class question (a gate that tells the two apart) was closed earlier: #10026, #9672 and #8765. This card is not that gate. It is the specific leaves, as #16165 (the `gap` helpText, closed) was.\n\n## Suggested shape (⛔ not a ruling)\n\n- Re-translate the leaves whose meaning contradicts the current `en`, starting with `backup_codes.help`, in ja-JP and es-ES. Check zh-CN's, which #20462 left as authored.\n- Measure the set first: compare each authored leaf's meaning with the `en` history since it was authored. A mechanical diff of `en` since each leaf's last edit is the lit instrument.\n- ⛔ No new gate (新增门禁默认否). ⛔ Not the byte-copy class (#20462, #20493).\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"stale authored translation ja-JP es-ES leaf source changed backup_codes help ciphertext JSON present-but-stale\" gives 4 hits.\n- #16165 (closed, one stale `gap` helpText in es-ES / ja-JP);\n- #10026, #9672 and #8765 (closed, the gate question).\n\nNone names these leaves.\n\nDedupe words: `stale authored translation ja-JP es-ES` · `backup_codes help ciphertext JSON` · `present-but-stale leaf` · `sys_notification description stale translation`"
