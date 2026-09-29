@@ -453,8 +453,8 @@ overrides:
   #     container's egress proxy, so the severity and the fixed version above
   #     are read off the scanner's own output line and nothing else.
   'devalue@<6.0.0': '^5.9.2'
-  # OSV 2026-09-29 (scan run 36510180397) — seven Medium findings, every one
-  # naming a fixed version, so this is the "take the fix" path
+  # OSV 2026-09-29 (#20561, scan run 36510180397) — seven Medium findings,
+  # every one naming a fixed version, so this is the "take the fix" path
   # osv-scanner.toml's header prescribes and NOT an exemption; that ledger
   # stays at ZERO entries. Advisory ranges below are read from the OSV
   # offline npm database the scanner itself downloads; nodemailer (the one
