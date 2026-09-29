@@ -139,10 +139,13 @@ const GATED: ReadonlyArray<{
   // audits source too (a hand-written row must name a live sited file), which is
   // why the `gen:` fixes only half of what it can report — the other half is a
   // ledger edit, and the failure says which.
+  //
+  // A DIRECTORY since #20361, one shard per source directory and no committed
+  // cross-directory total, for the reason its liveness neighbour below is one.
   {
     check: 'check:strictness-ledger',
     gen: 'gen:strictness-ledger',
-    artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+    artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts/',
   },
   // Moved out of NO_GENERATOR at #7377, by the same precedent as its neighbour
   // above and for the same measured reason: the liveness README's "Current state"
@@ -156,10 +159,15 @@ const GATED: ReadonlyArray<{
   //
   // Last among the non-`ratchet` entries on the cheapest-first rule: it eagerly
   // loads every Zod schema and walks all 30 governed types.
+  //
+  // A DIRECTORY since #20361: one shard per governed type and no committed
+  // total, so two PRs moving different types never touch the same file — the
+  // single file's shared total row made every in-flight liveness PR conflict
+  // with the next one to land, in the server-side merge no driver reaches.
   {
     check: 'check:liveness',
     gen: 'gen:liveness-counts',
-    artifact: 'liveness/state-counts.md',
+    artifact: 'liveness/state-counts/',
   },
   // GATED by the definition above — it compares a checked-in artifact
   // (test-typecheck-debt.json) against what `tsc -p tsconfig.test.json` measures

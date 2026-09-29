@@ -46,15 +46,33 @@
 // prose — hand-written measurement, "how this type got where it is", the one part
 // of the table a script cannot author.
 //
+// WHY THE ARTIFACT IS A DIRECTORY (#20361). #7377 made the numbers one generated
+// file with a row per type AND a shared total row. `merge=os-regen` defers that
+// file only in a LOCAL merge; GitHub's server-side merge — the one that decides a
+// PR's `mergeable` state and builds the ref CI runs on — runs no custom driver. So
+// every PR that moved a verdict rewrote the one total row, any two of them in
+// flight conflicted on it, and the moment one landed every other went `dirty` and
+// got no CI run at all. When the two deltas happened to be EQUAL the text merge
+// was worse than a conflict: both sides wrote the same total, git took it once,
+// and the merged table published a total short by one side's move. So the counts
+// are sharded one file per governed type (`state-counts/<type>.md`, the
+// `.gitattributes` cure its header already names), each shard carries only its
+// own row, and NO total is committed — the gate sums the shards when it reads
+// them. Two PRs that move different types now touch disjoint files; a same-type
+// pair still conflicts on that type's one row, which is the residue sharding
+// cannot remove and the local driver still owns.
+//
 // This module therefore serves two reconciliations over one parse:
 //
 //   - `reconcileReadmeTable` — the row set against `GOVERNED` (#7257, unchanged);
-//   - `reconcileStateCounts` — the artifact against the gate's own report, the
-//     README's row set against the artifact's, and the README against a count
-//     column coming back (#7377).
+//   - `reconcileStateCounts` — every shard against the gate's own report, the
+//     README's row set against the shards', and the README against a count
+//     column coming back (#7377, sharded at #20361).
 //
 // STILL NOT CHECKED, and it must stay that way: the Notes cell's CONTENT. A
 // manufactured Note is worse than a missing row.
+
+import { reconcileTextShardDir } from '../lib/sharded-artifacts';
 
 /** One parsed row of the "Current state" table. */
 export interface StateTableRow {
@@ -253,17 +271,34 @@ export const README_ORPHAN_ROW_GUIDANCE = [
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
- * The count columns, as a generated artifact (#7377)
+ * The count columns, as a generated artifact (#7377), sharded (#20361)
  * ══════════════════════════════════════════════════════════════════════════ */
 
-/** Where the generated counts live, relative to the ledger root. */
-export const STATE_COUNTS_FILE = 'state-counts.md';
+/**
+ * Where the generated counts live, relative to the ledger root: a DIRECTORY
+ * holding one `<type>.md` shard per governed type, and nothing else (#20361).
+ */
+export const STATE_COUNTS_DIR = 'state-counts';
 
 /** Its repo-relative path, for failure messages a reader can open. */
-export const STATE_COUNTS_PATH = `packages/spec/liveness/${STATE_COUNTS_FILE}`;
+export const STATE_COUNTS_PATH = `packages/spec/liveness/${STATE_COUNTS_DIR}/`;
+
+/**
+ * The single file the shards replaced. Named for exactly one live reason: a
+ * branch cut before #20361 still carries it, and a merge of `main` into that
+ * branch meets it as a modify/delete. Kept, it would publish a stale table and a
+ * stale total beside the shards, and nothing would re-render it — so its presence
+ * is an artifact error, and the generator deletes it.
+ */
+export const LEGACY_STATE_COUNTS_FILE = 'state-counts.md';
 
 /** The one command that rewrites it. Named in every failure below. */
 export const STATE_COUNTS_GEN_COMMAND = 'pnpm --filter @objectstack/spec gen:liveness-counts';
+
+/** The shard file that carries one governed type's row. */
+export function stateCountShardName(type: string): string {
+  return `${type}.md`;
+}
 
 /**
  * The status columns the table publishes, in the order it publishes them.
@@ -272,7 +307,7 @@ export const STATE_COUNTS_GEN_COMMAND = 'pnpm --filter @objectstack/spec gen:liv
  * deletable and must not satisfy `live`'s local-evidence rules (its own
  * executable criteria live in elsewhere.mts). Widening this list is an
  * artifact-shape decision (#7377): `StateCountsRow`, `foldStateCounts` and
- * `renderStateCounts` name every column by hand — move all of them together
+ * `renderStateCountShard` name every column by hand — move all of them together
  * with this line, then regenerate.
  */
 export const STATUS_COLUMNS = ['live', 'experimental', 'live-elsewhere', 'dead', 'planned'] as const;
@@ -321,7 +356,7 @@ export function foldStateCounts(
  * `foldStateCounts` above reads the published names and nothing else, so a `byStatus`
  * bucket it cannot name — a ledger row written `"status": "planed"` — is dropped
  * on the floor. Every check downstream then agrees with every other, because
- * they are all reading the same understated fold: `renderStateCounts` computes
+ * they are all reading the same understated fold: `renderStateCountShard` computes
  * the `classified` column as the SUM OF THE FOUR COLUMNS BESIDE IT, the
  * freshness leg compares those bytes against a re-render of the same fold, and
  * the README agrees with that. The published total is smaller than the ledger by
@@ -336,7 +371,7 @@ export function foldStateCounts(
  * Deliberately NOT an "other" column. That would change what the artifact
  * PUBLISHES — a fifth column, new bytes, a re-render of every row — and the
  * defect here is that the gate cannot SEE a dropped status, not that the table
- * should carry one. This leg leaves `renderStateCounts` byte-identical and adds
+ * should carry one. This leg leaves `renderStateCountShard` byte-identical and adds
  * a reading; the file's idiom for "a population the artifact must not hide" is a
  * `reconcile*` returning named errors (see `reconcileStateCounts`, and the
  * heading rule its interface states), not a wider table.
@@ -375,7 +410,8 @@ export function reconcileStateCountTotals({
 
     const unnamed = Object.entries(byStatus[row.type] ?? {}).filter(([s]) => !named.has(s));
     errors.push(
-      `${row.type} — ${STATE_COUNTS_FILE} publishes ${columnSum} classified, the walk counted ${walked}` +
+      `${row.type} — ${STATE_COUNTS_DIR}/${stateCountShardName(row.type)} publishes ${columnSum} classified, ` +
+        `the walk counted ${walked}` +
         (unnamed.length
           ? `; ${unnamed.map(([s, n]) => `${n} in \`${s}\``).join(', ')} — not one of ${STATUS_COLUMNS.join(' / ')}`
           : '; no unnamed status accounts for the gap — the fold and the walk have come apart for another reason'),
@@ -399,7 +435,7 @@ export const STATE_COUNTS_TOTALS_GUIDANCE = [
   '    the offending row. Never add the misspelling to STATUS_COLUMNS to get green.',
   '',
   '  • a status DELIBERATELY added to STATUS_COLUMNS — then the vocabulary grew and',
-  '    the fold did not. `StateCountsRow`, `foldStateCounts` and `renderStateCounts`',
+  '    the fold did not. `StateCountsRow`, `foldStateCounts` and `renderStateCountShard`',
   '    all name every column by hand, and a new one publishes as a COLUMN, which',
   '    changes what the artifact contains. That is an artifact-shape decision (#7377):',
   '    make it deliberately, move all the named sites together, and regenerate —',
@@ -410,74 +446,95 @@ export const STATE_COUNTS_TOTALS_GUIDANCE = [
 ];
 
 /**
- * Render the whole artifact. The generator writes this; the gate renders it again
- * and compares BYTES.
+ * Render ONE governed type's shard. The generator writes these; the gate renders
+ * them again and compares BYTES, shard by shard.
  *
  * Byte comparison, deliberately not a second parser — #5107's rule, and the
  * reason it is a rule: two implementations of the same truth eventually disagree,
  * and the one that wins is whichever the gate happens to call, which is how a
  * green check ends up standing over a wrong file. Regeneration is WHOLESALE; this
  * function never patches a number in place and neither should anyone.
+ *
+ * Everything in a shard is about its own type and nothing else (#20361). That is
+ * the whole locality claim: a line naming a sibling type, the governed-type count
+ * or a total would be a line two PRs moving different types both rewrite, which
+ * is exactly the conflict the shard exists to remove. So the prose names only
+ * this type, links the README without the heading anchor (that anchor carries
+ * the governed-type count), and the total is left to the reader that sums.
  */
-export function renderStateCounts(rows: readonly StateCountsRow[]): string {
-  const total = rows.reduce(
-    (a, r) => ({
-      type: 'total',
-      live: a.live + r.live,
-      experimental: a.experimental + r.experimental,
-      'live-elsewhere': a['live-elsewhere'] + r['live-elsewhere'],
-      dead: a.dead + r.dead,
-      planned: a.planned + r.planned,
-    }),
-    { type: 'total', live: 0, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 0 },
-  );
-
-  const classifiedOf = (r: StateCountsRow) => STATUS_COLUMNS.reduce((a, c) => a + r[c], 0);
-  const body = rows.map(
-    (r) => `| \`${r.type}\` | ${r.live} | ${r.experimental} | ${r['live-elsewhere']} | ${r.dead} | ${r.planned} | ${classifiedOf(r)} |`,
-  );
-
+export function renderStateCountShard(row: StateCountsRow): string {
   return [
     '<!-- GENERATED — DO NOT EDIT BY HAND. -->',
     `<!-- Regenerate: ${STATE_COUNTS_GEN_COMMAND} -->`,
     '',
-    '# Liveness state table — the counts (generated)',
+    `# \`${row.type}\` — liveness counts (generated)`,
     '',
-    'Every number the [liveness ledger README](./README.md)\'s "Current state" table',
-    'used to publish, computed by the gate that enforces them —',
-    '`scripts/liveness/check-liveness.mts --json`, `types.<type>.byStatus`, the',
-    'counting method fixed in #4488. The Notes prose, which is hand-written',
-    'measurement of how each type got where it is, stays in the README and is never',
-    'regenerated.',
-    '',
-    'Split out at #7377 on #5107\'s precedent. Nine of the thirty rows had drifted',
-    'from the gate by the time anyone re-ran the documented snippet, and',
-    'hand-maintained counts merge in the one way that hides: two PRs each move a',
-    'different row by their own correct delta, the rows do not overlap, git merges',
-    'them without complaint, and the result is a table nobody wrote down. The',
-    'correct resolution was always "recompute from the merged tree", so this path',
-    'carries `merge=os-regen` (#4675) and the recomputation is mandatory rather than',
-    'remembered. **Never hand-patch a number here** — fix the ledger or the schema',
-    'and regenerate.',
-    '',
-    'Counts are at the gate\'s one-level walk granularity and include the ADR-0010',
-    'protection envelope, which the gate auto-classifies `live` on every type that',
-    'spreads `MetadataProtectionFields`. See the README\'s counting-method section',
-    'for both corollaries.',
+    `This type's row of the liveness state table, computed by the gate that enforces`,
+    'it (`scripts/liveness/check-liveness.mts --json`, `types.<type>.byStatus`). Its',
+    `Notes prose is the \`${row.type}\` row of [the ledger README](../README.md), which`,
+    'also states the counting method. One file per governed type, and no total is',
+    'committed anywhere: `check:liveness` sums the shards when it reads them.',
+    '**Never hand-patch a number here** — fix the ledger or the schema and regenerate.',
     '',
     '| Type | live | exp | elsewhere | dead | planned | classified |',
     '|---|---|---|---|---|---|---|',
-    ...body,
-    `| **total** | **${total.live}** | **${total.experimental}** | **${total['live-elsewhere']}** | **${total.dead}** | **${total.planned}** | **${classifiedOf(total)}** |`,
+    `| \`${row.type}\` | ${row.live} | ${row.experimental} | ${row['live-elsewhere']} | ${row.dead} | ` +
+      `${row.planned} | ${classifiedOf(row)} |`,
     '',
   ].join('\n');
 }
 
+/** Every shard, keyed by its file name, in `GOVERNED` order. */
+export function renderStateCountShards(rows: readonly StateCountsRow[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const row of rows) {
+    const name = stateCountShardName(row.type);
+    if (out.has(name)) throw new Error(`two governed rows render the same shard ${name} — GOVERNED lists a type twice`);
+    out.set(name, renderStateCountShard(row));
+  }
+  return out;
+}
+
+/** The `classified` column: the published status columns, summed. */
+function classifiedOf(row: Omit<StateCountsRow, 'type'>): number {
+  return STATUS_COLUMNS.reduce((a, c) => a + row[c], 0);
+}
+
+/** The table's total, which no file carries any more — summed where it is read. */
+export interface StateCountsTotal {
+  live: number;
+  experimental: number;
+  'live-elsewhere': number;
+  dead: number;
+  planned: number;
+  classified: number;
+}
+
+/**
+ * Sum the rows at READ time (#20361). This is the number the single-file artifact
+ * used to commit as its `**total**` row — the one line every liveness PR rewrote,
+ * so the one line any two of them conflicted on. It is computed by whoever needs
+ * it, from the same fold the shards are rendered from, and written nowhere.
+ */
+export function sumStateCounts(rows: readonly StateCountsRow[]): StateCountsTotal {
+  const total: StateCountsTotal = { live: 0, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 0, classified: 0 };
+  for (const row of rows) {
+    for (const c of STATUS_COLUMNS) total[c] += row[c];
+    total.classified += classifiedOf(row);
+  }
+  return total;
+}
+
+/** `940 live · 5 experimental · … = 1103 classified` — one line, column order. */
+export function formatStateCountsTotal(total: StateCountsTotal): string {
+  return `${STATUS_COLUMNS.map((c) => `${total[c]} ${c}`).join(' · ')} = ${total.classified} classified`;
+}
+
 /** What `reconcileStateCounts` found. Separate from `ReadmeReconciliation` on purpose — one population per failure heading. */
 export interface StateCountsReconciliation {
-  /** The artifact is absent, or its bytes are not what the gate renders right now. */
+  /** A shard is absent, stale or stray, the directory is gone, or the retired single file came back. */
   artifactErrors: string[];
-  /** The README's row set and the artifact's disagree, in either direction. */
+  /** The README's row set and the shards' disagree, in either direction. */
   rowSetErrors: string[];
   /** A count column has come back into the README — a hand-maintained number in the merge path again. */
   handCountErrors: string[];
@@ -487,17 +544,21 @@ export interface StateCountsReconciliation {
 const COUNT_CELL_RE = /^(\d+|[–—-])$/;
 
 /**
- * Reconcile the generated artifact against the gate, and the README against the
- * artifact.
+ * Reconcile the generated shards against the gate, and the README against the
+ * shards.
  *
  * Three legs, and each fails for a reason the other two cannot see:
  *
- *   A. FRESHNESS — the artifact equals what the gate measures right now. This is
- *      the leg the hand-edit used to buy for free: touching a schema forced you
- *      back through the table to confirm the Note beside the number still held.
- *      It still does, and the failure says so — `gen:` then READ the diff.
- *   B. ROW SET — every artifact row has a README row and back. The README's rows
- *      are reconciled against `GOVERNED` separately (#7257) and the artifact is
+ *   A. FRESHNESS — every shard equals what the gate measures right now, no shard
+ *      is missing, nothing else sits in the directory, and the retired single
+ *      file is gone. This is the leg the hand-edit used to buy for free: touching
+ *      a schema forced you back through the table to confirm the Note beside the
+ *      number still held. It still does, and the failure says so — `gen:` then
+ *      READ the diff. A STRAY shard fails too: a type that left `GOVERNED` would
+ *      otherwise keep publishing its last counts, beside rows that no longer
+ *      include it, and nobody would re-render them.
+ *   B. ROW SET — every rendered shard has a README row and back. The README's rows
+ *      are reconciled against `GOVERNED` separately (#7257) and the shards are
  *      generated FROM `GOVERNED`, so in a green tree this is implied; it is
  *      checked anyway because "implied by two other checks" is how the heading's
  *      completeness claim survived unfalsifiable for a year.
@@ -511,39 +572,62 @@ export function reconcileStateCounts({
   table,
   rendered,
   onDisk,
+  legacyOnDisk,
 }: {
   /** The parsed README section — rows and their cells. */
   table: ParsedStateTable;
-  /** What `renderStateCounts` produces from the gate's report right now. */
-  rendered: string;
-  /** The artifact's bytes, or `null` when the file does not exist. */
-  onDisk: string | null;
+  /** What `renderStateCountShards` produces from the gate's report right now. */
+  rendered: ReadonlyMap<string, string>;
+  /** The shard directory as `readTextShardDir` reads it, or `null` when it does not exist. */
+  onDisk: ReadonlyMap<string, string> | null;
+  /** Whether the retired single-file artifact is still on disk beside the shards. */
+  legacyOnDisk: boolean;
 }): StateCountsReconciliation {
   const artifactErrors: string[] = [];
   const rowSetErrors: string[] = [];
   const handCountErrors: string[] = [];
 
-  if (onDisk === null) {
+  const shards = reconcileTextShardDir({ displayDir: STATE_COUNTS_PATH, rendered, onDisk });
+  if (shards.missingDir) {
     artifactErrors.push(`${STATE_COUNTS_PATH} is MISSING — the table's numbers are published by nothing.`);
-  } else if (onDisk !== rendered) {
+  }
+  for (const p of shards.missing) {
+    artifactErrors.push(`${p} is MISSING — a governed type whose counts nothing publishes.`);
+  }
+  for (const { name, onDisk: current, expected } of shards.stale) {
     artifactErrors.push(
-      `${STATE_COUNTS_PATH} is STALE — it does not match what the gate measures right now.\n` +
-        `    ${firstStateCountsDifference(onDisk, rendered)}`,
+      `${name} is STALE — it does not match what the gate measures right now.\n` +
+        `    ${firstStateCountsDifference(current, expected)}`,
+    );
+  }
+  for (const p of shards.stray) {
+    artifactErrors.push(
+      `${p} is STRAY — no governed type renders it. The directory is generator-owned: a type ` +
+        'that left GOVERNED, or a file written by hand, and either way numbers nothing re-renders.',
+    );
+  }
+  if (legacyOnDisk) {
+    artifactErrors.push(
+      `packages/spec/liveness/${LEGACY_STATE_COUNTS_FILE} is RETIRED — the counts are one shard per ` +
+        `governed type under ${STATE_COUNTS_PATH}, and this file's committed total row is the line every ` +
+        'liveness PR rewrote. A branch cut before the split keeps it through a merge; delete it.',
     );
   }
 
-  // Leg B reads the artifact the gate just RENDERED, not the copy on disk: on a
-  // stale artifact leg A has already fired, and reconciling against a file we
+  // Leg B reads the shards the gate just RENDERED, not the copies on disk: on a
+  // stale shard leg A has already fired, and reconciling against a file we
   // know to be wrong would report the same defect twice under two headings.
-  const artifactTypes = parseRenderedCountRows(rendered);
+  const artifactTypes = [...rendered.values()].flatMap(parseRenderedCountRows);
   const readmeTypes = table.rows.map((r) => r.type);
   const readmeSet = new Set(readmeTypes);
   const artifactSet = new Set(artifactTypes);
   for (const t of artifactTypes) {
-    if (!readmeSet.has(t)) rowSetErrors.push(`${t} — counted in ${STATE_COUNTS_FILE}, no row in the README table`);
+    if (!readmeSet.has(t)) {
+      rowSetErrors.push(`${t} — counted in ${STATE_COUNTS_DIR}/${stateCountShardName(t)}, no row in the README table`);
+    }
   }
   for (const t of readmeTypes) {
-    if (!artifactSet.has(t)) rowSetErrors.push(`${t} — a README row with no counts in ${STATE_COUNTS_FILE}`);
+    if (!artifactSet.has(t)) rowSetErrors.push(`${t} — a README row with no counts in ${STATE_COUNTS_DIR}/`);
   }
 
   for (const row of table.rows) {
@@ -558,7 +642,7 @@ export function reconcileStateCounts({
   return { artifactErrors, rowSetErrors, handCountErrors };
 }
 
-/** The type names the rendered artifact publishes, in its own order. */
+/** The type names a rendered shard publishes, in its own order. */
 function parseRenderedCountRows(rendered: string): string[] {
   const out: string[] = [];
   for (const line of rendered.split('\n')) {
@@ -579,9 +663,11 @@ function firstStateCountsDifference(actual: string, expected: string): string {
   return 'the files differ but no line does — a trailing-newline difference.';
 }
 
-/** The prescription printed under a stale or missing artifact. */
+/** The prescription printed under a stale, missing or stray shard. */
 export const STATE_COUNTS_GUIDANCE = [
-  `The count columns are GENERATED (#7377). Regenerate them, wholesale:`,
+  `The count columns are GENERATED (#7377), one shard per governed type. Regenerate`,
+  'them, wholesale — the generator rewrites only the shards whose counts moved and',
+  'prunes anything else in the directory:',
   '',
   `  ${STATE_COUNTS_GEN_COMMAND}`,
   '',
@@ -592,7 +678,8 @@ export const STATE_COUNTS_GUIDANCE = [
   'keeping: #7377 found `translation` publishing `dead 2` next to a sentence',
   'naming one key, and that key had already been removed.',
   '',
-  '⛔ Never hand-patch a number in the artifact, and never put a count column back',
-  'into the README table. Both put the numbers back in the merge path, where they',
-  'merge clean and wrong (#5107).',
+  '⛔ Never hand-patch a number in a shard, never commit a total, and never put a',
+  'count column back into the README table. All three put the numbers back in the',
+  'merge path, where they merge clean and wrong (#5107) or conflict for every PR',
+  'in flight at once.',
 ];
