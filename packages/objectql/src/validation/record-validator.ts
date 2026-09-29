@@ -54,7 +54,8 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
- *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
+ *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999;
+ *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481)
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -85,7 +86,7 @@ import {
   parseNumericString,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { isOutsideTemporalYearRange } from '@objectstack/core';
+import { isOutsideTemporalYearRange, isUninterpretableTemporalComparand } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -1220,7 +1221,29 @@ function validateOne(
     // 201 on memory and SQLite) and PostgreSQL refused it with a 500; year 0
     // is a 500 on PostgreSQL on both kinds. Same code and words as any other
     // value that is not a valid date.
-    if (readable && !isOutsideTemporalYearRange(value, t)) return null;
+    //
+    // [#20481] …and a `date` STRING is one the `date` storage rule reads: a
+    // leading `YYYY-MM-DD` (after trimming), which `temporalStorageForm`
+    // collapses to that day. The rule hands every other string back unchanged,
+    // so `"2026/07/15"`, `"07/15/2026"`, `"15 July 2026"` or `"2026-7-15"` —
+    // each `Date.parse`-readable — was stored verbatim on memory and SQLite, a
+    // non-day that sorts and compares as text beside real days, while
+    // PostgreSQL read it by its `DateStyle` (`07/08/2026` is July 8 under
+    // MDY and August 7 under DMY). No other spelling is canonicalised, on
+    // purpose: `07/08/2026` names two days, and a guess stores the wrong one
+    // silently. The question is asked of `@objectstack/core`'s
+    // `isUninterpretableTemporalComparand` — the temporal-comparand door's
+    // reading of the same rule, never a second copy of it here — so every
+    // `date` string that door refuses as a comparand is refused as a written
+    // value too; the `Date.parse` check above still applies on top of it
+    // (`2026-13-45` has a leading day shape and no reading). Its two
+    // comparand-only exemptions never reach here: a blank is missing before
+    // this arm, and a `{placeholder}` is not `Date.parse`-readable. A `Date`
+    // is not a string and keeps its UTC calendar day; a `datetime` is
+    // untouched.
+    const readsAsDay =
+      t !== 'date' || typeof value !== 'string' || !isUninterpretableTemporalComparand('date', value);
+    if (readable && readsAsDay && !isOutsideTemporalYearRange(value, t)) return null;
     // Same wire code, two sentences: "a valid date" vs "a valid datetime".
     return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }

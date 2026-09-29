@@ -94,8 +94,10 @@ import { nextUtcCalendarDay, temporalStorageForm } from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
+  describeMissingIndexColumns,
   diffManagedIndexes,
   diffManagedTable,
+  diffUnbuildableIndexes,
   driftKey,
   expectedIndexes,
   fieldHasColumn,
@@ -11670,6 +11672,7 @@ export class SqlDriver implements IDataDriver {
         perShard,
         new Set(Object.keys(colInfo)),
         this.computeAndRecordTenantField(baseTable, obj),
+        obj.fields ?? {},
       );
     }
   }
@@ -13423,6 +13426,12 @@ export class SqlDriver implements IDataDriver {
     // (dev autoMigrate may apply it); duplicates block the op with a row
     // report. Data-dependent, so it runs HERE, not in the pure differ.
     await this.applyNullSafeUniquePreflight(entries);
+    // The declared indexes `expectedIndexes` leaves out because a key column
+    // will never materialize (a misspelt name, a virtual `formula` field).
+    // `syncDeclaredIndexes` skips each one at `error` on every sync, and this
+    // is its plan-side face: a report-only entry, so `os migrate plan` shows
+    // the unenforced declaration instead of reporting nothing.
+    entries.push(...diffUnbuildableIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }));
     return entries;
   }
 
@@ -13866,6 +13875,11 @@ export class SqlDriver implements IDataDriver {
    * neither `ALTER COLUMN` nor the SQLite table rebuild that column ops do.
    */
   protected async applyIndexDriftOp(op: DriftOp): Promise<boolean> {
+    // REPORT ONLY: there is no column to build the index over, so no DDL can
+    // apply it and the remedy is a metadata edit. Answered before any read, and
+    // on every dialect, so `applyMigrationEntries` reports it `skipped`. The
+    // `default` arm below would say the same; this names the reason.
+    if (op.type === 'unbuildable_index') return false;
     const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
     const ensure = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
       this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns);
@@ -14555,7 +14569,7 @@ export class SqlDriver implements IDataDriver {
     // re-resolve it: every caller of this method already holds the value the
     // registration recorded, and a declared `unique: 'organization'` index
     // (ADR-0120 D1) must scope against exactly that column.
-    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField);
+    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField, fields);
   }
 
   /**
@@ -14582,8 +14596,17 @@ export class SqlDriver implements IDataDriver {
    *   sync CREATES and what the differ EXPECTS cannot drift apart.
    * - Idempotent: indexes already present (by deterministic name) are
    *   skipped, and an "already exists" race is absorbed.
-   * - Indexes referencing a column that wasn't materialized (e.g. a virtual
-   *   `formula` field) are skipped with a warning rather than failing sync.
+   * - An index referencing a column that is not materialized (a misspelt name
+   *   the Studio save door admits, or a virtual `formula` field) is skipped
+   *   rather than failing the sync. The skip is logged at `error` through
+   *   {@link logDurabilityFailure}; it used to be a `warn`. A declared UNIQUE
+   *   that is never created is exactly the durability-degradation rule's case:
+   *   the constraint is not enforced while everything looks normal. The
+   *   duplicate-row arms below already answer their version of it at `error`.
+   *   A plain index is DDL that was supposed to run and did not, so it takes
+   *   the same channel, and the line says which of the two it is. The drift
+   *   report carries the same index as a report-only `unbuildable_index` entry
+   *   (`diffUnbuildableIndexes`), so `os migrate plan` shows it too.
    * - A NULL-safe unique whose data already violates it (legacy duplicates the
    *   void constraint admitted, #5030) is NOT created; the failure is logged
    *   at `error` (a declared constraint is not enforced — the
@@ -14606,6 +14629,12 @@ export class SqlDriver implements IDataDriver {
     indexes: DeclaredIndexInput[],
     physicalColumns: Set<string>,
     tenantField?: string | null,
+    /**
+     * The object's fields, when the caller holds them. They only tell the
+     * skip line WHY a column is missing (not a field, or a virtual `formula`).
+     * The drift-op apply paths re-feed already-normalized shapes and pass none.
+     */
+    fields?: Record<string, any>,
   ): Promise<void> {
     const existing = await this.getExistingIndexNames(tableName);
     const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
@@ -14618,9 +14647,23 @@ export class SqlDriver implements IDataDriver {
 
       const missing = columns.filter((f) => !physicalColumns.has(f));
       if (missing.length > 0) {
-        this.logger.warn(
-          `[sql-driver] skipping declared index on "${tableName}" — column(s) not materialized: ${missing.join(', ')}`,
-          { tableName, fields: columns },
+        // Durability, not function (AGENTS.md "Degradation log levels"): the
+        // sync goes on and the object serves normally, while DDL the metadata
+        // declares did not run. For a UNIQUE index, that means duplicate rows
+        // are accepted. So this goes on the durability channel, like the
+        // duplicate-row arms further down this loop. One line per skipped index
+        // per sync. It states the consequence and the fix, and says whether
+        // the index was UNIQUE (the prose, and `unique` in the meta).
+        this.logDurabilityFailure(
+          `[sql-driver] declared ${unique ? 'UNIQUE ' : ''}index '${name}' on "${tableName}" was NOT created: ` +
+            `no column for ${describeMissingIndexColumns(missing, fields)}. ` +
+            (unique
+              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and the object keeps ` +
+                `working as if the constraint existed. `
+              : `The index does not exist, and the object keeps working as if it did. `) +
+            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
+            `remove the index ("os validate" refuses a name that is not a field).`,
+          { tableName, index: name, fields: columns, missing, unique },
         );
         continue;
       }
