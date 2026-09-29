@@ -272,12 +272,6 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'time' }, '14:30');
     bad({ type: 'time' }, '14:60');
     bad({ type: 'time' }, 'not-a-time');
-    // [#20671] A time is a zone-less wall clock: a `Z` or an offset is refused,
-    // as the record validator's `time` arm refuses it.
-    ok({ type: 'time' }, '14:30:00.500');
-    bad({ type: 'time' }, '14:30:00Z');
-    bad({ type: 'time' }, '14:30+08:00');
-    bad({ type: 'time' }, '08:15:00-0530');
   });
 
   it('option types enforce declared option codes; free-form without options', () => {

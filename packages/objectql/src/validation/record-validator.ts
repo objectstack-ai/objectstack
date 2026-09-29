@@ -1301,9 +1301,7 @@ function validateOne(
   // instant was stored verbatim on memory and SQLite and was a 500 on
   // PostgreSQL. Each is refused now with `invalid_time`, never a 500. A zone
   // suffix on a time of day gets its own sentence, which says what to do: drop
-  // the suffix, or use a `datetime` field for an instant. The spec's `time`
-  // stored form (`ClockTimeValueSchema`, ADR-0104 D1) refuses the same suffix,
-  // so a literal `defaultValue` this arm would refuse fails when it is authored.
+  // the suffix, or use a `datetime` field for an instant.
   //
   // `readable` holds the write door to what the comparand door exempts. A
   // number is refused as a written `time` (a comparand may be epoch
