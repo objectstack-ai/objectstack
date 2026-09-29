@@ -83,7 +83,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -4717,7 +4717,22 @@ export class SecurityPlugin implements Plugin {
       const callerTenantId = typeof callerContext?.tenantId === 'string' && callerContext.tenantId !== ''
         ? callerContext.tenantId
         : undefined;
-      targetContext = await buildContextForUser(this.ql, request.userId, Date.now(), callerTenantId);
+      // [#20580] ...but only while the explained user could be resolved in it.
+      // Explaining them in the caller's organization is a CLAIM on it made for
+      // them, and enforcement vets a claim before it resolves anything:
+      // under a walled posture a member removed from that organization, whose
+      // session still names it, has the claim dropped and resolves with NO
+      // active organization — so none of that organization's grants apply.
+      // `vetOrganizationClaim` is that check (the session arm of
+      // `resolveAuthzContext`), asked of the same membership set; the explainer
+      // spells no membership rule of its own.
+      const nowMs = Date.now();
+      let explained = await buildContextForUser(this.ql, request.userId, nowMs, callerTenantId);
+      const explainedTenantId = vetOrganizationClaim(callerTenantId, explained.accessible_org_ids ?? [], this.tenancyPosture);
+      if (explainedTenantId !== callerTenantId) {
+        explained = await buildContextForUser(this.ql, request.userId, nowMs, explainedTenantId);
+      }
+      targetContext = explained;
     }
 
     // [C2 / ADR-0095] The optional `sharing` service backs the record-grained

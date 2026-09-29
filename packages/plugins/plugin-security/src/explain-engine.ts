@@ -568,6 +568,10 @@ async function collectGrantProvenance(
  * very resolution that kept a removed member's grants. Each caller passes the
  * organization it is explaining in — the live principal's for a delegator
  * ({@link resolveDelegatorContext}), the caller's own for the explain API.
+ * [#20580] The explain API passes the caller's organization only once
+ * `vetOrganizationClaim` (`@objectstack/core`) has let it stand for the
+ * explained user, as enforcement does for that user's session claim: this
+ * function passes on what it is handed and vets nothing itself.
  * Omitted, the context is the user with NO active organization. The returned
  * context still carries no `tenantId` of its own; a caller that needs one sets
  * it, as {@link resolveDelegatorContext} does.

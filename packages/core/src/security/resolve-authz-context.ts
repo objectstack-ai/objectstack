@@ -529,12 +529,13 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Session-only by construction: an admitted API key sets `userId`, which
   // makes the session branch above unreachable, so a non-empty `tenantId` here
   // with no `keyPrincipal` can only have come from the session claim.
+  //
+  // [#20580] The check itself is {@link vetOrganizationClaim}, so the
+  // permission explainer asks the same question about the user it explains.
   if (
     !keyPrincipal
     && tenantId
-    && input.tenancyPosture
-    && postureEnforcesWall(input.tenancyPosture)
-    && !grants.accessible_org_ids.includes(tenantId)
+    && vetOrganizationClaim(tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined
   ) {
     // [#15256 / 2A, mirrored] The one decision point where the drop is decided.
     warnSessionOrganizationClaimDropped({
@@ -563,6 +564,34 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   if (grants.email && !ctx.email) ctx.email = grants.email;
 
   return ctx;
+}
+
+/**
+ * [#15409 — maintainer ruling 2026-09-05, option B] The organization a
+ * principal that CLAIMS `claimedOrganizationId` is resolved in: the claim
+ * itself while a current membership backs it, `undefined` once it does not.
+ *
+ * This is the session arm of {@link resolveAuthzContext}, as one function.
+ * Under a wall-enforcing posture (`isolated`, `group`) a claim on an
+ * organization absent from `accessibleOrgIds` (the principal's
+ * {@link UserAuthzGrants.accessible_org_ids}, which does not depend on the
+ * organization the grants were resolved in) is dropped, and the principal
+ * resolves with NO active organization. Under `single`, or with no posture
+ * supplied, there is no wall and the claim stands as made.
+ *
+ * [#20580] A second reader asks it: the permission explainer, about the user
+ * it explains in the caller's organization. That is how `security/explain`
+ * resolves that user in the organization enforcement would resolve them in.
+ * ⛔ Nothing else spells this rule — a caller that needs it calls this.
+ */
+export function vetOrganizationClaim(
+  claimedOrganizationId: string | undefined,
+  accessibleOrgIds: readonly string[],
+  tenancyPosture: TenancyPosture | undefined,
+): string | undefined {
+  if (!claimedOrganizationId) return undefined;
+  if (!tenancyPosture || !postureEnforcesWall(tenancyPosture)) return claimedOrganizationId;
+  return accessibleOrgIds.includes(claimedOrganizationId) ? claimedOrganizationId : undefined;
 }
 
 /** The authorization grants a KNOWN user holds — a subset of {@link ResolvedAuthzContext}. */
