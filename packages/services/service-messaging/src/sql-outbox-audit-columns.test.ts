@@ -32,7 +32,7 @@ interface RecordedUpdate {
  * sets so a claim can be driven all the way through candidate-select →
  * atomic-claim → read-back; everything else is inert.
  *
- * [#11453] `SqlNotificationOutbox.ack` is a compare-and-set now — it reads the
+ * [commit 1a47a5368] `SqlNotificationOutbox.ack` is a compare-and-set now — it reads the
  * row's STATUS as well as its attempts, writes conditionally, then reads back
  * to confirm the write landed. So the fake keeps one row's state and applies
  * writes to it, rather than answering a bare `{ attempts }` forever:
@@ -48,7 +48,7 @@ function makeEngine(findResults: Array<Array<Record<string, unknown>>> = []) {
     const updates: RecordedUpdate[] = [];
     const inserts: Array<{ object: string; data: Record<string, unknown> }> = [];
     let findCall = 0;
-    // [#11859] The row carries the claim credential ack()'s ownership check
+    // [commit d9cf78eaa] The row carries the claim credential ack()'s ownership check
     // reads back; the record handed to ack() below round-trips the same pair.
     const row: Record<string, unknown> = { status: 'in_flight', attempts: 2, claimed_by: 'n1', claimed_at: 111 };
 
@@ -134,7 +134,7 @@ describe('SqlNotificationOutbox — audit columns on UPDATE (#4765)', () => {
         const { engine, updates } = makeEngine();
         const outbox = new SqlNotificationOutbox(engine, { partitionCount: 8 });
 
-        // [#11859] ack() takes the claimed record back; the credential here
+        // [commit d9cf78eaa] ack() takes the claimed record back; the credential here
         // matches what the fake row carries, as a real claim's would.
         await outbox.ack({
             id: 'd1', notificationId: 'n1', recipientId: 'u1', channel: 'inbox',

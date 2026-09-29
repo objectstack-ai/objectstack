@@ -63,13 +63,13 @@ export interface NotificationDeliveryRecord {
 }
 
 /**
- * [#11859] A delivery row as handed out by {@link INotificationOutbox.claim} /
+ * [commit d9cf78eaa] A delivery row as handed out by {@link INotificationOutbox.claim} /
  * {@link INotificationOutbox.claimDigest}: the **claim credential** — the
  * (`claimedBy`, `claimedAt`) pair the store stamped when it took the row — is
  * guaranteed present. {@link INotificationOutbox.ack} takes this record back,
  * and the credential joins the compare-and-set predicate, so ownership is
  * proven by ROUND-TRIPPING what `claim()` returned rather than by the caller
- * supplying an identity it had to know (the option-A shape the #11859 ruling
+ * supplying an identity it had to know (the option-A shape commit d9cf78eaa's ruling
  * refused). The pair identifies one CLAIM, not one node: `claimedAt` is what
  * refuses a late ack even when the SAME node re-claimed its own reaped row —
  * the outcome belongs to the attempt, and a re-claim is a new attempt.
@@ -153,7 +153,7 @@ export interface AckFailure {
 export type AckResult = AckSuccess | AckFailure;
 
 /**
- * [#11453] Error raised by {@link INotificationOutbox.ack} when the delivery
+ * [commit 1a47a5368] Error raised by {@link INotificationOutbox.ack} when the delivery
  * row's status does not permit the completion it was handed.
  *
  * `DELIVERY_NOT_ELIGIBLE` is this package's already-registered ADR-0112 code
@@ -191,7 +191,7 @@ export function notificationAckNotClaimedMessage(id: string, status: DeliverySta
 /**
  * The refusal message for the OTHER half of the precondition: the row WAS
  * claimed by this caller and had stopped being so by the time the outcome was
- * recorded — a claim lost to the visibility-timeout reap. [#11859] Covers BOTH
+ * recorded — a claim lost to the visibility-timeout reap. [commit d9cf78eaa] Covers BOTH
  * post-reap states: the row moved out of `in_flight`, and the row re-claimed
  * (still `in_flight`, but under a different claim credential — possibly the
  * same node's LATER claim, which is still not the claim this ack completes).
@@ -212,7 +212,7 @@ export function notificationAckLostClaimMessage(id: string, status: DeliveryStat
 }
 
 /**
- * [#11859] The refusal message for a record that carries no claim credential
+ * [commit d9cf78eaa] The refusal message for a record that carries no claim credential
  * at all. `ack()` takes back the exact record {@link INotificationOutbox.claim}
  * / {@link INotificationOutbox.claimDigest} returned; a row read via `list()`
  * while unclaimed, or a hand-built record, has no (`claimedBy`, `claimedAt`)
@@ -248,7 +248,7 @@ export interface INotificationOutbox {
      *
      * Safe at any moment and from any number of nodes: it moves only rows already
      * past their timeout, {@link claim} takes only `pending` rows, and an
-     * {@link ack} whose claim was reaped matches nothing and is refused (#11859).
+     * {@link ack} whose claim was reaped matches nothing and is refused (commit d9cf78eaa).
      *
      * Optional, so an outbox written before it keeps working unchanged: the
      * dispatcher probes for it and, when it is absent, lets every claim reap as
@@ -267,12 +267,12 @@ export interface INotificationOutbox {
      * status — an unclaimed `pending` row, or one already terminal — throws
      * {@link NotificationAckError}, writes nothing, and leaves `attempts`
      * untouched; so does a late ack whose claim was reaped and re-claimed
-     * (#11859): `status = 'in_flight'` alone could not tell "claimed" from
+     * (commit d9cf78eaa): `status = 'in_flight'` alone could not tell "claimed" from
      * "claimed by the caller", so a node whose send outran `claimTtlMs` wrote
      * its outcome over the re-claiming node's live attempt. `ack` is the
      * dispatcher's completion callback, NOT a cancellation primitive: using it
      * to flip a `pending` row to `suppressed` raced the dispatcher and
-     * recorded an attempt that never happened (#11453). A record whose id
+     * recorded an attempt that never happened (commit 1a47a5368). A record whose id
      * matches no row is not a contract violation and stays a silent no-op —
      * an absent row has no state to corrupt and no claim to lose.
      *

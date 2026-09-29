@@ -38,7 +38,7 @@ export interface SmsChannelOptions {
     /**
      * Resolve the SMS service; `undefined` ⇒ there is no transport, which
      * {@link MessagingChannel.send} REFUSES with the declared
-     * `transport_not_configured` reason (#18424). ⛔ Not a no-op success: a
+     * `transport_not_configured` reason (commit 879b51270). ⛔ Not a no-op success: a
      * delivery nothing was sent for is never reported as delivered.
      */
     getSms(): SmsSenderSurface | undefined;
@@ -85,7 +85,7 @@ const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
 /**
  * The ONE token both members of this channel use for "there is no transport"
- * (#18424, #18567) — the reason `isAvailable()` returns, reused verbatim so the
+ * (commit 879b51270, #18567) — the reason `isAvailable()` returns, reused verbatim so the
  * refusal `send()` writes onto a delivery row and the suppression fan-out
  * records on `sys_notification.suppressed_channels` name one condition. The
  * email channel names the same condition with the same token.
@@ -110,7 +110,7 @@ const TRANSPORT_NOT_CONFIGURED: ChannelUnavailableReason = 'transport_not_config
  * `payload.title`/`body`), and hand the text to the `sms` service.
  * Retry/backoff/dead-letter come for free from the P1 outbox dispatcher.
  *
- * Failure is always REPORTED, never absorbed (#18424): no sms service ⇒ a
+ * Failure is always REPORTED, never absorbed (commit 879b51270): no sms service ⇒ a
  * refusal carrying the declared `transport_not_configured` reason, graded
  * `permanent` so the row dead-letters on attempt one; a recipient with no
  * resolvable phone number ⇒ a reported failure. Either way the delivery row
@@ -238,7 +238,7 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const sms = opts.getSms();
             if (!sms) {
-                // [#18424] A refusal, ⛔ never `{ ok: true }`. This used to
+                // [commit 879b51270] A refusal, ⛔ never `{ ok: true }`. This used to
                 // return success ("capability not installed — no-op"), which
                 // recorded a delivery nobody performed: the row reached
                 // `status: 'success'`, nothing went red, and a deployment with
@@ -312,7 +312,7 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
             // `sms send failed: TOO_MANY_REQUESTS: …`.
             const text = err instanceof Error ? err.message : String(err ?? '');
             if (text.includes(SMS_QUOTA_EXCEEDED_CODE)) return 'rate_limited';
-            // [#18424] The grade is driven rather than assumed: in the shipping
+            // [commit 879b51270] The grade is driven rather than assumed: in the shipping
             // composition the same condition already terminates a claimed row
             // at once — the mount gate unmounts the channel and the dispatcher
             // acks `dead: true, attempts: 1` without consulting this method at

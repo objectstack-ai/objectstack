@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11453 — `ack()` is the dispatcher's completion callback for a row IT
+ * Commit 1a47a5368 — `ack()` is the dispatcher's completion callback for a row IT
  * CLAIMED, and both implementations must enforce that.
  *
  * ## The measured defect this file pins the fix for
@@ -134,7 +134,7 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
         expect(`${(await readRow(id)).status}:${(await readRow(id)).attempts}`).toBe('pending:0');
 
         // The card's trap, verbatim: ack-as-cancel on a row no dispatcher
-        // holds. [#11859] `ack` now takes the claimed record back, so the
+        // holds. [commit d9cf78eaa] `ack` now takes the claimed record back, so the
         // literal spelling of the trap is handing it a `list()` row — which
         // carries NO claim credential; the cast is the JS caller/miscast this
         // pin keeps refused at runtime, not just at compile time.

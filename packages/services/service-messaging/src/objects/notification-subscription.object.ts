@@ -10,7 +10,7 @@ import { F } from '@objectstack/spec';
  * Declares standing interest in a `topic` by a `principal` (see that field for
  * the accepted selector forms).
  *
- * ⚠️ [#9807] The subscription→recipient expansion is **NOT WIRED in this
+ * ⚠️ [commit 44738f7af] The subscription→recipient expansion is **NOT WIRED in this
  * repo**: `AudienceSpec` (`messaging-service.ts`) has no `'subscribers'`
  * member, `EmitInput.audience` is REQUIRED, and no `RecipientResolver` branch
  * expands a topic's subscriptions — so nothing here reads these rows at
@@ -65,7 +65,7 @@ export const NotificationSubscription = ObjectSchema.create({
             label: 'Topic',
             required: true,
             searchable: true,
-            // [#12978] Sibling-declaration bound (#11374 route A): subscribed
+            // [commit e4902d2b9] Sibling-declaration bound (route A, ruling 2026-08-24): subscribed
             // topics are matched against the event's `sys_notification.topic`
             // (maxLength: 200 there), so a longer stored topic could never
             // match an event the platform can store.
@@ -77,15 +77,15 @@ export const NotificationSubscription = ObjectSchema.create({
             label: 'Principal',
             required: true,
             searchable: true,
-            // [#9807] Kept in step with what `RecipientResolver.resolveOne()` really
-            // accepts for a string spec, so this does not under-describe the day the
-            // expansion above is wired: an email-shaped value is matched against
+            // [commit 44738f7af] Kept in step with what `RecipientResolver.resolveOne()`
+            // really accepts for a string spec, so this does not under-describe the day
+            // the expansion above is wired: an email-shaped value is matched against
             // `sys_user` (kept verbatim when no user matches), and anything otherwise
             // unrecognized falls through as a bare user id.
-            // [#12978] Derived bound (#11374 route A) over the declared
+            // [commit e4902d2b9] Derived bound (route A, ruling 2026-08-24) over the declared
             // selector grammar: the widest arm is `owner_of:object:id` =
             // 'owner_of:' (9) + object API name (≤ 255 — storage-owned by
-            // `sys_metadata.name`, maxLength: 255, #12144) + ':' (1) + record
+            // `sys_metadata.name`, maxLength: 255, commit 3a04b0125) + ':' (1) + record
             // id (≤ 255 — the physical id column, varchar(255)) = 520. Every
             // other arm is narrower: an email ≤ 254 (RFC 5321) and
             // `sys_user.email` is a string-family varchar(255); 'user:' + id
@@ -119,7 +119,7 @@ export const NotificationSubscription = ObjectSchema.create({
         // org_yi (billing.invoice, user:u1) 201 / org_yi's own GET on the
         // colliding pair 0 rows.
         //
-        // ⚠️ [#9722, correcting this note] `principal` names are per-organization:
+        // ⚠️ [commit 2074b2651, correcting this note] `principal` names are per-organization:
         // `role:x` resolves against `sys_member` (tenant-scoped org-membership
         // rows — the org-administration tier that is the sole ADR-0090 D3
         // "role" exception) and `team:x` against `sys_team_member` (tenant-scoped
