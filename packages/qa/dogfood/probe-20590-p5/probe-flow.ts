@@ -16,6 +16,8 @@ export const S = {
   connNested: 'p5-conn-nested-secret-literal-20590',
   signingTop: 'p5-signing-top-sentinel-20590',
   signingNested: 'p5-signing-nested-sentinel-20590',
+  /** A credential carried in the URL itself (a query key) — the shape the Slack-webhook examples teach. */
+  urlSecret: 'p5-url-secret-literal-20590',
   controlHeader: 'p5-control-header-value-20590',
   controlInput: 'p5-control-input-value-20590',
 } as const;
@@ -24,6 +26,8 @@ export const S = {
 export const CREDENTIAL_LITERALS = ['topAuthz', 'topApiKey', 'nestedAuthz', 'connToken', 'connNested'] as const;
 export const DECLARED_KEY_CONTROLS = ['signingTop', 'signingNested'] as const;
 export const NON_CREDENTIAL_CONTROLS = ['controlHeader', 'controlInput'] as const;
+/** Beside the open maps: a credential-bearing `url` (reported apart, never folded into the open-map counts). */
+export const URL_LITERALS = ['urlSecret'] as const;
 /** A `{token}` template in a credential-named header: not a literal, recorded apart. */
 export const TEMPLATE_HEADER = 'Bearer {api_token}';
 
@@ -40,7 +44,7 @@ export function probeFlow(name: string) {
         type: 'http',
         label: 'Call (top level)',
         config: {
-          url: 'https://example.invalid/p5-top',
+          url: `https://example.invalid/p5-top?api_key=${S.urlSecret}`,
           method: 'POST',
           headers: {
             Authorization: `Bearer ${S.topAuthz}`,

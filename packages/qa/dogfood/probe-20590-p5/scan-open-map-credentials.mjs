@@ -44,7 +44,11 @@
  *
  * Markdown / MDX files are scanned through their fenced ts/js/json blocks.
  *
- * Usage: node scan-open-map-credentials.mjs [--json <out>]
+ * Usage: node scan-open-map-credentials.mjs [--json <out>] [--control] [--root <another checkout>]
+ *
+ * `--root` runs the same rule over another git checkout (every tracked file,
+ * bucketed by top-level directory) — the spelling another repository's own
+ * lane would use to measure its flows.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -54,7 +58,9 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, '../../../..');
+const ROOT_IDX = process.argv.indexOf('--root');
+const FOREIGN_ROOT = ROOT_IDX > 0 ? resolve(process.argv[ROOT_IDX + 1]) : undefined;
+const REPO = FOREIGN_ROOT ?? resolve(HERE, '../../../..');
 const SELF_DIR = 'packages/qa/dogfood/probe-20590-p5/';
 
 const CODE_EXT = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
@@ -62,6 +68,9 @@ const DOC_EXT = /\.(md|mdx)$/;
 const JSON_EXT = /\.json$/;
 
 function corpusOf(file) {
+  // Another checkout (`--root`): bucket by top-level directory — this repo's
+  // corpus names mean nothing there.
+  if (FOREIGN_ROOT) return `root: ${file.includes('/') ? file.split('/')[0] : '.'}`;
   if (file.startsWith('examples/app-showcase/')) return 'showcase';
   if (file.startsWith('examples/')) return 'examples (other)';
   if (file.startsWith('packages/qa/')) return 'dogfood / qa fixtures';
@@ -361,7 +370,7 @@ if (CONTROL) {
     httpNodes: 4,
     'header literal': 3, 'header template': 1, 'header computed': 4,
     connectorNodes: 2, 'input literal': 2, 'input computed': 2,
-    'cred-URL': 1,
+    'cred-URL': 2,
   };
   const got = c && {
     httpNodes: c.httpNodes,

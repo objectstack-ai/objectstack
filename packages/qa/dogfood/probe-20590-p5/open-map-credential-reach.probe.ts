@@ -35,7 +35,7 @@ import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
-import { S, CREDENTIAL_LITERALS, DECLARED_KEY_CONTROLS, NON_CREDENTIAL_CONTROLS, TEMPLATE_HEADER, probeFlow } from './probe-flow.js';
+import { S, CREDENTIAL_LITERALS, DECLARED_KEY_CONTROLS, NON_CREDENTIAL_CONTROLS, TEMPLATE_HEADER, URL_LITERALS, probeFlow } from './probe-flow.js';
 
 type ReadName = 'meta_item' | 'meta_list' | 'meta_published' | 'automation_item';
 
@@ -74,6 +74,7 @@ function verdict(o: ReadOutcome) {
     declaredKeyControlsServed: DECLARED_KEY_CONTROLS.filter((k) => o.served[k]),
     nonCredentialControlsServed: NON_CREDENTIAL_CONTROLS.filter((k) => o.served[k]),
     templateHeaderServed: o.templateHeaderServed,
+    urlLiteralsServed: URL_LITERALS.filter((k) => o.served[k]),
   };
 }
 
