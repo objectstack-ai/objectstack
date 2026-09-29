@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 /**
- * #11286 — CONTRACT: the two `managerIsProvablyOutsideOrg` screens are EQUAL.
+ * Commit b019891cd — CONTRACT: the two `managerIsProvablyOutsideOrg` screens are EQUAL.
  *
  * `sys_user.manager_id` is read by two packages, and each screens the manager
  * it finds against the caller's organization with its OWN implementation:
@@ -55,10 +55,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ApprovalService } from './approval-service.js';
-// [#11286] plugin-sharing's screen is reached by RELATIVE SOURCE PATH, and that
+// [commit b019891cd] plugin-sharing's screen is reached by RELATIVE SOURCE PATH, and that
 // is the only way in: it is deliberately NOT exported from that package's index
 // (exporting it would hoist a security screen into another plugin's public API
-// surface — the very decision this card is fenced out of), and the package's
+// surface — the very decision this pin is fenced out of), and the package's
 // `exports` map publishes `.` only, so there is no subpath to import. The read
 // escapes this package, so it is declared in `CROSS_PACKAGE_TEST_INPUTS` in
 // scripts/check-cross-package-test-inputs.mjs and mirrored into the

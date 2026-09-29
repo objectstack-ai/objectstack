@@ -49,8 +49,8 @@ import type {
   ResumeFailureReport,
 } from '@objectstack/spec/contracts';
 // [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
-// declares for every one of these context parameters since #6523 (the #6206
-// ruling: enforcement adjudicates on the whole envelope, never a per-site
+// declares for every one of these context parameters since commit aa4b90d9a (the
+// full-envelope ruling: enforcement adjudicates on the whole envelope, never a per-site
 // subset). Annotating the implementation with the retired six-field shape is
 // what forced this file to cast its way out of its own contract to read
 // fields the caller had already supplied.
@@ -60,7 +60,7 @@ import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
-// mechanism for a second producer, and #12493 landed this service's key
+// mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { isGrantActive } from '@objectstack/core';
@@ -218,7 +218,7 @@ export interface ApprovalResumeSurface {
    * evidence of anything. Rejects when a store cannot be read; the inspection
    * counts such a row `undetermined` — but ⛔ unlike a thrown
    * {@link hasSuspendedRun} it does NOT drop the row, because this oracle is
-   * asked only WHICH shape a row already known to be stranded is (#16709).
+   * asked only WHICH shape a row already known to be stranded is (commit 8c7cca1ce).
    * A host that resolves a malformed verdict is treated the same way, and
    * costs no OTHER row its answer.
    */
@@ -657,7 +657,7 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
  *    was asked and could not answer. Three ways in: the attached surface has
  *    no `inspectConsumedSuspension` (an engine build older than this plugin,
  *    or a test double); the read THREW (a store outage); or the host resolved
- *    a malformed verdict, violating its own declared surface (#16709). Today's
+ *    a malformed verdict, violating its own declared surface (commit 8c7cca1ce). Today's
  *    undifferentiated label, kept on purpose as the fail-closed fallback
  *    (#15358 ruling, item 1): a failure to differentiate is not evidence, so
  *    the row is reported and its repairability left unstated — ⛔ never
@@ -1378,7 +1378,7 @@ export class ApprovalService implements IApprovalService {
     const perms = Array.isArray(context.permissions) ? context.permissions : [];
     // [#7135] A DECLARED read. `posture` (ADR-0095 D2) is resolved by
     // `resolveAuthzContext` and is a field of the envelope the contract has
-    // named here since #6523 — the doc block above already says it is the
+    // named here since commit aa4b90d9a — the doc block above already says it is the
     // intended signal. Until this parameter widened, reading it meant an
     // unchecked `as any` on an enforcement input: a typo (`postures`,
     // `'PLATFORM-ADMIN'`) would have compiled and silently denied every
@@ -2292,7 +2292,7 @@ export class ApprovalService implements IApprovalService {
    * `plugin-sharing`, whatever the shared method name suggests. Both answer
    * "who holds position P"; this one reads the directory RAW — neither the
    * ADR-0091 D2 validity window nor the `sys_position.active` catalogue flag is
-   * applied. Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+   * applied. Maintainer ruling, 2026-08-15 (commit 04d03c3a0, inheriting #8613), verbatim:
    *
    * > Access-conferring paths filter deactivated positions; addressing paths
    * > do not.
@@ -2315,7 +2315,7 @@ export class ApprovalService implements IApprovalService {
    *     projects `user_id` too). The table carries no window columns at all and
    *     `isGrantActive` reads an absent bound as unbounded, so there is nothing
    *     a filter could do here; membership tier names have no `sys_position`
-   *     row either (#8710's "a name with no row is untouched" fallback), so no
+   *     row either (commit 04d03c3a0's "a name with no row is untouched" fallback), so no
    *     catalogue flag either. This limb cannot be brought into parity by
    *     adding a filter — see {@link expandMembershipTierUsers}.
    *  3. `sys_position.active` — the sharing engine's gate for it lives at the
@@ -2326,7 +2326,7 @@ export class ApprovalService implements IApprovalService {
    * The omission is per-READ, not a missing dependency: `isGrantActive` is
    * imported in this file and IS applied to `sys_approval_delegation` in
    * {@link lookupActiveDelegation}. ⛔ So do not "fix" this by adding the window
-   * filter here — that is the option #8710 rejected, on the reasoning above.
+   * filter here — that is the option the ruling (commit 04d03c3a0) rejected, on the reasoning above.
    */
   private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
     if (!positionName) return [];
@@ -2360,7 +2360,7 @@ export class ApprovalService implements IApprovalService {
    * filter even if it were not: `sys_member` carries no ADR-0091 D2 window
    * columns, and a tier name has no `sys_position` row to read `active` off.
    * {@link expandPositionUsers} carries the ruling both reads inherit
-   * (#8613 / #8710) — this method is also the second limb of that union, so a
+   * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
    * change here changes position routing too.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
@@ -4793,7 +4793,7 @@ export class ApprovalService implements IApprovalService {
    * A surface without that member leaves the row `'failed'` — reported,
    * undifferentiated — because absence of the discriminator is not evidence
    * of anything. So does a read that THREW or answered a malformed verdict
-   * (#16709): by the time this oracle is asked the row is already known to be
+   * (commit 8c7cca1ce): by the time this oracle is asked the row is already known to be
    * stranded, so a failure to differentiate it is not a reason to drop it from
    * a report — it is counted `undetermined` as telemetry AND reported.
    *
@@ -4820,7 +4820,7 @@ export class ApprovalService implements IApprovalService {
      * outage must not be published as a lost run); a thrown or malformed THIRD
      * read leaves its row in `stranded` as the undifferentiated `'failed'` and
      * is counted here as well — the row is known to be stranded, only its
-     * shape could not be told (#16709). So this counter and `stranded.length`
+     * shape could not be told (commit 8c7cca1ce). So this counter and `stranded.length`
      * overlap on purpose, and neither one alone sizes the scan's blind spot.
      */
     undetermined: number;
@@ -4890,7 +4890,7 @@ export class ApprovalService implements IApprovalService {
       // the other two oracles. See `refineFailedRunState` and
       // `StrandedRunState` for the three answers and why none is folded.
       if (runState === 'failed' && typeof this.automation.inspectConsumedSuspension === 'function') {
-        // ⚠️ [#16709 item 3] The REFINEMENT runs inside this `try`, with the
+        // ⚠️ [commit 8c7cca1ce, item 3] The REFINEMENT runs inside this `try`, with the
         // read it refines. `refineFailedRunState` dereferences the verdict, so
         // a host that violates the declared surface — resolving `undefined`
         // where a verdict is declared — used to throw a `TypeError` out of
@@ -4903,7 +4903,7 @@ export class ApprovalService implements IApprovalService {
         try {
           refined = refineFailedRunState(await this.automation.inspectConsumedSuspension(runId));
         } catch (err: any) {
-          // [#16709 item 2 — PM ruling, 2026-09-08] The row STAYS in the
+          // [commit 8c7cca1ce, item 2 — PM ruling, 2026-09-08] The row STAYS in the
           // report, as the undifferentiated `'failed'`. This oracle is not
           // asked WHETHER the row is stranded: the first two already answered
           // that (no live pause, terminal `failed`). It is asked only WHICH of

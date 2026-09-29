@@ -746,9 +746,9 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
   });
 
-  // ── the #8710 carve-out, asserted on THIS side (#8863) ──────────────────
+  // ── the commit 04d03c3a0 carve-out, asserted on THIS side (commit d200b016b) ──
   //
-  // Maintainer ruling, 2026-08-15 (#8710, inheriting #8613), verbatim:
+  // Maintainer ruling, 2026-08-15 (commit 04d03c3a0, inheriting #8613), verbatim:
   //
   //   > Access-conferring paths filter deactivated positions; addressing
   //   > paths do not.
