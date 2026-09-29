@@ -75,7 +75,7 @@ const REALTIME_EVENT_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
  *
  * Metadata change events (`metadata.{type}.{action}`, `MetadataEventType`) are
  * deliberately NOT members. A subscription event is record-shaped — `object`
- * names a data object and `filters` narrows records — while a metadata event is
+ * names a data object and `filters` is meant to narrow records — while a metadata event is
  * keyed by metadata type and has its own contract and its own client primitive
  * (`subscribeMetadata`).
  *
