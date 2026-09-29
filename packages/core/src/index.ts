@@ -49,6 +49,14 @@ export * from './utils/env.js';
 // Export timezone-aware calendar utilities (ADR-0053 Phase 2)
 export * from './utils/datetime.js';
 
+// [#20544] The ONE compensated fold for `sum` / `avg`, hoisted from
+// `@objectstack/objectql`'s rows path for the reason `bucketDateKey` above
+// was: `driver-memory`'s two faces and `service-analytics`' draft preview add
+// a group's values in JavaScript too, neither package has objectql among its
+// runtime dependencies, and a copy per face is how one `sum` came to answer
+// two doubles.
+export * from './utils/compensated-sum.js';
+
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
 
