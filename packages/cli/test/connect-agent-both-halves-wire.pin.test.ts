@@ -252,10 +252,15 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(allowedIds).toContain('nav_connect_agent');
         expect(groupChildren(setupAllowed.body?.item, 'group_integrations'))
             .toContain('nav_connect_agent');
-        // The Setup tree the platform admin is served: 9 authored groups less
-        // `group_approvals`, which nothing contributes into and the filter
-        // collapses, plus 25 contributed entries plus the MCP one.
-        expect(allowedIds).toHaveLength(34);
+        // The Setup tree the platform admin is served: 9 authored groups, plus
+        // 26 contributed entries plus the MCP one. One of the 26 is
+        // `nav_ai_approvals` (#20142), the only entry this composition folds
+        // into `group_approvals` (plugin-approvals is not part of it). It is
+        // gated on the `ai` service, and it rides through HERE only because
+        // this harness has no service probe, so ADR-0057 D10 fails open (see
+        // the header); its absence without that service is pinned where a
+        // probe is wired, in `console-page-nav-entries.pin.test.ts`.
+        expect(allowedIds).toHaveLength(36);
     });
 
     it('the Account half widened NOTHING on Setup — the admin tree is unchanged', async () => {
@@ -273,7 +278,7 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(34);
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(36);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at
