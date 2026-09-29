@@ -20,6 +20,16 @@
  * `"2026-07-15T14:00:00.000Z"`, and `date` `"2026-02-30"` verbatim. The engine
  * refuses those now; the REST door over SQL is
  * `packages/rest/src/data-temporal-write-real-day-iso.test.ts`.
+ *
+ * [#20549] The comparand door now refuses the same values as a filter
+ * (`INVALID_FILTER` / 400, one rule in `@objectstack/core`). Measured on the
+ * base through the engine over this driver, the process in America/New_York:
+ * `opened_at $eq "2026-02-30T10:00:00Z"` matched the row stored on March 2,
+ * `"07/15/2026 10:00"` the row at 14:00Z, and `placed_on $eq "2026-02-30"`
+ * answered `[]`. The refusal is the engine's
+ * (`packages/objectql/src/engine-temporal-comparand-door.test.ts`); this
+ * driver's half is the controls: every spelling the door admits as a
+ * comparand finds the instant it names, and the leap day finds itself.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -74,5 +84,18 @@ describe('[#20525] every temporal spelling the write door admits is stored as th
     expect(await ids({ opened_at: { $eq: '2026-07-15T10:00:00Z' } })).toEqual(july);
     expect(await ids({ opened_at: { $gt: '2026-07-15T09:59:59Z', $lt: '2027-01-01' } })).toEqual(july);
     expect(await ids({ placed_on: { $gt: '2028-02-28' } })).toEqual(['leap-day']);
+  });
+
+  it('[#20549] finds each one by every comparand spelling the door admits, and the leap day by itself', async () => {
+    const ids = async (where: Record<string, unknown>) =>
+      (await driver.find(OBJECT, { where })).map((r) => r.id as string).sort();
+    const july = ADMITTED_DATETIME.filter(([id]) => id !== 'leap').map(([id]) => id).sort();
+    for (const [, spelling] of ADMITTED_DATETIME.filter(([id]) => id !== 'leap' && id !== 'a-date')) {
+      expect(await ids({ opened_at: { $eq: spelling } }), String(spelling)).toEqual(july);
+    }
+    expect(await ids({ opened_at: { $eq: '2026-07-15T05:00:00-0500' } }), 'an offset without a colon').toEqual(july);
+    expect(await ids({ opened_at: { $eq: Date.UTC(2026, 6, 15, 10) } }), 'epoch milliseconds as a number').toEqual(july);
+    expect(await ids({ opened_at: { $eq: '2028-02-29T10:00:00Z' } }), 'the leap day on a datetime').toEqual(['leap']);
+    expect(await ids({ placed_on: { $eq: '2028-02-29' } }), 'the leap day on a date').toEqual(['leap-day']);
   });
 });

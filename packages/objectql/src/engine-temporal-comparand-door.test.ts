@@ -375,3 +375,132 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
     ).resolves.toBeDefined();
   });
 });
+
+/**
+ * [#20549] The comparand door refuses what the write door refuses — one rule,
+ * `@objectstack/core`'s `isUninterpretableTemporalComparand`, asked by both.
+ *
+ * Measured on the base (`f1e921ab8e`), the process in America/New_York, through
+ * `engine.find` over InMemoryDriver and SqlDriver on SQLite and PostgreSQL 16
+ * (at Asia/Shanghai):
+ *
+ * | `where` | memory | SQLite | PostgreSQL | now |
+ * |:--|:--|:--|:--|:--|
+ * | `datetime $eq "2026-02-30T10:00:00Z"` | the row at 2026-03-02T10:00Z (rolled over) | the same | the same | 400 |
+ * | `datetime $eq "07/15/2026 10:00"` / `"2026/07/15 10:00"` | the row at 2026-07-15T14:00Z (the process zone) | the same | the same | 400 |
+ * | `date $eq "2026-02-30"` | 200 `[]` (compared as text) | 200 `[]` | 500 `DATABASE_ERROR` | 400 |
+ * | `datetime $gt "2026"` | every row (read as 2026 epoch milliseconds) | the same | the same | 400 |
+ *
+ * The refusal sits in front of every driver, so this file's recording driver
+ * is enough to pin it; the REST door over SQLite and PostgreSQL is
+ * `packages/rest/src/data-temporal-write-real-day-iso.test.ts`, beside the
+ * write door's twin rows, and the memory driver's half is
+ * `memory-20525-temporal-write-real-day-iso.test.ts`.
+ */
+describe('[#20549] the comparand door refuses what the write door refuses — a real calendar day, and an ISO spelling for a datetime', () => {
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+  const refusalOf = async (p: Promise<unknown>) =>
+    p.then(() => null, (e: any) => e as Error & { code?: string; status?: number; fields?: Array<{ field: string; code: string }> });
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(support_case, 'test');
+    await engine.insert('support_case', { id: 'leap', subject: 'leap', created_date: '2028-02-29T10:00:00.000Z', due_on: '2028-02-29' });
+    await engine.insert('support_case', { id: 'july', subject: 'july', created_date: '2026-07-15T10:00:00.000Z', due_on: '2026-07-15' });
+    reads.length = 0;
+  });
+
+  /** The card's rows, and the rest of each class — every one a comparand the rule read as another value. */
+  const REFUSED: ReadonlyArray<readonly [field: 'created_date' | 'due_on', value: string]> = [
+    ['created_date', '2026-02-30T10:00:00Z'],
+    ['created_date', '07/15/2026 10:00'],
+    ['created_date', '2026/07/15 10:00'],
+    ['due_on', '2026-02-30'],
+    ['due_on', '2026-02-29'],
+    ['due_on', '2026-04-31T10:00:00Z'],
+    ['created_date', '2026-02-30'],
+    ['created_date', '2026-02-29 10:00'],
+    ['created_date', '15 July 2026 10:00'],
+    ['created_date', '07/08/2026'],
+    ['created_date', 'Wed, 15 Jul 2026 10:00:00 GMT'],
+    ['created_date', '2026-07-15 10:00:00+08:00'],
+    ['created_date', '2026'],
+    ['created_date', '1784109600000'],
+  ];
+
+  it('refuses each with INVALID_FILTER / 400 naming the field, before any driver read — the leap day and the ISO spellings beside them still answer', async () => {
+    for (const [field, value] of REFUSED) {
+      for (const where of [{ [field]: { $eq: value } }, { [field]: { $gt: value } }, { [field]: { $in: ['2026-07-15', value] } }]) {
+        const err = await refusalOf(engine.find('support_case', { where }));
+        expect(err, `${field} ${JSON.stringify(where)}`).not.toBeNull();
+        expect(err!.code, `${field} ${value}`).toBe('INVALID_FILTER');
+        expect(err!.status, `${field} ${value}`).toBe(400);
+        expect(err!.message).toContain(`'${field}'`);
+        expect(err!.message).toMatch(/NOT applied/);
+        // Not junk: the rule READ it, as the wrong value, so the refusal does
+        // not claim it would have compared false for every row.
+        expect(err!.message, `${field} ${value}`).not.toContain('compare false for EVERY row');
+      }
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+
+    // ── the POSITIVE CONTROLS, in this same test ────────────────────────────
+    const ids = async (where: Record<string, unknown>) =>
+      (await engine.find('support_case', { where })).map((r: any) => r.id).sort();
+    expect(await ids({ due_on: { $eq: '2028-02-29' } }), 'a leap day on a date').toEqual(['leap']);
+    expect(await ids({ created_date: { $eq: '2028-02-29T10:00:00.000Z' } }), 'a leap day on a datetime').toEqual(['leap']);
+    // The recording driver compares as written, so each ISO spelling below is
+    // checked by what reached the driver: the storage rule's canonical form is
+    // the drivers' business; that the door let it through is this one's.
+    for (const iso of ['2026-07-15T10:00:00Z', '2026-07-15T18:00:00+08:00', '2026-07-15T10:00', '2026-07-15 10:00', '2026-07-15']) {
+      await expect(engine.find('support_case', { where: { created_date: { $gte: iso } } }), iso).resolves.toBeDefined();
+    }
+    // Epoch milliseconds stay a comparand as a NUMBER.
+    await expect(engine.find('support_case', { where: { created_date: { $gte: Date.UTC(2026, 6, 15, 10) } } })).resolves.toBeDefined();
+    expect(reads.length, 'every control reached the driver').toBe(8);
+  });
+
+  it('refuses the same comparands at the per-aggregation filter and in having, as on where', async () => {
+    for (const [field, value] of REFUSED) {
+      const agg = await refusalOf(engine.aggregate('support_case', {
+        aggregations: [{ function: 'count', alias: 'n', filter: { [field]: { $gt: value } } as never }],
+      } as never));
+      expect(agg, `aggregation filter ${field} ${value}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      const having = await refusalOf(engine.aggregate('support_case', {
+        groupBy: ['subject'],
+        aggregations: [{ function: 'max', field, alias: 'last' }],
+        having: { last: { $gt: value } } as never,
+      } as never));
+      expect(having, `having max(${field}) ${value}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(reads).toHaveLength(0);
+  });
+
+  it('one rule at both doors: over a corpus, a string is refused as a comparand exactly when the write door refuses it', async () => {
+    const CORPUS = [
+      ...REFUSED.map(([, v]) => v),
+      '2028-02-29', '2028-02-29T10:00:00Z', '2026-07-15', '2026-07-15T10:00:00Z', '2026-07-15T10:00:00.123456Z',
+      '2026-07-15T18:00:00+08:00', '2026-07-15T18:00:00+0800', '2026-07-15T10:00', '2026-07-15 10:00', '2026-07-15 10:00:00.5',
+      '0001-01-01', '9999-12-31', '0000-06-15', '+010000-01-01T00:00:00.000Z', 'not-a-date', '2026-13-45',
+      '2026-07-15t10:00:00z', '2026-7-15',
+    ];
+    for (const field of ['created_date', 'due_on'] as const) {
+      for (const value of CORPUS) {
+        const asComparand = (await refusalOf(engine.find('support_case', { where: { [field]: { $eq: value } } })))?.code === 'INVALID_FILTER';
+        const written = await refusalOf(engine.insert('support_case', { id: `w_${field}_${value}`, subject: 'w', [field]: value }));
+        const asWritten = written?.code === 'VALIDATION_FAILED' && written.fields?.some((f) => f.field === field && f.code === 'invalid_date') === true;
+        expect(asComparand, `${field} ${JSON.stringify(value)}: comparand ${asComparand}, written ${asWritten}`).toBe(asWritten);
+      }
+    }
+    // The one place the two doors differ, on purpose: epoch milliseconds as a
+    // NUMBER is a comparand and never a written value (the stored form is text).
+    await expect(engine.find('support_case', { where: { created_date: { $gt: 1784109600000 } } })).resolves.toBeDefined();
+    const number = await refusalOf(engine.insert('support_case', { id: 'n', subject: 'n', created_date: 1784109600000 }));
+    expect(number).toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+});

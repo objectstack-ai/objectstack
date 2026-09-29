@@ -117,6 +117,24 @@
  * the predicate this door calls asks it, and so does the record validator's
  * write door, so the two doors cannot disagree about a year.
  *
+ * ## [#20549] A value the rule reads as another value than it names
+ *
+ * A string comparand is refused here exactly when the record validator refuses
+ * it as a written value, because both ask `@objectstack/core`'s one predicate.
+ * Two classes joined it from the write door, measured before this on
+ * InMemoryDriver and SqlDriver on SQLite and PostgreSQL 16, the process in
+ * America/New_York, through `engine.find`:
+ *
+ * ```
+ * datetime $eq "2026-02-30T10:00:00Z"   200, the row at 2026-03-02T10:00Z   (rolled over)
+ * datetime $eq "07/15/2026 10:00"       200, the row at 2026-07-15T14:00Z   (the process zone)
+ * date     $eq "2026-02-30"             200 [] on memory and SQLite, 500 on PostgreSQL
+ * ```
+ *
+ * These are not junk: the rule reads each one, as the wrong value, so each
+ * answered rows. Their refusal says so in its own words ({@link misreadClassOf})
+ * rather than in the junk class's "compare false for EVERY row".
+ *
  * ## [#20263] The third position: `having`
  *
  * `engine.aggregate` evaluates `having` itself, over the aggregated rows, so no
@@ -340,11 +358,11 @@ function preview(value: unknown): string {
  */
 const REMEDY: Record<TemporalComparandKind, string> = {
   datetime:
-    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z"), a bare "YYYY-MM-DD" '
-    + '(read as midnight UTC), epoch milliseconds, or a relative-date placeholder the '
-    + 'resolver knows, e.g. "{30_days_ago}" / "{current_month_start}".',
+    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z") on a calendar day that exists, '
+    + 'a bare "YYYY-MM-DD" (read as midnight UTC), epoch milliseconds as a number, or a '
+    + 'relative-date placeholder the resolver knows, e.g. "{30_days_ago}" / "{current_month_start}".',
   date:
-    'Write a "YYYY-MM-DD" calendar day, or a relative-date placeholder the resolver '
+    'Write a "YYYY-MM-DD" calendar day that exists, or a relative-date placeholder the resolver '
     + 'knows, e.g. "{30_days_ago}" / "{current_month_start}".',
   time:
     'Write an "HH:MM" / "HH:MM:SS" wall clock (timezone-naive, ADR-0053 D-C1).',
@@ -382,6 +400,57 @@ function yearClassOf(hit: UninterpretableTemporalComparand): (typeof YEAR_CLASS)
 }
 
 /**
+ * [#20549] A comparand the storage rule READS, but not as the value it names —
+ * the two readings the write door refused first, and `@objectstack/core`'s one
+ * rule now refuses at both doors. Such a comparand does not compare false for
+ * every row, as junk does: it answers rows, the wrong ones. Each class says
+ * why, and what the value would have done, per position.
+ */
+interface MisreadClass {
+  why: string;
+  where: string;
+  having: string;
+}
+
+const IMPOSSIBLE_DAY: MisreadClass = {
+  why: 'whose calendar day does not exist',
+  where: 'Read as written it rolls over into another day or compares as text, and answers the wrong '
+    + 'rows or a database error.',
+  having: 'Compared with each group, it rolls over into another day or compares as text, and keeps the '
+    + 'wrong groups.',
+};
+
+function notAnIsoSpelling(kind: TemporalComparandKind): MisreadClass {
+  const parser = 'Outside those spellings the server\'s own parser decides the instant: a zone-less '
+    + 'spelling in the server\'s time zone, a slashed day in a guessed order, a bare integer as epoch '
+    + 'milliseconds';
+  return {
+    why: `which is not one of the ISO 8601 spellings a ${kind} comparand is read in`,
+    where: `${parser}. The rows it matched would depend on the host rather than on the filter.`,
+    having: `${parser}. The groups it kept would depend on the host rather than on the filter.`,
+  };
+}
+
+/**
+ * [#20549] The misread class of a hit, or `undefined` for a comparand the rule
+ * cannot read at all (junk, the #8690 class) — for the message only. The
+ * verdict is core's, and the leading day is judged by asking core's predicate
+ * of it, so the calendar arithmetic is never re-derived here.
+ */
+function misreadClassOf(hit: UninterpretableTemporalComparand): MisreadClass | undefined {
+  if (typeof hit.value !== 'string') return undefined;
+  const s = hit.value.trim();
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(s)?.[0];
+  if (day !== undefined && isUninterpretableTemporalComparand('date', day) && !isOutsideTemporalYearRange(day, 'date')) {
+    return IMPOSSIBLE_DAY;
+  }
+  if (hit.kind !== 'date' && (/^-?\d+$/.test(s) || Number.isFinite(Date.parse(s)))) {
+    return notAnIsoSpelling(hit.kind);
+  }
+  return undefined;
+}
+
+/**
  * Refuse every comparand a declared temporal field's storage rule cannot read.
  *
  * Runs on the CALLER's own `where`, before the middleware chain composes
@@ -415,6 +484,16 @@ export function assertTemporalComparandsInterpretable(
       + `value may name, so it is not a ${hit.kind} value this platform can interpret. It `
       + `would reach the driver in a form that ${yearClass.misorder} and answer the wrong rows, or a `
       + `database error. The filter was NOT applied. ${yearClass.remedy}`,
+    );
+  }
+  // [#20549] A comparand the rule reads as another value than it names.
+  const misread = misreadClassOf(hit);
+  if (misread) {
+    throw invalidFilterError(
+      `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
+      + `against ${preview(hit.value)} at ${hit.path}, ${misread.why}, so it is not a ${hit.kind} `
+      + `value this platform can interpret. ${misread.where} The filter was NOT applied. `
+      + REMEDY[hit.kind],
     );
   }
   throw invalidFilterError(
@@ -487,6 +566,15 @@ export function assertHavingTemporalComparandsInterpretable(
       + 'value this platform can interpret. Compared with each group, it '
       + `${yearClass.misorder} and would keep the wrong groups. The \`having\` was NOT applied. `
       + yearClass.remedy,
+    );
+  }
+  // [#20549] The misread classes, in their own words, as on `where`.
+  const misread = misreadClassOf(hit);
+  if (misread) {
+    throw invalidFilterError(
+      `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
+      + `${misread.why}, so it is not a ${hit.kind} value this platform can interpret. `
+      + `${misread.having} The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
     );
   }
   throw invalidFilterError(

@@ -155,7 +155,8 @@ describe('[#20264] isUninterpretableTemporalComparand — a datetime string outs
     ['year 0099 — inside the range', '0099-03-04T10:00:00.000Z'],
     ['a 2026 instant (the control)', '2026-02-01T10:00:00.000Z'],
     ['a 2026 zone-naive timestamp (the control)', '2026-02-01 10:00'],
-    ['epoch milliseconds for 2026, as a string (the control)', '1769940000000'],
+    // [#20549] The 2026 epoch-millisecond control is a NUMBER now: as a
+    // string it is refused with every other bare integer string (below).
   ];
   it('refuses each, on datetime and on date', () => {
     for (const [name, value] of REFUSED) {
@@ -169,9 +170,104 @@ describe('[#20264] isUninterpretableTemporalComparand — a datetime string outs
     for (const [name, value] of READ) {
       expect(isUninterpretableTemporalComparand('datetime', value), name).toBe(false);
     }
+    expect(isUninterpretableTemporalComparand('datetime', 1769940000000), 'epoch milliseconds for 2026, a number').toBe(false);
   });
   it('a time column judges no year — its rule keeps a time of day', () => {
     expect(isUninterpretableTemporalComparand('time', '0000-06-15T10:00:00.000Z')).toBe(false);
     expect(isUninterpretableTemporalComparand('time', '10:00')).toBe(false);
+  });
+});
+
+// [#20549] The write door (the record validator) refuses a string whose
+// leading `YYYY-MM-DD` names a day that does not exist, and a `datetime`
+// string outside the ISO 8601 spellings the platform writes. The comparand
+// door was wider: measured under TZ=America/New_York on driver-memory, SQLite
+// and PostgreSQL 16, `datetime $eq "2026-02-30T10:00:00Z"` matched the row
+// stored at 2026-03-02T10:00Z (rolled over), `"07/15/2026 10:00"` matched
+// 2026-07-15T14:00Z (the process zone), and `date $eq "2026-02-30"` answered
+// 200 [] on memory and SQLite and 500 on PostgreSQL. The two predicates moved
+// here from the validator, which now asks this function, so one rule answers
+// both doors.
+describe('[#20549] isUninterpretableTemporalComparand — a real calendar day, and an ISO spelling for a datetime', () => {
+  const IMPOSSIBLE_DAYS = ['2026-02-30', '2026-02-29', '2026-04-31', '2026-13-01', '2026-00-10', '2026-06-00', '2100-02-29'];
+
+  it('refuses a leading day that does not exist — on a date, and as the day part of a datetime', () => {
+    for (const day of IMPOSSIBLE_DAYS) {
+      expect(isUninterpretableTemporalComparand('date', day), `date ${day}`).toBe(true);
+      expect(isUninterpretableTemporalComparand('date', `${day}T10:00:00Z`), `date ${day}T10:00:00Z`).toBe(true);
+      expect(isUninterpretableTemporalComparand('datetime', day), `datetime ${day}`).toBe(true);
+      expect(isUninterpretableTemporalComparand('datetime', `${day}T10:00:00Z`), `datetime ${day}T10:00:00Z`).toBe(true);
+      expect(isUninterpretableTemporalComparand('datetime', `${day} 10:00`), `datetime ${day} 10:00`).toBe(true);
+    }
+  });
+
+  it('reads every real day beside them — the leap days and the month ends, the discriminating half', () => {
+    for (const day of ['2028-02-29', '2000-02-29', '2026-02-28', '2026-04-30', '2026-12-31', '0004-02-29', '2026-01-01']) {
+      expect(isUninterpretableTemporalComparand('date', day), `date ${day}`).toBe(false);
+      expect(isUninterpretableTemporalComparand('datetime', day), `datetime ${day}`).toBe(false);
+      expect(isUninterpretableTemporalComparand('datetime', `${day}T10:00:00Z`), `datetime ${day}T10:00:00Z`).toBe(false);
+    }
+  });
+
+  it('refuses a datetime string outside the ISO spellings — each one Date.parse reads', () => {
+    const NOT_ISO = [
+      '07/15/2026 10:00', '2026/07/15 10:00', '15 July 2026 10:00', '07/08/2026',
+      'Wed, 15 Jul 2026 10:00:00 GMT', '2026-07-15 10:00 PM', '2026-07-15t10:00:00z',
+      '2026-07-15 10:00:00+08:00', '2026-07-15 10:00Z', '+002026-07-15T10:00:00Z', '2026-07', '2026-7-15',
+      // A bare integer string: epoch milliseconds to the rule, a year to its author.
+      '2026', '1769940000000', '-1',
+    ];
+    for (const value of NOT_ISO) {
+      expect(Number.isFinite(Date.parse(value)) || /^-?\d+$/.test(value), `the control: ${value} is read by someone`).toBe(true);
+      expect(isUninterpretableTemporalComparand('datetime', value), value).toBe(true);
+    }
+  });
+
+  it('reads each ISO spelling the write door writes, the same instant in every host zone — the discriminating half', () => {
+    const ISO = [
+      '2026-07-15', '2026-07-15T10:00', '2026-07-15T10:00:00', '2026-07-15T10:00:00.123',
+      '2026-07-15T10:00:00Z', '2026-07-15T10:00:00.000Z', '2026-07-15T10:00:00.123456Z',
+      '2026-07-15T18:00:00+08:00', '2026-07-15T18:00:00+0800', '2026-07-15T05:00:00-05:00',
+      '2026-07-15 10:00', '2026-07-15 10:00:00', '2026-07-15 10:00:00.5', '  2026-07-15T10:00:00Z  ',
+    ];
+    for (const value of ISO) {
+      expect(isUninterpretableTemporalComparand('datetime', value), value).toBe(false);
+    }
+  });
+
+  it('still refuses what the grammar admits but no clock reads', () => {
+    for (const value of ['2026-07-15T25:00:00Z', '2026-07-15T10:60:00Z', '2026-07-15T10:00:00+99:99']) {
+      expect(isUninterpretableTemporalComparand('datetime', value), value).toBe(true);
+    }
+  });
+
+  it('leaves a date column\'s own reading alone: a real leading day, whatever follows it', () => {
+    // The `date` rule collapses a leading day, so an instant on a real day is
+    // that day (#20481); only the day's existence is new.
+    for (const value of ['2026-07-15T10:00:00Z', '2026-07-15 10:00', '2026-07-15T10:00:00+08:00']) {
+      expect(isUninterpretableTemporalComparand('date', value), value).toBe(false);
+    }
+    expect(isUninterpretableTemporalComparand('date', '2026/07/15'), 'the #20481 shape, as before').toBe(true);
+  });
+
+  it('an instant on a time column is read by the datetime rule, so the same two classes are refused there', () => {
+    for (const value of ['07/15/2026 10:00', '2026/07/15 10:00', '2026-02-30T10:00:00Z', '1784109600000', 'Wed, 15 Jul 2026 10:00:00 GMT']) {
+      expect(isUninterpretableTemporalComparand('time', value), value).toBe(true);
+    }
+    // The wall clocks and the ISO instants beside them — the discriminating half.
+    for (const value of ['10:00', '10:00:00', '10:00:00.5', '2026-07-15T10:00:00Z', '2026-07-15T18:00:00+08:00', '2026-07-15 10:00']) {
+      expect(isUninterpretableTemporalComparand('time', value), value).toBe(false);
+    }
+    expect(isUninterpretableTemporalComparand('time', Date.UTC(2026, 6, 15, 10)), 'epoch milliseconds as a number').toBe(false);
+  });
+
+  it('keeps the comparand-only exemptions and the non-string readings', () => {
+    for (const kind of ['date', 'datetime'] as const) {
+      expect(isUninterpretableTemporalComparand(kind, ''), `${kind} empty`).toBe(false);
+      expect(isUninterpretableTemporalComparand(kind, '   '), `${kind} blank`).toBe(false);
+      expect(isUninterpretableTemporalComparand(kind, '{today}'), `${kind} placeholder`).toBe(false);
+      expect(isUninterpretableTemporalComparand(kind, 1769940000000), `${kind} epoch-ms number`).toBe(false);
+      expect(isUninterpretableTemporalComparand(kind, new Date(Date.UTC(2026, 1, 28))), `${kind} Date`).toBe(false);
+    }
   });
 });

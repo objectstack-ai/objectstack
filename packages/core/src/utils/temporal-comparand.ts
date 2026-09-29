@@ -45,8 +45,34 @@
  * the one rule both drivers read since #20176; before it, a copy in each).
  * That function is total on purpose: an input it cannot interpret is returned
  * UNCHANGED rather than becoming an invented instant. So, for a STRING, "the
- * driver would return it unchanged" IS the definition of uninterpretable, and
- * defining it any other way would refuse comparands that work today.
+ * driver would return it unchanged" is the first half of the definition of
+ * uninterpretable.
+ *
+ * [#20549] The second half is the write door's: a string is also
+ * uninterpretable when the rule READS it, but not as the value it names, and
+ * the record validator refuses the same string as a written value for that
+ * reason. Two readings, both `Date.parse`'s:
+ *
+ * - **A calendar day that does not exist.** `Date.parse` rolls
+ *   `"2026-02-30T10:00:00Z"` over to March 2, so the comparand matched the
+ *   row stored on March 2; the `date` rule keeps `"2026-02-30"` as written and
+ *   compares it as text, and PostgreSQL refuses it (`22008`). Only a real
+ *   leading `YYYY-MM-DD` is read now ({@link namesRealCalendarDay}), for a
+ *   `date`, for the day part of a `datetime`, and for the day part of an
+ *   instant on a `time` column.
+ * - **A `datetime` string outside the ISO 8601 spellings the platform writes**
+ *   ({@link ISO_DATETIME_WRITE_FORM}). `Date.parse` reads `"07/15/2026 10:00"`
+ *   and `"2026/07/15 10:00"` in the SERVER PROCESS's zone, so the rows a filter
+ *   matched were a property of the host; it reads `"07/08/2026"` month-first.
+ *   A bare integer string is not one of them either: the rule reads it as
+ *   epoch milliseconds, so `"2026"` meant two seconds after 1970 and matched
+ *   every later row. Epoch milliseconds stay a comparand as a NUMBER, which no
+ *   one can mistake for a year.
+ *
+ * Both halves together are the one rule for a string, and the record
+ * validator's `date` / `datetime` arm asks this function rather than a copy of
+ * it — so a string is refused as a comparand exactly when it is refused as a
+ * written value.
  *
  * [#20240] One non-string class is uninterpretable by the same test's other
  * half — the rule cannot put it in the column's form. On a `date` column a
@@ -66,12 +92,6 @@
  * PostgreSQL's `DATE` and `timestamptz` have no year 0 (`22008`). The range is
  * `temporal-storage-form.ts`'s `isOutsideTemporalYearRange`, the one the
  * record validator asks of a written value too; this predicate only calls it.
- *
- * That is why this is not `utcInstantMs` (`@objectstack/spec/data`), which is
- * the stricter canonical reader: it rejects a bare epoch-millisecond string and
- * every non-ISO spelling `Date.parse` accepts, both of which the drivers read
- * correctly today. Refusing those would be a narrowing this card did not ask
- * for and no measurement supports.
  *
  * ## Two things it deliberately does NOT judge
  *
@@ -118,15 +138,67 @@ export function temporalComparandKind(fieldType: unknown): TemporalComparandKind
 }
 
 /**
- * `temporalStorageForm`'s `datetime` reading, as a yes/no.
+ * [#20525] [#20549] The ISO 8601 spellings a `datetime` STRING is read in,
+ * after trimming — the ones the platform itself writes, each read the same on
+ * every host by the `datetime` storage rule (`temporalStorageForm`):
  *
- * Mirrors it step for step: a bare integer in either sign is epoch
- * milliseconds; a bare `YYYY-MM-DD` is midnight UTC; a zone-naive
- * `YYYY-MM-DD[ T]HH:MM[:SS[.fff]]` has its wall clock read AS UTC; anything
- * else is handed to `Date.parse` exactly as the drivers hand it over.
+ * - `YYYY-MM-DD` — midnight UTC;
+ * - `YYYY-MM-DDTHH:MM[:SS[.f…]]`, then `Z`, a `±HH:MM` / `±HHMM` offset, or
+ *   nothing — a zone-naive wall clock is read AS UTC (ADR-0074);
+ * - `YYYY-MM-DD HH:MM[:SS[.f…]]`, zone-naive only — read AS UTC the same way.
+ *
+ * Every other spelling is uninterpretable, as a comparand and as a written
+ * value alike (the record validator asks {@link isUninterpretableTemporalComparand}).
+ * `Date.parse` reads `"2026/07/15 10:00"`, `"07/15/2026 10:00"` or
+ * `"15 July 2026 10:00"` in the SERVER PROCESS's zone and `"07/08/2026"`
+ * month-first, so the instant was a property of the deployment host; the rule
+ * reads a bare integer string such as `"2026"` as epoch milliseconds
+ * (`1970-01-01T00:00:02.026Z`), never as the year it looks like. A space
+ * separator carries no zone because the rule hands such a string to
+ * `Date.parse` whole, and its non-ISO reading moves
+ * `"0050-01-01 10:00+01:00"` to 1950. `T` and `Z` are upper case: a zone-naive
+ * `"…t10:00"` is not the form the rule reads as UTC.
+ */
+const ISO_DATETIME_WRITE_FORM =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?| \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/;
+
+/**
+ * [#20525] [#20549] Does the string's leading `YYYY-MM-DD` name a calendar day
+ * that exists — month 01..12, day 01 to that month's length, February 29 only
+ * in a leap year? Arithmetic, never a `Date` round trip: `Date.UTC` reads a
+ * year 0..99 as 1900..1999, and `Date.parse` ROLLS an impossible day over
+ * (`"2026-02-30"` is March 2), which is the defect this answers. A string with
+ * no leading day answers `false`.
+ */
+function namesRealCalendarDay(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const length = month === 2 ? (leap ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+  return day <= length;
+}
+
+/**
+ * `temporalStorageForm`'s `datetime` reading of a STRING, as a yes/no: one of
+ * the {@link ISO_DATETIME_WRITE_FORM} spellings, on a calendar day that
+ * exists, that the rule reads as an instant.
+ *
+ * The last step mirrors the rule: a bare `YYYY-MM-DD` is midnight UTC; a
+ * zone-naive `YYYY-MM-DD[ T]HH:MM[:SS[.fff]]` has its wall clock read AS UTC;
+ * anything else is handed to `Date.parse` exactly as the drivers hand it over
+ * — which is what still refuses `T25:00` or a `+99:99` offset, both inside
+ * the grammar's shape.
+ *
+ * [#20549] Before the first two steps this read every spelling `Date.parse`
+ * reads and every bare integer string, which is the comparand door the write
+ * door was narrower than — see the module note.
  */
 function readsAsInstant(s: string): boolean {
-  if (/^-?\d+$/.test(s)) return Number.isFinite(new Date(Number(s)).getTime());
+  if (!ISO_DATETIME_WRITE_FORM.test(s) || !namesRealCalendarDay(s)) return false;
   const iso = /^\d{4}-\d{2}-\d{2}$/.test(s)
     ? `${s}T00:00:00.000Z`
     : /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)
@@ -137,17 +209,19 @@ function readsAsInstant(s: string): boolean {
 
 /**
  * `temporalStorageForm`'s `date` reading of a STRING: its leading `YYYY-MM-DD`, and
- * nothing else.
+ * nothing else — [#20549] when that day exists.
  *
  * Narrower than {@link readsAsInstant} on purpose, because the rule it mirrors
  * is narrower: the `date` rule collapses a leading calendar day and returns
  * every other string untouched. `2026/07/15` is therefore uninterpretable for a
  * `date` column even though `Date.parse` reads it — today it survives to the
  * driver and compares as text against `YYYY-MM-DD` values, which is the silent
- * wrong answer this door exists to stop.
+ * wrong answer this door exists to stop. The rule keeps `"2026-02-30"` as
+ * written, a day that does not exist: compared as text on memory and SQLite
+ * (`200 []`), and a 500 on PostgreSQL.
  */
 function readsAsCalendarDay(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}/.test(s);
+  return namesRealCalendarDay(s);
 }
 
 /**
@@ -165,7 +239,9 @@ function readsAsWallClock(s: string): boolean {
  * Is `value` a comparand that a `kind` column's storage rule cannot read?
  *
  * `true` for a non-empty, non-placeholder STRING that the kind's rule would
- * hand back unchanged, and — on a `date` or `datetime` column — for a number,
+ * hand back unchanged, or [#20549] would read as another value than it names
+ * (an impossible calendar day, a `datetime` spelling outside
+ * {@link ISO_DATETIME_WRITE_FORM}), and — on a `date` or `datetime` column — for a number,
  * a `Date` or a string the rule reads whose year falls outside 0001..9999
  * ([#20264], `isOutsideTemporalYearRange`). Everything else — any other number
  * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
