@@ -147,6 +147,69 @@ export interface AnalyticsResult {
      * Absent on a `query` (cube) answer, which has no dataset behind it.
      */
     object?: string;
+
+    // ── Drill-through sidecars (ADR-0021 D2) ────────────────────────────────
+    // Four keys a `queryDataset` answer carries so a host can drill a clicked
+    // bucket back to the records behind it. Each is set only on a drillable
+    // answer, by the conditions stated per member; none is set on a `query`
+    // (cube) answer, on an answer with no rows, or on a draft-preview answer
+    // computed over pending seed rows (`previewDrafts`).
+
+    /**
+     * Each equality-drillable dimension the answer is grouped by: dimension
+     * NAME → that dataset dimension's own `field` (a base-object field, or a
+     * `relationship.field` path, as the dataset declares it). A host builds an
+     * exact-match drill filter on these field names; the rows carry only
+     * dimension names.
+     *
+     * Set only on a `queryDataset` answer that has rows and whose selection
+     * groups by at least one dimension with a `field` that is not
+     * `type: 'date'`. A date bucket cannot be exact-matched, so a date
+     * dimension is never listed here; its drill scope is `drillRanges`.
+     */
+    dimensionFields?: Record<string, string>;
+    /**
+     * The RAW grouped value behind each row, aligned to `rows` by index:
+     * `drillRawRows[i]` maps each `dimensionFields` dimension NAME → the stored
+     * value `rows[i]` was grouped by (a select option's value, a lookup's
+     * record id), captured before dimension label resolution rewrites
+     * `rows[i][dim]` to its display label. An exact-match drill filter is
+     * built from these values, not from the labels in `rows`.
+     *
+     * Set exactly when `dimensionFields` is.
+     */
+    drillRawRows?: Array<Record<string, unknown>>;
+    /**
+     * The totals-side companion to `drillRawRows`: `drillRawTotals[i]` aligns
+     * to `totals[i]` and `drillRawTotals[i][j]` to `totals[i].rows[j]`. Each
+     * map holds the raw grouped value of the `dimensionFields` dimensions that
+     * grouping groups by, captured in the same pass, so the grand-total
+     * grouping (`[]`) yields an empty map per row.
+     *
+     * Set only when `dimensionFields` is and the answer carries at least one
+     * `totals` grouping.
+     */
+    drillRawTotals?: Array<Array<Record<string, unknown>>>;
+    /**
+     * The half-open range `[gte, lt)` each row's time bucket covers, aligned
+     * to `rows` by index: `drillRanges[i]` maps date dimension NAME →
+     * `{ field, gte, lt }`, `field` being that dimension's `field`. A bucket
+     * ("2026-Q2") groups a span of records, so it drills by range rather than
+     * by the equality `drillRawRows` carries. `gte` and `lt` are `YYYY-MM-DD`
+     * calendar days, except for a dimension whose source field is `datetime`:
+     * those are ISO-8601 instants at midnight in the reference timezone (the
+     * selection's `timezone`, else the request's, else UTC). A row whose
+     * bucket value is `null` gets no entry for that dimension.
+     *
+     * Set only on a `queryDataset` answer that has rows and whose selection
+     * groups by at least one `type: 'date'` dimension with a `field` and a
+     * granularity (the selection's, else the dimension's `dateGranularity`).
+     * Such a dimension is left out when its source field is neither `date`
+     * nor `datetime` (or its type is unknown) and the reference timezone is
+     * not UTC. Independent of `dimensionFields`: a date-only grouping carries
+     * `drillRanges` and none of the equality sidecars.
+     */
+    drillRanges?: Array<Record<string, { field: string; gte: string; lt: string }>>;
 }
 
 /**

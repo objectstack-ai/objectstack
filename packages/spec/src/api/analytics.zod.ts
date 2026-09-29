@@ -149,6 +149,43 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
       + 'back, so a consumer can refresh on that object\'s record changes and drill '
       + 'into its records. Absent on a cube query answer, which has no dataset behind it.',
     ),
+    // Drill-through sidecars (ADR-0021 D2) — mirrored member for member from
+    // `AnalyticsResult`, where each one's conditions are stated in full.
+    dimensionFields: z.record(z.string(), z.string()).optional().describe(
+      'Drill-through sidecar: each equality-drillable dimension the answer is grouped '
+      + 'by, dimension name to that dataset dimension\'s own `field` (a base-object '
+      + 'field or a `relationship.field` path). Set only on a dataset answer '
+      + '(`POST /analytics/dataset/query`) that has rows and groups by at least one '
+      + 'dimension with a `field` that is not `type: \'date\'`; a date dimension is '
+      + 'never listed (see `drillRanges`). Absent on a cube query answer.',
+    ),
+    drillRawRows: z.array(z.record(z.string(), z.unknown())).optional().describe(
+      'Drill-through sidecar, aligned to `rows` by index: each `dimensionFields` '
+      + 'dimension name to the stored value that row was grouped by (a select '
+      + 'option\'s value, a lookup\'s record id), captured before label resolution '
+      + 'rewrites the row to its display label. An exact-match drill filter is built '
+      + 'from these, not from the labels in `rows`. Set exactly when `dimensionFields` is.',
+    ),
+    drillRawTotals: z.array(z.array(z.record(z.string(), z.unknown()))).optional().describe(
+      'Drill-through sidecar for `totals`: entry `[i][j]` aligns to `totals[i].rows[j]` '
+      + 'and holds the stored value of the `dimensionFields` dimensions that grouping '
+      + 'groups by, so the grand-total grouping yields an empty map per row. Set only '
+      + 'when `dimensionFields` is and the answer carries at least one `totals` grouping.',
+    ),
+    drillRanges: z.array(z.record(z.string(), z.object({
+      field: z.string().describe('The date dimension\'s own `field`'),
+      gte: z.string().describe('Inclusive lower bound of the bucket'),
+      lt: z.string().describe('Exclusive upper bound of the bucket'),
+    }))).optional().describe(
+      'Drill-through sidecar for time buckets, aligned to `rows` by index: date '
+      + 'dimension name to the half-open range `[gte, lt)` that row\'s bucket covers. '
+      + 'Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants at midnight in the '
+      + 'reference timezone when the source field is `datetime`; a row whose bucket '
+      + 'value is null gets no entry for that dimension. Set only on a dataset answer '
+      + 'that has rows and groups by at least one `type: \'date\'` dimension with a '
+      + '`field` and a granularity; independent of `dimensionFields`. Absent on a cube '
+      + 'query answer.',
+    ),
   }),
 }));
 
