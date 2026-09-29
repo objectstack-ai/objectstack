@@ -9799,7 +9799,7 @@ const connectorTriggersRemoved: MetadataConversion = {
   id: 'connector-triggers-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
-  retiredAfter: '17.4.0',
+  retiredAfter: '17.5.0',
   surface: 'connector.triggers',
   summary:
     "connector key 'triggers' removed (ADR-0049 — a connector trigger never started anything: "
