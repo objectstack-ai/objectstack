@@ -4731,9 +4731,10 @@ export class AutomationEngine implements IAutomationService {
             // ADR-0112 envelope: code AND status. `DELETE_RESTRICTED` is the
             // standard catalog's "cannot do this due to dependencies" member
             // (409) — ⛔ no new ledger entry is minted here. Its `DELETE_`
-            // prefix fits because this repo's own #10243 ruling records that
-            // "disabling a shipped flow is functionally equivalent to deleting
-            // it for as long as it stays off".
+            // prefix fits because the toggle ruling (commit 266436a7f,
+            // recorded at `isFlowAuthoringWrite` in the runtime's automation
+            // domain) holds that "disabling a shipped flow is functionally
+            // equivalent to deleting it for as long as it stays off".
             { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: guarding },
         );
     }
