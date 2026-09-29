@@ -51,9 +51,9 @@
  * then a `find` through the engine. `@objectstack/core` resolves through its
  * built `dist/` here, as this package's other suites read it.
  *
- * The probe object carries no `organization_id` column, so Layer 0 contributes
- * nothing on either face and the verdict compared is the one the grants
- * decide. The explained context carries no organization of its own, which on
+ * The probe object is platform-global (`tenancy: { enabled: false }`,
+ * ADR-0066), so Layer 0 contributes nothing on either face and the verdict
+ * compared is the one the grants decide. The explained context carries no organization of its own, which on
  * a tenant object under `isolated` is a separate explain-versus-enforce
  * position this card does not change.
  */
@@ -118,6 +118,7 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
       {
         name: PROBE,
         label: 'Probe',
+        tenancy: { enabled: false },
         fields: {
           id: { name: 'id', type: 'text', primaryKey: true },
           name: { name: 'name', type: 'text' },
