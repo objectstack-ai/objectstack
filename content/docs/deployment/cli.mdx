@@ -852,7 +852,7 @@ occupancy on its own.
 | Category | Examples | Applied by |
 |----------|----------|------------|
 | `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_widen_varchar_to_text`, `manual_column_type_change` and `unbuildable_index`, which nothing applies |
+| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
 #### Index drift
