@@ -25,8 +25,9 @@ export const entry: SemanticMigration = {
     + 'meant to fire triggers is a judgment no transform can make, so the prescription is '
     + 'a TODO rather than a rewrite. The server decides in import-prepare.ts with '
     + '`body?.runAutomations !== false`, i.e. an omitted flag runs automations, and has '
-    + 'since #2922 — automations always ran on import historically (the engine ignored '
-    + 'the flag entirely before then), so opt-out was made the explicit act, matching '
+    + 'since the flag was first honoured — automations always ran on import historically '
+    + '(the engine ignored the flag entirely before then), '
+    + 'so opt-out was made the explicit act, matching '
     + 'platform convention. The schema said the opposite in both machine-readable and '
     + "human-readable form, and both SHIPPED: `.default(false)` in `@objectstack/spec`'s "
     + 'JSON Schema, and the describe prose in the published reference tables for both '
@@ -45,12 +46,13 @@ export const entry: SemanticMigration = {
     + 'warned, and the reference page told an author the wrong thing in the other '
     + 'direction. There is deliberately NO schema tombstone and no D2 conversion: no key '
     + 'is removed, and an HTTP request body is neither authored nor persisted — the same '
-    + 'disposition `notification-list-cursor-retired` (#6361) takes for the sibling '
+    + 'disposition `notification-list-cursor-retired` takes for the sibling '
     + 'default on this major, and `batch-options-validate-only-retired` before it. The '
     + 'declared move itself is recorded mechanically, per key, in '
-    + 'DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` fingerprints are '
-    + 're-derived on every build. Maintainer ruling 2026-08-09 (#6704, disposition A: '
-    + 'the spec follows the runtime). ADR-0049 / ADR-0078.',
+    + 'DEFAULT_CHANGES_BY_MAJOR[17] — the per-key default fingerprint added once a flipped '
+    + 'default was found invisible to every gate — whose `from`/`to` fingerprints are '
+    + 're-derived on every build. Maintainer ruling 2026-08-09, disposition A: '
+    + 'the spec follows the runtime. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'Every import request of yours that must NOT fire triggers sends `runAutomations: '
     + 'false` explicitly, rather than omitting the key and trusting the old declared '
@@ -64,5 +66,6 @@ export const entry: SemanticMigration = {
     + 'fires them after, and `runAutomations: false` turns them off before and after. '
     + 'Nothing starts being refused — the route never validated this body against the '
     + 'schema and does not begin to. `dryRun` is unaffected and still runs NO automations '
-    + 'whatever the flag says (#6037).',
+    + 'whatever the flag says: it asks the engine\'s validate-only write path for its verdict, '
+    + 'and that path deliberately fires no hooks.',
 };

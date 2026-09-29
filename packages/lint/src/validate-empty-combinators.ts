@@ -7,7 +7,7 @@
  * ## The runtime is not changing, and this file changes nothing about it
  *
  * #5322 (maintainer ruling, 2026-08-04) settled the RUNTIME semantics of the
- * four empty shapes as the boolean identity reduction, and #5659/PR #6528 made
+ * four empty shapes as the boolean identity reduction, and #5659 (commit 3510e4a25) made
  * that reduction one implementation — `reduceFilterVerdict` in
  * `@objectstack/spec/data`, proven against `FILTER_LOGIC_CASES` and consumed by
  * every backend. This rule touches no translate or evaluation path. It asks the

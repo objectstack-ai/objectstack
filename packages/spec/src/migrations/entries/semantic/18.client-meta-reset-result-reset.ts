@@ -42,9 +42,9 @@ export const entry: SemanticMigration = {
     + 'and a consumer accepting two spellings is what contract-first exists to prevent. No '
     + 'deprecated `deleted?: boolean` transition key ships, for the same reason — a '
     + 'transition period is for keys that WORKED, and this one never did. The identical '
-    + 'correction one door over is `client-delete-result-success` (#5638); the wire is '
+    + 'correction one door over is `client-delete-result-success`; the wire is '
     + 'deliberately untouched here, per the 2026-08-29 ruling that reality is the '
-    + 'contract. ADR-0087, #13023.',
+    + 'contract. ADR-0087.',
   acceptanceCriteria:
     'No code reads `.deleted`, `.type` or `.name` off a `client.meta.deleteItem()` / '
     + '`client.environment(id).meta.deleteItem()` result; `tsc` names every site for a '

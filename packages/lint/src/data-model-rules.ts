@@ -61,7 +61,7 @@ export interface LintIssue {
  * runtime gate's `fingerprint` reads `where` and `path` together (making
  * `where` more specific cannot merge two findings that were distinct).
  *
- * [#10064] On the runtime gate's WIRE surface (`RuntimeAuthoringIssue.path`,
+ * [commit def0d3e63] On the runtime gate's WIRE surface (`RuntimeAuthoringIssue.path`,
  * the 422 `issues[]` / 2xx `advisories`), the top-level collection index of a
  * collection-resident finding is rewritten to the entry's NAME
  * (`objects[417].sharingModel` → `objects.acme_invoice.sharingModel`) after

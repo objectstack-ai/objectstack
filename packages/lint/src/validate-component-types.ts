@@ -2,7 +2,7 @@
 
 /**
  * [ADR-0078] The page-component TYPE gate — the author-time rejection the open
- * `type` union never had (#12950, riding the #12183 ruling of 2026-08-26).
+ * `type` union never had (commit 225e7690f, riding the #12183 ruling of 2026-08-26).
  *
  * ## What was missing
  *

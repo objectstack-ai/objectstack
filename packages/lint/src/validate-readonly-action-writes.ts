@@ -4,7 +4,7 @@
 // declares `readonlyWhen` THROUGH `ctx.api` is a SILENT NO-OP on every record
 // whose predicate is TRUE (#13770).
 //
-// The action-surface sibling of `validate-readonly-hook-writes.ts` (#13653) and
+// The action-surface sibling of `validate-readonly-hook-writes.ts` (commit 36d287803) and
 // `validate-readonly-flow-writes.ts` - the same question ("is this declared
 // field writable through THIS channel?") on the third write surface. It reuses
 // both halves of the existing machinery rather than growing its own: the flow

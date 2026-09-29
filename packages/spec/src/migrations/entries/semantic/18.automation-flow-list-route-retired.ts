@@ -23,8 +23,10 @@ export const entry: SemanticMigration = {
     + '`GET /api/v1/automation/_status` (`client.automation.getRuntimeStatus`), which is '
     + 'unchanged',
   reason:
-    'Maintainer ruling on #19543 (door ④, verbatim 「退役，统一走 /meta/flow」, recorded in '
-    + 'that card\'s re-derivation comment of 2026-09-25), under ADR-0049 enforce-or-remove. The '
+    'Maintainer ruling of 2026-09-25 on the list doors found declaring `limit` / `cursor` and '
+    + 'never reading them (this route is door ④; verbatim 「退役，统一走 /meta/flow」, given when '
+    + 'asked why the flow list does not use the standard '
+    + 'API), under ADR-0049 enforce-or-remove. The '
     + 'route\'s contract described a capability nobody built: ListFlowsRequestSchema declared '
     + '`status`, `type`, `limit` (default 50) and `cursor`, and the handler read none of them — '
     + 'it asked the automation service for its flow names with no arguments at all. '
@@ -42,8 +44,7 @@ export const entry: SemanticMigration = {
     + 'There is no alias and no transition window: GET simply stops being mounted there. There is '
     + 'no D2 conversion and no tombstone, because the shape is HTTP-only — nobody authors a '
     + 'ListFlowsRequest and nothing persists one — so the three schemas are whole-def removals in '
-    + 'RETIRED_DEFS_BY_MAJOR and this entry carries the record. ADR-0049 / ADR-0087 / ADR-0106, '
-    + '#19543.',
+    + 'RETIRED_DEFS_BY_MAJOR and this entry carries the record. ADR-0049 / ADR-0087 / ADR-0106.',
   acceptanceCriteria:
     'On the composition `objectstack serve` builds, GET is no longer mounted at '
     + '/api/v1/automation (nor at its environment-scoped twin), so the host gives its standard '

@@ -22,8 +22,9 @@ export const entry: SemanticMigration = {
     + 'rather than the constant `false` it used to be, so for the first time it answers the '
     + 'question a caller reaching for a cursor was actually asking',
   reason:
-    'ADR-0049 enforce-or-remove (director seat, decision batch #204 item 2, maintainer '
-    + '「204 同意」 2026-09-21, letter C of three for this door; letter A — build a cursor '
+    'ADR-0049 enforce-or-remove (maintainer ruling 2026-09-21 on the list doors found '
+    + 'declaring `limit` / `cursor` and never reading them — this door is door ①, and the '
+    + 'ruling took letter C of three for it; letter A — build a cursor '
     + 'protocol for a 100-row window — and letter B — retire the key and leave the '
     + '`hasMore` lie standing — were both considered and refused). `cursor` was declared on '
     + 'the request, VALIDATED at the boundary, forwarded into a `cursor?: string` slot on '
@@ -33,7 +34,8 @@ export const entry: SemanticMigration = {
     + 'error. '
     + '⭐ The `limit` half of this door was NOT retired, and the distinction is the ruling, '
     + 'not an oversight. The sibling `/packages` door retired its `limit` with its `cursor` '
-    + '(#17667, decision batch #126 item 1) because nothing read it; the parent ruling '
+    + '(the 2026-09-13 ruling aligning that door\'s declaration with its reads: pagination is '
+    + 'no part of a small bounded list) because nothing read it; the parent ruling '
     + 'explicitly does not transfer here. On this door `limit` is read end to end — the '
     + 'boundary enforces the declared 1..100 range off the schema itself, the service takes '
     + 'it as an option, and the engine spends it as `RunStore.listHistory`\'s window — and '
@@ -66,8 +68,8 @@ export const entry: SemanticMigration = {
     + 'in the schema alone would have left the one generated client this repo ships typing it '
     + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
     + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
-    + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
-    + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
+    + 'the notifications `cursor` was retired: the client dropped the option and recorded '
+    + 'the removal in its docblock. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No caller sends `cursor` to `GET /api/v1/automation/:name/runs`, and that is true of every '
     + 'channel this repo ships rather than of the schema alone. Writing it on a '
@@ -83,9 +85,11 @@ export const entry: SemanticMigration = {
     + 'the schema typing the key `never` while the shipped client typed it `string` and sent it, '
     + 'silently dropped by a route that no longer reads it (ADR-0104). '
     + '⚠️ ONE wire behaviour CHANGES and must be verified as such, because it reverses a '
-    + 'decision recorded under #7300: a repeated `?cursor=a&cursor=b` used to answer '
+    + 'decision recorded when this door\'s query parameters were first validated where they are '
+    + 'read (the fix for `?limit=abc` reaching the engine as `NaN`): a repeated '
+    + '`?cursor=a&cursor=b` used to answer '
     + '`400 VALIDATION_FAILED` with a `details.fields[]` entry naming `cursor`, and now '
-    + 'answers `200` with the key ignored like any other unrecognised query name. #7300 '
+    + 'answers `200` with the key ignored like any other unrecognised query name. That fix '
     + 'validated the key rather than deciding it, so that a future cursor implementation '
     + 'would not be the one to discover the type was unenforced; this ruling decides it '
     + 'instead — there will be no cursor implementation on this door — so the refusal would '

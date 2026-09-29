@@ -20,8 +20,8 @@ export const entry: SemanticMigration = {
     + 'limiting returns only via the ENFORCE route of ADR-0049 through a new '
     + 'ADR — the executor first, the vocabulary second)',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-15 on #8715 '
-    + '(disposition B: delete). `ApiKeySchema` documented better-auth\'s `apiKey` '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-15, '
+    + 'disposition B: delete the schema. `ApiKeySchema` documented better-auth\'s `apiKey` '
     + 'PLUGIN schema — a plugin this platform does not load '
     + '(`plugin-auth/src/managed-extension-fields.ts` states the table is '
     + 'hand-rolled ObjectStack): `start` and `lastRefetchAt` name columns that do '
@@ -39,8 +39,11 @@ export const entry: SemanticMigration = {
     + 'declarations and the published one was fiction; the generated reference '
     + 'page rendered it faithfully, which is how the defect surfaced as a docs '
     + 'card. With no carrier key and no authored document there is nothing to '
-    + 'tombstone and no seam for a D2 conversion: route 3, the #4834 / #4988 / '
-    + '#5055 / #6486 / #8075 shape — RETIRED_DEFS_BY_MAJOR plus this entry ARE '
+    + 'tombstone and no seam for a D2 conversion: route 3, the shape of the '
+    + 'earlier removals of the dynamic plugin-loading family, the `ui/` '
+    + 'interaction configs, the widget / i18n shapes, five declared-but-inert '
+    + 'surfaces and two credential-bearing schemas no `sys_metadata` door '
+    + 'reached — RETIRED_DEFS_BY_MAJOR plus this entry ARE '
     + 'the declaration.',
   acceptanceCriteria:
     'No code imports `ApiKeySchema`, `ApiKey` or `ApiKeyParsed` from '

@@ -15,11 +15,15 @@ export const entry: SemanticMigration = {
     + '`latitude` → `lat`, `longitude` → `lng`). A key that names no declared member is removed '
     + 'at the producer — never tolerated at a consumer (AGENTS.md #0.1)',
   reason:
-    'Maintainer ruling 2026-09-01 on #13802 (option A). Both value classes were all-optional '
+    'Maintainer ruling 2026-09-01, option A: both value classes refuse undeclared keys. Both '
+    + 'value classes were all-optional '
     + 'STRIPPING `z.object`s, so a value with a completely wrong key set parsed green and the '
     + 'wrong keys vanished from the parse output: the showcase seed wrote `postal_code`, the '
-    + 'platform accepted it, dropped it, and rendered an empty ZIP box (#13388, objectui#6812; '
-    + '#5143 named the same stripping on the widget round-trip), while a stored-value scan over '
+    + 'platform accepted it, dropped it, and rendered an empty ZIP box (found while counting '
+    + 'stored address values for objectui\'s survey of which structured values its field '
+    + 'validator checks; an earlier report had named the same stripping on the address '
+    + 'widget\'s round-trip, whose ZIP input bound `zipCode` against a stored `postalCode`), '
+    + 'while a stored-value scan over '
     + 'the class could only ever report a clean count it had no way to earn. Closing the two '
     + 'shapes restores declared = enforced and pulls "loose" back to the one deliberate '
     + 'exception (`FileValueSchema`, untouched). Where the refusal BITES is the ADR-0104 write '

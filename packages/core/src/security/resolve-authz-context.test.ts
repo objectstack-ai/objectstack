@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { hasPlatformAdminStanding, resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext } from './resolve-authz-context.js';
+import { hasPlatformAdminStanding, resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext, vetOrganizationClaim } from './resolve-authz-context.js';
 import { POSTURE_RANK } from './posture-ladder.js';
 import { hashApiKey } from './api-key.js';
 import type { AuthzPosture } from '@objectstack/spec/security';
@@ -1829,6 +1829,38 @@ describe('[#15409] a session organization claim that no membership backs', () =>
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
     // ⛔ Not degraded into the session's drop: the key is REFUSED, not trimmed.
     expect(dropLines()).toHaveLength(0);
+  });
+});
+
+/**
+ * [#20580] The session arm's check, as the one exported function a second
+ * reader (plugin-security's permission explainer) asks about the user it
+ * explains. The session arm's own behaviour is pinned end to end above; this
+ * block pins the function's contract, so a change to either reader's answer
+ * goes through here.
+ */
+describe('[#20580] vetOrganizationClaim — the organization a claim resolves in', () => {
+  const HELD = ['org_beta', 'org_gamma'];
+
+  it('walled (`isolated`, `group`): a claim no current membership backs is dropped', () => {
+    expect(vetOrganizationClaim('org_alpha', HELD, 'isolated')).toBeUndefined();
+    expect(vetOrganizationClaim('org_alpha', HELD, 'group')).toBeUndefined();
+    expect(vetOrganizationClaim('org_alpha', [], 'isolated')).toBeUndefined();
+  });
+
+  it('walled: a claim a current membership backs stands as made', () => {
+    expect(vetOrganizationClaim('org_beta', HELD, 'isolated')).toBe('org_beta');
+    expect(vetOrganizationClaim('org_gamma', HELD, 'group')).toBe('org_gamma');
+  });
+
+  it('no wall (`single`, or no posture supplied): the claim stands whatever the memberships', () => {
+    expect(vetOrganizationClaim('org_alpha', HELD, 'single')).toBe('org_alpha');
+    expect(vetOrganizationClaim('org_alpha', [], undefined)).toBe('org_alpha');
+  });
+
+  it('no claim resolves in no organization', () => {
+    expect(vetOrganizationClaim(undefined, HELD, 'isolated')).toBeUndefined();
+    expect(vetOrganizationClaim('', HELD, 'single')).toBeUndefined();
   });
 });
 

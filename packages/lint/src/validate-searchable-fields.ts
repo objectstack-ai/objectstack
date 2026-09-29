@@ -97,7 +97,7 @@
  *      the runtime would refuse — `created_by` in a view's narrowing — is a
  *      missed finding, not a wrong one.)
  *
- * Skip 3 answers EXISTENCE, and since #8404 it no longer ends the matter. On an
+ * Skip 3 answers EXISTENCE, and since commit b849e6911 it no longer ends the matter. On an
  * ADR-0015 `external` object the platform registers its injected anchors and
  * provisions no storage behind them (#7865 / #8116), so `owner_id` there is
  * addressable and empty on every record. Existence rightly stays silent —
@@ -305,11 +305,11 @@ export function checkSearchableFieldList(
   path: string,
   subject: string,
   role: SearchableFieldRole = 'narrowing',
-  // [#8404] `objectName -> its unprovisioned injected anchors`
+  // [commit b849e6911] `objectName -> its unprovisioned injected anchors`
   // ({@link indexUnprovisionedAnchors}). OPTIONAL, and its absence means
   // exactly one thing: this caller did not build the index, so the provenance
   // question goes unasked and only existence/admissibility are answered — the
-  // pre-#8404 behaviour, preserved for out-of-repo callers of this exported
+  // behaviour before commit b849e6911, preserved for out-of-repo callers of this exported
   // core (cloud graph-lint, the AI authoring path). Every in-repo caller passes
   // it: `validateSearchableFields` below and `validate-react-page-props`.
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
@@ -359,7 +359,7 @@ export function checkSearchableFieldList(
       continue;
     }
 
-    // ── [#8404] Provenance — the second question about a name skip 3 kept ──
+    // ── [commit b849e6911] Provenance — the second question about a name skip 3 kept ──
     //
     // Existence answered "yes" (authored, or a registry-injected system
     // column). On a federated object the injected anchor is addressable and
@@ -493,7 +493,7 @@ export function checkSearchableFieldList(
  * (the canonical set, ADR-0061) and the list views that narrow it, including
  * the two standalone `views[]` shapes the `PUT /api/v1/meta/view` door
  * carries and the runtime publish gate snapshots: the flattened list overlay
- * (#9313, top-level set) and the ViewItem record (#10001,
+ * (#9313, top-level set) and the ViewItem record (commit f1b5ad39a,
  * `config.searchableFields` one level down). Returns findings (empty = clean).
  *
  * The react page surface (`<ListView searchableFields={…}>`) is deliberately
@@ -584,7 +584,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     // `viewKind: 'list'` (required on the overlay arm since #7741, refused by
     // name on the strict container schema) with no nested `config` (that
     // shape is a ViewItem RECORD — judged by its own record rung below since
-    // #10001). A `narrowing`, like
+    // commit f1b5ad39a). A `narrowing`, like
     // every list-view surface: the overlay's set is echoed verbatim as the
     // `$searchFields` override and judged by the #4254 ingress gate.
     if (view.viewKind === 'list' && !isRec(view.config)) {
@@ -598,7 +598,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
       );
     }
 
-    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    // ── [commit f1b5ad39a] The RECORD rung: a standalone ViewItem record ──
     //
     // The self rung's structural complement — `ViewMetadataSchema`'s member 1
     // (`ViewItemWireSchema`, `{ name, object, viewKind: 'list', config }`),

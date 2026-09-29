@@ -104,7 +104,7 @@ import { recordsOf } from './object-graph.js';
 
 /**
  * `error` for the existence verdict — a literal key against a literal object is
- * a certainty (see the module note). [#8663] `warning` for the provenance one:
+ * a certainty (see the module note). [commit 192213f66] `warning` for the provenance one:
  * the same widening `validateFlowTemplatePaths` carries, for the same reason.
  * The two questions have different certainties, so they cannot share a
  * severity; the suite that runs this rule is severity-agnostic by contract and
@@ -128,7 +128,7 @@ export interface FlowNodeWriteFinding {
 export const FLOW_NODE_WRITE_UNKNOWN_FIELD = 'flow-node-write-unknown-field';
 
 /**
- * [#8663] The flow-node twin of `hook-body-write-unprovisioned-anchor`. This
+ * [commit 192213f66] The flow-node twin of `hook-body-write-unprovisioned-anchor`. This
  * rule reached the same blind spot from the same direction: it imports
  * {@link IMPLICIT_FIELDS} from the hook rule, so it inherited the set's
  * object-independence along with its contents.
@@ -214,7 +214,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
 
   // Built lazily: a stack whose flows carry no write node never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
-  // [#8663] Non-empty only for a stack carrying an ADR-0015 `external` object.
+  // [commit 192213f66] Non-empty only for a stack carrying an ADR-0015 `external` object.
   let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   flows.forEach((flow, flowIndex) => {
@@ -259,7 +259,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
         // maps a remote column the author vouches for (#7859's direction).
         if (known.has(fieldName)) continue;
         if (IMPLICIT_FIELDS.has(fieldName)) {
-          // [#8663] Implicitly writable SOMEWHERE is not provisioned HERE.
+          // [commit 192213f66] Implicitly writable SOMEWHERE is not provisioned HERE.
           if (!anchors.get(objectName)?.has(fieldName)) continue;
           findings.push({
             severity: 'warning',
