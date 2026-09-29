@@ -95,7 +95,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { AnalyticsService } from '../analytics-service.js';
 
-const EMPTY = { rows: [], fields: [], totals: [] };
+/** The degraded answer: no rows — and, like every dataset answer, its base object (#20644). */
+const EMPTY = { rows: [], fields: [], totals: [], object: 'opportunity' };
 
 const dataset = DatasetSchema.parse({
   name: 'sales',
