@@ -10882,8 +10882,8 @@ const step18: MigrationStep = {
         + 'of FILTER_OPERATORS until every face answered it, then added in the same change that flipped '
         + 'the lowering, after measuring that no face drops it. Two consequences reach stored metadata. '
         + 'A stored 「is empty」 on a text or multi-value field finds more rows: the ones holding the '
-        + 'empty string or the empty list, which the $null lowering missed while the three builders '
-        + 'already showed them as empty. And the rule is refused, loudly and with the $null '
+        + 'empty string or the empty list, which the $null lowering missed. '
+        + 'And the rule is refused, loudly and with the $null '
         + 'prescription, where the face that answers it holds no declaration for the column — the four '
         + 'compositions the replacement names — where the $null lowering compiled IS NULL. The same '
         + 'change made the write door refuse a $empty object as a field value, because that door '
@@ -10893,11 +10893,11 @@ const step18: MigrationStep = {
         + 'ADR-0087 / ADR-0112.',
       acceptanceCriteria:
         'Grep your stored views, sharing rules and filter arrays for is_empty / is_not_empty. On a text '
-        + 'or multi-value field, re-check what the view or rule is supposed to select: it now also '
-        + 'selects the rows holding the empty string or the empty list. On the built-in id, rewrite it '
+        + 'or multi-value field, re-check what the view or rule is supposed to select. '
+        + 'On the built-in id, rewrite it '
         + 'to is_null / is_not_null. If a federated object on driver-memory or driver-mongodb, or an '
-        + 'AnalyticsService host without sourceFieldMeta, carries such a rule, the query now fails with '
-        + 'INVALID_FILTER instead of answering — bind the object on a federation-capable driver, or pass '
+        + 'AnalyticsService host without sourceFieldMeta, carries such a rule, the query now fails '
+        + 'instead of answering — bind the object on a federation-capable driver, or pass '
         + 'sourceFieldMeta. No insert or update payload carries a $empty object as a field value.',
     },
     // Ruling A on #19886, item 1: the $ne slot's half of the question
