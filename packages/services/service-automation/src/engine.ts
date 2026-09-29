@@ -4689,20 +4689,22 @@ export class AutomationEngine implements IAutomationService {
      *    each named run through the operator cancel door (ADR-0044) or to let
      *    it finish.
      * A disabled caller with no parked run cannot reach the node, and does not
-     * guard. The parked-run read happens only when a disabled caller is being
-     * judged, so a flow whose callers are all armed never touches the store.
+     * guard.
+     *
+     * `parked` is {@link parkedRunsOf} over the switched-off `callers`, read by
+     * {@link toggleFlow} only when there is one to judge — so a flow whose
+     * callers are all armed never touches the run stores, and awaits nothing
+     * it did not await before.
      *
      * ADR-0112 envelope unchanged: `DELETE_RESTRICTED` / 409, and
      * `subflowCallers` lists exactly the callers that guard.
-     *
-     * @throws the durable suspended-run store's own failure when it cannot be
-     *   listed while a disabled caller is judged — see {@link parkedRunsOf}.
      */
-    private async refuseDisableUnderReachingCallers(name: string): Promise<void> {
-        const callers = this.packagedSubflowCallers(name);
-        if (callers.length === 0) return;
+    private refuseDisableUnderReachingCallers(
+        name: string,
+        callers: string[],
+        parked: ReadonlyMap<string, string[]>,
+    ): void {
         const armed = callers.filter((c) => this.isFlowEnabled(c));
-        const parked = await this.parkedRunsOf(new Set(callers.filter((c) => !this.isFlowEnabled(c))));
         const guarding = callers.filter((c) => armed.includes(c) || parked.has(c));
         if (guarding.length === 0) return;
 
@@ -4915,7 +4917,17 @@ export class AutomationEngine implements IAutomationService {
         if (enabled) {
             this.refuseEnableOntoDisabledSubflow(name, flow);
         } else {
-            await this.refuseDisableUnderReachingCallers(name);
+            // A switched-off caller guards only while it holds a parked run,
+            // so only then are the run stores read — and only that read is
+            // awaited: every other disable flips exactly as it did before,
+            // synchronously up to its durable write. A store that cannot be
+            // listed throws out of `parkedRunsOf` and nothing is written.
+            const callers = this.packagedSubflowCallers(name);
+            const switchedOff = callers.filter((c) => !this.isFlowEnabled(c));
+            const parked = switchedOff.length > 0
+                ? await this.parkedRunsOf(new Set(switchedOff))
+                : new Map<string, string[]>();
+            this.refuseDisableUnderReachingCallers(name, callers, parked);
         }
 
         // The durable row FIRST. A store that throws aborts the flip with
