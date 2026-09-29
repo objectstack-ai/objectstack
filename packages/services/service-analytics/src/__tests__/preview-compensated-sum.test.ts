@@ -35,17 +35,17 @@ const GROUPS: Record<string, { values: number[]; s: number; a: number }> = {
 };
 
 const ROWS: Record<string, unknown>[] = Object.entries(GROUPS).flatMap(([g, { values }], gi) =>
-  values.map((w, i) => ({ id: `${gi}-${i}`, g, w })),
+  values.map((amt, i) => ({ id: `${gi}-${i}`, grp: g, amt })),
 );
 
 const DATASET = DatasetSchema.parse({
   name: 'ledger_ds',
   label: 'Ledger',
   object: 'ledger',
-  dimensions: [{ name: 'g', field: 'g', type: 'string', label: 'Group' }],
+  dimensions: [{ name: 'grp', field: 'grp', type: 'string', label: 'Group' }],
   measures: [
-    { name: 's', aggregate: 'sum', field: 'w' },
-    { name: 'a', aggregate: 'avg', field: 'w' },
+    { name: 'sum_amt', aggregate: 'sum', field: 'amt' },
+    { name: 'avg_amt', aggregate: 'avg', field: 'amt' },
   ],
 });
 
@@ -83,11 +83,11 @@ function svc(preview: boolean) {
 async function grid(preview: boolean): Promise<Record<string, { s: unknown; a: unknown }>> {
   const result = await svc(preview).queryDataset(
     DATASET,
-    { dimensions: ['g'], measures: ['s', 'a'] },
+    { dimensions: ['grp'], measures: ['sum_amt', 'avg_amt'] },
     undefined,
     preview ? { previewDrafts: true } : undefined,
   );
-  return Object.fromEntries(result.rows.map((r) => [String(r.g), { s: r.s, a: r.a }]));
+  return Object.fromEntries(result.rows.map((r) => [String(r.grp), { s: r.sum_amt, a: r.avg_amt }]));
 }
 
 const expected = Object.fromEntries(Object.entries(GROUPS).map(([g, { s, a }]) => [g, { s, a }]));
@@ -98,9 +98,9 @@ beforeAll(async () => {
   const locateFile = await locateWasm();
   const SQL = await initSqlJs(locateFile ? { locateFile } : undefined);
   db = new SQL.Database();
-  db.run(`CREATE TABLE "ledger" ("id" TEXT PRIMARY KEY, "g" TEXT, "w" REAL);`);
-  const insert = db.prepare(`INSERT INTO "ledger" ("id","g","w") VALUES (?,?,?)`);
-  for (const r of ROWS) insert.run([r.id, r.g, r.w] as any[]);
+  db.run(`CREATE TABLE "ledger" ("id" TEXT PRIMARY KEY, "grp" TEXT, "amt" REAL);`);
+  const insert = db.prepare(`INSERT INTO "ledger" ("id","grp","amt") VALUES (?,?,?)`);
+  for (const r of ROWS) insert.run([r.id, r.grp, r.amt] as any[]);
   insert.free();
 });
 
