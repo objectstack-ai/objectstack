@@ -32,8 +32,8 @@
       "children": {
         "name": {
           "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "The RECORD KEY is the identity, not this field. `measures` is `z.record(z.string(), MetricSchema)`, and every consumer resolves a measure by its key: `analytics-service.ts#getMeta` publishes `${cube.name}.${key}`, `native-sql-strategy.ts#lookupMember` looks the member up in the `cube.measures` bag by key, `memory-analytics.ts` indexes `cube.measures[fieldName]`. Nothing reads the inner `name`. The dataset compiler WRITES it (`dataset-compiler.ts`: `const metric: Metric = { name: m.name, … }; measures[m.name] = metric`) — writing it equal to the key it files the metric under, which is exactly why no reader ever needed it. Authoring a `name` that DISAGREES with the key is the trap: the key wins everywhere and the authored value is inert. ⛔ Not an ADR-0049 deletion candidate as it stands: it is `z.string().regex(…)` and REQUIRED, so removing it breaks every authored cube to delete nothing; the honest repairs are to derive it from the key or to make the disagreement an authoring refusal, and both are decisions rather than sweeps."
+          "verifiedAt": "2026-09-28",
+          "note": "REMOVED 2026-09-28 (#20300, ADR-0049 enforce-or-remove) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources and stored cubes by the protocol-18 conversion `cube-member-inner-name-removed`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the record KEY in `measures` is the metric's name — to rename a metric, rename its key. The dead verdict was re-measured at retirement with a lit control: zero reads of a member's inner `name` in non-test source — `analytics-service.ts#getMeta` publishes `${cube.name}.${key}`, `native-sql-strategy.ts#lookupMember` and `memory-analytics.ts` index the bag by key — against four reads of the neighbouring `measure.label` / `dimension.label` in the same two `getMeta` projections. The earlier objection on this row (REQUIRED, so removing it breaks every authored cube to delete nothing) is answered by that conversion, which strips the key from every stored and built cube, and by the producers: `dataset-compiler.ts`, `CubeRegistry.inferFromObject` and `inferCubeFromQuery` stopped writing it in the same change. The disagreeing-value trap was live in-repo: the in-memory driver's fixtures authored `totalAmount: { name: 'total_amount' }` and queried `orders.totalAmount`."
         },
         "label": {
           "status": "live",
@@ -72,8 +72,8 @@
       "children": {
         "name": {
           "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Same shape and same verdict as `measures.name`: `dimensions` is a `z.record`, every consumer resolves by the record KEY (`getMeta` publishes `${cube.name}.${key}`, `lookupMember` indexes the bag, `memory-analytics.ts` reads `cube.dimensions[fieldName]`), and the dataset compiler writes the inner `name` equal to the key it files the dimension under (`dimensions[d.name] = dim`). A `name` that disagrees with its key is inert. Not a deletion candidate for the reason given on `measures.name`."
+          "verifiedAt": "2026-09-28",
+          "note": "REMOVED 2026-09-28 (#20300, ADR-0049 enforce-or-remove) — the same tombstone, the same conversion (`cube-member-inner-name-removed`) and the same re-measurement as `measures.name`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the record KEY in `dimensions` is the dimension's name (`getMeta` publishes `${cube.name}.${key}`, `lookupMember` and `memory-analytics.ts#resolveDimension` index the bag by key) — to rename a dimension, rename its key."
         },
         "label": {
           "status": "live",

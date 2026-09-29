@@ -76,7 +76,8 @@ function mutableProtocolService(initial: unknown[]) {
     let fail = false;
     return {
         service: {
-            async getMetaItems(q: { type: string }) {
+            // [#20552] The engine reads the protocol's EXECUTION face.
+            async getMetaItemsForExecution(q: { type: string }) {
                 if (fail) throw new Error('protocol unavailable');
                 return { items: q.type === 'flow' ? flows : [] };
             },

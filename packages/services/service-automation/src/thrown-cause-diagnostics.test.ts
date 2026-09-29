@@ -101,7 +101,8 @@ function goodFlow(name: string) {
 /** The protocol's flattened flow view, in the `{ items: [...] }` envelope. */
 function fakeProtocolService(flows: () => unknown[], opts: { throwOnRead?: Error } = {}) {
     return {
-        async getMetaItems(q: { type: string }) {
+        // [#20552] The engine reads the protocol's EXECUTION face.
+        async getMetaItemsForExecution(q: { type: string }) {
             if (opts.throwOnRead) throw opts.throwOnRead;
             return { items: q.type === 'flow' ? flows() : [] };
         },

@@ -75,10 +75,10 @@ const OPEN_SUMMARY: Cube = {
   title: 'Open summary',
   sql: 'admission_open',
   measures: {
-    authored_total: { name: 'authored_total', label: 'Authored total', type: 'count', sql: '*' },
+    authored_total: { label: 'Authored total', type: 'count', sql: '*' },
   },
   dimensions: {
-    region: { name: 'region', label: 'Region', type: 'string', sql: 'region' },
+    region: { label: 'Region', type: 'string', sql: 'region' },
   },
 };
 
@@ -88,7 +88,7 @@ const WALLED_SUMMARY: Cube = {
   title: 'Walled summary',
   sql: 'admission_walled',
   measures: {
-    walled_total: { name: 'walled_total', label: 'Walled total', type: 'count', sql: '*' },
+    walled_total: { label: 'Walled total', type: 'count', sql: '*' },
   },
   dimensions: {},
 };

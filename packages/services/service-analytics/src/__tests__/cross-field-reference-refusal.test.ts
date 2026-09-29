@@ -150,11 +150,11 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
-    budget: { name: 'budget', label: 'Budget', type: 'number', sql: 'budget' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    amount: { label: 'Amount', type: 'number', sql: 'amount' },
+    budget: { label: 'Budget', type: 'number', sql: 'budget' },
   },
   public: true,
 } as unknown as Cube;

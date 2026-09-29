@@ -52,11 +52,11 @@ const CUBE: Cube = {
   name: 'events',
   title: 'Events',
   sql: 'events',
-  measures: { count: { name: 'count', label: 'Count', type: 'count', sql: 'id' } },
+  measures: { count: { label: 'Count', type: 'count', sql: 'id' } },
   dimensions: {
-    probe: { name: 'probe', label: 'Probe', type: 'string', sql: 'probe' },
+    probe: { label: 'Probe', type: 'string', sql: 'probe' },
     createdAt: {
-      name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+      label: 'Created At', type: 'time', sql: 'created_at',
       granularities: ['day'],
     },
   },

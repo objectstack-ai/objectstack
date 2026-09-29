@@ -81,10 +81,10 @@ const CUBE: Cube = {
   name: 'deals',
   title: 'Deals',
   sql: 'deal',
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: {
-    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-    stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+    id: { label: 'Id', type: 'string', sql: 'id' },
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
   },
   public: true,
 } as unknown as Cube;

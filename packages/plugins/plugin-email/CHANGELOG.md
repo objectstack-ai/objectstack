@@ -1,5 +1,614 @@
 # @objectstack/plugin-email
 
+## 17.5.0
+
+### Patch Changes
+
+- cd5fdaa: docs(email): the shipped carriers said "best-matching locale"; the resolver matches `(name, locale)` exactly (#18499)
+  
+  Clause-②: no — no accept set moves and no published payload key changes; the
+  corrected prose ships as JSDoc in each package's `dist/*.d.ts` (and, for
+  `@objectstack/service-messaging`, inside the bundled `dist/index.js`), which is
+  why this is a changeset rather than `skip-changeset`.
+  
+  `packages/plugins/plugin-email/src/template-loader.ts` already enumerates
+  "the EmailService picks the best-matching locale" as a FALSE declaration, and
+  three shipped carriers still stated it. Measured against the code at this
+  branch's base rather than against the card's transcription:
+  
+  - `createSysEmailTemplateLoader.load` — `locale` given ⇒ exact `{ name, locale }`
+    match ordered by `id`, or `null`; `locale` absent ⇒ `{ name, locale: 'en-US' }`
+    first, and only if that misses `{ name }` ordered by `locale` ascending;
+  - `EmailService.resolveAndRenderTemplate` — `wanted = input.locale?.trim() ||
+    'en-US'`, then exactly one retry at the literal `'en-US'` when the call NAMED a
+    locale, then `TEMPLATE_NOT_FOUND`; the unpinned rung is reachable only for a
+    call that named no locale.
+  
+  No language-subtag folding anywhere on that path, and nothing that could be
+  called a "best match". Corrected:
+  
+  - `sys_email_template`'s object doc (`@objectstack/platform-objects`) now states
+    the exact match, the single `en-US` rung and the no-locale last resort;
+  - `sys_notification_template.locale`'s sibling-declaration comment
+    (`@objectstack/service-messaging`) said "both resolve a template by
+    best-matching locale", which was false in a second way: the two resolvers do
+    not agree. `NotificationTemplateStore.load` walks `(topic, channel, locale)`
+    through a candidate list — the named tag, its primary subtag, then
+    `DEFAULT_LOCALE` (`'en'`) — so it DOES fold a subtag, where
+    `sys_email_template` does not. Only the shared 16-char BCP-47 bound is shared;
+    the resolution is not, and the comment now says so;
+  - `template-loader.ts`'s own "What was wrong" block quoted two sentences it can
+    no longer quote — one was already stale at this base (the
+    `EmailTemplateDefinitionSchema.locale` text it reproduces has zero occurrences
+    in `packages/spec` today) and the other is corrected above. Both bullets are
+    now cited rather than quoted, so a later rewording cannot strand them again.
+  
+  No resolution behaviour changes: every edit in this changeset is prose.
+- 8dba7aa: docs(plugin-email): the `TemplateLoader` docblock opened on a "best match" its own next paragraph denies (#19507)
+  
+  Clause-②: no — no accept set moves, no published payload key changes, no
+  export is added or removed. The corrected prose ships as JSDoc in
+  `@objectstack/plugin-email`'s `dist/index.d.ts` (the package publishes `dist`),
+  which is why this is a changeset rather than `skip-changeset`.
+  
+  `TemplateLoader`'s docblock in `packages/plugins/plugin-email/src/email-service.ts`
+  contradicted itself inside one paragraph. It opened with *"Returns the
+  best-matching row for `(name, locale)`"* and then, two lines later, correctly
+  said *"`locale` set → an EXACT match for that locale, or `null`"*.
+  `SendTemplateInput.template` (`packages/spec/src/contracts/email-service.ts`)
+  declares the opposite of the opening in as many words: there is no "best match"
+  and no language-subtag folding, the locale row is resolved by the exact ladder.
+  
+  The opening now states what `createSysEmailTemplateLoader` implements, measured
+  against the code at this branch's base rather than against any transcription of
+  it — `load(name, locale)`:
+  
+  - `locale` given ⇒ `first({ name, locale }, BY_ID)`, an exact `(name, locale)`
+    match ordered by `id`, or `null`;
+  - `locale` absent ⇒ `first({ name, locale: 'en-US' }, BY_ID)` first, and only
+    when that misses, `first({ name }, BY_LOCALE)` — the bundle's lowest locale
+    tag, ordered;
+  - no branch asks the store to pick a locale, and none folds a subtag.
+  
+  This is the fourth shipped carrier of the same false declaration and the first
+  outside the set #18499 enumerated: that probe was written as the literal strings
+  `best-matching locale` / `picks the best`, and this sentence says
+  "best-matching **row**", so it was never in the hit set. A carrier set built
+  from literal strings is blind to its own synonyms.
+  
+  No resolution behaviour changes: the edit is prose. `createSysEmailTemplateLoader`,
+  the `sendTemplate` ladder and every `where` clause are untouched.
+- df3ba16: A template's plain-text faces — the subject and `body_text` — now render their `{{x}}` values verbatim instead of HTML-escaping them, so a link in the text part keeps its literal `&` (#20374).
+  
+  Clause-②: no
+  
+  - **What was wrong.** `EmailService` rendered every face of a `sys_email_template` row through the HTML escaper. In the text/plain part of the built-in verification, password-reset, invitation and magic-link mails the link read `…?token=…&amp;callbackURL=%2F`: a plain-text client, or a user copying the link, got a parameter named `amp;callbackURL`, and the post-verification redirect fell back to `/`. The same escaping put `&amp;` / `&#39;` into subjects built from names such as `R&D` or `O'Brien`.
+  - **What changes.** Escaping now follows the face. `body_html` is markup and is rendered exactly as before: `{{x}}` HTML-escaped, `{{{x}}}` not. The subject and `body_text` are plain text: every hole renders its value as-is, and triple braces mean the same as double there. The switch is in the renderer, so it covers every row that reaches `sendTemplate` / `renderTemplate` — the built-in auth templates, declared `emailTemplates` and rows authored in Studio — with no template edit.
+  - **Who sees it.** The persisted `sys_email.body_text` and `subject`, the delivered text part and Subject header, and `IEmailService.renderTemplate()`'s `text` / `subject` (which the messaging inbox channel stores as a notification's body and title). A row with no `body_text` is unchanged: its text part was already derived from the HTML with the entities decoded.
+  - **Unchanged.** The exported `renderTemplate()` helper is still the HTML renderer. Nothing an author writes needs to change.
+- f572a7e: `@objectstack/plugin-email` declares `nodemailer` `^10.0.2` (was `^9.1.1`), clearing GHSA-6vj9-mwq6-2f5v (5.9): nodemailer's process-global DNS cache kept the TLS `servername` per host, so a second SMTPS transport to the same host could inherit the first transport's SNI and certificate identity and send its credentials to the wrong TLS virtual host. Every release from 5.0.0 through 10.0.1 is affected and the fix ships only in 10.0.2, so the 9.x line has no patched release and the major is taken.
+  
+  Clause-②: no
+  
+  No exported symbol, option key, payload key or accept/reject verdict of ours moves; the published surface is unchanged and grades `patch`. What an operator can see is nodemailer's own behaviour inside the 10.x line this range admits:
+  
+  - **Node.js floor.** nodemailer 10 declares `node >= 20`. `@objectstack/core`, which this package depends on, already declares `node >= 22`, so no install that could load the plugin is excluded.
+  - **Module shape.** nodemailer 10 is a TypeScript rewrite shipping both ESM and CommonJS builds with bundled declarations. `SmtpTransport` loads it lazily and reads `createTransport` off the namespace or its `default`; measured on 10.0.2, 10.0.10, 10.0.11 and 10.0.12, both entry points expose it both ways, so the loader is unchanged.
+  - **Contradictory TLS flags in `transportOptions`.** From nodemailer 10.0.12 (the version a fresh install resolves today), `requireTLS` wins over `ignoreTLS` / `opportunisticTLS`. `SmtpTransport` sets `requireTLS` itself whenever TLS is on and the port is not 465. On such a port, a `transportOptions: { ignoreTLS: true }` escape-hatch override ran a cleartext session under nodemailer 9. It now performs the required STARTTLS upgrade or fails the send, which is the behaviour `secure: true` already documents. To connect in the clear on purpose, set `secure: false`.
+  
+  The devDependency on `@types/nodemailer` is dropped: nodemailer 10 ships its own declarations, and TypeScript resolves `nodemailer` to them (`dist/esm/nodemailer.d.ts`) before any `@types` package.
+  
+  The same sweep also moves two transitive packages. Neither release changes anything, and they are listed here so all seven findings can be read in one place. Both are workspace overrides in `pnpm-workspace.yaml`, and each dependent's declared range already admits the fixed version:
+  
+  - `ip-address` 10.4.0 and 10.5.0 → one copy on `^10.5.1`, for GHSA-2vr4-cq9g-pvrc (6.9) and GHSA-rpw4-54j3-4h4q (6.3). It reaches the tree through `@modelcontextprotocol/sdk` → `express-rate-limit` and through `mongodb` → `socks`.
+  - `undici` 7.29.0 → `^7.29.1` (a target-only lift of the existing pin) and 8.9.0 → `^8.10.2` (a new 8.x selector), for GHSA-3wwx-pv8p-q78v (5.9). Both copies are dev-only, through `ai` and `jsdom`.
+  
+  `osv-scanner.toml` keeps zero exemptions and is untouched.
+- ca31ff6: Take the fix for the fifteen OSV advisories that turned `Validate Package Dependencies` red on every PR.
+  
+  The advisory database moved; the lockfile did not. `origin/main`'s `pnpm-lock.yaml` is byte-identical to the tree that scanned GREEN the day before and RED the day after, so this is a repo-wide condition rather than any PR's regression, and every one of the fifteen names a published fix version — the take-the-fix path `osv-scanner.toml`'s header describes, not the exemption path. That ledger keeps its zero entries and is untouched here, as is `.github/workflows/validate-deps.yml`.
+  
+  Two published packages change what a downstream install resolves, which is what this changeset grades:
+  
+  - **`@objectstack/plugin-email`** declares `nodemailer` `^9.1.1` (was `^9.0.5`), clearing GHSA-2x7j-588g-ccc2 (7.5), GHSA-cc9r-2j5m-2m83 (6.5), GHSA-wmmp-3585-3rmp (6.5) — all fixed in 9.1.0 — and GHSA-8m3c-c648-2xjj (5.9), fixed in 9.1.1. The range takes the higher of the two fix lines so one floor covers all four. The 10.x major is deliberately not taken.
+  - **`@objectstack/plugin-hono-server`** declares `hono` `^4.13.5` (was `^4.13.2`), clearing GHSA-crvj-82cr-hjcx (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5).
+  
+  No exported symbol, payload key or accept/reject behaviour of ours moves — the published surface is unchanged and both grade `patch`.
+  
+  The rest of the sweep releases nothing and is named here only so the set is readable in one place: the `sharp` override target lifts to `^0.35.4` (GHSA-rgj7-g3m4-5g8c, 8.9) and the `hono` override target to `^4.13.5`, both target-only lifts whose selectors already sit at the compatibility boundary; the private docs app takes `next` 16.3.3 (GHSA-2xp9-vwfh-vxw4 9.5 and GHSA-p293-qw3h-jr36 9.0, the two Criticals); and the `vitest` devDependency line takes 4.1.11 across the workspace, with `@vitest/coverage-v8` moved in lockstep because its peer on `vitest` is exact (GHSA-82fw-gwwq-j7x9, 5.9, which flagged both `vitest` and `@vitest/mocker`).
+  
+  `hono` was flagged at TWO resolved versions and both are gone: the override lift is what collapses them. The transitive copy `@modelcontextprotocol/sdk` pulled sat exactly on the old `^4.12.34` floor and so was never re-resolved, while our own three declarations floated up to 4.13.2; `^4.13.5` excludes the floor, both edges re-resolve, and the tree now holds one `hono`. A bump that moved only our declarations would have left the transitive copy flagged and the gate red.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [0283cb9]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [2dfe070]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [9dacf61]
+- Updated dependencies [146c291]
+- Updated dependencies [4db1bf1]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [7b1e4a4]
+- Updated dependencies [d7c0241]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [6d2571f]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [9be2b59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [cd5fdaa]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [e75cc3c]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [1f05ea4]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [fc91239]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [74fb2f7]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [6cc8dcd]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [ec292cf]
+- Updated dependencies [dc0ab6a]
+- Updated dependencies [19e58e2]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [c736eaa]
+- Updated dependencies [4d0bd23]
+- Updated dependencies [4045781]
+- Updated dependencies [ecf56e7]
+- Updated dependencies [0e658fb]
+- Updated dependencies [9529989]
+- Updated dependencies [236cec1]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [eec56c3]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [3875ae6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [2bbebf5]
+- Updated dependencies [369bcbe]
+- Updated dependencies [3bd28e2]
+- Updated dependencies [9347c1f]
+- Updated dependencies [c164186]
+- Updated dependencies [e7344f0]
+- Updated dependencies [4d7e740]
+- Updated dependencies [de091b5]
+- Updated dependencies [6aa3188]
+- Updated dependencies [a34c27c]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [cf55914]
+- Updated dependencies [17bd318]
+- Updated dependencies [681868c]
+- Updated dependencies [a9fb83e]
+- Updated dependencies [2274894]
+- Updated dependencies [e462186]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [560b724]
+- Updated dependencies [16c5473]
+- Updated dependencies [b276d44]
+- Updated dependencies [3f86dc5]
+- Updated dependencies [172b4cf]
+- Updated dependencies [67c98f6]
+- Updated dependencies [b98fbc2]
+- Updated dependencies [e7f69db]
+- Updated dependencies [7465eeb]
+- Updated dependencies [84156c7]
+- Updated dependencies [e0f17a3]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [ca753c0]
+- Updated dependencies [8ecbe0f]
+- Updated dependencies [6a4aec7]
+- Updated dependencies [d624002]
+- Updated dependencies [e4471e6]
+- Updated dependencies [e8fcf55]
+- Updated dependencies [fe677ae]
+- Updated dependencies [8d1f7ab]
+- Updated dependencies [cfc3bcf]
+- Updated dependencies [dd1b803]
+- Updated dependencies [03d6cb0]
+- Updated dependencies [9e7824a]
+- Updated dependencies [437bb0d]
+- Updated dependencies [49144fc]
+- Updated dependencies [e2c4e12]
+- Updated dependencies [08c8484]
+- Updated dependencies [93cfc3f]
+- Updated dependencies [6ac33a5]
+- Updated dependencies [443b2f4]
+- Updated dependencies [7e7fab7]
+- Updated dependencies [b09ce67]
+- Updated dependencies [4df101c]
+- Updated dependencies [6a6a17b]
+- Updated dependencies [733822c]
+- Updated dependencies [e5cf27d]
+- Updated dependencies [a91d12a]
+- Updated dependencies [bea6d2e]
+- Updated dependencies [f415bcf]
+- Updated dependencies [615c468]
+- Updated dependencies [5f9d7d7]
+- Updated dependencies [31d281d]
+- Updated dependencies [569d4d2]
+- Updated dependencies [9e9bb46]
+- Updated dependencies [0d7ed5a]
+- Updated dependencies [2aa25ef]
+- Updated dependencies [0e1afe8]
+- Updated dependencies [288611e]
+- Updated dependencies [dfd8e39]
+- Updated dependencies [89f87f2]
+- Updated dependencies [28ad7e4]
+- Updated dependencies [e6b7d8c]
+- Updated dependencies [3062e50]
+- Updated dependencies [40b315b]
+- Updated dependencies [f2c7eef]
+- Updated dependencies [7e36a3c]
+- Updated dependencies [5a6267f]
+- Updated dependencies [0bbe400]
+- Updated dependencies [862b6ce]
+- Updated dependencies [80153f5]
+- Updated dependencies [26daf0b]
+- Updated dependencies [826f327]
+- Updated dependencies [7e5246d]
+- Updated dependencies [b810ddb]
+- Updated dependencies [7dc45eb]
+- Updated dependencies [17e4f52]
+- Updated dependencies [dcd3bce]
+- Updated dependencies [2d91c9a]
+- Updated dependencies [b285508]
+- Updated dependencies [2c31070]
+- Updated dependencies [7db1332]
+- Updated dependencies [aeb0557]
+- Updated dependencies [1c1b8c8]
+- Updated dependencies [05077d4]
+- Updated dependencies [ba5927f]
+- Updated dependencies [75b2169]
+- Updated dependencies [de8c973]
+- Updated dependencies [65352b7]
+- Updated dependencies [e956924]
+- Updated dependencies [2304b16]
+- Updated dependencies [c7ad16f]
+- Updated dependencies [48efe91]
+- Updated dependencies [fb38607]
+- Updated dependencies [dc07593]
+- Updated dependencies [e967cbd]
+- Updated dependencies [9bf5e67]
+- Updated dependencies [8255a51]
+- Updated dependencies [d1c01ff]
+- Updated dependencies [6427e2c]
+- Updated dependencies [9e1689f]
+- Updated dependencies [b057434]
+- Updated dependencies [f6ceddc]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [72eeabd]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [9cc5010]
+- Updated dependencies [6e3e546]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [6af2901]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [3cf6449]
+- Updated dependencies [3cf6449]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [576d5df]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [5cf58eb]
+- Updated dependencies [66e266c]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [03b19d9]
+- Updated dependencies [6154165]
+- Updated dependencies [199002b]
+- Updated dependencies [ab450f4]
+- Updated dependencies [21ab410]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [029d8a4]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [3cb84d0]
+- Updated dependencies [119a02b]
+- Updated dependencies [eea8787]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

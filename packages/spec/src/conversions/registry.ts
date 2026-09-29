@@ -7673,7 +7673,6 @@ const metricFiltersRemoved: MetadataConversion = {
         measures: {
           // The card's measured shape: parsed, registered, returned unfiltered.
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
@@ -7682,10 +7681,10 @@ const metricFiltersRemoved: MetadataConversion = {
           // A metric WITHOUT the key rides through untouched — the strip
           // dispatches on key presence, and the copy-on-write contract keeps
           // the reference.
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7695,15 +7694,14 @@ const metricFiltersRemoved: MetadataConversion = {
         sql: 'orders',
         measures: {
           closed_won_revenue: {
-            name: 'closed_won_revenue',
             label: 'Closed-Won Revenue',
             type: 'sum',
             sql: 'amount',
           },
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+          order_count: { label: 'Orders', type: 'count', sql: 'id' },
         },
         dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7769,25 +7767,25 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           // Mixed list — the sub-day names go, the rest stays in its order.
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['hour', 'day', 'month'],
           },
           // Sub-day ONLY — the key goes rather than becoming an empty list.
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
             granularities: ['second', 'minute'],
           },
           // Neither retired member nor the key at all: both ride through, and
           // the copy-on-write contract keeps the references.
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7795,20 +7793,20 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
       analyticsCubes: [{
         name: 'events',
         sql: 'events',
-        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        measures: { count: { label: 'Events', type: 'count', sql: 'id' } },
         dimensions: {
           created_at: {
-            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            label: 'Created At', type: 'time', sql: 'created_at',
             granularities: ['day', 'month'],
           },
           touched_at: {
-            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            label: 'Touched At', type: 'time', sql: 'touched_at',
           },
           closed_at: {
-            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            label: 'Closed At', type: 'time', sql: 'closed_at',
             granularities: ['day', 'week'],
           },
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+          stage: { label: 'Stage', type: 'string', sql: 'stage' },
         },
       }],
     },
@@ -7899,8 +7897,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             // The persisted shape: `sql` was REQUIRED and `relationship` was
             // MATERIALIZED by the schema's own default, so this is what a cube
@@ -7920,9 +7918,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
           // A SECOND cube, so the notices have to distinguish two of them.
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             // Only the cardinality — a join whose `sql` an author already
@@ -7937,8 +7935,8 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'delivery',
           sql: 'task',
-          measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: 'id' } },
-          dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
           joins: {
             project: { name: 'showcase_project' },
             owner: { name: 'sys_user' },
@@ -7947,9 +7945,9 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
         {
           name: 'billing',
           sql: 'invoice',
-          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
           dimensions: {
-            issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' },
+            issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' },
           },
           joins: {
             customer: { name: 'crm_account' },
@@ -7961,6 +7959,141 @@ const cubeJoinSqlAndRelationshipRemoved: MetadataConversion = {
     // `billing.customer` loses the materialized default, and `delivery.owner`
     // produces none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `measures.<metric>.name` and `dimensions.<dimension>.name` — the inner name a
+ * cube member used to REQUIRE (#20300, ADR-0049 enforce-or-remove; triage
+ * verdict RETIRE by the maintainer's criterion: Cube.dev and LookML key a
+ * member by its declared name, with no second inner name that can disagree).
+ *
+ * `measures` and `dimensions` are RECORDS, and every consumer resolves a member
+ * by its KEY — `AnalyticsService#getMeta` and the in-memory driver publish
+ * `<cube>.<key>`, `NativeSQLStrategy#lookupMember` and the in-memory driver's
+ * `resolveMeasure` / `resolveDimension` index the bag by key. The inner `name`
+ * was a second copy of the identity that nothing read.
+ *
+ * ## Why a D2 strip, and why it strips a DISAGREEING value too
+ *
+ * The key was REQUIRED, so every cube artifact written from the old schema's
+ * parse output, and every stored `analytics_cube` row, carries it on every
+ * member — and after the tombstone the boot door refuses it
+ * (`ObjectStackDefinitionSchema` spreads `analyticsCubes: z.array(CubeSchema)`).
+ * Only the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so this
+ * entry is what keeps a deployed cube booting.
+ *
+ * A value EQUAL to its key is the lossless case the triage named. A value that
+ * DISAGREES is stripped as well, and that is not a guess about intent: the key
+ * already won everywhere, so the running system never saw the inner spelling,
+ * and deleting it changes no query and no discovery answer. Leaving it in place
+ * would change one — the cube would stop loading. What the strip cannot decide
+ * is which spelling the author MEANT, so the notice prints both (`from` carries
+ * the inner value, `to` names the key that stays) and the paired D3 entry
+ * `cube-member-inner-name-retired` addresses that judgement to the author.
+ *
+ * Members live one level below the collection item, in two records, so the
+ * walk runs per member — the `metric-filters-removed` shape, over both bags.
+ * The emitted path NAMES the cube, as `cube-join-sql-and-relationship-removed`
+ * does: an index into the author's `analyticsCubes[]` is a position, not a name.
+ */
+const cubeMemberInnerNameRemoved: MetadataConversion = {
+  id: 'cube-member-inner-name-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.4.0',
+  surface: 'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name',
+  summary:
+    "cube member key 'name' removed from measures and dimensions (ADR-0049 enforce-or-remove — nothing read it: "
+    + 'every consumer resolves a member by its record KEY, published and queried as `<cube>.<key>`. The '
+    + 'record key is the member\'s name; to rename a member, rename its key)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      let next: Dict = cube;
+      for (const bag of ['measures', 'dimensions'] as const) {
+        const members = cube[bag];
+        if (!isDict(members)) continue;
+        let touched = false;
+        const nextMembers: Dict = { ...members };
+        for (const [key, member] of Object.entries(members)) {
+          if (!isDict(member) || !('name' in member)) continue;
+          const { name, ...rest } = member;
+          const at = `${where}.${bag}.${key}.name`;
+          emit(name === key
+            ? { from: 'name', to: '(removed)', path: at }
+            : { from: `name ${JSON.stringify(name)}`, to: `(removed; the record key "${key}" is the name)`, path: at });
+          nextMembers[key] = rest;
+          touched = true;
+        }
+        if (touched) next = { ...next, [bag]: nextMembers };
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            // The persisted shape: `name` was REQUIRED, and every producer in
+            // the repo wrote it equal to the key it filed the member under.
+            count: { name: 'count', label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { name: 'total_amount', label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them.
+          name: 'events',
+          sql: 'event',
+          measures: {
+            // DISAGREEING — the in-memory driver's own fixtures authored this
+            // shape and queried `events.eventCount`: the key won, the inner
+            // spelling was inert. Stripped, and the notice prints both.
+            eventCount: { name: 'event_count', label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            // Already canonical — rides through untouched. The fixture's own
+            // control: the strip dispatches on key presence.
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'orders',
+          sql: 'orders',
+          measures: {
+            count: { label: 'Orders', type: 'count', sql: '*' },
+            total_amount: { label: 'Total', type: 'sum', sql: 'amount' },
+          },
+          dimensions: {
+            status: { label: 'Status', type: 'string', sql: 'status' },
+          },
+        },
+        {
+          name: 'events',
+          sql: 'event',
+          measures: {
+            eventCount: { label: 'Events', type: 'count', sql: '*' },
+          },
+          dimensions: {
+            kind: { label: 'Kind', type: 'string', sql: 'kind' },
+          },
+        },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: three equal names on `orders`, one
+    // disagreeing name on `events`, and none for the canonical `events.kind`.
+    expectedNotices: 4,
   },
 };
 
@@ -12488,6 +12621,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     currencyConfigPrecisionRemoved,
     permissionRlsTagsRemoved,
     actionAriaRemoved,
+    cubeMemberInnerNameRemoved,
     flowDecisionModeInclusiveExplicit,
     viewListTabsRemoved,
   ],

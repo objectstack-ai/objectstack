@@ -126,8 +126,8 @@ Type: `[string, string]`
 | **title** | `string` | optional |  |
 | **description** | `string` | optional |  |
 | **sql** | `string` | ✅ | Base SQL statement or Table Name |
-| **measures** | `Record<string, { name: string; label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; … }>` | ✅ | Quantitative metrics |
-| **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
+| **measures** | `Record<string, { label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; sql: string; … }>` | ✅ | Quantitative metrics, keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`. A metric declares no inner `name`. |
+| **dimensions** | `Record<string, { label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; sql: string; … }>` | ✅ | Qualitative attributes, keyed by dimension name: the record key IS the dimension's name, published and queried as `<cube>.<key>`. A dimension declares no inner `name`. |
 | **joins** | `Record<string, { name: string }>` | optional |  |
 | **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
 | **public** | `boolean` | optional (default: `true`) | Whether the analytics API exposes this cube. Default true (visible). false hides it from GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it (CUBE_NOT_FOUND). Visibility only: the underlying object's permissions and row-level security still govern its records on every door. |
@@ -143,7 +143,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique metric ID |
+| **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
@@ -154,7 +154,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique dimension ID |
+| **name** | `never` | optional | [REMOVED] `dimensions.<dimension>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the dimension's name. Every consumer resolves a dimension by its key in `dimensions` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a dimension, rename its key in `dimensions` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
@@ -194,7 +194,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique dimension ID |
+| **name** | `never` | optional | [REMOVED] `dimensions.<dimension>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the dimension's name. Every consumer resolves a dimension by its key in `dimensions` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a dimension, rename its key in `dimensions` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
@@ -223,7 +223,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique metric ID |
+| **name** | `never` | optional | [REMOVED] `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. Every consumer resolves a metric by its key in `measures` (`GET /analytics/meta` publishes it as `<cube>.<key>`, and a query names it that way), so the inner `name` was a second copy of the identity that nothing read, and one that disagreed with its key was silently ignored. Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |

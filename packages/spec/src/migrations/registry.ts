@@ -5176,6 +5176,23 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the reading that customers do not upgrade major by major in order.',
   },
   {
+    id: 'cube-member-inner-name-retired',
+    order: 47,
+    text:
+      'It retires the inner `name` on cube members — `measures.<metric>.name` and '
+      + '`dimensions.<dimension>.name` (ADR-0049 enforce-or-remove) — by the mainstream criterion: '
+      + 'Cube.dev and LookML key a member by its declared name, with no second inner name that can '
+      + 'disagree. Both member bags are records, and every consumer already resolved a member by its '
+      + 'record KEY, publishing and querying it as `<cube>.<key>`; the REQUIRED inner copy was read by '
+      + 'nothing, and one that disagreed with its key was silently ignored. The keys are retiredKey '
+      + 'tombstones on `MetricSchema` and `DimensionSchema`, and because the key was required, every '
+      + 'stored or built cube carries it: the D2 conversion `cube-member-inner-name-removed` strips it '
+      + 'from every member of every cube, retired from the load path, and its notice prints a '
+      + 'disagreeing value beside the key that stays. Its D3 record is the semantic entry '
+      + '`cube-member-inner-name-retired`, which asks the author of a disagreeing name which spelling '
+      + 'they meant.',
+  },
+  {
     id: 'cube-metric-filters-retired',
     order: 10,
     text:
@@ -7897,6 +7914,38 @@ const step18: MigrationStep = {
         + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
         + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
         + 'table and the per-object RLS/tenant read scope are resolved from.',
+    },
+    // #20300 — ADR-0049 enforce-or-remove (triage verdict RETIRE) — the D3 entry of
+    // the `cube-member-inner-name-removed` family (one D3 entry per retirement
+    // family, even when D2 is lossless). Registered keys: `data/Metric:name` and
+    // `data/Dimension:name`. The strip changes no query and no discovery answer;
+    // what it cannot decide is which of two DISAGREEING names an author meant.
+    {
+      id: 'cube-member-inner-name-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name — the '
+        + 'inner name a cube member used to require',
+      replacement:
+        'The record key. `measures` and `dimensions` are records, and the key a member is declared under '
+        + 'IS its name: the analytics API publishes it as `<cube>.<key>` and a query names it that way. To '
+        + 'rename a member, rename its key.',
+      reason:
+        'The D2 conversion `cube-member-inner-name-removed` deletes the inner `name` from every metric and '
+        + 'dimension of every cube, and the delete is lossless in behaviour: every consumer — discovery, both '
+        + 'query strategies, the in-memory driver — resolves a member by its record key, so the inner value '
+        + 'was never read. Where it EQUALED its key there is nothing left to decide. Where it DISAGREED, the '
+        + 'key was already the name every query, dashboard and report used, and the inner value was a spelling '
+        + 'nothing read; the conversion notice prints both. Only the author can say whether the disagreeing '
+        + 'spelling was the one they meant — in which case the member must be re-keyed, and every consumer '
+        + 'that names `<cube>.<old key>` changes with it — or a stale copy to drop.',
+      acceptanceCriteria:
+        'No metric or dimension of any cube carries `name`; the parse refuses it with the prescription. '
+        + 'For every conversion notice whose `from` shows a name that differed from its record key, the '
+        + 'author has either kept the key (nothing else changes) or re-keyed the member to the intended '
+        + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
+        + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
     },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
@@ -19070,6 +19119,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `currencyConfig` on objects and object extensions — including the `2` the
     // old `.overwrite()` baked into parse output.
     'data/CurrencyConfig:precision',
+    // #20300 — the same ruling, the same diff and the same route as
+    // `data/Metric:name`: `Dimension.name` was REQUIRED and read by nothing, because
+    // `dimensions` is a record and every consumer resolves a dimension by its KEY
+    // (`getMeta` publishes `<cube>.<key>`, `lookupMember` and the in-memory driver's
+    // `resolveDimension` index the bag by key). A `retiredKey()` tombstone on the
+    // `strictObject`; the D2 conversion `cube-member-inner-name-removed` strips it
+    // from stored and built cubes, and the D3 record is
+    // `cube-member-inner-name-retired`.
+    'data/Dimension:name',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -19205,6 +19263,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #20300 — ADR-0049 enforce-or-remove (triage verdict RETIRE by the
+    // maintainer's criterion for declared-but-unenforced families: Cube.dev and
+    // LookML key a member by its declared name, with no second inner name that can
+    // disagree). `Metric.name` was REQUIRED and read by nothing: `measures` is a
+    // record, and every consumer resolves a metric by its KEY — `getMeta`
+    // publishes `<cube>.<key>`, `NativeSQLStrategy#lookupMember` and the in-memory
+    // driver index the bag by key. Measured with a lit control: zero reads of a
+    // member's inner `name` in non-test source, four reads of the neighbouring
+    // `measure.label` / `dimension.label` in the same `getMeta` projections.
+    //
+    // `retiredKey()` on a `strictObject`, for the prescription and the `tsc`
+    // channel (the `ui/Action:aria` precedent). Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention — accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. The D2 conversion
+    // `cube-member-inner-name-removed` strips the key wherever the chain is
+    // replayed; it is owed because the key was REQUIRED, so every stored or built
+    // cube carries it. The D3 record is `cube-member-inner-name-retired`.
+    'data/Metric:name',
     // #15680 (stack card 5/6 of #14478) — ruling B. `NoSQLQueryOptions.timeout`
     // said "Query timeout (ms)" in prose and nothing else, directly beside
     // `batchSize`, a plain row COUNT: two bare numbers side by side, one carrying a

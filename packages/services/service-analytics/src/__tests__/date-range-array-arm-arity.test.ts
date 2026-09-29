@@ -140,10 +140,10 @@ async function nativeSql(range: readonly unknown[]): Promise<{ where: string; pa
 const PREVIEW_CUBE = {
   name: 'events', sql: 'events',
   dimensions: {
-    id: { name: 'id', type: 'string', sql: 'id' },
-    created_at: { name: 'created_at', type: 'time', sql: 'created_at' },
+    id: { type: 'string', sql: 'id' },
+    created_at: { type: 'time', sql: 'created_at' },
   },
-  measures: { count: { name: 'count', type: 'count', sql: '*' } },
+  measures: { count: { type: 'count', sql: '*' } },
 } as unknown as Cube;
 
 /**

@@ -131,46 +131,129 @@ export function redactMetadataItems<T>(type: string, items: T[]): T[] {
     return items.map((item) => redactMetadataItem(type, item));
 }
 
-/**
- * Walk to the plain object that OWNS the last segment of `segments`.
- *
- * `undefined` when any hop along the way is absent or is not a plain object —
- * which the caller must read as "this body does not speak to that path at all",
- * never as "the value is absent". The distinction is the whole guard: a PUT
- * body carrying no `config` key is an author removing the container, and
- * grafting `config.password` back onto it would MINT a config that holds
- * nothing but a credential.
- */
-function containerAt(root: unknown, segments: string[]): Record<string, unknown> | undefined {
-    let node: unknown = root;
-    for (let i = 0; i < segments.length - 1; i += 1) {
-        if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
-        node = (node as Record<string, unknown>)[segments[i] as string];
-    }
-    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
-    return node as Record<string, unknown>;
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** An element's identity for an array hop: a non-empty string `id`, or none. */
+function identityOf(element: unknown): string | undefined {
+    if (!isPlainRecord(element)) return undefined;
+    const id = element.id;
+    return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
 /**
- * Copy-on-write set of `value` at `segments`, returning a new root and copying
- * only the containers along the path.
- *
- * The incoming request body belongs to the caller (`saveMetaItem` hands the
- * same object to the audit trail and the registry write-through), so the
- * carry-forward must not mutate it in place.
+ * The ONE element of `array` whose identity is `elementId` — `undefined` when
+ * none carries it or more than one does. Two elements sharing an id cannot be
+ * told apart, so neither is chosen: guessing would graft a credential onto
+ * whichever of the two happened to come first.
  */
-function withValueAt(
-    root: Record<string, unknown>,
-    segments: string[],
-    value: unknown,
-): Record<string, unknown> {
-    const [head, ...rest] = segments as [string, ...string[]];
-    const next: Record<string, unknown> = { ...root };
-    if (rest.length === 0) {
-        next[head] = value;
-        return next;
+function elementWithIdentity(
+    array: readonly unknown[],
+    elementId: string,
+): { index: number; element: Record<string, unknown> } | undefined {
+    let found: { index: number; element: Record<string, unknown> } | undefined;
+    for (let index = 0; index < array.length; index += 1) {
+        if (identityOf(array[index]) !== elementId) continue;
+        if (found) return undefined;
+        found = { index, element: array[index] as Record<string, unknown> };
     }
-    next[head] = withValueAt(root[head] as Record<string, unknown>, rest, value);
+    return found;
+}
+
+/**
+ * One container hop of a redacted path, resolved against the STORED body.
+ *
+ * A `redactedKeys` entry is dotted and item-relative, and a segment that lands
+ * on an ARRAY is the element's index in the body the redactor was handed — the
+ * row at rest (a flow's credential sits on `nodes.<i>.config`, #20552). An
+ * index is a position, and a position is not an identity: an author who
+ * reorders a flow's `nodes` sends the same start node back at another index,
+ * and grafting by position would put its credential on whichever node now sits
+ * where it used to. So an array hop is resolved ONCE, against the stored body,
+ * into the element's `id`, and every body — served and incoming — is then
+ * walked by that identity, never by the index.
+ *
+ * An array hop whose stored element carries no string `id`, or shares it with
+ * a sibling, resolves to nothing: the path is skipped, exactly as every array
+ * hop was skipped before identity resolution existed.
+ */
+type PathHop = { readonly key: string } | { readonly elementId: string };
+
+/**
+ * Resolve every CONTAINER hop of `segments` (all but the last, which names the
+ * redacted key itself) against `stored`. `undefined` when the stored body does
+ * not reach that far — which the caller reads as "nothing at rest to carry".
+ */
+function resolveHops(stored: unknown, segments: readonly string[]): PathHop[] | undefined {
+    const hops: PathHop[] = [];
+    let node: unknown = stored;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+        const segment = segments[i] as string;
+        if (Array.isArray(node)) {
+            if (!/^(0|[1-9][0-9]*)$/.test(segment)) return undefined;
+            const element = node[Number(segment)];
+            const elementId = identityOf(element);
+            if (elementId === undefined || !elementWithIdentity(node, elementId)) return undefined;
+            hops.push({ elementId });
+            node = element;
+            continue;
+        }
+        if (!isPlainRecord(node)) return undefined;
+        hops.push({ key: segment });
+        node = node[segment];
+    }
+    return hops;
+}
+
+/**
+ * Walk to the plain object that OWNS the redacted key, hop by hop.
+ *
+ * `undefined` when any hop along the way is absent, is the wrong kind of
+ * container, or (for an array hop) holds no single element with that identity
+ * — which the caller must read as "this body does not speak to that path at
+ * all", never as "the value is absent". The distinction is the whole guard: a
+ * PUT body carrying no `config` key is an author removing the container, and
+ * grafting `config.password` back onto it would MINT a config that holds
+ * nothing but a credential.
+ */
+function containerAt(root: unknown, hops: readonly PathHop[]): Record<string, unknown> | undefined {
+    let node: unknown = root;
+    for (const hop of hops) {
+        if ('key' in hop) {
+            if (!isPlainRecord(node)) return undefined;
+            node = node[hop.key];
+            continue;
+        }
+        if (!Array.isArray(node)) return undefined;
+        const found = elementWithIdentity(node, hop.elementId);
+        if (!found) return undefined;
+        node = found.element;
+    }
+    return isPlainRecord(node) ? node : undefined;
+}
+
+/**
+ * Copy-on-write set of `value` under `key` at the end of `hops`, returning a
+ * new root and copying only the containers along the path — an array hop
+ * copies the array and replaces the one element it names.
+ *
+ * Called only after {@link containerAt} found the container in `root`, so
+ * every hop resolves. The incoming request body belongs to the caller
+ * (`saveMetaItem` hands the same object to the audit trail and the registry
+ * write-through), so the carry-forward must not mutate it in place.
+ */
+function withValueAt(root: unknown, hops: readonly PathHop[], key: string, value: unknown): unknown {
+    if (hops.length === 0) return { ...(root as Record<string, unknown>), [key]: value };
+    const [hop, ...rest] = hops as [PathHop, ...PathHop[]];
+    if ('key' in hop) {
+        const record = root as Record<string, unknown>;
+        return { ...record, [hop.key]: withValueAt(record[hop.key], rest, key, value) };
+    }
+    const array = root as unknown[];
+    const found = elementWithIdentity(array, hop.elementId) as { index: number; element: Record<string, unknown> };
+    const next = array.slice();
+    next[found.index] = withValueAt(found.element, rest, key, value);
     return next;
 }
 
@@ -209,6 +292,12 @@ function sameValue(a: unknown, b: unknown): boolean {
  *  - the incoming body has no container for that path at all ⇒ nothing is
  *    grafted, because a removed container is also the author's word.
  *
+ * A path through an ARRAY (a flow's start node, `nodes.<i>.config.secret`,
+ * #20552) is walked by the stored element's `id`, not by its index, so a body
+ * that reorders the array still carries the value onto the element it came
+ * from — see {@link resolveHops}. An element with no `id`, or an `id` shared
+ * with a sibling, is never carried into.
+ *
  * ⚠️ The first case is genuinely INDISTINGUISHABLE, not merely treated as
  * equal: an author who hand-deletes `:password` from a URL sends exactly the
  * bytes the redaction served, and this function restores the stored password.
@@ -238,21 +327,25 @@ export function carryForwardRedactedValues<T>(type: string, incoming: T, stored:
     let out = incoming as unknown as Record<string, unknown>;
     for (const path of served.redactedKeys) {
         // Dotted, item-relative — the registry's documented contract for
-        // `redactedKeys` (`config.password`).
+        // `redactedKeys` (`config.password`; an array hop is an index into the
+        // stored body, `nodes.0.config.secret`, resolved to an identity by
+        // {@link resolveHops}).
         const segments = path.split('.');
         const key = segments[segments.length - 1] as string;
+        const hops = resolveHops(stored, segments);
+        if (!hops) continue;
 
-        const storedParent = containerAt(stored, segments);
+        const storedParent = containerAt(stored, hops);
         const storedValue = storedParent?.[key];
         if (storedValue === undefined) continue;
 
-        const incomingParent = containerAt(out, segments);
+        const incomingParent = containerAt(out, hops);
         if (!incomingParent) continue;
 
-        const servedParent = containerAt(served.item, segments);
+        const servedParent = containerAt(served.item, hops);
         if (!sameValue(incomingParent[key], servedParent?.[key])) continue;
 
-        out = withValueAt(out, segments, storedValue);
+        out = withValueAt(out, hops, key, storedValue) as Record<string, unknown>;
     }
     return out as unknown as T;
 }

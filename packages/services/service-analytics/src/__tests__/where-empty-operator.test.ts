@@ -65,9 +65,9 @@ const CUBE: Cube = {
   name: 'empties',
   title: 'Empties',
   sql: TABLE,
-  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  measures: { total: { label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
-    Object.keys(SHAPES).map((n) => [n, { name: n, label: n, type: 'string', sql: n }]),
+    Object.keys(SHAPES).map((n) => [n, { label: n, type: 'string', sql: n }]),
   ),
   public: true,
 } as unknown as Cube;

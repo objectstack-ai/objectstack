@@ -630,8 +630,11 @@ export function compileDataset(
   const dimensions: Record<string, CubeDimension> = {};
   for (const d of dataset.dimensions) {
     assertDeclared(d.field, 'dimension', d.name);
+    // The dimension's NAME is the key it is filed under (`dimensions[d.name]`
+    // below) — the cube member carries no inner copy: #20300 retired
+    // `Dimension.name` (ADR-0049 enforce-or-remove), because every consumer
+    // resolves a member by its record key and nothing ever read the inner one.
     const dim: CubeDimension = {
-      name: d.name,
       // [#6761] An inline locale map is a label, not a missing one. Before this,
       // the `typeof === 'string'` test dropped the map and substituted the
       // machine name, which `/analytics/meta` then published as a display title
@@ -664,8 +667,9 @@ export function compileDataset(
     // dotted field is refused for the reason it is actually wrong (an
     // undeclared relationship) before this gate stands down on it.
     assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredFieldType);
+    // Filed under its name (`measures[m.name]` below), with no inner copy —
+    // the same #20300 retirement as the dimension's.
     const metric: Metric = {
-      name: m.name,
       // [#6761] Same as the dimension label above — see {@link REGISTRY_LOCALE}.
       label: resolveI18nLabel(m.label, REGISTRY_LOCALE) ?? m.name,
       type: aggregateToMetricType(m),
