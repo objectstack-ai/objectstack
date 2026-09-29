@@ -71,9 +71,9 @@ import {
  * `[...FILTER_OPERATORS, '$like', '$ilike']` — the spec's declaration order,
  * not a hand-copy of it. That matters twice: a nineteenth operator is ranked
  * the day it is declared, and the rank of `$exists` (after every comparison,
- * set and text operator in the spec's list; only `$empty`, since #20446,
- * follows it) is what makes this generalisation emit, byte for byte, the
- * documents #13195's guard already emits for the one operator it moved.
+ * set and text operator in the spec's list; only `$empty` follows it since
+ * #20446) is what makes this generalisation emit, byte for byte, the documents
+ * #13195's guard already emits for the one operator it moved.
  *
  * An operator absent from the vocabulary cannot reach the assembly — the
  * `default:` arm throws first — so the `?? Number.MAX_SAFE_INTEGER` fallback is
