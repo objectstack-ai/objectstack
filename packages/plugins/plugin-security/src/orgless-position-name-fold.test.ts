@@ -56,11 +56,6 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
-import {
-  assertEngineUpdateDispatch,
-  assertEngineFindOnePredicate,
-  assertEngineDeleteDispatch,
-} from '@objectstack/metadata-core';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { buildContextForUser } from './explain-engine.js';
@@ -171,8 +166,10 @@ async function boot(): Promise<ObjectQL> {
 interface LoaderRead { rows: Array<{ id: string; name: string; organization_id: string | null }> }
 
 /**
- * The real engine, `find` OBSERVED and forwarded verbatim. The dispatch-shaped
- * verbs open with the producer's own predicates (`check:engine-double-contract`).
+ * The real engine's `find`, OBSERVED and forwarded verbatim — the one verb the
+ * loader under test calls. No write or by-id verb is exposed: the plugin's
+ * `kernel:ready` bootstraps are never fired here, so nothing on this path
+ * needs one, and a verb that is not there cannot answer on the engine's behalf.
  */
 function observed(engine: any, reads: LoaderRead[]): any {
   return {
@@ -187,19 +184,6 @@ function observed(engine: any, reads: LoaderRead[]): any {
         });
       }
       return r;
-    },
-    findOne: (o: string, q?: any, opt?: any) => {
-      assertEngineFindOnePredicate(o, q);
-      return engine.findOne(o, q, opt);
-    },
-    insert: (o: string, d: any, opt?: any) => engine.insert(o, d, opt),
-    update: (o: string, d: any, opt?: any) => {
-      assertEngineUpdateDispatch(d, opt);
-      return engine.update(o, d, opt);
-    },
-    delete: (o: string, id: any, opt?: any) => {
-      assertEngineDeleteDispatch(opt);
-      return engine.delete(o, id, opt);
     },
   };
 }
