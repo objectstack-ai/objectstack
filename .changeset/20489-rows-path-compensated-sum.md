@@ -32,9 +32,9 @@ JS number.
 **Residual, stated.** PostgreSQL and MySQL add `sum` / `avg` natively in double without
 compensation, and that arithmetic is the database's own. So over three or more fractions their
 native path can still differ from the rows path in the last place (`0.1 + 0.2 + 0.3`: native
-`0.6000000000000001`, rows path `0.6`). This replaces the residual the `@objectstack/driver-sql`
-entry for the double accumulation states: that difference is no longer SQLite's native path
-against every other face; it is now PostgreSQL / MySQL native against the rows path. The
+`0.6000000000000001`, rows path `0.6`). The `@objectstack/driver-sql` entry for the double
+accumulation states the same residual: the difference is no longer SQLite's native path against
+every other face; it is PostgreSQL / MySQL native against SQLite and the rows path. The
 in-memory driver (`@objectstack/driver-memory`) still adds naively in its own `aggregate`, so on
 that driver the two paths can now differ in the same last place. An exact `$eq` on a fractional
 sum compares doubles: compare with a range.
