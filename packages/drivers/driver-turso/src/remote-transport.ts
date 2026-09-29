@@ -1248,6 +1248,13 @@ export class RemoteTransport {
    * each one scans the table — nothing is visibly wrong, and the cost arrives
    * as read volume.
    *
+   * [#20537] A declared index SKIPPED because a key column never materialized
+   * (a misspelt name, a virtual `formula` field) is the same class again, one
+   * step earlier: {@link buildDeclaredIndexDDL} plans no DDL for it at all, so
+   * the constraint (or the access path) is missing for the same reason and with
+   * the same outward look. The local face logs that skip through
+   * `SqlDriver.logDurabilityFailure`, so this face reports it here.
+   *
    * Absent, the degradation is not lost: {@link retrofitDeclaredIndexes} still
    * skips the index, and a missing UNIQUE resurfaces as the enveloped refusal
    * in {@link upsert}. `TursoDriver` wires this to `logger.error` at construction,
@@ -2425,11 +2432,13 @@ export class RemoteTransport {
    * (`COALESCE(<tenant>, '__global__')`) from the shared helper for the reason
    * ADR-0120 D3 records. Neither rule is re-decided here.
    *
-   * Columns that were never materialized (a virtual `formula` field) are
-   * skipped rather than emitted — the same choice `SqlDriver.syncDeclaredIndexes`
-   * makes, and for the same reason: DDL naming a column that does not exist
-   * fails the whole sync over an index nothing could have used. A name declared
-   * twice is emitted once, as the local face creates it once.
+   * Columns that were never materialized (a misspelt key name, a virtual
+   * `formula` field) are skipped rather than emitted — the same choice
+   * `SqlDriver.syncDeclaredIndexes` makes, and for the same reason: DDL naming a
+   * column that does not exist fails the whole sync over an index nothing could
+   * have used. [#20537] The skip is reported where the local face reports it,
+   * at `error`: on {@link durabilitySink}, not the diagnostic sink. A name
+   * declared twice is emitted once, as the local face creates it once.
    */
   private buildDeclaredIndexDDL(
     tableName: string,
@@ -2453,9 +2462,26 @@ export class RemoteTransport {
     for (const index of expected) {
       const missing = index.columns.filter((c) => !materializedColumns.has(c));
       if (missing.length > 0) {
-        this.diagnosticSink?.(
-          `[RemoteTransport] skipping declared index "${index.name}" on "${tableName}" — ` +
-            `column(s) not materialized: ${missing.join(', ')}`,
+        // [#20537] Durability, not function — the durability sink, never the
+        // diagnostic one. The sync goes on and the object serves normally while
+        // DDL the metadata declares never runs; for a UNIQUE index that means
+        // duplicate rows are accepted. `SqlDriver.syncDeclaredIndexes` answers
+        // the same skip on the local face through `logDurabilityFailure`, for
+        // the same reason, and a PLAIN index takes the same channel on both
+        // faces (see {@link durabilitySink}). One line per skipped index per
+        // sync, and the line says which of the two kinds it is.
+        const columns = missing.map((c) => `'${c}'`).join(', ');
+        this.durabilitySink?.(
+          `[RemoteTransport] declared ${index.unique ? 'UNIQUE ' : ''}index "${index.name}" on "${tableName}" ` +
+            `was NOT created: no column for ${columns} (a key column must be a stored field of the object — a ` +
+            `name that is not a field, or a virtual formula field computed on read, has no column). ` +
+            (index.unique
+              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and nothing looks ` +
+                `broken from the outside. `
+              : `Every query this index exists to serve is answered by scanning the whole table instead: ` +
+                `nothing looks broken from the outside and results stay correct. `) +
+            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
+            `remove the index ("os validate" refuses a name that is not a field).`,
         );
         continue;
       }
