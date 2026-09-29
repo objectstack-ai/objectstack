@@ -7,7 +7,7 @@
  *
  * ── The defect class ─────────────────────────────────────────────────────────
  *
- * #13324 repaired the predicate by giving it `readObject`, so a driver fault
+ * Commit 4cda78c9b repaired the predicate by giving it `readObject`, so a driver fault
  * naming a DIFFERENT relation can no longer be answered "this table is not
  * provisioned yet". The parameter had to ship OPTIONAL: `@objectstack/types` is
  * published (17.2.0, `exports` `.` and `./node`), and re-exported again from
@@ -17,12 +17,12 @@
  *
  * Optional is right for the world outside this repo and wrong for the inside of
  * it. `isMissingTableError(err)` still compiles, still type-checks, and still
- * returns the pre-#13324 WIDE verdict — silently. On the authz path
+ * returns the WIDE verdict from before commit 4cda78c9b — silently. On the authz path
  * (`packages/core/src/security/resolve-authz-context.ts`) that verdict resolves
  * a permission-store OUTAGE to `[]` permissions instead of failing loud, so the
  * omission fails in the OPEN direction. That is the same declared-but-not-
- * enforced shape #13324 existed to close, one level up: the obligation is
- * stated in prose, and prose is exactly what #13324 proved insufficient.
+ * enforced shape commit 4cda78c9b closed, one level up: the obligation is
+ * stated in prose, and prose is exactly what that commit's defect proved insufficient.
  *
  * ── Why a gate and not a required parameter ──────────────────────────────────
  *

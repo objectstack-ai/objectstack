@@ -181,11 +181,23 @@ describe('[#20264] the temporal-comparand door — a year outside 0001..9999 is 
     expect(reads).toHaveLength(1);
   });
 
-  it('a time field judges no year — its rule keeps a time of day', async () => {
-    for (const comparand of [Y10000, new Date(Y0), '0000-06-15T10:00:00.000Z']) {
+  // [#20480] A wall clock has no year, but a time field reads a number, a
+  // `Date` or an instant string as an INSTANT and keeps its UTC time of day —
+  // only when that instant's UTC year has a four-digit spelling. Year 0 does
+  // (`0000-…`), so its time of day is read; year 10000 and year -1 do not, and
+  // the rule handed them back as written, compared with `HH:MM:SS`. This pin
+  // asserted the year-10000 number was read; it is refused now.
+  it('a time field reads the time of day of a year-0 instant, and [#20480] refuses one with no four-digit UTC year', async () => {
+    for (const comparand of [new Date(Y0), Y0, '0000-06-15T10:00:00.000Z']) {
       await expect(engine.find('ledger', { where: { opens_at: { $gt: comparand } } }), String(comparand)).resolves.toEqual([]);
     }
     expect(reads).toHaveLength(3);
+    for (const comparand of [Y10000, new Date(Y10000), '+010000-01-01T00:00:00.000Z', YNEG1, '9999-12-31T23:59:59-01:00']) {
+      const err = await refusalOf(engine.find('ledger', { where: { opens_at: { $gt: comparand } } }));
+      expect(err, String(comparand)).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message).toContain("'opens_at'");
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(3);
   });
 
   it('the refusal names the year class, not "compares false for every row"', async () => {

@@ -48,7 +48,7 @@
  * `ensureDefaultOrganization`). Install that plugin to get
  * multi-tenant bootstrap.
  *
- * ## Provenance of the seeded permission-set rows (#8692, ruled 2026-08-15)
+ * ## Provenance of the seeded permission-set rows (commit 712e185db, ruled 2026-08-15)
  *
  * The seed insert stamps `managed_by: 'platform'` **explicitly**, so a fresh
  * install's default sets are platform-owned and `os meta resync` reconciles
@@ -60,7 +60,7 @@
  * ⚠️ **Installs created BEFORE that ruling carry `'admin'` on these rows.**
  * The pre-ruling insert omitted `managed_by` altogether, so the value came from
  * the declared `defaultValue: 'admin'` in `objects/sys-permission-set.object.ts`
- * — measured on a real engine (#8804: a seeded row stored `'admin'`, and a real
+ * — measured on a real engine (commit db923a3a8: a seeded row stored `'admin'`, and a real
  * resync returned `resynced 0 / resyncSkipped 8`, skipping every shipped
  * default set).
  *
@@ -263,9 +263,9 @@ interface BootstrapOptions {
    * silently stale (a changed default set is served with its OLD value until a
    * `--fresh` wipe). Only platform-owned rows (`managed_by` absent or
    * `'platform'`) are overwritten. Rows carrying any other provenance are left
-   * alone: `'user'` / `'admin'` (taken over in Setup — or, on a pre-#8692
-   * install, seeded before the platform stamped its own rows) and `'package'`
-   * (owned by package metadata).
+   * alone: `'user'` / `'admin'` (taken over in Setup — or, on an install older
+   * than commit 712e185db, seeded before the platform stamped its own rows) and
+   * `'package'` (owned by package metadata).
    */
   resync?: boolean;
   /**
@@ -285,7 +285,7 @@ interface BootstrapOptions {
 const SYSTEM_CTX = { isSystem: true };
 
 /**
- * [#16682] The `single`-posture candidate scan's page size and hard ceiling —
+ * [commit 9b9581b11] The `single`-posture candidate scan's page size and hard ceiling —
  * what replaced the bare `50` at the promotion read.
  *
  * ## The cap's disposition
@@ -311,7 +311,7 @@ export const PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE = 200;
 export const PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING = 5000;
 
 /**
- * [#16861] The `already_have_admin` guard's page size and hard ceiling — what
+ * [commit 1c83ca226] The `already_have_admin` guard's page size and hard ceiling — what
  * replaced the bare, unordered `50` at the HOLDERS read, one read above the
  * candidate scan.
  *
@@ -438,7 +438,7 @@ function genId(prefix: string): string {
  * it (the `resolveEngineUpdateDispatch` pattern).
  *
  * [#11974 / #11663 L4] NARROWED with the walled elevation's retirement. The
- * #11343 `update` arm (payload touching `email_verified` / `email`) existed
+ * `update` arm of commit c0714eb5d (payload touching `email_verified` / `email`) existed
  * for exactly one reason: walled elevation was a WRITE that had to be
  * re-attempted after the owner's verifying update. Under walled postures the
  * bootstrap no longer writes a grant at all — standing is derived from config
@@ -470,7 +470,7 @@ function genId(prefix: string): string {
  *    difference between "the first real sign-up is promoted" and "no platform
  *    admin is ever promoted".
  *  - `single` + `sys_user` update touching `email` / `email_verified`, ONLY
- *    while an owner address is declared: [#16682, maintainer ruling of
+ *    while an owner address is declared: [commit 9b9581b11, maintainer ruling of
  *    2026-09-08, decision batch #100] the `single` leg now consults
  *    `OS_PLATFORM_OWNER_EMAIL` and promotes only a VERIFIED holder of a
  *    declared address. So the verifying write is an INPUT to this function's
@@ -499,7 +499,7 @@ export function shouldReplayBootstrapFor(opCtx: {
   const op = opCtx?.operation;
   if (op === 'create' || op === 'insert') return true;
   if (op !== 'update' || opCtx.object !== 'sys_user') return false;
-  // [#16682] The verifying write, and only where it can decide something.
+  // [commit 9b9581b11] The verifying write, and only where it can decide something.
   const data = opCtx.data;
   if (!data || typeof data !== 'object') return false;
   if (!('email_verified' in data) && !('email' in data)) return false;
@@ -515,7 +515,7 @@ export function shouldReplayBootstrapFor(opCtx: {
  * (`id`, `name`, `active`, `managed_by`, `package_id`) are deliberately NOT
  * here — resync reconciles the declaration, never the ownership.
  *
- * [#8692] `managed_by` must stay out of this helper even though the seed insert
+ * [commit 712e185db] `managed_by` must stay out of this helper even though the seed insert
  * now stamps it. Both paths share these fields, so adding it here would make
  * every resync RESTAMP the row it reconciles -- silently converting a legacy
  * `admin`-owned row (which may be a real Setup takeover) into a platform-owned
@@ -570,7 +570,7 @@ export async function bootstrapPlatformAdmin(
    * SAME admin. Before this, the short-circuited pass knew the answer and threw
    * it away, so the only way to re-own the missed rows was to re-derive the
    * holder — a second implementation of the two-leg scan above, which is how the
-   * guard and its copy drift apart (#16861 is what that scan costs to get
+   * guard and its copy drift apart (commit 1c83ca226 is what that scan costs to get
    * right). One owner, read by both passes.
    */
   adminUserId?: string;
@@ -579,14 +579,14 @@ export async function bootstrapPlatformAdmin(
   /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
   resyncSkipped?: number;
   /**
-   * [#16682] WHY this target was chosen, when one was. `declared-owner` means
+   * [commit 9b9581b11] WHY this target was chosen, when one was. `declared-owner` means
    * `OS_PLATFORM_OWNER_EMAIL` named them; `oldest-authenticable` means nobody
    * did and the age rule answered. The highest-privilege grant in the system
    * should not be auditable only by reading which code path ran.
    */
   basis?: 'declared-owner' | 'oldest-authenticable';
   /**
-   * [#16861] How many `admin_full_access` grant rows the `already_have_admin`
+   * [commit 1c83ca226] How many `admin_full_access` grant rows the `already_have_admin`
    * guard actually examined before answering. The old read looked at "up to 50,
    * whichever the driver produced first" and said nothing, so a guard that had
    * seen the whole population and a guard that had seen a truncated sample of
@@ -625,9 +625,9 @@ export async function bootstrapPlatformAdmin(
           }
         } else {
           resyncSkipped += 1;
-          // [#8692] Neutral by ruling: state the provenance and the action, and
+          // [commit 712e185db] Neutral by ruling: state the provenance and the action, and
           // claim NOTHING about intent. This used to say "(intentional
-          // override)", which is a lie for every row on a pre-#8692 install --
+          // override)", which is a lie for every row on a pre-ruling install --
           // there the only writer may have been this very seeder one call
           // earlier, inheriting `defaultValue: 'admin'` rather than any admin
           // deciding anything. The stored value cannot tell the two apart, so
@@ -646,10 +646,10 @@ export async function bootstrapPlatformAdmin(
       name: ps.name,
       ...platformOwnedFields(ps),
       active: true,
-      // [#8692] Stamp provenance EXPLICITLY rather than letting it fall to the
+      // [commit 712e185db] Stamp provenance EXPLICITLY rather than letting it fall to the
       // declaration's `defaultValue: 'admin'`. Without this the platform's own
       // default sets are stored indistinguishably from admin-authored ones, so
-      // `os meta resync` skips every single one of them (measured in #8804:
+      // `os meta resync` skips every single one of them (measured in commit db923a3a8:
       // resynced 0 / resyncSkipped 8) -- the exact inverse of what #2705 built
       // the flag for. Matches `bootstrap-builtin-positions.ts` and
       // `bootstrap-system-capabilities.ts`, which already stamp `'platform'`.
@@ -712,7 +712,7 @@ export async function bootstrapPlatformAdmin(
     return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
   }
 
-  // ── Does this deployment ALREADY have a platform admin? (#16861) ──────────
+  // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─
   //
   // This read was `tryFind(ql, 'sys_user_permission_set', { permission_set_id:
   // adminPsId }, 50)` — no `orderBy`, cap 50 — with the predicate that actually
@@ -817,7 +817,7 @@ export async function bootstrapPlatformAdmin(
     }
   }
 
-  // ⛔ The truncation is never silent (#16861). Reaching the ceiling is the one
+  // ⛔ The truncation is never silent (commit 1c83ca226). Reaching the ceiling is the one
   // way this scan still answers "no platform admin yet" while one exists, and
   // that answer does not merely skip a log line — it MINTS A SECOND unscoped
   // grant and hands it the seeded business records. So it says the number it
@@ -1039,7 +1039,7 @@ export async function bootstrapPlatformAdmin(
    * Mint the grant and RECORD it. One call site for both legs, so the write,
    * the log and the seed-ownership handoff cannot drift apart per basis.
    *
-   * [#16682] The old line was `first user promoted to platform admin: <email>`
+   * [commit 9b9581b11] The old line was `first user promoted to platform admin: <email>`
    * and nothing else. It is the only record of the highest-privilege grant
    * this system ever makes, and it did not say WHY that row won or HOW MANY
    * rows it was chosen from — so a promotion decided by a truncated,
@@ -1107,7 +1107,7 @@ export async function bootstrapPlatformAdmin(
     };
   };
 
-  // ── The candidate ORDER, stated to the DRIVER (#16682) ────────────────────
+  // ── The candidate ORDER, stated to the DRIVER (commit 9b9581b11) ──────────
   //
   // The age rule used to be applied by `[...users].sort(byCreatedAtAsc)` over
   // whatever `tryFind(ql, 'sys_user', {}, 50)` returned. That read carried no
@@ -1146,7 +1146,7 @@ export async function bootstrapPlatformAdmin(
   // itself into the derivation site (`resolve-authz-context.ts` §6b-config)
   // and, for the audit answer, `platform-admin-service.ts`.
   //
-  // ── Leg 1: the DECLARED owner, when the operator declared one (#16682) ────
+  // ── Leg 1: the DECLARED owner, when the operator declared one (commit 9b9581b11) ─
   //
   // `PLATFORM_OWNER_EMAIL_ENV` was imported into this file and read only on
   // the walled branch. So a deployment that had SAID who the owner is could
@@ -1267,7 +1267,7 @@ export async function bootstrapPlatformAdmin(
     return {
       seeded: seededCount,
       adminPromoted: false,
-      // [#16682, batch #100] The ruling allows either a distinct code or a
+      // [commit 9b9581b11, batch #100] The ruling allows either a distinct code or a
       // fold into `declared_owner_not_authenticable` with verification named
       // in the warning. A distinct code is used for the verification miss so
       // #14348's refusal keeps its own name and its own pins, and an operator
@@ -1319,7 +1319,7 @@ export async function bootstrapPlatformAdmin(
         '— platform admin NOT promoted. The first human that signs in will be promoted instead; a ' +
         'directory row nobody can sign in as would hold a grant it could never exercise.',
     );
-    // ⛔ The truncation is never silent again (#16682). Reaching the ceiling is
+    // ⛔ The truncation is never silent again (commit 9b9581b11). Reaching the ceiling is
     // the ONE way an ordered scan can still answer "nobody" while a promotable
     // human exists, so it says the number it examined instead of letting the
     // line above read as a statement about the whole table.

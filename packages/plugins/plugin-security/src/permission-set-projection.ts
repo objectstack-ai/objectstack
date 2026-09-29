@@ -29,9 +29,9 @@
  * declaration as the BASELINE (boot seeding / publish materialization). The
  * 2026-07-14 direction confirmation that used to sit here — "the environment
  * customizes them through the platform's standard ADR-0005 metadata overlay"
- * — is **RETIRED** (ADR-0094 D5-R, 2026-08-09; #6609 ruling A executed by
- * #6858). #6483 rolled `permission` back to `allowOrgOverride: false`
- * (PR #6608), so ADR-0005's security row is enforced again: an overlay of the
+ * — is **RETIRED** (ADR-0094 D5-R, 2026-08-09, recording ruling A, executed by
+ * #6858). Commit ee58392e1 rolled `permission` back to `allowOrgOverride: false`
+ * (the nine-type rollback), so ADR-0005's security row is enforced again: an overlay of the
  * authorization surface IS the "silent privilege drift" it excludes.
  *
  * What that means for THIS file, per write point:
@@ -51,7 +51,7 @@
  *    ITSELF, before translating it, with a message that names the clone path
  *    ({@link createPermissionSetWriteThrough}'s insert and update legs throw
  *    it; the `restore` leg consults the same lock before its re-author and
- *    reports the refusal on the durability channel instead — #12020, argued
+ *    reports the refusal on the durability channel instead — commit 9cfc1f7e9, argued
  *    at the leg; the rule and its reasoning live in
  *    `packaged-permission-set-lock.ts`). Two
  *    measured reasons the producer could not carry it alone: the producer's
@@ -83,7 +83,7 @@
  *    backfill only runs for names with NO metadata presence at all) — and the
  *    `restore` leg no longer relies on that fence alone: it consults the
  *    packaged-permission-set lock before re-authoring, refusing the mint on
- *    the same durability channel (#12020).
+ *    the same durability channel (commit 9cfc1f7e9).
  *
  * Cross-package composition stays a POSITION concern (bind several packages'
  * sets to one position); package-first authoring (ADR-0070) gives
@@ -479,7 +479,7 @@ const isProjectionEcho = (v: any): boolean =>
  * and the one store the env projection never writes, so it can't be poisoned
  * by our own registry sync. It is the body for a declared set with no overlay
  * at all, and the reset target when an overlay IS lifted off one — which since
- * ADR-0094 D5-R means a LEGACY (pre-#6483) row removed through the operator
+ * ADR-0094 D5-R means a LEGACY row (older than commit ee58392e1) removed through the operator
  * hatch, not a data-door delete: #6960 measures that delete refusing with 403
  * `NOT_OVERRIDABLE`.
  *
@@ -532,8 +532,8 @@ function hasSchemaRegistry(ql: any): boolean {
  * overlay is the platform's standard ADR-0005 customization of a packaged
  * definition, and deleting the overlay resets the row to the shipped
  * declaration" — is **RETIRED**, in BOTH halves (ADR-0094 D5-R, 2026-08-09;
- * #6609 ruling A executed by #6858; the file header above records the same
- * retirement). Since #6483 / PR #6608 rolled `permission` back to
+ * the ruling A it records, executed by #6858; the file header above records the same
+ * retirement). Since commit ee58392e1 rolled `permission` back to
  * `allowOrgOverride: false`:
  *
  *  - **no new overlay of a packaged set can be minted.** A metadata write
@@ -554,7 +554,7 @@ function hasSchemaRegistry(ql: any): boolean {
  *    rollback still merges overlay-wins at read time
  *    ({@link projectPermissionMutation} hands us `overlay ?? declared`) and
  *    this pass still stamps the flag for it. The in-repo corpus had zero such
- *    rows when PR #6608 measured it;
+ *    rows when commit ee58392e1 measured it;
  *  - **"delete = reset" must NOT be read back into that.** #6960 measures the
  *    ordinary delete path refusing to lift exactly such a legacy overlay: on
  *    an environment-scoped kernel `deleteMetaItem` throws `NOT_OVERRIDABLE` /
@@ -1092,7 +1092,7 @@ export function createPermissionSetWriteThrough(
       // package-managed row stays read-only through the data door.
       //
       // [ADR-0094 D5-R] This is no longer the ONLY reason a packaged set is
-      // read-only through the data door — since #6483 a CAPABLE kernel refuses
+      // read-only through the data door — since commit ee58392e1 a CAPABLE kernel refuses
       // an artifact-backed set too, at the protocol's ADR-0005 tier gate. The
       // remedy this message names ("edit the package and re-publish") is
       // therefore right on every kernel; only the stated cause is specific to
@@ -1126,7 +1126,7 @@ export function createPermissionSetWriteThrough(
       // Let the engine un-trash the record, then re-author its definition
       // into metadata (the delete removed it) so the stores converge live.
       //
-      // [2026-08-24 ruling — lock the base, clone to customize; #12020] This
+      // [2026-08-24 ruling — lock the base, clone to customize; commit 9cfc1f7e9] This
       // leg consults the SAME lock as the insert and update legs — but the
       // refusal lands on the durability channel instead of being thrown, and
       // the engine un-trash above it stands. The placement is argued, not
@@ -1238,7 +1238,7 @@ export function createPermissionSetWriteThrough(
         // Refused here, before the write, with a message that names the clone
         // path. Fail-closed: unresolvable provenance refuses too.
         //
-        // [#19307] ⭐ It runs BEFORE the duplicate-name check below, and the
+        // [commit 8f6d83147] ⭐ It runs BEFORE the duplicate-name check below, and the
         // order is the fix rather than a tidy-up. A package-declared set has a
         // PROJECTED ROW, so its name is duplicate AND locked at once — and the
         // admin most likely to arrive here is the one who opened the Clone
@@ -1260,7 +1260,7 @@ export function createPermissionSetWriteThrough(
         assertPermissionSetNotPackageDeclared(
           name, ql, 'insert', (await probeLayered(protocol, name)).probe,
         );
-        // [#19307] The duplicate-name refusal carries `UNIQUE_VIOLATION` — the
+        // [commit 8f6d83147] The duplicate-name refusal carries `UNIQUE_VIOLATION` — the
         // wire identity this collision already has when the `name` index
         // catches it instead. See `PermissionSetNameConflictError`.
         const dup = (await tryFind(ql, 'sys_permission_set', { name }, 1))[0];

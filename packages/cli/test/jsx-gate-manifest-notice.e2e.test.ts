@@ -24,7 +24,13 @@
  *     a `kind: 'full'` page) beside html pages that live only in `packages[]`:
  *     the union fold keeps the top-level key, but the per-package pass still
  *     hands those pages to the gate, so the notice (counting them) and the
- *     refusal both fire there too, on all three commands.
+ *     refusal both fire there too, on all three commands;
+ *   - [#20166] an EXPLICIT config path run from somewhere else reads the
+ *     manifest beside that config: a foreign working directory carrying its
+ *     own `sdui.manifest.json` does not win, and a bare one is not where the
+ *     project's manifest is looked for. The control is a run from the config's
+ *     own directory, and a lit control shows the foreign manifest really
+ *     refuses the page when it IS the project's.
  *
  * The notice is found by its rule id — an anchor — never by its prose.
  *
@@ -44,7 +50,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
@@ -178,6 +184,8 @@ const TOP_FULL = "[{ name: 'jxg_home', label: 'Home', kind: 'full', regions: [] 
 /** Declares exactly the one component the fixture page uses. */
 const MANIFEST = JSON.stringify({ components: { div: { type: 'div', inputs: [{ name: 'children', type: 'slot' }] } } });
 const MALFORMED = '{ "components": [ oops';
+/** [#20166] Declares `span` only, so the fixture page's `div` is refused wherever this file judges it. */
+const FOREIGN_MANIFEST = JSON.stringify({ components: { span: { type: 'span', inputs: [{ name: 'children', type: 'slot' }] } } });
 
 type Fixture =
   | 'noManifest'
@@ -189,7 +197,8 @@ type Fixture =
   | 'pkgTopEmpty'
   | 'pkgTopFull'
   | 'pkgTopEmptyMalformed'
-  | 'pkgTopFullMalformed';
+  | 'pkgTopFullMalformed'
+  | 'foreign';
 
 /** The package-carried fixtures, by layout, as the `it.each` rows below read them. */
 const PACKAGE_LAYOUTS = [
@@ -210,6 +219,9 @@ const FIXTURES: Record<Fixture, { config: string; manifest?: string }> = {
   pkgTopFull: { config: packageCarried(TOP_FULL) },
   pkgTopEmptyMalformed: { config: packageCarried(TOP_EMPTY), manifest: MALFORMED },
   pkgTopFullMalformed: { config: packageCarried(TOP_FULL), manifest: MALFORMED },
+  // [#20166] A directory carrying its OWN project and manifest — the foreign
+  // working directory the runs below stand in.
+  foreign: { config: stack('<div>hi</div>'), manifest: FOREIGN_MANIFEST },
 };
 
 /** Every spawn this file reads, keyed `fixture|args`. */
@@ -232,6 +244,7 @@ const PLAN: ReadonlyArray<readonly [Fixture, readonly string[]]> = [
   ['malformed', ['build', '--json']],
   ['malformed', ['lint', '--json']],
   ['noPagesMalformed', ['validate', '--json']],
+  ['foreign', ['validate', '--json']],
   ...PACKAGE_LAYOUTS.flatMap(([, notice, malformed]) =>
     COMMANDS.flatMap((command) => [
       [notice, [command, '--json']] as const,
@@ -244,6 +257,48 @@ const key = (fixture: Fixture, args: readonly string[]) => `${fixture}|${args.jo
 const runs = new Map<string, Run>();
 const dirs = {} as Record<Fixture, string>;
 let root = '';
+
+/**
+ * [#20166] Runs of the `withManifest` project — its manifest declares the
+ * page's `div` — handed its config path EXPLICITLY, from where the run stands:
+ *
+ *   besideConfig  the config's own directory (the control);
+ *   foreign       a directory carrying its own project and a manifest that
+ *                 refuses `div` — where a working-directory reading lands;
+ *   bare          a directory with no manifest at all.
+ *
+ * `relative` spells the config path relative to where the run stands, the
+ * way an author types it; `absolute` is the resolved path.
+ */
+type Stand = 'besideConfig' | 'foreign' | 'bare';
+type Spelling = 'absolute' | 'relative';
+const ELSEWHERE_PLAN: ReadonlyArray<readonly [Stand, Spelling, (typeof COMMANDS)[number]]> = [
+  ...COMMANDS.flatMap((command) =>
+    (['besideConfig', 'foreign', 'bare'] as const).map((stand) => [stand, 'absolute', command] as const),
+  ),
+  ['foreign', 'relative', 'validate'],
+];
+const elsewhereKey = (stand: Stand, spelling: Spelling, command: string) => `${stand}|${spelling}|${command}`;
+const elsewhereRuns = new Map<string, Run>();
+
+function elsewhere(stand: Stand, spelling: Spelling, command: string): Run {
+  const r = elsewhereRuns.get(elsewhereKey(stand, spelling, command));
+  if (!r) throw new Error(`not in ELSEWHERE_PLAN: ${elsewhereKey(stand, spelling, command)}`);
+  return r;
+}
+
+/** Every `jsx-*` finding a payload carries, in any of its lists. */
+function jsxFindingsIn(payload: Record<string, unknown>): Array<Record<string, unknown>> {
+  const all = [
+    ...(Array.isArray(payload.errors) ? payload.errors : []),
+    ...(Array.isArray(payload.warnings) ? payload.warnings : []),
+    ...(Array.isArray(payload.issues) ? payload.issues : []),
+  ] as unknown[];
+  return all.filter(
+    (x): x is Record<string, unknown> =>
+      typeof x === 'object' && x !== null && String((x as { rule?: unknown }).rule ?? '').startsWith('jsx-'),
+  );
+}
 
 function run(fixture: Fixture, ...args: string[]): Run {
   const r = runs.get(key(fixture, args));
@@ -261,13 +316,22 @@ beforeAll(async () => {
     if (f.manifest !== undefined) writeFileSync(join(dir, 'sdui.manifest.json'), f.manifest);
     dirs[name] = dir;
   }
+  const bare = join(root, 'bare');
+  mkdirSync(bare);
+  const stands: Record<Stand, string> = { besideConfig: dirs.withManifest, foreign: dirs.foreign, bare };
+  const config = join(dirs.withManifest, 'objectstack.config.ts');
   // A few at a time: each spawn is a full CLI start from source.
-  const queue = [...PLAN];
-  const worker = async () => {
-    for (let next = queue.shift(); next; next = queue.shift()) {
-      const [fixture, args] = next;
+  const queue: Array<() => Promise<void>> = [
+    ...PLAN.map(([fixture, args]) => async () => {
       runs.set(key(fixture, args), await runCli(args, dirs[fixture]));
-    }
+    }),
+    ...ELSEWHERE_PLAN.map(([stand, spelling, command]) => async () => {
+      const configArg = spelling === 'absolute' ? config : relative(stands[stand], config);
+      elsewhereRuns.set(elsewhereKey(stand, spelling, command), await runCli([command, configArg, '--json'], stands[stand]));
+    }),
+  ];
+  const worker = async () => {
+    for (let next = queue.shift(); next; next = queue.shift()) await next();
   };
   await Promise.all([worker(), worker(), worker()]);
 }, 600_000);
@@ -396,5 +460,44 @@ describe('[round 1] html pages carried only in packages[], beside a top-level pa
     const manifestPath = join(dirs[malformed], 'sdui.manifest.json');
     expect(String(payloadOf(r, `${malformed} ${command}`).error)).toContain(manifestPath);
     expect(r.stderr).toContain(manifestPath);
+  });
+});
+
+describe('[#20166] an explicit config path reads the manifest beside that config, wherever the run stands', () => {
+  it('lit control: the foreign manifest refuses this page when it IS the project’s', () => {
+    const r = run('foreign', 'validate', '--json');
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    expect(jsxFindingsIn(payloadOf(r, 'foreign')).some((f) => f.rule === 'jsx-forbidden-tag')).toBe(true);
+  });
+
+  it.each(COMMANDS)('control — os %s CONFIG from the config’s own directory: exit 0, no jsx finding, no notice', (command) => {
+    const r = elsewhere('besideConfig', 'absolute', command);
+    const payload = payloadOf(r, `besideConfig ${command}`);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(jsxFindingsIn(payload)).toEqual([]);
+    expect(noticesIn(payload)).toEqual([]);
+  });
+
+  it.each(COMMANDS)('os %s CONFIG from a foreign directory carrying its own manifest: that manifest does not win', (command) => {
+    const r = elsewhere('foreign', 'absolute', command);
+    const payload = payloadOf(r, `foreign ${command}`);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(jsxFindingsIn(payload)).toEqual([]);
+    expect(noticesIn(payload)).toEqual([]);
+  });
+
+  it.each(COMMANDS)('os %s CONFIG from a directory with no manifest: the project’s own is read, and no notice', (command) => {
+    const r = elsewhere('bare', 'absolute', command);
+    const payload = payloadOf(r, `bare ${command}`);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(jsxFindingsIn(payload)).toEqual([]);
+    expect(noticesIn(payload)).toEqual([]);
+  });
+
+  it('os validate with the config path spelled relative to the foreign directory: the same answer', () => {
+    const r = elsewhere('foreign', 'relative', 'validate');
+    const payload = payloadOf(r, 'foreign relative validate');
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(jsxFindingsIn(payload)).toEqual([]);
   });
 });

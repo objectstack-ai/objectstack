@@ -8,7 +8,7 @@
  * 时候不要强制加上 org_id 的过滤」— when plugin-security arms the Layer 0
  * organization wall, the `org_id` filter is NOT appended for a session whose
  * account is the VERIFIED declared platform owner (`OS_PLATFORM_OWNER_EMAIL`
- * under the #11343 verified-email predicate). Everyone else's wall is
+ * under commit c0714eb5d's verified-email predicate). Everyone else's wall is
  * byte-identical to before.
  *
  * The pins hold BOTH fail-closed directions the ruling records (there is no
@@ -167,7 +167,7 @@ describe('[#12974] verified-platform-owner Layer 0 wall bypass — fail-closed d
   it('email matches but the account is NOT verified ⇒ still walled', async () => {
     process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
     const { plugin } = await boot({
-      // No `email_verified` at all — the #11343 allow-list reads absent as
+      // No `email_verified` at all — commit c0714eb5d's allow-list reads absent as
       // unverified (the imported/legacy-row shape).
       users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL } },
     });

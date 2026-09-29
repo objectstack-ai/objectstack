@@ -21,7 +21,13 @@
  *  - it is dropped exactly where the mark is dropped, and a forged record on
  *    an unmarked value is not read;
  *  - `composeStacks`: the inputs' records concatenated in input order, one
- *    application once, at every arity and through nesting.
+ *    application once, at every arity and through nesting;
+ *  - a producer that REFUSES carries the record on its ADR-0112 refusal, as it
+ *    stood at the throw: every `defineStack` refusal site (both modes), the
+ *    `composeStacks` refusals (its inputs' records), the empty record when
+ *    nothing was converted, and B's own notice when a refusing
+ *    `defineStack(B)` inside `composeStacks([...])` had its stderr line
+ *    swallowed by the warn-once. A non-refusal throw carries none.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
@@ -274,5 +280,278 @@ describe('composeStacks records its inputs’ records, in input order, one appli
     const composed = composeStacks([build('aa', 'subtitle'), build('bb', 'subtitle')] as ObjectStackDefinition[]);
     expect(hasStackProvenance(composed)).toBe(true);
     expect(stackConversionsOf(composed)).toEqual([]);
+  });
+});
+
+/** The thrown value (the test fails when nothing is thrown). */
+function thrown(run: () => unknown): Error & { code?: string; status?: number; issues?: readonly unknown[] } {
+  try {
+    run();
+  } catch (error) {
+    return error as Error & { code?: string; status?: number; issues?: readonly unknown[] };
+  }
+  throw new Error('expected a refusal, but the call returned');
+}
+
+/** The record property as the stamp left it, or `undefined` when there is none. */
+const ownRecord = (value: object) => Object.getOwnPropertyDescriptor(value, Symbol.for('objectstack.stack.conversions'));
+
+describe('a refusing producer carries the conversions it applied on its refusal', () => {
+  it("⭐ triage pin: a convert-then-refuse call's error answers page-header-subtitle-alias", () => {
+    quiet();
+    const error = thrown(() =>
+      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+    );
+    expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
+    expect(error.status).toBe(422);
+    const record = stackConversionsOf(error);
+    expect(record.map(substance)).toEqual([HEADER_NOTICE]);
+    // The element is the whole `ConversionNotice`, the same shape a built stack carries.
+    expect(Object.keys(record[0]).sort()).toEqual(
+      ['code', 'conversionId', 'from', 'message', 'path', 'retiresIn', 'surface', 'to', 'toMajor'].sort(),
+    );
+    // An error is not a built stack: the record rides without the mark.
+    expect(hasStackProvenance(error)).toBe(false);
+  });
+
+  it('⭐ triage pin: a refusal with no conversion answers an empty record — stamped, not merely absent', () => {
+    quiet();
+    const error = thrown(() =>
+      defineStack({ ...source('rf', 'subtitle'), requires: ['no-such-capability'] } as never),
+    );
+    expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
+    expect(stackConversionsOf(error)).toEqual([]);
+    // Anti-vacuity: `[]` is the refusal's own (empty) record, so the guard
+    // covered this throw — an unstamped error answers `[]` too.
+    const desc = ownRecord(error);
+    expect(desc, 'the refusal carries the record property').toBeDefined();
+    expect(desc?.value).toEqual([]);
+    expect(Object.isFrozen(desc?.value)).toBe(true);
+  });
+
+  it('the refusal is otherwise the same refusal: code, status, name, message and issues are unchanged', () => {
+    quiet();
+    const converting = thrown(() =>
+      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+    );
+    const canonical = thrown(() =>
+      defineStack({ ...source('rf', 'subtitle'), requires: ['no-such-capability'] } as never),
+    );
+    for (const key of ['code', 'status', 'name', 'message'] as const) {
+      expect(converting[key], key).toBe(canonical[key]);
+    }
+    expect(converting.issues).toEqual(canonical.issues);
+    expect(converting.message).toMatch(/^defineStack capability validation failed \(1 issue\):/);
+  });
+
+  it('the record on a refusal is invisible to data readers and frozen, like the one on a stack', () => {
+    quiet();
+    const error = thrown(() =>
+      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+    );
+    const desc = ownRecord(error);
+    expect(desc?.enumerable).toBe(false);
+    expect(desc?.writable).toBe(false);
+    expect(desc?.configurable).toBe(false);
+    expect(Object.keys(error).some((k) => k.includes('conversion'))).toBe(false);
+    const record = stackConversionsOf(error);
+    expect(record, 'anti-vacuity: there is a record to freeze').toHaveLength(1);
+    expect(Object.isFrozen(record)).toBe(true);
+    expect(record.every((n) => Object.isFrozen(n))).toBe(true);
+  });
+
+  it('the record is what was applied so far: a built stack handed straight back and then refused keeps the record it arrived with', () => {
+    quiet();
+    // Built without validation, so the capability refusal is still owed.
+    const inner = defineStack(
+      { ...source('rf', 'description'), requires: ['no-such-capability'] } as never,
+      { strict: false },
+    );
+    expect(stackConversionsOf(inner), 'anti-vacuity: the inner build recorded one').toHaveLength(1);
+    // Handed straight back, strict: the pass finds nothing left to convert,
+    // and the refusal carries the record the input arrived with.
+    const error = thrown(() => defineStack(inner as never));
+    expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
+    expect(stackConversionsOf(error)).toEqual(stackConversionsOf(inner));
+    // Control: a spread copy drops the record with the mark, and its source is
+    // already canonical — so this call applied nothing, and says so. The
+    // record is the producer's, never reconstructed.
+    const copied = thrown(() => defineStack({ ...inner } as never));
+    expect(copied.code).toBe('STACK_CAPABILITY_UNKNOWN');
+    expect(stackConversionsOf(copied)).toEqual([]);
+  });
+
+  it("⭐ triage pin: in composeStacks([defineStack(A), defineStack(B)]) the refusing B's error carries B's own notice, though its stderr line was swallowed", () => {
+    const warn = quiet();
+    const printed: string[][] = [];
+    const built: unknown[] = [];
+    /** `defineStack`, recording the stderr lines THIS call printed. */
+    const define = (config: unknown) => {
+      const start = warn.mock.calls.length;
+      try {
+        const stack = defineStack(config as never);
+        built.push(stack);
+        return stack;
+      } finally {
+        printed.push(warn.mock.calls.slice(start).map((c) => String(c[0])));
+      }
+    };
+    const headerLines = (lines: string[]) =>
+      lines.filter((l) => l.includes("conversion 'page-header-subtitle-alias'") && l.includes(HEADER_PATH));
+
+    // A and B author the same notice path, so their warn-once key is one key.
+    const error = thrown(() =>
+      composeStacks([
+        define(source('ca', 'description')),
+        define({ ...source('cb', 'description'), requires: ['no-such-capability'] }),
+      ] as ObjectStackDefinition[]),
+    );
+
+    // Where it surfaces: B's own `defineStack` refusal, thrown while the array
+    // was being built — `composeStacks` never ran.
+    expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
+    expect(error.message).toMatch(/^defineStack capability validation failed/);
+    expect(built, 'only A was built').toHaveLength(1);
+    expect(printed).toHaveLength(2);
+    // B printed nothing: the warn-once set had the key already (from A, or
+    // from an earlier build of the same path in this process).
+    expect(headerLines(printed[1])).toEqual([]);
+    // …and its refusal still carries B's own notice — exactly one, and not A's object.
+    const record = stackConversionsOf(error);
+    expect(record.map(substance)).toEqual([HEADER_NOTICE]);
+    const aRecord = stackConversionsOf(built[0]);
+    expect(aRecord, 'anti-vacuity: A recorded the same notice').toHaveLength(1);
+    expect(record[0]).not.toBe(aRecord[0]);
+  });
+});
+
+describe('every refusal site in defineStack carries the record — census, both modes', () => {
+  const manifest = {
+    id: 'com.example.refusalrecord',
+    name: 'refusal-record-test',
+    version: '1.0.0',
+    type: 'app' as const,
+    namespace: 'probe',
+  };
+  const task = { name: 'probe_task', label: 'Task', fields: { title: { type: 'text' as const, label: 'Title' } } };
+  const app = (name: string) => ({
+    name,
+    label: name,
+    navigation: [{ id: `nav_${name}`, type: 'object' as const, label: 'Tasks', objectName: task.name }],
+  });
+  const recordFlow = {
+    name: 'task_fanout',
+    label: 'task_fanout',
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'start', config: { objectName: task.name, triggerType: 'record-after-create' } },
+      { id: 'end', type: 'end', label: 'end' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  };
+  /** The converting page every row carries: `description` on a `page:header`. */
+  const pages = source('probe', 'description').pages;
+  const grant = { name: 'managers', label: 'Managers', objects: { [task.name]: { allowRead: true, readScope: 'unit_and_below' } } };
+
+  const rows: Array<{ site: string; code: string; config: Record<string, unknown>; strict?: false }> = [
+    { site: 'schema parse', code: 'STACK_SCHEMA_INVALID', config: { manifest: {}, pages } },
+    { site: 'capability', code: 'STACK_CAPABILITY_UNKNOWN', config: { manifest, objects: [task], pages, requires: ['automations'] } },
+    {
+      site: 'cross-reference',
+      code: 'STACK_CROSS_REFERENCE_INVALID',
+      config: { manifest, objects: [task], pages, data: [{ object: 'missing_object', records: [] }] },
+    },
+    { site: 'namespace prefix', code: 'STACK_NAMESPACE_PREFIX_INVALID', config: { manifest, objects: [{ ...task, name: 'task' }], pages } },
+    { site: 'single app', code: 'STACK_SINGLE_APP_VIOLATION', config: { manifest, objects: [task], pages, apps: [app('app_one'), app('app_two')] } },
+    { site: 'hierarchy-scope capability', code: 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED', config: { manifest, objects: [task], pages, permissions: [grant] } },
+    {
+      site: 'trigger capability',
+      code: 'STACK_TRIGGER_CAPABILITY_REQUIRED',
+      config: { manifest, objects: [task], pages, requires: ['automation'], flows: [recordFlow] },
+    },
+    { site: 'bound-action merge, strict: false — objects not an array', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: 'nope', pages }, strict: false },
+    { site: 'bound-action merge, strict: false — an objects entry not an object', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: [null], pages }, strict: false },
+    { site: 'bound-action merge, strict: false — actions not an array', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: [task], actions: 7, pages }, strict: false },
+  ];
+
+  for (const row of rows) {
+    it(`${row.site}: ${row.code} carries the header notice`, () => {
+      quiet();
+      const error = thrown(() => defineStack(row.config as never, row.strict === false ? { strict: false } : undefined));
+      expect(error.code).toBe(row.code);
+      expect(error.status).toBe(422);
+      expect(stackConversionsOf(error).map(substance)).toEqual([HEADER_NOTICE]);
+    });
+  }
+
+  it('the census reaches every code defineStack refuses with: seven distinct codes', () => {
+    expect(new Set(rows.map((r) => r.code)).size).toBe(7);
+  });
+});
+
+describe('a composeStacks refusal carries its inputs’ records', () => {
+  const build = (ns: string, headerKey: 'description' | 'subtitle', objectNs = ns) => {
+    quiet();
+    const stack = source(ns, headerKey);
+    return defineStack(
+      { ...stack, objects: [{ ...stack.objects[0], name: `${objectNs}_thing` }] } as never,
+      { strict: false },
+    );
+  };
+
+  it('an object conflict: the inputs’ records, in input order — the record the artifact would have carried', () => {
+    const a = build('ka', 'description', 'kk');
+    const b = build('kb', 'subtitle', 'kk');
+    const c = build('kc', 'description', 'kk');
+    const error = thrown(() => composeStacks([a, b, c] as ObjectStackDefinition[]));
+    expect(error.code).toBe('STACK_COMPOSE_OBJECT_CONFLICT');
+    expect(error.status).toBe(422);
+    expect(stackConversionsOf(error)).toEqual([...stackConversionsOf(a), ...stackConversionsOf(c)]);
+    expect(stackConversionsOf(error).map(substance)).toEqual([HEADER_NOTICE, HEADER_NOTICE]);
+  });
+
+  it('an unbuilt input: the built inputs’ records ride the provenance refusal', () => {
+    const a = build('pa', 'description');
+    const error = thrown(() => composeStacks([a, { ...a }] as ObjectStackDefinition[]));
+    expect(error.code).toBe('STACK_PROVENANCE_MISSING');
+    expect(stackConversionsOf(error)).toEqual(stackConversionsOf(a));
+    expect(stackConversionsOf(error), 'anti-vacuity').toHaveLength(1);
+  });
+
+  it('⭐ control: inputs that converted nothing refuse with an empty record — stamped', () => {
+    const error = thrown(() =>
+      composeStacks([build('za', 'subtitle', 'zz'), build('zb', 'subtitle', 'zz')] as ObjectStackDefinition[]),
+    );
+    expect(error.code).toBe('STACK_COMPOSE_OBJECT_CONFLICT');
+    expect(stackConversionsOf(error)).toEqual([]);
+    expect(ownRecord(error)?.value).toEqual([]);
+  });
+
+  it('a non-refusal throw is not given a record: the options parse error carries none', () => {
+    const a = build('oa', 'description');
+    const b = build('ob', 'subtitle');
+    const error = thrown(() =>
+      composeStacks([a, b] as ObjectStackDefinition[], { objectConflict: 'nope' } as never),
+    );
+    expect(error.code, 'not an ADR-0112 refusal').toBeUndefined();
+    expect(ownRecord(error)).toBeUndefined();
+    expect(stackConversionsOf(error)).toEqual([]);
+  });
+});
+
+describe('stackConversionsOf reads a refusal’s record and nothing that merely looks like one', () => {
+  it('an Error nobody stamped answers []', () => {
+    expect(stackConversionsOf(new Error('x'))).toEqual([]);
+  });
+
+  it('a record inherited through the prototype, not stamped on the error itself, is not read', () => {
+    quiet();
+    const refusal = thrown(() =>
+      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+    );
+    expect(stackConversionsOf(refusal), 'anti-vacuity: the stamped refusal is read').toHaveLength(1);
+    const heir = Object.create(refusal) as Error;
+    expect(heir).toBeInstanceOf(Error);
+    expect(stackConversionsOf(heir)).toEqual([]);
   });
 });

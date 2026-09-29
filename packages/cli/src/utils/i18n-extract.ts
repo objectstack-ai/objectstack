@@ -30,8 +30,8 @@
  * whose translations live in a bundle under the key this walk emits, and an
  * inline locale map — `{ en: 'Members', 'zh-CN': '成员' }` — which the author
  * writes out in place and the renderer picks from (`pickLocalized` /
- * `resolveI18nLabel`). Rulings #5728, #10926 and #14412 make the map the ONE
- * localisation route for the props that have no bundle key at all
+ * `resolveI18nLabel`). Rulings #5728 and #14412, and the ruling commit d173125fb landed,
+ * make the map the ONE localisation route for the props that have no bundle key at all
  * (`element:text`'s `content` among them), so a page localised that way is
  * fully localised.
  *
@@ -246,7 +246,7 @@ export interface ExtractOptions extends ExpectedEntryOptions {
    * The `<locale>.source-hashes.generated.ts` tables already committed beside
    * the bundles, keyed by locale.
    *
-   * This is the mechanism's ONLY memory (#11671 / #12069 Option A): a leaf that
+   * This is the mechanism's ONLY memory (commit 09b4f4e4e, ruling #12069 Option A): a leaf that
    * is a byte copy of a source revision keeps its record across runs, which is
    * what makes the drift detectable after the source moves. Passing nothing
    * makes the run behave like a first extract — every record is re-derived from
@@ -1089,16 +1089,16 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
 
 /**
  * Write `pages.<page>.components.<id>.<key>` for every component
- * `translatePage` addresses — and only those (#13109).
+ * `translatePage` addresses — and only those (commit 8b236c826).
  *
  * BOTH halves of that sentence are imported from `@objectstack/spec`, so
  * neither can drift. The KEY list is {@link PAGE_COMPONENT_COPY_KEYS}; the
  * WALK — which components carry those keys — is `walkAddressedPageComponents`,
- * the same traversal `translatePage` itself runs (#13218, completing the key
+ * the same traversal `translatePage` itself runs (commit c45d8e6b4, completing the key
  * list's precedent). The walk owns the roots (`regions[].components[]` AND
  * `slots.<slot>`), the descent (`properties.children` AND a panel's
  * `properties.items[].children`, depth-capped, cycle-guarded) and the ruled
- * collision arbitration (#12961: root level wins outright; among nested
+ * collision arbitration (commit 901355c3b: root level wins outright; among nested
  * components, document-order first sighting) — this function used to
  * hand-mirror all five and now owns none of them. What it still owns:
  *
@@ -1430,7 +1430,7 @@ export function collectExpectedEntries(
     // addressed by page name above, and emitting it here too would offer one
     // string under two keys. A NESTED `page:header` is a different component —
     // `translatePage`'s page-name route stops at region level, so a nested one
-    // is reachable by the id route ONLY and must be offered here (#13109).
+    // is reachable by the id route ONLY and must be offered here (commit 8b236c826).
     emitPageComponentCopy(out, page, name);
   }
 
@@ -2291,7 +2291,7 @@ export function renderSourceHashModule(
   lines.push(' *');
   lines.push(" * Each entry is the digest of the SOURCE REVISION that this locale's leaf at");
   lines.push(' * that path is still a byte copy of — provenance for the generated half of the');
-  lines.push(' * bundles (#11671, maintainer ruling #12069 Option A, extending #8765 Option B).');
+  lines.push(' * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).');
   lines.push(' *');
   lines.push(' * An entry exists only while the leaf IS such a copy. Re-translate the leaf in');
   lines.push(' * `<locale>.objects.generated.ts` and the next extract drops its entry by');

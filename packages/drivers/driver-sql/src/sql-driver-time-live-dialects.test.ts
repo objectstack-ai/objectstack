@@ -134,6 +134,23 @@ function suite(cell: DialectCell) {
       expect(minutesOffUtc(String(row.auto_at))).toBeLessThan(5);
     });
 
+    // [#20480] The 2026 control beside the engine's refusal of an instant with
+    // no four-digit UTC year on a time column: `+010000-01-01T10:00:00Z` was a
+    // 500 here at the base (PostgreSQL `22009`). The same wall clock in 2026, in
+    // each spelling the door admits, compares by its UTC time of day — with the
+    // process and the server in two different zones.
+    it('[#20480] a 2026 instant comparand compares by its UTC time of day — the control', async () => {
+      for (const [id, starts_at] of [['t09', '09:00:00'], ['t1030', '10:30:00'], ['t12', '12:00:00']]) {
+        await driver.create(TABLE, { id, label: id, starts_at }, { bypassTenantAudit: true });
+      }
+      const ids = async (where: Record<string, unknown>) =>
+        (await driver.find(TABLE, { where, orderBy: [{ field: 'id', order: 'asc' }] }, { bypassTenantAudit: true })).map((r: any) => r.id);
+      for (const at of ['2026-07-15T10:00:00Z', '2026-07-15T18:00:00+08:00', '2026-07-15 10:00', Date.UTC(2026, 6, 15, 10), new Date(Date.UTC(2026, 6, 15, 10))]) {
+        expect(await ids({ starts_at: { $gt: at } }), `$gt ${String(at)}`).toEqual(['t1030', 't12']);
+        expect(await ids({ starts_at: { $lt: at } }), `$lt ${String(at)}`).toEqual(['t09']);
+      }
+    });
+
     it('distinct() presents exactly what find() presents', async () => {
       await driver.create(TABLE, { id: 'a', label: 'a', starts_at: '14:30' }, { bypassTenantAudit: true });
       await driver.create(TABLE, { id: 'b', label: 'b', starts_at: '14:30:00' }, { bypassTenantAudit: true });

@@ -4,7 +4,7 @@
 //
 // The docblock half (#9130 / PR #9183) already explains, IN SOURCE, that a
 // stored `'admin'` (or legacy `'user'`) stamp is not always a deliberate
-// Setup takeover — on any install created before #8692 the platform's own
+// Setup takeover — on any install created before commit 712e185db the platform's own
 // seeder wrote that exact stamp, so `resynced 0 / skipped N` is a permanent,
 // by-design outcome there. This card is the runtime-output half: the same
 // explanation has to reach the operator who is staring at the terminal,
@@ -20,7 +20,7 @@
 //   • it says the skip is expected / by design / not a failure — the whole
 //     point of the card;
 //   • it does NOT reintroduce "intentional override" framing for the
-//     admin-owned case — the docblock removed that as false (a pre-#8692
+//     admin-owned case — the docblock removed that as false (before commit 712e185db the
 //     seeder wrote the stamp, not an admin), and this line must not
 //     contradict it.
 
@@ -60,7 +60,7 @@ describe('resyncSkipExplanationLine — the runtime-output half of #9184', () =>
 
   it('never claims the admin-owned case is a deliberate override — the framing PR #9183 removed', () => {
     const line = resyncSkipExplanationLine(1)!;
-    // The pre-#8692 case is exactly the platform's own seeder inheriting a
+    // The case predating commit 712e185db is exactly the platform's own seeder inheriting a
     // field default, not an administrator deciding anything — the docblock
     // in bootstrap-platform-admin.ts is explicit that stating this as
     // "(intentional override)" is a lie for those rows. This line must keep

@@ -137,7 +137,7 @@ export function platformOwnershipFloorPolicyCount(): number {
  *  - `controlled_by_parent` derives its access from the MASTER record, which
  *    has its own OWD and its own gate (`assertControlledByParentWrite`) — the
  *    detail declares nothing about who may write it. ⚠️ **That reasoning is
- *    about THIS constant and stops here** (#8757). It says a detail is not
+ *    about THIS constant and stops here** (commit 6feac910b). It says a detail is not
  *    org-wide-open, and it is still right about that. It was ALSO read as
  *    saying the master gate governs a detail's by-id writes — and when this
  *    bullet was written that was not true of the runtime: the floor answered
@@ -186,7 +186,7 @@ export function owdOpenWritesCoversOperation(operation: string): boolean {
 }
 
 /**
- * [#8757] The OWD whose row-level write authority is ANOTHER OBJECT's gate.
+ * [commit 6feac910b] The OWD whose row-level write authority is ANOTHER OBJECT's gate.
  *
  * Maintainer ruling 2026-08-15 (delegated adjudication), on the card that
  * measured a `controlled_by_parent` detail refusing a cross-creator by-id

@@ -95,9 +95,10 @@
  *   to precede the driver), so judging one would refuse `{30_days_ago}`, the
  *   platform's own correct spelling. Unknown tokens keep their existing loud
  *   refusal one layer down.
- * - **Non-string comparands are not judged, save one class.** A number is
- *   epoch milliseconds and a `Date` is an instant; the `datetime` and `time`
- *   rules read both. [#20240] On a `date` field, one whose UTC calendar day
+ * - **Non-string comparands are not judged, save the year classes.** A number
+ *   is epoch milliseconds and a `Date` is an instant; the `datetime` and `time`
+ *   rules read both, [#20480] a `time` column only when the instant's UTC year
+ *   has four digits (below). [#20240] On a `date` field, one whose UTC calendar day
  *   falls in a year outside the four-digit ones has no `YYYY-MM-DD` form, so
  *   it is refused here in its own words (below); every other number and `Date`
  *   is read as before. The #8690 ruling scoped THAT change to strings; it did
@@ -116,6 +117,41 @@
  * spelling. `@objectstack/core`'s `isOutsideTemporalYearRange` is the range;
  * the predicate this door calls asks it, and so does the record validator's
  * write door, so the two doors cannot disagree about a year.
+ *
+ * ## [#20549] A value the rule reads as another value than it names
+ *
+ * A string comparand is refused here exactly when the record validator refuses
+ * it as a written value, because both ask `@objectstack/core`'s one predicate.
+ * Two classes joined it from the write door, measured before this on
+ * InMemoryDriver and SqlDriver on SQLite and PostgreSQL 16, the process in
+ * America/New_York, through `engine.find`:
+ *
+ * ```
+ * datetime $eq "2026-02-30T10:00:00Z"   200, the row at 2026-03-02T10:00Z   (rolled over)
+ * datetime $eq "07/15/2026 10:00"       200, the row at 2026-07-15T14:00Z   (the process zone)
+ * date     $eq "2026-02-30"             200 [] on memory and SQLite, 500 on PostgreSQL
+ * ```
+ *
+ * These are not junk: the rule reads each one, as the wrong value, so each
+ * answered rows. Their refusal says so in its own words ({@link misreadClassOf})
+ * rather than in the junk class's "compare false for EVERY row".
+ *
+ * ## [#20480] An instant on a `time` column outside the four-digit years
+ *
+ * A `time` column keeps the UTC time of day of an instant, and only of one
+ * whose UTC year has four digits; any other it hands back as written. Measured
+ * before this, the process in America/New_York, over three rows
+ * `09:00:00` / `10:30:00` / `12:00:00`:
+ *
+ * ```
+ * time $gt "+010000-01-01T10:00:00Z"     3 of 3 on memory and SQLite, 500 on PostgreSQL
+ * time $gt "9999-12-31T23:00:00-02:00"   0 on memory and SQLite, 500 on PostgreSQL
+ * time $gt <the number of that instant>  0 on memory, 3 on SQLite, 500 on PostgreSQL
+ * ```
+ *
+ * The right answer for 10:00 is 2 (the 2026 instant at 10:00Z answers 2 / 1).
+ * Each is refused here now, in every spelling, and no time of day is read from
+ * it; core's `isOutsideTemporalYearRange` on the instant names the class.
  *
  * ## [#20263] The third position: `having`
  *
@@ -166,7 +202,8 @@ export interface UninterpretableTemporalComparand {
   kind: TemporalComparandKind;
   /**
    * A non-empty string — or, on a `date` or `datetime` field, a number or
-   * `Date` whose year falls outside 0001..9999 ([#20240], [#20264]).
+   * `Date` whose year falls outside 0001..9999 ([#20240], [#20264]), and on a
+   * `time` field one whose UTC year has no four-digit spelling ([#20480]).
    */
   value: unknown;
   /** The `where.…` (or `having.…`, `aggregations[i].filter.…`) key path the offending comparand sits at. */
@@ -340,11 +377,11 @@ function preview(value: unknown): string {
  */
 const REMEDY: Record<TemporalComparandKind, string> = {
   datetime:
-    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z"), a bare "YYYY-MM-DD" '
-    + '(read as midnight UTC), epoch milliseconds, or a relative-date placeholder the '
-    + 'resolver knows, e.g. "{30_days_ago}" / "{current_month_start}".',
+    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z") on a calendar day that exists, '
+    + 'a bare "YYYY-MM-DD" (read as midnight UTC), epoch milliseconds as a number, or a '
+    + 'relative-date placeholder the resolver knows, e.g. "{30_days_ago}" / "{current_month_start}".',
   date:
-    'Write a "YYYY-MM-DD" calendar day, or a relative-date placeholder the resolver '
+    'Write a "YYYY-MM-DD" calendar day that exists, or a relative-date placeholder the resolver '
     + 'knows, e.g. "{30_days_ago}" / "{current_month_start}".',
   time:
     'Write an "HH:MM" / "HH:MM:SS" wall clock (timezone-naive, ADR-0053 D-C1).',
@@ -382,6 +419,72 @@ function yearClassOf(hit: UninterpretableTemporalComparand): (typeof YEAR_CLASS)
 }
 
 /**
+ * [#20549] A comparand the storage rule READS, but not as the value it names —
+ * the two readings the write door refused first, and `@objectstack/core`'s one
+ * rule now refuses at both doors. Such a comparand does not compare false for
+ * every row, as junk does: it answers rows, the wrong ones. Each class says
+ * why, and what the value would have done, per position.
+ */
+interface MisreadClass {
+  why: string;
+  where: string;
+  having: string;
+}
+
+const IMPOSSIBLE_DAY: MisreadClass = {
+  why: 'whose calendar day does not exist',
+  where: 'Read as written it rolls over into another day or compares as text, and answers the wrong '
+    + 'rows or a database error.',
+  having: 'Compared with each group, it rolls over into another day or compares as text, and keeps the '
+    + 'wrong groups.',
+};
+
+function notAnIsoSpelling(kind: TemporalComparandKind): MisreadClass {
+  const parser = 'Outside those spellings the server\'s own parser decides the instant: a zone-less '
+    + 'spelling in the server\'s time zone, a slashed day in a guessed order, a bare integer as epoch '
+    + 'milliseconds';
+  return {
+    why: `which is not one of the ISO 8601 spellings a ${kind} comparand is read in`,
+    where: `${parser}. The rows it matched would depend on the host rather than on the filter.`,
+    having: `${parser}. The groups it kept would depend on the host rather than on the filter.`,
+  };
+}
+
+/**
+ * [#20480] An instant on a `time` column whose UTC year has no four-digit
+ * spelling: the rule keeps no time of day from it and hands it back as
+ * written, so it compared as text or as a number with stored `HH:MM:SS`.
+ */
+const TIME_OUTSIDE_FOUR_DIGIT_YEARS: MisreadClass = {
+  why: 'an instant whose UTC year falls outside the years 0001 to 9999, so no time of day is read from it',
+  where: 'It would reach the driver as written and compare as text or as a number, answering the wrong '
+    + 'rows or a database error.',
+  having: 'Compared with each group as written, it would keep the wrong groups.',
+};
+
+/**
+ * [#20549] The misread class of a hit, or `undefined` for a comparand the rule
+ * cannot read at all (junk, the #8690 class) — for the message only. The
+ * verdict is core's, and the leading day is judged by asking core's predicate
+ * of it, so the calendar arithmetic is never re-derived here.
+ */
+function misreadClassOf(hit: UninterpretableTemporalComparand): MisreadClass | undefined {
+  // [#20480] The range is core's, asked of the instant the `datetime` rule
+  // reads — the reading a `time` column takes of every non-wall-clock value.
+  if (hit.kind === 'time' && isOutsideTemporalYearRange(hit.value, 'datetime')) return TIME_OUTSIDE_FOUR_DIGIT_YEARS;
+  if (typeof hit.value !== 'string') return undefined;
+  const s = hit.value.trim();
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(s)?.[0];
+  if (day !== undefined && isUninterpretableTemporalComparand('date', day) && !isOutsideTemporalYearRange(day, 'date')) {
+    return IMPOSSIBLE_DAY;
+  }
+  if (hit.kind !== 'date' && (/^-?\d+$/.test(s) || Number.isFinite(Date.parse(s)))) {
+    return notAnIsoSpelling(hit.kind);
+  }
+  return undefined;
+}
+
+/**
  * Refuse every comparand a declared temporal field's storage rule cannot read.
  *
  * Runs on the CALLER's own `where`, before the middleware chain composes
@@ -415,6 +518,16 @@ export function assertTemporalComparandsInterpretable(
       + `value may name, so it is not a ${hit.kind} value this platform can interpret. It `
       + `would reach the driver in a form that ${yearClass.misorder} and answer the wrong rows, or a `
       + `database error. The filter was NOT applied. ${yearClass.remedy}`,
+    );
+  }
+  // [#20549] A comparand the rule reads as another value than it names.
+  const misread = misreadClassOf(hit);
+  if (misread) {
+    throw invalidFilterError(
+      `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
+      + `against ${preview(hit.value)} at ${hit.path}, ${misread.why}, so it is not a ${hit.kind} `
+      + `value this platform can interpret. ${misread.where} The filter was NOT applied. `
+      + REMEDY[hit.kind],
     );
   }
   throw invalidFilterError(
@@ -487,6 +600,15 @@ export function assertHavingTemporalComparandsInterpretable(
       + 'value this platform can interpret. Compared with each group, it '
       + `${yearClass.misorder} and would keep the wrong groups. The \`having\` was NOT applied. `
       + yearClass.remedy,
+    );
+  }
+  // [#20549] The misread classes, in their own words, as on `where`.
+  const misread = misreadClassOf(hit);
+  if (misread) {
+    throw invalidFilterError(
+      `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
+      + `${misread.why}, so it is not a ${hit.kind} value this platform can interpret. `
+      + `${misread.having} The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
     );
   }
   throw invalidFilterError(

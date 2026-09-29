@@ -13,7 +13,7 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
-import { markStackProvenance, hasStackProvenance, stackConversionsOf } from './stack-provenance';
+import { markStackProvenance, markRefusalConversions, hasStackProvenance, stackConversionsOf } from './stack-provenance';
 import {
   normalizeStackInput,
   MAP_SUPPORTED_FIELDS,
@@ -3588,6 +3588,60 @@ export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
 ): ObjectStackDefinition {
+  // Every ADR-0087 D2 conversion this call applies is RECORDED, beside the
+  // provenance mark on the stack it returns (`stackConversionsOf`,
+  // `stack-provenance.ts`): the stack leaves here already canonical, so a door
+  // that reports conversions — the `--json` `conversions` field,
+  // `os validate --strict` — can learn what was converted only from this
+  // producer. The record starts from the input's own record, so a built stack
+  // handed straight back here keeps what its first build applied (the pass
+  // finds nothing left to convert on it); it is not subject to the stderr
+  // warn-once.
+  //
+  // A call that REFUSES returns no stack, so the record rides on the refusal
+  // instead: every ADR-0112 refusal thrown below — the schema parse, the six
+  // cross-field refusals, and the bound-action merge's shape refusal that ends
+  // BOTH modes — carries the conversions applied so far, and
+  // `stackConversionsOf(error)` reads them off the caught error. The same
+  // array, as it stands at the throw: never a second conversion pass.
+  const appliedConversions: ConversionNotice[] = [...stackConversionsOf(config)];
+  try {
+    return buildDefinedStack(config, options, appliedConversions);
+  } catch (error) {
+    throw withRefusalConversions(error, () => appliedConversions);
+  }
+}
+
+/**
+ * [ADR-0087 · ADR-0112] The one rule for which throw carries a producer's
+ * conversion record, applied in each producer's `catch` before it rethrows: a
+ * member of the {@link StackRefusalError} family — the producers' own answer
+ * to authored input — is stamped with the record
+ * (`markRefusalConversions`, `stack-provenance.ts`); anything else is returned
+ * untouched. Either way it is the SAME object, rethrown, so its `code`,
+ * `status`, `issues`, message and stack are exactly what the throw site built.
+ * A non-refusal throw is not the producer's answer (a bare zod error from an
+ * options parse, an internal invariant), so it is not given a record that
+ * would read as one.
+ *
+ * `conversions` is lazy so a producer computes its record only when there is
+ * a refusal to carry it.
+ */
+function withRefusalConversions(error: unknown, conversions: () => readonly ConversionNotice[]): unknown {
+  if (error instanceof StackRefusalError) markRefusalConversions(error, conversions());
+  return error;
+}
+
+/**
+ * The body of {@link defineStack}. `appliedConversions` is the caller's
+ * record, pushed to as the conversion pass runs, so the caller holds what was
+ * applied so far whichever line below throws.
+ */
+function buildDefinedStack(
+  config: ObjectStackDefinitionInput,
+  options: DefineStackOptions | undefined,
+  appliedConversions: ConversionNotice[],
+): ObjectStackDefinition {
   // Default to strict=true for safety (validate by default)
   const strict = options?.strict !== false;
 
@@ -3595,17 +3649,8 @@ export function defineStack(
   // surface every ADR-0087 D2 conversion the pass had to apply. Unlike the alias
   // warning below this runs in BOTH modes: a conversion happens whether or not
   // we go on to parse, so `strict: false` does not make the old shape any less
-  // retiring.
-  //
-  // Each notice is also RECORDED on the stack returned below, beside the
-  // provenance mark (`stackConversionsOf`, `stack-provenance.ts`): the stack
-  // leaves here already canonical, so a door that reports conversions — the
-  // `--json` `conversions` field, `os validate --strict` — can learn what was
-  // converted only from this producer. The record starts from the input's own
-  // record, so a built stack handed straight back here keeps what its first
-  // build applied (the pass below finds nothing left to convert on it); it
-  // is not subject to the stderr warn-once.
-  const appliedConversions: ConversionNotice[] = [...stackConversionsOf(config)];
+  // retiring. Each notice is pushed to the caller's record (see
+  // {@link defineStack}) as well as printed, warn-once, on stderr.
   const normalized = normalizeStackInput(config as Record<string, unknown>, {
     onConversionNotice: (notice) => {
       appliedConversions.push(notice);
@@ -5119,6 +5164,37 @@ export function composeStacks(
   stacks: ObjectStackDefinition[],
   options?: ComposeStacksOptions,
 ): ObjectStackDefinition {
+  // [ADR-0087 · ADR-0112] A composition that REFUSES carries the conversion
+  // record the artifact would have carried — its inputs' records, by the rule
+  // the return below uses ({@link composedConversions}) — so a door that
+  // catches a composition conflict still reports what the inputs' own
+  // `defineStack` calls converted. Composition converts nothing itself, so the
+  // record is complete from the first line; `stackConversionsOf(error)` reads
+  // it off the caught refusal.
+  try {
+    return composeBuiltStacks(stacks, options);
+  } catch (error) {
+    throw withRefusalConversions(error, () => composedConversions(stacks));
+  }
+}
+
+/**
+ * The conversion record of a composition: its inputs' records, concatenated
+ * in input order, one application once — a `Set` over the (frozen,
+ * identity-kept) notices counts the same built stack passed twice once. Each
+ * notice's `path` stays relative to the `defineStack` call that applied it.
+ * One formula for the artifact {@link composeStacks} returns and for the
+ * refusal it throws.
+ */
+function composedConversions(stacks: readonly unknown[]): readonly ConversionNotice[] {
+  return [...new Set(stacks.flatMap((stack) => stackConversionsOf(stack)))];
+}
+
+/** The body of {@link composeStacks}. */
+function composeBuiltStacks(
+  stacks: ObjectStackDefinition[],
+  options?: ComposeStacksOptions,
+): ObjectStackDefinition {
   // 0. [#20367 ruling B] Every input must be a stack a producer built. The
   //    per-stack refusals run only inside `defineStack`, so an input that never
   //    passed through it is unjudged, and nothing below re-judges it (the
@@ -5333,12 +5409,9 @@ export function composeStacks(
   // a producer's output too: a nested `composeStacks` or an author-time door
   // accepts it.
   //
-  // Its conversion record is its inputs' records, concatenated in input order.
+  // Its conversion record is its inputs' records ({@link composedConversions}).
   // Composition converts nothing itself — every input arrived canonical from
   // its own `defineStack` — so this is the whole of what was applied to build
-  // the artifact. A `Set` over the (frozen, identity-kept) notices counts one
-  // application once when the same built stack is passed twice; each notice's
-  // `path` stays relative to the `defineStack` call that applied it.
-  const conversions = [...new Set(stacks.flatMap((stack) => stackConversionsOf(stack)))];
-  return markStackProvenance(artifact, 'composeStacks', conversions) as ObjectStackDefinition;
+  // the artifact.
+  return markStackProvenance(artifact, 'composeStacks', composedConversions(stacks)) as ObjectStackDefinition;
 }

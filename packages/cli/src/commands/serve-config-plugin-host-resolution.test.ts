@@ -13,14 +13,14 @@ import Serve from './serve.js';
  * which Node ESM resolves against the CLI's realpath — so a plugin the APP
  * declares could only be served where it happened to be hoisted somewhere the
  * CLI could see. Green in a dev checkout, absent on a real distribution layout
- * (#10908; the same mechanism as cloud#1013 and #10645).
+ * (until commit 9cc6777d3; the same mechanism as cloud#1013 and #10645).
  *
  * The repair moves ONLY the declared case. These tests pin every branch the
  * method has, including the ones that exist to keep behaviour a naive
  * `await importFromHost(specifier)` would have taken away — see
  * `Serve.importConfigPlugin` for the measurements.
  *
- * ⚠️ #11157 collapsed the shape from three branches to two: once `importFromHost`
+ * ⚠️ Commit a4cb7817f collapsed the shape from three branches to two: once `importFromHost`
  * hands `createHostImporter` this file's own resolver (`fallbackImport`), the
  * helper's undeclared leg IS the local `import()` the undeclared branch used to
  * make, so that branch and the re-entry branch became one call. Every assertion
@@ -120,7 +120,7 @@ describe('os serve → an app-declared `plugins: [...]` package resolves from th
 });
 
 /**
- * Triage ② on #10908: host-anchoring changes the user-facing text a missing
+ * Triage ②, as landed in commit 9cc6777d3: host-anchoring changes the user-facing text a missing
  * plugin produces — the wrapper now nests `createHostImporter`'s #4719 remedy.
  * That is a better diagnostic, but it is VISIBLE, so it is pinned here as a
  * chosen behaviour rather than left to drift.
@@ -155,13 +155,13 @@ describe('os serve → the branches that must NOT move (#10908 supersedes nothin
     // writes `plugins: ['@objectstack/plugin-auth']` without declaring it boots
     // today, and this is the assertion that says it still does.
     //
-    // ⚠️ This assertion is why #11157 had to land BEFORE the branch collapse and
+    // ⚠️ This assertion is why commit a4cb7817f threaded the base BEFORE the branch collapse and
     // not after. It used to be kept true by a local `import()` here; it is now
     // kept true by `importFromHost` carrying this file's base.
     //
     // ⛔ IT IS NOT THE MEASUREMENT OF THAT BASE, and this comment used to claim
     // it was ("take the base away and this line goes red"). #11412 ablated it:
-    // with `fallbackImport` removed from `importFromHost` — the #11157 fix gone,
+    // with `fallbackImport` removed from `importFromHost` — commit a4cb7817f's fix gone,
     // everything else identical — this case stayed GREEN, while the spawned-child
     // pin of the same claim in `test/serve-host-fallback-base.e2e.test.ts` went
     // RED. Under vitest `@objectstack/types` is inlined and its `import()` is
@@ -181,10 +181,10 @@ describe('os serve → the branches that must NOT move (#10908 supersedes nothin
     expect(mod.default ?? mod).toBeTruthy();
   });
 
-  // ⚠️ REPLACED, not reworded (#10944). This slot used to pin that a RELATIVE
+  // ⚠️ REPLACED, not reworded (commit e598b1cbc). This slot used to pin that a RELATIVE
   // specifier stayed anchored to serve.ts rather than being re-based under
-  // `@objectstack/types/dist/` — i.e. it pinned the exact branch #10944 has
-  // since removed. #10944 ruled that neither base is the served app's root, so
+  // `@objectstack/types/dist/` — i.e. it pinned the exact branch commit e598b1cbc has
+  // since removed. The ruling it landed: neither base is the served app's root, so
   // the spelling is now refused at load instead of resolved anywhere; keeping
   // the old assertion would have pinned a resolution that no longer runs.
   // The refusal, the two spellings that do work, and the full shape matrix live
@@ -235,7 +235,7 @@ describe('os serve → the config-plugin load stays wired to the helper', () => 
     // importer would still pass the behavioural tests above, so pin the wiring.
     //
     // ⚠️ This used to also require `isDeclaredByHost(pluginSpecifier, root)` in
-    // this method. #11157 removed that call — not the check. `importFromHost`
+    // this method. Commit a4cb7817f removed that call — not the check. `importFromHost`
     // now carries this file's resolution base, which made the local undeclared
     // branch identical to the helper's own fallback, so the declaration is read
     // exactly once, by `readHostDeclaration` inside `createHostImporter`. Asking
@@ -248,7 +248,7 @@ describe('os serve → the config-plugin load stays wired to the helper', () => 
     // The resolver is never chosen by a second, local reading of the manifest.
     expect(body).not.toContain('isDeclaredByHost');
     // …and the entry is never handed to a bare `import()` once it names a
-    // package: that is the #10908 defect itself.
+    // package: that is the defect commit 9cc6777d3 fixed.
     expect(body).not.toMatch(/if \(isDeclaredByHost/);
   });
 });

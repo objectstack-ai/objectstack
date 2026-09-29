@@ -35,6 +35,7 @@ import {
   nextUtcCalendarDay,
   resolveAnalyticsDateRangeString,
   utcInstantMs,
+  isUnboundedAbove,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -92,9 +93,17 @@ function compare(a: unknown, b: unknown): number {
  * matters here, because the preview sees drafted rows with no schema.
  *
  * Shared by `$lte` and the max of `$between` so the two cannot drift apart.
+ *
+ * [#20600] `9999-12-31`, the last supported day, has no next day to compare
+ * against (`UNBOUNDED_ABOVE`): every instant the platform stores is on or
+ * before it, so a value that denotes an instant ({@link utcInstantMs}) is
+ * inside the bound, and any other value keeps the comparison as written — the
+ * same reading `formula`'s `check` evaluator gives, so the two type-blind
+ * surfaces answer one bound alike.
  */
 function lteBound(value: unknown, bound: unknown): boolean {
   const nextDay = nextUtcCalendarDay(bound);
+  if (isUnboundedAbove(nextDay)) return utcInstantMs(value) !== null || compare(value, bound) <= 0;
   if (nextDay != null) return compare(value, nextDay) < 0;
   return compare(value, bound) <= 0;
 }
@@ -671,16 +680,20 @@ export function evaluateAnalyticsQueryOverRows(
     // ⛔ Neither reaches a RESOLVED preset window: it states its own upper
     // reading and is never a bare day — the ten calendar presets stop BEFORE
     // their end instant, the three rolling ones end at NOW and reach it.
+    // [#20600] A bare end on the last supported day has no next day to stop
+    // before: every value is inside it, so the window keeps its start alone.
     const nextDay = explicit ? nextUtcCalendarDay(end) : null;
     filtered = filtered.filter((r) => {
       const v = String(r[field] ?? '');
       const inUpper = endExclusive
         ? v < end
-        : nextDay != null
-          ? v < nextDay
-          : explicit
-            ? v <= `${end}~`
-            : v <= end;
+        : isUnboundedAbove(nextDay)
+          ? true
+          : nextDay != null
+            ? v < nextDay
+            : explicit
+              ? v <= `${end}~`
+              : v <= end;
       return v >= start && inUpper;
     });
   }

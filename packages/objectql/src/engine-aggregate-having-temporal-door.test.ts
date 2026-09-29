@@ -213,6 +213,16 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     ['"noon" on max(time)',
       () => ({ last_slot: { $gt: 'noon' } }), { slot: { $gt: 'noon' } },
       ["`having` on 'last_slot' (max(slot), a time column)", 'not a time value']],
+    // [#20480] A time column keeps the UTC time of day of an instant only when
+    // its UTC year has a four-digit spelling. This number kept NO group at the
+    // base (it was compared with `HH:MM:SS` text as written), and was listed
+    // among the comparands left alone; it is refused now, with its string twin.
+    ['[#20480] the number for 10000-01-01 on max(time), which kept no group',
+      () => ({ last_slot: { $gt: Y10000 } }), { slot: { $gt: Y10000 } },
+      ["`having` on 'last_slot' (max(slot), a time column)", '253402300800000', 'at having.last_slot.$gt']],
+    ['[#20480] the card\'s extended-year instant on max(time)',
+      () => ({ last_slot: { $gt: '+010000-01-01T10:00:00Z' } }), { slot: { $gt: '+010000-01-01T10:00:00Z' } },
+      ["`having` on 'last_slot' (max(slot), a time column)", '"+010000-01-01T10:00:00Z"', 'at having.last_slot.$gt']],
     ['an $in member', () => ({ last_placed: { $in: ['2026-02-01', 'not-a-date'] } }), { placed_on: { $in: ['2026-02-01', 'not-a-date'] } },
       ['at having.last_placed.$in[1]']],
     ['a $nin member', () => ({ last_placed: { $nin: ['not-a-date'] } }), { placed_on: { $nin: ['not-a-date'] } },
@@ -330,7 +340,8 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     // the REFUSED table); the first instant of year 1 is read, as before.
     ['the first instant of year 1 on min(datetime) — inside the range', { first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
     ['a wall clock on max(time)', { last_slot: { $gte: '12:00' } }, ['c2', 'c3', 'c4']],
-    ['the number for 10000-01-01 on max(time) — not judged on time', { last_slot: { $gt: Y10000 } }, []],
+    ['[#20480] the same wall clock as a 2026 instant on max(time) — the control', { last_slot: { $gte: '2026-01-01T12:00:00Z' } }, ['c2', 'c3', 'c4']],
+    ['[#20480] the same wall clock as a 2026 epoch-ms number on max(time)', { last_slot: { $gte: Date.parse('2026-01-01T12:00:00Z') } }, ['c2', 'c3', 'c4']],
     ['a {placeholder} is stepped around, as on where', { last_placed: { $lte: '{today}' } }, ['c1', 'c2', 'c3', 'c4']],
     ['the empty string (its own card)', { last_placed: { $gt: '' } }, ['c1', 'c2', 'c3', 'c4']],
     ['null in the equality slot', { last_placed: null }, []],

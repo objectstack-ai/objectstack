@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { nextUtcCalendarDay, utcInstantMs } from './calendar-day';
+import { nextUtcCalendarDay, utcInstantMs, UNBOUNDED_ABOVE, isUnboundedAbove } from './calendar-day';
 
 describe('nextUtcCalendarDay', () => {
   it('advances one calendar day', () => {
@@ -105,5 +105,73 @@ describe('[#20550] years 0001..0099 are calendar days, not 1900..1999', () => {
     expect(nextUtcCalendarDay('0100-02-28')).toBe('0100-03-01'); // 0100 is not a leap year
     expect(nextUtcCalendarDay('0100-02-29')).toBeNull();
     expect(utcInstantMs('0100-02-29')).toBeNull();
+  });
+});
+
+/**
+ * [#20600] `9999-12-31`, the last day of the supported years, has no next day
+ * with a `YYYY-MM-DD` spelling. The helper answered the five-digit
+ * `'10000-01-01'`, which sorts below `'2026-…'` as text, so a SQLite `datetime`
+ * `$lte '9999-12-31'` answered no rows. It now answers `UNBOUNDED_ABOVE`: every
+ * supported value is inside that day's whole-day bound, so an emitter compiles
+ * no upper bound. The answer is neither `null` ("not a calendar day", which
+ * would compile the day's midnight and miss the rest of it) nor a string.
+ */
+describe('[#20600] the last supported day answers UNBOUNDED_ABOVE', () => {
+  it('9999-12-31 answers UNBOUNDED_ABOVE — not a five-digit day, not null', () => {
+    const next = nextUtcCalendarDay('9999-12-31');
+    expect(next).toBe(UNBOUNDED_ABOVE);
+    expect(next).not.toBeNull();
+    expect(typeof next).toBe('symbol');
+    expect(nextUtcCalendarDay(' 9999-12-31 ')).toBe(UNBOUNDED_ABOVE); // trimmed, like every day
+  });
+
+  it('the days before it still answer the next day (the control)', () => {
+    expect(nextUtcCalendarDay('9999-12-30')).toBe('9999-12-31');
+    expect(nextUtcCalendarDay('9999-11-30')).toBe('9999-12-01');
+    expect(nextUtcCalendarDay('9998-12-31')).toBe('9999-01-01');
+  });
+
+  it('it is the one real day that does: every answer is a bare day or that value', () => {
+    // Walk the last year day by day; only its final day has no next day.
+    let unbounded = 0;
+    for (let ms = Date.parse('9999-01-01T00:00:00.000Z'); ms <= Date.parse('9999-12-31T00:00:00.000Z'); ms += 86_400_000) {
+      const day = new Date(ms).toISOString().slice(0, 10);
+      const next = nextUtcCalendarDay(day);
+      if (isUnboundedAbove(next)) unbounded += 1;
+      else expect(next, day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    expect(unbounded).toBe(1);
+  });
+
+  it('refusals are unchanged: an instant on that day, an impossible day and a five-digit day stay null', () => {
+    expect(nextUtcCalendarDay('9999-12-31T10:00:00.000Z')).toBeNull();
+    expect(nextUtcCalendarDay(new Date('9999-12-31T00:00:00.000Z'))).toBeNull();
+    expect(nextUtcCalendarDay('9999-12-32')).toBeNull();
+    expect(nextUtcCalendarDay('10000-01-01')).toBeNull();
+  });
+
+  it('is one registered symbol, so a second bundled copy of the helper answers the same value', () => {
+    expect(UNBOUNDED_ABOVE).toBe(Symbol.for('objectstack.calendarDay.unboundedAbove'));
+  });
+
+  it('isUnboundedAbove is true for that answer alone, and narrows it away', () => {
+    expect(isUnboundedAbove(nextUtcCalendarDay('9999-12-31'))).toBe(true);
+    expect(isUnboundedAbove(UNBOUNDED_ABOVE)).toBe(true);
+    expect(isUnboundedAbove(Symbol.for('objectstack.calendarDay.unboundedAbove'))).toBe(true);
+    // An unregistered symbol with the same description is another value.
+    expect(isUnboundedAbove(Symbol('objectstack.calendarDay.unboundedAbove'))).toBe(false);
+    for (const other of [nextUtcCalendarDay('9999-12-30'), null, undefined, '10000-01-01', '9999-12-31', {}]) {
+      expect(isUnboundedAbove(other), String(other)).toBe(false);
+    }
+    // The false branch is `string | null` to the compiler: a template literal
+    // compiles there, and would not on the unnarrowed answer (TS2731).
+    const next = nextUtcCalendarDay('9999-12-30');
+    const bound = isUnboundedAbove(next) || next === null ? null : `${next}T00:00:00.000Z`;
+    expect(bound).toBe('9999-12-31T00:00:00.000Z');
+  });
+
+  it("utcInstantMs still reads 9999-12-31 as that day's midnight UTC", () => {
+    expect(utcInstantMs('9999-12-31')).toBe(Date.parse('9999-12-31T00:00:00.000Z'));
   });
 });

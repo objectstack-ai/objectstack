@@ -38,7 +38,7 @@
  * ObjectStack is a developer tool, so a documented developer-facing command has
  * to work for the developer who follows the docs. This command is documented on
  * four public doc pages (`deployment/cli`, `plugins/index`, the two
- * `protocol/kernel` pages) and, until #14824, every one of those readers got a
+ * `protocol/kernel` pages) and, until commit cf6b67164, every one of those readers got a
  * project that CANNOT INSTALL:
  *
  *   - the emitted `package.json` declared `@objectstack/spec` and
@@ -81,7 +81,7 @@
  *
  * ## The emitted package NAME follows the placement too (#15530)
  *
- * The audience decides the name, and #14824 moved the audience without moving
+ * The audience decides the name, and commit cf6b67164 moved the audience without moving
  * the name: the standalone default kept stamping `@objectstack/plugin-<name>`
  * — a scope the developer it now scaffolds for cannot publish to — onto every
  * project, with the emitted README telling them to install it from there. The
@@ -321,9 +321,9 @@ function pluginDirName(name: string): string {
  * ## Why the standalone name is unscoped
  *
  * `@objectstack` is a scope the developer this command scaffolds FOR cannot
- * publish to. Until #14824 that was arguably fine, because the default output
+ * publish to. Until commit cf6b67164 that was arguably fine, because the default output
  * landed inside this monorepo, where every sibling really does carry the scope.
- * That ruling pointed the default at the developer's own directory and the name
+ * That commit pointed the default at the developer's own directory and the name
  * did not move with the audience — so the standalone emission stamped a scope
  * its owner does not own onto every project generated from it. ⚠️ Nothing in
  * this repository can see that: the name is never resolved from a registry

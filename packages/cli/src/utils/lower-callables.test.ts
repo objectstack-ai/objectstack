@@ -149,7 +149,7 @@ describe('lowerCallables — declared `functions` entries (#4396)', () => {
 // `lowerCallables` has lowered the array branch the whole time. Its member
 // lives inline in `stack.zod.ts` rather than in `FlowFunctionEntrySchema`
 // (an array entry names itself, so it is a different record, not the same
-// schema in a list), which is why widening one did not widen the other. #6238
+// schema in a list), which is why widening one did not widen the other. Commit c8d6f6e08
 // widened it; the parametrisation below now covers the array form too.
 describe('lowerCallables → the spec parses what it emits (#4976, #6238)', () => {
   const base = {
@@ -179,7 +179,7 @@ describe('lowerCallables → the spec parses what it emits (#4976, #6238)', () =
       scoreLead: () => ({ score: 1 }),
       syncBilling: { handler: () => ({ ok: true }), effect: 'writes' },
     }],
-    // ── the array form (#6238) ──
+    // ── the array form (commit c8d6f6e08) ──
     ['an array entry with a bare handler', 'array', [{ name: 'scoreLead', handler: () => ({ score: 1 }) }]],
     ['an array entry declaring a writer', 'array', [{ name: 'syncBilling', handler: () => ({ ok: true }), effect: 'writes' }]],
     ['an array entry declaring the pure default', 'array', [{ name: 'scoreLead', handler: () => ({ score: 1 }), effect: 'pure' }]],
@@ -270,7 +270,7 @@ describe('lowerCallables → the spec parses what it emits (#4976, #6238)', () =
 //      pass had gone out of its way to keep.
 //   2. A MALFORMED entry was destroyed rather than reported. The headless husk
 //      `{ effect: 'writes' }` (what a plain `JSON.stringify(stack)` leaves
-//      where a declaration was, #6293) left the lowering as `functions: {}` and
+//      where a declaration was, as commit c39a911ae found) left the lowering as `functions: {}` and
 //      the stack then parsed GREEN — the build writing an artifact missing the
 //      function instead of refusing.
 describe('lowerCallables — unrecognised `functions` entries reach the parse (#7318)', () => {

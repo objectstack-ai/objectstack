@@ -62,6 +62,22 @@
  * at parse level even where the console shipped the file. It now resolves the
  * console's `package.json` from the CLI's OWN location and joins the file's
  * path to it ({@link consoleSduiManifestPath}), which keeps `exports` closed.
+ *
+ * ## The project leg is read beside the config, not in the invoker's cwd (#20166)
+ *
+ * The first place looked is the project's own `sdui.manifest.json`, and the
+ * project is the directory of the config the command was given. `os validate
+ * path/to/objectstack.config.ts` locates everything else about that project
+ * from there — the capability preflight's `projectDir`, the access-matrix
+ * snapshot beside the config — so the manifest follows the same root. It used
+ * to follow the invoker's working directory instead: run from anywhere else,
+ * the command never read the project's own manifest, and a manifest that
+ * happened to sit in the invoker's directory judged a project it does not
+ * belong to. {@link resolveJsxGateManifest} therefore takes the project
+ * directory as a REQUIRED argument, with no working-directory default for a
+ * caller to fall into; `os validate`, `os build` and `os lint` hand it
+ * `dirname()` of the config path `loadConfig` resolved. A run started in the
+ * project's own directory is unchanged, because that directory is both.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -73,7 +89,7 @@ import { artifactPackages, packageBodyAsStack } from './artifact-packages.js';
 import { printErrorToStderr, printInfo } from './format.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
-/** The file the project provides, looked for in the working directory. */
+/** The file the project provides, looked for in the project directory: the config's own directory. */
 export const PROJECT_SDUI_MANIFEST_FILE = 'sdui.manifest.json';
 
 /**
@@ -186,12 +202,20 @@ export function consoleSduiManifestPath(origin: string | URL = import.meta.url):
 }
 
 /**
- * The manifest for the project in `cwd`, or the reason there is none: the
- * project's own file first, then the copy `@objectstack/console` ships
- * (located from `consoleOrigin`, see {@link consoleSduiManifestPath}). Never
- * throws: what an `unusable` answer costs is the caller's decision
+ * The manifest for the project whose directory is `cwd`, or the reason there
+ * is none: the project's own file first, then the copy `@objectstack/console`
+ * ships (located from `consoleOrigin`, see {@link consoleSduiManifestPath}).
+ * Never throws: what an `unusable` answer costs is the caller's decision
  * ({@link resolveJsxGateManifest} refuses it; `init`'s scaffold check, which
  * reads the INVOKER's directory rather than the project's, does not).
+ *
+ * ⚠️ Despite its name, `cwd` is the PROJECT directory — the directory of the
+ * config the command was given — whenever a command judges a project: the
+ * three authoring commands pass it through {@link resolveJsxGateManifest}.
+ * The working-directory default serves `init`'s scaffold check alone, whose
+ * module header records that reading as its own decision. ⛔ A new caller that
+ * has a config path passes that path's directory: never `process.cwd()`, and
+ * never the default.
  */
 export function resolveSduiManifest(
   cwd: string = process.cwd(),
@@ -312,10 +336,17 @@ export interface JsxGateManifest {
  * holds. Throws {@link SduiManifestRefusalError} for an `unusable` project
  * manifest when there is a page to check; see the header for the three
  * outcomes.
+ *
+ * `projectDir` is the directory of the config the command was given, and it
+ * is required: see the header for why the project leg is read there and not
+ * in the invoker's working directory (#20166). `resolution` is the pins'
+ * seam — an answer already made, standing in for the resolver's over
+ * `projectDir`.
  */
 export function resolveJsxGateManifest(
   stack: AnyRec,
-  resolution: SduiManifestResolution = resolveSduiManifest(),
+  projectDir: string,
+  resolution: SduiManifestResolution = resolveSduiManifest(projectDir),
 ): JsxGateManifest {
   if (resolution.status === 'resolved') return { sduiManifest: resolution.manifest, notices: [] };
   const pages = countJsxGatePages(stack);

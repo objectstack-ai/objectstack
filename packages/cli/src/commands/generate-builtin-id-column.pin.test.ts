@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE #15040 PIN: the `id` column both migration generators emit is the column
+ * THE commit 8644d1d33 PIN: the `id` column both migration generators emit is the column
  * `driver-sql` actually creates.
  *
  * ## The defect
@@ -46,7 +46,7 @@
  *
  * ## The audit-stamp columns: all three rows now ruled (#15521)
  *
- * #15040 measured a THIRD disagreement in the same pass and recorded it here
+ * Commit 8644d1d33 measured a THIRD disagreement in the same pass and recorded it here
  * without correcting it. #15521 split that record into rows and has now ruled
  * every one of them the same way — the generator follows the driver:
  *

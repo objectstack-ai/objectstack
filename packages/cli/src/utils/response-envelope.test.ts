@@ -89,7 +89,7 @@ describe('readEnvelopeFrom', () => {
 });
 
 /**
- * `readErrorMessage` — the PRINTABLE-message reader (#10763).
+ * `readErrorMessage` — the PRINTABLE-message reader (added by commit c2b97c2a1).
  *
  * Two dialects are covered because the control plane really does emit two: the
  * declared envelope, and the flat `error: '<sentence>'` its `fail()` helper

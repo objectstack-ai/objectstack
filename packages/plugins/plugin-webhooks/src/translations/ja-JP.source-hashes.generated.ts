@@ -5,7 +5,7 @@
  *
  * Each entry is the digest of the SOURCE REVISION that this locale's leaf at
  * that path is still a byte copy of — provenance for the generated half of the
- * bundles (#11671, maintainer ruling #12069 Option A, extending #8765 Option B).
+ * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).
  *
  * An entry exists only while the leaf IS such a copy. Re-translate the leaf in
  * `<locale>.objects.generated.ts` and the next extract drops its entry by

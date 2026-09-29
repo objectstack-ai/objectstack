@@ -18,7 +18,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -543,13 +543,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
           // had — the #16179 separation, on this side too.
           const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
-          const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
           params.push(this.coerceTemporal(ctx, td2, range[0]));
           const lower = `${column} >= $${params.length}`;
-          params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
-          whereClauses.push(
-            `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
-          );
+          // [#20600] A bare end on the last supported day has no next day to
+          // stop before: every value is inside it, so the window keeps its
+          // start alone.
+          if (isUnboundedAbove(nextDay)) {
+            whereClauses.push(`(${lower})`);
+          } else {
+            const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
+            params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
+            whereClauses.push(
+              `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
+            );
+          }
         }
       }
     }
@@ -1235,6 +1242,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // Equivalent to `<=` for a `date` column, so no column-type lookup needed.
     if (operator === 'lte') {
       const nextDay = nextUtcCalendarDay(values[0]);
+      // [#20600] On the last supported day there is no next day: every value is
+      // inside the bound, so what `lte` still asks is a value — the `set` arm's
+      // `IS NOT NULL`.
+      if (isUnboundedAbove(nextDay)) return `${rawCol} IS NOT NULL`;
       if (nextDay != null) {
         params.push(this.coerceTemporal(ctx, target, nextDay));
         return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;

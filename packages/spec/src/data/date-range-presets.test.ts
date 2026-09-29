@@ -157,8 +157,10 @@ const midnightUtc = (day: string): number => Date.parse(`${day}T00:00:00.000Z`);
  */
 function prescribedDayCount(startDay: string, endDay: string): number {
   const exclusiveEnd = nextUtcCalendarDay(endDay);
-  expect(exclusiveEnd, `${endDay} must be a real calendar day`).not.toBeNull();
-  return (midnightUtc(exclusiveEnd!) - midnightUtc(startDay)) / DAY_MS;
+  // A day: never `null`, and never `UNBOUNDED_ABOVE` — no preset ends on
+  // 9999-12-31, the one day without a next day (#20600).
+  expect(typeof exclusiveEnd, `${endDay} must be a real calendar day before the last one`).toBe('string');
+  return (midnightUtc(exclusiveEnd as string) - midnightUtc(startDay)) / DAY_MS;
 }
 
 describe('the prescribed window covers exactly the days the preset names (#17014)', () => {

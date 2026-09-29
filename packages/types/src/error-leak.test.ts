@@ -138,7 +138,7 @@ describe('looksLikeInternalErrorLeak — shipped-dialect phrasings (#8132)', () 
         // SQLite/libsql message-only errors: the same conditions with NO
         // `SQLITE_` prefix to trip the existing limb. Measured shapes in this
         // repo — `driver-error-classification.ts` (next door, moved here by
-        // #13279 from `metadata/src/utils/schema-sync-errors.ts`) documents both.
+        // commit 6a180e42d from `metadata/src/utils/schema-sync-errors.ts`) documents both.
         ['sqlite bare missing table', 'no such table: sys_metadata'],
         ['sqlite bare missing table with a schema prefix', 'no such table: main.sys_metadata_history'],
         ['sqlite bare missing column', 'no such column: bogus'],
@@ -177,7 +177,7 @@ describe('looksLikeInternalErrorLeak — shipped-dialect phrasings (#8132)', () 
  * MySQL, and a reviewer sizing a disclosure residual on PR #8737 quoted it in
  * good faith; the claim was false (`driver-sql` branches on `mysql`/`mysql2`,
  * CI stands up a live `mysql:8.0` for a required check, live MySQL 8.0.46
- * measurements landed driver fixes #8621/#8622). PR #8824 corrected the
+ * measurements landed driver fixes #8621/#8622). Commit 8ac232306 corrected the
  * sentence and pinned the narrower, then-true fact — the predicate did not
  * COVER MySQL — as a deliberate tripwire for the decision that was still open.
  *

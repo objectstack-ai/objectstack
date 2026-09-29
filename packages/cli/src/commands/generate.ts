@@ -10,7 +10,7 @@ import path from 'path';
 // `@objectstack/spec/data` helpers — the enum object carries the type of the
 // same name, so the three vocabularies below still read
 // `satisfies Record<FieldType, …>` and a field type added to the spec is still a
-// named compile error here instead of a silent fallback (#14657). The value
+// named compile error here instead of a silent fallback (commit 431979e67). The value
 // half is what {@link refuseUndeclarableFieldType} reads.
 // #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
 // exported surface, and spec is not a driver package: the #5726 constraint the
@@ -84,8 +84,8 @@ const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
  * called: every filename comes from {@link metadataFileName}, which reads the
  * type's own `filePatterns` out of `DEFAULT_METADATA_TYPE_REGISTRY`. The
  * harness wrote `NAME.ts` for years, which matches no pattern the registry
- * declares for any type; #11025 closed that for `skill` alone through a
- * per-generator override, and #11071 replaced the override with the derived
+ * declares for any type; commit 1c3a46f87 closed that for `skill` alone through a
+ * per-generator override, and commit 50fb191dc replaced the override with the derived
  * default so a type added here cannot arrive misnamed by omission.
  *
  * A type registered here that the registry gives no TypeScript pattern is
@@ -148,9 +148,9 @@ const GENERATORS: Record<string, {
     description: 'Business data object',
     defaultDir: 'src/objects',
     /**
-     * Carries an AUTHORED `sharingModel` (#14336).
+     * Carries an AUTHORED `sharingModel` (commit 79c71d29d).
      *
-     * Unlike the other three repairs on that card this one is not shape drift:
+     * Unlike the other three repairs in that commit this one is not shape drift:
      * the object parsed fine and was refused one layer later, by
      * `security-owd-unset` — an author-time ERROR rule saying the org-wide
      * default must be a decision rather than an accident. So the scaffold
@@ -218,7 +218,7 @@ export default ${toCamelCase(name)};
     description: 'List or form view',
     defaultDir: 'src/views',
     /**
-     * A view CONTAINER — which is what a `view` artifact is (#14336).
+     * A view CONTAINER — which is what a `view` artifact is (commit 79c71d29d).
      *
      * `ViewSchema` is `.strict()` and its view slots are `list` / `form` /
      * `listViews` / `formViews`; `type` and `objectName` belong to a single
@@ -279,7 +279,7 @@ export default ${toCamelCase(name)}Views;
     defaultDir: 'src/actions',
     /**
      * `type` comes from `ActionType` — `script | url | modal | flow | api |
-     * form` — and the handler binding is the single `target` slot (#14336).
+     * form` — and the handler binding is the single `target` slot (commit 79c71d29d).
      *
      * The template used to write `type: 'custom'`, which is not a member, plus
      * a `handler: { type, target }` block, which is not an Action key: the
@@ -429,7 +429,7 @@ export default ${toCamelCase(name)}Dashboard;
     description: 'Application navigation',
     defaultDir: 'src/apps',
     /**
-     * `AppSchema.navigation` is an ARRAY of nav items (#14336).
+     * `AppSchema.navigation` is an ARRAY of nav items (commit 79c71d29d).
      *
      * The template used to write `{ type: 'sidebar', items: [] }`. There is no
      * `sidebar` wrapper on the authoring surface: the array IS the sidebar
@@ -474,16 +474,16 @@ export default ${toCamelCase(name)}App;
      * from a per-generator override.
      *
      * `skill` is where the consequence of getting this wrong was first
-     * measured (#11025). It is `allowRuntimeCreate: true`, a type the platform
+     * measured (commit 1c3a46f87). It is `allowRuntimeCreate: true`, a type the platform
      * expects to DISCOVER rather than one wired in by hand, so a scaffold
      * named `lead_qualification.ts` matches neither `*.skill.ts` nor
      * `*.skill.yml`, and then type-checks, passes `os validate` and publishes
      * with nothing anywhere saying it was skipped — the silent-strip shape
-     * ADR-0063's retirement of `os g agent` closed (#10359), re-entering
+     * ADR-0063's retirement of `os g agent` closed (commit 15b63e85a), re-entering
      * through the scaffolder that replaced it.
      *
      * That reasoning was scoped to `skill` on the belief that the other six
-     * types were not filesystem-discovered. #11071 measured the loader
+     * types were not filesystem-discovered. Commit 50fb191dc measured the loader
      * instead — the mechanism, and the precondition that keeps it from
      * firing in this repo today, are stated once in `metadata-file-name.ts`
      * (#12075), not restated here. The override is gone and the rule is the
@@ -804,7 +804,7 @@ function nameCharsetRefusal(name: string): string | null {
  * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
  * key, in this table and in the two vocabularies below it.
  *
- * TOTAL since #14657, and total BY CONSTRUCTION: the `satisfies
+ * TOTAL since commit 431979e67, and total BY CONSTRUCTION: the `satisfies
  * Record<FieldType, string>` below makes a missing member a named `tsc` error
  * (`Property 'x' is missing …`), so the next field type the spec adds cannot
  * arrive here in silence. Before it, 21 real members had no entry and every one
@@ -853,7 +853,7 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   color: 'string',
   rating: 'number',
   vector: 'number[]',
-  // #14657 — the members that used to fall to `|| 'unknown'`. Grouped by the
+  // Commit 431979e67 — the members that used to fall to `|| 'unknown'`. Grouped by the
   // spec's ADR-0104 D1 value class, which is what decides each answer.
   // STRING_VALUE_TYPES. `secret` is a string because the ROW holds an opaque
   // ref, not the credential: the engine encrypts via the ICryptoProvider,
@@ -908,7 +908,7 @@ const FIELD_TYPE_MAP: Record<string, string> = {
  * `schema-drift`'s `fieldHasColumn` opens with `isMultiValueField(...)` — and
  * left this file behind on a raw `field.multiple` read. That gap was measurable:
  * a `text` field flagged `multiple: true` got JSONB from `os generate migration`
- * and a varchar from the driver that actually creates the table, which is #14829
+ * and a varchar from the driver that actually creates the table — the defect commit ee370d318 fixed
  * ("the platform and the GENERATED DDL as two lists") in reverse.
  *
  * Takes the RESOLVED type rather than reading `field.type`, for the same reason
@@ -1827,7 +1827,7 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 /**
  * The SQL column type each authored field type generates (#13871).
  *
- * Same invariant as `FIELD_TYPE_MAP`, and since #14657 the same totality: every
+ * Same invariant as `FIELD_TYPE_MAP`, and since commit 431979e67 the same totality: every
  * key is a `FieldType` member AND every `FieldType` member has a key, enforced
  * by the `satisfies` below. The `|| 'TEXT'` default now covers only a `type`
  * string that is not a field type at all (the unvalidated authoring door).
@@ -1841,9 +1841,9 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * The totality rule is unchanged: `formula` still has an ENTRY, so a field type
  * added to the spec still cannot arrive here in silence.
  *
- * ## #14828 — the five pre-#14657 entries that disagreed with the platform
+ * ## Commit 08706f0e0 — the five entries predating commit 431979e67 that disagreed with the platform
  *
- * #13871 removed entries naming types the platform does not have; #14657 added
+ * #13871 removed entries naming types the platform does not have; commit 431979e67 added
  * entries for real members that had none, and deliberately left every
  * PRE-EXISTING entry byte-for-byte alone. This is the third direction: entries
  * that existed, keyed on a real member, and described something the platform
@@ -1893,12 +1893,12 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *                 other two moved would have manufactured a fresh within-file
  *                 contradiction of exactly the kind this card exists to close.
  *
- * ## #17883 — the FILE_REFERENCE_TYPES exclusion is closed
+ * ## Commit b06b2db5c — the FILE_REFERENCE_TYPES exclusion is closed
  *
  * This paragraph used to hold the family (`file` / `image` / `avatar` /
  * `video` / `audio`) out of scope, "filed rather than mirrored": the family was
  * in the driver's `JSON_COLUMN_TYPES` while this table gave it `VARCHAR(2048)`,
- * which was #14657's ADR-0104 D3 answer against a driver that was still pre-D3
+ * which was commit 431979e67's ADR-0104 D3 answer against a driver that was still pre-D3
  * — a decision about which side moves, not a wrong value to correct.
  *
  * It was decided, and it landed. ADR-0104 records the ruling: "The driver is
@@ -1908,7 +1908,7 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * `table.string(name, MEDIA_ID_VARCHAR_CHARS)` at 2048.
  *
  * What that left was the same fork one level down and INSIDE this file, which
- * is the defect #17883 names: the typescript format below spelled the family's
+ * is the defect commit b06b2db5c fixed: the typescript format below spelled the family's
  * column as a bare `table.string(name)` — knex's `varchar(255)`, as the
  * `autonumber` note above states in as many words — so ONE `os generate
  * migration` answered ONE field with `varchar(2048)` under `--format sql` and
@@ -2013,20 +2013,20 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   phone: 'VARCHAR(255)',
   url: 'VARCHAR(255)',
   select: 'VARCHAR(255)',
-  // #14828 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
+  // Commit 08706f0e0 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
   // the runtime stores this in a JSON column; `json: 'JSONB'` below is the
   // spelling, read from this table's own entry by `fieldTypeToSql`.
   multiselect: 'JSONB',
-  // #14828 — REFERENCE_VALUE_TYPES, one width for the whole class: the stored
+  // Commit 08706f0e0 — REFERENCE_VALUE_TYPES, one width for the whole class: the stored
   // value is the TARGET's `id`, which `driver-sql` emits as
   // `table.string('id').primary()` = `varchar(255)`. See `user` / `tree` below.
   lookup: 'VARCHAR(255)',
   master_detail: 'VARCHAR(255)',
-  // #14828 — VIRTUAL. `createColumn` answers `case 'formula': return;` and its
+  // Commit 08706f0e0 — VIRTUAL. `createColumn` answers `case 'formula': return;` and its
   // own mirror `varcharColumnChars` answers `case 'formula': return null;`.
   // Both migration generators skip the field entirely; see `fieldTypeToSql`.
   formula: null,
-  // #14828 — the runtime issues a RENDERED string (prefix + counter + suffix)
+  // Commit 08706f0e0 — the runtime issues a RENDERED string (prefix + counter + suffix)
   // and `createColumn` gives it `table.string(name)`. `FIELD_TYPE_MAP` above
   // has always said `string`; `SERIAL` made this file contradict itself.
   autonumber: 'VARCHAR(255)',
@@ -2044,11 +2044,11 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // for the same object refuses.
   color: 'VARCHAR(255)',
   rating: numericSqlType('rating'),
-  // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
+  // Commit 08706f0e0 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
   // does not exist on MySQL or SQLite.
   vector: 'JSONB',
-  // #14657 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
+  // Commit 431979e67 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
   // classes as `FIELD_TYPE_MAP`, resolved to this table's own SQL vocabulary.
   // STRING_VALUE_TYPES. `secret` holds the opaque `sys_secret` ref, not the
   // credential, so it is an ordinary short string column (ADR-0100).
@@ -2078,7 +2078,7 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   progress: numericSqlType('progress'),
   summary: numericSqlType('summary'),
   // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
-  // width belongs to the TARGET's id column, never to this field. #14828 read
+  // width belongs to the TARGET's id column, never to this field. Commit 08706f0e0 read
   // that derivation off the driver and applied it: the target's `id` column is
   // `table.string('id').primary()`, knex's `varchar(255)`. These two moved with
   // `lookup` / `master_detail` above so one class keeps one answer.
@@ -2461,7 +2461,7 @@ function declaredVarchar(maxLength: unknown): VarcharAnswer {
 
 /**
  * The `varchar(n)` width a FILE_REFERENCE_TYPES column takes, READ from this
- * file's own SQL vocabulary rather than transcribed beside it (#17883).
+ * file's own SQL vocabulary rather than transcribed beside it (commit b06b2db5c).
  *
  * ⛔ Never a second literal. The width is a decision this file already carries
  * once — {@link FIELD_TYPE_SQL_MAP}'s `VARCHAR(2048)`, which ADR-0104 calls the
@@ -2754,7 +2754,7 @@ function uniqueIndexesForObject(obj: Record<string, any>): MirroredUniqueIndex[]
  *   1. A key part with no column. `syncDeclaredIndexes` skips a declared index
  *      whose columns are not in `physicalColumns` and warns; the generator's
  *      equivalent of "not materialized" is a field this file emits no column
- *      for — a VIRTUAL `formula` (#14828). Emitting the index anyway produces
+ *      for — a VIRTUAL `formula` (commit 08706f0e0). Emitting the index anyway produces
  *      DDL that refuses to run at all.
  *   2. An EXPRESSION key part. `COALESCE(<tenant>, '__global__')` is what the
  *      driver builds through raw DDL precisely because knex's schema builder
@@ -2806,7 +2806,7 @@ function partitionUniqueIndexes(
  * the comment "Mirrors `SqlDriver.createColumn` exactly ... including
  * `multiple` (a JSON column)". Three statements of one rule: a multi-value
  * field is a JSON column whatever its element type would have been, so the
- * element type gets no vote here either (#14829). Before this, one authored
+ * element type gets no vote here either (commit ee370d318). Before this, one authored
  * `Field.lookup({ multiple: true })` produced `account?: string[]` from
  * `os generate types` and a scalar `VARCHAR(36)` column from this generator, in
  * the same run.
@@ -2827,7 +2827,7 @@ function partitionUniqueIndexes(
  * The JSON spelling is READ from this table's own `json` entry rather than
  * restated, so the two cannot drift about what a JSON column is spelled here.
  *
- * `null` means NO COLUMN — the answer for a virtual field type (#14828). It is
+ * `null` means NO COLUMN — the answer for a virtual field type (commit 08706f0e0). It is
  * the table's own entry, not a second decision here, and it composes in the
  * driver's order: multi-value still wins first, so a multi-value field of any
  * type is a JSON column and never reaches the lookup at all.
@@ -2835,7 +2835,7 @@ function partitionUniqueIndexes(
  * ⚠️ The lookup is by OWN-PROPERTY PRESENCE, not by the value being falsy or
  * nullish, because `null` is a meaningful ANSWER and every other spelling
  * swallows it: `||` and `??` both fall through on `null` and hand a virtual
- * field a TEXT column again — the exact defect #14828 closed, one operator to
+ * field a TEXT column again — the exact defect commit 08706f0e0 closed, one operator to
  * the left. (Measured: the first cut of that fix used `??` and still emitted
  * `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second half of the same
  * care — `in` answers true for `toString` and every other inherited key.
@@ -2946,7 +2946,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     const fields = (obj.fields ?? {}) as Record<string, Record<string, unknown>>;
 
     lines.push(`CREATE TABLE IF NOT EXISTS "${tableName}" (`);
-    // #15040 — the table's OWN id, corrected to what `driver-sql` emits for it:
+    // Commit 8644d1d33 — the table's OWN id, corrected to what `driver-sql` emits for it:
     // `table.string('id').primary()`, i.e. knex's `varchar(255)`
     // (`SqlDriver.DEFAULT_STRING_VARCHAR_CHARS`). This is the same derivation
     // `lookup` / `master_detail` / `user` / `tree` above already state — a
@@ -2982,7 +2982,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
         fieldDef.maxLength,
         keyColumns.has(fieldName),
       );
-      // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
+      // Commit 08706f0e0 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
       if (sqlType === null) continue;
@@ -3025,7 +3025,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     //
     // #15521's other two rows are now RULED, option B on both: the generator
     // follows the driver rather than improving on it — the same principle
-    // #15040 applied to the `id` column a few lines above.
+    // commit 8644d1d33 applied to the `id` column a few lines above.
     //
     //   NULLABILITY — the driver leaves both columns nullable, so the `NOT
     //   NULL` these two lines carried is gone. It was never load-bearing:
@@ -3129,7 +3129,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     const emittedColumns = new Set<string>(['id']);
 
     lines.push(`  await db.schema.createTable('${tableName}', (table: any) => {`);
-    // #15040 — the driver's own line for this column, emitted verbatim:
+    // Commit 8644d1d33 — the driver's own line for this column, emitted verbatim:
     // `table.string('id').primary()`. See `generateMigrationSql` above for the
     // derivation and for why the `.defaultTo(db.fn.uuid())` half goes with it
     // (on Postgres `knex.fn.uuid()` compiles to `(gen_random_uuid())`, so the
@@ -3144,7 +3144,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // name is kept so the emitter below reads unchanged.
       const required = declaredNotNull(fieldDef) ? '.notNullable()' : '.nullable()';
 
-      // #14829 - MULTI-VALUE before the type, exactly as `SqlDriver.createColumn`
+      // Commit ee370d318 - MULTI-VALUE before the type, exactly as `SqlDriver.createColumn`
       // does it: the driver short-circuits above its own per-type switch, so a
       // multi-value field is a JSON column whatever its element type would have
       // been. Emitted here rather than as a switch arm because the switch cases
@@ -3159,7 +3159,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         continue;
       }
 
-      // #14828 — `string | null`, where `null` is the VIRTUAL answer. Carried
+      // Commit 08706f0e0 — `string | null`, where `null` is the VIRTUAL answer. Carried
       // through the switch rather than short-circuited above it so every field
       // type keeps exactly one arm in one vocabulary, which is what
       // `generate-field-type-vocabulary.pin.test.ts` measures.
@@ -3193,7 +3193,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // a declared bound would size the wrong string. That is the driver's
         // own stated reason, not an inference from its silence.
         case 'select': case 'color':
-        // #14657 — `secret` holds the opaque `sys_secret` ref, not the
+        // Commit 431979e67 — `secret` holds the opaque `sys_secret` ref, not the
         // credential (ADR-0100); `radio` is a single option code like `select`.
         case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
@@ -3216,7 +3216,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // both generated tables, accepting it.
         case 'text':
         case 'textarea': case 'richtext': case 'html': case 'markdown':
-        // #14657 — `driver-sql`'s own DDL switch puts these three in the text
+        // Commit 431979e67 — `driver-sql`'s own DDL switch puts these three in the text
         // family (#11794, #11875): the declared `maxLength`, when there is one
         // and the column is not keyed, is enforced at the write seam rather
         // than by the column.
@@ -3252,7 +3252,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           break;
         }
         case 'boolean':
-        // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
+        // Commit 431979e67 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
         case 'toggle':
           colMethod = `table.boolean('${fieldName}')`;
           break;
@@ -3266,7 +3266,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.time('${fieldName}')`;
           break;
         case 'json': case 'multiselect':
-        // #14657 — the rest of MULTI_OPTION_TYPES, the whole
+        // Commit 431979e67 — the rest of MULTI_OPTION_TYPES, the whole
         // STRUCTURED_JSON_TYPES family answered ONCE, and `vector`. Every one
         // of these is a member of `driver-sql`'s `JSON_COLUMN_TYPES`, which is
         // seeded from these very spec classes, so a JSON column here is what
@@ -3278,7 +3278,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         case 'location': case 'address': case 'vector':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
-        // #14828 — VIRTUAL: `SqlDriver.createColumn` answers this type with
+        // Commit 08706f0e0 — VIRTUAL: `SqlDriver.createColumn` answers this type with
         // `case 'formula': return; // Virtual — no column`, and
         // `schema-drift.ts`'s `fieldHasColumn` answers false for it. The
         // generated migration used to create a `table.text` column the runtime
@@ -3289,14 +3289,14 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),
         // so store it as a string column — consistent with the runtime sql-driver.
-        // #14657 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
-        // object's own id. (FILE_REFERENCE_TYPES rode this arm too until #17883
+        // Commit 431979e67 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
+        // object's own id. (FILE_REFERENCE_TYPES rode this arm too until commit b06b2db5c
         // gave it its own below: its value is not another row's id, and the sql
         // format states a width of its own for it.) `autonumber` is a RENDERED string
         // (prefix + counter + suffix), which is both what `FIELD_TYPE_MAP` says
         // and what `driver-sql` emits — a SERIAL could not hold `INV-0001`.
         //
-        // #14828 — `lookup` / `master_detail` JOIN this arm, out of a
+        // Commit 08706f0e0 — `lookup` / `master_detail` JOIN this arm, out of a
         // `table.uuid` arm of their own. They are the other two members of
         // REFERENCE_VALUE_TYPES and the driver gives the whole class one
         // answer: `createColumn`'s `case 'lookup': case 'user':` is
@@ -3313,7 +3313,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         case 'autonumber':
           colMethod = `table.string('${fieldName}')`;
           break;
-        // #17883 — FILE_REFERENCE_TYPES takes an arm of its own, at the width
+        // Commit b06b2db5c — FILE_REFERENCE_TYPES takes an arm of its own, at the width
         // the sql format above already states for it.
         //
         // It used to ride the reference arm, and that arm's derivation was
@@ -3342,7 +3342,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.text('${fieldName}')`;
       }
 
-      // #14828 — the virtual answer: emit nothing at all for this field.
+      // Commit 08706f0e0 — the virtual answer: emit nothing at all for this field.
       if (colMethod === null) continue;
 
       // [#16294 cause 3] The same verdict the sql format above renders, in

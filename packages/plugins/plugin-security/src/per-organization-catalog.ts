@@ -311,7 +311,7 @@ export type OrganizationLessRowOrigin = 'platform-bucket' | 'pre-fix-residue';
  * Membership is decided by NAME, not by `managed_by`, because the question the
  * remedy turns on is "will a re-initialized deployment have this row again?" —
  * and for these names it will, whatever provenance the current row carries (a
- * pre-#8692 install stores `'admin'` on the very same names).
+ * pre-ruling install (before commit 712e185db) stores `'admin'` on the very same names).
  *
  * The pass that emits either warning has ALREADY created the organization's own
  * copies — both describe rows beside that catalog, never a refusal to seed.

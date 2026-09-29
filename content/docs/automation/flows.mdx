@@ -261,14 +261,18 @@ nothing is assigned or written in its place.
 {
   id: 'notify_slack',
   type: 'http',
-  label: 'Send Slack Notification',
+  label: 'Post Order Event',
   config: {
-    url: 'https://hooks.slack.com/services/...',
+    url: 'https://api.example.com/v1/order-events',
     method: 'POST',
-    body: { text: 'New order: {record.name}' },
+    body: { event: 'order.created', name: '{record.name}' },
   },
 }
 ```
+
+<Callout type="warn" title="Do not put a secret in an http node's url or headers">
+A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential to a declarative connector's `auth.credentialRef` and call it with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). Only `signingSecret` (and a start node's `secret`) is withheld when a definition is served; `url` and `headers` are served as written.
+</Callout>
 
 **Script:**
 
@@ -2377,6 +2381,22 @@ never binds in the first place.
 
 **No fan-out.** A single flow belongs to one organization. A sweep wanted in
 several organizations is declared once per organization.
+
+That once-per-organization declaration needs an author who already knows the
+organization ids, and a package written before its tenants exist does not. So a
+**packaged** scheduled flow — one shipped inside an app package that other
+organizations install — does not serve multiple tenants under `isolated`: there
+is no key that means "each organization that installs this package", and without
+a declaration the flow stays unarmed — refused at bind as above, or, while the
+[deployment switch](#does-this-deployment-run-scheduled-work-at-all)
+(`OS_AUTOMATION_SCHEDULED_WORK_ENABLED`) is off, listed as disabled by
+deployment policy.
+
+⛔ Never hard-code an organization id into a package flow to get around this.
+The id would be a guess made by an author who cannot know who installs the
+package, and a wrong `organization_id` is worse than a missing one: it is
+silently authoritative to every run, notification, history row, report and
+export the flow touches.
 
 <Callout type="warn">
 The start node's `config` is an open record, so a near-miss spelling —

@@ -24,7 +24,7 @@
  */
 
 import type { Filter } from 'mongodb';
-import { nextUtcCalendarDay } from '@objectstack/core';
+import { nextUtcCalendarDay, isUnboundedAbove } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 // [#5659] The Filter Protocol's boolean identity reduction, shared with
 // driver-sql, driver-memory and the flow linter and proven against the same
@@ -1000,7 +1000,7 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true`, `$lte` (the LAST supported day, `9999-12-31` — #20600: no bound, a value) |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
  * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
@@ -1158,8 +1158,13 @@ function translateFieldOperators(
         // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is a
         // member of the clobber class that no card had named. See
         // {@link assembleLoweredWrites}.
+        // [#20600] On the last supported day there is no next day: every
+        // value is inside the bound, so what `$lte` still asks is a value —
+        // `$ne: null`, the lowering `$exists: true` takes above. Collected like
+        // every other write, so an author's own `$ne` survives beside it.
         const nextDay = nextUtcCalendarDay(value);
-        if (nextDay != null) put('$lt', store(nextDay));
+        if (isUnboundedAbove(nextDay)) put('$ne', null);
+        else if (nextDay != null) put('$lt', store(nextDay));
         else put('$lte', store(value));
         break;
       }
@@ -1249,7 +1254,10 @@ function translateFieldOperators(
       case '$between': {
         if (!isBetweenRange(value)) throw malformedBetweenError(field, value, `${path}.$between`);
         put('$gte', store(value[0]));
+        // [#20600] A max on the last supported day bounds nothing: the range
+        // keeps its minimum alone.
         const betweenNextDay = nextUtcCalendarDay(value[1]);
+        if (isUnboundedAbove(betweenNextDay)) break;
         if (betweenNextDay != null) put('$lt', store(betweenNextDay));
         else put('$lte', store(value[1]));
         break;

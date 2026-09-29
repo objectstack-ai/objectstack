@@ -151,7 +151,7 @@ import { isEmptyFilterValue } from '@objectstack/spec/data';
 // reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
 // the spec, where that rule is declared.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
-import { nextUtcCalendarDay } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -1311,10 +1311,19 @@ function listHolds(list: readonly unknown[], value: unknown): boolean {
  * semantics). The same decision both drivers' `where` emitters take
  * (`SqlDriver.calendarDayUpperBoundRewrite`, `driver-memory`'s `$lte` arm),
  * read from the spec's `nextUtcCalendarDay`.
+ *
+ * [#20600] `UNBOUNDED_ABOVE` for `9999-12-31`, the last supported day: every
+ * supported value is inside its whole day, so the callers compare against NO
+ * upper bound — `$lte` asks only for a value, a `$between` keeps its minimum.
+ * The drivers compile the same (`IS NOT NULL`, `$ne: null`).
  */
-function wholeDayUpperBound(bound: unknown, kind: TemporalComparandKind | undefined): unknown {
+function wholeDayUpperBound(
+  bound: unknown,
+  kind: TemporalComparandKind | undefined,
+): unknown | UnboundedAbove {
   if (kind !== 'datetime') return undefined;
   const next = nextUtcCalendarDay(bound);
+  if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
   return next === null ? undefined : temporalStorageForm(next, 'datetime');
 }
 
@@ -1413,6 +1422,11 @@ function checkCondition(
       case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
       case '$lte': {
         const dayAfter = wholeDayUpperBound(target, kind);
+        if (isUnboundedAbove(dayAfter)) {
+          // [#20600] No upper bound: what `$lte` still asks is a value.
+          if (stored === null || stored === undefined) return false;
+          break;
+        }
         if (dayAfter !== undefined
           ? !ordered(stored, dayAfter, (a, b) => a < b)
           : !ordered(stored, form(target), (a, b) => a <= b)) return false;
@@ -1421,10 +1435,14 @@ function checkCondition(
       case '$between': {
         if (!Array.isArray(target)) break;
         const dayAfter = wholeDayUpperBound(target[1], kind);
+        // [#20600] A max on the last supported day bounds nothing: the range
+        // keeps its minimum alone.
         if (ordered(stored, form(target[0]), (a, b) => a < b)
-          || (dayAfter !== undefined
-            ? ordered(stored, dayAfter, (a, b) => a >= b)
-            : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
+          || (isUnboundedAbove(dayAfter)
+            ? false
+            : dayAfter !== undefined
+              ? ordered(stored, dayAfter, (a, b) => a >= b)
+              : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
         break;
       }
       case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;

@@ -6,7 +6,7 @@
  *
  * ## The half `packages/cli` could not write for itself
  *
- * #17081 closed the platform's own half: the `🔑 Dev admin` line now says what
+ * Commit f721ef0ff closed the platform's own half: the `🔑 Dev admin` line now says what
  * that account will and will not see. What it could not do is name an account
  * that DOES see something, because the platform does not know an application's
  * audiences — measured downstream, four of five personas rendered their group
@@ -31,7 +31,7 @@
  *    account. An entry naming an unseeded account must read as the app's
  *    claim, not as a platform credential that broke.
  *
- * The exact sentences are pinned for the same reason #17081's are: the
+ * The exact sentences are pinned for the same reason commit f721ef0ff's are: the
  * deliverable here is words on a terminal, so the wording is the only thing
  * that can regress.
  */

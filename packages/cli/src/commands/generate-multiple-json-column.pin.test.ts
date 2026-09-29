@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE #14829 PIN: one authored `multiple: true` field, three surfaces, ONE answer.
+ * THE commit ee370d318 PIN: one authored `multiple: true` field, three surfaces, ONE answer.
  *
  * ## The defect
  *
@@ -54,7 +54,7 @@
  * `field.multiple` raw, so for one release this file carried a paragraph saying
  * the two halves it exists to hold together had SPLIT: `os generate migration`
  * emitted JSONB for a `text` field flagged `multiple: true` while the driver
- * emitted a varchar for it — #14829 in reverse, one notch narrower. All five
+ * emitted a varchar for it — the defect commit ee370d318 fixed, in reverse, one notch narrower. All five
  * reads in `generate.ts` now go through its own `declaredMultiValued` seam onto
  * the same `isMultiValueField`, so the assertions below state ONE answer again
  * and the arms that used to record the divergence are inverted rather than
@@ -197,7 +197,7 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     // THE discriminating control. If this file could be satisfied by emitting a
     // JSON column for everything, the arms below would prove nothing.
     //
-    // #14828 moved the unflagged `lookup` answers — `VARCHAR(36)` /
+    // Commit 08706f0e0 moved the unflagged `lookup` answers — `VARCHAR(36)` /
     // `table.uuid` became `VARCHAR(255)` / `table.string`, the driver's own
     // answer for a reference column. The control is unweakened by that: what it
     // discriminates is scalar-vs-JSON, and both spellings are scalar. `select`
@@ -412,13 +412,13 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
       .toMatch(/!== 'formula'/);
   });
 
-  // ── The former SCOPE FENCE for #14828 — DISCHARGED, and kept as the seam ──
+  // ── The former SCOPE FENCE — DISCHARGED by commit 08706f0e0, and kept as the seam ──
   //
-  // This block was written by #14829 as a fence, not an endorsement: the five
-  // scalar answers disagreed with what the platform stores, #14829 left them
+  // This block was written by commit ee370d318 as a fence, not an endorsement: the five
+  // scalar answers disagreed with what the platform stores, commit ee370d318 left them
   // byte-for-byte because they were a different card, and asserted them here so
   // that changing one would have to be a deliberate edit to this block rather
-  // than a side effect of a card about the `multiple` flag. #14828 is that card
+  // than a side effect of a card about the `multiple` flag. Commit 08706f0e0 landed that card
   // and this is that deliberate edit — the values below are now the platform's,
   // each read from `driver-sql`.
   //

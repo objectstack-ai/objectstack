@@ -90,7 +90,13 @@ import {
   declareTargetedTable,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { nextUtcCalendarDay, temporalStorageForm } from '@objectstack/core';
+import {
+  nextUtcCalendarDay,
+  temporalStorageForm,
+  UNBOUNDED_ABOVE,
+  isUnboundedAbove,
+  type UnboundedAbove,
+} from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
@@ -15395,15 +15401,23 @@ export class SqlDriver implements IDataDriver {
    *     keeps instant semantics — only the day-granular STRING carries
    *     calendar-day intent);
    *   - `$gte` / `$gt` / `$lt` keep their midnight anchoring (correct today).
+   *
+   * [#20600] `9999-12-31`, the last supported day, has no next day to stop
+   * before: every supported value is at most its last millisecond, so the
+   * spec's helper answers `UNBOUNDED_ABOVE` and this passes it on for the two
+   * emitters below to compile NO upper bound. It used to be the five-digit
+   * `'10000-01-01…'`, which a SQLite column (ISO text) sorts above every row,
+   * so `$lte '9999-12-31'` answered no rows there.
    */
   protected calendarDayExclusiveUpperBound(
     table: string | null,
     field: string,
     value: unknown,
-  ): unknown | null {
+  ): unknown | UnboundedAbove | null {
     if (this.temporalFieldKind(table, field) !== 'datetime') return null;
     const next = nextUtcCalendarDay(value);
     if (next == null) return null;
+    if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
     return this.storageDatetimeValue(`${next}T00:00:00.000Z`);
   }
 
@@ -15412,16 +15426,21 @@ export class SqlDriver implements IDataDriver {
    * with a bare `YYYY-MM-DD` on a `datetime` column becomes `$lt`/`<` against
    * {@link calendarDayExclusiveUpperBound}. Returns `null` — "not applicable,
    * compile as-is" — for every other operator/comparand/column combination.
+   *
+   * [#20600] `UNBOUNDED_ABOVE` for the last supported day: the comparison has
+   * no bound to compile, and what it still asks is that the column has a value
+   * (a comparison never holds for NULL) — the caller compiles `IS NOT NULL`.
    */
   protected calendarDayUpperBoundRewrite(
     table: string | null,
     field: string,
     op: string,
     value: unknown,
-  ): { op: string; value: unknown } | null {
+  ): { op: string; value: unknown } | UnboundedAbove | null {
     if (op !== '$lte' && op !== '<=') return null;
     const upper = this.calendarDayExclusiveUpperBound(table, field, value);
     if (upper == null) return null;
+    if (isUnboundedAbove(upper)) return UNBOUNDED_ABOVE;
     return { op: op === '$lte' ? '$lt' : '<', value: upper };
   }
 
@@ -15432,13 +15451,14 @@ export class SqlDriver implements IDataDriver {
    * `whereBetween` is inclusive on both ends, so it inherits the same
    * midnight-anchored upper bound `$lte` had. Returns `null` when the range is
    * malformed (caller keeps its descriptive error) or the rewrite does not
-   * apply.
+   * apply. [#20600] `upper` is `UNBOUNDED_ABOVE` when the max is the last
+   * supported day: the range keeps only its minimum.
    */
   protected calendarDayBetweenRewrite(
     table: string | null,
     field: string,
     value: unknown,
-  ): { lower: unknown; upper: unknown } | null {
+  ): { lower: unknown; upper: unknown | UnboundedAbove } | null {
     if (!Array.isArray(value) || value.length !== 2) return null;
     const upper = this.calendarDayExclusiveUpperBound(table, field, value[1]);
     if (upper == null) return null;
@@ -16951,18 +16971,31 @@ export class SqlDriver implements IDataDriver {
           if (rawOp === '$between') {
             const dayRange = this.calendarDayBetweenRewrite(table, localField, opValue);
             if (dayRange) {
+              // [#20600] A max on the last supported day bounds nothing: the
+              // range keeps its minimum alone.
+              const bounded = !isUnboundedAbove(dayRange.upper);
               (builder as any)[method]((qb: any) => {
                 if (columnExpr) {
                   this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
-                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
+                  if (bounded) this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
                 } else {
-                  qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
+                  qb.where(field, '>=', dayRange.lower);
+                  if (bounded) qb.andWhere(field, '<', dayRange.upper);
                 }
               });
               continue;
             }
           }
           const rewrite = this.calendarDayUpperBoundRewrite(table, localField, rawOp, opValue);
+          if (isUnboundedAbove(rewrite)) {
+            // [#20600] `$lte` on the last supported day: no upper bound, so the
+            // comparison asks only that the column has a value — the `IS NOT
+            // NULL` the `$ne: null` arm below spells. The raw column, not
+            // `columnExpr`: a legacy-repair expression is NULL exactly when
+            // the column is.
+            (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
+            continue;
+          }
           const op = rewrite?.op ?? rawOp;
           const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;

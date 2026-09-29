@@ -146,7 +146,7 @@ export function artifactPackages(parsed: Record<string, unknown>): Array<{
  * that is safe here for one reason only: nothing parses it. `runAuthoringRules`
  * reads fields off this object and never hands it to a schema. ⛔ Do not start
  * parsing it against `ManifestSchema`, and do not reach for a widened schema to
- * make that possible: `ManifestSchema` is `strictObject` since #14192, so it
+ * make that possible: `ManifestSchema` is `strictObject` since commit 4d0d9445a, so it
  * would REFUSE, by name, every collection key this superset deliberately puts
  * under `manifest` — and re-opening it to stop the refusal would re-open the
  * real manifest surface with it.
