@@ -65,8 +65,10 @@ describe('http (canonical node)', () => {
     // this configSchema as the node's authoring form. A credential typed into
     // `url` or `headers` is served with the flow definition, so both fields
     // name the route that keeps it out: a declarative connector's
-    // `auth.credentialRef`, called through `connector_action`. The prose is
-    // free to change; the named route is what is held here.
+    // `auth.credentialRef`, called through `connector_action` (for `url`, the
+    // route for a query-string key; a path-borne secret has no `credentialRef`
+    // variant and is sent to a token-authenticated connector instead). The
+    // prose is free to change; the named route is what is held here.
     it.each(['url', 'headers'])('the %s field names the connector credentialRef route for a credential', (key) => {
         const engine = new AutomationEngine(createTestLogger());
         registerHttpNodes(engine, createCtx());

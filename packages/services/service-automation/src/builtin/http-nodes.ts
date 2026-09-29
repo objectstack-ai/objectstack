@@ -97,22 +97,31 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 type: 'object',
                 required: ['url'],
                 properties: {
-                    // #20590 — `url` and `headers` carry the credential steer, in
-                    // step with the `HttpConfigSchema` describes in
-                    // `@objectstack/spec/automation`. This config is stored in the
-                    // flow definition, and every definition read serves it to any
-                    // member who can read flows. Only `signingSecret` is withheld
-                    // (`flow-credential-projection.ts`), so a credential in `url`
-                    // or `headers` is served as authored. Nothing else is withheld,
-                    // because a withheld non-credential breaks the round trip; the
-                    // remedy is to keep the credential out of the definition.
+                    // #20590 — `url` and `headers` carry the credential steer, the
+                    // same steer #20654 brings to the `HttpConfigSchema` describes
+                    // in `@objectstack/spec/automation`. This config is stored in
+                    // the flow definition, and every definition read serves it to
+                    // any member who can read flows. Only `signingSecret` is
+                    // withheld (`flow-credential-projection.ts`), so a credential in
+                    // `url` or `headers` is served as authored. Nothing else is
+                    // withheld, because a withheld non-credential breaks the round
+                    // trip; the remedy is to keep the credential out of the
+                    // definition. The route depends on where the credential sits.
+                    // A header or a query-string key is carried by a declarative
+                    // connector's `auth.credentialRef` (`bearer` / `basic` /
+                    // `api-key`, whose `paramName` puts the key in the query). No
+                    // `credentialRef` variant carries a secret in the url PATH, so
+                    // a path-secret webhook is replaced by a token-authenticated
+                    // connector (`@objectstack/connector-slack`'s bot token).
                     url: {
                         type: 'string',
                         description:
                             'Target URL. Stored in the flow definition, which is served to every member who can read '
-                            + 'flows, so never a secret-bearing URL (a webhook whose path is the secret, a key in the '
-                            + 'query string): call that upstream through a `connector_action` on a declarative connector '
-                            + 'whose `auth.credentialRef` names the secret.',
+                            + 'flows, so never a secret-bearing URL. A key in the query string: call the upstream with a '
+                            + '`connector_action` on a declarative `rest` connector with `api-key` auth, whose '
+                            + '`paramName` names the parameter and `auth.credentialRef` names the secret. A webhook whose '
+                            + 'path is the secret: call the service through a token-authenticated connector instead, such '
+                            + 'as the `slack` connector with its bot token.',
                     },
                     method: { type: 'string', description: 'HTTP method (default GET; POST when durable)' },
                     headers: {
