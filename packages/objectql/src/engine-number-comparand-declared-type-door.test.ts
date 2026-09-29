@@ -356,6 +356,11 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
         expect(err, `${fn} ${op}`).not.toBeNull();
         expect({ code: err!.code, status: err!.status }, `${fn} ${op}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
         expect(err!.message, `${fn} ${op}`).toContain(`having.total.${op}`);
+        // [#20510] `total` is the aggregated row's own column, not a declared
+        // field, and `having` never binds to a driver.
+        expect(err!.message, `${fn} ${op}`).toContain("filter on 'total' compares a numeric aggregated column");
+        expect(err!.message, `${fn} ${op}`).not.toContain('declared');
+        expect(err!.message, `${fn} ${op}`).not.toContain('PostgreSQL');
         expect(reads, `${fn} ${op}`).toHaveLength(0);
       }
     }
@@ -410,6 +415,10 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
         expect({ code: err!.code, status: err!.status }, `${name} ${op}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
         expect(err!.message, `${name} ${op}`).toContain(`aggregations[1].filter.f_number.${op}`);
         expect(err!.message, `${name} ${op}`).toMatch(/^aggregate\('number_door_probe'\): filter on 'f_number' compares a declared number field/);
+        // [#20510] `f_number` is the object's own declared field here — the
+        // per-aggregation `filter` narrows the RAW rows, before aggregation —
+        // but the engine evaluates it itself, never through a driver bind.
+        expect(err!.message, `${name} ${op}`).not.toContain('PostgreSQL');
         expect(findNonNumericComparand(engine.registry.getObject(OBJECT), { f_number: { [op]: value() } }), name)
           .toMatchObject({ field: 'f_number', form });
         expect(reads, `${name} ${op}`).toHaveLength(0);
@@ -429,7 +438,10 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
         expect(err, `${name} ${fn}`).not.toBeNull();
         expect({ code: err!.code, status: err!.status }, `${name} ${fn}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
         expect(err!.message, `${name} ${fn}`).toContain('having.total.$gt');
-        expect(err!.message, `${name} ${fn}`).toContain("filter on 'total' compares a declared number field");
+        // [#20510] Same as the string case above: an aggregated column, no PostgreSQL clause.
+        expect(err!.message, `${name} ${fn}`).toContain("filter on 'total' compares a numeric aggregated column");
+        expect(err!.message, `${name} ${fn}`).not.toContain('declared');
+        expect(err!.message, `${name} ${fn}`).not.toContain('PostgreSQL');
         expect(reads, `${name} ${fn}`).toHaveLength(0);
       }
     }

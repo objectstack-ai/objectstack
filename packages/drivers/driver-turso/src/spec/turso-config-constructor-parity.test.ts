@@ -28,6 +28,9 @@
  *  - [#20200] where the constructor refuses on `syncUrl` or `sync`, its message
  *    is the spec contract's issue message, byte for byte: those two texts are
  *    copies in `../turso-driver.ts`, and this is the pin that holds them equal.
+ *    [#20437] The same holds for a forced `mode: 'replica'` with no `syncUrl`,
+ *    refused on `mode` — the third copy. That row used to be accepted
+ *    everywhere, as a replica that never synced.
  *
  * ⚠️ The mirror declares no `mode`, so zod strips an authored one before its
  * refinement runs: rows that FORCE a mode are judged by the constructor and the
@@ -74,7 +77,9 @@ interface Row {
   /** The constructor's verdict on this config. */
   ctor: 'accept' | 'refuse';
   /** The key both schemas refuse on, or `undefined` when they accept. */
-  refusedOn?: 'url' | 'syncUrl' | 'timeoutMs' | 'sync';
+  refusedOn?: 'url' | 'syncUrl' | 'timeoutMs' | 'sync' | 'mode';
+  /** How many issues the spec contract raises on a refused row; 1 unless stated. */
+  issues?: number;
   /** The constructor accepts it and ignores a key: refused at authoring only. None today (#20200). */
   inert?: true;
 }
@@ -97,7 +102,7 @@ const ROWS: Row[] = [
   { name: 'a url behind whitespace (the loaders trim it)', config: { url: `  ${FILE}` }, ctor: 'accept' },
   { name: 'a remote url behind whitespace', config: { url: ` ${REMOTE}` }, ctor: 'accept' },
   { name: 'an empty syncUrl (unset)', config: { url: REMOTE, syncUrl: '' }, ctor: 'accept' },
-  { name: "file: under a forced mode: 'replica'", config: { url: FILE, mode: 'replica' }, ctor: 'accept' },
+  { name: "file: + syncUrl under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', syncUrl: REMOTE, sync: { onConnect: false } }, ctor: 'accept' },
   { name: "file: + syncUrl under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: REMOTE, sync: { onConnect: false } }, ctor: 'accept' },
   { name: "libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' }, ctor: 'accept' },
   { name: "file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' }, ctor: 'accept' },
@@ -147,13 +152,24 @@ const ROWS: Row[] = [
   { name: 'sync with no syncUrl', config: { url: FILE, sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync' },
   { name: 'sync with no syncUrl on a remote url', config: { url: REMOTE, sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync' },
   { name: "sync with no syncUrl under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote', sync: { onConnect: true } }, ctor: 'refuse', refusedOn: 'sync' },
-  { name: "sync with no syncUrl under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync' },
+  // The spec contract raises BOTH issues here (`sync`, then `mode`); the
+  // constructor throws one, the `sync` refusal, which is the spec's first.
+  { name: "sync with no syncUrl under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync', issues: 2 },
   { name: 'sync beside an empty syncUrl (unset)', config: { url: FILE, syncUrl: '', sync: { intervalSeconds: 60 } }, ctor: 'refuse', refusedOn: 'sync' },
+
+  // ── a forced replica with no remote to replicate from: refused on `mode` (#20437) ──
+  { name: "file: under a forced mode: 'replica'", config: { url: FILE, mode: 'replica' }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "an uppercase FILE: url under a forced mode: 'replica'", config: { url: `FILE:${DIR}/upper-replica.db`, mode: 'replica' }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file: + an empty syncUrl (unset) under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', syncUrl: '' }, ctor: 'refuse', refusedOn: 'mode' },
+  { name: "file: + timeoutMs under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', timeoutMs: 5000 }, ctor: 'refuse', refusedOn: 'mode' },
 ];
 
-/** The rows the constructor refuses on a sync key: its message is a copy of the spec's (#20200). */
+/**
+ * The rows the constructor refuses on a sync key, or on a forced replica with
+ * no `syncUrl`: its message is a copy of the spec's (#20200, #20437).
+ */
 const SYNC_KEY_REFUSALS = ROWS.filter(
-  (r) => r.ctor === 'refuse' && (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync'),
+  (r) => r.ctor === 'refuse' && (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync' || r.refusedOn === 'mode'),
 );
 
 /**
@@ -209,7 +225,8 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     expect(ROWS.filter((r) => r.refusedOn === 'timeoutMs').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'syncUrl').length).toBeGreaterThanOrEqual(3);
     expect(ROWS.filter((r) => r.refusedOn === 'sync').length).toBeGreaterThanOrEqual(5);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(8);
+    expect(ROWS.filter((r) => r.refusedOn === 'mode').length).toBeGreaterThanOrEqual(4);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(12);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
@@ -229,7 +246,7 @@ describe('turso config: the constructor, the spec contract and this mirror agree
       const verdict = schemaVerdict(SpecTursoConfigSchema, row.config);
       expect(verdict.refusedOn, verdict.message).toBe(row.refusedOn);
       if (row.refusedOn) {
-        expect(verdict.count, verdict.message).toBe(1);
+        expect(verdict.count, verdict.message).toBe(row.issues ?? 1);
         expect(verdict.code).toBe('custom');
       }
     });
@@ -241,11 +258,12 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     });
   });
 
-  // [#20200] The two sync refusals are copies of the spec contract's texts in
-  // `../turso-driver.ts` (the spec keeps them module-local); this is the pin
-  // that holds each copy equal to the schema's issue, byte for byte.
+  // [#20200] The two sync refusals, and [#20437] the forced-replica refusal,
+  // are copies of the spec contract's texts in `../turso-driver.ts` (the spec
+  // keeps them module-local); this is the pin that holds each copy equal to the
+  // schema's issue, byte for byte.
   describe.each(SYNC_KEY_REFUSALS)('$name', (row) => {
-    it("the constructor's message is the spec contract's, byte for byte (#20200)", () => {
+    it("the constructor's message is the spec contract's, byte for byte (#20200, #20437)", () => {
       const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
       expect(spec.refusedOn).toBe(row.refusedOn);
       expect(spec.message).toBeTypeOf('string');

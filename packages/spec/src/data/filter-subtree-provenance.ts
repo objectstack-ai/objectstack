@@ -127,8 +127,8 @@ export const FILTER_SUBTREE_PROVENANCE: symbol = Symbol.for(
  * This paragraph used to end by calling the mark *"safe on filter objects that
  * are reused across requests (view metadata, cached scopes): the
  * classification of one subtree does not change between requests"*. The
- * #8794 survey measured that claim and it is true in ONE direction only; the
- * correction is pinned by `filter-subtree-provenance.test.ts` (#8836). The
+ * survey commit 1850ebbb0 records measured that claim and it is true in ONE direction only; the
+ * correction is pinned by `filter-subtree-provenance.test.ts` (same commit). The
  * claim holds where provenance is **intrinsic** to the subtree, and a caller's
  * `where` is the half where it is not:
  *
@@ -153,7 +153,7 @@ export const FILTER_SUBTREE_PROVENANCE: symbol = Symbol.for(
  * > that vouched it.
  *
  * It holds across every in-repo caller today — enumerated with controls in
- * #8794 — and it holds *incidentally*: every caller in a markable position
+ * the survey commit 1850ebbb0 records — and it holds *incidentally*: every caller in a markable position
  * (`options.where` itself, or an arm of a pure `$and` root) happens to build
  * its filter fresh per request. This module does not and cannot enforce it,
  * because "the request" is not a concept it can see. What is enforced is that

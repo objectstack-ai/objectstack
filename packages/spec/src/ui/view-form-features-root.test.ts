@@ -67,7 +67,7 @@ function expectFeaturesRefusal(
   expect(issue!.message).toContain('Form-view predicates may not name the `features.*` scope root');
   expect(issue!.message).toContain('ruled 2026-08-27');
   // The negative twin of the citation pin: the ruling is cited by DATE, never
-  // by a tracker id a refused author cannot resolve (#13156's strip).
+  // by a tracker id a refused author cannot resolve (commit fd289be45's strip).
   expect(issue!.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   expect(issue!.message).toContain('UNBOUND');
   expect(issue!.message).toContain('fails OPEN');
