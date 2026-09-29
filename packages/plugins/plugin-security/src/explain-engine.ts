@@ -26,7 +26,13 @@ import {
   derivePosture as deriveAdminPosture,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
-import { matchesFilterCondition } from '@objectstack/formula';
+import {
+  crossFieldClassRefusalCarriedBy,
+  findCrossFieldClassRefusal,
+  matchesFilterCondition,
+  type CrossFieldClassRefusal,
+  type MatchesFilterOptions,
+} from '@objectstack/formula';
 import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -41,7 +47,7 @@ import type {
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { ExplainObjectNotFoundError } from './errors.js';
-import { RLS_DENY_FILTER } from './rls-compiler.js';
+import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
 import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
@@ -844,6 +850,45 @@ function describeOwd(schema: any): { model: string; declared: boolean; effect: '
 }
 
 /**
+ * [#20431] The object's declared columns, handed to the record matcher so it
+ * applies the spec's cross-field comparison class (`crossFieldComparisonVerdict`)
+ * — the rule driver-sql applies when it compiles the find this report explains,
+ * and the rule the RLS write check applies to the same policy (`options.fields`
+ * of `matchesFilterCondition`, #20355).
+ *
+ * Read off `ql.getSchema`, the schema the engine already reads for the OWD: the
+ * ObjectQL registry is the declaration the find's driver compiles against. A
+ * schema that cannot be read hands over no columns, and the matcher then judges
+ * values only, as it did before — a missing schema never manufactures a refusal.
+ */
+function declaredColumnsOf(schema: any): MatchesFilterOptions | undefined {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return undefined;
+  return { fields };
+}
+
+/**
+ * [#20431] The names of the policies in a compiled business-RLS filter that
+ * carry a refused field-to-field comparison — the attribution the RLS write
+ * check logs for the same refusal. The composed filter is one policy's filter or
+ * `{ $or: [...] }` of them, and `compiledPolicyNameOf` recognises each by
+ * identity.
+ */
+function refusedPolicyNamesOf(
+  filter: Record<string, unknown>,
+  fields: NonNullable<MatchesFilterOptions['fields']>,
+): string[] {
+  const members =
+    compiledPolicyNameOf(filter) === undefined && Array.isArray((filter as { $or?: unknown }).$or)
+      ? ((filter as { $or: unknown[] }).$or)
+      : [filter];
+  const names = members
+    .filter((m) => findCrossFieldClassRefusal(m as Record<string, unknown>, fields) !== null)
+    .map((m) => compiledPolicyNameOf(m) ?? '(unnamed)');
+  return [...new Set(names)];
+}
+
+/**
  * [C2 / ADR-0095] Inputs the record-grained augmentation needs from the already
  * computed object-level pass — the row story is decomposed FROM the same facts,
  * never re-judged.
@@ -869,6 +914,8 @@ interface RecordAttributionContext {
   vamaEffective: boolean;
   /** [#4647] The sets that carry the bypass, for the row-level detail text. */
   vamaSets: string[];
+  /** [#20431] The object's declared columns ({@link declaredColumnsOf}); absent → values only. */
+  declaredColumns: MatchesFilterOptions | undefined;
 }
 
 /**
@@ -880,14 +927,18 @@ interface RecordAttributionContext {
  *   - Layer 0 / Layer 1 filters come from `computeLayeredRlsFilter` (the middleware's
  *     own `Layer0(tenant) AND Layer1(business)` split);
  *   - "does THIS record satisfy the filter?" is `matchesFilterCondition` — the
- *     third canonical backend for the same FilterCondition shape the query runs;
+ *     third canonical backend for the same FilterCondition shape the query runs —
+ *     handed the object's declared columns, so it refuses what the query refuses;
  *   - the write verdict is the sharing service's own `canEdit`.
  * So the record story is explained by construction, exactly like the object-level pass.
  */
 async function applyRecordAttribution(
   ra: RecordAttributionContext,
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
-  const { deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets } = ra;
+  const {
+    deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
+    declaredColumns,
+  } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
 
@@ -895,10 +946,20 @@ async function applyRecordAttribution(
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
     : null;
   const recordExists = record != null;
+  // [#20431] With the declared columns, the matcher REFUSES (throws
+  // `INVALID_FILTER` / 400) a field-to-field comparison between two columns of
+  // no shared comparison class, for every record or for none — the comparison
+  // the find's driver refuses to compile. Without them it compared the two raw
+  // values, so the report answered `visible` true or false, depending on how
+  // they happened to compare, for a read enforcement refuses outright. Only the
+  // business-RLS site below catches that refusal: the tenant wall and the
+  // sharing filter are platform-composed and compare no two columns, so a
+  // refusal from either would fail this explanation loudly rather than be
+  // answered.
   const matches = (filter: unknown): boolean | undefined => {
     if (!recordExists) return undefined;
     if (filter == null) return true;
-    return matchesFilterCondition(record as Record<string, unknown>, filter as any);
+    return matchesFilterCondition(record as Record<string, unknown>, filter as any, declaredColumns);
   };
 
   // The composition enforcement runs before the query: when it throws, neither
@@ -1116,6 +1177,9 @@ async function applyRecordAttribution(
   }
 
   // ── rls: the business (Layer 1) predicate for this record ────────────────
+  // [#20431] Set when the matcher refused the predicate: the request it scopes
+  // is refused rather than answered, so there is no row judgement to report.
+  let rlsRefusal: CrossFieldClassRefusal | null = null;
   const rlsLayer = layers.find((l) => l.layer === 'rls');
   if (rlsLayer) {
     if (!recordExists) {
@@ -1128,19 +1192,48 @@ async function applyRecordAttribution(
       rlsLayer.record = { outcome: 'not_evaluated', rowFilter: null, rules: [], detail: 'No business RLS policy applies to this record.' };
     } else {
       const deny = isDenyAll(layer1);
-      const m = matches(layer1);
-      const excluded = deny || m === false;
-      rlsLayer.record = {
-        outcome: excluded ? 'excluded' : 'admitted',
-        rowFilter: layer1,
-        matchesRecord: deny ? false : m,
-        rules: [{ kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' }],
-        detail: deny
-          ? 'Business RLS composes to DENY ALL for this principal.'
-          : excluded
-            ? 'The record does not satisfy the business row-level predicate.'
-            : 'The record satisfies the business row-level predicate.',
-      };
+      let m: boolean | undefined;
+      try {
+        m = matches(layer1);
+      } catch (e) {
+        rlsRefusal = crossFieldClassRefusalCarriedBy(e);
+        if (!rlsRefusal) throw e;
+      }
+      if (rlsRefusal) {
+        // The #20002 shape for a call enforcement cannot complete: the layer
+        // `not_evaluated`, no `matchesRecord` (there is no judgement behind
+        // it), the detail naming the refusal. `rowFilter` stays the predicate
+        // that was composed — the one the object-level `readFilter` reports.
+        const policies = declaredColumns?.fields ? refusedPolicyNamesOf(layer1, declaredColumns.fields) : [];
+        rlsLayer.record = {
+          outcome: 'not_evaluated',
+          rowFilter: layer1,
+          rules: [],
+          detail:
+            `Business RLS cannot be evaluated for this record: in ` +
+            (policies.length > 0 ? `policy ${policies.map((p) => `'${p}'`).join(', ')}` : 'a business RLS policy') +
+            `, ${rlsRefusal.diagnostic}. ` +
+            (isRead
+              ? 'The find this predicate scopes is refused with INVALID_FILTER / 400 before any record is read, ' +
+                'so the record is reported NOT visible (fail closed), never judged by comparing the two values.'
+              : `The ${engineOp} this predicate scopes is refused rather than judged (the read under it is refused ` +
+                'with INVALID_FILTER, and a by-id update or delete fails closed at its row-level gate), so the ' +
+                'record is reported NOT writable (fail closed), never judged by comparing the two values.'),
+        };
+      } else {
+        const excluded = deny || m === false;
+        rlsLayer.record = {
+          outcome: excluded ? 'excluded' : 'admitted',
+          rowFilter: layer1,
+          matchesRecord: deny ? false : m,
+          rules: [{ kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' }],
+          detail: deny
+            ? 'Business RLS composes to DENY ALL for this principal.'
+            : excluded
+              ? 'The record does not satisfy the business row-level predicate.'
+              : 'The record satisfies the business row-level predicate.',
+        };
+      }
     }
   }
 
@@ -1178,6 +1271,9 @@ async function applyRecordAttribution(
   if (capsDeny) { visible = false; decidedBy = 'required_permissions'; }
   else if (!crudAllowed) { visible = false; decidedBy = 'object_crud'; }
   else if (!recordExists) { visible = false; decidedBy = undefined; }
+  // [#20431] A refused predicate fails the request before any row is read, the
+  // tenant wall's included: the driver compiles `Layer0 AND Layer1` as one query.
+  else if (rlsRefusal) { visible = false; decidedBy = 'rls'; }
   else if (tenantExcluded) { visible = false; decidedBy = 'tenant_isolation'; }
   else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
   // A dependency that threw decides by failing the request, in the order the
@@ -1628,7 +1724,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   if (input.recordId) {
     const out = await applyRecordAttribution({
       deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
-      vamaEffective, vamaSets,
+      vamaEffective, vamaSets, declaredColumns: declaredColumnsOf(schema),
     });
     recordVerdict = out.record;
     posture = out.posture;
