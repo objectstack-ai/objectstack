@@ -21,3 +21,5 @@ A stored 「is empty」 / 「is not empty」 — `['field', 'is_empty', …]`, `
 Stored sharing rules and views that use 「is empty」 are not rewritten; they are re-read under the new meaning. Production rules that use 「is empty」 on a text or multi-value field were not measured; each finds more rows (the `''` / `[]` ones) from this release.
 
 Clause-②: yes (narrowing)
+
+<!-- adr-0087: registered filter-is-empty-lowers-to-empty-operator -->
