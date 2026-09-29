@@ -6,7 +6,7 @@ fix(cli)!: a project with no `sdui.manifest.json` of its own has its `kind: 'htm
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row. The CLI's JSX page gate now reads the component manifest the console package already ships, so an html page's source is judged against a vocabulary it was never judged against. `objectstack migrate meta` does not rewrite page source, and the refusal names the page and the tag; for `div` the repair is `box`. -->
+<!-- adr-0087: registered ui-html-page-div-refused -->
 
 **BREAKING for `kind: 'html'` pages in projects without their own manifest.**
 
