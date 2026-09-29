@@ -31,7 +31,7 @@ import { keysetWalk } from '@objectstack/types';
  *
  * ⚠️ "Declared" is not "present". `syncDeclaredIndexes` logs a plain UNIQUE
  * whose CREATE fails on existing duplicates onto the durability channel and
- * lets the boot continue (#14902 / #15479) — deliberately, so one dirty table
+ * lets the boot continue (commit 61821e54c / #15479) — deliberately, so one dirty table
  * cannot take a deployment down. A database that ever held duplicates therefore
  * carries the declaration and not the constraint, and can still hold the class
  * today.

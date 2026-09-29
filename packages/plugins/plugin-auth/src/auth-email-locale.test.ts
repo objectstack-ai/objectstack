@@ -8,7 +8,7 @@
  * caller's own `Accept-Language` first (only when it names a locale in
  * `AUTH_EMAIL_TEMPLATE_LOCALES`), and the deployment default second. The
  * 2026-08-13 ruling had made the deployment default the whole answer and
- * rejected `Accept-Language` outright. #14762 then added the rung ABOVE both,
+ * rejected `Accept-Language` outright. Commit 35e94c96b then added the rung ABOVE both,
  * per the #14788 option-D ruling of 2026-09-03: the recipient's own
  * `sys_user.locale` (#13881) when the account holds one.
  *
@@ -479,7 +479,7 @@ describe('#14319 — authEmailLocaleFromRequest', () => {
   });
 });
 
-// ── #14762 — the stored rung ───────────────────────────────────────────────
+// ── commit 35e94c96b — the stored rung ─────────────────────────────────────
 
 /**
  * #14788 was ruled option D on 2026-09-03 (maintainer verbatim 「同意」):

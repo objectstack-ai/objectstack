@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #11477 — ORDERING PIN: on `/admin/remove-user` the break-glass guard must run
+// commit 6dd3e6968 — ORDERING PIN: on `/admin/remove-user` the break-glass guard must run
 // AFTER authorization, and the whole `/admin/*` family must agree on that order.
 //
 // ── The defect this pins, and why a pin is half the fix ─────────────────────

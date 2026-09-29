@@ -18,7 +18,7 @@
  * declaration without the constraint. That population is real and reachable:
  * `syncDeclaredIndexes` logs a plain UNIQUE whose CREATE fails on existing
  * duplicates onto the durability channel and lets the boot continue
- * (#14902 / #15479), deliberately, so one dirty table cannot take a deployment
+ * (commit 61821e54c / #15479), deliberately, so one dirty table cannot take a deployment
  * down. `SYS_ACCOUNT_NO_UNIQUE` below is that deployment, spelled as a fixture
  * — the same shape with the unique index absent.
  *
@@ -51,7 +51,7 @@ const SYSTEM = { context: { isSystem: true } } as never;
 
 /**
  * `sys_account` as a deployment whose declared `(provider_id, account_id)`
- * UNIQUE was never physically created — the #14902 / #15479 population. Only
+ * UNIQUE was never physically created — the commit 61821e54c / #15479 population. Only
  * the columns the probe reads are spelled.
  */
 const SYS_ACCOUNT_NO_UNIQUE = {

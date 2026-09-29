@@ -1003,7 +1003,7 @@ export class AuthPlugin implements Plugin {
       });
     }
 
-    // [#11640] The walled deployment that declares an owner it can never
+    // [commit bf8d129b5] The walled deployment that declares an owner it can never
     // verify — maintainer ruling 2026-08-25 (option A): warn loudly, by name,
     // at boot; NEVER refuse. The whole decision (and why it must run here
     // rather than in `init()`, where no email transport is resolvable yet)
@@ -1134,7 +1134,7 @@ export class AuthPlugin implements Plugin {
       ctx.hook('kernel:ready', runEnsure);
       // [#11973 / #11663 L3] Re-run after every write that can move the
       // population answer, judged by the ONE exported trigger predicate: a
-      // `sys_user` insert or email/email_verified update (the #11343 trigger
+      // `sys_user` insert or email/email_verified update (commit c0714eb5d's trigger
       // set — how a CONFIG-anchored admin comes into standing), and the
       // legacy `sys_user_permission_set` insert (how `single`-posture
       // first-user promotion lands standing, Choice 4A — retired with the
@@ -1932,10 +1932,10 @@ export class AuthPlugin implements Plugin {
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
-    // [#11640] Both clauses (and the seeded address below) are resolved by
+    // [commit bf8d129b5] Both clauses (and the seeded address below) are resolved by
     // `walled-owner-verification-path.ts`, because the boot check there treats
     // this seed as a verification path — it stamps the seeded account
-    // `email_verified` (#11343). That is only true while the two agree on when
+    // `email_verified` (commit c0714eb5d). That is only true while the two agree on when
     // the seed is armed and which address it provisions, so they read one
     // resolution rather than two copies of the same env parsing.
     if (!isDevAdminSeedArmed()) return;
@@ -2028,7 +2028,7 @@ export class AuthPlugin implements Plugin {
       } finally {
         this.authManager.clearOperatorProvisioning(email);
       }
-      // [#11343] Stamp the seeded admin's address VERIFIED. This account is
+      // [commit c0714eb5d] Stamp the seeded admin's address VERIFIED. This account is
       // provisioned by the deployment's own boot command with operator-known
       // credentials — it is not an unknown self-registrant, which is the class
       // the verified-elevation invariant exists to refuse. Under walled
@@ -2109,7 +2109,7 @@ export class AuthPlugin implements Plugin {
           { context: { isSystem: true } },
         )
         .catch(() => []);
-      // [#8676] `sys_account.password` is `internal: true`, so the row above
+      // [commit d6e80b28b] `sys_account.password` is `internal: true`, so the row above
       // arrives without it — the engine's strip has no `isSystem` carve-out.
       // Recover it through the privileged accessor; otherwise this probe reads
       // `undefined` on every boot and the dev credential hint silently stops
@@ -2633,7 +2633,7 @@ export class AuthPlugin implements Plugin {
         }
       });
 
-      // ── #11477: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──────
+      // ── commit 6dd3e6968: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──
       //
       // The break-glass last-local-credential guard is a global
       // `hooks.before` in auth-manager.ts keyed on `ctx.path`. A better-auth
@@ -2735,8 +2735,8 @@ export class AuthPlugin implements Plugin {
       //
       // Ledger: `POST /api/v1/auth/admin/has-permission` stays a
       // `BETTER_AUTH_MOUNTED_SURFACE` row; `check:auth-mount-ledger` accounts
-      // for this mount as "shadowing a vendor-declared path" (the #12029
-      // worked reading — a shadow is accounted for, not a new row).
+      // for this mount as "shadowing a vendor-declared path" (as it read commit
+      // 6dd3e6968's remove-user mount — a shadow is accounted for, not a new row).
       //
       // Pinned by `admin-has-permission-endpoint.test.ts` (both directions,
       // full table) and the two dogfood sweeps (admin standing + non-admin
