@@ -3,8 +3,8 @@
 /**
  * [#20431] `security.explain` answers what enforcement answers for a row-level
  * policy that compares two fields of no shared comparison class: the request
- * is REFUSED, so the record's verdict is reported as that refusal — never as a
- * row judgement.
+ * is REFUSED, with the find's own envelope (`INVALID_FILTER` / 400), and no
+ * record verdict is reported.
  *
  * `record.status != record.amount` lowers to `{ status: { $ne: { $field:
  * 'amount' } } }`. driver-sql refuses to compile a column-to-column comparison
@@ -12,18 +12,25 @@
  * 400, and a by-id update or delete fails closed at its row-level gate (403),
  * whose pre-image re-read is that same refused read (#20355's table). The
  * explain engine's record matcher was handed no declared columns, so it
- * compared the two raw values and answered `visible` true or false depending
- * on how they happened to compare. It now hands the matcher the object's
- * declared columns (the write check's `options.fields`, #20355) and reports the
- * refusal in the shape a call enforcement cannot complete already has (#20002):
- * the `rls` layer's record `not_evaluated` with no `matchesRecord`, the detail
- * naming `INVALID_FILTER`, the policy and both columns, and `record: { visible:
- * false, decidedBy: 'rls' }`.
+ * compared the two raw values. Measured on this stack before the fix:
  *
- * Every refused cell asserts both halves — explain's answer, and the real
- * request through the real `SecurityPlugin`, `ObjectQL` and SQL driver — so a
- * future fork between the two reds here. The control, a same-class comparison,
- * keeps its row verdict on both sides.
+ * | policy | find | by-id update / delete | explain read / update / delete, `record` |
+ * |---|---|---|---|
+ * | `record.status != record.amount` | 400 | 403 | `visible: true`, `decidedBy: 'rls'`, rls `admitted` |
+ * | `record.amount > record.status` | 400 | 403 | `visible: false`, `decidedBy: 'rls'`, rls `excluded` |
+ * | `record.status != record.title` (control) | the row | admitted | `visible: true`, `decidedBy: 'rls'` |
+ *
+ * The matcher is now handed the object's declared columns (the write check's
+ * `options.fields`, #20355), refuses the comparison, and explain answers with
+ * that refusal: the envelope the find answers with, the message naming the
+ * policy and both columns. That is the answer explain already gives the
+ * matcher's other `INVALID_FILTER` refusals, a `{ $field }` comparison against
+ * a list-holding column among them (`rls-stored-list-ordering-fails-closed.test.ts`).
+ *
+ * Every refused cell asserts both halves: explain's answer, and the real
+ * request through the real `SecurityPlugin`, `ObjectQL` and SQL driver. A
+ * future fork between the two turns a cell here red. The control, a same-class
+ * comparison, keeps its row verdict on both sides.
  *
  * PostgreSQL runs when `OS_TEST_POSTGRES_URL` names a server (CI does not run
  * this package against a live server, so there it is skipped).
@@ -159,6 +166,12 @@ const envelopeOf = (e: unknown): Envelope => {
 };
 const outcome = (p: Promise<unknown>): Promise<'admitted' | Envelope> =>
   p.then(() => 'admitted' as const, (e: unknown) => envelopeOf(e));
+/** A refusal's envelope and message, or `'answered'` for an explanation that came back. */
+const refusalOf = (p: Promise<unknown>): Promise<'answered' | (Envelope & { message: string })> =>
+  p.then(
+    () => 'answered' as const,
+    (e: unknown) => ({ ...envelopeOf(e), message: String((e as Error)?.message) }),
+  );
 
 /** What enforcement answers the caller's own request with, per operation. */
 const ENFORCED: Record<ExplainOp, Envelope> = { read: INVALID, update: DENIED, delete: DENIED };
@@ -168,18 +181,16 @@ const ROW = { id: 'r1', status: 'open', title: 'x', amount: 5 };
 const rlsRecordOf = (d: ExplainDecision) => d.layers.find((l) => l.layer === 'rls')?.record;
 
 /**
- * The refusal as explain reports it: NOT visible, decided by the business RLS
- * layer, whose record attribution carries no row judgement and names the code
- * enforcement refuses with, the policy and both columns.
+ * Explain's answer is the find's refusal: the same envelope, no decision and so
+ * no record verdict, and a message that names the policy and both columns.
  */
-function expectRefusalReported(d: ExplainDecision, recordId: string, columns: [string, string]): void {
-  expect(d.record).toEqual({ recordId, visible: false, decidedBy: 'rls' });
-  const rls = rlsRecordOf(d);
-  expect(rls?.outcome).toBe('not_evaluated');
-  expect(rls).not.toHaveProperty('matchesRecord');
-  expect(rls?.detail).toContain('INVALID_FILTER');
-  expect(rls?.detail).toContain(`policy '${POLICY}'`);
-  for (const column of columns) expect(rls?.detail).toContain(`"${column}"`);
+async function expectExplainRefuses(p: Promise<unknown>, columns: [string, string]): Promise<void> {
+  const r = await refusalOf(p);
+  expect(r).not.toBe('answered');
+  if (r === 'answered') return;
+  expect({ code: r.code, status: r.status }).toEqual(INVALID);
+  expect(r.message).toContain(`'${POLICY}'`);
+  for (const column of columns) expect(r.message).toContain(`"${column}"`);
 }
 
 interface Case {
@@ -201,14 +212,14 @@ const REFUSED: Case[] = [
 for (const [driverName, makeDriver, available] of DRIVERS) {
   describe.skipIf(!available)(`[#20431] ${driverName}: explain reports the refusal enforcement gives a cross-class field comparison`, () => {
     for (const c of REFUSED) {
-      it(`${c.id} \`${c.predicate}\` — read, update and delete: enforcement refuses, explain reports that refusal and no row verdict`, async () => {
+      it(`${c.id} \`${c.predicate}\` — read, update and delete: enforcement refuses, explain answers INVALID_FILTER / 400 and no row verdict`, async () => {
         const w = await boot(makeDriver, c.predicate);
         await w.engine.insert(w.OBJ, [ROW], { context: SYS_CTX } as never);
         const before = await w.stored();
 
         for (const op of ['read', 'update', 'delete'] as const) {
           expect(await outcome(w.request(op, 'r1')), `${op}: enforcement`).toEqual(ENFORCED[op]);
-          expectRefusalReported(await w.explain(op, 'r1'), 'r1', c.columns);
+          await expectExplainRefuses(w.explain(op, 'r1'), c.columns);
         }
         expect(await w.stored()).toEqual(before);
       });
@@ -219,19 +230,12 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
       for (const predicate of ['record.status != record.amount', 'record.amount > record.status']) {
         const w = await boot(makeDriver, predicate);
         await w.engine.insert(w.OBJ, [ROW], { context: SYS_CTX } as never);
-        const d = await w.explain('read', 'r1');
-        const rls = rlsRecordOf(d);
         answers.push({
           find: await outcome(w.request('read', 'r1')),
-          record: d.record,
-          rls: { outcome: rls?.outcome, judged: rls !== undefined && 'matchesRecord' in rls },
+          explain: await outcome(w.explain('read', 'r1')),
         });
       }
-      expect(answers[0]).toEqual({
-        find: INVALID,
-        record: { recordId: 'r1', visible: false, decidedBy: 'rls' },
-        rls: { outcome: 'not_evaluated', judged: false },
-      });
+      expect(answers[0]).toEqual({ find: INVALID, explain: INVALID });
       expect(answers[1]).toEqual(answers[0]);
     });
 
