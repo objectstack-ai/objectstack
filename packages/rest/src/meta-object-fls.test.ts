@@ -164,7 +164,7 @@ const EXITS: ObjectSchemaMaskExit[] = [
     {
         name: 'GET /meta/objects/:name?state=draft — uncached branch via the canonical PLURAL spelling',
         run: (testCase) => {
-            // #3984/#6241: the plural spelling is canonical, and a gate keyed on
+            // #3984 / commit 83a3b1f2e: the plural spelling is canonical, and a gate keyed on
             // the raw `:type` param is a gate it walks past. Driving one row of
             // the table through it keeps that from being re-learned.
             const { rest } = boot({ testCase, cached: true });
@@ -200,7 +200,7 @@ const EXITS: ObjectSchemaMaskExit[] = [
             );
         },
     },
-    // [#12195] The compound-name read `GET /meta/:type/:section/:name` was the
+    // [commit 7986d973f] The compound-name read `GET /meta/:type/:section/:name` was the
     // fourth exit in this table until its arity was retired. Every name reaches
     // the single-item read above now, and that exit carries the same ADR-0106
     // masking contract — so the removal costs this table no coverage, it costs

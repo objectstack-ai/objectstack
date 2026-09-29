@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on objectql's `having` — the face that
+ * [#20444] The `$empty` operator on objectql's `having` — the face that
  * filters AGGREGATED rows, and the one no shared conformance table drives
  * (`FILTER_LOGIC_CASES` does not reach the HAVING path), so its conclusion is
  * stated here, explicitly.

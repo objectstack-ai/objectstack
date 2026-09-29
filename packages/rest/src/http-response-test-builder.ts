@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The one place this package builds an `IHttpResponse` for a test (#13454).
+ * The one place this package builds an `IHttpResponse` for a test (commit 7ad57e17a).
  *
  * Test layer only — nothing in `src/index.ts` reaches it, so tsup (entry:
  * `src/index.ts`) never emits it into `dist` and it is not published. Same
@@ -26,7 +26,7 @@
  * ⚠️ Those two errors were never absent — they were MASKED. `tsc` reports at
  * most one argument-assignability error per call expression, so while argument
  * 1 was a non-conforming request literal it hid argument 2 entirely; repairing
- * the request half (#13377) is what made them visible, at the very same two
+ * the request half (commit e10cf3444) is what made them visible, at the very same two
  * sites and with the per-file ledger count unmoved at 2. That mechanism has not
  * gone away and is why the repair here is one builder rather than two edits:
  * the decision about what a mock response IS belongs in a place a reader can

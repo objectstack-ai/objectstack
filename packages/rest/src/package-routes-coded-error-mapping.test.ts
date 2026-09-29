@@ -62,7 +62,7 @@
  * ⚠️ The block's OTHER reason for driving the gate here is stale as well. It
  * read: *"`GET /packages` is different BY DESIGN: both of its data sources sit
  * in their own inner `try { … } catch {}` … so nothing below it reaches the
- * outer catch"*. #11063 and #11130 removed both inner catches —
+ * outer catch"*. #11063 and commit 851909530 removed both inner catches —
  * `package-routes.ts` now marks each read `NOT wrapped in a catch,
  * deliberately` — so those arms DO reach this outer catch, and are pinned in
  * `package-list-durable-read-refusal.test.ts` and

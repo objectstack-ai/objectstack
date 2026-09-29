@@ -2559,7 +2559,7 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.status).toBe(400);
     expect(r.body.error).toBe('制作基地被「项目主计划批次」引用(3 条),删除被阻断,请先解除引用');
     expect(r.body.object).toBe('pm_base');
-    // [#10345] No `code` because this producer DECLARED none — not because
+    // [commit cad8b42f0] No `code` because this producer DECLARED none — not because
     // the unwrap door withholds it. That door carries a declared code now; the
     // old "older bundled clients prepend any code to the message" rationale was
     // retired with the measurement in `error-response.ts`. What stays pinned

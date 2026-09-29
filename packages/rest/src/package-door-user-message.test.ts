@@ -17,7 +17,7 @@
  * ```
  *
  * `resolveThrownHttpError` answers `userMessage` whenever the throw carried a
- * non-empty string one (`declaredUserMessage`, #9934), so an author's
+ * non-empty string one (`declaredUserMessage`, commit 79c46da90), so an author's
  * deliberate, end-user-addressed refusal text sat in that local and was
  * dropped one line later. Nothing invalid shipped — `code`, `status` and
  * `message` were all correct — which is what made the loss silent: the mark

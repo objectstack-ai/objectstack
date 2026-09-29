@@ -49,7 +49,7 @@ export { buildFieldMetaMap } from './export-format.js';
 export type { ExportFieldMeta } from './export-format.js';
 
 // Query-parameter MULTIPLICITY — the repo's ONE rule for a single-valued
-// parameter supplied more than once (#6307 / #6877), published so the doors
+// parameter supplied more than once (commit 293476148 / #6877), published so the doors
 // OUTSIDE this package can answer it with that one implementation instead of a
 // second copy that drifts (#17672). `query-multiplicity.ts`'s header is the
 // authority on the rule; what belongs here is which half travels.

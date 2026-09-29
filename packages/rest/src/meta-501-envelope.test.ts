@@ -19,8 +19,8 @@
  * mechanism"), so it carried the sibling-key shape too — the card's table
  * sampled one of the twins, not both.
  *
- * ⚠️ [#12195] The compound `PUT /meta/:type/:section/:name` in that table is
- * RETIRED (#12176 stage 3). The row is kept because it is the historical
+ * ⚠️ [commit 7986d973f] The compound `PUT /meta/:type/:section/:name` in that table is
+ * RETIRED (stage 3, commit 7986d973f). The row is kept because it is the historical
  * measurement this file exists to explain; the case that drove it is replaced
  * by a pin that the arity stays unmounted, so a re-mount cannot quietly
  * reintroduce a fourth envelope dialect.
@@ -139,7 +139,7 @@ function boot() {
         migrateStored: () => drive('POST', MIGRATE_PATH, { params: {} }),
         singleSave: () => drive('PUT', SINGLE_PATH, { params: { type: 'object', name: 'account' } }),
         /**
-         * [#12195] The compound arity's REGISTRATION, not a call to it.
+         * [commit 7986d973f] The compound arity's REGISTRATION, not a call to it.
          * `route()` above THROWS on an unregistered path, so this reads
          * the route list directly.
          */
@@ -219,7 +219,7 @@ describe('#7035 — the `/meta` 501 refusals all speak the ADR-0112 envelope', (
             await stack.reset(),
             await stack.singleSave(),
         ];
-        // [#12195] THREE routes, not four: the compound `PUT` twin that used to
+        // [commit 7986d973f] THREE routes, not four: the compound `PUT` twin that used to
         // be the fourth is retired.
         expect(answers.map((a) => a.status)).toEqual([501, 501, 501]);
         expect(answers.map((a) => a.body?.error?.code)).toEqual([

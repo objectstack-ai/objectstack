@@ -695,7 +695,7 @@ export async function coerceFieldValue(
 //
 // Ruling D (maintainer, 2026-08-06) retired the mirror rather than growing it:
 // the dry run now ASKS for the verdict through `DataProtocol.validateData`
-// (#6037), which runs the same `validateRecord` / `evaluateValidationRules`
+// (commit 18189983d), which runs the same `validateRecord` / `evaluateValidationRules`
 // `insert()` runs, under the deployment's own ADR-0104 posture. See
 // `import-runner.ts`'s dry-run branch. Every verdict these two produced is
 // re-asserted through that route in `import-dryrun-parity.test.ts` — retiring

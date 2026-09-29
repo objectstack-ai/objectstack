@@ -415,7 +415,7 @@ describe('[#11588] #5437/#5582 and #5423 are exactly where they were', () => {
         // RED pre-fix, because the fixture is a SANDBOXED refusal: the `error`
         // assertion reads the defect exactly as §1 does, and only the
         // `userMessage` half is direction-insensitive. Moved here and the claim
-        // corrected rather than the prediction re-fitted — #9934's marked
+        // corrected rather than the prediction re-fitted — commit 79c46da90's marked
         // channel is orthogonal to the unwrap and must stay so, which is a
         // "must not move" and not a control.
         const err = sandboxRefusal('this record is frozen', {
@@ -482,12 +482,12 @@ describe('[#11588] #5437/#5582 and #5423 are exactly where they were', () => {
 // door while `mapDataError` sanitised the same error to a `500`. #11588 stated
 // why it stopped there — "making the two agree means moving the STATUS the
 // passthrough decided, which is a contract question and not this card's" — and
-// #15071 widened the population without being able to take that question
+// commit cf6e0a193 widened the population without being able to take that question
 // either, recording it a second time as an ACCEPTED DIVERGENCE one file over
 // (`error-response-structured-arm-door-parity.test.ts` §4).
 //
 // #17273 is the card that took it: `resolveErrorResponse` now asks the same
-// `isSandboxCrash` gate #15071 put above `classifyDataError`'s arms, before its
+// `isSandboxCrash` gate commit cf6e0a193 put above `classifyDataError`'s arms, before its
 // declared-status passthrough, so the two doors answer one crash one way.
 //
 // ⛔ INVERTED rather than DELETED, the discipline §8b above already applies: a
@@ -512,7 +512,7 @@ describe('[#11588 → #17273] the crash-with-a-declared-4xx divergence, now CLOS
         expect(viaRoute.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(String(viaRoute.body.error)).not.toContain('threw:');
 
-        // The `/data` door, unmoved since #7543/#15071 — the control that says
+        // The `/data` door, unmoved since #7543 / commit cf6e0a193 — the control that says
         // the flip above is the route door meeting it, not both doors sliding.
         const viaData = mapDataError(withCrash());
         expect(viaData.status).toBe(500);
@@ -523,7 +523,7 @@ describe('[#11588 → #17273] the crash-with-a-declared-4xx divergence, now CLOS
 
     it('#17273 negative control: the same declared 4xx WITHOUT a crash keeps the passthrough, both status and sentence', () => {
         // One `innerMessage` apart from the case above. A refusal is not a
-        // crash, and #15071's ruling fences it explicitly — if this goes green
+        // crash, and the ruling commit cf6e0a193 implemented fences it explicitly — if this goes green
         // by answering 500, the fix above deleted the refusal surface instead
         // of moving the crash.
         const refusal = throughRouteDoor(sandboxRefusal('x', { status: 409 }));

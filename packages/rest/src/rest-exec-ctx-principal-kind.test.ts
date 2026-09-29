@@ -82,7 +82,7 @@ const makeAuth = () => ({
             const cookie = headers?.get?.('cookie');
             if (cookie === 'admin') return { user: { id: 'admin1' } };
             if (cookie === 'member') return { user: { id: 'member1' } };
-            // [#6216] A session that DOES carry a bearer token, so the
+            // [commit f586f1a89] A session that DOES carry a bearer token, so the
             // `accessToken` pin below exercises a live branch of
             // `resolveAuthzContext` rather than an absent value.
             if (cookie === 'member-tok') {
@@ -295,7 +295,7 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             // it, so it is an assembled field now and absent for the same reason
             // every other unset field is: this session carries no gate.
             '__kernel',
-            // [#13214] The SECOND post-assembly internal key, added by the
+            // [commit cc837dbfe] The SECOND post-assembly internal key, added by the
             // 2026-08-30 security ruling and named here rather than left to a
             // subset check — this pin exists precisely to make a key ARRIVING
             // as loud as a key going missing, and this one arrived.
@@ -318,7 +318,7 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
         // `ExecutionContext.accessToken` reaches hooks as `session.accessToken`
         // (`objectql/engine.ts` buildSession, `spec/data/hook.zod.ts`), and the
         // runtime / MCP face has always carried it. This transport never has.
-        // #6216 makes that an explicit `accessToken: undefined` input at this
+        // Commit f586f1a89 makes that an explicit `accessToken: undefined` input at this
         // face rather than a silent gap — widening a published hook surface to
         // a second transport is a product decision, not a refactor. If REST
         // should carry it, this pin is the thing that must change, deliberately.
@@ -333,7 +333,7 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
 describe('#7280 — the ADR-0069 gate posture is an ASSEMBLED field on this face', () => {
     // Before #7280 the gate reached the envelope through
     // `...(authGate ? { authGate } : {})` spread on AFTER assembly, behind an
-    // `as any` — outside the closed entry field set (#6216) by construction.
+    // `as any` — outside the closed entry field set (commit f586f1a89) by construction.
     // It is an assembler input now. These pins are on the WIRE, through the real
     // `computeExecCtx` pipeline: `rest-auth-gate.test.ts` hand-builds a context
     // and so proves only that `enforceAuth` reads the key, never that this face

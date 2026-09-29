@@ -52,12 +52,12 @@
  * empty string. That is the risk #7987 was parked on, and the reason the
  * mechanism is a readback rather than a bare flag.
  *
- * **`sys_account.password`** (#8676) — the credential hash. better-auth's
+ * **`sys_account.password`** (commit d6e80b28b) — the credential hash. better-auth's
  * sign-in verifier reads it off an adapter result row
  * (`internalAdapter.findCredentialAccount(userId)`), so it belongs to this
  * seam for the same reason the OAuth columns do.
  *
- * ## TWO seams, not one — this module owns both (#8676)
+ * ## TWO seams, not one — this module owns both (commit d6e80b28b)
  *
  * The table above serves better-auth's storage adapter, which is the only
  * importer of {@link reattachInternalFieldsOnRead}. plugin-auth also has
@@ -162,12 +162,12 @@ interface ReadbackColumn {
  */
 const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   [SystemObjectName.SESSION]: [{ field: 'token', absenceProvesStrip: true }],
-  // [#7987] All three OAuth credential columns, plus [#8676] `password`.
+  // [#7987] All three OAuth credential columns, plus [commit d6e80b28b] `password`.
   //
   // `password` is here because better-auth's sign-in verifier reads it OFF an
   // adapter result row: `internalAdapter.findCredentialAccount(userId)` returns
   // the row whose `password` is then compared against the submitted one. Under
-  // the #8676 flag that row comes back without the column, so without this row
+  // the commit d6e80b28b flag that row comes back without the column, so without this row
   // password sign-in would fail for every user. `absenceProvesStrip: false`
   // because `sys_account.password` is `required: false` and genuinely empty on
   // OAuth-only accounts — see the field's own doc above for why that
@@ -228,7 +228,7 @@ export async function reattachInternalFieldsOnRead(
 }
 
 /**
- * [#8676] Recover flagged columns for one of plugin-auth's OWN raw-engine
+ * [commit d6e80b28b] Recover flagged columns for one of plugin-auth's OWN raw-engine
  * reads — the second seam, and the reason a bare flag was not enough.
  *
  * ## Why this exists beside {@link reattachInternalFieldsOnRead}

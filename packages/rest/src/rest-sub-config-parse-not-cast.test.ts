@@ -40,12 +40,12 @@
  * `normalizeConfig` reads is declared by the sub-object's schema (measured
  * key by key; the diff is empty for all four), so the PARSED output is what
  * the normalized config is built from and the schema's own defaults are the
- * defaults. `api` held #11637's validate-only posture until [#14366] measured
+ * defaults. `api` held #11637's validate-only posture until commit 53cbad9f7 measured
  * its key diff empty too and folded its `??` chain onto the parse; it keeps
  * the `.omit()`ed `requireAuth` tombstone, and is not this file's subject.
  *
- * [#14691] Ten of the keys these pins originally exercised were RETIRED under
- * ADR-0049 enforce-or-remove (the #14369 liveness census found them normalized
+ * [commit b3a63d32c] Ten of the keys these pins originally exercised were RETIRED under
+ * ADR-0049 enforce-or-remove (the liveness census recorded in commit a3d5724c8 found them normalized
  * and never read): `crud.patterns` / `objectParamStyle`, `metadata.cacheTtl` /
  * `endpoints.schema`, `batch.operations.upsertMany` / `defaultAtomic`, and all
  * of `routes.*`. Each is now a `retiredKey()` tombstone, so the pins below that
@@ -141,7 +141,7 @@ describe('[#11984] §A RestServer construction runs the four sibling schemas', (
     });
 
     // `routes.nameTransform`, `crud.objectParamStyle` and `metadata.cacheTtl` used
-    // to be pinned here as "refuses the OUT-OF-CONTRACT value". Since #14691 the
+    // to be pinned here as "refuses the OUT-OF-CONTRACT value". Since commit b3a63d32c the
     // keys themselves are tombstones and EVERY value is refused — see §E.
 
     it('refuses a declared key written with the wrong type', () => {
@@ -152,7 +152,7 @@ describe('[#11984] §A RestServer construction runs the four sibling schemas', (
 
     // `crud.patterns` (an enum-keyed record) and `routes.overrides.<object>.operations`
     // (an exhaustive one) used to be pinned here for their key-by-key refusals.
-    // Both records are tombstones since #14691 — see §E.
+    // Both records are tombstones since commit b3a63d32c — see §E.
 
     it('lists every failing key of the sub-object in one refusal', () => {
         const message = refusal({ batch: { maxBatchSize: 0, enableBatchEndpoint: 'yes' as never } });
@@ -210,7 +210,7 @@ describe('[#11984] §B the refusal survives the plugin path', () => {
     });
 
     it('rejects `createRestApiPlugin({ api: { routes: { nameTransform: "none" } } }).start()` — a #14691 tombstone, through the plugin path', async () => {
-        // Before #14691 this case drove `'snake_case'`, the out-of-enum value.
+        // Before commit b3a63d32c this case drove `'snake_case'`, the out-of-enum value.
         // The key is retired now, so its former DEFAULT is refused too, with the
         // prescription rather than the enum text.
         await expect(
@@ -229,7 +229,7 @@ describe('[#11984] §C regression guards — the narrowing is exactly the declar
         expect(cfg.batch.maxBatchSize).toBe(200);
         expect(cfg.metadata.prefix).toBe('/meta');
         expect(cfg.crud.dataPrefix).toBe('/data');
-        // [#14691] the retired keys materialize NO default any more — the
+        // [commit b3a63d32c] the retired keys materialize NO default any more — the
         // normalized config simply does not carry them.
         expect(cfg.metadata).not.toHaveProperty('cacheTtl');
         expect(cfg.crud).not.toHaveProperty('objectParamStyle');
@@ -245,7 +245,7 @@ describe('[#11984] §C regression guards — the narrowing is exactly the declar
 
     // The two enum read-backs (`routes.nameTransform`, `crud.objectParamStyle`)
     // and the "KEEPS a negative `metadata.cacheTtl`" bound used to live here.
-    // All three keys are tombstones since #14691, so those pins are reversed
+    // All three keys are tombstones since commit b3a63d32c, so those pins are reversed
     // in §E; the negative-TTL bound the card once argued about is moot — no
     // TTL of any sign is accepted.
 
@@ -299,7 +299,7 @@ describe('[#11984] §D the four siblings consume the parsed output', () => {
     });
 
     it('KEEPS a partial `batch.operations` and `metadata.endpoints` the same way', () => {
-        // [#14691] `upsertMany` and `schema` left both shapes: the three live
+        // [commit b3a63d32c] `upsertMany` and `schema` left both shapes: the three live
         // switches per block are exactly what the normalized config carries.
         expect(normalized({ batch: { operations: { deleteMany: false } } }).batch.operations).toEqual({
             createMany: true, updateMany: true, deleteMany: false,
@@ -318,11 +318,11 @@ describe('[#11984] §D the four siblings consume the parsed output', () => {
     });
 
     // The `crud.patterns` preservation pin (and the `z.partialRecord` question it
-    // deferred to #14365) is gone with the key — #14691 retired the record.
+    // deferred to #14365) is gone with the key — commit b3a63d32c retired the record.
 });
 
 // ---------------------------------------------------------------------------
-// §E — [#14691] the retired keys are REFUSED at construction, with the
+// §E — [commit b3a63d32c] the retired keys are REFUSED at construction, with the
 // prescription, whatever the value. These are the #11984 pins above, reversed:
 // the SERVER is still what is measured (the schema-level pins live in
 // `packages/spec`'s `rest-server.test.ts`), and `refusal()`'s `''`-on-success

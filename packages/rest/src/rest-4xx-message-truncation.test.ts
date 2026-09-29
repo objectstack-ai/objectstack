@@ -263,7 +263,7 @@ async function callRoute(rest: any, method: string, path: string, req: Record<st
  * joined by `; `, behind an `[invalid_metadata] <type>/<name> failed spec
  * validation: ` prefix, with a `(+N more)` suffix for the remainder.
  *
- * ⚠️ [#10888] That is no longer the form THIS route receives in production, and
+ * ⚠️ [commit d806081dd] That is no longer the form THIS route receives in production, and
  * the distinction is worth stating because the docblock used to imply otherwise.
  * `saveMetaItem` renders its findings clause per face: the `/meta` write doors
  * declare `writeFace: 'meta-envelope'` and get a short headline (count plus

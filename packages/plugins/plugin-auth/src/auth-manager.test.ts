@@ -1553,7 +1553,7 @@ describe('AuthManager', () => {
     });
   });
 
-  // #10366 — the localhost-wildcard trio is a DEVELOPMENT convenience and is
+  // commit bbe643c08 — the localhost-wildcard trio is a DEVELOPMENT convenience and is
   // gated on `NODE_ENV !== 'production'`. Before the gate the condition tested
   // only emptiness, so a production deployment whose trusted-origin list
   // resolved empty silently CSRF-trusted every `localhost` / `*.localhost`
@@ -2530,7 +2530,7 @@ describe('AuthManager', () => {
       expect(sms.sent[0].body).toContain('verification code');
     });
 
-    // ── #14762 — the recipient's own `sys_user.locale` as the top rung ──────
+    // ── commit 35e94c96b — the recipient's own `sys_user.locale` as the top rung
     //
     // #14788 was ruled option D on 2026-09-03: `sys_user.locale` when set →
     // the request's `Accept-Language` → the deployment default. There is no
@@ -2651,7 +2651,7 @@ describe('AuthManager', () => {
 
     // ── #14641 — the SMS INVITE path gets the same rung ──────────────────
     //
-    // Its OWN describe, sibling to #14762 above rather than nested inside it:
+    // Its OWN describe, sibling to commit 35e94c96b's above, not nested inside it:
     // the reporter path is what the next reader greps, and these pins answer
     // for #14641, not for the card that gave the OTP send its rung.
     describe("#14641 — the invitation SMS reads the invitee's own locale", () => {
@@ -2858,7 +2858,7 @@ describe('AuthManager', () => {
       expect(data.acceptUrl).toBe('http://localhost:3000/_console/accept-invitation/tok456');
     });
 
-    // #11741 — the invitation producer HOLDS an organization (the invitation
+    // commit b706af987 — the invitation producer HOLDS an organization (the invitation
     // row's own organizationId), so it threads that exact value into
     // SendTemplateInput for the sys_email.organization_id stamp. Auth mail
     // that genuinely has no organization (password reset / verification /
@@ -4086,15 +4086,15 @@ describe('AuthManager', () => {
       expect(written).toEqual(['hash:current', 'hash:old1']); // prepend + trim to 2
     });
 
-    // ---- #8676: the same control, against an engine that actually STRIPS ----
+    // ---- commit d6e80b28b: the same control, against an engine that actually STRIPS ----
     //
     // ⚠️ Every test above uses `makeEngine`, which hands back the stored object
     // untouched. That is a faithful model of a strip-less engine — and it is
-    // precisely why those tests carry NO information about #8676: once
+    // precisely why those tests carry NO information about commit d6e80b28b: once
     // `sys_account.password` and `previous_password_hashes` are `internal:
     // true`, the REAL engine omits both from this read, with no `isSystem`
     // carve-out and in spite of the explicit projection (#7728's design;
-    // measured against a real ObjectQL engine + stub driver on #8676, which
+    // measured against a real ObjectQL engine + stub driver for commit d6e80b28b, which
     // returned `{"id":"a1"}` for the exact query at `assertPasswordNotReused`).
     // `compareList` then empties, the loop never runs, `PASSWORD_REUSE` is
     // never thrown, and the method's own `catch { return undefined }` means
@@ -4188,7 +4188,7 @@ describe('AuthManager', () => {
       });
 
       it('⛔ the recovery is LOAD-BEARING: drop the accessor and the control provably dies', async () => {
-        // The falsification arm. This is the pre-#8676 shape — a stripping
+        // The falsification arm. This is the shape before commit d6e80b28b — a stripping
         // engine with no privileged accessor — and it is what every assertion
         // in this block would look like if the recovery were removed. Pinned so
         // the four tests above can never pass vacuously: if the strip stopped

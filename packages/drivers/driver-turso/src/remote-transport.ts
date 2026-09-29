@@ -3324,7 +3324,7 @@ export class RemoteTransport {
               // `$null: true` and `$exists: false` are one question asked twice.
               clauses.push(`${column} IS ${opValue === false ? 'NULL' : 'NOT NULL'}`);
               break;
-            // [#20444] `$empty` — the staged emptiness flag, answered by the
+            // [#20444] `$empty` — the emptiness flag, answered by the
             // field's DECLARED row of the ruled table on the plain column (a
             // presence question like the two above, so no storage form applies).
             // Refused, as its two siblings are, unless the comparand is boolean.

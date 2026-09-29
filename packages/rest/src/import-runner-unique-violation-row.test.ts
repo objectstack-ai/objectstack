@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14723] An import ROW reports a unique-constraint refusal as
+ * [commit 65846bc46] An import ROW reports a unique-constraint refusal as
  * `UNIQUE_VIOLATION` — the one wire spelling the route has.
  *
  * ## The fork this closes
@@ -163,7 +163,7 @@ describe('[#14723] §3 — the row and the whole-request door agree on the spell
 
 describe('[#14723] [GUARD] what the mapping must NOT do', () => {
   it('a producer that merely SPEAKS `DUPLICATE_RECORD` is not the engine\'s envelope and keeps its own code', async () => {
-    // The same discrimination the whole-request arm makes (#14389 §5): the
+    // The same discrimination the whole-request arm makes (commit 10220a7bf, `rest-duplicate-record-arm.test.ts` §5): the
     // gate is the registered code AND the class name.
     const hookRefusal = Object.assign(new Error('already there, says the hook'), { code: 'DUPLICATE_RECORD', status: 409 });
     const p = protocolWith({ createData: vi.fn(async () => { throw hookRefusal; }) });

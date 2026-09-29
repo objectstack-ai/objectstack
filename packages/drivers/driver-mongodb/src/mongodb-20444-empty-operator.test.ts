@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20444] The staged `$empty` operator on `translateFilter`, translated by the
+ * [#20444] The `$empty` operator on `translateFilter`, translated by the
  * field's DECLARED row of the ruled 「is empty」 table (ruling A on #20399,
  * record 5865693155; the spec's `expandEmptyOperator`):
  *

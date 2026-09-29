@@ -15,7 +15,7 @@
  * one does, so each neighbouring shape is pinned SILENT: an account exists, no
  * humans exist, and either fact unanswerable.
  *
- * The other load-bearing half is INDEPENDENCE. The neighbouring [#11640]
+ * The other load-bearing half is INDEPENDENCE. The neighbouring [commit bf8d129b5]
  * walled-owner reporter only runs when all four of {no email transport, no
  * federated sign-in, walled tenancy posture, declared platform owner} hold.
  * This report shares that hook but none of those preconditions, and the
@@ -592,7 +592,7 @@ describe('#14353 — the emitter logs ONCE, at `error`, and survives a broken si
   });
 
   it('a sink that declares only `warn` still HEARS this — the fallback is explicit', () => {
-    // The #13398-class ruling forbids growing `error?` onto a published sink
+    // The sink ruling (commit e238c79f0) forbids growing `error?` onto a published sink
     // that lacks it. A bare `error?.(…)` against such a sink emits NOTHING,
     // which would make this report silent on exactly the hosts that publish
     // the narrower shape; the explicit branch is what stops that.

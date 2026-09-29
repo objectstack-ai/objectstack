@@ -59,7 +59,7 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0135 D6 / ADR-0134.
   ssoProvider: 'sys_sso_provider',
   // (rc.1's one scim model, `scimProvider` → `sys_scim_provider`, retired
-  // under #11757: stable 1.7.x no longer derives that model.)
+  // under commit 4d25d22d4: stable 1.7.x no longer derives that model.)
   // The stable @better-auth/scim 1.7.x model set (#3653). Verified against the
   // installed 1.7.1: `SCIMOptions` still declares no `schema` / `modelName` /
   // `fields` member, so the adapter bridge remains scim's ONLY naming route.

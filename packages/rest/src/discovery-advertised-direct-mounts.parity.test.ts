@@ -17,7 +17,7 @@
 // chain together against the live surface, so ANY future change that moves
 // only one side goes red here: move the mount without the advertisement (or
 // vice versa) and the advertised URL stops resolving in the handler table.
-// #6306 was the first such move and it landed with no edit in this file —
+// Commit fec784863 was the first such move and it landed with no edit in this file —
 // which is the property working, not the pin missing it.
 //
 // The non-default-base case is the load-bearing one: it drives the
@@ -25,7 +25,7 @@
 // convention. Note the level this file measures at — it calls
 // `mountAndRecordDirectRoutes` directly, so `versionedBase` is its own
 // parameter and the projection is pinned independently of WHO chooses that
-// base. Since #6306 the production chooser is `RestServer.getApiBasePath()`
+// base. Since commit fec784863 the production chooser is `RestServer.getApiBasePath()`
 // (so `apiPath` deployments mount and advertise under `{apiPath}`); that
 // wiring — plugin config in, mounted+advertised+documented URLs out — is
 // pinned end to end in `direct-mount-base-follows-apipath.test.ts`.
@@ -219,7 +219,7 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     // The mount base is an input here, deliberately decoupled from the
     // RestServer's own base: that is what proves the advertisement is read
     // off the recorded mounts rather than re-derived from config. It is also
-    // what kept advertisement and mount inseparable across #6306's move.
+    // what kept advertisement and mount inseparable across commit fec784863's move.
     const { table } = boot({ versionedBase: '/backend/api/v9' });
     const discovery = await readDiscovery(table);
 

@@ -150,7 +150,7 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'Operator "$exists" in this filter requires a boolean comparand',
   },
-  // ── #20444: the staged `$empty` operator, born in the seam ──────────────────
+  // ── #20444: the `$empty` operator, born in the seam ─────────────────────────
   {
     builder: 'nonBooleanEmptyComparand',
     where: () => ({ [POLICY_COL]: { $empty: SECRET } }),
@@ -480,7 +480,7 @@ describe('[#20039] TursoDriver LOCAL and REMOTE withhold these classes alike', (
     ['undeclared combinator', () => ({ [UNDECLARED_KEY]: 'x' }), UNDECLARED_KEY],
     // [#20041] Written on both compilers as one sentence from the start.
     ['U+0000 in a pattern', () => ({ [POLICY_COL]: { $like: `${SECRET}${String.fromCharCode(0x00)}` } }), SECRET],
-    // [#20444] …and so were the staged `$empty` operator's two refusals.
+    // [#20444] …and so were the `$empty` operator's two refusals.
     ['$empty non-boolean flag', () => ({ [POLICY_COL]: { $empty: SECRET } }), SECRET],
     ['$empty on an undeclared field', () => ({ secret_undeclared_col: { $empty: true } }), 'secret_undeclared_col'],
   ];

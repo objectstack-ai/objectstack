@@ -125,7 +125,7 @@ describe('#5882 GET /meta/:type/:name/layers — the declared layered resource',
     });
 
     it('has no three-segment catch-all left to capture its path', async () => {
-        // [#12195] This used to be an ORDER pin. `/:type/:name` cannot match a
+        // [commit 7986d973f] This used to be an ORDER pin. `/:type/:name` cannot match a
         // 3-segment path, but `/:type/:section/:name` COULD — it would bind
         // section=<name>, name="layers" and answer an ordinary metadata read
         // for an item called "layers". Under a first-match router, registration

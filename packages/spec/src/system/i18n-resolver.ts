@@ -3522,7 +3522,10 @@ export function resolveFlowScreenTitle(
  * draws, read at the `.objectui-sha` pin `f8a9d0fb`, and the ledger's
  * `flows.screens` row is `live` citing it. This function stays unregistered
  * because the server-side route is not the one taken. `flows.<flow>.label`
- * has no reader on either side yet, so its ledger row stays `planned`.
+ * takes the same client side: the authored label it falls back to reaches the
+ * runner on every run result as `AutomationResult.flowLabel`, but nothing reads
+ * the translation key on either side yet (the objectui runner half is still to
+ * land), so its ledger row stays `planned`.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,

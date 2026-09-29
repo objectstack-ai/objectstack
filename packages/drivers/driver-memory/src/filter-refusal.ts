@@ -364,13 +364,12 @@ export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
   '$like',
   '$ilike',
-  // [#20444] The staged emptiness flag, admitted BY HAND for the reason the
-  // `$like` paragraph above gives, and under its ordering rule: both arms land
-  // with this entry — the reference matcher judges the stored value
-  // (`isEmptyFilterValue`, the spec's reading for a face holding no field
-  // declaration) and the live query path the field's DECLARED row
-  // (`expandEmptyOperator`, from the declaration `syncSchema` recorded).
-  '$empty',
+  // [#20444] `$empty` was admitted here BY HAND, with both its arms (the
+  // reference matcher by value through `isEmptyFilterValue`, the live query
+  // path by the field's DECLARED row through `expandEmptyOperator`), while it
+  // was staged out of `FILTER_OPERATORS`. [#20446] It arrives by DERIVATION
+  // now, after `$exists` in the spec's order, so the hand entry is gone — the
+  // `$icontains` direction above, with the arms already in place.
 ]);
 
 /** The vocabulary as it appears in a refusal message, in declaration order. */

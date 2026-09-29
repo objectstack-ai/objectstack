@@ -60,7 +60,7 @@
  * The predicates are deliberately boring: string equality, `$in` / `$nin`,
  * `$ne`, `$gte` / `$lt` on lexicographic strings, `$notContains` over plain
  * substrings, the value-presence pair `$null` / `$exists`, and (since #20444)
- * the staged emptiness flag `$empty` on the same nullable column. Dates, numeric
+ * the emptiness flag `$empty` on the same nullable column. Dates, numeric
  * coercion, `LIKE` escaping and case sensitivity are still out — those
  * legitimately differ between a SQL engine and a JS matcher, and folding them
  * in would make the table unpassable rather than more useful. Keep it that way: a case belongs here only if
@@ -545,15 +545,15 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     note: 'The direction the ruling called the hardest live harm: a key-presence reading returns NOTHING here, silently emptying every "field is not set" scope. Enrolled beside its twin so a single-direction blind spot cannot rebuild.',
   },
 
-  // ── The staged emptiness flag `$empty` (#20444) ───────────────────────────
+  // ── The emptiness flag `$empty` (#20444) ──────────────────────────────────
   //
   // Ruling A on #20399 (record 5865693155): `$empty: boolean`, answered by the
   // field's declared row of the ruled table on the faces that hold field
   // declarations and by value on the ones that do not. `d` stores a value or
   // NULL and never `''` / `[]`, so every row of the table agrees here — see
-  // this file's header for what that does and does not pin. Staged: the
-  // engine's front door refuses the operator until its flip card adds it to
-  // `FILTER_OPERATORS`, so these cases reach each face directly.
+  // this file's header for what that does and does not pin. These cases reach
+  // each face directly; since #20446 `$empty` is in `FILTER_OPERATORS` and the
+  // view operators `is_empty` / `is_not_empty` lower to it.
   {
     name: '$empty true selects exactly the no-value rows',
     filter: { d: { $empty: true } },
