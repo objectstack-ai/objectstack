@@ -9,17 +9,24 @@
 // ---------------------------------------------------------------------------
 // The card's acceptance, in its own words: "each entry resolves to its
 // registered page (a `componentRef` that is registered), and the
-// `ai:approvals` entry is absent when the `ai` service is not." Three facts:
+// `ai:approvals` entry is absent when the `ai` service is not." For the two
+// entries `@objectstack/platform-objects` declares:
 //
-//   1. `nav_audit_log_browser` → `audit:log`, contributed by the REAL
-//      `AuditPlugin` into `group_diagnostics` beside `nav_audit_logs`;
-//   2. `nav_integrations` → `developer:integrations`, in Studio's
-//      `group_developer`;
-//   3. `nav_ai_approvals` → `ai:approvals`, in `group_approvals` — ABSENT from
+//   1. `nav_ai_approvals` → `ai:approvals`, in `group_approvals` — ABSENT from
 //      the served body on a Community Edition composition, PRESENT once an
 //      `ai` service is registered. Both readings sit in one `it()`: a gated-off
 //      entry with no lit counterpart proves the gate held exactly as much as
 //      it proves the fold never reached the entry.
+//   2. `nav_integrations` → `developer:integrations`, in Studio's
+//      `group_developer`.
+//
+// The third entry, `nav_audit_log_browser` → `audit:log`, carries no gate and
+// is contributed by `@objectstack/plugin-audit`; its ref is pinned beside it in
+// `packages/plugins/plugin-audit/src/audit-nav-contribution.test.ts`. It is not
+// folded in here because importing that plugin (or plugin-approvals) from this
+// package's tests resolves to its `dist/`, which `check:test-source-alias`
+// refuses for a new import — and nothing about an ungated entry needs the
+// probe this file exists to wire.
 //
 // "Registered" is judged against the keys MEASURED at the commit
 // objectstack's `.objectui-sha` pins (dd3f7e1be3561d63267d7162f3fc0ac52e72834d):
@@ -44,15 +51,12 @@
 //
 // It lives in `packages/cli/test/` for the reason its sibling states: `cli` is
 // the one workspace package that depends on every piece at once — the shells
-// and contributions (`@objectstack/platform-objects`), the contributing plugins
-// (`@objectstack/plugin-audit`, `@objectstack/plugin-approvals`), the fold
+// and contributions (`@objectstack/platform-objects`), the fold
 // (`@objectstack/objectql`) and the per-request filter (`@objectstack/rest`).
 
 import { describe, expect, it, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from '@objectstack/platform-objects/apps';
-import { AuditPlugin } from '@objectstack/plugin-audit';
-import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RestServer } from '@objectstack/rest';
 import { CORE_SERVICE_PROVIDER } from '@objectstack/spec/system';
 
@@ -61,39 +65,19 @@ type AnyRec = Record<string, any>;
 /** The registry keys the pinned console registers for the three pages. */
 const MEASURED_CONSOLE_KEYS = ['audit:log', 'ai:approvals', 'developer:integrations'];
 
-/** A plugin's `init()` against a manifest sink — the nav contributions it registers. */
-async function contributionsOf(plugin: { init(ctx: any): Promise<void> | void }): Promise<AnyRec[]> {
-    const manifests: AnyRec[] = [];
-    const ctx: AnyRec = {
-        logger: { info() {}, warn() {}, error() {}, debug() {}, child() { return ctx.logger; } },
-        getService: (name: string) =>
-            name === 'manifest' ? { register: (m: AnyRec) => manifests.push(m) } : undefined,
-        registerService() {},
-        hook() {},
-    };
-    await plugin.init(ctx);
-    return manifests.flatMap((m) => (m.navigationContributions ?? []) as AnyRec[]);
-}
-
 /**
- * The real composition: the Setup and Studio shells, this package's own Setup
- * contributions, and the two plugins that contribute into the slots under test.
- * `structuredClone` because `registerItem` writes the `_lock` envelope onto
- * what it is handed (ADR-0010 §3.7).
+ * The real composition: the Setup and Studio shells and the Setup
+ * contributions `@objectstack/platform-objects` ships. `structuredClone`
+ * because `registerItem` writes the `_lock` envelope onto what it is handed
+ * (ADR-0010 §3.7).
  */
-async function composedRegistry(): Promise<SchemaRegistry> {
+function composedRegistry(): SchemaRegistry {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as AnyRec).logLevel = 'silent';
     registry.registerApp(structuredClone(SETUP_APP), '@objectstack/platform-objects');
     registry.registerApp(structuredClone(STUDIO_APP), '@objectstack/platform-objects');
     for (const c of SETUP_NAV_CONTRIBUTIONS) {
         registry.registerAppNavContribution(c as any, '@objectstack/platform-objects');
-    }
-    for (const c of await contributionsOf(new AuditPlugin())) {
-        registry.registerAppNavContribution(c as any, '@objectstack/plugin-audit');
-    }
-    for (const c of await contributionsOf(new ApprovalsServicePlugin({ disableService: true }))) {
-        registry.registerAppNavContribution(c as any, '@objectstack/plugin-approvals');
     }
     return registry;
 }
@@ -118,8 +102,8 @@ function makeRes() {
  * capability probe answering from `serviceExists` and recording every name
  * it was asked about.
  */
-async function serve(serviceExists: (name: string) => boolean) {
-    const registry = await composedRegistry();
+function serve(serviceExists: (name: string) => boolean) {
+    const registry = composedRegistry();
     const probed: string[] = [];
     const protocol: AnyRec = {
         getDiscovery: vi.fn().mockResolvedValue({
@@ -178,53 +162,35 @@ describe('#20142 — the console pages\' nav entries, served from the composed a
         expect(CORE_SERVICE_PROVIDER.ai).toBeNull();
 
         // ── Community Edition: no `ai` service ─────────────────────────────
-        const ce = await serve(communityEdition);
+        const ce = serve(communityEdition);
         const ceSetup = await getApp(ce.rest, 'setup');
         expect(ceSetup.statusCode).toBe(200);
         // The gate RAN: the probe was asked about `ai`. Without this, an
         // unwired probe (fail-open) and a held gate read the same way below.
         expect(ce.probed).toContain('ai');
-        // Absent from the served tree AND from the wire bytes.
-        expect(ids(group(ceSetup.body?.item, 'group_approvals'))).toEqual([
-            'nav_approvals_inbox',
-            'nav_approval_requests',
-            'nav_approval_actions',
-            'nav_approval_delegations',
-        ]);
+        // Absent from the served tree AND from the wire bytes. `nav_ai_approvals`
+        // is the only entry this composition folds into `group_approvals`
+        // (plugin-approvals is not part of it), so stripping it leaves the group
+        // with nothing to serve.
+        expect(ids(group(ceSetup.body?.item, 'group_approvals'))).toEqual([]);
+        expect(JSON.stringify(ceSetup.body)).not.toContain('nav_ai_approvals');
         expect(JSON.stringify(ceSetup.body)).not.toContain('ai:approvals');
+        // The rest of the served Setup tree is untouched by the gate: a
+        // neighbouring component entry from the same contributor still arrives.
+        expect(ids(group(ceSetup.body?.item, 'group_apps'))).toContain('nav_packaged_automation');
 
         // ── Cloud / Enterprise: `ai` registered — the lit counterpart ──────
-        const cloud = await serve(() => true);
+        const cloud = serve(() => true);
         const cloudSetup = await getApp(cloud.rest, 'setup');
         expect(cloudSetup.statusCode).toBe(200);
+        expect(cloud.probed).toContain('ai');
         const approvals = group(cloudSetup.body?.item, 'group_approvals');
-        // Last in the slot: plugin-approvals' inbox stays the first entry.
-        expect(ids(approvals)).toEqual([
-            'nav_approvals_inbox',
-            'nav_approval_requests',
-            'nav_approval_actions',
-            'nav_approval_delegations',
-            'nav_ai_approvals',
-        ]);
-        expect(approvals?.at(-1)).toMatchObject({ type: 'component', componentRef: 'ai:approvals' });
-    });
-
-    it('audit:log is served beside the Audit Logs object view, with no gate', async () => {
-        const { rest } = await serve(communityEdition);
-        const setup = await getApp(rest, 'setup');
-        expect(setup.statusCode).toBe(200);
-        const diagnostics = group(setup.body?.item, 'group_diagnostics');
-        const at = ids(diagnostics).indexOf('nav_audit_logs');
-        expect(at, 'nav_audit_logs is served in group_diagnostics').toBeGreaterThanOrEqual(0);
-        expect(diagnostics?.[at + 1]).toMatchObject({
-            id: 'nav_audit_log_browser',
-            type: 'component',
-            componentRef: 'audit:log',
-        });
+        expect(ids(approvals)).toEqual(['nav_ai_approvals']);
+        expect(approvals?.[0]).toMatchObject({ type: 'component', componentRef: 'ai:approvals' });
     });
 
     it('developer:integrations is served last in Studio\'s Developer group', async () => {
-        const { rest } = await serve(communityEdition);
+        const { rest } = serve(communityEdition);
         const studio = await getApp(rest, 'studio');
         expect(studio.statusCode).toBe(200);
         const developer = group(studio.body?.item, 'group_developer');
@@ -234,15 +200,16 @@ describe('#20142 — the console pages\' nav entries, served from the composed a
         expect(developer?.at(-1)).toMatchObject({ type: 'component', componentRef: 'developer:integrations' });
     });
 
-    it('every served ref of the three entries is a key the pinned console registers', async () => {
-        const { rest } = await serve(() => true);
+    it('every served ref of the two entries is a key the pinned console registers', async () => {
+        const { rest } = serve(() => true);
         const served = [
             ...((await getApp(rest, 'setup')).body?.item?.navigation ?? []),
             ...((await getApp(rest, 'studio')).body?.item?.navigation ?? []),
         ].flatMap((g: AnyRec) => (g?.children ?? []) as AnyRec[]);
         const refs = served
-            .filter((i) => ['nav_audit_log_browser', 'nav_ai_approvals', 'nav_integrations'].includes(i?.id))
+            .filter((i) => ['nav_ai_approvals', 'nav_integrations'].includes(i?.id))
             .map((i) => i.componentRef);
-        expect(refs.sort()).toEqual([...MEASURED_CONSOLE_KEYS].sort());
+        expect(refs).toHaveLength(2);
+        for (const ref of refs) expect(MEASURED_CONSOLE_KEYS).toContain(ref);
     });
 });
