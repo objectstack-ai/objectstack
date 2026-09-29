@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T01:24:10Z",
-  "updated_at": "2026-09-29T01:24:10Z",
+  "updated_at": "2026-09-29T04:33:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20542",
   "body": "Filed by the director seat (objectstack#12708, `session_01AsCNgFBs8HCjwhyHQsFbx3`) as the predecessor of #20312, per ruling `5881821895` on that card (batch #241 item 1, letter A, maintainer 「同意」): `page.requires` is enforced per ADR-0080 §5 in three stages, and this card is stage ①. ⛔ Not a claim.\n\n## What\n\nNo host hands the metadata save door a component manifest today, so the door cannot judge an html page's source against the deployment's components:\n- `evaluateRuntimeAuthoringGate` accepts an optional `sduiManifest` (`packages/metadata-protocol/src/runtime-authoring-gate.ts:625`, passed through at `:697`); its one call site, `packages/metadata-protocol/src/protocol.ts:5148`, does not pass it.\n- The CLI resolves a manifest for `os validate` / `os build` / `os lint` (`packages/cli/src/utils/sdui-manifest.ts`, `resolveSduiManifest`): the project's `sdui.manifest.json`, else `@objectstack/console/dist/sdui.manifest.json`. `@objectstack/console`'s `package.json` `exports` map exposes only `./package.json`, so that fallback specifier is expected to fail Node's exports check and resolve `absent` — NOT MEASURED; measure it first.\n- `os serve` does not resolve a manifest at all.\n\n## Do\n\n1. Measure the console fallback: does `createRequire(...).resolve('@objectstack/console/dist/sdui.manifest.json')` succeed under the package's `exports`? If not, add the subpath to `@objectstack/console`'s `exports` (one line) so the CLI's existing fallback and this card's reader both work.\n2. `os serve` (and the standalone host path it shares) resolves the manifest through `resolveSduiManifest` and passes it into `evaluateRuntimeAuthoringGate` as `sduiManifest`.\n3. A host that resolves no manifest prints one boot line — 「page source and `requires` are not validated at save: no SDUI manifest」 — instead of degrading silently (the #20113 posture on the CLI side).\n4. Pins: the save door receives the manifest when the host has one; the boot line appears when it has none; the console fallback resolves.\n\nOut of scope here, stages ② and ③ on #20312: compiling the page source at save, stamping `requires`, the load-time report.\n\n`Clause-②: no` (nothing narrows until stage ②). Lane: `domain:cli` (the host and the console package); the save-door pass-through is a one-line change in metadata-protocol."

@@ -2,8 +2,8 @@
   "number": 20534,
   "kind": "issue",
   "title": "/import: parseDateCell emits a `date` cell year below 1000 unpadded (`0500-01-01` → `500-01-01`), so after PR #20524 a valid ISO date cell is refused per row as `invalid_date`, and before it a non-day was stored",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:cli",
-    "pm:queue",
-    "priority:p3"
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T00:20:21Z",
-  "updated_at": "2026-09-29T02:08:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T07:46:26Z",
+  "closed_at": "2026-09-29T07:44:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20534",
   "body": "Filing gate: **① a product defect with a named landing site and a `reach:`**. Finding class **(a)**. `reach:` is `POST /api/v1/data/:object/import` with a `date` cell naming a year from 0001 to 0999, such as `0500-01-01`. **Derived at source**, not driven: the two code facts below are read on `origin/main` (after `fb386074f`) and at PR #20524's head `4c5740d2d`. The at-tier contract review of PR #20524 found it (record 5881202199, ① item 9 and ③ item 7) and recommended filing it.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n`packages/rest/src/import-coerce.ts`, `parseDateCell`, builds a `date` cell's value with the year as a bare number on all three `date` branches:\n- the fast path: `${y}-${pad2(mo)}-${pad2(d)}` with `y = Number(ymd[1])`;\n- the wall-clock path: `${wall.year}-…`;\n- the `Date` / `new Date(s)` paths: `${…getUTCFullYear()}-…`.\n\nA cell `0500-01-01` therefore becomes `500-01-01`.\n\n- **Before PR #20524** (#20481), the `date` write arm admitted any `Date.parse`-readable string, so `500-01-01` was stored as written: a non-day that sorts and compares wrongly as text (the #20240 class).\n- **After PR #20524,** the `date` write arm admits only a leading `YYYY-MM-DD` (core's `isUninterpretableTemporalComparand`). `500-01-01` is refused per row with `VALIDATION_FAILED` / `invalid_date`. The same value written directly as `0500-01-01` through `POST /api/v1/data/:object` is accepted (the year range is 0001..9999 since #20264), so the import refuses a date the write door takes.\n\nYears 1000..9999 are unaffected, because their year already has four digits. The `datetime` branches return `toISOString()`, which pads, so they are unaffected too.\n\n## Why\n\n`parseDateCell` predates the 0001..9999 range (#20264) and the four-digit day rule, and never pads the year. `pad2` exists for month and day. The year needs a four-digit pad, which the `date` storage rule already uses (`temporalStorageForm`, #20240).\n\n## Suggested shape (⛔ not a ruling)\n\n- Pad the year to four digits on every `date` branch of `parseDateCell`.\n- Pin `0500-01-01` and `0001-01-01` through `/import` on memory and SQLite, with a year-2026 control.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"import parseDateCell date cell year below 1000 emitted unpadded 500-01-01\" gives 3 hits.\n- #20481 is the write door.\n- #20264 (closed) is the year range.\n- #20240 (closed) is core `temporalStorageForm`'s unpadded year, the same class in the storage rule, not in the import reader.\n\nNone is this.\n\nDedupe words: `parseDateCell unpadded year` · `import date cell year below 1000` · `0500-01-01 import 500-01-01`"

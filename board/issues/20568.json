@@ -1,0 +1,37 @@
+{
+  "number": 20568,
+  "kind": "pull_request",
+  "title": "fix(spec): os migrate meta guidance for fourteen more migration-entry families states each lesson in words, not tracker numbers (stage 7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T03:28:40Z",
+  "updated_at": "2026-09-29T04:30:46Z",
+  "closed_at": "2026-09-29T04:30:45Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-29T04:30:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20568",
+  "body": "Part of #20233\nStage 7: the actor-, hot-, external-, query-, delete-, etl-, storage-, apimethod-, dashboard-, notification-, record-, runtime-, rls- and scim- families.\n\nClause-②: no\n\nText only. In these families' ADR-0087 semantic entries, the `reason` / `replacement` / `acceptanceCriteria` prose that `os migrate meta` prints now states in words what each cited ruling, measurement or fix decided, instead of a tracker number (form D, ruling C+D `5749154545`). ADR ids stay. No entry `id`, `from` / `to`, conversion or matcher changes.\n\n- The stage-6 carry-over: `18.rest-api-endpoint-handler-status-retired` names the API skill.\n- `packages/cli/test/migrate-meta-engine-guidance.test.ts` adds the fourteen families to `COVERED_PREFIXES`; its `REWRITTEN` floor rises to 174.\n- `registry.ts`, `spec-changes.json` and `docs/protocol-upgrade-guide.md` are regenerated.\n- `patch` changeset.\n\nThe census, the text-only proof, the ablation and the test runs are in the dev report on #20233 (`5883241063`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

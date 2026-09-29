@@ -1,0 +1,33 @@
+{
+  "number": 20607,
+  "kind": "pull_request",
+  "title": "fix(spec): os migrate meta guidance for twenty-four more migration-entry families states each lesson in words, not tracker numbers (stage 8)",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T06:57:43Z",
+  "updated_at": "2026-09-29T08:16:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20607",
+  "body": "Part of #20233\nStage 8: the `stack-`, `evaluated-`, `aggregation-`, `authoring-`, `automation-`, `cache-`, `tenant-`, `client-`, `spec-`, `cli-`, `identity-`, `import-`, `tool-`, `advanced-`, `cloud-`, `startup-`, `sys-`, `declarative-`, `sort-`, `address-`, `packages-`, `platform-`, `session-` and `strategy-` families.\n\nClause-②: no\n\n`os migrate meta` prints each ADR-0087 semantic entry's `surface`, `replacement`, `reason` and `acceptanceCriteria` to the author. In these families, each sentence that cited a tracker number now says what the cited ruling, measurement or fix decided (form D). ADR ids stay, and so do the contributor-guide rule references, which are not tracker ids.\n\n- **Text only:** the dev's base-vs-head AST comparison over the changed entry files and `registry.ts` found no change outside prose fields, except `surface` on the two entries whose `surface` carried an id.\n- **Pin:** `packages/cli/test/migrate-meta-engine-guidance.test.ts` covers the 24 new prefixes; its ablation went red.\n- **Generated:** `registry.ts`, `spec-changes.json` and `docs/protocol-upgrade-guide.md`, by their generators. `patch` changeset.\n\nThe measurements are in the dev's report on #20233 (`5886017515`).\n\n## Acceptance notes\n\n- `cli-command-contribution-retired` said the `manifest.contributes.commands` tombstone was protocol 17. It is registered under 18, and the rewritten sentence says so.\n- Comment and docblock lines of these entries still cite tracker ids. They are form C's, under #20234, and are untouched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

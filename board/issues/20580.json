@@ -1,0 +1,38 @@
+{
+  "number": 20580,
+  "kind": "issue",
+  "title": "plugin-security: `security.explain` shows a member removed from an organization that organization's grants, which enforcement refuses since PR #20540 (explain ≠ enforce, split from #20431)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T04:53:02Z",
+  "updated_at": "2026-09-29T08:32:53Z",
+  "closed_at": "2026-09-29T08:32:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20580",
+  "body": "Filing gate: **① a product defect with a named landing site**. Class (a): the explainer answers differently from enforcement. `reach:` was measured by the #20515 dev at `SecurityPlugin.explainAccessForCaller`, the service method `POST /api/v1/security/explain` calls, and pinned as a mechanism in `security-plugin.test.ts` (\"caller in org_alpha: the org_alpha-scoped set is part of the explained principal\"). It was not driven at HTTP.\n\nSplit by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) when it answered #20431's retriage. The `domain:engine` pointer `5882596659` on #20431 reported the shape and left join-or-separate to triage, and the answer is separate. The evidence below is that pointer's.\n\n## What happens\n\n- An administrator in `org_alpha` explains a member who was removed from `org_alpha` and whose session still names it.\n- `explainAccessForCaller` resolves the explained user in the caller's organization, through `buildContextForUser`. So it shows that member's `manage_metadata` set scoped to `org_alpha`.\n- Enforcement for that member drops the unbacked organization claim (ruling B on #15409), resolves with no tenant, and, since PR #20540 (#20515), refuses the grant.\n- So the explainer says the member holds a capability that enforcement refuses.\n\nIt is pre-existing in shape, and PR #20540 narrowed it without introducing it (at-tier record `5881827545` ①5 on PR #20540). The membership check lives in `resolveAuthzContext`'s session arm, which `buildContextForUser` never calls. Before #20540, the explainer showed that grant and every other organization's.\n\n## Direction (triage's grade, on the first comment)\n\n- The explainer resolves the explained user through the same membership check that enforcement applies, so explain answers what enforcement does. ⛔ No second membership rule in the explainer.\n- Pins: a removed member explained by an `org_alpha` administrator shows no `org_alpha`-scoped grant. A current member's explanation is unchanged.\n- Serial after #20555, which is in flight in the same `security-plugin.ts` surface.\n\nRelated: #20431 (the record-attribution shape of the same family, at `explain-engine.ts`), #20515, and #15409.\n\nDedupe words: `explain removed member left organization grants` · `explain other user caller organization membership` · `explain enforce claim drop`"
+}

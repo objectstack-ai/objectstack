@@ -1,0 +1,33 @@
+{
+  "number": 20563,
+  "kind": "pull_request",
+  "title": "docs(cli): document unbuildable_index drift op and complete the never-applied set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T03:01:01Z",
+  "updated_at": "2026-09-29T03:32:46Z",
+  "closed_at": "2026-09-29T03:32:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T03:32:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20563",
+  "body": "Fixes #20538\nClause-②: no\n\n`content/docs/deployment/cli.mdx` now documents the report-only `unbuildable_index` drift op (added by #20519) and names the complete never-applied set.\n\n## Before / after\n\n`needs_confirm` row (category table)\n\n- before: `os migrate apply` — except `manual_widen_varchar_to_text`, which nothing applies\n- after: `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies\n\nNew Index-drift row (after `drop_index`)\n\n- after: `unbuildable_index` — a declared index whose key column can never exist (name is not a field of the object, or a virtual `formula` field). Report-only, category `needs_confirm`; severity `error` for a UNIQUE index, `warning` for a plain one. `os migrate apply` never performs it and reports it `skipped`. A column merely not added yet is pending `add_columns` work and is not reported.\n\n`os migrate multi-value-columns` prose\n\n- before: \"it isn't the only one: `manual_widen_varchar_to_text` (...) is also never applied, but has no `os migrate` subcommand of its own. This section covers the op that does.\"\n- after: names `manual_widen_varchar_to_text` and `unbuildable_index` as also never applied, with no subcommand of their own; the section covers `manual_column_type_change`.\n\nCommand table row for `os migrate multi-value-columns` (same never-applied set)\n\n- before: \"one of two drift ops `apply` never reconciles\"\n- after: \"one of three drift ops\"\n\n## Code anchors measured on origin/main 615416548\n\n- `packages/drivers/driver-sql/src/schema-drift.ts:294` `unbuildable_index` member of `DriftOp` (fields `table`, `column?`, `indexName`, `unique`, `missingColumns`); `:373` listed in `INDEX_DRIFT_OPS`; `:378` in `IndexDriftOp`.\n- `schema-drift.ts:1970-1975` doc: classified `needs_confirm`, `os migrate apply` reports it skipped; UNIQUE is `error`, plain is `warning`.\n- `schema-drift.ts:1976-2020` `diffUnbuildableIndexes`: `severity: idx.unique ? 'error' : 'warning'` (`:2001`), `category: 'needs_confirm'` (`:2002`); qualifies only when a key column is absent AND never materializes (misspelt name or virtual `formula`, `:1958-1963`); a not-yet-added column is excluded (`:1965-1968`).\n- `packages/drivers/driver-sql/src/sql-driver.ts:13884` `applyIndexDriftOp`: `if (op.type === 'unbuildable_index') return false;`, so the entry is reported `skipped` on every dialect (call site `:13865`, dispatch `:14022`).\n- `manual_column_type_change` never applied: `schema-drift.ts:166-180` (no reconciler arm, \"skipped, never applied ... the intended behaviour\"), emitted at `:1137-1138` as severity `error`, category `needs_confirm`; `sql-driver.ts:14131` (no reconciler arm on any dialect, by decision).\n- `manual_widen_varchar_to_text`: `schema-drift.ts:212`, emitted `:1341-1342` as `error` / `needs_confirm`.\n\nThe code agrees with the card on every point, with one correction found in review: `manual_column_type_change` is never applied by `os migrate apply` but IS applied by `os migrate multi-value-columns --apply` (`packages/cli/src/commands/migrate/multi-value-columns.ts:105-107` selects only that op; `:315-318`, `:338-339` the `--apply` path), so the row separates it from the two ops nothing applies. Follow-up commit b982ca1c1b. Nothing was copied from the card without a read.\n\n## Acceptance notes\n\n- CLI source and `os migrate apply`'s skip-summary wording are untouched (other lane).\n- Gates (re-run on b982ca1c1b, 36 of 41 derived, all exit 0 except the one below): docs-relevant families derived by `dispatch-gates.mjs --commands` run in the foreground; all 0 except `check:skill-examples`, which exits 3 (PREREQUISITE NOT MET: needs a `@objectstack/client-react` build; not a finding, NOT MEASURED). Neither `check:docs` nor `check:docs-transcript-drift` nor `check:nul-bytes` flags the change.\n- Docs-only; no changeset (`content/docs/**` is not shipped in a package `files[]`).\n- Commit trailers are the model-free pair.\n\n## 维护者速读(草稿)\n\nNot applicable: no managed path (`.claude/**`) is touched.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 20588,
+  "kind": "issue",
+  "title": "[finding] `scripts/gen-sdui-manifest-node.mjs`, the sole producer of `sdui.manifest.json`, exits 1 on macOS with the default `TMPDIR`: its resolve hook compares against an unresolved temp path",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T05:27:45Z",
+  "updated_at": "2026-09-29T06:10:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20588",
+  "body": "Filing gate: **① a defect with a named landing site**: `scripts/gen-sdui-manifest-node.mjs`, the runner directory at about :180 (`mkdtempSync(join(tmpdir(), 'sdui-manifest-runner-'))`) and the resolve hook that compares `parentURL` against it. Finding class **(a)**. `reach:` is a named real producer: this script is the sole producer of the tracked `sdui.manifest.json` (`pnpm sdui:manifest`). The #20112 dev measured it on a maintainer's macOS host, while regenerating the manifest for PR #20582.\n\nFiled by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from the #20112 round, as that PR's at-tier review recommended. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured)\n\nWith the default macOS `TMPDIR` (`/var/folders/…`), the generator exits 1 with 16 「Cannot find package @object-ui/…」 failures and 「the registry enumeration failed (exit 1)」. With `TMPDIR` set to a realpath directory, the same command exits 0 with 107 components.\n\n## Why (`origin/main` `f11b5f20a`, read at source)\n\nThe runner URL is built from `os.tmpdir()`, which is `file:///var/folders/…`. Node reports module URLs by their realpath, `file:///private/var/folders/…`, because `/var` is a symlink to `/private/var` on macOS. So the hook's `parentURL === RUNNER` test never matches, and no bare specifier is re-anchored to the modules root.\n\n## Suggested shape (⛔ not a ruling)\n\n`realpathSync` the `mkdtemp` directory before the runner URL is built. This is the same class as the macOS `TMPDIR` realpath notes on PR #20459's round (`packages/cli` suites), which were test-only. This one blocks regenerating a tracked artefact.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card:\n- 「gen-sdui-manifest-node TMPDIR」: 1 hit, #20112, the parent round.\n- 「sdui manifest generator realpath macOS」: 1 hit, #20112.\n- 「Cannot find package @object-ui manifest runner」: 102 hits, none on this generator.\n\nQuery terms for later deduplication: `gen-sdui-manifest-node TMPDIR realpath macOS`, `sdui-manifest-runner Cannot find package @object-ui`, `private/var/folders resolve hook parentURL`."
+}

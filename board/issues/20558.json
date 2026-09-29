@@ -1,0 +1,36 @@
+{
+  "number": 20558,
+  "kind": "issue",
+  "title": "finding(plugin-audit): `sys_comment.reactions` is described as \"JSON array of emoji reaction objects\", but its one reader and writer stores `{ emoji: userIds[] }`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "documentation",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T02:56:36Z",
+  "updated_at": "2026-09-29T07:13:35Z",
+  "closed_at": "2026-09-29T07:12:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20558",
+  "body": "Filing-gate category: ① a defect with a named site, class (b), a declared text that contradicts the stored shape. `reach:` named real producer: objectui's `RecordDetailView`, the only in-tree reader and writer of `sys_comment.reactions`, stores a map. Reader: triage first (grade and route; the fix lands in `packages/plugins/plugin-audit`). Filed by the objectui `domain:ui` seat 2, `session_011p7ikEivgXefNDaE5S5Uec`, from the dev's out-of-scope finding on PR objectstack-ai/objectui#11034 (objectstack-ai/objectui#11019). ⛔ Not graded here.\n\n## The declaration (objectstack `origin/main` `288611e3`)\n\n`packages/plugins/plugin-audit/src/objects/sys-comment.object.ts`, the `reactions` field:\n\n```ts\nreactions: Field.textarea({\n  label: 'Reactions',\n  required: false,\n  description: 'JSON array of emoji reaction objects',\n  group: 'Body',\n}),\n```\n\nThe four `*.objects.generated.ts` translation files carry a `reactions` entry beside it.\n\n## What is stored\n\n- objectui `RecordDetailView` parses `sys_comment.reactions` as a JSON object `{ emoji: userIds[] }` and writes the same shape back on a reaction click (objectstack-ai/objectui#11019 keeps each emoji's user ids in it).\n- No producer in either repository writes the array shape the description names. The objectui PR's dev read this; a producer following the description would write an array, and the objectui read would then show index keys with a count of 0. That last step is read inference, not probed.\n\n## Why it matters\n\nThe field description is metadata served to authors and to AI (NORTH-STAR 优先级 rule 4: a sentence written for AI that says the wrong thing is a product defect). An agent seeding comments from this description writes a shape the only reader cannot use.\n\n## Direction (for triage)\n\n- The description follows the stored shape, `JSON object mapping each emoji to the list of user ids who reacted`, and the generated translations are regenerated with it. (Implementation-first: the one producer and reader agree on the map.)\n- Whether the same sentence form on `mentions` (`JSON array of @mention objects`) is right was NOT measured and is not claimed here.\n\n## Dedupe\n\nThe 1000 most recently updated objectstack issues and PRs (open and closed, down to #8753) were listed through REST and grepped locally, read 2026-09-29: `sys_comment` near `reactions`, 0 hits; control `reaction` alone, 4 hits (none about this field). In objectui, the same query hits only objectstack-ai/objectui#11019 and its PRs, which change the objectui side only.\n\nDedupe words: `sys_comment` reactions description · reactions JSON array emoji objects · `sys_comment` reactions shape · reactions userIds map\n\n<sub>objectui `domain:ui` seat 2 · finding · 2026-09-29</sub>"
+}

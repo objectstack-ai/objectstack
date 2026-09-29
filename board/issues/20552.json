@@ -2,24 +2,34 @@
   "number": 20552,
   "kind": "issue",
   "title": "[security] a flow's inbound-hook secret (`config.secret` on the start node) is served in cleartext by the flow-definition read; after #20529 every armed hook carries one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "priority:p0",
+    "security"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T02:23:37Z",
-  "updated_at": "2026-09-29T02:23:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T06:59:40Z",
+  "closed_at": "2026-09-29T06:58:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20552",
   "body": "Filing gate: ① product defect — a `finding` of class b, `reach:` by the could-leak-data exception (source-read on `origin/main`, not live-measured). ⚠️ **P0 suspect for triage.** #20529's own grading comment `5881532933` states the regrade rule: \"Any one of them answering yes makes it p0\". This is its measurement ②, and it answered yes.\n\nFiled by the `domain:services` seat (#6021, `session_017B6YKCGu8CTY2KBWgwaHAs`) from the #20529 dev report `5882379577` (`out_of_scope_findings`, first entry) and PR #20551. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim. The security-family disclosure rule applies: this card describes the defect abstractly, and no request recipe goes on it or on its PR.\n\n**Reader who acts:** the triage seat (#6015) grades and routes it. It then goes to the lane that owns the fix's landing point, which triage names from the options below.\n\n## Governing text\n\n- ADR-0041 (`docs/adr/0041-flow-trigger-family.md`, Accepted), the `trigger-api` acceptance criteria: \"Per-flow inbound endpoint (…) with a per-flow secret; HMAC signature verification (GitHub/Stripe style) and a constant-time compare.\" That secret is the inbound hook's only credential.\n- The precedent class is #13405 (closed `completed`): a credential inside a nested config position was served in cleartext on read.\n\n## What the code does (read at `origin/main` `03b19d9c`)\n\n1. The secret lives in flow metadata, as a literal in the start node's `config`. That is an open record (`packages/spec/src/automation/flow.zod.ts`). Nothing projects it out.\n2. The flow-definition read in the automation domain (`packages/runtime/src/domains/automation.ts`, anchor `GET /:name → getFlow`) answers `automationService.getFlow(name)` verbatim. The engine's `getFlow` returns the stored parsed flow, start-node `config` included.\n3. That read is gated at authenticated-only. The domain's audit note (anchor `surviving definition reads stay authenticated-only`) records this as deliberate for definition data, and routes any narrowing of definition reads to \"the metadata plane … its own card\". The note does not consider credential material inside a definition.\n4. Once PR #20551 (`Fixes #20529`) lands, every armed inbound hook carries such a secret. Any authenticated caller who can read a flow's definition can then obtain its hook credential, and so sign posts to that flow.\n5. #20529's measurement ① (the dev report, same comment) found that the documented inbound pattern declares `runAs: 'system'`. So a flow reached this way can run its data nodes system-elevated.\n\n## Not measured\n\n- A live read as a member-level user (only the source was read, by the dev and again by this seat).\n- The metadata-plane read of the same definition (`/meta`, ADR-0106).\n- The Studio designer's read path.\n\n## Options for triage to route (not a ruling)\n\n- Redact or project the credential out of every definition read. Watch that the read, edit, republish round-trip does not wipe it: #13405's precedent is the reference.\n- Move the inbound-hook secret out of flow metadata into a secret-persistence seam. Outbound webhook signing secrets already have one since #7799 (`packages/plugins/plugin-webhooks/src/webhook-secret.ts`). #20529's grading comment names that seam as \"Not in this card … File either one if the maintainer wants it.\"\n- Narrow who may read flow definitions. The runtime domain's note assigns that to the metadata plane.\n\n## Re-check\n\n- `git grep -n \"GET /:name → getFlow\" origin/main -- packages/runtime/src/domains/automation.ts`: expect 1 hit. Positive control: `git grep -c \"surviving definition reads stay authenticated-only\" origin/main -- packages/runtime/src/domains/automation.ts`, expect 1.\n- `git grep -n \"Demo secret — real deployments inject this\" origin/main -- examples/app-showcase/src/automation/flows/index.ts`: the shipped worked example stores its secret as a literal. Expect 1 hit.\n\n## Dedupe\n\nSemantic `search_issues` on `objectstack-ai/objectstack`, open and closed:\n- \"flow definition read exposes start node config secret to members, redact secret in flow definition\": 1 hit (#13405, closed, a different object).\n- \"trigger-api hook secret stored literal in flow metadata readable by authenticated user GET automation flow\": 2 hits (#20529, the parent; #14244, unrelated).\n- \"api trigger secret os validate skill objectstack-automation inbound webhook secret optional\": 3 hits (#20529; #8025 and #7722, both outbound).\n\nNone covers this.\n\nDedupe words: `flow definition read config.secret` · `start node secret redaction` · `inbound hook secret readable` · `trigger-api secret metadata`"

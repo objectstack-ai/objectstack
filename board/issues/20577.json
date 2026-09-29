@@ -1,0 +1,38 @@
+{
+  "number": 20577,
+  "kind": "pull_request",
+  "title": "fix(spec,objectql): name the aggregated column at `having`, PostgreSQL only at `where`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T04:27:53Z",
+  "updated_at": "2026-09-29T05:18:36Z",
+  "closed_at": "2026-09-29T05:18:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T05:18:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20577",
+  "body": "Fixes #20510\n\nClause-②: no\n\n## What changed\n\nTwo false phrases in the number-comparand refusal, at two positions:\n\n1. **`having` said \"a declared number field\".** The column at `having`\n   (`total`, an aggregation alias or a groupBy projection) has no declared\n   `FieldType` of its own — the door hands the verdict a synthesized\n   `{ type: 'number' }` for whatever the engine classes numeric\n   (`aggregatedRowColumnClasses`). It now says \"a numeric aggregated column\".\n2. **The `not-a-number` / `boolean` / `date` clauses named PostgreSQL's server\n   error at every position.** Only `where` (both spellings) ever reaches a\n   live driver bind; `having` and the per-aggregation `filter` are evaluated\n   by the engine itself, in JS, before any row is read, on every driver\n   alike — no driver ever sees the comparand there. The clause now appears\n   only where the driver actually binds it.\n\n**Measured, and the card's own claim corrected:** the per-aggregation\n`filter`'s column is a real declared field, not an aggregated one — that\nposition narrows the object's RAW source rows *before* aggregation runs,\nagainst the object's declared field map (confirmed by both the door's own\nheader and the existing pin at `aggregations[1].filter.f_number.$gt`, which\nalready reads `'f_number' compares a declared number field`). So only its\nPostgreSQL clause moves; its \"declared … field\" wording is unchanged.\n\n### Before / after\n\n| position | column | before | after |\n|:--|:--|:--|:--|\n| `where` | declared field | `… compares a declared number field against \"abc\" …, which is not a number: it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).` | unchanged, byte for byte |\n| per-aggregation `filter` | declared field | `… compares a declared number field against \"abc\" …: it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).` | `… compares a declared number field against \"abc\" …: it has no numeric reading.` |\n| `having` | aggregated column | `… compares a declared number field against \"abc\" at having.total.$gt, which is not a number: it has no numeric reading, and backends answer it differently (PostgreSQL with a server error).` | `… compares a numeric aggregated column against \"abc\" at having.total.$gt, which is not a number: it has no numeric reading.` |\n\nThe accept set is unchanged — no refusal added or removed, words only.\n\n### Mechanism\n\n`NumberComparandRefusalSite` (`@objectstack/spec`) gains two optional fields,\nboth defaulting to the pre-existing `where` behaviour so an existing site (or\none built before this change) renders identically:\n\n- `aggregated?: boolean` — the column is an aggregated-row column, not a\n  declared field. Only `having` sets it.\n- `boundByDriver?: boolean` — this position reaches a live driver bind. Only\n  `where` sets it `true`; default is `true` for backward compatibility.\n\nThe engine door (`@objectstack/objectql`) passes both at its three call\nsites — it already knew which position it was building a refusal for; no\nsecond rule, and no driver-level change.\n\n## Acceptance notes\n\n- Out of scope, noted only: a `{ $field }`-adjacent structural filter shape\n  (`where { amount: { \"a\": 1 } }`) was already flagged by PR #20545's at-tier\n  review as a class (a) finding for the filing seat to pick up; this PR does\n  not touch it.\n- `packages/rest`'s `data-number-comparand-door.test.ts` asserts no phrase at\n  `having` / the per-aggregation `filter` (only status/path), and its `where`\n  phrase pin is unaffected — left untouched, per the claimed file surface.\n\n## Tests (all green, fresh builds)\n\n- `@objectstack/spec` build, then `vitest run filter-number-comparand-declared-type.test.ts`\n  — **47/47 passed**, including new cases for `aggregated` / `boundByDriver`\n  and a byte-for-byte pin that the pre-existing `where` message is unchanged;\n  `pnpm typecheck` — clean (no new errors).\n- `@objectstack/objectql` build, then `vitest run engine-number-comparand-declared-type-door.test.ts\n  engine-aggregate-having-temporal-door.test.ts` — **85/85 passed**; `pnpm typecheck` — clean.\n- `@objectstack/rest` build, then `vitest run data-number-comparand-door.test.ts`\n  — **4 passed, 8 skipped** (PostgreSQL/MySQL cells skipped as before; no code\n  change was needed there).\n- `check:api-surface`, `check:dual-source-exports`, `check:entry-nameability`,\n  `check:exported-any`, `check:lean-entry-closure` — all green against the\n  fresh build (the widened `NumberComparandRefusalSite` type doesn't move the\n  name-level api-surface snapshot).\n- Derived gate sweep (`dispatch-gates.mjs`, 86 commands): all green except 3\n  that need the WHOLE workspace built (`check:doc-formula-expressions`,\n  `check:dual-build-cjs-loads`, `check:type-check-debt --re-measure`) — out\n  of this diff's local scope, left to CI.\n\nFull command list and exit codes are in the report comment on the issue.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014EJ1ED8X4MMrT18BhVx4tx)_\n"
+}

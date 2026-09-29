@@ -1,0 +1,37 @@
+{
+  "number": 20592,
+  "kind": "issue",
+  "title": "spec(migrations): register the ADR-0087 semantic ledger entry for the html-tier `div` refusal that #19922's live console fallback brings to manifest-less projects (`div` → `box`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T05:40:43Z",
+  "updated_at": "2026-09-29T08:07:22Z",
+  "closed_at": "2026-09-29T08:05:34Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20592",
+  "body": "**This card carries the `packages/spec` half of #19922; #19922 keeps the CLI half (PR #20589, draft, blocked on this card).** Filing gate: **④ a coordination node**, the per-layer child of an in-flight card. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`). ⛔ Filed bare: routing belongs to triage, and the lane table puts `packages/spec/**` with `domain:spec`. ⛔ Not a claim.\n\n## Why this is owed\n\nPR #20589 makes `resolveSduiManifest`'s console fallback live: the CLI now reads the manifest `@objectstack/console` ships when a project has none of its own. Under ruling A on #20112, `div` stays refused on the html tier (objectui#10808 names `box`), so a manifest-less customer project whose `kind:'html'` page uses `div` is newly refused by `os validate` / `compile` / `lint`. The #19922 dev measured this before and after the fix. It is a narrowing, so the changeset is `@objectstack/cli` `minor`, `Clause-②: no (narrowing)`, BREAKING, with a FROM → TO table (`div` → `box`), as triage directed on #19922 (`5882176569`).\n\n`check:adr-0087-registration` refuses `not-required (no-migration-prescription)` on a changeset that carries a prescription table. The honest disposition is a semantic ledger entry, and the gate's header documents rewording around the detector as the anti-pattern. PR #20589's changeset names the proposed id `ui-html-page-div-refused`, and the gate is red until an entry with that id exists (id to be confirmed by the spec seat).\n\n## What the entry says (the #19922 dev's proposal; ⛔ the spec seat owns the wording)\n\n- **Precedent:** `packages/spec/src/migrations/entries/semantic/18.ui-react-list-view-binding-aliases-retired.ts`, a page-source vocabulary change moved by hand, because `objectstack migrate meta` rewrites stored metadata by key and cannot rewrite props inside authored source.\n- **surface:** `kind:'html'` page source in a project without its own `sdui.manifest.json`.\n- **replacement:** `box` for `div`; any other undeclared tag or prop per the named finding.\n- **reason:** the CLI now reads the manifest `@objectstack/console` ships (#19922), which under ruling A declares the html tier's intrinsics and refuses `div`.\n- **acceptanceCriteria:** `os validate` reports no `jsx-forbidden-tag` / `jsx-unknown-component` on any html page.\n- Then `gen:migration-registry` and the spec-changes and upgrade-guide regeneration the ledger contract requires.\n\n## Order\n\nThe entry may land on `main` first, in which case PR #20589's marker becomes `already-registered`. The #19922 claimant adjusts that and merges `main`. Either way PR #20589 stays draft until `check:adr-0087-registration` is green on it. If the spec seat prefers the entry to ride PR #20589 so that both land atomically, it says so on #19922, and the two seats agree on who pushes to that branch.\n\n## Duplicate check\n\nBoard search, open and closed, taken in the act that filed this card: 「ui-html-page-div-refused」 (5 hits), 「div refused html page migration ledger」 (4) and 「semantic ledger div box html tier」 (3). All the hits are #19922, #20112, #20371 and seat posts; none is this entry."
+}

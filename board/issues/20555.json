@@ -1,0 +1,36 @@
+{
+  "number": 20555,
+  "kind": "issue",
+  "title": "security: with no active organization, resolvePermissionSetsForContext reads the principal's position names as permission-set names organization-less, and sys_permission_set.name has no reserved-identity guard (NOT MEASURED; from PR #20540's review)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T02:39:40Z",
+  "updated_at": "2026-09-29T06:49:27Z",
+  "closed_at": "2026-09-29T06:48:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20555",
+  "body": "Filing gate: **③ a follow-up measurement the at-tier review escalated**. The class is read at source, and **`reach:` is NOT MEASURED**. It comes from the at-tier contract review of PR #20540 (#20515, the organization-less grants p0; record 5881827545, ①1 and ③ note 3; carried in the ACCEPT 5882581283). ⛔ Filed bare: routing and grading belong to triage, and triage may close it on a measured \"not reached\". ⛔ Not a claim.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`).\n\n## The seam (read at source on PR #20540's head `4e3e4f5e4`)\n\n- `resolvePermissionSetsForContextUnmemoized` (`packages/plugins/plugin-security/src/security-plugin.ts`, about `:6022`) builds `requested = [...positions, ...permissions]`. It looks each name up as a **permission-set name** through `dbLoaderFor(callerOrganizationId(context))`, whose by-name read is **organization-less** when the caller has no active organization.\n- §3 of `resolveUserAuthzGrants` (`sys_member`) still lists every current membership's role in `positions[]` when no organization is active. Those names are the four ADR-0068 built-ins.\n- `reserved-identity-names.ts` guards `sys_position.name` and `sys_user_position.position` at the object layer. The review found **no equivalent guard on `sys_permission_set.name`**.\n\n## The question to measure\n\nCan an organization-less principal pick up a permission set's capabilities because it is **named** after one of its positions? For example, an organization-authored `sys_permission_set` row named like a built-in role, read organization-less. If yes, which organizations' sets does the organization-less by-name read return?\n\nPR #20540 did not change this seam: before it, the fold behaved identically, and wider. The review judged it pre-existing and not a fix owed there.\n\n## Suggested measurement (⛔ not a ruling)\n\n- An organization-scoped `sys_permission_set` named after a built-in position (`member`, `admin`), a principal with no active organization, and `resolvePermissionSetsForContext`. Read which rows the by-name read returns and whether their capabilities reach `systemPermissions` or the effective map.\n- If reached: decide between a reserved-name guard on `sys_permission_set.name`, or a tenant-scoped fold.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"position names folded as permission set names organization-less resolvePermissionSetsForContext sys_permission_set name reserved built-in role\" gives 2 hits. #20136 (the effective map's `'*'` fold, closed) and #15298 (a docblock, closed) are other seams. None is this.\n\nDedupe words: `position name fold permission set organization-less` · `sys_permission_set name reserved identity` · `resolvePermissionSetsForContext positions as set names`"
+}

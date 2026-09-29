@@ -1,0 +1,34 @@
+{
+  "number": 20565,
+  "kind": "pull_request",
+  "title": "test(create-objectstack,metadata): make two version-sensitive tests hold across the 17.5.0 version pass",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T03:07:14Z",
+  "updated_at": "2026-09-29T03:48:08Z",
+  "closed_at": "2026-09-29T03:48:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-29T03:48:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20565",
+  "body": "Fixes #20560\n\nUnblocks the 17.5.0 Version Packages PR #17076 (`changeset-release/main`). Its required `Test Core (1/6)` is red on head `de35e567` (CI run 36510180528):\n\n```\nAssertionError: scaffolded Dockerfile pins :17.4.2 but the scaffolded package.json asks for \"^17.5.0\" — the generated app would run a runtime image that is not the CLI building its artifact (#9017): expected false to be true\n```\n\nBoth changes are test-only. No runtime code moves, and neither file ships: both packages publish only `dist`, `README.md` and `CHANGELOG.md`, and neither file is a tsup entry. So there is no changeset and the PR carries `skip-changeset`.\n\n## 1. `create-objectstack`: the runtime-image fixture (the reported failure)\n\n`runtime-image.test.ts` planted the npm-resolved `@objectstack/cli` as the literal `${major}.4.2`. The scaffolder writes a caret range on its own version, so that literal is inside the range only while the minor is 4 or lower. At 17.5.0 it falls below the floor, and the agreement test blamed the scaffolder for what was a fixture defect.\n\n- `resolved` is now derived from the package's own version: same major, own minor + 1, patch 2 (17.4.0 gives 17.5.2, 17.5.0 gives 17.6.2). It is always inside the caret range and always above its floor, which is what the fixture's own comment says it is for.\n- A new precondition test, `plants a resolved version inside the scaffolded range and above its floor`, makes future fixture drift point at the fixture rather than at the scaffolder.\n\nI checked the other create-objectstack tests for a current-minor assumption. They key on the major only (`template-consistency`), use fixed literals unrelated to the package version (the `readResolvedCliVersion` cases, `banner-version`), or carry a fixture version of their own (`template-version-stamps`). The whole suite passes on the versioned tree (table below).\n\n## 2. `metadata`: artifact-door notice wording (found by running the unreached shard-1 packages on the versioned tree)\n\nTurbo stopped shard 1 at the failure above, so ten scheduled packages never ran against 17.5.0. Running them found one more failure of the same class:\n\n```\nFAIL src/plugin-artifact-forward-conversion-retired-after.test.ts > [#20390] artifact door — a 17.4.0-built artifact boots on unreleased main > logs one conversion summary per retired entry it replayed, naming the site count\nAssertionError: expected '[MetadataPlugin] artifact \\'forward-p…' not to contain 'predates this runtime\\'s spec'\n```\n\nThe fixture is a 17.4.0-built artifact (`engines.protocol: ^17.4.0`). While `packages/spec` carries the 17.4.0 label, the floor is not below the label. The per-entry half of the window opens (`converted-retired-after`), and its clause deliberately avoids \"predates\". The version pass moves the label to 17.5.0 and the floor falls below it. The label half opens instead (`converted-forward`), and the door correctly prints `predates this runtime's spec (authored engines.protocol floor 17.4.0, runtime spec 17.5.0)`. The runtime behaves as designed; the assertion had the pre-release label built in.\n\nThe assertion now reads the running spec label the same way the door does, with `resolveInstalledSpecVersion()`. `plugin-artifact-forward-conversion.test.ts` already uses that pattern. The test then pins the exact clause of whichever half that label selects. Both halves were exercised: the per-entry clause on `main` (label 17.4.0), and the `predates` clause with the exact floor and runtime version on the versioned tree (label 17.5.0).\n\n## Verification on the versioned tree\n\nI made a throwaway worktree at `origin/changeset-release/main` = `de35e567`, the #17076 head that the failing run tested, and copied both fixes in. Then:\n\n1. `pnpm install --frozen-lockfile`.\n2. `pnpm turbo run build` over each package's dependency closure (`--filter='PKG^...'`; 61 tasks, 0 cached).\n3. Each package's own script via `pnpm --filter PKG run SCRIPT`, with the env Test Core sets (`OS_TEST_TIERS=queue`, `CI=true`).\n\n| Package | Script | Result on de35e567 + this PR |\n|---|---|---|\n| create-objectstack | test | pass: 16 files / 234 tests. Without the fix: 1 failed, the assertion quoted above |\n| @objectstack/spec | test | pass: 573 / 16846, 1 todo |\n| @objectstack/spec | test:repo | pass: 40 / 716 |\n| @objectstack/verify | test | pass: 15 / 116 |\n| @objectstack/metadata | test | pass: 55 / 826. Without the fix: 1 failed, the assertion quoted in section 2 |\n| @objectstack/plugin-audit | test | pass: 25 / 363 |\n| @objectstack/example-todo | test | pass: 7 / 238 |\n| @objectstack/trigger-record-change | test | pass: 10 / 101 |\n| @objectstack/formula | test | pass: 42 / 1227 |\n| @objectstack/downstream-contract | test | pass: 3 / 31 |\n| @objectstack/service-cluster-redis | test | pass: 3 / 37 |\n| @objectstack/knowledge-ragflow | test | pass: 1 / 10 |\n\nOf shard 1's other scheduled packages, `@objectstack/types` had already passed in that run, and shards 2–6 were green. So every package that run scheduled has now passed against the `de35e567` tree.\n\n## Checks on this branch (base `b0574343`)\n\n- `pnpm --filter create-objectstack test`: 16 files / 234 tests pass; `typecheck` clean.\n- `pnpm --filter @objectstack/metadata test`: 55 / 826 pass (the per-entry half); `typecheck` clean.\n- `eslint` on both changed files: clean.\n\n`main` has since moved to `f6ceddc3`, six commits on. None of them touches `packages/create-objectstack`, `packages/metadata` or `packages/metadata-core`.\n\nA wider gap is tracked separately in #20562 and not addressed here: a version-sensitive test is only exercised after `pnpm run version`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014VGCS11YUtYAiinRcdqQwL)_"
+}

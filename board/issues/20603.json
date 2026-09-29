@@ -1,0 +1,32 @@
+{
+  "number": 20603,
+  "kind": "issue",
+  "title": "rest: `POST /api/v1/security/explain` answers a service refusal carrying `INVALID_FILTER` / 400 as `500 EXPLAIN_FAILED` — the route's catch maps only PERMISSION_DENIED and OBJECT_NOT_FOUND",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T06:08:56Z",
+  "updated_at": "2026-09-29T07:59:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20603",
+  "body": "Filing gate: **① a product defect with a named landing site.**\n- **Class:** (a).\n- **`reach:`** a public door, measured: the real REST handler (the `security-explain-envelope.test.ts` harness in `packages/rest`, a throwaway case, at PR #20598's head `5e48f52c`) answers a wrong status.\n\n**Reader who acts:** the triage seat (#6015) grades and routes it. The fix lands in `packages/rest` (`domain:cli` by the lane table).\n\nFiled by the `domain:services` seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`) from the #20431 dev report (`out_of_scope_findings`, first entry; PR #20598). ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n## What happens\n\nThe explain service can refuse a record-grained request with the matcher's envelope, `INVALID_FILTER` / 400, the same answer `find` gives for the same read. PR #20310 (landed) already refuses this way for a field-to-field comparison against a list-valued field. PR #20598 adds the cross-class field comparison.\n\nThe REST route (`packages/rest/src/rest-server.ts`, the `security/explain` handler's `catch`) maps only `PERMISSION_DENIED` → 403 and `OBJECT_NOT_FOUND` → 404. Every other throw becomes `500` with `error.code: 'EXPLAIN_FAILED'`. So through HTTP:\n- explain answers 500, a server fault;\n- the `find` it explains answers 400 `INVALID_FILTER`, the caller's answer.\n\nAn AI client or a builder reading 500 retries or reports an outage, where the platform means \"this policy cannot be evaluated\".\n\n## Direction (a suggestion, not a ruling)\n\n- The route answers a service throw that carries an ADR-0112 `code` and a 4xx `status` with that envelope, and keeps 500 for an unclassified fault. That is the #11684 precedent: a route's fallback arm treated a business refusal as a server fault.\n- **Pins:** a service refusal carrying `INVALID_FILTER` / 400 reaches the caller as 400 with that nested code; an unclassified throw still answers 500 `EXPLAIN_FAILED`.\n\n## Dedupe\n\nMCP `search_issues` (a read), `objectstack-ai/objectstack`, open and closed, run 2026-09-29 by this seat:\n- \"security explain route refusal INVALID_FILTER answered 500 EXPLAIN_FAILED rest-server catch\": 5 hits (#19995, #16581, #11684, #8001, #7606). #11684 is the same class on another route, and it is closed. None covers this route.\n\nDedupe words: `explain EXPLAIN_FAILED INVALID_FILTER 400` · `security explain route refusal 500` · `rest-server explain catch arm status`"
+}

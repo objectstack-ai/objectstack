@@ -2,24 +2,35 @@
   "number": 20550,
   "kind": "issue",
   "title": "spec `nextUtcCalendarDay` answers null for every day in years 0001..0099 (Date.UTC reads them as 1900..1999), so a datetime `$lte` / `$between` max on such a day skips whole-day widening and misses that day's rows",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T02:07:29Z",
-  "updated_at": "2026-09-29T02:07:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T06:49:16Z",
+  "closed_at": "2026-09-29T06:48:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20550",
   "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**. `reach:` is `POST /api/v1/data/:object/query`, measured by the #20525 dev at PR #20547's head `0999284ab` on memory, SQLite and PostgreSQL 16 (`os-dev-report` on #20525, `out_of_scope_findings[2]`).\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`). The landing site is `packages/spec`. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n- `where opened_at $lte '0050-01-01'` (a `datetime` field) returns `[]`, although a row is stored at `0050-01-01T10:00:00.000Z`.\n- The control `where opened_at $lte '2026-07-15'` includes that day's `2026-07-15T14:00:00.000Z` row, so whole-day widening works for 2026 and is skipped for 0050.\n\n## Why\n\n`packages/spec/src/data/calendar-day.ts`, `nextUtcCalendarDay`, proves a day real by a `Date.UTC` round trip, and `Date.UTC` reads years 0..99 as 1900..1999. So it answers `null` for every day in 0001..0099, and `$lte` / `$between`-max fall back to midnight.\n- Measured: `nextUtcCalendarDay('0050-01-01')` = `null` and `utcInstantMs('0050-01-01')` = `null`.\n- Control: `'0100-01-01'` answers.\n- The years 0001..9999 are the supported range since #20264 (closed).\n- This is also why #20525's write door does not reuse the helper.\n\n## Suggested shape (⛔ not a ruling)\n\n- Build the date with `setUTCFullYear` (or equivalent) so years 0..99 are not remapped. Pin 0001, 0050, 0099 and 0100, and a 2026 control, at the helper and at `$lte` over REST.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"nextUtcCalendarDay year below 100 Date.UTC 1900 whole day lte widening 0050\" gives 0 hits.\n\nDedupe words: `nextUtcCalendarDay year below 100 Date.UTC 1900` · `lte whole day widening year 0050` · `utcInstantMs 0050-01-01 null`"

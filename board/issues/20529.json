@@ -2,8 +2,8 @@
   "number": 20529,
   "kind": "issue",
   "title": "trigger-api arms a flow's inbound hook without a secret and accepts unsigned posts; ADR-0041's trigger-api acceptance criteria name a per-flow secret and HMAC verification",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:workflow",
     "bug",
     "domain:services",
-    "pm:dispatched",
-    "priority:p1",
+    "priority:p0",
     "security"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T23:53:34Z",
-  "updated_at": "2026-09-29T02:26:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T02:55:39Z",
+  "closed_at": "2026-09-29T02:53:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20529",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357), from the stage-1 measurement of #20287 (report `5880862266`, out-of-scope finding 2). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## Governing text\n\nADR-0041 (`docs/adr/0041-flow-trigger-family.md`, status Accepted), the `trigger-api` acceptance criteria, :118-119: \"Per-flow inbound endpoint (`POST /api/v1/automation/hooks/:flowName/:hookId`) with a per-flow secret; HMAC signature verification (GitHub/Stripe style) and a constant-time compare.\"\n\n## What the code does (read at `fb386074f5`, `packages/triggers/trigger-api/src/`)\n\n1. `ApiTrigger.start()` reads `hookId` and `secret` from the binding's config. `hookId` falls back to the literal `'default'` (`api-trigger.ts:123`); `secret` may be absent (:124).\n2. Without a secret the hook still arms. The one signal is a warning, \"armed WITHOUT a secret — endpoint accepts unsigned posts\" (:151-155).\n3. `handleRequest` verifies the signature only when a secret is set (:187).\n4. A test pins this: \"accepts unsigned posts when no secret is configured (and warned at arm time)\" (`api-trigger.test.ts:97`) arms with `{}`, posts to `hookId: 'default'` with no signature, and expects `202`.\n5. The route is mounted on the raw HTTP app (`plugin.ts:83`). The stage-1 report enumerated the raw-app middlewares and found none that authenticates this path; this seat did not re-run that enumeration.\n\n## Also measured\n\n- `hookId` and `secret` live in the start node's `config`, an open record (`packages/spec/src/automation/flow.zod.ts:591`). The engine's `api` binding carries them from there (`packages/services/service-automation/src/engine.ts:3546-3554`). The stage-1 report found 0 `hookId` hits in spec schema code.\n- The secret is a literal in flow metadata. The showcase flow says \"real deployments inject this from configuration\" (`examples/app-showcase/src/automation/flows/index.ts:1581`); the stage-1 report found no injection seam. Outbound webhook signing secrets have a persistence seam since #7799 (`packages/plugins/plugin-webhooks/src/webhook-secret.ts:4`).\n- The signature covers the raw body. The stage-1 report found no timestamp or replay window in it.\n\n## Not measured\n\n- Whether a non-admin can read a flow's `config.secret` through the metadata API.\n- Whether any deployment arms a hook without a secret.\n\nDedupe words: `trigger-api unsigned posts` · `hookId default` · `flow start node config.secret` · `x-objectstack-signature`"
