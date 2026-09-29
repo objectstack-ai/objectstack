@@ -3433,6 +3433,19 @@ export class AutomationEngine implements IAutomationService {
     ): { triggerType: string; binding: FlowTriggerBinding } | undefined {
         const flow = this.flows.get(flowName);
         if (!flow) return undefined;
+        return this.deriveTriggerBinding(flowName, flow);
+    }
+
+    /**
+     * {@link resolveTriggerBinding}'s body, over a flow that need not be
+     * registered yet — so {@link validateApiTriggerSecret} judges, at
+     * registration, the very binding {@link activateFlowTrigger} would hand the
+     * trigger, rather than a second reading of the start node.
+     */
+    private deriveTriggerBinding(
+        flowName: string,
+        flow: FlowParsed,
+    ): { triggerType: string; binding: FlowTriggerBinding } | undefined {
         const startNode = flow.nodes.find(n => n.type === 'start');
         const config = (startNode?.config ?? {}) as Record<string, unknown>;
         const condition = (config.condition as FlowTriggerBinding['condition']) ?? undefined;
@@ -4190,6 +4203,12 @@ export class AutomationEngine implements IAutomationService {
         // not a silent runtime `false`. Hard-fail: a broken predicate is never
         // safe to run.
         this.validateFlowExpressions(name, parsed);
+
+        // ADR-0041 — an `api` flow's inbound hook requires a per-flow secret.
+        // Refused here, at the publish seam, so the author learns before
+        // deploying; `trigger-api`'s own `start()` refuses the same binding for
+        // a host that binds without this engine.
+        this.validateApiTriggerSecret(name, parsed);
 
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
@@ -9347,6 +9366,46 @@ export class AutomationEngine implements IAutomationService {
                 `changes nothing; fix the node in the flow definition:\n${failures.join('\n')}`,
             );
         }
+    }
+
+    /**
+     * ADR-0041 — the registration-time half of `trigger-api`'s acceptance
+     * criteria: "a per-flow secret; HMAC signature verification". A flow whose
+     * binding resolves to the `api` trigger (the kind {@link
+     * deriveTriggerBinding} answers — `type: 'api'` or a start-node
+     * `triggerType: 'api'`) and whose start node carries no non-blank
+     * `config.secret` is refused, whatever its `status`: such a flow can never
+     * be armed, and an author who wrote it should hear so at publish time,
+     * not from a boot audit.
+     *
+     * It reads the BINDING's `config` — the same object `trigger-api`'s
+     * `start()` reads the secret from — so the two refusals judge one input
+     * and cannot disagree about which flows need a secret. The rule is kept in
+     * both places deliberately: `@objectstack/trigger-api` does not depend on
+     * this package (nor this package on it), and the trigger's own refusal is
+     * what protects a host that binds without this engine.
+     *
+     * Hard-fail, like {@link validateNodeConfigKeys}: every `registerFlow` call
+     * site already try/catches per flow, so a refused flow is skipped loudly
+     * at boot, and the `/automation` write doors answer the throw as `400
+     * VALIDATION_FAILED`.
+     */
+    private validateApiTriggerSecret(flowName: string, flow: FlowParsed): void {
+        const resolved = this.deriveTriggerBinding(flowName, flow);
+        if (resolved?.triggerType !== 'api') return;
+        const config = (resolved.binding.config ?? {}) as Record<string, unknown>;
+        if (typeof config.secret === 'string' && config.secret.trim() !== '') return;
+        const asks = [
+            flow.type === 'api' ? "`type: 'api'`" : undefined,
+            config.triggerType === 'api' ? "start-node `config.triggerType: 'api'`" : undefined,
+        ].filter((s): s is string => s !== undefined);
+        throw new Error(
+            `Flow '${flowName}' rejected: it binds the inbound \`api\` trigger (${asks.join(' and ')}) but its ` +
+            `start node declares no \`config.secret\`. An inbound hook is armed only with a per-flow secret that ` +
+            `every post is HMAC-verified against (ADR-0041), so this flow could never be armed. Set a non-blank ` +
+            `\`config.secret\` on the start node. A flow that is only ever started explicitly and never receives ` +
+            `inbound posts is \`type: 'autolaunched'\`, with no \`triggerType: 'api'\` on its start node.`,
+        );
     }
 
     /**

@@ -95,13 +95,33 @@ describe('scaffolded Dockerfile runtime image tag (#9017)', () => {
     // The version npm resolved is deliberately NOT the range's floor: that is
     // the normal case (`^17.0.0` installs the newest 17.x) and it is the case
     // that would go unnoticed if the tag were taken from package.json instead.
-    const resolved = `${String(ownVersion).split('.')[0]}.4.2`;
+    //
+    // It is DERIVED from the scaffolder's own version — same major, next minor
+    // — never spelled as a literal. The scaffolder writes `^<ownVersion>`, so a
+    // literal `<major>.4.2` lies inside that range only while ownVersion's minor
+    // is at most 4; the version pass to 17.5.0 put it BELOW the floor, and the
+    // agreement test went red on a fixture defect while blaming the scaffolder.
+    const [ownMajor, ownMinor] = String(ownVersion).split('.').map(Number);
+    const resolved = `${ownMajor}.${ownMinor + 1}.2`;
 
     beforeEach(() => {
       scaffold(dir);
       installCli(dir, resolved);
       const result = pinRuntimeImage(dir, readResolvedCliVersion(dir)!);
       expect(result.pinned, 'pinRuntimeImage refused the scaffolded Dockerfile').toBe(true);
+    });
+
+    // A precondition on the fixture, not on the scaffolder: should the planted
+    // version ever leave the range (or land on its floor), this names the
+    // fixture as the fault instead of the agreement test below reporting a
+    // runtime-image mismatch the scaffolder never produced.
+    it('plants a resolved version inside the scaffolded range and above its floor', () => {
+      expect(resolved).not.toBe(ownVersion);
+      expect(
+        satisfiesCaret(`^${ownVersion}`, resolved),
+        `fixture defect: the planted @objectstack/cli ${resolved} does not ` +
+          `satisfy ^${ownVersion}, the range the scaffolder writes for its own version`,
+      ).toBe(true);
     });
 
     it('pins the FROM tag to the @objectstack/cli the project resolved', () => {

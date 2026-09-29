@@ -97,11 +97,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "Gerente",
-        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
+        help: "Gerente directo de este usuario. Forma la cadena de reporte que recorre el ámbito jerárquico `own_and_reports` (ADR-0057 / @objectstack/security-enterprise)."
       },
       primary_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
+        help: "Unidad de negocio principal del usuario: una proyección desnormalizada de sys_business_unit_member.is_primary que mantiene plugin-sharing (anexo D12 de ADR-0057). Permite que una búsqueda de usuarios filtre candidatos por unidad de negocio sin recorrer la tabla de unión de membresías. No la edites directamente; establécela mediante la membresía a la unidad de negocio."
       },
       source: {
         label: "Origen de la identidad",
@@ -334,16 +334,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Caduca el"
       },
       last_activity_at: {
-        label: "Last Activity At",
-        help: "Timestamp of the last request on this session; drives idle-timeout. System-managed."
+        label: "Última actividad el",
+        help: "Marca temporal de la última solicitud en esta sesión; determina el tiempo de espera por inactividad. Gestionado por el sistema."
       },
       revoked_at: {
-        label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
+        label: "Revocado el",
+        help: "Si está establecido, esta sesión se revocó (inactividad / duración máxima absoluta / límite de sesiones simultáneas / administrador / fin de la membresía de la organización). Gestionado por el sistema."
       },
       revoke_reason: {
-        label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
+        label: "Motivo de la revocación",
+        help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "Organización activa"
@@ -431,15 +431,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "Token de acceso",
-        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
+        help: "Token de acceso OAuth vigente emitido por el proveedor; nunca se devuelve en la API de datos (#7987). better-auth lo vuelve a leer mediante el accesor privilegiado de campos internos del motor."
       },
       refresh_token: {
         label: "Token de actualización",
-        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
+        help: "Token de actualización OAuth vigente: de larga duración y no se revoca al revocar una sesión de ObjectStack; nunca se devuelve en la API de datos (#7987)."
       },
       id_token: {
         label: "Token de ID",
-        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
+        help: "Token de ID de OIDC emitido por el proveedor; nunca se devuelve en la API de datos (#7987)."
       },
       access_token_expires_at: {
         label: "El token de acceso caduca el"
@@ -455,8 +455,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Hash de la contraseña para el proveedor de correo electrónico/contraseña."
       },
       previous_password_hashes: {
-        label: "Previous Password Hashes",
-        help: "JSON array of prior password hashes (bounded by password_history_count); reuse-prevention only. System-managed."
+        label: "Hashes de contraseñas anteriores",
+        help: "Matriz JSON de hashes de contraseñas anteriores (limitada por password_history_count); solo para impedir su reutilización. Gestionado por el sistema."
       }
     },
     _views: {
@@ -554,12 +554,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Zona horaria IANA (p. ej. UTC, Asia/Shanghai) en la que se calculan los límites de fecha de esta organización: el valor raíz que hereda toda unidad de negocio sin zona propia. Sin definir significa UTC."
       },
       parent_organization_id: {
-        label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+        label: "Organización principal",
+        help: "Organización principal a efectos de informes y agrupación. No concede NADA: la visibilidad entre organizaciones procede de la membresía, nunca de esta referencia (ADR-0105 D6)."
       },
       sort_order: {
-        label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        label: "Orden",
+        help: "Orden de visualización entre organizaciones hermanas. Solo afecta a la presentación."
       },
       id: {
         label: "ID de organización"
@@ -633,17 +633,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Propietario",
           admin: "Administrador",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "Administrador delegado",
           member: "Miembro"
         }
       }
     },
     _views: {
       mine: {
-        label: "My Memberships",
+        label: "Mis organizaciones",
         emptyState: {
-          title: "No organizations yet",
-          message: "You haven't joined any organizations."
+          title: "Aún no hay organizaciones",
+          message: "No te has unido a ninguna organización."
         }
       }
     },
@@ -700,7 +700,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           owner: "Propietario",
           admin: "Administrador",
-          delegated_admin: "Delegated Admin",
+          delegated_admin: "Administrador delegado",
           member: "Miembro"
         }
       },
@@ -726,12 +726,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Equipo opcional que se asignará al aceptar."
       },
       business_unit_id: {
-        label: "Placement Business Unit",
-        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+        label: "Unidad de negocio de asignación",
+        help: "Unidad de negocio en la que se asigna a la persona invitada al aceptar (ADR-0105 D8). Debe estar dentro del subárbol delegado de quien emite la invitación."
       },
       positions: {
-        label: "Placement Positions",
-        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        label: "Puestos de asignación",
+        help: "Nombres de sys_position asignados al aceptar (ADR-0105 D8). Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
       }
     },
     _views: {
@@ -786,8 +786,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Organización principal de este equipo."
       },
       member_count: {
-        label: "Member Count",
-        help: "Seat counter maintained by better-auth; do not write directly."
+        label: "Número de miembros",
+        help: "Contador de plazas que mantiene better-auth; no lo escribas directamente."
       },
       id: {
         label: "ID de equipo"
@@ -845,8 +845,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Usuario"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership digest maintained by better-auth; do not write directly."
+        label: "Clave de membresía",
+        help: "Resumen derivado de la membresía que mantiene better-auth; no lo escribas directamente."
       }
     },
     _actions: {
@@ -1007,8 +1007,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Usuario que posee esta clave de API."
       },
       active_organization_id: {
-        label: "Active Organization",
-        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+        label: "Organización activa",
+        help: "Organización en la que se autentica esta clave: se hereda de quien la emite al crearla y se establece como la organización activa de la solicitud."
       },
       scopes: {
         label: "Ámbitos",
@@ -1095,16 +1095,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Códigos de recuperación de respaldo serializados en JSON."
       },
       verified: {
-        label: "Verified",
-        help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+        label: "Verificado",
+        help: "Indica si la inscripción se confirmó con un código TOTP válido (gestionado por better-auth)."
       },
       failed_verification_count: {
-        label: "Failed Verification Count",
-        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+        label: "Verificaciones fallidas",
+        help: "Verificaciones 2FA fallidas consecutivas; se restablece tras una verificación correcta. Lo mantiene better-auth."
       },
       locked_until: {
-        label: "Locked Until",
-        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
+        label: "Bloqueado hasta",
+        help: "Se establece cuando las verificaciones 2FA fallidas superan el umbral de bloqueo. Lo mantiene better-auth."
       }
     },
     _views: {
@@ -1291,8 +1291,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Identificador público del cliente OAuth."
       },
       client_discovery_id: {
-        label: "Client Discovery ID",
-        help: "Opaque identifier the provider uses to look this client up on the discovery path, kept apart from the public `client_id`"
+        label: "ID de descubrimiento del cliente",
+        help: "Identificador opaco que usa el proveedor para localizar este cliente en la ruta de descubrimiento; se mantiene separado del `client_id` público."
       },
       client_secret: {
         label: "Secreto de cliente",
@@ -1339,8 +1339,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Lista serializada en JSON de ámbitos que el cliente puede solicitar."
       },
       client_credentials_scopes: {
-        label: "Client-Credentials Scopes",
-        help: "JSON-serialized list of scopes the client may request on the client_credentials grant, where there is no user to consent — kept apart from `scopes`, which governs user-delegated grants"
+        label: "Ámbitos de credenciales de cliente",
+        help: "Lista serializada en JSON de ámbitos que el cliente puede solicitar en la concesión client_credentials, donde no hay un usuario que dé su consentimiento; se mantiene separada de `scopes`, que rige las concesiones delegadas por el usuario."
       },
       subject_type: {
         label: "Tipo de sujeto",
@@ -1348,15 +1348,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       jwks: {
         label: "JWKS",
-        help: "Client JSON Web Key Set (for private_key_jwt / signed-request verification)"
+        help: "JSON Web Key Set del cliente (para private_key_jwt y la verificación de solicitudes firmadas)."
       },
       jwks_uri: {
         label: "JWKS URI",
-        help: "URL of the client JSON Web Key Set"
+        help: "URL del JSON Web Key Set del cliente."
       },
       dpop_bound_access_tokens: {
-        label: "DPoP-bound Access Tokens",
-        help: "Require access tokens issued to this client to be DPoP-bound (RFC 9449)"
+        label: "Tokens de acceso vinculados a DPoP",
+        help: "Exige que los tokens de acceso emitidos a este cliente estén vinculados a DPoP (RFC 9449)."
       },
       disabled: {
         label: "Deshabilitado"
@@ -1370,12 +1370,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Permitir que el cliente llame al endpoint OIDC de finalización de sesión."
       },
       backchannel_logout_uri: {
-        label: "Back-channel Logout URI",
-        help: "OIDC back-channel logout endpoint of the client"
+        label: "URI de cierre de sesión por canal secundario",
+        help: "Endpoint de cierre de sesión por canal secundario de OIDC del cliente."
       },
       backchannel_logout_session_required: {
-        label: "Back-channel Logout Session Required",
-        help: "Whether the back-channel logout token must include a sid claim"
+        label: "Sesión requerida en el cierre por canal secundario",
+        help: "Indica si el token de cierre de sesión por canal secundario debe incluir un reclamo sid."
       },
       software_id: {
         label: "ID de software"
@@ -1404,7 +1404,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       mine: {
-        label: "My Applications"
+        label: "Mis aplicaciones"
       },
       active: {
         label: "Activo"
@@ -1509,16 +1509,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Identificador de correlación proporcionado por quien llama."
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token originates from"
+        label: "ID del código de autorización",
+        help: "ID de la concesión de código de autorización de la que procede este token."
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "Recursos",
+        help: "Lista serializada en JSON de indicadores de recurso RFC 8707 vinculados a este token."
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "Reclamos de UserInfo solicitados",
+        help: "Lista serializada en JSON de reclamos OIDC solicitados para el endpoint userinfo."
       },
       scopes: {
         label: "Ámbitos",
@@ -1531,12 +1531,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Creado el"
       },
       revoked: {
-        label: "Revoked At",
-        help: "Timestamp at which this access token was revoked"
+        label: "Revocado el",
+        help: "Marca temporal en la que se revocó este token de acceso."
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "Confirmación",
+        help: "Reclamo cnf de RFC 7800 en JSON (p. ej., la huella de la clave DPoP) que vincula este token a una clave."
       }
     }
   },
@@ -1569,16 +1569,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Identificador de correlación proporcionado por quien llama."
       },
       authorization_code_id: {
-        label: "Authorization Code ID",
-        help: "ID of the authorization-code grant this token chain originates from"
+        label: "ID del código de autorización",
+        help: "ID de la concesión de código de autorización de la que procede esta cadena de tokens."
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators bound to this token"
+        label: "Recursos",
+        help: "Lista serializada en JSON de indicadores de recurso RFC 8707 vinculados a este token."
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims requested for the userinfo endpoint"
+        label: "Reclamos de UserInfo solicitados",
+        help: "Lista serializada en JSON de reclamos OIDC solicitados para el endpoint userinfo."
       },
       scopes: {
         label: "Ámbitos",
@@ -1595,24 +1595,24 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Marca temporal en la que se revocó este token de actualización."
       },
       rotated_at: {
-        label: "Rotated At",
-        help: "Timestamp at which this token was rotated (superseded by a new row)"
+        label: "Rotado el",
+        help: "Marca temporal en la que se rotó este token (sustituido por una fila nueva)."
       },
       rotation_replay_response: {
-        label: "Rotation Replay Response",
-        help: "Cached token response replayed when the old token is re-presented within the reuse interval"
+        label: "Respuesta de reproducción de la rotación",
+        help: "Respuesta de token almacenada en caché que se reproduce cuando el token anterior se vuelve a presentar dentro del intervalo de reutilización."
       },
       rotation_replay_expires_at: {
-        label: "Rotation Replay Expires At",
-        help: "End of the post-rotation reuse interval during which the replay response is served"
+        label: "La reproducción de la rotación caduca el",
+        help: "Fin del intervalo de reutilización posterior a la rotación durante el que se sirve la respuesta de reproducción."
       },
       auth_time: {
         label: "Hora de autenticación",
         help: "Momento en que el usuario se autenticó originalmente para esta cadena de tokens."
       },
       confirmation: {
-        label: "Confirmation",
-        help: "JSON RFC 7800 cnf claim (e.g. DPoP key thumbprint) binding this token to a key"
+        label: "Confirmación",
+        help: "Reclamo cnf de RFC 7800 en JSON (p. ej., la huella de la clave DPoP) que vincula este token a una clave."
       }
     }
   },
@@ -1637,12 +1637,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Identificador de correlación proporcionado por quien llama."
       },
       resources: {
-        label: "Resources",
-        help: "JSON-serialized list of RFC 8707 resource indicators the consent covers"
+        label: "Recursos",
+        help: "Lista serializada en JSON de indicadores de recurso RFC 8707 que abarca el consentimiento."
       },
       requested_user_info_claims: {
-        label: "Requested UserInfo Claims",
-        help: "JSON-serialized list of OIDC claims the user consented to expose"
+        label: "Reclamos de UserInfo solicitados",
+        help: "Lista serializada en JSON de reclamos OIDC que el usuario consintió en exponer."
       },
       scopes: {
         label: "Ámbitos",
@@ -1657,103 +1657,103 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_oauth_resource: {
-    label: "OAuth Resource",
-    pluralLabel: "OAuth Resources",
-    description: "Registered OAuth protected resources (RFC 8707 resource indicators)",
+    label: "Recurso OAuth",
+    pluralLabel: "Recursos OAuth",
+    description: "Recursos protegidos OAuth registrados (indicadores de recurso RFC 8707).",
     fields: {
       id: {
         label: "ID"
       },
       identifier: {
-        label: "Identifier",
-        help: "Resource indicator URI presented in the RFC 8707 resource parameter"
+        label: "Identificador",
+        help: "URI del indicador de recurso que se presenta en el parámetro resource de RFC 8707."
       },
       name: {
-        label: "Name"
+        label: "Nombre"
       },
       access_token_ttl: {
-        label: "Access Token TTL",
-        help: "Access-token lifetime in seconds for this resource (overrides the server default)"
+        label: "TTL del token de acceso",
+        help: "Vida útil del token de acceso para este recurso, en segundos (anula el valor predeterminado del servidor)."
       },
       refresh_token_ttl: {
-        label: "Refresh Token TTL",
-        help: "Refresh-token lifetime in seconds for this resource (overrides the server default)"
+        label: "TTL del token de actualización",
+        help: "Vida útil del token de actualización para este recurso, en segundos (anula el valor predeterminado del servidor)."
       },
       signing_algorithm: {
-        label: "Signing Algorithm",
-        help: "JWS algorithm used to sign access tokens for this resource"
+        label: "Algoritmo de firma",
+        help: "Algoritmo JWS que se usa para firmar los tokens de acceso de este recurso."
       },
       signing_key_id: {
-        label: "Signing Key ID",
-        help: "Key id (kid) used to sign access tokens for this resource"
+        label: "ID de la clave de firma",
+        help: "ID de clave (kid) que se usa para firmar los tokens de acceso de este recurso."
       },
       allowed_scopes: {
-        label: "Allowed Scopes",
-        help: "JSON-serialized list of scopes clients may request for this resource"
+        label: "Ámbitos permitidos",
+        help: "Lista serializada en JSON de ámbitos que los clientes pueden solicitar para este recurso."
       },
       custom_claims: {
-        label: "Custom Claims",
-        help: "JSON object of extra claims stamped on access tokens for this resource"
+        label: "Reclamos personalizados",
+        help: "Objeto JSON de reclamos adicionales que se añaden a los tokens de acceso de este recurso."
       },
       dpop_bound_access_tokens_required: {
-        label: "DPoP Required",
-        help: "Require access tokens for this resource to be DPoP-bound (RFC 9449)"
+        label: "DPoP obligatorio",
+        help: "Exige que los tokens de acceso de este recurso estén vinculados a DPoP (RFC 9449)."
       },
       disabled: {
-        label: "Disabled"
+        label: "Deshabilitado"
       },
       policy_version: {
-        label: "Policy Version",
-        help: "Monotonic version of the resource token policy"
+        label: "Versión de la política",
+        help: "Versión monotónica de la política de tokens del recurso."
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional resource metadata"
+        label: "Metadatos",
+        help: "Objeto JSON con metadatos adicionales del recurso."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     }
   },
   sys_oauth_client_resource: {
-    label: "OAuth Client Resource",
-    pluralLabel: "OAuth Client Resources",
-    description: "Grants allowing an OAuth client to request tokens for a protected resource",
+    label: "Recurso de cliente OAuth",
+    pluralLabel: "Recursos de cliente OAuth",
+    description: "Concesiones que permiten a un cliente OAuth solicitar tokens para un recurso protegido.",
     fields: {
       id: {
         label: "ID"
       },
       client_id: {
-        label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        label: "ID de cliente",
+        help: "Clave foránea a sys_oauth_application.client_id."
       },
       resource_id: {
-        label: "Resource ID",
-        help: "Foreign key to sys_oauth_resource.identifier"
+        label: "ID del recurso",
+        help: "Clave foránea a sys_oauth_resource.identifier."
       },
       metadata: {
-        label: "Metadata",
-        help: "JSON object of additional grant metadata"
+        label: "Metadatos",
+        help: "Objeto JSON con metadatos adicionales de la concesión."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       }
     }
   },
   sys_oauth_client_assertion: {
-    label: "OAuth Client Assertion",
-    pluralLabel: "OAuth Client Assertions",
-    description: "Consumed OAuth client-assertion JTIs (RFC 7523 replay prevention)",
+    label: "Aserción de cliente OAuth",
+    pluralLabel: "Aserciones de cliente OAuth",
+    description: "JTI de aserciones de cliente OAuth ya consumidos (prevención de reproducción de RFC 7523).",
     fields: {
       id: {
         label: "ID"
       },
       expires_at: {
-        label: "Expires At",
-        help: "Assertion expiry — rows past this instant are safe to prune"
+        label: "Caduca el",
+        help: "Caducidad de la aserción: las filas posteriores a este instante se pueden depurar con seguridad."
       }
     }
   },
@@ -1947,174 +1947,174 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_scim_connection_binding: {
-    label: "SCIM Connection Binding",
-    pluralLabel: "SCIM Connection Bindings",
-    description: "Lifecycle state for a SCIM provisioning connection, including its decommission state machine",
+    label: "Vinculación de conexión SCIM",
+    pluralLabel: "Vinculaciones de conexión SCIM",
+    description: "Estado del ciclo de vida de una conexión de aprovisionamiento SCIM, incluida su máquina de estados de retirada.",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "Immutable SCIM connection identifier that scopes every provisioned resource"
+        label: "ID de conexión",
+        help: "Identificador inmutable de la conexión SCIM que delimita cada recurso aprovisionado."
       },
       connection_key: {
-        label: "Connection Key",
-        help: "Derived connection uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de conexión",
+        help: "Clave derivada de unicidad de la conexión que mantiene @better-auth/scim; no la escribas directamente."
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary that receives provisioned resources (defaults to the connection id)"
+        label: "Dominio de aprovisionamiento",
+        help: "Límite propiedad de la aplicación que recibe los recursos aprovisionados (de forma predeterminada, el ID de conexión)."
       },
       decommission_status: {
-        label: "Decommission Status",
-        help: "Connection lifecycle state: active | reconciling | complete"
+        label: "Estado de retirada",
+        help: "Estado del ciclo de vida de la conexión: active | reconciling | complete."
       },
       decommissioned_at: {
-        label: "Decommissioned At"
+        label: "Retirada el"
       },
       decommission_cursor_user_id: {
-        label: "Decommission Cursor User",
-        help: "Resumable reconciliation cursor maintained by the library"
+        label: "Usuario del cursor de retirada",
+        help: "Cursor de conciliación reanudable que mantiene la biblioteca."
       },
       decommission_reconciled_user_count: {
-        label: "Reconciled Users"
+        label: "Usuarios conciliados"
       },
       decommission_batch_count: {
-        label: "Decommission Batches"
+        label: "Lotes de retirada"
       },
       decommission_revision: {
-        label: "Decommission Revision",
-        help: "Optimistic-concurrency revision for the decommission state machine"
+        label: "Revisión de la retirada",
+        help: "Revisión de concurrencia optimista para la máquina de estados de retirada."
       },
       decommission_completed_at: {
-        label: "Decommission Completed At"
+        label: "Retirada completada el"
       },
       decommission_lease_id: {
-        label: "Decommission Lease",
-        help: "Single-worker reconciliation lease maintained by the library"
+        label: "Arrendamiento de la retirada",
+        help: "Arrendamiento de conciliación de un único worker que mantiene la biblioteca."
       },
       decommission_lease_expires_at: {
-        label: "Decommission Lease Expires At"
+        label: "El arrendamiento de la retirada caduca el"
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todas"
       }
     }
   },
   sys_scim_connection_credential: {
-    label: "SCIM Connection Credential",
-    pluralLabel: "SCIM Connection Credentials",
-    description: "Bearer credentials (one-way digests) that authenticate SCIM provisioning connections",
+    label: "Credencial de conexión SCIM",
+    pluralLabel: "Credenciales de conexión SCIM",
+    description: "Credenciales de portador (resúmenes unidireccionales) que autentican las conexiones de aprovisionamiento SCIM.",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "The SCIM connection this credential authenticates (e.g. \"okta-prod\"); scopes every resource the IdP provisions with it"
+        label: "ID de conexión",
+        help: "Conexión SCIM que autentica esta credencial (p. ej., «okta-prod»); delimita cada recurso que el IdP aprovisiona con ella."
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain",
-        help: "Application-owned boundary receiving provisioned resources; defaults to the connection id when absent"
+        label: "Dominio de aprovisionamiento",
+        help: "Límite propiedad de la aplicación que recibe los recursos aprovisionados; si no se indica, se usa el ID de conexión."
       },
       organization_id: {
-        label: "Organization",
-        help: "Organization scope of this connection, when provisioning is org-scoped"
+        label: "Organización",
+        help: "Ámbito de organización de esta conexión, cuando el aprovisionamiento es por organización."
       },
       label: {
-        label: "Label",
-        help: "Operator-facing name for this credential (e.g. \"rotation 2026-Q3\")"
+        label: "Etiqueta",
+        help: "Nombre de esta credencial para los operadores (p. ej., «rotation 2026-Q3»)."
       },
       token_digest: {
-        label: "Token Digest",
-        help: "HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored."
+        label: "Resumen del token",
+        help: "HMAC-SHA-256 (base64url) del token de portador, con clave derivada del secreto de autenticación del despliegue; unidireccional: el texto sin cifrar se muestra una vez al emitirlo y nunca se almacena."
       },
       active: {
-        label: "Active",
-        help: "Revocation switch — an inactive credential is refused at verification"
+        label: "Activa",
+        help: "Interruptor de revocación: una credencial inactiva se rechaza al verificarla."
       },
       expires_at: {
-        label: "Expires At",
-        help: "Optional hard expiry for staged credential rotation; an expired credential is refused"
+        label: "Caduca el",
+        help: "Caducidad estricta opcional para la rotación escalonada de credenciales; una credencial caducada se rechaza."
       },
       user_id: {
-        label: "Minted By",
-        help: "User who minted this credential"
+        label: "Emitida por",
+        help: "Usuario que emitió esta credencial."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todas"
       }
     }
   },
   sys_scim_group: {
-    label: "SCIM Group",
-    pluralLabel: "SCIM Groups",
-    description: "IdP-pushed SCIM 2.0 groups, scoped per provisioning connection",
+    label: "Grupo SCIM",
+    pluralLabel: "Grupos SCIM",
+    description: "Grupos SCIM 2.0 enviados por el IdP, delimitados por conexión de aprovisionamiento.",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "ID de conexión"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "Dominio de aprovisionamiento"
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "Revisión",
+        help: "Revisión de concurrencia optimista que mantiene @better-auth/scim."
       },
       display_name: {
-        label: "Display Name",
-        help: "SCIM displayName as sent by the IdP"
+        label: "Nombre visible",
+        help: "displayName de SCIM tal como lo envía el IdP."
       },
       display_name_key: {
-        label: "Display Name Key",
-        help: "Derived case-folded displayName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave del nombre visible",
+        help: "Clave derivada de unicidad del displayName, sin distinción de mayúsculas, que mantiene @better-auth/scim; no la escribas directamente."
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "ID externo",
+        help: "externalId asignado por el IdP, cuando el IdP lo envía."
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave del ID externo",
+        help: "Clave derivada de unicidad del externalId que mantiene @better-auth/scim; no la escribas directamente."
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de orden",
+        help: "Clave derivada para una paginación estable que mantiene @better-auth/scim; no la escribas directamente."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todos"
       }
     }
   },
   sys_scim_group_member: {
-    label: "SCIM Group Member",
-    pluralLabel: "SCIM Group Members",
-    description: "SCIM group membership rows pushed by the IdP (group ↔ provisioned user)",
+    label: "Miembro de grupo SCIM",
+    pluralLabel: "Miembros de grupo SCIM",
+    description: "Filas de membresía de grupos SCIM enviadas por el IdP (grupo ↔ usuario aprovisionado).",
     fields: {
       id: {
         label: "ID"
@@ -2124,72 +2124,72 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Título del registro: el usuario aprovisionado y el grupo (calculado al leer)"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "ID de conexión"
       },
       group_id: {
-        label: "Group"
+        label: "Grupo"
       },
       scim_user_id: {
-        label: "SCIM User"
+        label: "Usuario SCIM"
       },
       membership_key: {
-        label: "Membership Key",
-        help: "Derived membership uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de membresía",
+        help: "Clave derivada de unicidad de la membresía que mantiene @better-auth/scim; no la escribas directamente."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todos"
       }
     }
   },
   sys_scim_identity_tombstone: {
-    label: "SCIM Identity Tombstone",
-    pluralLabel: "SCIM Identity Tombstones",
-    description: "Tombstones of IdP-deleted SCIM identities, kept so a re-provision is recognized",
+    label: "Lápida de identidad SCIM",
+    pluralLabel: "Lápidas de identidad SCIM",
+    description: "Lápidas de identidades SCIM eliminadas por el IdP, que se conservan para reconocer un nuevo aprovisionamiento.",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "ID de conexión"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "Dominio de aprovisionamiento"
       },
       external_id: {
-        label: "External ID",
-        help: "The IdP-assigned externalId of the deleted identity"
+        label: "ID externo",
+        help: "externalId asignado por el IdP a la identidad eliminada."
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave del ID externo",
+        help: "Clave derivada de unicidad del externalId que mantiene @better-auth/scim; no la escribas directamente."
       },
       user_id: {
-        label: "User",
-        help: "The platform user the deleted identity was linked to"
+        label: "Usuario",
+        help: "Usuario de la plataforma al que estaba vinculada la identidad eliminada."
       },
       profile: {
-        label: "Final Profile",
-        help: "Serialized final SCIM profile at deletion time, maintained by @better-auth/scim"
+        label: "Perfil final",
+        help: "Perfil SCIM final serializado en el momento de la eliminación, mantenido por @better-auth/scim."
       },
       deleted_at: {
-        label: "Deleted At"
+        label: "Eliminado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todas"
       }
     }
   },
   sys_scim_projection_grant: {
-    label: "SCIM Projection Grant",
-    pluralLabel: "SCIM Projection Grants",
-    description: "Role/entitlement grants projected onto platform users by SCIM provisioning",
+    label: "Concesión proyectada por SCIM",
+    pluralLabel: "Concesiones proyectadas por SCIM",
+    description: "Concesiones de roles o derechos que el aprovisionamiento SCIM proyecta sobre los usuarios de la plataforma.",
     fields: {
       id: {
         label: "ID"
@@ -2199,173 +2199,173 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Título del registro: el rol proyectado y el usuario al que se concede (calculado al leer)"
       },
       connection_id: {
-        label: "Connection ID"
+        label: "ID de conexión"
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "Dominio de aprovisionamiento"
       },
       scim_user_id: {
-        label: "SCIM User",
-        help: "The per-connection user projection this grant belongs to"
+        label: "Usuario SCIM",
+        help: "Proyección de usuario por conexión a la que pertenece esta concesión."
       },
       user_id: {
-        label: "User",
-        help: "The platform user the grant is projected onto"
+        label: "Usuario",
+        help: "Usuario de la plataforma sobre el que se proyecta la concesión."
       },
       source_kind: {
-        label: "Source Kind",
-        help: "What projected the grant (e.g. group, entitlement, attribute)"
+        label: "Tipo de origen",
+        help: "Qué proyectó la concesión (p. ej., group, entitlement, attribute)."
       },
       source_id: {
-        label: "Source ID",
-        help: "Identifier of the projecting source (e.g. the SCIM group id)"
+        label: "ID de origen",
+        help: "Identificador del origen de la proyección (p. ej., el ID del grupo SCIM)."
       },
       source_value: {
-        label: "Source Value",
-        help: "Source attribute value, when the source kind carries one"
+        label: "Valor de origen",
+        help: "Valor del atributo de origen, cuando el tipo de origen lo incluye."
       },
       role: {
-        label: "Role",
-        help: "The role/entitlement projected onto the user"
+        label: "Rol",
+        help: "Rol o derecho proyectado sobre el usuario."
       },
       grant_key: {
-        label: "Grant Key",
-        help: "Derived grant uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de la concesión",
+        help: "Clave derivada de unicidad de la concesión que mantiene @better-auth/scim; no la escribas directamente."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todas"
       }
     }
   },
   sys_scim_subject: {
-    label: "SCIM Subject",
-    pluralLabel: "SCIM Subjects",
-    description: "Per-user SCIM provisioning link — one row per user any SCIM connection provisions",
+    label: "Sujeto SCIM",
+    pluralLabel: "Sujetos SCIM",
+    description: "Vínculo de aprovisionamiento SCIM por usuario: una fila por cada usuario que aprovisiona cualquier conexión SCIM.",
     fields: {
       id: {
         label: "ID"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this subject row tracks (unique — one row per user)"
+        label: "Usuario",
+        help: "Usuario de la plataforma del que hace seguimiento esta fila de sujeto (único: una fila por usuario)."
       },
       profile_source_id: {
-        label: "Profile Source",
-        help: "The sys_scim_user projection currently sourcing this user's profile"
+        label: "Origen del perfil",
+        help: "Proyección de sys_scim_user que aporta actualmente el perfil de este usuario."
       },
       revision: {
-        label: "Revision",
-        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+        label: "Revisión",
+        help: "Revisión de concurrencia optimista que mantiene @better-auth/scim."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todos"
       }
     }
   },
   sys_scim_user: {
-    label: "SCIM User",
-    pluralLabel: "SCIM Users",
-    description: "Per-connection projection of an IdP-provisioned user (SCIM 2.0 /Users)",
+    label: "Usuario SCIM",
+    pluralLabel: "Usuarios SCIM",
+    description: "Proyección por conexión de un usuario aprovisionado por el IdP (SCIM 2.0 /Users).",
     fields: {
       id: {
         label: "ID"
       },
       connection_id: {
-        label: "Connection ID",
-        help: "SCIM connection that provisioned this user"
+        label: "ID de conexión",
+        help: "Conexión SCIM que aprovisionó a este usuario."
       },
       provisioning_domain_id: {
-        label: "Provisioning Domain"
+        label: "Dominio de aprovisionamiento"
       },
       user_id: {
-        label: "User",
-        help: "The platform user this projection materialized as"
+        label: "Usuario",
+        help: "Usuario de la plataforma en el que se materializó esta proyección."
       },
       connection_user_key: {
-        label: "Connection User Key",
-        help: "Derived (connection, user) uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de conexión y usuario",
+        help: "Clave derivada de unicidad (conexión, usuario) que mantiene @better-auth/scim; no la escribas directamente."
       },
       user_name: {
-        label: "User Name",
-        help: "SCIM userName as sent by the IdP"
+        label: "Nombre de usuario",
+        help: "userName de SCIM tal como lo envía el IdP."
       },
       user_name_key: {
-        label: "User Name Key",
-        help: "Derived case-folded userName uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave del nombre de usuario",
+        help: "Clave derivada de unicidad del userName, sin distinción de mayúsculas, que mantiene @better-auth/scim; no la escribas directamente."
       },
       primary_email: {
-        label: "Primary Email"
+        label: "Correo principal"
       },
       work_email_value_index: {
-        label: "Work Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "Índice del correo del trabajo",
+        help: "Índice de búsqueda derivado que mantiene @better-auth/scim; no lo escribas directamente."
       },
       email_value_index: {
-        label: "Email Index",
-        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+        label: "Índice del correo",
+        help: "Índice de búsqueda derivado que mantiene @better-auth/scim; no lo escribas directamente."
       },
       display_name: {
-        label: "Display Name"
+        label: "Nombre visible"
       },
       formatted_name: {
-        label: "Formatted Name"
+        label: "Nombre con formato"
       },
       given_name: {
-        label: "Given Name"
+        label: "Nombre de pila"
       },
       family_name: {
-        label: "Family Name"
+        label: "Apellidos"
       },
       serialized_emails: {
-        label: "Emails (serialized)",
-        help: "Canonical serialized SCIM emails list maintained by @better-auth/scim; do not write directly."
+        label: "Correos (serializados)",
+        help: "Lista canónica serializada de correos SCIM que mantiene @better-auth/scim; no la escribas directamente."
       },
       serialized_attributes: {
-        label: "Attributes (serialized)",
-        help: "Canonical serialized SCIM attributes maintained by @better-auth/scim; do not write directly."
+        label: "Atributos (serializados)",
+        help: "Atributos SCIM canónicos serializados que mantiene @better-auth/scim; no los escribas directamente."
       },
       external_id: {
-        label: "External ID",
-        help: "IdP-assigned externalId, when the IdP sends one"
+        label: "ID externo",
+        help: "externalId asignado por el IdP, cuando el IdP lo envía."
       },
       external_id_key: {
-        label: "External ID Key",
-        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+        label: "Clave del ID externo",
+        help: "Clave derivada de unicidad del externalId que mantiene @better-auth/scim; no la escribas directamente."
       },
       active: {
-        label: "Active",
-        help: "SCIM active flag — false means the IdP deactivated this user"
+        label: "Activo",
+        help: "Indicador active de SCIM: false significa que el IdP desactivó a este usuario."
       },
       order_key: {
-        label: "Order Key",
-        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+        label: "Clave de orden",
+        help: "Clave derivada para una paginación estable que mantiene @better-auth/scim; no la escribas directamente."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     },
     _views: {
       all: {
-        label: "All"
+        label: "Todos"
       }
     }
   },
@@ -2378,29 +2378,29 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID de notificación"
       },
       topic: {
-        label: "Topic",
-        help: "Notification topic, e.g. task.assigned, collab.mention"
+        label: "Tema",
+        help: "Tema de la notificación, p. ej., task.assigned o collab.mention."
       },
       payload: {
-        label: "Payload",
-        help: "Template inputs carried to channels (title/body/url/actor/source/…)"
+        label: "Carga útil",
+        help: "Entradas de plantilla que se envían a los canales (title/body/url/actor/source/…)."
       },
       severity: {
-        label: "Severity",
-        help: "Severity hint for rendering / filtering",
+        label: "Severidad",
+        help: "Indicación de severidad para la visualización y el filtrado.",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "Información",
+          warning: "Advertencia",
+          critical: "Crítica"
         }
       },
       suppressed_channels: {
-        label: "Suppressed Channels",
-        help: "Channels fan-out skipped because they are unavailable for this tenant, as [{channel, reason}]; reason is the closed set: transport_not_configured"
+        label: "Canales suprimidos",
+        help: "Canales que la distribución omitió porque no están disponibles para este inquilino, como [{channel, reason}]; reason es un conjunto cerrado: transport_not_configured."
       },
       dedup_key: {
-        label: "Dedup Key",
-        help: "Idempotency key within a topic window; a repeat emit is a no-op"
+        label: "Clave de deduplicación",
+        help: "Clave de idempotencia dentro de una ventana de tema; una emisión repetida no tiene efecto."
       },
       source_object: {
         label: "Objeto de origen",
@@ -2420,14 +2420,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent",
+        label: "Recientes",
         emptyState: {
-          title: "No events",
-          message: "No notification events have been emitted."
+          title: "No hay eventos",
+          message: "No se ha emitido ningún evento de notificación."
         }
       },
       by_topic: {
-        label: "By Topic"
+        label: "Por tema"
       }
     }
   },
@@ -2626,17 +2626,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Matriz JSON de {name,type,required,description}."
       },
       managed_by: {
-        label: "Managed By",
-        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from declared email_template metadata) / admin = created in Studio.",
+        label: "Gestionado por",
+        help: "Procedencia del registro: platform = integrado en el framework / package = declarado por una aplicación o paquete (sembrado al arrancar a partir de los metadatos email_template declarados) / admin = creado en Studio.",
         options: {
-          platform: "platform",
-          package: "package",
-          admin: "admin"
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
         }
       },
       customized: {
-        label: "Customized",
-        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+        label: "Personalizada",
+        help: "Se establece cuando un administrador edita una plantilla declarada por un paquete; la siembra al arrancar ya no sobrescribirá la fila (un correo de restablecimiento de contraseña reformulado se conserva tras los redespliegues). No tiene significado en las filas de administrador."
       },
       created_at: {
         label: "Creado el"
@@ -3100,7 +3100,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       recorded_by: {
         label: "Registrado por",
-        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
+        help: "Usuario que realizó este cambio. NULL = iniciado por el sistema (sincronización al arrancar, migración, tarea programada); nunca una cadena centinela."
       },
       recorded_at: {
         label: "Registrado el"
@@ -3232,8 +3232,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Estado de bloqueo",
         options: {
           none: "Ninguno",
-          nooverlay: "no-overlay",
-          nodelete: "no-delete",
+          nooverlay: "Sin superposición",
+          nodelete: "Sin eliminación",
           full: "Bloqueo total"
         }
       },
@@ -3367,7 +3367,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "All Secrets"
+        label: "Todos los secretos"
       }
     }
   },
@@ -3447,60 +3447,60 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent"
+        label: "Recientes"
       }
     }
   },
   sys_migration: {
-    label: "Data Migration",
-    pluralLabel: "Data Migrations",
-    description: "Deployment-level data-migration flags: which gated data migrations ran here and whether their self-check passed.",
+    label: "Migración de datos",
+    pluralLabel: "Migraciones de datos",
+    description: "Indicadores de migración de datos a nivel de despliegue: qué migraciones de datos con compuerta se ejecutaron aquí y si su autocomprobación fue correcta.",
     fields: {
       id: {
-        label: "Migration ID",
-        help: "Well-known migration id (e.g. adr-0104-file-references). One row per migration."
+        label: "ID de migración",
+        help: "ID conocido de la migración (p. ej., adr-0104-file-references). Una fila por migración."
       },
       last_run_at: {
-        label: "Last Run At",
-        help: "When this migration last completed a gated (apply-mode) run on this deployment."
+        label: "Última ejecución el",
+        help: "Cuándo completó esta migración por última vez una ejecución con compuerta (modo de aplicación) en este despliegue."
       },
       verified_at: {
-        label: "Verified At",
-        help: "When the self-check last PASSED. Null until it does, and cleared again by a later failing run — a regression closes the gate. Consumers require this to be set AND blocking = 0."
+        label: "Verificado el",
+        help: "Cuándo SUPERÓ por última vez la autocomprobación. Es nulo hasta que la supera y se vuelve a borrar si una ejecución posterior falla: una regresión cierra la compuerta. Los consumidores exigen que esté establecido Y que blocking = 0."
       },
       applied_at: {
-        label: "Applied At",
-        help: "When the backfill last ran in apply mode (writes enabled)."
+        label: "Aplicado el",
+        help: "Cuándo se ejecutó por última vez el relleno en modo de aplicación (escrituras habilitadas)."
       },
       blocking: {
-        label: "Blocking Discrepancies",
-        help: "Blocking discrepancies reported by the last self-check. The gate requires 0."
+        label: "Discrepancias bloqueantes",
+        help: "Discrepancias bloqueantes que notificó la última autocomprobación. La compuerta exige 0."
       },
       advisory: {
-        label: "Advisory Findings",
-        help: "Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate."
+        label: "Hallazgos informativos",
+        help: "Hallazgos informativos de la última ejecución (URL externas, propietarios obsoletos, …): consumen almacenamiento o requieren una decisión de modelado, pero nunca bloquean la compuerta."
       },
       details: {
-        label: "Details (JSON)",
-        help: "JSON-encoded counts from the last run, for diagnostics."
+        label: "Detalles (JSON)",
+        help: "Recuentos codificados en JSON de la última ejecución, para diagnóstico."
       },
       deviation_observed_at: {
-        label: "Deviation Observed At",
-        help: "When this deployment last ADMITTED a value its own verified contract rejects, through an OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the irreversible half of what the certificate authorises — byte deletion stops, validation and tombstoning continue. Cleared by the next apply-mode run."
+        label: "Desviación observada el",
+        help: "Cuándo ADMITIÓ por última vez este despliegue un valor que su propio contrato verificado rechaza, mediante una vía de escape OS_ALLOW_LAX_*. A propósito NO borra verified_at: solo retira la mitad irreversible de lo que autoriza el certificado; se detiene la eliminación de bytes y continúan la validación y la creación de lápidas. Se borra en la siguiente ejecución en modo de aplicación."
       },
       deviation_detail: {
-        label: "Deviation Detail (JSON)",
-        help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
+        label: "Detalle de la desviación (JSON)",
+        help: "Primer contraejemplo codificado en JSON detrás de deviation_observed_at (objeto, campo, tipo, problema de análisis), para que un operador pueda encontrar el valor que cerró la compuerta irreversible."
       },
       columns_moved_at: {
-        label: "Columns Moved At",
-        help: "When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume."
+        label: "Columnas movidas el",
+        help: "Cuándo completó este despliegue por última vez el MOVIMIENTO DE COLUMNAS de esta migración: el paso que cambia el tipo de las columnas migradas y reescribe sus valores con la nueva codificación. Es una prueba distinta de applied_at y verified_at, que solo acreditan el relleno y su autocomprobación: un despliegue puede tener ambos y seguir almacenando la codificación heredada. Un valor nulo indica exactamente eso y es un estado estable esperado, no un error: es lo que debe suponer un consumidor que no pueda leer este campo."
       },
       created_at: {
-        label: "Created At"
+        label: "Creado el"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Actualizado el"
       }
     }
   }

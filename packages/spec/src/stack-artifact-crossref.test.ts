@@ -345,7 +345,10 @@ describe('#18202 — an input that bypassed the strict parse IS checked at compo
   const unparsedApp = (grantObject: string, seedObject: string) =>
     defineStack(appConfig(grantObject, seedObject), { strict: false });
 
-  /** The same config as a hand-built object — it never enters `defineStack` at all. */
+  /**
+   * The same config as a hand-built object — it never enters `defineStack` at
+   * all, so it carries no provenance mark (`stack-provenance.ts`).
+   */
   const handBuiltApp = (grantObject: string, seedObject: string) =>
     appConfig(grantObject, seedObject) as unknown as ReturnType<typeof defineStack>;
 
@@ -374,13 +377,19 @@ describe('#18202 — an input that bypassed the strict parse IS checked at compo
     expect(refused?.issues).toContain(SEED_ON_NOWHERE);
   });
 
-  it('REFUSES a hand-built stack object on the same two rules', () => {
+  it('REFUSES a hand-built stack object before either rule runs — it was never built (#20367 ruling B)', () => {
+    // Since ruling B a hand-built object no longer reaches the artifact pass:
+    // `composeStacks` refuses an input no stack producer built at its step 0,
+    // naming the input, so the two rules above never get to run on it. The
+    // refusal is the stronger one — the same dangling references inside
+    // `defineStack({ … })` are refused per stack, and the `strict: false` tests
+    // above keep the artifact pass itself pinned.
     const refused = refusalOf(() =>
       composeStacks([serviceStack(), handBuiltApp(NOWHERE, NOWHERE)], { manifest: 'preserve' }),
     );
-    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
-    expect(refused?.issues).toContain(GRANT_ON_NOWHERE);
-    expect(refused?.issues).toContain(SEED_ON_NOWHERE);
+    expect(refused?.code).toBe('STACK_PROVENANCE_MISSING');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues).toEqual([`'${appManifest.id}' (stack #1)`]);
   });
 
   it('leaves every OTHER rule un-applied to an unparsed input — only these two cross', () => {
@@ -429,14 +438,24 @@ describe('#18202 — a malformed collection on an unparsed input is skipped or r
     }
   }
 
+  /**
+   * A BUILT stack whose keys were rewritten after `defineStack` returned: the
+   * provenance mark survives an in-place mutation, so this — not a hand-built
+   * literal, which composition now refuses at step 0 (#20367 ruling B) — is the
+   * route by which a malformed collection still reaches the artifact pass.
+   */
   const malformed = (overrides: Record<string, unknown>) =>
-    anyStack({ manifest: appManifest, objects: [account], ...overrides }) as unknown as ReturnType<typeof defineStack>;
+    Object.assign(defineStack(anyStack({}), { strict: false }), {
+      manifest: appManifest,
+      objects: [account],
+      ...overrides,
+    }) as unknown as ReturnType<typeof defineStack>;
 
   const composeWith = (stack: ReturnType<typeof defineStack>) => () =>
     composeStacks([serviceStack(), stack], { manifest: 'preserve' });
 
   it('a non-array `permissions` is refused by the concat pass, never a bare TypeError (#19784)', () => {
-    // Map format on a hand-built stack (only `defineStack` normalizes it). It
+    // Map format written onto a built stack (only `defineStack` normalizes it). It
     // is NOT iterable, which is what makes this the case that distinguishes a
     // guard from a bare `TypeError`: a string value would iterate its
     // characters and never throw either way.

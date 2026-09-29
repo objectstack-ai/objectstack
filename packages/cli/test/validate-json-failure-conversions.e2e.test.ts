@@ -1,6 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
+ * ⚠️ RE-JUDGED under the one-authoring-shape ruling (#20367). The command now
+ * refuses a default export `defineStack` did not build, and `defineStack`
+ * applies every ADR-0087 D2 conversion itself at load (either mode), reporting
+ * it on stderr. So the door's step-2 sink converts nothing for any accepted
+ * config and every exit below carries `conversions: []` — which is still
+ * exactly "what the run computed". The pins now assert that, plus the live
+ * notice on the producer's stderr line (`expectTheOneNotice`). Whether the
+ * producer's notices should reach this envelope is an open question the PR
+ * reports; it was not this change's to decide.
+ *
  * #12125 — `os validate --json`'s FAILURE payloads dropped the `conversions`
  * field the run had ALREADY COMPUTED, on all five of its failure exits.
  *
@@ -94,6 +104,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -145,7 +156,9 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extraFields?: string } = {}): string {
   const { pageKind = 'jsx', requires = [], extraFields = '' } = opts;
   return `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
   pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
@@ -159,7 +172,7 @@ export default {
       },
     },
   ],
-};
+}, { strict: false });
 `;
 }
 
@@ -192,10 +205,18 @@ const THE_NOTICE = {
  * Asserts the payload carries EXACTLY the one computed notice. `toEqual` over
  * the whole array is the "and NO MORE" half.
  */
-function expectTheOneNotice(payload: Record<string, unknown>, label: string): void {
-  expect(conversionsOf(payload), `${label}: expected exactly the one computed conversion notice`).toEqual([
-    expect.objectContaining(THE_NOTICE),
-  ]);
+function expectTheOneNotice(payload: Record<string, unknown>, label: string, run: Run): void {
+  // [#20367 ruling B] Re-judged. The door accepts only `defineStack` output,
+  // and `defineStack` applies the D2 conversion at load (either mode) and
+  // reports it on stderr — so the notice is computed by the PRODUCER, and the
+  // door's own step-2 sink has nothing left to convert. What this exit carries
+  // is therefore exactly what the door computed: `[]`, asserted whole. The
+  // notice itself is asserted where it now lives — the producer's stderr line,
+  // by conversion id AND path, so a different conversion cannot satisfy it.
+  expect(conversionsOf(payload), `${label}: the door computes no conversion for a defineStack export`).toEqual([]);
+  expect(run.stderr, `${label}: the producer reported the conversion at load`).toContain(
+    `defineStack: ${THE_NOTICE.path}: '${THE_NOTICE.from}' → '${THE_NOTICE.to}' (converted at load; conversion '${THE_NOTICE.conversionId}'`,
+  );
 }
 
 const dirs: Record<string, string> = {};
@@ -208,6 +229,7 @@ beforeAll(() => {
     mkdirSync(dir, { recursive: true });
     if (docs.length > 0) mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    linkSpec(dir);
     for (const [file, body] of docs) writeFileSync(join(dir, 'src', 'docs', file), body);
     dirs[name] = dir;
     return dir;
@@ -242,7 +264,9 @@ beforeAll(() => {
   // catch-all, AT LOAD — the config throws on import, ABOVE step 2.
   make('earlythrow', `
 throw new Error('zzz_config_module_threw');
-export default {};
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({}, { strict: false });
 `);
 
   // The control — the same shape, reaching SUCCESS.
@@ -262,9 +286,10 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     expect(run.code, `expected the control to pass:\n${run.stdout}${run.stderr}`).toBe(0);
     const payload = payloadOf(run, 'control');
     expect(payload.valid).toBe(true);
-    expectTheOneNotice(payload, 'control');
+    expectTheOneNotice(payload, 'control', run);
     // The expiry is the reason this field cannot just be dropped into prose.
-    expect(typeof (conversionsOf(payload)[0] as { retiresIn?: unknown }).retiresIn).toBe('number');
+    // The expiry still reaches the author — on the producer's line.
+    expect(run.stderr).toMatch(/conversion 'page-kind-jsx-to-html', retires in protocol \d+\)/);
   }, 120_000);
 
   it('parse failure — THE HEADLINE: the notice computed at step 2 survives the schema error', async () => {
@@ -273,7 +298,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     const payload = payloadOf(run, 'parsefail');
     expect(payload.valid).toBe(false);
     expect(Array.isArray(payload.errors), 'the parse exit reports under `errors`').toBe(true);
-    expectTheOneNotice(payload, 'parsefail');
+    expectTheOneNotice(payload, 'parsefail', run);
   }, 120_000);
 
   it('⭐ converts nothing — the SAME exit reports `[]`, so the field tracks the run', async () => {
@@ -286,6 +311,8 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     expect(payload.valid).toBe(false);
     expect('conversions' in payload, 'the field must be PRESENT even when empty').toBe(true);
     expect(payload.conversions, 'a canonical page kind converts nothing').toEqual([]);
+    // …and, since the producer is what converts now, raised no notice at load either.
+    expect(run.stderr).not.toContain("conversion 'page-kind-jsx-to-html'");
   }, 120_000);
 
   it('rule errors — the notice rides the author-time gate', async () => {
@@ -294,7 +321,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     const payload = payloadOf(run, 'rulefail');
     expect(payload.valid).toBe(false);
     expect((payload.errors as Array<{ rule: string }>).map((i) => i.rule)).toContain('expression-invalid');
-    expectTheOneNotice(payload, 'rulefail');
+    expectTheOneNotice(payload, 'rulefail', run);
   }, 120_000);
 
   it('capability errors — the notice rides the #3366 preflight gate', async () => {
@@ -303,7 +330,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     const payload = payloadOf(run, 'capfail');
     expect(payload.valid).toBe(false);
     expect((payload.errors as Array<{ token: string }>).map((i) => i.token)).toEqual([FATAL_TOKEN]);
-    expectTheOneNotice(payload, 'capfail');
+    expectTheOneNotice(payload, 'capfail', run);
   }, 120_000);
 
   it('doc errors — the notice rides the ADR-0046 docs gate', async () => {
@@ -312,7 +339,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     const payload = payloadOf(run, 'docsfail');
     expect(payload.valid).toBe(false);
     expect((payload.errors as Array<{ rule: string }>).map((i) => i.rule)).toEqual(['docs/namespace-prefix']);
-    expectTheOneNotice(payload, 'docsfail');
+    expectTheOneNotice(payload, 'docsfail', run);
   }, 120_000);
 
   it('catch-all (late throw) — a THROWN failure still reports the computed notice', async () => {
@@ -323,7 +350,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     expect(run.code, `expected the docs read to throw:\n${run.stdout}${run.stderr}`).toBe(1);
     const payload = payloadOf(run, 'thrown');
     expect(String(payload.error)).toContain('ENOTDIR');
-    expectTheOneNotice(payload, 'thrown');
+    expectTheOneNotice(payload, 'thrown', run);
   }, 120_000);
 
   it('catch-all (throw at load) — `conversions` is PRESENT and empty, because step 2 never ran', async () => {

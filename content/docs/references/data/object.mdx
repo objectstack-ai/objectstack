@@ -354,7 +354,7 @@ const result = ApiMethod.parse(data);
 | **field** | `string` | ✅ | Field to watch (typically a status/stage select). |
 | **value** | `string` | ✅ | The value the field must transition INTO to fire the milestone. |
 | **summary** | `string` | ✅ | Activity summary template; `{field}` tokens interpolate the record value. e.g. "Deal won: `{name}`". |
-| **type** | `string` | optional | Activity type for the emitted row (default "completed"). |
+| **type** | `string` | optional | Activity type for the emitted row — left unset, it keeps the update row's kind, "updated" (a milestone only fires on an update). |
 
 ### Nested Shape: `Object.listViews[string]`
 

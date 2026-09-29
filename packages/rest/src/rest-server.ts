@@ -3716,6 +3716,16 @@ export class RestServer {
      * old spelling answers *the same body* — two copies would let that stop
      * being true without anything failing.
      *
+     * [#20478] …and behind two TRANSPORTS: everything after the store read is
+     * `createMetaLayeredAnswer` in `./meta-item-read-gate.ts` — THE per-caller
+     * gate on every layer under the stored-version doors' policy (#20156,
+     * ruling 5856774816: whole for whoever may write the item, pruned as the
+     * plain read prunes it for everyone else) and the ADR-0106 mask on every
+     * layer with its cache posture — which the runtime dispatcher serves both
+     * spellings through too. ⛔ A step is added there, never here. The read
+     * stays this transport's, scoped by `metaReadOrganizationId`, the one
+     * answer the dispatcher's layered read asks.
+     *
      * Not translated and not cached, both deliberately: this is a diagnostic
      * view of what is STORED at each layer, so locale-collapsing it (or serving
      * it from the published-value cache) would misreport the thing being
@@ -3752,11 +3762,12 @@ export class RestServer {
         // why naming the org unconditionally would resurrect #6190's phantoms).
         const layeredCtx = await this.resolveExecCtx(environmentId, req)
             .catch(rethrowAuthzStoreUnavailable);
-        const layeredOrganizationId = organizationIdForMetaRead(
-            // [#10340] FOLDED, not raw — see the PUT door's org-scope comment
-            // for the measurement.
-            canonicalMetaUrlType(req.params.type), layeredCtx?.tenantId,
-        );
+        // [folded-type commit 26f3588fb] (the original card no longer
+        // resolves) FOLDED, not raw — see the PUT door's org-scope comment for
+        // the measurement. [#20478] Asked of `metaReadOrganizationId` (the
+        // same fold over the vetted `tenantId`), the one answer the runtime
+        // dispatcher's layered read asks too.
+        const layeredOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, layeredCtx);
         // [#9741] This door never carried an `as any`, but `p: any` meant its
         // request literal was never checked either — the same blind spot with
         // a different spelling. Typing the literal (spec shape + the
@@ -3770,61 +3781,26 @@ export class RestServer {
             ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         };
         const layered = await p.getMetaItemLayered(layeredRequest);
-        // [#20156] The per-caller read gate, on EVERY layer. This view used to
-        // run none of the plain read's gates, so a member the plain read refuses
-        // `crm_admin_runbook` read its body here — and an anonymous caller read
-        // any doc or book through the deprecated `?layers=true`, which sits on
-        // the publicly-reachable book/doc route. Each present layer is judged,
-        // `effective` first (it is what the plain read serves, so its refusal is
-        // the plain read's own), then `code` and `overlay`: a layer the caller
-        // may not read is not served beside one they may. `per-caller` because
-        // these are STORED versions, loaded by Studio's designer and saved
-        // back.
-        //
-        // [#20156] Each layer is SERVED as the gate serves it, never as
-        // stored: ruling 5856774816 — a caller who may write an app reads
-        // every layer whole, and any other caller who may open it reads each
-        // layer pruned, exactly as the plain read prunes it (see
-        // `MetaReadGatePolicy.app`). Every layer is judged before any is
-        // replaced, so a refusal sends nothing of the others.
-        {
-            const metaType = RestServer.metaTypeSingular(req.params.type);
-            const present = (['effective', 'code', 'overlay'] as const)
-                .filter((layer) => (layered as any)?.[layer] != null);
-            const judge = this.metaItemReadGate(
-                environmentId, req, p, metaType, req.params.name,
-                present.map((layer) => (layered as any)[layer]),
-                RestServer.STORED_VERSION_DOOR_POLICY,
-            );
-            const served = new Map<(typeof present)[number], unknown>();
-            for (const layer of present) {
-                const verdict = await judge((layered as any)[layer]);
-                if (verdict.kind === 'refuse') {
-                    verdict.send(res);
-                    return;
-                }
-                served.set(layer, verdict.document);
-            }
-            for (const [layer, document] of served) (layered as any)[layer] = document;
+        // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
+        // the shared chain. The stored-version doors honour the author
+        // exemption, so the caller carries this transport's save-door
+        // admission (`metaItemReadGateSources(…, true)`).
+        const answer = await metaReadGate.createMetaLayeredAnswer(
+            this.metaItemReadGateSources(environmentId, req, p, true),
+            { metaType: RestServer.metaTypeSingular(req.params.type), name: req.params.name, maskPosture },
+        )(layered);
+        switch (answer.kind) {
+            case 'refuse':
+                RestServer.sendMetaReadRefusal(res, answer.refusal);
+                return;
+            case 'mask-fault':
+                sendFieldVisibilityFault(res, answer.object);
+                return;
+            case 'serve':
+                if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
+                res.json(answer.layered);
+                return;
         }
-        // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
-        // `code`, `overlay` and `effective` are each a full object schema.
-        // Both entry points (the canonical `/layers` path and the deprecated
-        // `?layers=` flag) pass their request's resolved posture in, so the
-        // extraction cannot turn the mask into a one-entry-point detour.
-        if (maskPosture.kind === 'project') {
-            for (const layer of ['code', 'overlay', 'effective'] as const) {
-                const masked = this.maskObjectDocument(
-                    res, maskPosture, req.params.name, (layered as any)?.[layer],
-                );
-                if (!masked) return;
-                if (layered && typeof layered === 'object') (layered as any)[layer] = masked.document;
-            }
-        }
-        if (maskPosture.kind === 'undetermined') {
-            res.header('Cache-Control', 'private, no-store');
-        }
-        res.json(layered);
     }
 
     /**
@@ -4824,6 +4800,45 @@ export class RestServer {
     }
 
     /**
+     * The served OpenAPI `info`: the bundled artifact's, with the identity
+     * members the host authored in `api.documentation` laid over it (#20294,
+     * ruling B on #20359 — ADR-0049 enforce-or-remove, the ENFORCE half).
+     *
+     * - Nothing authored (no block, `{}`, or only unset members) answers
+     *   `bundled` ITSELF, so the served block is byte-identical to the
+     *   artifact's — #11646's whole-block invariant, now the unset case.
+     * - Anything authored answers a NEW object and never writes into
+     *   `bundled`, which is the cached artifact's own `info`: a write there
+     *   would serve one request's overlay to every later request.
+     * - `title`, `description` and `termsOfService` overlay key by key.
+     * - `contact` and `license` REPLACE the bundled object whole: a member the
+     *   host left out is absent, never inherited, so `license: { name: 'MIT' }`
+     *   is not published at the bundled Apache-2.0 URL.
+     * - `version` is never read. It is a `retiredKey()` tombstone the
+     *   construction-time parse refuses, and `info.version` stays the
+     *   artifact's — the protocol version (#11646).
+     *
+     * Pure: its only inputs are its two arguments. The overlaid members are a
+     * closed list on purpose — the parsed block carries nothing else live, and
+     * a spread of it would publish whatever a later schema member meant for
+     * something other than `info`.
+     */
+    private static overlayDocumentationInfo(
+        bundled: Record<string, unknown> | undefined,
+        documentation: NormalizedRestServerConfig['api']['documentation'],
+    ): Record<string, unknown> | undefined {
+        if (!documentation) return bundled;
+        const authored: Record<string, unknown> = {};
+        if (documentation.title !== undefined) authored.title = documentation.title;
+        if (documentation.description !== undefined) authored.description = documentation.description;
+        if (documentation.termsOfService !== undefined) authored.termsOfService = documentation.termsOfService;
+        if (documentation.contact !== undefined) authored.contact = { ...documentation.contact };
+        if (documentation.license !== undefined) authored.license = { ...documentation.license };
+        if (Object.keys(authored).length === 0) return bundled;
+        return { ...bundled, ...authored };
+    }
+
+    /**
      * Register OpenAPI 3.1 spec + interactive docs viewer.
      *
      *   GET <basePath>/openapi.json   → enriched OpenAPI document
@@ -4863,7 +4878,11 @@ export class RestServer {
      * the cost of regenerating on every request, and a missing or
      * malformed file degrades to a stub instead of crashing. What survives
      * from it is what `packages/spec` genuinely owns: `components.schemas`,
-     * `info`, `securitySchemes` (and the document-level `security`).
+     * `info`, `securitySchemes` (and the document-level `security`) — with
+     * one addition to `info` since #20294: the publisher's identity members
+     * the host authored in `api.documentation` are laid over it, see
+     * {@link RestServer.overlayDocumentationInfo}. `info.version` stays the
+     * artifact's.
      */
     private registerOpenApiEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
@@ -5019,25 +5038,39 @@ export class RestServer {
                     logError('[REST] openapi.json endpoint enrichment skipped:', err?.message ?? err);
                 }
 
-                // `info` is passed through from the artifact UNTOUCHED — the
-                // whole block, version included. `packages/spec` produces it
-                // (`build-openapi.ts`, pinned by `openapi-self-consistency.test.ts`)
-                // and owns it, so the served document and the published
-                // `@objectstack/spec/openapi.json` export now state the same
-                // fact about the same field (#11646). This handler enriches
-                // `paths` and `servers`; it writes nothing into `info`.
+                // 5) `info`: the artifact's, with the publisher's identity laid
+                //    over it (#20294, ruling B on #20359). `packages/spec`
+                //    produces the block (`build-openapi.ts`, pinned by
+                //    `openapi-self-consistency.test.ts`); the host may sign it
+                //    with the identity members of `api.documentation` —
+                //    `title`, `description`, `termsOfService`, and `contact` /
+                //    `license` each replaced whole. Nothing authored serves the
+                //    artifact's `info` byte for byte, so the served document and
+                //    the published `@objectstack/spec/openapi.json` export still
+                //    state the same fact about every field nobody signed
+                //    (#11646's invariant, now the unset case). The same closure
+                //    serves this base and its environment-scoped twin, so both
+                //    doors carry the overlay. The helper returns a NEW object:
+                //    `enriched.info` is still the cached artifact's own `info`
+                //    here (the clone above is shallow), and writing into it
+                //    would leak one request's overlay into every later one.
                 //
-                // The API version identifier this deployment declares
-                // (`api.version`, which `normalizeConfig` defaults to `'v1'`)
-                // is not lost — it lives where it is observable, in the mount
-                // `${basePath}/${version}` -> `/api/v1`. The runtime version
-                // is answered by `{basePath}/discovery` and `/health`, derived
-                // from `OS_RUNTIME_VERSION` (#10993/#11235/#11292). OpenAPI
-                // 3.1 defines this field as "the version of the OpenAPI
-                // document (which is distinct from the OpenAPI Specification
-                // version or the API implementation version)" — the document
-                // being served IS the artifact, so its version is the
-                // artifact's.
+                //    `info.version` is NOT publisher identity, and nothing here
+                //    writes it: it stays the artifact's — the protocol version
+                //    (#11646) — and `api.documentation.version` is a retired
+                //    tombstone the construction-time parse already refused. The
+                //    API version identifier this deployment declares
+                //    (`api.version`, which `normalizeConfig` defaults to `'v1'`)
+                //    lives where it is observable, in the mount
+                //    `${basePath}/${version}` -> `/api/v1`. The runtime version
+                //    is answered by `{basePath}/discovery` and `/health`, derived
+                //    from `OS_RUNTIME_VERSION` (#10993/#11235/#11292). OpenAPI
+                //    3.1 defines this field as "the version of the OpenAPI
+                //    document (which is distinct from the OpenAPI Specification
+                //    version or the API implementation version)" — the document
+                //    being served IS the artifact, so its version is the
+                //    artifact's.
+                enriched.info = RestServer.overlayDocumentationInfo(enriched.info, this.config.api.documentation);
 
                 res.json(enriched);
             } catch (error: any) {
@@ -6256,19 +6289,36 @@ export class RestServer {
                         // headers, so a client can discover the migration without
                         // reading the changelog. Delete this branch (and the
                         // headers with it) once the callers have moved.
-                        const wantLayered = req.query?.layers !== undefined && req.query?.layers !== '';
+                        //
+                        // [#20478] The flag's parse (`wantsMetaItemLayers`) and its
+                        // headers (`metaItemLayersDeprecationHeaders`: RFC 9745
+                        // `Deprecation` + RFC 8288 `Link` to the successor) are the
+                        // ones the runtime dispatcher's item read asks too, so the
+                        // deprecated spelling is one answer on both transports.
+                        //
+                        // [#20508] The `Link` names the path THIS request arrived
+                        // on (`IHttpRequest.path`), read the way the dispatcher
+                        // reads its request URL (`requestedItemPath`, runtime
+                        // `domains/meta.ts`): parsed as a URL path, without its
+                        // trailing slash. ⛔ Never `metaPath` — on the
+                        // environment-scoped mount that is the route TEMPLATE, and
+                        // the successor read `/environments/:environmentId/…/layers`,
+                        // a path no client can request. The parse is what keeps the
+                        // path a valid URI reference: the Hono adapter hands over a
+                        // `decodeURI`'d path (`lead%20all` arrives as `lead all`),
+                        // and the parse percent-encodes it again. A request with no
+                        // path names no successor: `Deprecation` alone, as the
+                        // helper prescribes for a transport that cannot say where
+                        // it serves the item.
+                        const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
-                            // RFC 9745 `Deprecation` + RFC 8288 `Link` — the same
-                            // machine-readable pairing `versioning.zod.ts` already
-                            // describes for retiring API versions, applied to a
-                            // retiring query flag. No `Sunset` date: choosing the
-                            // hard cut-off is a maintainer call, and an invented
-                            // date is worse than none.
-                            res.header('Deprecation', 'true');
-                            res.header(
-                                'Link',
-                                `<${metaPath}/${req.params.type}/${req.params.name}/layers>; rel="successor-version"`,
+                            const requestPath: unknown = req.path;
+                            const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
+                                typeof requestPath === 'string' && requestPath.startsWith('/')
+                                    ? new URL(`http://rest-server.invalid${requestPath}`).pathname.replace(/\/+$/, '') || undefined
+                                    : undefined,
                             );
+                            for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
                             await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
                             return;
                         }
@@ -8031,7 +8081,7 @@ export class RestServer {
                 }
             },
             metadata: {
-                summary: 'Diff two metadata versions (from/to query params; omit for previous-vs-current)',
+                summary: 'Diff two metadata versions (from/to query params; to defaults to the active version, from to the nearest earlier version whose body differs)',
                 tags: ['metadata'],
             },
         });

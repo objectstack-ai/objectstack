@@ -344,7 +344,7 @@ describe('RangeOperatorSchema', () => {
   });
 
   // ==========================================================================
-  // #6571 — BOTH endpoints accept the STRING the platform itself produces.
+  // Commit 2f3e79351 — BOTH endpoints accept the STRING the platform itself produces.
   //
   // Before this was pinned each endpoint union was `number | Date |
   // FieldReference`, so every accepted shape below threw — including the shape
@@ -463,7 +463,7 @@ describe('RangeOperatorSchema', () => {
   // REMOVE — declared = enforced (ADR-0049).
   //
   // The tests above this block asserted the ACCEPTANCE of exactly these shapes
-  // (#6571 pinned `['2026-01-01', { $field: 'contract.end_date' }]` and
+  // (commit 2f3e79351 pinned `['2026-01-01', { $field: 'contract.end_date' }]` and
   // `[{ $field: 'a.min' }, { $field: 'a.max' }]`); they are flipped here rather
   // than deleted, so the removal is pinned in the same place the declaration
   // was.
@@ -583,7 +583,7 @@ describe('RangeOperatorSchema', () => {
   });
 
   // ==========================================================================
-  // #18012 — a BLANK endpoint is ruled out, in both endpoint unions and in both
+  // Commit 176b03582 — a BLANK endpoint is ruled out, in both endpoint unions and in both
   // copies of the schema. Ruled 2026-09-17 (decision batch #146 item 5, letter
   // A): `$between` requires two endpoints that are present and non-empty.
   //
@@ -1085,7 +1085,7 @@ describe('TypeScript Type System', () => {
   });
 
   /**
-   * #6571 — the TYPED half of the range contract, the exact mirror of the
+   * Commit 2f3e79351 — the TYPED half of the range contract, the exact mirror of the
    * ordering block above. Checked by `pnpm typecheck`, NOT by the runtime
    * expectation below: vitest never typechecks, so reverting `filter.zod.ts`
    * leaves this test GREEN under vitest and RED under `tsc`. Measured on the

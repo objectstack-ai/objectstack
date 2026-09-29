@@ -98,14 +98,19 @@ function routeFor(rest: RestServer, path: string) {
     return (rest as any).getRoutes().find((r: any) => r.method === 'GET' && r.path === path);
 }
 
-async function dispatch(protocol: any, path: string, params: any, query: any = {}) {
+/**
+ * `requestPath` is the request's own path (`IHttpRequest.path`), which the
+ * deprecated spelling's successor `Link` is built from (#20508). Omitted, the
+ * request carries none, as a request built by hand may.
+ */
+async function dispatch(protocol: any, path: string, params: any, query: any = {}, requestPath?: string) {
     const rest = new RestServer(mockServer() as any, protocol as any, ANON_API as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
     rest.registerRoutes();
     const route = routeFor(rest, path);
     if (!route) throw new Error(`route not registered: GET ${path}`);
     const res = mockRes();
-    await route.handler({ params, query, headers: {} }, res);
+    await route.handler({ params, query, headers: {}, ...(requestPath === undefined ? {} : { path: requestPath }) }, res);
     return { res, body: res.json.mock.calls.at(-1)?.[0] };
 }
 
@@ -204,11 +209,23 @@ describe('#5882 `?layers=true` — the deprecation window', () => {
     it('advertises the successor path in machine-readable headers', async () => {
         const { res } = await dispatch(
             baseProtocol(), ITEM_PATH, { type: 'object', name: 'customer' }, { layers: 'true' },
+            '/api/v1/meta/object/customer',
         );
         expect(res.header).toHaveBeenCalledWith('Deprecation', 'true');
         expect(res.headers.Link).toBe(
             '</api/v1/meta/object/customer/layers>; rel="successor-version"',
         );
+    });
+
+    it('names no successor when the request carries no path of its own (#20508)', async () => {
+        // The `Link` is built from the path the request arrived on, never from
+        // the route template. A request with none is still deprecated, and says
+        // so, but advertises no successor it cannot locate.
+        const { res } = await dispatch(
+            baseProtocol(), ITEM_PATH, { type: 'object', name: 'customer' }, { layers: 'true' },
+        );
+        expect(res.header).toHaveBeenCalledWith('Deprecation', 'true');
+        expect(res.headers).not.toHaveProperty('Link');
     });
 
     it('does not mark the ordinary read deprecated', async () => {

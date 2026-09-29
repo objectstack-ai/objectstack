@@ -39,11 +39,12 @@ the rows path add exact decimals and round once. It was rejected because SQLite'
 adds the stored doubles (`0.30000000000000004`), so the rows path would then disagree with SQLite
 for exactly `0.1 + 0.2`.
 
-**Residual, stated.** Double sums are added in row order, one after another, as the rows path
-adds them. SQLite 3.43 and later adds with compensated summation. So for a group of three or
-more fractions, SQLite's native answer can still differ from every other face in the last
-place (`0.1 + 0.2 + 0.3`: SQLite `0.6`, every other face `0.6000000000000001`). This was
-already true of SQLite's two paths before this change. Two addends cannot differ.
+**Residual, stated.** On PostgreSQL and MySQL the double sums are added in row order, one after
+another, without compensation. SQLite 3.43 and later adds with compensated summation, and since
+#20489 so does the engine's rows path. So for a group of three or more fractions, the PostgreSQL
+and MySQL native answer can still differ from SQLite's and the rows path's in the last place
+(`0.1 + 0.2 + 0.3`: PostgreSQL / MySQL native `0.6000000000000001`, SQLite and the rows path
+`0.6`). Before #20489, SQLite's own two paths differed there too. Two addends cannot differ.
 
 A consumer that compared `sum` / `avg` over a fractional column with a decimal literal on
 PostgreSQL or MySQL (`$eq: 0.3`) now gets the answer SQLite and the rows path already gave:

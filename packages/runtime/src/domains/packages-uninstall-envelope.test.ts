@@ -66,10 +66,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+// [#20492] The caller acts in an organization: an uninstall that names none is
+// refused before the registry is touched (as the persisted delete itself
+// does), so it would never reach the persisted outcomes this file pins.
 const authed = (caps: string[] = ['manage_metadata']): any => ({
     request: {},
     environmentId: 'platform',
-    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: caps },
+    executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: caps, tenantId: 'org_acme' },
 });
 
 function make(deletePackageResult: any, opts: { registryRemoved?: boolean } = {}) {

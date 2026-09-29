@@ -77,7 +77,7 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 };
 
 /**
- * `params`' lookup-steering keys, retired in the 17.x line (#10329, ADR-0049).
+ * `params`' lookup-steering keys, retired in the 17.x line (commit 15d58dbf1, ADR-0049).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
  * reference-resolution dialect that the import path never implemented:
@@ -86,8 +86,8 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  * `import-coerce.ts`, driven by the TARGET FIELD's own metadata — never by
  * these keys. Implementing them was considered and declined (a second
  * reference-resolution dialect on the import path; the code comment in
- * `packages/rest/src/import-mapping.ts` declines it and the #10329 triage
- * ruling confirms), so under ADR-0049 they go.
+ * `packages/rest/src/import-mapping.ts` declines it and the triage ruling
+ * commit 15d58dbf1 landed confirms), so under ADR-0049 they go.
  *
  * `autoCreate` is the one with teeth: it reads as "create the referenced
  * record when nothing matches", and what actually happens — with or without
@@ -236,7 +236,7 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
       // NOTE: `lookupObject` / `targetObject` / `match` / `matchOn` /
       // `matchField` / `keyField` / `returnField` / `valueField` / `create` /
       // `createIfMissing` / `upsert` were aliases onto the four lookup keys
-      // removed in the 17.x line (#10329). An alias pointing at a key that no
+      // removed in the 17.x line (commit 15d58dbf1). An alias pointing at a key that no
       // longer exists routes the author into a second rejection, so their
       // spellings fall through to the `guidance` prescriptions instead —
       // the 17.0.0 (#4509) treatment, one level down.
@@ -249,7 +249,7 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
     value: z.unknown().optional(),
 
     // `object` / `fromField` / `toField` / `autoCreate` — the `lookup`
-    // transform's steering keys — were removed in the 17.x line (#10329,
+    // transform's steering keys — were removed in the 17.x line (commit 15d58dbf1,
     // ADR-0049); see PARAMS_RETIRED_KEY_GUIDANCE above. The live mechanism:
     // `lookup` copies the cell through and the import pipeline resolves the
     // reference from the target field's own metadata (`import-coerce.ts`),

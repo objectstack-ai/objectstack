@@ -214,6 +214,7 @@
     "formatUnknownAuthoringKey": "src/data/authoring-key-lint.ts#formatUnknownAuthoringKey (function)",
     "formatZodError": "src/shared/error-map.zod.ts#formatZodError (function)",
     "formatZodIssue": "src/shared/error-map.zod.ts#formatZodIssue (function)",
+    "hasStackProvenance": "src/stack-provenance.ts#hasStackProvenance (function)",
     "isAggregatedViewContainer": "src/ui/view.zod.ts#isAggregatedViewContainer (function)",
     "isKnownPlatformCapability": "src/kernel/platform-capabilities.ts#isKnownPlatformCapability (function)",
     "isViewContainerShaped": "src/ui/assembled-views.zod.ts#isViewContainerShaped (function)",

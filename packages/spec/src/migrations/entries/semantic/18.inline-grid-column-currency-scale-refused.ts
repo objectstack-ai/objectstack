@@ -13,9 +13,9 @@ export const entry: SemanticMigration = {
     + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
     + 'any other key.',
   reason:
-    'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retired `scale` from the '
-    + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
-    + 'ISO 4217 minor unit decides its display) worded the remedy. Neither reached the inline grid '
+    'The maintainer\'s ruling of 2026-09-23 (option B) retired `scale` from the `currency` field '
+    + 'type, and the ruling of 2026-09-24 (option 乙 — a currency\'s ISO 4217 minor unit decides its '
+    + 'display) worded the remedy. Neither reached the inline grid '
     + 'column, the strict mirror of the console grid\'s column, which still offered per-column '
     + 'decimals on a `currency` column; triage read the column as inherited from both rulings, so '
     + '`InlineGridColumnSchema` now refuses the key on a column declaring `type: \'currency\'` at '

@@ -387,7 +387,10 @@ describe('[#20477] controls: the rig can tell the organizations apart', () => {
 
 describe('[#20477] a session claim the resolver DROPPED reaches no organization on any /packages door', () => {
     for (const [transport, entry] of TRANSPORTS) {
-        for (const door of DOORS) {
+        // [#20492] The uninstall door is pinned on its own, below: it refuses a
+        // caller with no organization BEFORE the protocol is asked at all, so
+        // there is no protocol call for this generic pin to read.
+        for (const door of DOORS.filter((d) => d.verb !== 'deletePackage')) {
             it(`${transport} · ${door.name}: the protocol is handed no organization, and the left organization's rows are neither read nor written`, async () => {
                 const answer = await entry()(door.method, 'exmember', door.path, door.body);
                 expect(state.calls.map((c) => c.verb)).toContain(door.verb);
@@ -397,9 +400,15 @@ describe('[#20477] a session claim the resolver DROPPED reaches no organization 
             });
         }
 
-        it(`${transport} · DELETE /packages/:id: the org-less uninstall gets the protocol's ruled refusal, and nothing is deleted`, async () => {
+        // [#20492] The refusal is the door's own now, taken before the registry
+        // is touched: the protocol is never handed the org-less request. The
+        // registry half of "nothing changed" is pinned in
+        // `packages-uninstall-refuse-before-mutate.test.ts` (this rig's
+        // registry cannot uninstall anything).
+        it(`${transport} · DELETE /packages/:id: the org-less uninstall is refused by the door before the protocol is asked, and nothing is deleted`, async () => {
             const answer = await entry()('DELETE', 'exmember', `/packages/${PKG}`);
             expect({ status: answer.status, code: answer.code }).toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
+            expect(state.calls).toEqual([]);
             expect(state.store).toEqual(seedStore());
         });
     }

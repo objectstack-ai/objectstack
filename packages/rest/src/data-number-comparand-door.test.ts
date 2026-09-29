@@ -18,6 +18,14 @@
  * | per-aggregation `filter` `$gt "abc"` (`$ne "abc"`) | count 0 (3) | count 0 (3) | count 0 (3) |
  * | `having` on `sum(amount)` `$gt "abc"` (`$ne "abc"`) | no group (every group) | same | same |
  *
+ * [#20502] The contract's verdict was widened from strings to every comparand:
+ * a boolean, a `Date` and an array against the number field are refused the
+ * same way, at the same three positions. Measured on the base, the card's
+ * table: `$gt true` no rows on InMemoryDriver, every row on SQLite, 500 on
+ * PostgreSQL; a `Date` no rows, no rows, 500; at the per-aggregation `filter`
+ * and `having` the engine's own evaluator coerced `true` (every row counted,
+ * every group kept) on all three.
+ *
  * The door sits in the engine, in front of every driver, so one verdict holds
  * on each cell; the engine-level pin that drives the contract's whole case
  * table through a recording driver is `@objectstack/objectql`'s
@@ -95,6 +103,38 @@ const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
   ['$eq "" (blank)', { $eq: '' }],
   ['$gt "1,000" (a locale spelling)', { $gt: '1,000' }],
   ['$gt "{current_user_id}" (a placeholder)', { $gt: '{current_user_id}' }],
+];
+
+/**
+ * [#20502] name · the constraint on `amount` — a boolean or an array, the
+ * non-strings JSON carries. Measured on the base, over rows 5, 12, 30: `$gt
+ * true` no rows on memory, every row on SQLite, 500 on PostgreSQL; `$between
+ * [true, 20]` two rows on SQLite, 500 on PostgreSQL; `$gt [1]` a driver's own
+ * 400 in its own words; `$in [[1], 10]` no rows on memory, a driver 400 on SQL.
+ */
+const NON_STRING_OVER_REST: ReadonlyArray<readonly [string, unknown]> = [
+  ['$gt true (the card)', { $gt: true }],
+  ['$gt false', { $gt: false }],
+  ['$eq true', { $eq: true }],
+  ['implicit true', true],
+  ['$ne true', { $ne: true }],
+  ['a $in member true', { $in: [10, true] }],
+  ['a $between bound true', { $between: [true, 20] }],
+  ['$gt [1] (an array)', { $gt: [1] }],
+  ['a $in member [1]', { $in: [[1], 10] }],
+];
+
+/**
+ * [#20502] name · a factory for the comparand — what only an in-process caller
+ * (a flow, a hook, server code) can send: a `Date`, beside the boolean. Measured
+ * on the base: `$gt` a `Date` no rows on memory and SQLite, 500 on PostgreSQL;
+ * the per-aggregation `filter` counted 0 and `having` kept no group on all
+ * three; `$gt true` there counted every row and kept every group.
+ */
+const NON_STRING_IN_PROCESS: ReadonlyArray<readonly [string, () => unknown]> = [
+  ['true', () => true],
+  ['a Date', () => new Date(Date.UTC(2026, 0, 1))],
+  ['an array', () => [1]],
 ];
 
 /** name · the constraint as a numeric string · the same as a number · `where` count. */
@@ -221,6 +261,43 @@ for (const cell of CELLS) {
             }
           }
         }
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+      });
+
+      it('[#20502] a boolean, a Date or an array against the number field: 400 INVALID_FILTER at where, the per-aggregation filter and having — no read', async () => {
+        const before = reads.n;
+        // Over the wire: what JSON can carry — a boolean and an array.
+        for (const [name, spec] of NON_STRING_OVER_REST) {
+          const res = await query({ where: { amount: spec } });
+          expect(res.status, `REST, ${name}: ${JSON.stringify(res.body)}`).toBe(400);
+          expect(res.body.code, `REST, ${name}`).toBe('INVALID_FILTER');
+          expect(res.body.error, `REST, ${name}`).toContain("filter on 'amount' compares a declared number field");
+        }
+        for (const [name, value] of NON_STRING_IN_PROCESS) {
+          const where = { amount: { $gt: value() } } as FilterCondition;
+          const found = await refusalOf(engine.find(OBJECT, { where }));
+          expect({ code: found?.code, status: found?.status }, `engine.find, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+          expect(found?.message, `engine.find, ${name}`).toContain("filter on 'amount' compares a declared number field");
+          const filtered = await refusalOf(engine.aggregate(OBJECT, perAggregation({ amount: { $gt: value() } } as FilterCondition)));
+          expect({ code: filtered?.code, status: filtered?.status }, `filter, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+          expect(filtered?.message, `filter, ${name}`).toContain('aggregations[1].filter.amount.$gt');
+          for (const path of ['native', 'rows'] as const) {
+            for (const column of ['total', 'top'] as const) {
+              const having = await refusalOf(engine.aggregate(OBJECT, grouped(path, { [column]: { $gt: value() } } as FilterCondition)));
+              expect({ code: having?.code, status: having?.status }, `having ${path} ${column}, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+              expect(having?.message, `having ${path} ${column}, ${name}`).toContain(`having.${column}.$gt`);
+            }
+          }
+        }
+        // The per-aggregation filter and having over the wire too, for the JSON-carried boolean.
+        const filter = await query(perAggregation({ amount: { $gt: true } } as FilterCondition) as Record<string, unknown>);
+        expect(filter.status, JSON.stringify(filter.body)).toBe(400);
+        expect(filter.body.code).toBe('INVALID_FILTER');
+        expect(filter.body.error).toContain('aggregations[1].filter.amount.$gt');
+        const having = await query(grouped('native', { total: { $gt: true } } as FilterCondition) as Record<string, unknown>);
+        expect(having.status, JSON.stringify(having.body)).toBe(400);
+        expect(having.body.code).toBe('INVALID_FILTER');
+        expect(having.body.error).toContain('having.total.$gt');
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
       });
 

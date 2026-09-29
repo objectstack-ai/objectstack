@@ -596,7 +596,7 @@ describe('urlUserinfoUsername — the username half of the same grammar (#8876)'
 });
 
 /**
- * The passthrough spelling of the same secret (#9040) — the FOURTH: #7990
+ * The passthrough spelling of the same secret (commit 24206416a) — the FOURTH: #7990
  * refused the top-level key, #8082 the URL userinfo, #8337 the URL query
  * parameter, and `options.auth.password` was the next syntax over. Measured on
  * mongodb@7.5.0 (the client `@objectstack/driver-mongodb` spreads
@@ -626,7 +626,7 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     expect(issue!.message).toContain('sys_secret');
     expect(issue!.message).toContain('secret binder');
     // Unlike #8337's query form, the "wins over" reassurance is TRUE here and
-    // load-bearing: #8696's pin measures the bound secret outranking a
+    // load-bearing: commit 90a12fb18's pin measures the bound secret outranking a
     // passthrough `auth` block at connect.
     expect(issue!.message).toContain('wins over');
   });
@@ -689,7 +689,7 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
   it('accepts the legitimate passthrough byte-identically (pin) — replicaSet, tls, timeouts', () => {
     // The dispatch fence: the refusal must not break what the passthrough is
     // FOR. Includes the redacted round-trip shape (`auth` with only a
-    // username) — what the #9040 read path serves for an affected legacy row,
+    // username) — what commit 24206416a's read path serves for an affected legacy row,
     // and what the Studio edit form PUTs back on an untouched "Save".
     for (const options of [
       { replicaSet: 'rs0', tls: true, connectTimeoutMS: 5000, serverSelectionTimeoutMS: 3000 },
@@ -732,7 +732,7 @@ describe('mongo options passthrough — nested credential-SPELLED keys refused a
     expect(issue!.message).toContain('`options.auth.token`');
     expect(issue!.message).toContain('cleartext at rest');
     expect(issue!.message).toContain('external.credentialsRef');
-    // The "wins over" reassurance is measured for `auth.password` ONLY (#8696)
+    // The "wins over" reassurance is measured for `auth.password` ONLY (commit 90a12fb18)
     // — this message must not inherit it for a position nothing reads.
     expect(issue!.message).not.toContain('wins over');
   });
@@ -757,7 +757,7 @@ describe('mongo options passthrough — nested credential-SPELLED keys refused a
     const at = result.error!.issues.filter((i) => i.path.join('.') === 'options.auth.password');
     expect(at.length).toBe(1);
     // The measured path keeps its own prescription — including the "wins over"
-    // reassurance that is TRUE for this position (#8696).
+    // reassurance that is TRUE for this position (commit 90a12fb18).
     expect(at[0]!.message).toContain('wins over');
   });
 
@@ -786,8 +786,8 @@ describe('mongo options passthrough — nested credential-SPELLED keys refused a
 
 /**
  * The contradictory pair "`external.credentialsRef` bound + a mongo
- * `config.url` naming no user" is refused at the datasource level (#9041) —
- * the "absence must be loud" half of the #8696 family. The binding is a silent
+ * `config.url` naming no user" is refused at the datasource level (commit d491625c1) —
+ * the "absence must be loud" half of commit 90a12fb18's injection. The binding is a silent
  * no-op at connect (`buildMongoAuth` injects only when the URL's userinfo
  * names a user, because `MongoClient` credentials need a username the URL must
  * supply and fabricating an empty one is a measured handshake failure), so the
@@ -859,7 +859,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     expect(result.data!.config).toEqual(ds.config);
     expect(result.data!.external!.credentialsRef).toBe(BOUND.credentialsRef);
-    // Multi-host too — the form `new URL()` cannot even parse (#8696).
+    // Multi-host too — the form `new URL()` cannot even parse (commit 90a12fb18).
     const multi = parse({
       ...ds,
       config: { url: 'mongodb://app@h1:27017,h2:27017/app' },
@@ -894,9 +894,9 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
 
   it('the COMPOSED branch is #9147\'s arm, never this one — a composed config reports neither #9041 nor a `config.url` path', () => {
     // With no `url` the discrete `username` is live and the factory
-    // interpolates the bound secret into the URI it composes (#8696's other
-    // branch), so a composed config that NAMES a user has no contradictory
-    // pair at all …
+    // interpolates the bound secret into the URI it composes (the branch
+    // beside commit 90a12fb18's DSN one), so a composed config that NAMES a
+    // user has no contradictory pair at all …
     const named = parse({
       name: 'events',
       driver: 'mongodb',
@@ -904,7 +904,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
       external: { ...BOUND },
     });
     expect(named.success, JSON.stringify(named.error?.issues)).toBe(true);
-    // … and one that does not is judged by #9147's own message, with #9041's
+    // … and one that does not is judged by #9147's own message, with commit d491625c1's
     // URL prescription (which would name a fix this branch cannot take) kept
     // out. The two arms partition the input; they never both fire.
     const unnamed = parse({
@@ -928,9 +928,9 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
   });
 
   it('fence ① — the postgres arm is NOT assumed: a user-less pg DSN + binding stays accepted', () => {
-    // #8873 measured pg injecting on a user-less DSN (`pg` sends a password
+    // Commit 096106522 measured pg injecting on a user-less DSN (`pg` sends a password
     // only when the server asks), so the mongo mechanism does not transfer;
-    // the postgres equivalent is re-judged after #8873, never inherited.
+    // the postgres equivalent is re-judged after commit 096106522, never inherited.
     const result = parse({
       name: 'warehouse',
       driver: 'postgres',
@@ -950,14 +950,14 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     });
     expect(result.success).toBe(false);
     // The driver-config parse reports the type error at the same path; the
-    // #9041 refusal stays silent rather than judging a value that has no
+    // commit d491625c1's refusal stays silent rather than judging a value that has no
     // userinfo to read.
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 
   it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
-    // The PM-mechanism composition pin: the datasource-level #9041 refinement
-    // and the config-level #9040 `credentialFreeMongoOptions` judge the same
+    // The PM-mechanism composition pin: the datasource-level commit d491625c1 refinement
+    // and the config-level commit 24206416a `credentialFreeMongoOptions` judge the same
     // artefact independently — an input violating both reports both.
     const result = parse({
       name: 'events',
@@ -1013,10 +1013,10 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
  * bound while the mongo `config` authors no `url` and names no `username`.
  *
  * Same silent discard, one branch over, and the branches were measured to agree
- * on this input before either was refused — so this inherits #9041's ruling
+ * on this input before either was refused — so this inherits commit d491625c1's ruling
  * rather than re-opening it. What does NOT carry over is the remedy: with no
  * `url` the discrete `config.username` is the live field, so the fix is
- * `config.username`, and #9041's "add the username to the URL's userinfo" would
+ * `config.username`, and commit d491625c1's "add the username to the URL's userinfo" would
  * name a fix this branch cannot take.
  *
  * The mechanism, measured against `default-datasource-driver-factory.ts`: with
@@ -1077,7 +1077,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
   });
 
   it('an EMPTY-STRING `username` is refused too — it is the same silent no-op, and the prescription must land somewhere enforced', () => {
-    // Deliberate asymmetry with #9041's present-but-empty carve-out: there
+    // Deliberate asymmetry with commit d491625c1's present-but-empty carve-out: there
     // `MongoClient` throws on the empty userinfo forms, so the shape is
     // already loud. Here nothing throws — `username: ''` is falsy at
     // `buildMongoUrl`'s `user ?` test, composes the same userinfo-free URI and
@@ -1165,7 +1165,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
   });
 
   it('fence — the postgres arm is NOT widened to: a composed pg config with no username + binding stays accepted', () => {
-    // #8873 measured `pg` receiving the bound password regardless of the DSN
+    // Commit 096106522 measured `pg` receiving the bound password regardless of the DSN
     // naming a user, so the mongo mechanism does not transfer to it on this
     // branch any more than it did on the URL branch.
     const result = parse({

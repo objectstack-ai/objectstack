@@ -28,6 +28,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { childEnv, runServe, randomPort, CLI, TSX } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const execFileP = promisify(execFile);
 
@@ -42,7 +43,9 @@ export const onEnable = async (ctx) => {
   ctx.ql.registerAction('hookfix_task', 'doThing', () => ({ ok: true }));
 };
 
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: {
     id: 'com.example.hookfix',
     namespace: 'hookfix',
@@ -64,7 +67,7 @@ export default {
       target: 'doThing',
     }],
   }],
-};
+}, { strict: false });
 `;
 
 let dir: string;
@@ -72,6 +75,7 @@ let dir: string;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-runtime-hooks-e2e-'));
   writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
+  linkSpec(dir);
   // The artifact is REQUIRED by this test, and for a positive reason rather than
   // as a workaround: it is what makes `createStandaloneStack()` contribute an
   // artifact-derived `AppPlugin`, which is the bundle whose missing code this

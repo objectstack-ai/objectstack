@@ -14,9 +14,9 @@ export const entry: SemanticMigration = {
     + 'on a currency field that declared no `scale`. ⛔ Nothing replaces the key: do not re-declare '
     + 'its value under any other key.',
   reason:
-    'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retires `scale` from the '
-    + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
-    + 'decimal places are the currency\'s, not a setting) words the remedy. On a currency field the '
+    'The maintainer\'s ruling of 2026-09-23 (option B) retires `scale` from the `currency` field '
+    + 'type, and the ruling of 2026-09-24 (option 乙 — a currency\'s decimal places are the '
+    + 'currency\'s, not a setting) words the remedy. On a currency field the '
     + 'key was three-faced: the metadata-admin field designer offered it as stored metadata, the '
     + 'amount\'s cell never read it (fraction digits come from the currency\'s ISO 4217 minor '
     + 'unit), and the record validator\'s `max_scale` branch still refused writes carrying more '

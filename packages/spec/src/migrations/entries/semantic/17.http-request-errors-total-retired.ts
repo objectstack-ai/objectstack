@@ -21,8 +21,9 @@ export const entry: SemanticMigration = {
     + '`@objectstack/runtime`\'s `instrumentRouteHandler`, applied only by the dispatcher\'s '
     + 'own route Proxy — so the series never saw auth\'s `getRawApp()` mount, the REST data '
     + 'API via `RouteManager`, or any other inbound surface. Its two siblings in the same '
-    + 'family were moved to the transport seam (#9650/#9835 for the counter, #9834/#10004 '
-    + 'for the histogram) and this one could not follow: `HttpResponseObservation` carries '
+    + 'family were moved to the transport seam (the request counter, then the latency '
+    + 'histogram, both through the response-observing hook the transport was given) and this '
+    + 'one could not follow: `HttpResponseObservation` carries '
     + '`{method, routePattern, status, elapsedMs}` and NO throw signal of any kind, so every '
     + 'transport-side shape would have counted a DIFFERENT population rather than the same '
     + 'one more widely. The divergence was measured in both directions — the dispatcher '
@@ -38,8 +39,8 @@ export const entry: SemanticMigration = {
     + 'the series in its own dashboard or alert file, outside this repo. That is exactly why '
     + 'this entry exists: for an operator whose Grafana keys on the string, the ledger is the '
     + 'only notification channel there is. Same disposition, and the same reason, as '
-    + '`runtime-httpserver-wrapper-retired` (#5122) and `enhanced-api-error-field-errors-renamed` '
-    + '(#3977). ADR-0049 / ADR-0087, #9834.',
+    + '`runtime-httpserver-wrapper-retired` and `enhanced-api-error-field-errors-renamed`. '
+    + 'ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'No dashboard, alert rule or exporter config names `http_request_errors_total`: the '
     + 'series stops receiving samples the moment 17.2.0 is deployed, so a panel keyed on it '

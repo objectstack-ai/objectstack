@@ -163,8 +163,11 @@
  *    still skips the index at sync. `indexes[].fields[]` used to sit in this
  *    list whole, as a storage question for the registration path answered
  *    against the physical column set. That left a MISSPELLING with no door at
- *    all: the sync's skip is a `warn` and drift drops the index, so nothing
- *    anywhere refused a name that is not a field. Existence is therefore
+ *    all: the sync's skip was a `warn` and drift dropped the index, so nothing
+ *    anywhere refused a name that is not a field. (Since #20432 step 2 the
+ *    skip is logged at `error` through `logDurabilityFailure` and `os migrate
+ *    plan` reports the unbuildable index, but both still come after the
+ *    authoring doors.) Existence is therefore
  *    judged here, against the authored field map plus the injected columns —
  *    exactly the physical set a correct name can land in — and only the
  *    materialization question stays with the sync (#20432 step 2, the
@@ -322,9 +325,9 @@ const LIST_POSITIONS: readonly ListPosition[] = [
  */
 const INDEX_POSITION = {
   consequence:
-    'The SQL driver skips the WHOLE index at sync with only a warning, and drift drops it too, '
-    + 'so `os migrate plan` never reports it: a `unique` index is then silently unenforced '
-    + 'while everything looks normal.',
+    'The SQL driver skips the WHOLE index at sync. It logs the skip at error and `os migrate plan` '
+    + 'reports the index as unbuildable, but the object keeps serving: a `unique` index is then '
+    + 'unenforced until the name is fixed.',
   prescription:
     'Fix the column name. An index column is a field of this object, or a column the platform '
     + 'injects on it (`created_at`, `organization_id`, …), spelled exactly — never a dotted path.',

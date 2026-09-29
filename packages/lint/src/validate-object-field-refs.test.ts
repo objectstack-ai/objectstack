@@ -603,7 +603,7 @@ describe('validateObjectFieldRefs — indexes[].fields (verbatim physical column
     });
     expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
     expect(findings[0]!.message).toContain('Did you mean "total"?');
-    expect(findings[0]!.message).toContain('`unique` index is then silently unenforced');
+    expect(findings[0]!.message).toContain('`unique` index is then unenforced');
     expect(findings[0]!.hint).toContain('Fields on "crm_invoice":');
   });
 

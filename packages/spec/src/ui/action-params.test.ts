@@ -391,7 +391,7 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
     // neighbour (`hook-context-session-roles-retired`, #5050) was — the reason
     // must not read as a removal notice.
     expect(entry!.reason).toMatch(/deprecation window/);
-    expect(entry!.reason).toMatch(/#5613/);
+    expect(entry!.reason).toMatch(/ruled contract-first/);
     expect(entry!.acceptanceCriteria).toMatch(/ctx\.session\.positions/);
   });
 });

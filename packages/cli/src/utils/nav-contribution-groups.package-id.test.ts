@@ -59,7 +59,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { composeStacks, defineStack, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { ObjectQL } from '@objectstack/objectql/core';
 import { findNavGroupDiagnostics } from './nav-contribution-groups.js';
 import { artifactPackages } from './artifact-packages.js';
@@ -137,8 +137,11 @@ const ordersStack = (group: string, id: string = ORDERS_ID) => ({
 
 /** The composed artifact, up to but NOT through the parse — the parse is what two cases below read. */
 const composedArtifact = (group: string, id: string = ORDERS_ID): AnyRec => {
+  // Each input through `defineStack` — `composeStacks` refuses any other
+  // (#20367 ruling B). `strict: false`: the `name: ''` manifest above is the
+  // input under test, not a finding for the producer to refuse first.
   const composed = composeStacks(
-    [ordersStack(group, id), coreStack()],
+    [defineStack(ordersStack(group, id), { strict: false }), defineStack(coreStack(), { strict: false })],
     { manifest: 'preserve' },
   ) as unknown as Record<string, unknown>;
   return normalizeStackInput(composed, { onConversionNotice: () => {} }) as unknown as AnyRec;

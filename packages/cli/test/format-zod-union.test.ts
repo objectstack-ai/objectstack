@@ -38,6 +38,7 @@ import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { NormalizedFilterSchema } from '@objectstack/spec/data';
 import { formatZodErrors } from '../src/utils/format';
 import { childEnv } from './helpers/serve-process.js';
+import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -209,11 +210,14 @@ const TOOLTIP_ALIAS_STACK = {
 function runCli(command: string, stack: Record<string, unknown>, args: string[] = []): { exitCode: number; output: string } {
   const dir = mkdtempSync(join(tmpdir(), 'os-union-format-'));
   try {
-    // A plain literal, not `defineStack`/`defineView`: those factories parse
-    // eagerly and would throw through spec's OWN formatter, which has expanded
-    // unions since #4971 — the one thing this file must not accidentally
-    // measure instead of the CLI's renderer.
-    writeFileSync(join(dir, 'objectstack.config.mjs'), `export default ${JSON.stringify(stack, null, 2)};\n`);
+    // `defineStack(…, { strict: false })`, not a strict factory: a strict
+    // `defineStack` / `defineView` parses eagerly and would throw through
+    // spec's OWN formatter, which has expanded unions since #4971 — the one
+    // thing this file must not accidentally measure instead of the CLI's
+    // renderer. Non-strict skips that parse and still carries the provenance
+    // mark the doors require (#20367 ruling B); spec is linked in.
+    writeFileSync(join(dir, 'objectstack.config.mjs'), defineStackSource(stack, { strict: false }));
+    linkSpec(dir);
     try {
       const output = execFileSync(process.execPath, [cliBin, command, ...args], {
         cwd: dir,

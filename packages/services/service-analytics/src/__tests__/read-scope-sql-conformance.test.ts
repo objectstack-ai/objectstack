@@ -55,6 +55,14 @@ import { compileScopedFilterToSql } from '../read-scope-sql.js';
 
 const ALIAS = 't';
 
+/**
+ * [#20444] The fixture's columns, declared: every one a `text` field. The
+ * table's `$empty` rows are answered by the field's DECLARED row, which this
+ * compiler reads from `declaredValueShape` and refuses without — so the sweep
+ * hands it the declaration a host answers from its field metadata.
+ */
+const FIXTURE_SHAPES = { declaredValueShape: () => ({ type: 'text' }) } as const;
+
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */
 async function locateWasm(): Promise<((file: string) => string) | undefined> {
   try {
@@ -106,7 +114,7 @@ describe('compileScopedFilterToSql — filter logic conformance', () => {
 
   for (const c of FILTER_LOGIC_CASES) {
     it(c.name, () => {
-      const { sql, params } = compileScopedFilterToSql(c.filter, ALIAS);
+      const { sql, params } = compileScopedFilterToSql(c.filter, ALIAS, FIXTURE_SHAPES);
       // The compiler returns a boolean expression, exactly as the analytics
       // query builder splices it — including the unparenthesized top level.
       // `''` is the compiler's TRUE (#5322: `{$and: []}` and an absorbed `$or`

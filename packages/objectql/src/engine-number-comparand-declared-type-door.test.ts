@@ -45,7 +45,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
   NON_NUMERIC_STRING_FORMS,
+  NON_NUMERIC_VALUE_FORMS,
   NUMBER_COMPARAND_DOOR_CASES,
+  normalizeFilterComparandTypes,
   NUMBER_COMPARAND_DOOR_FIXTURE,
   NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT,
   NUMBER_COMPARAND_DOOR_LIST_OPERATORS,
@@ -157,8 +159,9 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     // The untyped formula is the table's only deferred row, and it is judged one door earlier.
     expect(DEFERRED).toHaveLength(0);
     expect(STAGED.map((c) => c.verdict)).toEqual(['passes']);
-    // Every refused form the grammar names is driven, not just the card's "abc".
-    expect(new Set(REFUSALS.map((c) => c.form))).toEqual(new Set(NON_NUMERIC_STRING_FORMS));
+    // Every refused form the grammar names is driven, not just the card's "abc" —
+    // and [#20502] every non-string form (a boolean, a Date, an array) beside them.
+    expect(new Set(REFUSALS.map((c) => c.form))).toEqual(new Set([...NON_NUMERIC_STRING_FORMS, ...NON_NUMERIC_VALUE_FORMS]));
     // Every judged position is driven both ways.
     const positions = (cs: readonly NumberComparandDoorCase[]) =>
       new Set(cs.filter((c) => c.key === 'f_number').map((c) => c.position.replace(/\[\d\]$/, '')));
@@ -381,6 +384,110 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     expect(await groups({ total: { $eq: '12' } })).toEqual(['r2']);
     // `id` is a text column of the aggregated row — the door has no opinion there.
     expect(await groups({ id: { $ne: 'abc' } })).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  // ── [#20502] a boolean, a Date, an array: one refusal at every position ──
+
+  /** The non-string comparands the widened verdict refuses — each a value the card measured three ways. */
+  const NON_STRING: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['true', () => true, 'boolean'],
+    ['false', () => false, 'boolean'],
+    ['a Date', () => new Date(Date.UTC(2026, 0, 1)), 'date'],
+    ['an array', () => [10], 'array'],
+  ];
+
+  it('[#20502] refuses a boolean, a Date or an array in ONE aggregation\'s own filter, rooted at that position — no read', async () => {
+    for (const [name, value, form] of NON_STRING) {
+      for (const op of ['$gt', '$lte'] as const) {
+        reads.length = 0;
+        const err = await refusalOf(engine.aggregate(OBJECT, {
+          aggregations: [
+            { function: 'count', alias: 'all' },
+            { function: 'count', alias: 'bad', filter: { f_number: { [op]: value() } } },
+          ],
+        } as EngineAggregateOptions));
+        expect(err, `${name} ${op}`).not.toBeNull();
+        expect({ code: err!.code, status: err!.status }, `${name} ${op}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err!.message, `${name} ${op}`).toContain(`aggregations[1].filter.f_number.${op}`);
+        expect(err!.message, `${name} ${op}`).toMatch(/^aggregate\('number_door_probe'\): filter on 'f_number' compares a declared number field/);
+        expect(findNonNumericComparand(engine.registry.getObject(OBJECT), { f_number: { [op]: value() } }), name)
+          .toMatchObject({ field: 'f_number', form });
+        expect(reads, `${name} ${op}`).toHaveLength(0);
+      }
+    }
+  });
+
+  it('[#20502] refuses a boolean, a Date or an array against a NUMERIC `having` column — count, sum and a numeric min alike', async () => {
+    for (const [name, value] of NON_STRING) {
+      for (const [fn, field] of [['count', undefined], ['sum', 'f_number'], ['min', 'f_currency']] as const) {
+        reads.length = 0;
+        const err = await refusalOf(engine.aggregate(OBJECT, {
+          groupBy: ['f_text'],
+          aggregations: [{ function: fn, ...(field ? { field } : {}), alias: 'total' }],
+          having: { total: { $gt: value() } },
+        } as EngineAggregateOptions));
+        expect(err, `${name} ${fn}`).not.toBeNull();
+        expect({ code: err!.code, status: err!.status }, `${name} ${fn}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err!.message, `${name} ${fn}`).toContain('having.total.$gt');
+        expect(err!.message, `${name} ${fn}`).toContain("filter on 'total' compares a declared number field");
+        expect(reads, `${name} ${fn}`).toHaveLength(0);
+      }
+    }
+  });
+
+  it('[#20502] the numeric control at all three positions: a number reaches the driver and the evaluator as written', async () => {
+    reads.length = 0;
+    await engine.find(OBJECT, { where: { f_number: { $gt: 10 } } });
+    expect(reads[0]?.ast?.where).toEqual({ f_number: { $gt: 10 } });
+    const counted = await engine.aggregate(OBJECT, {
+      aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'm', filter: { f_number: { $gt: 10 } } }],
+    } as EngineAggregateOptions);
+    expect(Number((counted[0] as Record<string, unknown>).m)).toBe(2);
+    const groups = (await engine.aggregate(OBJECT, {
+      groupBy: ['id'],
+      aggregations: [{ function: 'sum', field: 'f_number', alias: 'total' }],
+      having: { total: { $gt: 10 } },
+    } as EngineAggregateOptions)).map((r) => (r as Record<string, unknown>).id).sort();
+    expect(groups).toEqual(['r2', 'r3']);
+  });
+
+  it('[#20502] the same mistake as FilterArray sugar and inside $and / $or / $not — one answer per mistake', async () => {
+    const sugar = await refusalOf(
+      engine.find(OBJECT, { where: [['f_number', '>', true]] } as unknown as EngineQueryOptions),
+    );
+    expect({ code: sugar!.code, status: sugar!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(sugar!.message).toContain("filter on 'f_number' compares a declared number field against true at where.f_number.$gt");
+    for (const where of [
+      { $and: [{ f_text: 'a' }, { f_number: { $gt: true } }] },
+      { $or: [{ f_text: 'a' }, { f_currency: { $in: [1, new Date(0)] } }] },
+      { $not: { f_percent: { $between: [[1], 10] } } },
+    ]) {
+      const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
+      expect({ code: err?.code, status: err?.status }, JSON.stringify(where)).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(reads).toHaveLength(0);
+    expect(engine.judgeFilter(OBJECT, { f_number: { $gt: new Date(0) } })).toMatchObject({ ok: false, code: 'INVALID_FILTER', status: 400 });
+  });
+
+  it('[#20502] a value OUTSIDE the accepted comparand types is the comparand-TYPE door\'s refusal, in that door\'s words, on both spellings', async () => {
+    const context = `find('${OBJECT}')`;
+    for (const [name, value] of [['a plain object', { a: 1 }], ['undefined', undefined], ['a Map', new Map()]] as const) {
+      const where = { f_number: { $gt: value } };
+      // The verdict passes it, so THIS door has no second opinion …
+      expect(findNonNumericComparand(engine.registry.getObject(OBJECT), where), name).toBeNull();
+      // … and the engine answers exactly what the comparand-type door answers.
+      let expected: Error | undefined;
+      try { normalizeFilterComparandTypes(where, context); } catch (e) { expected = e as Error; }
+      expect(expected, name).toBeDefined();
+      const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
+      expect({ code: err?.code, status: err?.status }, name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, name).toBe(expected!.message);
+    }
+    const sugar = await refusalOf(engine.find(OBJECT, { where: [['f_number', '>', { a: 1 }]] } as unknown as EngineQueryOptions));
+    let expected: Error | undefined;
+    try { normalizeFilterComparandTypes({ f_number: { $gt: { a: 1 } } }, context); } catch (e) { expected = e as Error; }
+    expect(sugar!.message).toBe(expected!.message);
+    expect(reads).toHaveLength(0);
   });
 
   it('GUARD the having walk narrows copy-on-write and judges only columns classed numeric', () => {

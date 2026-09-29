@@ -111,6 +111,10 @@ beforeAll(async () => {
 
   sweepDriver = new InMemoryDriver({ persistence: false });
   await sweepDriver.connect();
+  // [#20444] `$empty` is answered by the field's DECLARED row and refused on an
+  // undeclared field, so the sweep declares `v` — a `text` field, which is not
+  // temporal, so no other operator's comparand changes form.
+  await sweepDriver.syncSchema('t', { fields: { v: { type: 'text' } } });
   for (const row of SWEEP_ROWS) await sweepDriver.create('t', { ...row });
 });
 
@@ -258,6 +262,9 @@ const SWEEP_COMPARANDS: Readonly<Record<string, unknown>> = Object.freeze({
   $ilike: '%07-15',
   $null: false,
   $exists: true,
+  // [#20444] Lowered to a condition of its own beside the field's operator map,
+  // so it contests no key — the sweep proves it rather than assuming it.
+  $empty: false,
 });
 
 describe('[#13524] the ENUMERATION — every declared operator, every pair, both orders', () => {

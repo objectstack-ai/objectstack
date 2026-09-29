@@ -23,18 +23,21 @@ export const entry: SemanticMigration = {
     + '`PackageRollbackRequestSchema` stays published (ruled out of the '
     + 'retirement), bound to no route.',
   reason:
-    'Maintainer ruling 2026-08-27 on #12038, sub-question 3A (五问一批, '
-    + '「其他接受」). The schema declared a version rollback — '
+    'Maintainer ruling of 2026-08-27 on the client SDK\'s unbound response '
+    + 'contracts, sub-question 3A: retire this false declaration first, then '
+    + 'author the true one. The schema declared a version rollback — '
     + '`{ success, restoredVersion?, message? }`, matching its file header '
     + '"Rollback a package" — while the live path it was contract-bound to '
     + 'serves the ADR-0067 commit rollback: a different operation with a '
     + 'different result. Binding it in the SDK would compile and be false '
-    + '(#11925 left a compile-time guard against exactly that substitution). '
+    + '(the change that typed the SDK\'s un-annotated return values left a '
+    + 'compile-time guard against exactly that substitution). '
     + 'Zero consumers measured across objectstack, objectui and cloud '
-    + '(#12038 survey §5.2, re-verified at the retiring PR\'s base): only its '
-    + 'own unit test and the #11925 negative guard. A published declaration '
-    + 'that outran the implementation is the #3877 hazard realised in the '
-    + 'opposite direction — not "no declaration" but a WRONG one — and it is '
+    + '(the ruling\'s own survey, re-verified at the retiring PR\'s base): only its '
+    + 'own unit test and that negative guard. A published declaration that '
+    + 'outran the implementation is the hazard of response bodies never checked '
+    + 'against the schemas that declare them, realised in the opposite direction '
+    + '— not "no declaration" but a WRONG one — and it is '
     + 'retired BEFORE the true schema is authored so no window exists in '
     + 'which both claims are published.',
   acceptanceCriteria:

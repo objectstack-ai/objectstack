@@ -43,13 +43,16 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const objects = (orderFields: string, orderExtra = '') => `
-export default {
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
   manifest: { id: 'com.example.trav', name: 'trav', version: '1.0.0', type: 'app', namespace: 'trav' },
   objects: [
     {
@@ -74,7 +77,7 @@ export default {
     },
   ],
   apps: [{ name: 'trav_app', label: 'Trav App' }],
-};
+}, { strict: false });
 `;
 
 /** One read through `account` on each of the three slots. */
@@ -150,8 +153,10 @@ let controlDir: string;
 beforeAll(() => {
   traversingDir = mkdtempSync(join(tmpdir(), 'os-validate-traversal-'));
   writeFileSync(join(traversingDir, 'objectstack.config.ts'), TRAVERSING);
+  linkSpec(traversingDir);
   controlDir = mkdtempSync(join(tmpdir(), 'os-validate-traversal-control-'));
   writeFileSync(join(controlDir, 'objectstack.config.ts'), CONTROL);
+  linkSpec(controlDir);
 });
 
 afterAll(() => {

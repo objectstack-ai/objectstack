@@ -2,8 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Writes `packages/spec/liveness/state-counts.md` — every number the liveness
- * ledger's "Current state" table used to publish by hand (#7377).
+ * Writes `packages/spec/liveness/state-counts/<type>.md` — every number the
+ * liveness ledger's "Current state" table used to publish by hand (#7377), one
+ * shard per governed type (#20361).
  *
  * The table's Notes prose merged cleanly for a year; its NUMBERS drifted from the
  * gate on 9 of 30 rows and nothing could see it, because the count columns were
@@ -45,6 +46,18 @@
  * Regeneration is WHOLESALE — this script never patches a number in place, and
  * neither should you.
  *
+ * ## One shard per type, and no total (#20361)
+ *
+ * The artifact was one file with a row per type and a shared total row, and the
+ * `merge=os-regen` driver that defers it only runs in a LOCAL merge. GitHub's
+ * server-side merge runs none, so any two in-flight PRs that moved verdicts
+ * conflicted on the total row, and each landing turned every other one `dirty` —
+ * no CI run until a merge-and-regenerate round. So each type's row is its own
+ * file, the total is summed by whoever reads it (the gate prints it; so does this
+ * script) and committed nowhere, and a shard whose bytes did not change is not
+ * rewritten: a regeneration touches exactly the types whose counts moved. The
+ * retired single file is deleted if a merge carried it back.
+ *
  * Usage:
  *   tsx build-state-counts.mts     # rewrite the artifact
  *
@@ -53,20 +66,24 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  STATE_COUNTS_FILE,
+  LEGACY_STATE_COUNTS_FILE,
+  STATE_COUNTS_DIR,
   STATE_COUNTS_PATH,
   STATE_COUNTS_TOTALS_GUIDANCE,
   foldStateCounts,
+  formatStateCountsTotal,
   parseStateTable,
   reconcileStateCountTotals,
-  renderStateCounts,
+  renderStateCountShards,
+  sumStateCounts,
 } from './readme-table.mts';
+import { writeTextShardDir } from '../lib/sharded-artifacts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -94,7 +111,7 @@ let report: {
 try {
   report = JSON.parse(run.stdout || '');
 } catch {
-  console.error(`✗ ${gate} --json produced no parseable report — refusing to write ${STATE_COUNTS_FILE}.`);
+  console.error(`✗ ${gate} --json produced no parseable report — refusing to write ${STATE_COUNTS_PATH}.`);
   console.error('  Nothing is written from a half-measurement; a stale artifact is the safer state.\n');
   if (run.error) console.error(`  ${run.error.message}`);
   if (run.stderr) console.error(run.stderr);
@@ -124,19 +141,26 @@ const totalErrors = reconcileStateCountTotals({
   classified: Object.fromEntries(Object.entries(types).map(([t, v]) => [t, v.classified])),
 });
 if (totalErrors.length) {
-  console.error(`✗ refusing to write ${STATE_COUNTS_FILE} — the fold does not preserve the walk's total:\n`);
+  console.error(`✗ refusing to write ${STATE_COUNTS_PATH} — the fold does not preserve the walk's total:\n`);
   totalErrors.forEach((s) => console.error(`    ${s}`));
   console.error('');
   STATE_COUNTS_TOTALS_GUIDANCE.forEach((line) => console.error(line ? `   ${line}` : ''));
   process.exit(1);
 }
 
-const rendered = renderStateCounts(rows);
-writeFileSync(join(ledgerRoot, STATE_COUNTS_FILE), rendered);
+const { written, removed } = writeTextShardDir(join(ledgerRoot, STATE_COUNTS_DIR), renderStateCountShards(rows));
+const legacy = join(ledgerRoot, LEGACY_STATE_COUNTS_FILE);
+const legacyRemoved = existsSync(legacy);
+if (legacyRemoved) rmSync(legacy);
 
-const total = rows.reduce((a, r) => a + r.live + r.experimental + r['live-elsewhere'] + r.dead + r.planned, 0);
-console.log(`✓ wrote ${STATE_COUNTS_PATH}`);
-console.log(`  ${rows.length} governed type(s), ${total} classified propert(ies).`);
+console.log(`✓ wrote ${STATE_COUNTS_PATH} — ${rows.length} governed type(s), one shard each.`);
+console.log(
+  `  ${written.length} shard(s) rewritten${written.length ? ` (${written.join(', ')})` : ''}, ` +
+    `${removed.length} pruned${removed.length ? ` (${removed.join(', ')})` : ''}` +
+    (legacyRemoved ? `, and the retired ${LEGACY_STATE_COUNTS_FILE} deleted` : '') +
+    '.',
+);
+console.log(`  total, summed here and committed nowhere: ${formatStateCountsTotal(sumStateCounts(rows))}.`);
 
 // ── the #7257 skeleton, preserved ──
 // Prefer the gate's own reconciliation when the report carries it; fall back to a
