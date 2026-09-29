@@ -7299,7 +7299,7 @@ export class ObjectStackProtocolImplementation implements
      * was carried, which is the silent deletion this method exists to prevent.
      * The read is skipped entirely — no extra query, for any save — when the
      * type has no registered redactor, which is every type but `datasource`
-     * today.
+     * (built in) and `flow` (registered by the automation plugin, #20552).
      */
     private async carryForwardRedactedCredentials(args: {
         type: string;
@@ -7320,9 +7320,51 @@ export class ObjectStackProtocolImplementation implements
                 packageId: args.packageId,
             });
         }
-        const body = stored?.body;
+        // [#20552] NO overlay row at either state: the body the read served is
+        // the CODE layer, so that is what the incoming body is compared with.
+        // Without this a code-authored item — an inbound flow whose secret is a
+        // literal in the app's source, the shipped reference shape — had its
+        // FIRST save persist an overlay row with the credential dropped, and
+        // an overlay wins every later merge.
+        const body = stored?.body ?? await this.readCodeLayerForCarryForward(args.type, args.ref.name, args.packageId);
         if (!body) return args.item;
         return carryForwardRedactedValues(args.type, args.item, body);
+    }
+
+    /**
+     * [#20552] The body a read served for an item with NO overlay row — the
+     * CODE layer, resolved in the order `getMetaItemLayered` resolves its `code`
+     * layer: the MetadataService item, else the loaded artifact's item, else the
+     * SchemaRegistry item (with the plural/singular retry). The artifact lookup
+     * comes before the plain registry key because an overlay hydrated into that
+     * key can shadow it (see {@link lookupArtifactItem}); here there is no
+     * overlay row, so a hydrated copy would be stale.
+     *
+     * Type-agnostic, like the carry-forward it feeds: a code-defined datasource
+     * gets the same first-save protection as a code-authored flow.
+     *
+     * ⛔ No `try`/`catch` — the carry-forward's own rule. A MetadataService read
+     * that throws fails the save, and one that reports itself degraded with
+     * nothing found anywhere fails it as the same 503 the read doors answer:
+     * the alternative is persisting a body whose credential this save could not
+     * confirm was carried.
+     */
+    private async readCodeLayerForCarryForward(
+        type: string,
+        name: string,
+        packageId: string | null,
+    ): Promise<unknown> {
+        const pkg = packageId ?? undefined;
+        const fromService = await this.readItemFromMetadataService(type, name, pkg);
+        if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
+        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? this.engine.registry.getItem(type, name, pkg);
+        if (item === undefined) {
+            const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
+            if (alt) item = this.engine.registry.getItem(alt, name, pkg);
+        }
+        if (item !== undefined && item !== null) return item;
+        if (fromService.degraded) this.throwMetadataServiceUnavailable(fromService.errors);
+        return undefined;
     }
 
     /**
