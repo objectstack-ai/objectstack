@@ -726,3 +726,61 @@ describe('#20552 — first save of a registry-only (code-authored) flow keeps it
         expect(startNodeOf(JSON.parse(overlayRow(rows, 'active')!.metadata)).config.secret).toBe(ROTATED);
     });
 });
+
+// ---------------------------------------------------------------------------
+// #20590 position 3 — the carry-forward never lands a credential where the
+// projection does not withhold it
+// ---------------------------------------------------------------------------
+//
+// The two halves pick positions by different rules. The read side withholds by
+// the element's KIND (a flow's start node); the write side follows an array hop
+// by the stored element's IDENTITY (`id`). An ordinary round trip that keeps a
+// node's id and changes its kind therefore used to graft the stored credential
+// onto a node the next read serves whole. The save door runs the carry-forward
+// after every authoring gate, so no node-config check stood in the way there.
+
+/** The served body of the seeded flow, relocated: the old start node's kind changed, a new start node added. */
+function relocate(served: any) {
+    const [finish, begin] = served.nodes;
+    return {
+        ...served,
+        nodes: [
+            finish,
+            { ...begin, type: 'assignment', label: 'Was the start node', config: {} },
+            { id: 'begin_v2', type: 'start', label: 'On Webhook', config: { triggerType: 'api', hookId: 'intake' } },
+        ],
+        edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }],
+    };
+}
+
+describe('#20590 — a relocating round trip never carries a credential into a served position', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('carryForwardRedactedValues drops a carried value the projection would not withhold at its new position', () => {
+        const stored = storedInboundFlow();
+        const incoming = relocate(redactMetadataItem('flow', stored));
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        // What the next read serves from the persisted body.
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(FLOW_SECRET);
+        expect(allStrings(out)).not.toContain(FLOW_SECRET);
+    });
+
+    it('the save door: the next served read of a relocated flow carries no credential', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: relocate(editable) });
+
+        const next: any = await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' });
+        expect(next.item.nodes.map((n: any) => n.id)).toEqual(['finish', 'begin', 'begin_v2']);
+        expect(allStrings(next)).not.toContain(FLOW_SECRET);
+        const list: any = await protocol.getMetaItems({ type: 'flow' });
+        expect(allStrings(list)).not.toContain(FLOW_SECRET);
+        // Nothing was grafted at rest either: the relocated node holds no credential.
+        expect(allStrings(storedFlowBody(rows))).not.toContain(FLOW_SECRET);
+    });
+});
