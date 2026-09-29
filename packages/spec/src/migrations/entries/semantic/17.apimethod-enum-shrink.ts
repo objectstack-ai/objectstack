@@ -18,7 +18,8 @@ export const entry: SemanticMigration = {
     + 'fact. The FROM → TO is a table rather than a rename: `upsert` → `create` + `update`; '
     + '`import` → `create` + `update`; `export`, `aggregate` and `search` → `list`; '
     + '`history` → `get`; and `restore` / `purge` map to NOTHING — they never derived, '
-    + 'because `enable.trash` was retired in #2377, so the value is deleted outright. That '
+    + 'because `enable.trash` was retired with the other dead `enable.*` flags in the 11.0 '
+    + 'ADR-0049 removal of dead author-facing properties, so the value is deleted outright. That '
     + 'last row is why this is a semantic entry and not a mechanical conversion, and the '
     + 'reason is a security one: the mapping WIDENS. An allowlist naming `history` was '
     + 'granting read of one record\'s audit trail; rewritten to `get` it grants ordinary '
@@ -30,8 +31,11 @@ export const entry: SemanticMigration = {
     + 'replacement per site, and FLAGS the allowlists the mapping would widen so the edit '
     + 'stays reviewable — it reports, it does not rewrite. Stored metadata keeps parsing '
     + '(permanent tolerance, narrowing only), so nothing breaks at rest; what changes is what '
-    + 'an author may newly write. Registered by the #6350 stock reconciliation; #3543 (P2 of '
-    + '#3391) predates the #6148 completeness gate. ADR-0087, #3543 (backfilled #6350).',
+    + 'an author may newly write. Registered late, by the stock reconciliation that compared '
+    + 'the breaking changesets already on the v17 release train against this ledger: the enum '
+    + 'shrink (phase 2 of the programme that made UI action buttons agree with the '
+    + '`apiMethods` allowlist) predates the gate that makes a breaking changeset state its '
+    + 'ledger disposition. ADR-0087.',
   acceptanceCriteria:
     'No authored `enable.apiMethods` array names a legacy value; `objectstack validate` '
     + 'passes. Run the reporter codemod first and read its widening flags before applying '
@@ -42,6 +46,6 @@ export const entry: SemanticMigration = {
     + 'operation. Where the six primitives are all present, prefer deleting the key: that is '
     + 'equivalent to default-open and it tracks future primitives, whereas a hand-listed six '
     + 'silently stops granting anything added later. `restore` / `purge` are deleted with no '
-    + 'replacement — if trash-like behaviour was being relied on, that capability left in '
-    + '#2377 and this entry is not where it returns.',
+    + 'replacement — if trash-like behaviour was being relied on, that capability left in the '
+    + '11.0 dead-property removal and this entry is not where it returns.',
 };

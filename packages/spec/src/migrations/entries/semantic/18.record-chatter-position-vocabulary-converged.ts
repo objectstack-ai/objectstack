@@ -22,7 +22,7 @@ export const entry: SemanticMigration = {
     + '(the schema\'s own DEFAULT, materialized onto every parsed node that said nothing) '
     + 'silently fell through to the in-flow render, and the value that actually docks the '
     + 'panel (`right`) was refused at publish — declared ≠ enforced in both directions on the '
-    + 'same key. The maintainer ruling (2026-08-15, #8762) converged the row on the '
+    + 'same key. The maintainer ruling of 2026-08-15 on this row converged it on the '
     + 'renderer\'s vocabulary with no mapping layer, and dropped all three schema defaults per '
     + 'the `maxVisible` principle (renderer fallbacks stay the renderer\'s facts): the old '
     + '`collapsible` default (`true`) additionally INVERTED the renderer merge\'s own fallback '
@@ -34,7 +34,7 @@ export const entry: SemanticMigration = {
     + 'chain cannot make: whether `drawer` → `right` (a docked panel standing in for a '
     + 'never-implemented overlay) is the presentation the author wants, and whether a page '
     + 'that relied on the old materialized `collapsible: true` default should now author it '
-    + 'explicitly. ADR-0087, maintainer ruling 2026-08-15, #8762.',
+    + 'explicitly. ADR-0087, maintainer ruling 2026-08-15.',
   acceptanceCriteria:
     'No authored `record:chatter` / `record:discussion` component carries `position: '
     + "'sidebar' | 'inline' | 'drawer'`; `objectstack validate` passes. Review the rewritten "

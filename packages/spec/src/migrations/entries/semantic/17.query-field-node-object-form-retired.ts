@@ -11,9 +11,11 @@ export const entry: SemanticMigration = {
     + "projection (`fields: ['title', 'owner_id']`), because the relation is carried by that "
     + 'column and projecting it away leaves expansion nothing to resolve. A dotted `fields` '
     + 'path is NOT a replacement: no driver ever resolved one, and the ingress refuses it '
-    + '(`400 INVALID_FIELD`, #7532). Where the value is wanted on the queried object itself, '
+    + '(`400 INVALID_FIELD` — refused since a dotted projection was found silently widening '
+    + 'the response to every field). Where the value is wanted on the queried object itself, '
     + 'denormalise it onto that object (a stored field, written when the source changes) — the '
-    + 'same remedy the sort axis prescribes (#6924)',
+    + 'same remedy the sort axis\'s refusal hint was corrected to prescribe, because a formula '
+    + 'or rollup field materialises no column to sort or select by',
   reason:
     'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
     + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
@@ -23,7 +25,7 @@ export const entry: SemanticMigration = {
     + 'is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST '
     + 'surface — `QueryAST` is never stored in stack metadata (no view, dataset or report '
     + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
-    + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
+    + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078.',
   acceptanceCriteria:
     'No caller puts an object in `fields[]`; related records AND single related columns are '
     + 'read through `expand`, with the foreign-key column retained in the projection so '

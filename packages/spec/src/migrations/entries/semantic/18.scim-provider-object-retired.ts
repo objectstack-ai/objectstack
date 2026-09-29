@@ -13,7 +13,8 @@ export const entry: SemanticMigration = {
     + 'retired `/scim/generate-token` endpoint.',
   replacement:
     '(removed — no direct replacement row. The stable `@better-auth/scim` '
-    + '1.7.x line (#3653, PR #12726) derives no `scimProvider` model: SCIM '
+    + '1.7.x line, which the platform adopted as one whole-model migration, '
+    + 'derives no `scimProvider` model: SCIM '
     + 'state lives in the seven stable platform objects '
     + '(`sys_scim_connection_binding`, `sys_scim_group`, '
     + '`sys_scim_group_member`, `sys_scim_identity_tombstone`, '
@@ -26,16 +27,18 @@ export const entry: SemanticMigration = {
     + 'on any path, so the IdP reissues its token — a migration-day operator '
     + 'action, not a code rewrite.)',
   reason:
-    'Maintainer ruling 2026-08-24 on #11693 (verbatim: 「11700 11693 不需要考虑'
-    + '历史数据，其他按照你的建议继续」) — disposition A: retire, with no '
+    'Maintainer ruling 2026-08-24 on the disposition of `sys_scim_provider` '
+    + '(verbatim, in part: 「不需要考虑历史数据」) — disposition A: retire, with no '
     + 'data-migration path owed for existing rows (reaffirmed 2026-08-25: SCIM '
     + 'has no real customers; the binding constraint is a smooth upgrade). '
-    + 'Executed as #11757 after the stable-1.7.1 migration landed (#3653 / '
-    + 'PR #12726): the installed library derives no `scimProvider` model, so '
+    + 'Executed as a retirement of its own after the stable-1.7.1 migration '
+    + 'landed: the installed library derives no `scimProvider` model, so '
     + 'the object backed nothing — nothing could write a row to it any more. '
     + 'Retiring it also removes its `provider_id` unique index, whose '
-    + 'stricter-than-upstream uniqueness was flagged on #3653 and parked '
-    + 'pending exactly this retirement.',
+    + 'stricter-than-upstream uniqueness (one `provider_id` across every '
+    + 'organization, where upstream scopes it per organization) was flagged '
+    + 'while the SCIM upgrade was parked, and left pending exactly this '
+    + 'retirement.',
   acceptanceCriteria:
     'No code imports `SysScimProvider` from `@objectstack/platform-objects` '
     + '(TS2305 after upgrade); `isPlatformProvidedObjectName(\'sys_scim_provider\')` '
@@ -45,7 +48,7 @@ export const entry: SemanticMigration = {
     + 'spec registry conformance test (`platform-object-names.test.ts`) pins '
     + 'the absence bidirectionally — re-adding either the object file or the '
     + 'registry name alone reds `registry group "platform-objects" is out of '
-    + 'date` (measured both ways on #11757). Existing `sys_scim_provider` '
+    + 'date` (measured both ways when the object was retired). Existing `sys_scim_provider` '
     + 'tables in deployed databases are left in place untouched, by ruling — '
     + 'no backfill, no reaper, no migrate command.',
 };

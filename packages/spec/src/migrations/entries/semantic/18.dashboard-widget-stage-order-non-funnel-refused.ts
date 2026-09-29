@@ -17,7 +17,8 @@ export const entry: SemanticMigration = {
     + 'lands at `options.stageOrder` and names the type the widget carries, the one type '
     + 'that reads the key, and the two keys to reach for instead.',
   reason:
-    '#17344 finding 1, ADR-0049 enforce-or-remove, and the enforce arm of a defect whose '
+    'The first finding of the report that `options.stageOrder` is honoured by the funnel '
+    + 'branch only, ADR-0049 enforce-or-remove, and the enforce arm of a defect whose '
     + 'whole content was SILENCE. `options` is the open renderer-extras bag, so '
     + '`stageOrder` was an ungated member of it: a `horizontal-bar` (or `line`, `pie`, '
     + '`table`, `metric`) widget carrying an authored lifecycle order PARSED, booted, and '
