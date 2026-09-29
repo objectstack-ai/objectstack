@@ -22,5 +22,6 @@
 // `monitoringWindow` spelling was retired. The rename's breaker half was absorbed
 // by `connector-resilience-keys-removed`, which strips the block an author
 // holding either spelling still carries; the `health` tombstone's prescription
-// names both spellings.
+// names both spellings. (Its trigger half was absorbed later in the same step by
+// `connector-triggers-removed`, so the rename conversion itself left the table.)
 export const entry = 'integration/CircuitBreakerConfig:monitoringWindow';

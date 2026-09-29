@@ -95,7 +95,7 @@ const DEAL_FIELDS: Record<string, Record<string, unknown>> = {
 
 const SHARE_FIELDS: Record<string, Record<string, unknown>> = {
   id: { type: 'text', name: 'id', label: 'Id', primary: true },
-  // [#14484] The tenant column the registry provisions on every platform
+  // [commit 3f64fe6c6] The tenant column the registry provisions on every platform
   // object (`applySystemFields`); this hand-built table must declare it too,
   // now that the writer stamps it — the fixture was never spec-faithful
   // without it, the omission just had no reader.

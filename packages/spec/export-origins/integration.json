@@ -36,8 +36,6 @@
     "ConnectorRetryStrategySchema": "src/integration/connector.zod.ts#ConnectorRetryStrategySchema (const)",
     "ConnectorSchema": "src/integration/connector.zod.ts#ConnectorSchema (const)",
     "ConnectorState": "src/integration/connector-descriptor.ts#ConnectorState (type)",
-    "ConnectorTrigger": "src/integration/connector.zod.ts#ConnectorTrigger (type)",
-    "ConnectorTriggerSchema": "src/integration/connector.zod.ts#ConnectorTriggerSchema (const)",
     "ConnectorType": "src/integration/connector.zod.ts#ConnectorType (type)",
     "ConnectorTypeSchema": "src/integration/connector.zod.ts#ConnectorTypeSchema (const)",
     "ConnectorUpstreamUnavailableError": "src/integration/connector-provider-errors.ts#ConnectorUpstreamUnavailableError (class)",

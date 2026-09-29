@@ -282,27 +282,24 @@ describe('connector resilience family retirement — the D2 conversion', () => {
     expect(stack).toEqual({ connectors: [{ ...WELL_FORMED }] });
   });
 
-  it('the absorbed chain: a pre-rename breaker key ends with the whole block gone, and the rename no longer fires on it', () => {
+  it('the absorbed chain: a pre-rename breaker key ends with the whole block gone, and no rename fires on it', () => {
+    // The rename's other half (`triggers[].interval`) used to ride in this same
+    // connector as the control that the rename still fired. It was absorbed in
+    // turn by the triggers retirement, so the rename left the table; that
+    // chain is pinned in `connector-triggers-retirement.test.ts`. The control
+    // here is now a live sibling key the removal must leave alone.
     const { stack, notices } = collectConversionNotices(
       {
         connectors: [{
           ...WELL_FORMED,
           health: { circuitBreaker: { enabled: true, monitoringWindow: 120000 } },
-          // The rename's surviving half, in the same connector, as the control:
-          // it must still fire — this retirement touched only the breaker half.
-          triggers: [{ key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 }],
+          requestTimeoutMs: 12000,
         }],
       },
       { includeRetired: true },
     );
-    expect(stack).toEqual({
-      connectors: [{
-        ...WELL_FORMED,
-        triggers: [{ key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 }],
-      }],
-    });
+    expect(stack).toEqual({ connectors: [{ ...WELL_FORMED, requestTimeoutMs: 12000 }] });
     expect(notices.map((n) => [n.conversionId, n.from, n.to])).toEqual([
-      ['connector-health-and-trigger-durations-unit-in-key', 'interval', 'intervalSeconds'],
       ['connector-resilience-keys-removed', 'health', '(removed)'],
     ]);
   });
@@ -332,11 +329,14 @@ describe('connector resilience family retirement — ADR-0087 registration', () 
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('integration/CircuitBreakerConfig:monitoringWindow');
   });
 
-  it('wires the D2 conversion into the step-18 chain, AFTER the duration rename it absorbs', () => {
+  it('wires the D2 conversion into the step-18 chain; the duration rename it absorbed is gone from it', () => {
     const ids = MIGRATIONS_BY_MAJOR[18]!.conversionIds;
     expect(ids).toContain('connector-resilience-keys-removed');
-    expect(ids.indexOf('connector-resilience-keys-removed'))
-      .toBeGreaterThan(ids.indexOf('connector-health-and-trigger-durations-unit-in-key'));
+    // This used to pin the removal AFTER the rename in the chain. The rename
+    // lost its trigger half to the triggers retirement as well, so with neither
+    // half left it is no longer in the step at all — an ordering assertion
+    // against an absent id would pass vacuously.
+    expect(ids).not.toContain('connector-health-and-trigger-durations-unit-in-key');
   });
 
   it('carries ONE D3 entry for the family, naming its D2 conversion and the chain', () => {
@@ -370,7 +370,9 @@ describe('connector resilience family retirement — the seven defs leave every 
       expect(holdersOf(name), `${name} must have zero holders`).toEqual([]);
     }
     const integrationNames = exportNamesOf('./integration');
-    for (const name of ['ConnectorSchema', 'DeclarativeConnectorEntrySchema', 'RetryConfigSchema', 'ConnectorTriggerSchema']) {
+    // `ConnectorTriggerSchema` was the fourth survivor here until the triggers
+    // retirement took it whole; `connector-triggers-retirement.test.ts` pins that.
+    for (const name of ['ConnectorSchema', 'DeclarativeConnectorEntrySchema', 'RetryConfigSchema']) {
       expect(integrationNames, `${name} must SURVIVE this retirement`).toContain(name);
     }
   });

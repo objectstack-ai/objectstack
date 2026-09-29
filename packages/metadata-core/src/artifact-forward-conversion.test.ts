@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ObjectStackDefinitionSchema, applyConversions, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
+import { ALL_CONVERSIONS, ObjectStackDefinitionSchema, applyConversions, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import {
   applyArtifactForwardConversions,
   parseRangeFloor,
@@ -37,6 +37,53 @@ type _SpecToMirror = ConversionNotice extends ArtifactConversionNotice ? true : 
 type _MirrorToSpec = ArtifactConversionNotice extends ConversionNotice ? true : never;
 const _mirrorPin: [_SpecToMirror, _MirrorToSpec] = [true, true];
 void _mirrorPin;
+
+// ── The per-entry rule, read off the LIVE registry ──────────────────────────
+// Several pins below model a release (`17.4.0`, `17.5.0`) against THIS tree's
+// real registry, and a registry grows retirements stamped past any release a
+// pin names: a retirement landing after a version bump is stamped with the new
+// label (spec's `retired-after.census.test.ts`). So a pin that hard-codes which
+// entries a floor opens is a snapshot of the registry, not the rule. These
+// helpers state the rule itself — entry E opens for a floor at or above the
+// label when `floor <= E.retiredAfter` — with the door's two default flips
+// named, as the blocks below already name them.
+
+/** The door's DEFAULT-FLIP refusals, named in their own blocks below (#17885, #15429). */
+const DOOR_DEFAULT_FLIPS: readonly string[] = ['app-hidden-to-unpublished', 'flow-decision-mode-inclusive-explicit'];
+
+const versionTriple = (v: string): [number, number, number] =>
+  v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number];
+
+function compareVersions(a: string, b: string): number {
+  const x = versionTriple(a);
+  const y = versionTriple(b);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! < y[i]! ? -1 : 1;
+  return 0;
+}
+
+/** Every retired entry the per-entry half opens for `floor` (at or above the label): id → `retiredAfter`. */
+function openedByRule(floor: string): Map<string, string> {
+  const opened = new Map<string, string>();
+  for (const c of ALL_CONVERSIONS) {
+    if (c.retiredFromLoadPath !== true || DOOR_DEFAULT_FLIPS.includes(c.id)) continue;
+    if (compareVersions(floor, c.retiredAfter) <= 0) opened.set(c.id, c.retiredAfter);
+  }
+  return opened;
+}
+
+/**
+ * The first `x.y.z` past both `label` and every retired entry's `retiredAfter`:
+ * the floor of an artifact authored against the surface a runtime at `label`
+ * enforces, which no window opens for. The derivation
+ * `packages/metadata/src/plugin-unbound-form-predicate-roots.test.ts` uses for
+ * its "current surface", over an injected label.
+ */
+function currentSurfaceFloor(label: string): string {
+  const all = [label, ...ALL_CONVERSIONS.flatMap((c) => (c.retiredFromLoadPath === true ? [c.retiredAfter] : []))];
+  const sorted = [...all].sort(compareVersions);
+  const [major, minor, patch] = versionTriple(sorted[sorted.length - 1]!);
+  return `${major}.${minor}.${patch + 1}`;
+}
 
 /** The measured 17.1-built shape: full CRUD plus the two retired lifecycle bits. */
 function legacyPermissionDefinition(protocolRange: string | undefined) {
@@ -98,19 +145,49 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
   });
 
   it('REFUSES the amnesty for an artifact authored at the current spec version — no blanket strip', () => {
-    // "Current" for THIS registry: every retirement it carries is stamped
-    // `retiredAfter` 17.4.0 or earlier, so a 17.5.0 floor on a 17.5.0 runtime
-    // predates none of them. (A floor at the label that DOES predate one opens
-    // the per-entry window instead — the #20390 block below.)
-    const def = legacyPermissionDefinition('^17.5.0');
-    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.5.0' });
+    // "Current" is DERIVED from this registry, never assumed: the first version
+    // past both the runtime label and every `retiredAfter` it carries, so the
+    // floor predates none of them. This pin used to spell it `17.5.0` beside the
+    // premise "every retirement is stamped 17.4.0 or earlier" — a snapshot of the
+    // registry that stopped holding when a retirement landed after the 17.5.0
+    // version pass and was stamped `17.5.0`. (A floor at the label that DOES
+    // predate one opens the per-entry window instead — the next case and the
+    // #20390 block below.)
+    const current = currentSurfaceFloor('17.5.0');
+    const def = legacyPermissionDefinition(`^${current}`);
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: current });
 
     expect(result.verdict).toBe('authored-current');
     expect(result.notices).toEqual([]);
+    expect(result.replayedRetirements).toEqual([]);
     // The definition comes back by reference, retired keys still present —
     // the strict parse downstream is what answers, with the tombstone.
     expect(result.definition).toBe(def);
     expect(def.permissions[0]!.objects.crm_ticket).toHaveProperty('allowPurge');
+  });
+
+  it('an artifact authored at the release the label names gets no blanket strip — only retirements stamped at or after its floor open', () => {
+    // The label case the pin above used to model. A floor at the label is not
+    // "current" once the registry carries a retirement stamped at that label
+    // (the release still accepted the shape); the per-entry half opens for
+    // exactly those, and a retirement the floor post-dates — this fixture's
+    // `allowRestore`/`allowPurge`, retired after 17.1.0 — is never replayed.
+    const def = legacyPermissionDefinition('^17.5.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.5.0' });
+    const expected = openedByRule('17.5.0');
+
+    expect(result.verdict).toBe(expected.size > 0 ? 'converted-retired-after' : 'authored-current');
+    expect(new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]))).toEqual(expected);
+    expect(result.replayedRetirements.map((r) => r.conversionId)).not.toContain('permission-allow-restore-purge-removed');
+    for (const r of result.replayedRetirements) {
+      expect(compareVersions('17.5.0', r.retiredAfter), `${r.conversionId} opened below its retiredAfter`).toBeLessThanOrEqual(0);
+    }
+    // No blanket strip: nothing fired, the reference comes back, the retired
+    // bits are still there for the strict parse to refuse.
+    expect(result.notices).toEqual([]);
+    expect(result.definition).toBe(def);
+    expect(def.permissions[0]!.objects.crm_ticket).toHaveProperty('allowPurge');
+    expect(def.permissions[0]!.objects.crm_ticket).toHaveProperty('allowRestore');
   });
 
   it('REFUSES the amnesty for an artifact authored at a NEWER spec than the runtime', () => {
@@ -504,19 +581,53 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
     expect(replayed.get('page-assigned-profiles-removed')).toBe('17.4.0');
     expect(replayed.get('dashboard-widget-chart-config-structure-removed')).toBe('17.4.0');
     expect(replayed.has('flow-decision-mode-inclusive-explicit')).toBe(false);
-    expect([...new Set(replayed.values())]).toEqual(['17.4.0']);
+    // Exactly the entries the rule opens for this floor over the LIVE registry —
+    // every one at or after the floor, none a retirement the floor post-dates.
+    // This used to read `['17.4.0']` as the whole set of stamps, true only while
+    // no retirement had landed after the 17.5.0 version pass; one stamped
+    // `17.5.0` also opens for a 17.4.0 floor, and a tree labelled 17.4.0 could
+    // not have carried it (spec's census never stamps above the label).
+    expect(replayed).toEqual(openedByRule('17.4.0'));
+    for (const [id, retiredAfter] of replayed) {
+      expect(compareVersions('17.4.0', retiredAfter), `${id} opened below its retiredAfter`).toBeLessThanOrEqual(0);
+    }
+    expect([...replayed.values()]).toContain('17.4.0');
   });
 
   // Pin (3): the boundary the per-entry rule must keep.
   it('an artifact whose floor is exactly 17.5.0 on a 17.5.0-labelled runtime is refused, not converted', () => {
+    // The boundary: the 17.5.0 cohort is stamped `retiredAfter` 17.4.0, so a
+    // 17.5.0 floor post-dates it and its keys meet their tombstones. The window
+    // may still open for a retirement stamped AT 17.5.0 (one that landed after
+    // the version pass, whose release still accepted the shape) — that is the
+    // rule, read off the live registry below, and it opens nothing this
+    // fixture carries.
     const def = builtBy174('^17.5.0');
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.5.0' });
+    const expected = openedByRule('17.5.0');
+
+    expect(result.verdict).toBe(expected.size > 0 ? 'converted-retired-after' : 'authored-current');
+    expect(new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]))).toEqual(expected);
+    for (const id of ['page-assigned-profiles-removed', 'dashboard-widget-chart-config-structure-removed']) {
+      expect(result.replayedRetirements.map((r) => r.conversionId), `${id} is post-dated by the floor`).not.toContain(id);
+    }
+    expect(result.notices).toEqual([]);
+    expect(result.definition).toBe(def);
+    // The strict parse the door feeds refuses every retired site, tombstones included.
+    expect(issuePaths(result.definition)).toEqual(RETIRED_SITES);
+  });
+
+  it('an artifact authored against the current surface (past the label and every retiredAfter) is refused with the window shut', () => {
+    // Pin (3)'s verdict half, kept at full strength where the registry cannot
+    // move it: a floor past every stamp opens nothing at all.
+    const current = currentSurfaceFloor('17.5.0');
+    const def = builtBy174(`^${current}`);
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: current });
 
     expect(result.verdict).toBe('authored-current');
     expect(result.notices).toEqual([]);
     expect(result.replayedRetirements).toEqual([]);
     expect(result.definition).toBe(def);
-    // The strict parse the door feeds refuses every retired site, tombstones included.
     expect(issuePaths(result.definition)).toEqual(RETIRED_SITES);
   });
 

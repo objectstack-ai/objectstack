@@ -24,8 +24,6 @@
     "ConnectorRetryStrategy": "integration/ConnectorRetryStrategy",
     "ConnectorRetryStrategySchema": "integration/ConnectorRetryStrategy",
     "ConnectorSchema": "integration/Connector",
-    "ConnectorTrigger": "integration/ConnectorTrigger",
-    "ConnectorTriggerSchema": "integration/ConnectorTrigger",
     "ConnectorType": "integration/ConnectorType",
     "ConnectorTypeSchema": "integration/ConnectorType",
     "DataSyncConfig": "integration/DataSyncConfig",

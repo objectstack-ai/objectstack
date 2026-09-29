@@ -5173,9 +5173,29 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rows as a pure lossless delete (the nested webhooks are stripped, never moved: moving them '
       + 'would start deliveries that never happened). It ABSORBS the breaker half of the duration '
       + 'rename above: `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` is no longer '
-      + 'converted, because the whole block it lived in is now removed, and '
-      + '`connector-health-and-trigger-durations-unit-in-key` keeps only `triggers[].interval` → '
-      + '`intervalSeconds`.',
+      + 'converted, because the whole block it lived in is now removed.',
+  },
+  {
+    id: 'connector-triggers-retired',
+    order: 48,
+    text:
+      'It also retires the connector `triggers` array (ADR-0049 enforce-or-remove; ADR-0041 keeps '
+      + 'connector-event triggers in its third tier, as their own trigger package): the '
+      + '`ConnectorTrigger` shape — `key`, `label`, `description`, `type` (`polling` / `webhook`) and '
+      + '`intervalSeconds` — was read by nothing. The automation engine registered a connector\'s '
+      + 'actions only, its trigger registry holds FLOW trigger kinds that no connector trigger ever '
+      + 'entered, no polling loop read an interval and no receiver was driven by a `webhook` trigger, '
+      + 'so a declared trigger never started a flow. `triggers` is a retiredKey tombstone on '
+      + '`ConnectorBaseSchema`, registered under both carrier defs; the provider-bound refusal of '
+      + 'the key, whose reason (the provider derives triggers) was untrue, is gone with it, since '
+      + 'the tombstone refuses every value on every carrier. `ConnectorTrigger` leaves whole, and '
+      + 'the D2 conversion `connector-triggers-removed` strips the array from `connectors[]` and '
+      + 'stored rows as a pure lossless delete — never turning a trigger into a flow, which is the '
+      + 'author\'s decision (an `api` flow for an external event, a `schedule` flow for a scheduled '
+      + 'pull, each calling the connector\'s action). It ABSORBS the trigger half of the connector '
+      + 'duration rename (its breaker half went with `health` above), so '
+      + '`connector-health-and-trigger-durations-unit-in-key`, with neither half left, is no longer '
+      + 'in this step.',
   },
   {
     id: 'cron-positions-deleted',
@@ -5280,7 +5300,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'semantic entry each, naming the suffixed key. The `data`, `ui`, `ai` and '
       + '`integration` remainder closes the same sweep: `dashboard.refreshInterval` → '
       + '`refreshIntervalSeconds`, the connector pair `health.circuitBreaker.monitoringWindow` '
-      + '→ `monitoringWindowMs` and `triggers[].interval` → `intervalSeconds`, and the two '
+      + '→ `monitoringWindowMs` and `triggers[].interval` → `intervalSeconds` (both halves later '
+      + 'absorbed by the removal of the block each key lived in — see the connector retirements '
+      + 'below), and the two '
       + 'datasource config keys `memory config.persistence.autoSaveInterval` → '
       + '`autoSaveIntervalMs` (BOTH union arms — the `auto` arm forwards the same value to the '
       + 'same file adapter, so splitting them would have left one value with two spellings) '
@@ -7825,49 +7847,6 @@ const step18: MigrationStep = {
         + 'deliberately do NOT move, and a sweep that removed either has over-applied this entry: '
         + 'both resolve to real reads at the fetch site.',
     },
-    // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
-    // unit in its NAME) — the D3 entry of the
-    // `connector-health-and-trigger-durations-unit-in-key` family (ruling B on
-    // #17152: one D3 entry per retirement family, even when D2 is lossless). The
-    // family was two keys in one authored document and one conversion:
-    // `health.circuitBreaker.monitoringWindow` → `monitoringWindowMs` and
-    // `triggers[].interval` → `intervalSeconds`.
-    //
-    // ⚠️ Reconciled with the connector resilience retirement (ADR-0049, the same
-    // unreleased protocol step): the whole `health` block was then removed, so the
-    // breaker half of this rename was ABSORBED — the renamed key is itself retired,
-    // and the conversion now carries only the trigger half. This entry says so,
-    // rather than prescribing a rename to a key the parse refuses next; the
-    // removal's own judgement is the D3 entry `connector-resilience-keys-retired`.
-    // `triggers[].interval` is still unread (the liveness ledger records it dead,
-    // `liveness/connector.json`): the rename is an honesty fix to the declaration,
-    // and the entry says so rather than implying a live engine.
-    {
-      id: 'connector-resilience-durations-unit-in-key',
-      surface: 'connector.triggers[].interval — the connector duration whose name carried no unit '
-        + '(and, until the whole `health` block was retired, connector.health.circuitBreaker.monitoringWindow)',
-      replacement: '`intervalSeconds` (seconds) — rename the key; the value is unchanged. There is no '
-        + 'replacement for `monitoringWindow`: its renamed spelling `monitoringWindowMs` was retired with '
-        + 'the rest of `connector.health` — delete the block (see `connector-resilience-keys-retired`).',
-      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames '
-        + '`triggers[].interval` in `connectors[]` and on stored connector rows, keeping the value; the '
-        + 'rename is lossless because the key always meant seconds. It used to rename the breaker\'s '
-        + '`monitoringWindow` too, but that half was absorbed by `connector-resilience-keys-removed`, '
-        + 'which strips the whole `health` block — so an author holding either `monitoringWindow` or '
-        + '`monitoringWindowMs` ends with no key at all, and must not re-add `monitoringWindowMs`: the '
-        + 'parse refuses the block. Two judgments remain for the trigger. First, the unit was easy to '
-        + 'get wrong: the bare token `interval` means MILLISECONDS elsewhere in this same spec while a '
-        + 'trigger interval meant SECONDS — so a trigger written `interval: 60000` for one minute asked '
-        + 'for once every sixteen hours or so, and the rename keeps 60000. Second, the key drives no '
-        + 'engine today: no polling loop reads a trigger interval, so an author who relied on it for '
-        + 'behaviour has not been getting it, before or after this rename.',
-      acceptanceCriteria: 'No connector carries `triggers[].interval`; the parse refuses it with the '
-        + 'rename, and every `intervalSeconds` value is the cadence the author intends in seconds — a '
-        + 'trigger meant to poll every minute reads `intervalSeconds: 60`. No connector carries '
-        + '`health` in any spelling (`monitoringWindow` or `monitoringWindowMs` included). No part of '
-        + 'the deployment\'s design depends on a connector polling on that interval or tripping on a '
-        + 'breaker window: where it did, the author has moved that need to a mechanism that runs.',
-    },
     // ADR-0049 enforce-or-remove — the D3 entry of the connector resilience family:
     // `connector.health` (the `healthCheck` probe and the `circuitBreaker`),
     // `connector.status` and the connector-nested `webhooks`, sixteen authorable keys
@@ -7877,7 +7856,9 @@ const step18: MigrationStep = {
     // what only the author can judge. It also names the CHAIN through the same
     // protocol step: `connector-health-and-trigger-durations-unit-in-key` used to
     // rename `health.circuitBreaker.monitoringWindow` to `monitoringWindowMs`, and
-    // that half was absorbed here — the renamed key is itself removed.
+    // that half was absorbed here — the renamed key is itself removed. (Its trigger
+    // half was absorbed later by `connector-triggers-removed`, and the conversion
+    // left the table.)
     {
       id: 'connector-resilience-keys-retired',
       surface: 'connector.health (healthCheck / circuitBreaker), connector.status and connector.webhooks — '
@@ -7904,8 +7885,10 @@ const step18: MigrationStep = {
         + 'counterpart there. The chain: in this same protocol step, '
         + '`connector-health-and-trigger-durations-unit-in-key` no longer renames '
         + '`health.circuitBreaker.monitoringWindow` to `monitoringWindowMs` — the whole block that '
-        + 'key lived in is removed, so an author holding either spelling ends with no key at all; '
-        + 'that conversion\'s `triggers[].interval` to `intervalSeconds` rename is unaffected.',
+        + 'key lived in is removed, so an author holding either spelling ends with no key at all. '
+        + 'That conversion\'s other half, `triggers[].interval` to `intervalSeconds`, was absorbed '
+        + 'the same way by the removal of the whole `triggers` array (`connector-triggers-removed`), '
+        + 'so the rename itself is no longer in the step.',
       acceptanceCriteria: 'No connector and no stack connector entry carries `health`, `status` or '
         + '`webhooks`; the parse refuses each with its prescription (a stored `status: \'inactive\'` '
         + 'default is accepted and stripped as inert residue), and no code imports ConnectorHealth, '
@@ -7917,6 +7900,57 @@ const step18: MigrationStep = {
         + 'is declared in the top-level `webhooks:` collection and observed delivering; and each '
         + 'probe or breaker the author relied on is provided by the connector provider or a gateway '
         + 'and observed tripping against a failing upstream.',
+    },
+    // ADR-0049 enforce-or-remove — the D3 entry of the connector triggers family:
+    // `connector.triggers`, the whole `ConnectorTrigger` array, retired as one
+    // batch by ruling (ADR-0041 unchanged: connector-event triggers stay in its
+    // third tier, as their own trigger package). One D3 entry per retirement
+    // family, even when D2 is lossless (ruling B on #17152): the D2 conversion
+    // `connector-triggers-removed` repairs the data, and this entry carries what
+    // only the author can judge. It also names the CHAIN through the same protocol
+    // step: `connector-health-and-trigger-durations-unit-in-key` used to rename
+    // `triggers[].interval` to `intervalSeconds`; that half was absorbed here (the
+    // breaker half already was, by the `health` removal), so the rename left the
+    // table, and this family's former rename entry left with it.
+    {
+      id: 'connector-triggers-retired',
+      surface: 'connector.triggers — the ConnectorTrigger array (key / label / description / type / '
+        + 'intervalSeconds, and the interval spelling it was renamed from), on a connector and on a '
+        + 'stack connectors[] entry',
+      replacement: '(removed — nothing replaces a connector trigger.) Start the work from a flow that '
+        + 'calls the connector\'s action in a `connector_action` node: an external event starts an '
+        + '`api` flow that the event\'s sender calls, and a scheduled pull is a `schedule` flow.',
+      reason: 'The D2 conversion `connector-triggers-removed` deletes `triggers` from every connector, '
+        + 'stack entry and stored connector row, one notice per connector, and the delete is lossless: '
+        + 'the automation engine registered a connector\'s actions only, no polling loop read an '
+        + 'interval, no receiver was driven by a `webhook` trigger, and no provider derived one — so a '
+        + 'declared trigger never started a flow, before or after the upgrade. Three judgements '
+        + 'remain. First, any part of the deployment designed around a connector trigger firing has '
+        + 'never been running, so the author decides which of those triggers should now exist as '
+        + 'flows: a `polling` trigger becomes a `schedule` flow whose `connector_action` node calls '
+        + 'the connector\'s read action, and a `webhook` trigger becomes an `api` flow that the '
+        + 'external sender calls. The conversion STRIPS the array and never writes a flow, because '
+        + 'a flow that runs STARTS work that never happened before — its cadence, its action and '
+        + 'what it does with the result are the author\'s. Second, a polling cadence is in SECONDS: '
+        + 'the key was renamed from `interval` to `intervalSeconds` earlier in this same protocol '
+        + 'step because the bare `interval` means milliseconds elsewhere in this spec, so a trigger '
+        + 'written `interval: 60000` for one minute asked for once every sixteen hours or so — carry '
+        + 'the intended cadence, not the stored number, into the schedule. Third, turning a '
+        + '`webhook` trigger into an `api` flow opens an inbound endpoint that never existed before '
+        + '(the trigger declared no receiver and no verification), and the platform refuses an `api` '
+        + 'flow with no per-flow secret and verifies a signature on every call — so whether the '
+        + 'external sender can sign its calls decides whether that flow can receive them directly. '
+        + 'The chain: '
+        + 'in this same protocol step, `connector-health-and-trigger-durations-unit-in-key` no '
+        + 'longer renames `triggers[].interval` — the whole array that key lived in is removed, so an '
+        + 'author holding either spelling ends with no key at all.',
+      acceptanceCriteria: 'No connector and no stack connector entry carries `triggers` in any '
+        + 'spelling; the parse refuses the key with its prescription, and no code imports '
+        + 'ConnectorTrigger or ConnectorTriggerSchema. Every connector registers and dispatches its '
+        + 'actions exactly as it did before the upgrade. Each connector trigger the author still '
+        + 'wants is a flow that is observed running: a scheduled pull as a `schedule` flow whose '
+        + '`connector_action` node calls the connector\'s action at the intended cadence in seconds, '
+        + 'and an external event as an `api` flow observed starting when the sender calls it.',
     },
     {
       id: 'cube-join-sql-and-relationship-retired',
@@ -19481,7 +19515,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `monitoringWindow` spelling was retired. The rename's breaker half was absorbed
     // by `connector-resilience-keys-removed`, which strips the block an author
     // holding either spelling still carries; the `health` tombstone's prescription
-    // names both spellings.
+    // names both spellings. (Its trigger half was absorbed later in the same step by
+    // `connector-triggers-removed`, so the rename conversion itself left the table.)
     'integration/CircuitBreakerConfig:monitoringWindow',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.connectionTimeoutMs`
     // (maintainer ruling 2026-09-22, letter A — the narrower SECOND decision this
@@ -19669,6 +19704,37 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // refusal. Sources and stored rows are rewritten by the D2 conversion
     // `connector-resilience-keys-removed`.
     'integration/Connector:status',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.triggers` — the connector
+    // triggers family, ruled RETIRE on the maintainer's criterion for a
+    // declared-but-unenforced family, with ADR-0041 left as it is (connector-event
+    // triggers stay in its third tier, as their own trigger package, promoted only
+    // when real projects ask for them). The `ConnectorTrigger` array (`key`,
+    // `label`, `description`, `type: 'polling' | 'webhook'`, `intervalSeconds`) was
+    // read by NOTHING. Measured on `origin/main` before the removal:
+    // `AutomationEngine.registerConnector` walks `parsed.actions` only and stores the
+    // rest of the def unread; the engine's trigger registry is keyed by FLOW trigger
+    // kind (`record_change`, `time_relative`, `schedule`, `api` — a closed set) and
+    // no connector trigger ever entered it; no polling loop read `intervalSeconds`;
+    // no receiver was driven by a `webhook` trigger; and across every `.ts`, `.tsx`
+    // and `.json` file outside `packages/spec` (tests excluded) at `288611e3e5`, the
+    // 15 authorings of a `triggers:` key were all webhook `triggers`, a plugin
+    // grouping or form-label translations — none a connector trigger — while
+    // `actions`, the lit control on the same def, is walked by `registerConnector`
+    // and handler-checked there.
+    //
+    // The one runtime touch was a REFUSAL of `triggers` on a provider-bound
+    // declarative instance, reasoned "the provider derives them from the upstream at
+    // boot" — untrue, since no provider ever derived a trigger. The tombstone makes
+    // that rule unreachable (every carrier refuses every value), so the rule left
+    // with it rather than being re-reasoned.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104); the orphaned
+    // `integration/ConnectorTrigger` leaves via `RETIRED_DEFS_BY_MAJOR[18]`. The key
+    // carried no default, so no retired-default residue is owed. Sources and stored
+    // rows are rewritten by the D2 conversion `connector-triggers-removed`, which
+    // STRIPS the array and never turns a trigger into a flow — that is the author's
+    // decision, carried by the D3 entry `connector-triggers-retired`.
+    'integration/Connector:triggers',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.webhooks` — part of the
     // connector resilience family batch (see `18.integration__Connector__health.ts`).
     // A connector's NESTED webhook array is not the collection anything delivers:
@@ -19700,9 +19766,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // value is unchanged. Tombstoned with `retiredKey()`; the shape is not
     // `.strict()`, so a bare deletion would strip in silence. Covered by the D2
     // conversion `connector-health-and-trigger-durations-unit-in-key`.
-    // ⚠️ The trigger shape itself is declared-but-unread (no polling loop is driven
-    // by it). The rename does not change that; it makes the declaration honest
-    // about its unit for whoever implements the loop.
+    //
+    // ⚠️ Superseded in the same unreleased step: the trigger shape was declared but
+    // never read (no polling loop was driven by it), and the whole `triggers` array
+    // was then retired under ADR-0049 — `integration/ConnectorTrigger` left whole
+    // (`RETIRED_DEFS_BY_MAJOR[18]`) and this tombstone left with it. The row STAYS —
+    // the whole-def removal steady state gate (b3) exempts — because it is still the
+    // record that the bare `interval` spelling was retired (the
+    // `integration/CircuitBreakerConfig:monitoringWindow` precedent). The rename
+    // conversion left the table, both of its halves absorbed; the trigger half by
+    // `connector-triggers-removed`, which strips the array an author holding either
+    // spelling still carries, and the `triggers` tombstone's prescription names both.
     'integration/ConnectorTrigger:interval',
     // The same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` are now SIBLINGS, not
@@ -19756,6 +19830,12 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
     // `18.integration__Connector__status.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:status',
+    // The same `triggers` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse, where the
+    // provider-bound refusal the tombstone replaced used to live. One tombstone, two
+    // registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__triggers.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:triggers',
     // The same `webhooks` tombstone seen through the second carrier — the shape
     // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse. One
     // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
@@ -23223,6 +23303,15 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // one. See `retired-keys/18.integration__Connector__status.ts` for the
     // retirement record.
     'integration/ConnectorStatus',
+    // `integration/ConnectorTrigger` (`key`, `label`, `description`,
+    // `type: 'polling' | 'webhook'`, `intervalSeconds`, and the `interval` tombstone
+    // of its unit rename) leaves with its only carrier, `ConnectorSchema.triggers`,
+    // tombstoned in this same major under ADR-0049 enforce-or-remove. Nothing read a
+    // connector trigger, so nothing replaces the shape: work starts from a flow that
+    // calls the connector's action. See
+    // `retired-keys/18.integration__Connector__triggers.ts` for the retirement
+    // record.
+    'integration/ConnectorTrigger',
     // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
     // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
     // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049

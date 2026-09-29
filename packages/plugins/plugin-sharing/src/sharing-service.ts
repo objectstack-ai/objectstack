@@ -17,11 +17,11 @@ import {
 } from '@objectstack/spec/security';
 // [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
 // envelope — the same type `ISharingService` declares for these parameters
-// since #6523 (the #6206 ruling: no per-site subset contracts). Annotating the
+// since commit aa4b90d9a (the full-envelope ruling: no per-site subset contracts). Annotating the
 // implementations with a narrower shape is what forced this file to cast its
 // way out of its own contract to read fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-// [#14484] The engine's own answer to "which column is this object walled
+// [commit 3f64fe6c6] The engine's own answer to "which column is this object walled
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
 import { resolveTenantFieldName } from '@objectstack/objectql';
@@ -113,7 +113,7 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
 /**
  * [#5859 / #5852] The caller's ACTIVE ORGANIZATION as carried by an execution
  * context — the value `HierarchyScopeContext.organizationId` (the authoritative
- * tenancy field since #5858 / PR #5973) must be filled with.
+ * tenancy field since #5858 / commit abeb3751f) must be filled with.
  *
  * Every transport puts it on `tenantId`: both HTTP entry points build their
  * context from the ONE shared authorization resolver
@@ -144,7 +144,7 @@ function activeOrganizationId(context: ExecutionContext): string | null {
 }
 
 /**
- * [#14484] What `SharingService.recordOrganization` found — three answers the
+ * [commit 3f64fe6c6] What `SharingService.recordOrganization` found — three answers the
  * direct-grant path treats differently, so they are typed apart rather than
  * collapsed into one `null`. `none` (no tenant column, record gone, or an
  * organization-less row) earns the acting session's organization as the
@@ -1228,7 +1228,7 @@ export class SharingService implements ISharingService {
     // best-effort — the boot backfill, the object-wide re-grant and the
     // bu-tree re-grant queue log and continue, and the write hooks catch so a
     // user's insert/update is never failed by it.
-    // [#14484] The organization this grant belongs to, resolved here so BOTH
+    // [commit 3f64fe6c6] The organization this grant belongs to, resolved here so BOTH
     // halves of the upsert carry it. A rule-materialised grant carries the
     // rule's organization (the evaluator threads it — see
     // `SharingRuleService.criteriaContext`); a direct grant carries the shared
@@ -1265,7 +1265,7 @@ export class SharingService implements ISharingService {
       const row: any = existing[0];
       const patch: any = {
         id: row.id,
-        // [#14484] The update half stamps too: a row written before the writer
+        // [commit 3f64fe6c6] The update half stamps too: a row written before the writer
         // was repaired carries NULL, and the next grant that touches it is the
         // cheapest repair there is. A resolution of `null` leaves the stored
         // value alone rather than clearing one the backfill already wrote.
@@ -1276,7 +1276,7 @@ export class SharingService implements ISharingService {
         reason: input.reason ?? row.reason ?? null,
         updated_at: now,
       };
-      // [#14484] The organization rides the write context as well as the row —
+      // [commit 3f64fe6c6] The organization rides the write context as well as the row —
       // `{ isSystem, tenantId }` is the shape #8844's refusal prescribes for a
       // system write, the same chokepoint a session write goes through
       // (`ObjectQLEngine.buildDriverOptions` → `DriverOptions.tenantId`), and
@@ -1297,7 +1297,7 @@ export class SharingService implements ISharingService {
     const id = makeShareId();
     const row: any = {
       id,
-      // [#14484] Carried on the row literal itself, explicitly `null` when
+      // [commit 3f64fe6c6] Carried on the row literal itself, explicitly `null` when
       // nothing resolved: `sys_record_share` is tenant-scoped in the #13491
       // ledger, so an organization-less system insert is the engine's to
       // decide — derived on a `single` install, REFUSED loudly on a walled one
@@ -1316,7 +1316,7 @@ export class SharingService implements ISharingService {
       created_at: now,
       updated_at: now,
     };
-    // [#14484] Same write context as the update half — see the note there.
+    // [commit 3f64fe6c6] Same write context as the update half — see the note there.
     await this.engine.insert('sys_record_share', row, {
       context: { ...SYSTEM_CTX, tenantId: organizationId ?? undefined },
     });
@@ -1324,7 +1324,7 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * [#14484] The organization a SYSTEM caller's grant belongs to.
+   * [commit 3f64fe6c6] The organization a SYSTEM caller's grant belongs to.
    *
    * First the organization the caller THREADS: `SharingRuleService.reconcile`
    * / `reconcileForRecord` pass the rule's own `criteriaContext`, so a
@@ -1351,7 +1351,7 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * [#14484] The organization a DIRECT grant belongs to: the organization of
+   * [commit 3f64fe6c6] The organization a DIRECT grant belongs to: the organization of
    * the record being shared (the ruling's second pin), read from the record
    * itself — never the caller's active organization first, which under a
    * `single` posture holding several organizations may not be the record's.
@@ -1392,7 +1392,7 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * [#14484] The organization `(object, recordId)` is walled by, read off the
+   * [commit 3f64fe6c6] The organization `(object, recordId)` is walled by, read off the
    * column the object is actually walled by ({@link resolveTenantFieldName}:
    * ADR-0066 opt-out → declared `tenancy.tenantField` → injected
    * `organization_id`), under the system context so field-level masking cannot
@@ -1425,7 +1425,7 @@ export class SharingService implements ISharingService {
         ? { kind: 'organization', organizationId: value }
         : NO_RECORD_ORGANIZATION;
     } catch (err: any) {
-      // [#14484] The id stays out of the string: it reaches operators. The
+      // [commit 3f64fe6c6] The id stays out of the string: it reaches operators. The
       // text says what the failed read does NOT do — substitute the acting
       // session's organization — because that is the one thing a reader of
       // this line needs to know the row was spared.
@@ -1440,7 +1440,7 @@ export class SharingService implements ISharingService {
     }
   }
 
-  /** [#14484] The tenant column of `object`, or `null` when it has none / the engine cannot say. */
+  /** [commit 3f64fe6c6] The tenant column of `object`, or `null` when it has none / the engine cannot say. */
   private tenantFieldOf(object: string): string | null {
     if (typeof this.engine.getSchema !== 'function') return null;
     let schema: unknown;
@@ -1682,7 +1682,7 @@ export class SharingService implements ISharingService {
       const ids = await resolver.resolveOwnerIds(
         {
           userId: me,
-          // AUTHORITATIVE (#5858 / PR #5973). Never `(context as any).organizationId`:
+          // AUTHORITATIVE (#5858 / commit abeb3751f). Never `(context as any).organizationId`:
           // no execution context in this repo carries that key.
           organizationId,
           // [#6139] What a `null` organizationId MEANS. Under `single` it is

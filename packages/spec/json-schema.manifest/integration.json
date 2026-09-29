@@ -13,7 +13,6 @@
     "integration/ConnectorInstanceBearerAuth",
     "integration/ConnectorInstanceNoAuth",
     "integration/ConnectorRetryStrategy",
-    "integration/ConnectorTrigger",
     "integration/ConnectorType",
     "integration/DataSyncConfig",
     "integration/DeclarativeConnectorEntry",
