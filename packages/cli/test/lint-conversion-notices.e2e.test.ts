@@ -123,13 +123,15 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
  *
  * `source` is a single-root element: the `jsx-no-root` authoring rule rejects a
  * bare string, so a fixture that used one would never reach the exit under test.
+ * It is `<box>`, not `<div>`: where the CLI reaches the manifest
+ * `@objectstack/console` ships, the html tier refuses `div` (#19922).
  */
 function stack(ns: string, opts: { pageKind?: string } = {}): string {
   const { pageKind = 'jsx' } = opts;
   return `
 export default {
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
-  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
+  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<box>hi</box>' }],
   objects: [
     {
       name: '${ns}_ticket',
