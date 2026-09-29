@@ -142,6 +142,13 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
       + 'the underlying data (never re-derived from bucketed values). The '
       + 'grand-total grouping yields a single dimensionless row.',
     ),
+    object: z.string().optional().describe(
+      'The base object of the dataset the answer was computed from: the dataset\'s '
+      + '`object`, by machine name. Every dataset answer (`POST /analytics/dataset/query`) '
+      + 'must carry it, whatever dimensions are selected and whether or not rows came '
+      + 'back, so a consumer can refresh on that object\'s record changes and drill '
+      + 'into its records. Absent on a cube query answer, which has no dataset behind it.',
+    ),
   }),
 }));
 
