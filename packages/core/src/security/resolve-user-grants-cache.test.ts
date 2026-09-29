@@ -543,3 +543,43 @@ describe('pin 9 — two nodes over one database', () => {
     expect(converged.permissions).not.toContain('admin_full_access');
   });
 });
+
+// ── [#20515] the no-tenant rule holds with the cache ON ─────────────────────
+
+describe('[#20515] with the cache on, a no-tenant resolution never serves an organization\'s grants', () => {
+  /** One grant scoped to `org_a`, one global. */
+  function scopedTables(): Record<string, any[]> {
+    return {
+      sys_user: [{ id: 'u1', email: 'u1@x.com' }],
+      sys_member: [],
+      sys_user_position: [],
+      sys_user_permission_set: [
+        { user_id: 'u1', permission_set_id: 'ps_org', organization_id: 'org_a' },
+        { user_id: 'u1', permission_set_id: 'ps_global', organization_id: null },
+      ],
+      sys_permission_set: [
+        { id: 'ps_org', name: 'org_a_editors', system_permissions: ['manage_metadata'] },
+        { id: 'ps_global', name: 'everyone_readers' },
+      ],
+      sys_position: [],
+      sys_position_permission_set: [],
+    };
+  }
+
+  it('an org_a resolution cached first is NOT what a no-tenant resolution gets — and the reverse', async () => {
+    cacheOn(3_600_000);
+    const ql = makeSeamQl(scopedTables());
+
+    const inOrg = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a', nowMs: T });
+    expect(inOrg.systemPermissions).toContain('manage_metadata');
+    const orgless = await resolveUserAuthzGrants(ql, 'u1', { nowMs: T });
+    expect(orgless.permissions).toEqual(['everyone_readers']);
+    expect(orgless.systemPermissions).not.toContain('manage_metadata');
+
+    // Both entries are now cached, each under its own tenant — and each hit
+    // reads nothing and still answers its own tenant's grants.
+    expect((await resolveExpectingZeroReads(ql, 'u1', { nowMs: T })).systemPermissions).not.toContain('manage_metadata');
+    expect((await resolveExpectingZeroReads(ql, 'u1', { tenantId: 'org_a', nowMs: T })).systemPermissions)
+      .toContain('manage_metadata');
+  });
+});

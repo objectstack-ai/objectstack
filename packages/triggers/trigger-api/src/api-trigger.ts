@@ -47,11 +47,17 @@ export interface TriggerLogger {
 
 const QUEUE_PREFIX = 'flow-api';
 
-/** One armed inbound hook. */
+/**
+ * One armed inbound hook. `secret` is required by the type, not only by
+ * {@link ApiTrigger.start}'s check: ADR-0041's `trigger-api` acceptance
+ * criteria name a per-flow secret and HMAC verification, so a hook without
+ * one has no legal shape to be stored in, and {@link ApiTrigger.handleRequest}
+ * has no unsigned branch to take.
+ */
 interface ArmedHook {
     flowName: string;
     hookId: string;
-    secret?: string;
+    secret: string;
     queue: string;
     callback: (ctx: AutomationContext) => Promise<void>;
 }
@@ -79,14 +85,14 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * `api` flow trigger (ADR-0041 Tier 1) — inbound webhook/HTTP.
  *
  * The engine binds every `type: 'api'` flow to this trigger; `start()` arms a
- * hook (URL path + optional HMAC secret from the start node's `config`) and
- * subscribes a queue consumer that runs the flow. The HTTP side
+ * hook (URL path + the required HMAC secret from the start node's `config`)
+ * and subscribes a queue consumer that runs the flow. The HTTP side
  * ({@link handleRequest}) validates and **enqueues** — it never executes the
  * flow in-band:
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
  *     → 404 unknown flow / wrong hookId
- *     → 401 missing/bad HMAC signature (when the flow declares a `secret`)
+ *     → 401 missing/bad HMAC signature
  *     → 400 non-JSON body
  *     → 202 { accepted, messageId } — queued; a consumer executes the flow
  *
@@ -97,9 +103,12 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * Start-node config keys:
  *   - `hookId`  — URL path token (default `'default'`); rotate it to revoke
  *                 old URLs without renaming the flow.
- *   - `secret`  — HMAC-SHA256 shared secret. Strongly recommended; without it
- *                 the endpoint accepts unsigned posts (the trigger logs a
- *                 warning at arm time).
+ *   - `secret`  — HMAC-SHA256 shared secret. **Required** (ADR-0041): a
+ *                 binding with no non-blank `secret` is refused — `start()`
+ *                 throws naming the flow, and nothing is armed or subscribed.
+ *                 The automation engine refuses the same flow earlier, at
+ *                 registration, so an author learns before deploying; this
+ *                 refusal is what holds for a host that binds without it.
  */
 export class ApiTrigger implements FlowTrigger {
     readonly type = 'api';
@@ -122,6 +131,17 @@ export class ApiTrigger implements FlowTrigger {
         const cfg = (binding.config ?? {}) as Record<string, unknown>;
         const hookId = typeof cfg.hookId === 'string' && cfg.hookId.trim() ? cfg.hookId.trim() : 'default';
         const secret = typeof cfg.secret === 'string' && cfg.secret.trim() ? cfg.secret.trim() : undefined;
+        // ADR-0041 (`trigger-api` acceptance criteria): a per-flow secret and
+        // HMAC verification. Refused BEFORE anything is stored or subscribed,
+        // so a refused flow leaves no hook behind; the engine's bind catch
+        // reports the throw and its binding audit lists the flow as unbound.
+        if (!secret) {
+            throw new Error(
+                `[trigger-api] flow '${binding.flowName}' not armed: its start node declares no \`config.secret\`. ` +
+                    `An inbound hook is armed only with a per-flow secret that every post is HMAC-verified ` +
+                    `against (ADR-0041) — set a non-blank \`config.secret\` on the flow's start node.`,
+            );
+        }
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;
 
         const hook: ArmedHook = { flowName: binding.flowName, hookId, secret, queue, callback };
@@ -148,13 +168,8 @@ export class ApiTrigger implements FlowTrigger {
             });
         }
 
-        if (!secret) {
-            this.logger.warn(
-                `[trigger-api] flow '${binding.flowName}' armed WITHOUT a secret — endpoint accepts unsigned posts`,
-            );
-        }
         this.logger.info(
-            `[trigger-api] armed: POST .../automation/hooks/${binding.flowName}/${hookId}${secret ? ' (HMAC required)' : ''}`,
+            `[trigger-api] armed: POST .../automation/hooks/${binding.flowName}/${hookId} (HMAC required)`,
         );
     }
 
@@ -184,7 +199,7 @@ export class ApiTrigger implements FlowTrigger {
         if (!hook || !safeEqual(hook.hookId, input.hookId)) {
             return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } } };
         }
-        if (hook.secret && !verifySignature(hook.secret, input.rawBody, input.signatureHeader)) {
+        if (!verifySignature(hook.secret, input.rawBody, input.signatureHeader)) {
             return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
         }
 

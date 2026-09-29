@@ -25,9 +25,11 @@
  * `having` is evaluated by the engine, over the value this door answers
  * (`having-filter.ts`: `$eq` compares the value with `==`), so the value pinned
  * here is what decides `having` `$eq` / `$in` on every face. The expected
- * values are computed from `find()`'s own rows with the rows path's arithmetic
+ * values are computed from `find()`'s own rows, added in row order
  * ({@link rowsPathSum}), plus the literal the triage named, so a decimal
- * answer, a compensated sum or a string each fail.
+ * answer or a string each fail. Over these fixtures — two addends, and
+ * integer-valued columns within 2^53 — that sum is also the rows path's, which
+ * adds with compensation since #20489: the two folds cannot differ there.
  *
  * What stays as it was, pinned too: `count` / `min` / `max`, and a `sum` over
  * an integer-valued column, which keeps the database's exact total (above 2^53
@@ -49,10 +51,10 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** The rows path's `sum`: `values.reduce((a, b) => a + toNumber(b), 0)`, in row order. */
+/** `values.reduce((a, b) => a + toNumber(b), 0)`, in row order: the rows path's `sum` over this file's fixtures (see the header). */
 const rowsPathSum = (values: readonly unknown[]) => values.reduce<number>((a, b) => a + toNumber(b), 0);
 
-/** The rows path's `avg`: the non-null values' `sum`, divided by how many there are. */
+/** The non-null values' {@link rowsPathSum}, divided by how many there are: the rows path's `avg` over this file's fixtures. */
 function rowsPathAvg(values: readonly unknown[]): number | null {
   const defined = values.filter((v) => v != null);
   return defined.length === 0 ? null : rowsPathSum(defined) / defined.length;

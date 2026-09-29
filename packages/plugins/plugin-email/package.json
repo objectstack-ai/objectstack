@@ -23,14 +23,13 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "nodemailer": "^9.1.1"
+    "nodemailer": "^10.0.2"
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.2.0",
-    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
