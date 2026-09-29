@@ -67,7 +67,7 @@ with a prescription naming the two shapes that work, and in `tsc` (its input typ
 - **D3 entry `connector-triggers-retired`** carries the family's judgement: which
   triggers should exist now as flows, the cadence in seconds, and whether an external
   sender can sign the calls a signed `api` flow requires. The absorbed rename's own D3 entry
-  (`connector-resilience-durations-unit-in-key`, never released) is gone with its
+  (`connector-resilience-durations-unit-in-key`) is gone with its
   conversion.
 - **No deprecation window**, per the project's startup-stage posture.
 
