@@ -16350,7 +16350,10 @@ const step18: MigrationStep = {
         + 'file:./data/replica.db with syncUrl naming the remote. A plain local database drops mode: a '
         + 'file: url with no syncUrl and no mode is a local database',
       reason:
-        '#20437. An embedded replica is a local file kept in sync with the remote named in syncUrl. A '
+        'An embedded replica is a local file kept in sync with the remote named in syncUrl, so a replica '
+        + 'is defined by its remote. The ruling of 2026-09-28 weighed refusing this shape against '
+        + 'documenting a replica with no remote as a local mode, and refused it: with no remote there is '
+        + 'no replica mode to document, only a declaration nothing honours. A '
         + 'forced mode replica with no syncUrl parsed clean at authoring, and the turso driver built it as '
         + 'a replica that never synced: no sync client was created, no sync interval started, the sync '
         + 'call did nothing and the sync-enabled check answered false, while every read and write went '
