@@ -934,7 +934,7 @@ describe('#20590 — the inverse carries a credential back into a region', () =>
         expect(calloutOf(kept, 'per_row').config.signingSecret).toBe(SIGNING);
     });
 
-    it('a callout moved out of its region keeps its secret; one whose kind changed does not carry it', () => {
+    it('a callout left in place inside a rebuilt region keeps its secret; one whose kind changed in place does not carry it', () => {
         const stored = storedCalloutFlow();
         const served: any = redactMetadataItem('flow', stored);
         const perRow = served.nodes[1].config.body.nodes[0];
@@ -972,6 +972,135 @@ describe('#20590 — the inverse carries a credential back into a region', () =>
         expect(at.label).toBe('Edited');
         expect(calloutOf(at, 'per_row').config.signingSecret).toBe(SIGNING);
         expect(calloutOf(at, 'push').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(await protocol.getMetaItems({ type: 'flow' }))).not.toContain(SIGNING);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20590 patch round 1 — a node MOVED across regions keeps its credential
+// ---------------------------------------------------------------------------
+//
+// The stored path names the credential's container through the regions the
+// node sat in at rest. An author who moves that node — out of a loop body, into
+// a parallel branch — keeping its id, its kind and the withheld form, sends a
+// body in which that path no longer resolves. Skipping the graft there dropped
+// the stored secret at save, silently, and the next durable callout went out
+// unsigned. The node is found by its id across the whole incoming body instead
+// (exactly one match), and the position check still decides whether it lands.
+
+/** {@link storedCalloutFlow} plus a top-level callout, so a node can move INTO a region too. */
+function storedMovesFlow() {
+    const flow: any = storedCalloutFlow();
+    flow.name = 'moves';
+    flow.nodes.push({ id: 'call', type: 'http', label: 'Call', config: { url: 'https://c', durable: true, signingSecret: SIGNING } });
+    return flow;
+}
+
+const NOOP = (id: string) => ({ id, type: 'assignment', label: id, config: {} });
+
+/** The served body with `per_row` moved from the loop body to the top level (the body keeps a stand-in node). */
+function movedOutOfLoop(served: any) {
+    const [begin, each, fan, call] = served.nodes;
+    const perRow = each.config.body.nodes[0];
+    return {
+        ...served,
+        nodes: [begin, { ...each, config: { ...each.config, body: { nodes: [NOOP('body_noop')], edges: [] } } }, fan, call, perRow],
+    };
+}
+
+describe('#20590 round 1 — a node moved across regions keeps its credential', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', regionFlowStandIn));
+    afterEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('(a) an http node moved out of a loop body to the top level: the secret is kept at rest and not served', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const incoming = movedOutOfLoop(served);
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.nodes[4].id).toBe('per_row');
+        expect(out.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'push').config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'call').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+        expect(allStrings(incoming)).not.toContain(SIGNING);
+    });
+
+    it('(b) an http node moved from the top level into a parallel branch: the secret is kept at rest and not served', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const quiet = fan.config.branches[0];
+        const incoming = {
+            ...served,
+            nodes: [begin, each, { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, call] }, fan.config.branches[1]] } }],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(out.nodes[2].config.branches[0].nodes[1].id).toBe('call');
+        expect(out.nodes[2].config.branches[0].nodes[1].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(c) a node moved into a region AND changed in kind: the value is dropped — the position check still wins', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [...each.config.body.nodes, { ...call, type: 'assignment', config: {} }], edges: [] } } },
+                fan,
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        expect(calloutOf(out, 'call').type).toBe('assignment');
+        expect(calloutOf(out, 'call').config.signingSecret).toBeUndefined();
+        expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+        expect(allStrings(redactMetadataItem('flow', out))).not.toContain(SIGNING);
+    });
+
+    it('(d) an id duplicated across two regions: nothing is grafted onto either copy', () => {
+        const stored = storedMovesFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const [begin, each, fan, call] = served.nodes;
+        const perRow = each.config.body.nodes[0];
+        const [quiet, loud] = fan.config.branches;
+        const incoming = {
+            ...served,
+            nodes: [
+                begin,
+                { ...each, config: { ...each.config, body: { nodes: [NOOP('body_noop')], edges: [] } } },
+                { ...fan, config: { ...fan.config, branches: [{ ...quiet, nodes: [...quiet.nodes, perRow] }, { ...loud, nodes: [...loud.nodes, structuredClone(perRow)] }] } },
+                call,
+            ],
+        };
+        const out: any = carryForwardRedactedValues('flow', incoming, stored);
+        const copies = out.nodes[2].config.branches.flatMap((b: any) => b.nodes.filter((n: any) => n.id === 'per_row'));
+        expect(copies).toHaveLength(2);
+        expect(copies.every((n: any) => n.config.signingSecret === undefined)).toBe(true);
+        // The unambiguous ones are unaffected.
+        expect(calloutOf(out, 'call').config.signingSecret).toBe(SIGNING);
+    });
+
+    it('(a) through the save door: the row at rest keeps the moved node\'s secret, and no served read carries it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'moves', organization_id: null, package_id: null, state: 'active' };
+        const body = storedMovesFlow();
+        rows.set(keyOf(where), { id: 'r_moves', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'moves' })).item;
+        expect(allStrings(served)).not.toContain(SIGNING);
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        await protocol.saveMetaItem({ type: 'flow', name: 'moves', item: movedOutOfLoop(editable) });
+
+        const at = JSON.parse(Array.from(rows.values()).find((r) => r.name === 'moves' && r.state === 'active')!.metadata);
+        expect(at.nodes.map((n: any) => n.id)).toEqual(['begin', 'each', 'fan', 'call', 'per_row']);
+        expect(at.nodes[4].config.signingSecret).toBe(SIGNING);
+        expect(calloutOf(at, 'body_noop').config).toEqual({});
+        expect(allStrings(await protocol.getMetaItem({ type: 'flow', name: 'moves' }))).not.toContain(SIGNING);
         expect(allStrings(await protocol.getMetaItems({ type: 'flow' }))).not.toContain(SIGNING);
     });
 });
