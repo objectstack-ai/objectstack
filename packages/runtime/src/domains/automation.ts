@@ -53,6 +53,10 @@ import {
 } from '../flow-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#20552] The per-type credential redaction every metadata read exit applies,
+// and its write-path inverse — reused, never restated, for the definitions this
+// domain serves and overwrites.
+import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/metadata-protocol';
 
 /**
  * Translate a trigger request body into the canonical `AutomationContext` the
@@ -1291,6 +1295,60 @@ async function refuseUnrelatedResume(
 }
 
 /**
+ * [#20552] The metadata type a flow definition is redacted as — the key of the
+ * `flow` entry the automation plugin registers in the per-type redactor
+ * registry (`@objectstack/spec/kernel`).
+ */
+const FLOW_METADATA_TYPE = 'flow';
+
+/**
+ * [#20552] What every exit of this domain that answers with a flow DEFINITION
+ * serves: the definition with its credentials withheld — today the inbound
+ * hook's HMAC secret on the start node (ADR-0041), which any authenticated
+ * caller of `GET /:name` used to read back verbatim.
+ *
+ * It is the SAME redaction the metadata plane applies to the same flow
+ * (`redactMetadataItem`, resolving the registry's `flow` entry), so the two
+ * doors onto one definition cannot disagree about what is withheld; this
+ * function holds no opinion of its own about what a credential is.
+ *
+ * Applied at the four exits — `GET /:name`, the `POST /` and `PUT /:name`
+ * write answers (#12206: a write answers what the subsequent read serves) and
+ * the clone answer — and NOT to `automationService.getFlow` itself: that is the
+ * in-process read the clone copies a WHOLE definition through (ADR-0126 §7.1),
+ * secret included, and redaction is a serving act.
+ */
+function servedFlowDefinition<T>(flow: T): T {
+    return redactMetadataItem(FLOW_METADATA_TYPE, flow);
+}
+
+/**
+ * [#20552] The write-path inverse for the two doors that overwrite a flow by
+ * name (`POST /` onto an existing name, `PUT /:name`): a body that carries the
+ * projected form — no secret where the read served none — keeps the secret the
+ * engine holds, so a read → edit → republish round trip never wipes it; an
+ * explicit value replaces it. The metadata plane's own save door applies the
+ * same inverse (`carryForwardRedactedValues`), so both authoring surfaces keep
+ * one rule.
+ *
+ * The comparison runs against the definition the ENGINE holds (`getFlow`, the
+ * raw in-process read), not a served copy. A service without the optional
+ * `getFlow`, or a name it does not hold, carries nothing — the body is
+ * registered as written, and a missing secret is refused by the engine's own
+ * registration gate, loudly.
+ */
+async function keepStoredFlowCredentials(
+    automationService: Pick<IAutomationService, 'getFlow'>,
+    name: string,
+    definition: unknown,
+): Promise<unknown> {
+    if (typeof automationService.getFlow !== 'function') return definition;
+    const stored = await automationService.getFlow(name);
+    if (!stored) return definition;
+    return carryForwardRedactedValues(FLOW_METADATA_TYPE, definition, stored);
+}
+
+/**
  * [#8055] A refusal thrown by `registerFlow` is the CALLER's metadata being
  * wrong — serve it as one.
  *
@@ -2068,6 +2126,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // what the ruling forbids. Flow definitions are metadata and are governed
     // on the metadata plane (`/meta`, ADR-0106); if their read posture should
     // narrow, that is a metadata-plane decision and belongs to its own card.
+    //
+    // [#20552] What that audit did not weigh is CREDENTIAL material inside a
+    // definition: an `api` flow's start node carries its inbound hook's HMAC
+    // secret, and `GET /:name` served it to every authenticated caller. Who
+    // may read a definition is unchanged; what a definition read SERVES is
+    // not — every exit here answers `servedFlowDefinition(…)`, the metadata
+    // plane's own `flow` redaction, so the secret is withheld on both planes.
 
     // POST / → createFlow
     if (parts.length === 0 && m === 'POST') {
@@ -2100,16 +2165,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // `edge.condition` strings lowered to their envelopes) — the same
             // shape `GET /automation/:name` serves — never an echo of the
             // caller's own pre-parse bytes.
+            // [#20552] Creating onto a name the engine already holds is an
+            // overwrite, so the round-trip rule applies here as on `PUT /:name`.
+            const definition = await keepStoredFlowCredentials(automationService, body.name, body);
             let registered;
             try {
-                registered = automationService.registerFlow(body.name, body);
+                registered = automationService.registerFlow(body.name, definition);
             } catch (e) {
                 return {
                     handled: true,
                     response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
                 };
             }
-            return { handled: true, response: deps.success(registered) };
+            return { handled: true, response: deps.success(servedFlowDefinition(registered)) };
         }
     }
 
@@ -2408,7 +2476,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // cheapest place for ancestry to reappear, and a UI that reads
                 // one starts displaying a lineage the platform has ruled it
                 // does not track.
-                return { handled: true, response: deps.success({ flow: clone, notice: FLOW_CLONE_NOTICE }) };
+                // [#20552] The clone carries the source's whole definition into
+                // the engine (secret included — ADR-0126 §7.1); the ANSWER is a
+                // served definition like any other and withholds it.
+                return { handled: true, response: deps.success({ flow: servedFlowDefinition(clone), notice: FLOW_CLONE_NOTICE }) };
             }
         }
 
@@ -2958,7 +3029,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             if (typeof automationService.getFlow === 'function') {
                 const flow = await automationService.getFlow(name);
                 if (!flow) return { handled: true, response: deps.error('Flow not found', 404) };
-                return { handled: true, response: deps.success(flow) };
+                // [#20552] Served with its credentials withheld.
+                return { handled: true, response: deps.success(servedFlowDefinition(flow)) };
             }
         }
 
@@ -2988,16 +3060,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // caller's echo. This also closes the old PUT quirk where the
                 // echoed `definition` could lack `name` (the name rode the
                 // path) — the parsed flow always carries it.
+                // [#20552] A body that round-trips the served (projected) form
+                // keeps the secret the engine holds; an explicit one replaces it.
+                const toRegister = await keepStoredFlowCredentials(automationService, name, definition);
                 let registered;
                 try {
-                    registered = automationService.registerFlow(name, definition);
+                    registered = automationService.registerFlow(name, toRegister);
                 } catch (e) {
                     return {
                         handled: true,
                         response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
                     };
                 }
-                return { handled: true, response: deps.success(registered) };
+                return { handled: true, response: deps.success(servedFlowDefinition(registered)) };
             }
         }
 
