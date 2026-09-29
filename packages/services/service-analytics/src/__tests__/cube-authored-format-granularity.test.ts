@@ -29,9 +29,12 @@
  *   window-only `timeDimensions` entry stays a filter — the same five answers
  *   the dataset path gives;
  * - the declared narrowing: a bucketed query is served by the engine path,
- *   which refuses a custom-SQL measure, so grouping such a measure by a
- *   declared-default dimension is now refused — with the envelope, byte for
- *   byte, that stating the same granularity by hand already got.
+ *   which refuses every member it cannot evaluate — a custom-SQL measure, and,
+ *   on a cube with `joins`, a cross-object member (`planCrossObject`) — so
+ *   grouping such a query by a declared-default dimension is now refused, with
+ *   the envelope, byte for byte, that stating the same granularity by hand
+ *   already got. One pin per refusal source: the custom-SQL measure, and a
+ *   cross-object measure on a joined cube.
  */
 
 import { describe, it, expect, vi } from 'vitest';
