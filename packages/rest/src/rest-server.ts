@@ -10103,9 +10103,12 @@ export class RestServer {
             if (security && typeof security.getReadableFields === 'function') {
                 const readable = await security.getReadableFields(objectName, context);
                 if (!Array.isArray(readable)) {
-                    throw new Error(
-                        `The security service gave no field projection for '${objectName}', `
-                        + 'so the import template cannot tell which columns this caller may see.',
+                    // Declared 5xx: a fault, sanitised and logged — never read
+                    // as "no such object" by the message heuristics.
+                    throw Object.assign(
+                        new Error('The security service gave no field projection, so the import template '
+                            + 'cannot tell which columns this caller may see.'),
+                        { status: 500, code: 'INTERNAL_ERROR' },
                     );
                 }
                 permitted = new Set(readable);

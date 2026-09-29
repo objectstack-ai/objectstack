@@ -273,6 +273,10 @@ export interface TemplateText {
   booleanWords: readonly [string, string];
   multiJoiner: string;
   text: string;
+  sampleText: string;
+  email: string;
+  url: string;
+  phone: string;
   number: string;
   range: (min: unknown, max: unknown) => string;
   boolean: (trueTokens: string, falseTokens: string) => string;
@@ -309,6 +313,10 @@ const EN: TemplateText = {
   booleanWords: ['yes', 'no'],
   multiJoiner: ', ',
   text: 'Text.',
+  sampleText: 'Sample',
+  email: 'An email address.',
+  url: 'A URL.',
+  phone: 'A phone number.',
   number: `A number. Type it as a number, or as text in which a comma may only group thousands: 1 to 3 digits, then `
     + `groups of exactly 3, and only before any "." (${THOUSANDS.join(' or ')}). Any other comma is refused, a decimal `
     + `comma included: write ${C.number.decimalPoint[0]}, not ${C.number.decimalCommaRefused}. Also read: a leading `
@@ -351,6 +359,10 @@ const ZH: TemplateText = {
   booleanWords: ['是', '否'],
   multiJoiner: '、',
   text: '文本。',
+  sampleText: '示例',
+  email: '邮箱地址。',
+  url: '网址(URL)。',
+  phone: '电话号码。',
   number: `数字。可以填数值,也可以填文本;文本中的逗号只能作千分位:开头 1 到 3 位数字,之后每组恰好 3 位,且只能出现在「.」之前`
     + `(${THOUSANDS.join(' 或 ')})。其他任何逗号都会被拒绝,包括小数逗号:请写 ${C.number.decimalPoint[0]},`
     + `不要写 ${C.number.decimalCommaRefused}。另外可以识别:开头的货币符号(${C.number.currencySymbols.join(' ')})、`
@@ -428,6 +440,16 @@ function numberExample(def: TemplateFieldDef | undefined): number {
 
 const TIME_OF_DAY_TYPES = new Set(['date', 'datetime', 'time']);
 
+/** Free-text types whose example is the localized word for "sample". */
+const SAMPLE_TEXT_TYPES = new Set(['text', 'textarea', 'markdown', 'richtext', 'html']);
+
+/** Example values that satisfy the write door's format check for their type. */
+const FORMATTED_TEXT_EXAMPLES: Readonly<Record<string, string>> = Object.freeze({
+  email: 'name@example.com',
+  url: 'https://example.com',
+  phone: '+1 202 555 0100',
+});
+
 /**
  * Describe each template column: its header, the instructions row and the
  * example value. `schema` is the object as the caller reads it (labels
@@ -498,6 +520,11 @@ export function describeTemplateColumns(
       column.howToFill = multi ? text.multiReference(targetLabel) : text.reference(targetLabel);
     } else if (FILE_REFERENCE_TYPES.has(type)) {
       column.howToFill = multi ? text.multiFile : text.file;
+    } else if (SAMPLE_TEXT_TYPES.has(type)) {
+      column.example = text.sampleText;
+    } else if (type in FORMATTED_TEXT_EXAMPLES) {
+      column.howToFill = type === 'email' ? text.email : type === 'url' ? text.url : text.phone;
+      column.example = FORMATTED_TEXT_EXAMPLES[type];
     }
     return column;
   });
