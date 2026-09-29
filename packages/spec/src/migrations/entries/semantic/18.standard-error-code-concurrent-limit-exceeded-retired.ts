@@ -18,8 +18,8 @@ export const entry: SemanticMigration = {
     + 'concurrency limit registers a code for it in its own error-code ledger rather than reusing '
     + 'the retired spelling. `QUOTA_EXCEEDED`, its catalogue neighbour, is unchanged.',
   reason:
-    'ADR-0049 enforce-or-remove applied to the ADR-0112 error catalogue. Ruling A on #17707 '
-    + '(maintainer 「同意」, decision batch #126 item 2) retired both producerless 429 members; the '
+    'ADR-0049 enforce-or-remove applied to the ADR-0112 error catalogue. Ruling A of '
+    + '2026-09-13 (maintainer 「同意」) retired both producerless 429 members; the '
     + 'closure-review ruling of 2026-09-24 (letter 留·收窄, maintainer 「其他同意」) narrowed it to '
     + 'this code alone after `QUOTA_EXCEEDED` was found emitted by a hosted AI agent route and read '
     + 'by the console chatbot plugin. The ledger doctrine in error-code-ledger.zod.ts names a '

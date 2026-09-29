@@ -200,7 +200,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
   let kernel: ObjectKernel;
   let baseUrl: string;
   let messaging: MessagingService;
-  /** [#10629] The expected-noise capture, asserted by every authed test below. */
+  /** [commit 13a6cb4ad] The expected-noise capture, asserted by every authed test below. */
   const noise = captureExpectedReadRefusals([...ABSENT_AUTHZ_TABLES]);
 
   beforeAll(async () => {
@@ -210,7 +210,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     // MessagingServicePlugin registers the `notification` service the dispatcher
     // resolves and owns the inbox tables. Inline delivery (reliableDelivery:false)
     // writes the inbox row synchronously so `emit()` is observable immediately.
-    // [#10629] The driver is named rather than inlined so its logger can be
+    // [commit 13a6cb4ad] The driver is named rather than inlined so its logger can be
     // scoped before it ever runs a statement.
     const driver = new SqliteWasmDriver({ filename: ':memory:' });
     noise.captureDriver(driver);
@@ -230,7 +230,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
 
     await kernel.bootstrap();
 
-    // [#10629] The engine only exists once the kernel has bootstrapped; the
+    // [commit 13a6cb4ad] The engine only exists once the kernel has bootstrapped; the
     // reads this scopes all happen later, per request.
     noise.captureEngine(kernel.getService<unknown>('objectql'));
 
@@ -339,7 +339,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(served.status).toBe(200);
     expect((await served.json() as { success: boolean }).success).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in
@@ -392,7 +392,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(2);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in
@@ -409,7 +409,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     //   POST /api/v1/notifications/read/all  →  { readCount: 200 }
     //   GET  /api/v1/notifications           →  { unreadCount: 150 }
     //
-    // #6363 did not cause that — it removed the cover. While `unreadCount` was
+    // Commit 17d095413 did not cause that — it removed the cover. While `unreadCount` was
     // window-scoped the shortfall was self-consistent and invisible; once the
     // badge became a true total the same request pair states it out loud, which
     // is why this pin lives at the wire and not only under the service.
@@ -433,7 +433,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     }
 
     const before = await (await as(BULK_USER, '/api/v1/notifications')).json();
-    expect(before.data.unreadCount).toBe(TOTAL); // the true total (#6363)
+    expect(before.data.unreadCount).toBe(TOTAL); // the true total (commit 17d095413)
     expect(before.data.notifications).toHaveLength(50); // the list is still one window
 
     const readAll = await (await as(BULK_USER, '/api/v1/notifications/read/all', { method: 'POST' })).json();
@@ -450,7 +450,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(TOTAL);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // ── [#18070] The commit 13a6cb4ad pin, turned around: this used to assert that the
     // five resolver reads were still being REFUSED here. They are provisioned
     // now, so the assertion is that they SUCCEED. Kept per authed test rather
     // than moved to `afterAll` for the reason the old one was — two tests in

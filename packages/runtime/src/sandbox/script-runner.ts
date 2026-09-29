@@ -96,7 +96,7 @@ export type ScriptSession = ActionSession | HookContext['session'];
  * `ActionSession`) and neither producer writes one (`buildSession()` in
  * objectql, `buildActionSession()` in `../action-execution.ts`) — and left it
  * alone, because typing a seam does not get to re-decide a runtime expression.
- * #6316 re-ran that sweep across every producer on both faces, confirmed it,
+ * Commit 448ac9565 re-ran that sweep across every producer on both faces, confirmed it,
  * and deleted both limbs (the #4984 dead-limb family). So the union's arms are
  * the two REAL producer shapes and nothing else; if a session ever should
  * carry a user, DECLARE it on the session contract rather than restoring a
@@ -224,7 +224,7 @@ export interface ScriptContext {
   dispatch?: { mode: 'record' | 'per-row'; index: number };
   /**
    * The engine's referential-cleanup marker, marshalled for the HOOK face
-   * (#13644) — `true` exactly when this write is the engine's own reference
+   * (commit 34ce8e7db) — `true` exactly when this write is the engine's own reference
    * cleanup (the `set_null` cascade UPDATE clearing, or on a `multiple: true`
    * lookup member-removing, a lookup that references a record being deleted).
    * Mirrors the declared `HookContextSchema.referentialFieldClear`
@@ -305,7 +305,7 @@ export interface ScriptContext {
   /**
    * Action only: `true` exactly when the dispatcher ATTEMPTED to load the
    * subject row in the CALLER's own scope and that load did not deliver it
-   * (#14143). Absent otherwise — including on every record-less / new-record
+   * (commit f19475c0a). Absent otherwise — including on every record-less / new-record
    * action, which never attempts a load — so read it as
    * `ctx.recordLoadDenied === true`, the same absence semantics as
    * {@link referentialFieldClear}.
@@ -418,7 +418,7 @@ export interface ScriptResult {
    */
   mutatedInput?: Record<string, unknown>;
   /**
-   * [#14758] Hook path only: the keys of {@link mutatedInput} the BODY actually
+   * [commit 84199cb87] Hook path only: the keys of {@link mutatedInput} the BODY actually
    * assigned, defined or deleted — as opposed to every key the dump can see.
    *
    * `mutatedInput` alone cannot answer that question: it is the whole
@@ -437,7 +437,7 @@ export interface ScriptResult {
    *    nothing.
    *  - `undefined` — this runner cannot say (no recorder installed, the runner
    *    predates this field, the read failed). Carry back the whole dump, which
-   *    is the pre-#14758 behaviour: narrowing on a key set that cannot speak
+   *    is the behaviour before commit 84199cb87: narrowing on a key set that cannot speak
    *    would silently drop a write the body really made.
    *
    * Keys reachable only THROUGH a value on `ctx.input` — `ctx.input.meta.x = 1`

@@ -139,16 +139,21 @@ const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
 type CallerName = keyof typeof CALLERS;
 
 /**
- * One protocol double, the same shape both transports read. `unknownTypes`
- * makes `getMetaItems` throw for those types — the "protocol doesn't know this
- * type" answer that sends the dispatcher on to its fallback stores — while it
- * still answers every other type, the books the doc audience reads included.
+ * One protocol double, the same shape both transports read. `unansweredTypes`
+ * makes `getMetaItems` answer NO list for those types — the one protocol
+ * answer that sends the dispatcher on to its fallback stores — while it still
+ * answers every other type, the books the doc audience reads included.
+ *
+ * [#20590] Not a throw. A protocol throw is a fault and is answered as itself
+ * (`meta-list-protocol-fault.test.ts`); it used to be read as "the protocol
+ * does not know this type", which the one real protocol never signals that
+ * way — it answers such a type with an empty list.
  */
-function protocolDouble(unknownTypes: string[] = []) {
+function protocolDouble(unansweredTypes: string[] = []) {
     return {
         getMetaTypes: vi.fn(async () => ({ types: Object.keys(STORE) })),
         getMetaItems: vi.fn(async ({ type }: any) => {
-            if (unknownTypes.includes(singular(type))) throw new Error(`unknown metadata type '${type}'`);
+            if (unansweredTypes.includes(singular(type))) return undefined;
             return clone(STORE[singular(type)] ?? []);
         }),
     };

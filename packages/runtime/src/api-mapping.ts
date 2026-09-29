@@ -26,7 +26,7 @@
  *
  * Five short sentences, and everything below is the MINIMAL faithful reading of
  * them — `transform`'s now says out loud, at the point of authoring, what this
- * module and the E7 publish gate have always answered at rejection time (#6065).
+ * module and the E7 publish gate have always answered at rejection time (commit 026101660).
  * Where the text is silent this module takes the least expressive option
  * available and says so here, because the alternative — inventing expression
  * power (a template language, JSONPath, wildcards, conditionals) — would put a

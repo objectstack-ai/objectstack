@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14748] `POST /api/v1/packages` answers a namespace collision with
+ * [commit 92b5d7f00] `POST /api/v1/packages` answers a namespace collision with
  * `error.code: NAMESPACE_CONFLICT` — the wire half of registering the code in
  * `ERROR_CODE_LEDGER`.
  *
  * ## What changed, and why a pin belongs here rather than beside the throw
  *
  * `NamespaceConflictError` (`packages/objectql/src/registry.ts`) has carried
- * the ADR-0112 envelope (`code` + `status: 422`) since #14474, and
+ * the ADR-0112 envelope (`code` + `status: 422`) since commit df657d9df, and
  * `packages/objectql/src/registry-namespace-install-gate.test.ts` asserts both
  * fields ON THE THROW. That is a different claim from this one. Until the
  * ledger row landed, `NAMESPACE_CONFLICT` was not an `ErrorCode` member, so the

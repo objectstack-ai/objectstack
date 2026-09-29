@@ -54,7 +54,7 @@ function makeDispatcher(flowNames: string[] = ['welcome_flow']) {
 }
 
 /**
- * [#10243] The caller now holds `manage_metadata`.
+ * [commit 266436a7f] The caller now holds `manage_metadata`.
  *
  * This file is about ERROR MAPPING on `POST /:name/toggle` — that an unknown
  * flow is a 404 rather than a 500, and that a malformed body is a 400. Its

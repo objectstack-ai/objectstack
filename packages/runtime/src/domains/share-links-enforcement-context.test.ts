@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6551 / #6206 / #6430] Dispatcher-face `/share-links` enforcement context.
+ * [#6551 / commit 8e13ca876 / #6430] Dispatcher-face `/share-links` enforcement context.
  *
  * The dispatcher domain used to rebuild a two-field `{ userId, tenantId }`
  * out of the request's ALREADY-COMPLETE resolved `ExecutionContext` and hand
  * that to `svc.createLink` / `svc.listLinks` / `svc.revokeLink` — the same
- * consumption-site truncation #6206 fixed on the plugin-sharing face (PR
+ * consumption-site truncation commit 8e13ca876 fixed on the plugin-sharing face (PR
  * #6552), one entry point over. Structural subtyping keeps the trimmed object
  * compiling against the contract's `ExecutionContext` parameter, so only a
  * behavioural repro + a seam-parity pin can hold this boundary.
@@ -498,7 +498,7 @@ describe('[#6551] the dispatcher seam itself', () => {
         for (const verb of ['createLink', 'listLinks', 'revokeLink'] as const) {
             expect(svc[verb]).toHaveBeenCalledTimes(1);
             const got = seen[verb];
-            // The #6206 contract: the WHOLE `resolveExecutionContext` envelope,
+            // The contract commit 8e13ca876 set: the WHOLE `resolveExecutionContext` envelope,
             // unchanged — a re-trim shows up here as the exact keys it dropped.
             const dropped = Object.keys(envelope as any).filter(
                 (k) => !(k in got) || got[k] !== (envelope as any)[k],

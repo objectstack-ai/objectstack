@@ -6,7 +6,7 @@
  *
  * ## The shape, and which half of it is the security half
  *
- * After #14484 `sys_record_share` is `tenant-scoped` in the #13491 ledger, so
+ * After commit 3f64fe6c6 `sys_record_share` is `tenant-scoped` in the #13491 ledger, so
  * on a walled install an organization-less system insert on it is refused
  * loudly with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (#8844).
  * `SharingService.grant` resolves the organization on every path that can; a
@@ -34,7 +34,7 @@
  * the deployment posture. A fake engine would have to imitate the very thing
  * whose behaviour decides the case. So these cases run a real `SqlDriver` on
  * better-sqlite3 `:memory:` behind a real `ObjectQL` on an `isolated` posture,
- * the way `record-share-organization-stamp.test.ts` does for the #14484 stamp.
+ * the way `record-share-organization-stamp.test.ts` does for the commit 3f64fe6c6 stamp.
  *
  * ## Why the fixture's organization-less record is in the MIDDLE
  *
@@ -347,7 +347,7 @@ describe('[#14754] reconcile: a refused grant is counted and the pass CONTINUES'
     const rule = await platformGlobalRule(rules, 'os14754_update_half', 'read');
 
     // A pre-existing rule grant on the organization-less record, carrying no
-    // organization (which is how it got there before #14484). The pass wants
+    // organization (which is how it got there before commit 3f64fe6c6). The pass wants
     // to raise it to `edit`.
     await driver.create('sys_record_share', {
       id: 'shr_orgless_old', object_name: OBJECT, record_id: 'rec_orgless', recipient_type: 'user',

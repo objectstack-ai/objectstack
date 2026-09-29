@@ -13,7 +13,7 @@
 // signature here would silently drift from the one the spec declares and
 // `ObjectStackProtocolImplementation` states it `implements` — which is the
 // whole reason `UiDomainProtocol` below is `Pick`ed rather than written out.
-// Same move `domains/packages.ts` (#13598) and `domains/mcp.ts` (#8726) make.
+// Same move `domains/packages.ts` (#13598) and `domains/mcp.ts` (commit e783e163d) make.
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';

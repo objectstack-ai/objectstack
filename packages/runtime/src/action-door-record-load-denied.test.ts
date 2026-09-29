@@ -32,7 +32,7 @@
  *
  *  1. **Both doors × both surfaces.** The flow door and the script/body door,
  *     on the REST `/actions` route and on the MCP `run_action` bridge. A rule
- *     implemented at one door is the failure class #14143 and #15168 each paid
+ *     implemented at one door is the failure class commit f19475c0a and #15168 each paid
  *     for on this exact seam, so every case below is asserted on all four.
  *  2. **⛔ No run, no body.** The refusal lands BEFORE `automation.execute`
  *     (no persisted run) and BEFORE `executeAction` (no trusted, RLS-bypassing
@@ -46,7 +46,7 @@
  *  4. **Record-less and new-record actions are byte-for-byte unchanged.** An
  *     object-less action key never attempts a load, so its verdict is never
  *     `true` and it still receives the `recordId` stamp — the regression that
- *     #14143 deliberately kept and that this card must not take away.
+ *     commit f19475c0a deliberately kept and that this card must not take away.
  *  5. **A load that SUCCEEDS still runs.** The owner reaches the flow and the
  *     handler exactly as before; this is the firing control that stops every
  *     zero above from being a rig that dispatches nothing.
@@ -450,7 +450,7 @@ describe('[#16370] refuseDeniedSubjectLoad — the rule, isolated from every doo
 
     it('returns silently when the verdict is `false` — and the stamp is NOT the predicate', () => {
         // ⛔ `record.id` is truthy in BOTH cases; re-deriving the verdict from
-        // it is the #14143 defect verbatim, so this pair is what says the
+        // it is the defect commit f19475c0a fixed, verbatim, so this pair is what says the
         // implementation reads the flag and nothing else.
         expect(() => refuseDeniedSubjectLoad(OBJECT, RECORD_ID,
             { record: { id: RECORD_ID }, recordLoadDenied: false })).not.toThrow();

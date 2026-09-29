@@ -15,7 +15,7 @@
  * | ran and PAUSED           | ran, suspended   | not a refusal — see below           |
  *
  * The `FLOW_INPUT_SCHEMA_INVALID` row TRANSCRIBES the #10025 ruling's
- * spec-recorded contract (registered by the spec seat via #11504 — see
+ * spec-recorded contract (registered by the spec seat via commit f90e82024 — see
  * `ERROR_CODE_LEDGER['@objectstack/runtime']` and `AutomationResult.code`):
  * the definition-level guard's verdict is a pure function of the flow
  * definition, so the engine refuses ONCE, never enters its retry loop, and
@@ -109,7 +109,7 @@ import type { AutomationResult } from '@objectstack/spec/contracts';
  * `@objectstack/runtime` in `ERROR_CODE_LEDGER` — ⛔ nothing here mints one,
  * and a fifth row would be a spec-seat widening, never a call-site decision
  * (the #9384 ruling). `FLOW_INPUT_SCHEMA_INVALID` is the worked example:
- * registered by the spec seat first (#11504, under the #10025 ruling), and
+ * registered by the spec seat first (commit f90e82024, under the #10025 ruling), and
  * only then transcribed here.
  */
 export type FlowRefusalCode = 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID' | 'FLOW_FAILED';

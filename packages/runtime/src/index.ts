@@ -11,7 +11,7 @@ export type { RuntimeConfig } from './runtime.js';
 export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
-// The ONE libSQL/Turso loader (#6268). Public because `@objectstack/cli` is a
+// The ONE libSQL/Turso loader (commit 68f5eccb1). Public because `@objectstack/cli` is a
 // consumer, not a second implementation: `utils/storage-driver.ts` delegates to
 // `loadTursoDriverFactory` and RE-EXPORTS `MissingDriverPackageError`, so
 // `serve.ts`'s `e instanceof MissingDriverPackageError` fatal branch tests one

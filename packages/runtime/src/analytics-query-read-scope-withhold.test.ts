@@ -44,7 +44,7 @@
  * withhold got broader" and "the withhold swallowed everything" are one edit
  * apart.
  *
- * ⚠️ [#12281] The DECLARED half of that predicate has since widened, and this
+ * ⚠️ [commit 0783d7b80] The DECLARED half of that predicate has since widened, and this
  * file's half-envelope case was reversed with it. `declaresServerFault` required
  * a non-empty string `code` beside the 5xx and read the `status` spelling only,
  * so this exit withheld a NARROWER band than `/data`. Ruled 2026-08-27 on #12509
@@ -270,12 +270,12 @@ describe('[#5811] POST /analytics/query — a read-scope failure says nothing ab
     });
 
     it('[#12281] a 5xx with only HALF an envelope is ALSO withheld — a status alone declares it', async () => {
-        // ⚠️ REVERSED, deliberately. Until #12281 this case asserted the opposite
+        // ⚠️ REVERSED, deliberately. Until commit 0783d7b80 this case asserted the opposite
         // ("a code is required, not just a status"), on the reasoning that a
         // producer shipping a status without a code "has not declared anything".
         //
         // The maintainer ruled otherwise on #12509, 2026-08-27 (option D),
-        // propagated to #12281: `errorResponseBase` adopts the structural
+        // landed in commit 0783d7b80: `errorResponseBase` adopts the structural
         // withhold for EVERY declared 5xx message, aligning to `/data` — whose
         // `declaredHttpStatus` never looked at `code` at all. Naming a 5xx status
         // IS the declaration; the code is a second, independent channel (#9106),

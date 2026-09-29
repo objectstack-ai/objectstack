@@ -529,7 +529,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);
   });
   /**
-   * #10789 — PRESERVED-BEHAVIOUR control for the `absent`/`no-split` separation.
+   * Commit 38bc74ed1 — PRESERVED-BEHAVIOUR control for the `absent`/`no-split` separation.
    *
    * `backfillSeedTenancy` used to answer `no-split` over a seam it never
    * queried: a no-op `execute` returns `null`, `normalizeRows(null)` is `[]`,
@@ -573,7 +573,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
     expect(result.status).toBe('no-split');
     expect(result.detail).toBeUndefined();
-    // Nothing moved: the SQL path is untouched by #10789.
+    // Nothing moved: the SQL path is untouched by commit 38bc74ed1.
     expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: 2 }]);
     expect(await countUntenanted(driver)).toBe(0);
   });

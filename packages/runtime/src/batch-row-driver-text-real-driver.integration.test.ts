@@ -77,7 +77,7 @@ const NOTE = {
 };
 
 /**
- * [#10629] This fixture provisions its own business objects and nothing else,
+ * [commit 13a6cb4ad] This fixture provisions its own business objects and nothing else,
  * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
  * memoised once per engine) reads a `sys_organization` that was never created.
  * The probe is fail-soft by construction — it catches `isMissingTableError` and
@@ -88,7 +88,7 @@ const NOTE = {
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 /**
- * [#14403] The first bytes of the batch-row sink's OWN log line
+ * [commit 93d2d679b] The first bytes of the batch-row sink's OWN log line
  * (`clientFacingRowFailureText`, `metadata-protocol/src/protocol.ts`). A
  * literal rather than an import: the sink keeps that function private on
  * purpose, and what this suite pins is the line an OPERATOR reads, which is
@@ -97,21 +97,21 @@ const ABSENT_TENANCY_TABLE = 'sys_organization';
 const SINK_WITHHOLD_PREFIX = "[Protocol] Withheld a caught error's text from a batch row";
 
 describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
-    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest rig. */
     let noise: ExpectedReadRefusalCapture | null = null;
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
-    /** [#14403] Undoes the latest rig's `console.warn` recorder. */
+    /** [commit 93d2d679b] Undoes the latest rig's `console.warn` recorder. */
     let restoreWarn: (() => void) | null = null;
 
     afterEach(async () => {
-        // [#14403] First, so a throw below can never leave `console.warn` patched.
+        // [commit 93d2d679b] First, so a throw below can never leave `console.warn` patched.
         restoreWarn?.();
         restoreWarn = null;
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-        // [#10629] The capture is a PIN, not a mute — asserted after teardown so
+        // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so
         // a failure here can never leave the engine running. Every test in this
         // file rigs and writes, so the probe fires for each of them: this holds
         // for a single `-t` run as well as for the whole file.
@@ -126,7 +126,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
             connection: { filename: join(dir, 'data.sqlite') },
             useNullAsDefault: true,
         });
-        // [#10629] Installed on the REAL driver (the one that logs) before it
+        // [commit 13a6cb4ad] Installed on the REAL driver (the one that logs) before it
         // runs a statement — the `Object.create(real)` wrapper below resolves
         // `logger` through the prototype chain to this sink.
         noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
@@ -161,7 +161,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         }
         const protocol: any = new ObjectStackProtocolImplementation(engine as any);
 
-        // [#14403] Record the sink's own withhold line so BOTH directions of
+        // [commit 93d2d679b] Record the sink's own withhold line so BOTH directions of
         // its decision can be asserted: it must log exactly when it withheld.
         // ⛔ Recorded, never muted — every call is forwarded to the real
         // `console.warn`, so what a shard log shows is unchanged by this
@@ -213,7 +213,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         expect(payload).not.toContain('SQLITE');
         expect(payload).not.toContain('bd_child');
 
-        // ── [#14403] The sink's OPERATOR half, direction one: it withheld,
+        // ── [commit 93d2d679b] The sink's OPERATOR half, direction one: it withheld,
         // so it LOGGED — and the line carries the driver's own sentence whole.
         // That is what keeps withholding distinguishable from DELETING the
         // diagnostic, which is the failure this file's sink was built against.
@@ -280,7 +280,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         // idempotent batch writer branches on — it was `INTERNAL_ERROR` with no
         // status while the sentence was withheld.
         //
-        // ── [#14723] …and the row speaks the WIRE spelling ─────────────────
+        // ── [commit 65846bc46] …and the row speaks the WIRE spelling ───────
         // The engine's envelope is `code: 'DUPLICATE_RECORD'` in-process (the
         // objectql pins on `insert` / `insertMany` hold that), and this row
         // used to relay it verbatim while the whole-request failure on the
@@ -306,7 +306,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         expect(payload).not.toContain('UNIQUE constraint failed');
         expect(payload).not.toContain('SQLITE_CONSTRAINT');
 
-        // ── [#14403] The OPERATOR half — re-measured, and now a PIN ────────
+        // ── [commit 93d2d679b] The OPERATOR half — re-measured, and now a PIN ────────
         // What stood here called this a KNOWN RESIDUAL and deliberately
         // asserted nothing, on the reading that the driver's own sentence
         // "reaches neither the response nor the console". Re-measured on this
@@ -322,7 +322,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         //     `ERROR Insert operation failed {"object":"bd_note","error":
         //     {"message":"UNIQUE constraint failed: bd_note.email …"}}`.
         //     That line takes the envelope's `cause` on purpose (#14095 /
-        //     #14390, `e instanceof DuplicateRecordError ? e.cause : e`,
+        //     commit 9d7f7259f, `e instanceof DuplicateRecordError ? e.cause : e`,
         //     because the platform logger serializes only `message` and
         //     `stack`) and is pinned in objectql's
         //     `driver-fault-redaction.test.ts`, which asserts the failing

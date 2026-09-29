@@ -113,7 +113,7 @@ const live: Array<{
 }> = [];
 
 /**
- * [#10629] This fixture provisions `sweep_note` and nothing else, so the
+ * [commit 13a6cb4ad] This fixture provisions `sweep_note` and nothing else, so the
  * engine's own single-tenant probe (`ObjectQL.probeInstallOrganizations`) reads
  * a `sys_organization` that was never created. The probe is fail-soft by
  * construction, but the driver and the engine each log the fault on the way out.

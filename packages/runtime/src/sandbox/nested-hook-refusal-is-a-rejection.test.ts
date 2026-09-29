@@ -172,7 +172,7 @@ describe('[#17265] a nested sandboxed hook refusal keeps its business message', 
         // The fault branch dropped the whole `__errorInfo` payload, not just
         // `innerMessage`, so a hook declaring `{ status: 409, code:
         // 'RECORD_LOCKED' }` lost both and was flattened to 500. `/data`
-        // answers `declared ?? 400` for this producer (#9967); the action door
+        // answers `declared ?? 400` for this producer (commit 8f266f1cd); the action door
         // honours a declared status at its own first arm (#7867), so once the
         // classification is right the two agree without a second rule.
         const locked = () => {

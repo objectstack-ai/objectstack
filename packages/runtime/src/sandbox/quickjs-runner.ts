@@ -420,7 +420,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // Capture mutated ctx.input so the host can write through.
           const mutatedInput = readCtxInputJson(vm);
           // …and, on the hook path, WHICH of those keys the body actually
-          // wrote (#14758), so the write-back carries the body's own key set
+          // wrote (commit 84199cb87), so the write-back carries the body's own key set
           // rather than re-asserting the whole dump onto the engine's payload.
           const mutatedInputKeys =
             args.origin.kind === 'hook' ? readInputWritesJson(vm) : undefined;
@@ -538,7 +538,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.result !== undefined) {
       setObjectJson(vm, ctxObj, 'result', ctx.result);
     }
-    // [#13644] The declared referential-cleanup marker — installed only in its
+    // [commit 34ce8e7db] The declared referential-cleanup marker — installed only in its
     // declared shape (`true`), absent otherwise, so a body reads
     // `ctx.referentialFieldClear === true` with the spec's own back-compatible
     // absence semantics. A plain boolean: no freeze/graft ceremony needed —
@@ -547,7 +547,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.referentialFieldClear === true) {
       vm.setProp(ctxObj, 'referentialFieldClear', vm.true);
     }
-    // [#14143] The action face's caller-scope load verdict — same true-only
+    // [commit f19475c0a] The action face's caller-scope load verdict — same true-only
     // installation, same reason: a body reads `ctx.recordLoadDenied === true`
     // and an absent key means "nothing was refused". A plain boolean, so no
     // freeze/graft ceremony is needed (the write-back channel reads only
@@ -878,7 +878,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     }
     sugar.value.dispose();
 
-    // [#14758] The hook path's INPUT write-recorder — the instrument that lets
+    // [commit 84199cb87] The hook path's INPUT write-recorder — the instrument that lets
     // `applyMutationsToInput` carry back the keys the body wrote instead of
     // every key it could see.
     //
@@ -1243,7 +1243,7 @@ function safeJsonStringify(v: unknown): string {
  * nothing downstream needed teaching; the number simply never arrived. A
  * number, like `code`, carries no host state.
  *
- * [#9934] `userMessage` is the fourth member — the producer-side user-facing
+ * [commit 79c46da90] `userMessage` is the fourth member — the producer-side user-facing
  * marking (see `declaredUserMessage` in `@objectstack/types`). A hook or
  * action BODY is the authoring surface the marking exists for: an app author
  * writes `const e = new Error(msg); e.userMessage = msg; throw e`, and the
@@ -1289,7 +1289,7 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
       vm.setProp(errH, 'status', h);
       h.dispose();
     }
-    // [#9934] Non-empty strings only, same one-read rule as every other
+    // [commit 79c46da90] Non-empty strings only, same one-read rule as every other
     // boundary (`declaredUserMessage`): a blank or non-string value is not a
     // declaration and must not become one by crossing the VM.
     if (typeof e?.userMessage === 'string' && e.userMessage.trim().length > 0) {
@@ -1532,7 +1532,7 @@ function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
 }
 
 /**
- * [#14758] After the script has settled, dump the keys the write-recorder proxy
+ * [commit 84199cb87] After the script has settled, dump the keys the write-recorder proxy
  * saw on `ctx.input` — the keys the BODY assigned, defined or deleted, as
  * opposed to every key `readCtxInputJson` can see.
  *
@@ -1619,7 +1619,7 @@ export class SandboxError extends Error {
    */
   readonly status?: number;
   /**
-   * [#9934] The user-facing refusal text the error that crossed OUT of the VM
+   * [commit 79c46da90] The user-facing refusal text the error that crossed OUT of the VM
    * was marked with — the producer-side opt-in of the objectui#5210 ruling. A
    * body that throws `e.userMessage = '…'` is saying that exact text is
    * addressed to the END USER; the HTTP boundaries carry it to the wire's
@@ -1645,7 +1645,7 @@ export interface SandboxErrorInfo {
   fields?: unknown[];
   /** [#7867] See {@link SandboxError.status}. */
   status?: number;
-  /** [#9934] See {@link SandboxError.userMessage}. */
+  /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
@@ -1686,7 +1686,7 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   // number JSON-round-trips to `null`, and `NaN` would satisfy `typeof` while
   // making `errorFromThrown` emit a nonsense status line.
   if (typeof p?.status === 'number' && Number.isFinite(p.status)) info.status = p.status;
-  // [#9934] Non-empty strings only — the same "what counts as marked" rule as
+  // [commit 79c46da90] Non-empty strings only — the same "what counts as marked" rule as
   // `declaredUserMessage` (`@objectstack/types`), applied at this boundary too.
   if (typeof p?.userMessage === 'string' && p.userMessage.trim().length > 0) info.userMessage = p.userMessage;
   if (p?.sandboxFault === true) info.sandboxFault = true;

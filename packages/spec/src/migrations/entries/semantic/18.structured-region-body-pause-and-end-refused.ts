@@ -27,12 +27,14 @@ export const entry: SemanticMigration = {
     + 'pause inside a region. A `try_catch` whose only purpose was to contain the region\'s '
     + 'refusal has nothing left to contain and is deleted with it.',
   reason:
-    'Maintainer ruling, decision batch #145 item 5, verbatim and untranslated: 「同意,其他也同'
-    + '意」, carrying the presented option C; extended by batch #146 「146 同意」, which attached '
-    + 'the `end` half (the absorbed #18112) and recorded that #3267 is ruled 禁 — structured '
+    'Maintainer ruling of 2026-09-17, verbatim and untranslated: 「同意,其他也同'
+    + '意」, carrying the presented option C (a durable pause inside a structured region is '
+    + 'refused at authoring time); extended the same day by a second ruling, which attached '
+    + 'the `end` half (an `end` node inside a region body is refused as well) and ruled 禁 '
+    + 'on building durable pause into structured regions — structured '
     + 'regions do not support durable pause and a region body cannot terminate the run, so this '
     + 'is that limit\'s authoring-time enforcement rather than an interim. The POPULATION was '
-    + 'then fixed by decision batch #153 item 1, letter D (maintainer 「其他同意」): 「inside '
+    + 'then fixed by the 2026-09-18 ruling, letter D (maintainer 「其他同意」): 「inside '
     + '`loop` / `parallel` branch / `try_catch` (try and catch) bodies at any depth, the node '
     + 'types `screen`, `wait`, `approval`, `approval_revise` and `end` are refused by '
     + '`FlowSchema.superRefine` … `map` and `subflow` are ⛔ not refused by type.」 A parse-time '

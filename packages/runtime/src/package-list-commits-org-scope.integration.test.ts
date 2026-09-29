@@ -97,7 +97,7 @@ const ACTIVE_ORG = 'org_active';
 const OTHER_ORG = 'org_other';
 
 /**
- * [#10629] Every publish this fixture makes runs the metadata-protocol build
+ * [commit 13a6cb4ad] Every publish this fixture makes runs the metadata-protocol build
  * probes (`metadata-protocol/src/build-probes.ts`), and the views it publishes
  * are bound to the placeholder object `anything` — the #7741 inline arm
  * requires an object binding pair, and nothing here creates that table. The
@@ -110,12 +110,12 @@ const UNBOUND_PROBE_OBJECT = 'anything';
 
 let cleanup: Array<() => void> = [];
 
-/** [#10629] The expected-noise capture belonging to the latest `boot()`. */
+/** [commit 13a6cb4ad] The expected-noise capture belonging to the latest `boot()`. */
 let noise: ExpectedReadRefusalCapture | null = null;
 afterEach(() => {
   for (const c of cleanup) c();
   cleanup = [];
-  // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+  // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
   // failure here can never leave an engine running. Every test in this file publishes at
   // least once, so the probe fires for each of them: this holds for a single
   // `-t` run as well as for the whole file.
@@ -141,7 +141,7 @@ async function boot() {
     SysMetadataAuditObject,
     SysMetadataCommitObject,
   ] as any[];
-  // [#10629] Installed before the driver runs a statement and before the
+  // [commit 13a6cb4ad] Installed before the driver runs a statement and before the
   // engine issues a read — the two sinks the expected refusal travels out on.
   noise = captureExpectedReadRefusals([UNBOUND_PROBE_OBJECT]);
   noise.captureDriver(driver);

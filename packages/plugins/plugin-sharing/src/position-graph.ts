@@ -39,7 +39,7 @@ export interface PositionGraphOptions {
  *
  * ⚠️ A SECOND implementation of this question lives in `plugin-approvals`
  * (`ApprovalService.expandPositionUsers`), and it is deliberately NOT identical
- * — do not unify them without reading #8613 / #8710 first. Approval routing is
+ * — do not unify them without reading #8613 / commit 04d03c3a0 first. Approval routing is
  * an ADDRESSING path, so it reads the directory raw and applies no ADR-0091 D2
  * window: dropping a lapsed holder there is fail-OPEN (a step routing to
  * nobody). Note also that the `sys_position.active` gate for THIS path is not

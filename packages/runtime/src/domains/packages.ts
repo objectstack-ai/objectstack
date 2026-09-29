@@ -101,7 +101,7 @@ import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from 
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
-// [#19394] The repo's ONE coercion for a query parameter its schema declares
+// [commit 0862063ba] The repo's ONE coercion for a query parameter its schema declares
 // `z.boolean()`, from the module whose header is the authority on the rule
 // (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
 // door's `enabled` is declared `z.boolean().optional()` — character for
@@ -135,7 +135,7 @@ import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectst
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled.
  *
@@ -678,7 +678,7 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
  *
  * `400` with {@link repeatedQueryParamMessage} — the repo's ONE message for
  * this condition, imported from `packages/rest/src/query-multiplicity.ts`,
- * whose header is the authority on the rule. The status is the same one #6307
+ * whose header is the authority on the rule. The status is the same one commit 293476148
  * chose for this same condition on this same route, and the code is
  * `VALIDATION_ERROR`: `deps.error(msg, 400)` derives it from
  * `standardErrorCodeForHttpStatus(400)`, the standard catalog's member for 400,
@@ -833,12 +833,12 @@ function installedVersionOf(pkg: unknown): string | undefined {
 
 /**
  * The `?enabled=` filter of `GET /api/v1/packages`, read the way the schema
- * that publishes it declares it (#19394 — ruling item 2 of #17667).
+ * that publishes it declares it (commit 0862063ba — ruling item 2 of #17667).
  *
  * ⭐ THE DECLARATION IS THE AUTHORITY, and it is quoted here so the next reader
  * does not have to reconstruct it from this function's behaviour.
  * `ListInstalledPackagesRequestSchema` (`packages/spec/src/api/package-api.zod.ts`)
- * declares, since #19364:
+ * declares — a key commit ada701220 kept rather than retired:
  *
  * ```ts
  *   enabled: z.boolean().optional()
@@ -899,7 +899,7 @@ function readEnabledFilter(raw: unknown): { kind: 'repeated'; count: number } | 
 
 /**
  * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
- * comparison (#19394).
+ * comparison (commit 0862063ba).
  *
  * `InstalledPackageSchema` (`packages/spec/src/kernel/package-registry.zod.ts`)
  * declares the record's own key `enabled: z.boolean().default(true)`, so a row
@@ -956,7 +956,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages → list packages
         if (parts.length === 0 && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
-            // [#19394] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
+            // [commit 0862063ba] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
             //
             // Read BEFORE the registry, deliberately: a request-shape refusal
             // must not depend on server state (the same ordering argument the
@@ -1541,12 +1541,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // true` on the next restart, because the env-wide row it left
                     // untouched is the only one cold boot loads. The
                     // `getMetaItems` read below is env-wide for the same
-                    // reason, and since #14683 it is so by construction: that
+                    // reason, and since commit 96326040f it is so by construction: that
                     // method applies `organizationIdForMetaRead` to
                     // `request.type` itself, and the predicate answers
                     // `undefined` for every type the registry declares
                     // non-overridable — `app` among them, rolled back to
-                    // `allowOrgOverride: false` in #6483. The `organizationId`
+                    // `allowOrgOverride: false` in commit ee58392e1. The `organizationId`
                     // this route still hands that call is dropped at the gate.
                     //
                     // ⛔ Dropping it is the REPAIR, not an oversight to undo.
@@ -2303,7 +2303,7 @@ _context: HttpProtocolContext,
     for (const name of names) {
         // Read the just-published seed body. THE REGISTRY DECIDES THE SCOPE,
         // not this call site: `seed` declares `allowOrgOverride: false`, and
-        // since #14908 `getMetaItem` opens by resolving
+        // since commit d5cbb44f3 `getMetaItem` opens by resolving
         // `organizationIdForMetaRead(request.type, request.organizationId)`
         // and spends THAT binding — never the raw argument — on every read
         // beneath it. The predicate answers `undefined` for every type the
@@ -2311,7 +2311,7 @@ _context: HttpProtocolContext,
         // construction: `organization_id IS NULL`, the partition a workspace
         // seed is stored in and the only one cold boot hydrates.
         //
-        // [#15068] This used to be a two-attempt org-then-env ladder, written
+        // [commit 8744de9e9] This used to be a two-attempt org-then-env ladder, written
         // when resolving the wrong scope here is what silently produced "0
         // rows loaded". The gate is that fix now, and it made the org-first
         // rung a byte-identical repeat: both attempts resolved the same

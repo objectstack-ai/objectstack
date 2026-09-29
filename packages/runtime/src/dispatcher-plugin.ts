@@ -600,7 +600,7 @@ function sendResultBase(
  * boundaries. ⛔ It is NOT "withhold every 5xx" — #5667 kept UNDECLARED 5xx
  * legible on purpose, and a bare `Error` still goes through the heuristic alone.
  *
- * [#12281] A fifth, and the reason that predicate is now {@link
+ * [commit 0783d7b80] A fifth, and the reason that predicate is now {@link
  * serverFaultProvenance}: `declaresServerFault` required a non-empty string
  * `code` beside the 5xx and read the `status` spelling only, so this exit
  * withheld a NARROWER band than `/data` — a declared 5xx with no code, and a
@@ -618,7 +618,7 @@ function sendResultBase(
  * into `errorReporter` and the log.
  *
  * ⚠️ It reaches the client at `error.code` — NOT `error.details.code`, which is
- * where this note pointed until #6270 corrected it (#6123 corrected the same
+ * where this note pointed until #6270 corrected it (commit 59d1933f9 corrected the same
  * sentence at three sibling sites). The `details` assembly below (#3842) only
  * STAGES the code in a local object; `buildApiError` then runs
  * `splitSemanticCode` (`./error-envelope.ts`), which PROMOTES it into the declared
@@ -681,14 +681,14 @@ function errorResponseBase(
     const raw = err?.message;
     // [#3842] A thrown error's own `.code` finally has somewhere to go — see the
     // `declaredCode` note below for WHICH spelling travels. Resolved HERE, above
-    // the message ternary, because [#12281] that ternary now reads the same
+    // the message ternary, because [commit 0783d7b80] that ternary now reads the same
     // resolver answer: one read of the throw, one set of facts, so the prose rule
     // and the code rule can never be looking at different errors.
     const thrown = resolveThrownHttpError(err, 500);
-    // [#5811/#12281] Two independent reasons to withhold, both 5xx-only. The
+    // [#5811 / commit 0783d7b80] Two independent reasons to withhold, both 5xx-only. The
     // declaration comes first because it needs no guess about the text.
     //
-    // [#12281] The declaration limb is `serverFaultProvenance(thrown) ===
+    // [commit 0783d7b80] The declaration limb is `serverFaultProvenance(thrown) ===
     // 'declared'` — the ONE definition of "the producer named this 5xx itself"
     // (`@objectstack/types`), ruled 2026-08-27 (option D) and already read by
     // `demotedDeclaredCode` for the code channel. ⛔ Not re-derived here: "one
@@ -712,7 +712,7 @@ function errorResponseBase(
     // goes through the heuristic alone. A naive `httpStatus >= 500` test would
     // silently delete that, which is the one way this change could do harm.
     //
-    // The author-facing text channel is `userMessage` (#9934), never the raw
+    // The author-facing text channel is `userMessage` (commit 79c46da90), never the raw
     // message — a producer whose 5xx prose is addressed to a human declares it
     // there and it survives the withhold on its own channel.
     //
@@ -732,7 +732,7 @@ function errorResponseBase(
     // name.
     //
     // ⛔ Still NOT a widening of the `'declared'` limb. Absent the flag this
-    // expression is byte-identical, so #12281's structural withhold is intact
+    // expression is byte-identical, so commit 0783d7b80's structural withhold is intact
     // for every producer that declares a FAULT — which is the default, and the
     // only thing a rewrap can carry. The shared read is fail-closed on its own
     // account too: it requires a declared in-band 5xx, a non-empty string
@@ -759,7 +759,7 @@ function errorResponseBase(
     // statusCode → validation 400 → 500), so the two reads cannot disagree. A
     // non-string `.code` (a driver errno) stays in `details`, as context.
     const declaredCode = demotedDeclaredCode(thrown);
-    // [#13241] The author-facing text channel the withhold above assumes as its
+    // [commit a21d2a9cf] The author-facing text channel the withhold above assumes as its
     // compensation. `resolveThrownHttpError` ALREADY answered whether the throw
     // declared one — `thrown.userMessage` is `declaredUserMessage`'s non-empty
     // string rule, the ONE read every boundary applies (`@objectstack/types`) —
@@ -771,7 +771,7 @@ function errorResponseBase(
     // stop, which is why the shared resolver's field is read rather than
     // `err.userMessage` probed inline.
     //
-    // ⚠️ Status-agnostic on purpose (#9934's second constraint) — a 400, 403 or
+    // ⚠️ Status-agnostic on purpose (the ruling's second constraint, commit 79c46da90) — a 400, 403 or
     // 409 refusal may carry the mark too, so this is NOT gated on the 5xx limb
     // above. The withhold touches only the diagnostic `message`; the marked
     // channel is text an author deliberately addressed to the end user, so it

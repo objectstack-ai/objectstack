@@ -7,9 +7,9 @@
  * place. Three of the ADR's rules are the reason this file exists, and each has
  * a measurement behind it rather than a preference:
  *
- *  1. **Whole-definition copy.** The centrepiece here is the #11703
+ *  1. **Whole-definition copy.** The centrepiece here is the facet-drop (commit 5cb62d88b)
  *     counter-example expressed as a test: the cloned definition must deep-equal
- *     its source apart from the three fields a clone mutates. #11703 measured a
+ *     its source apart from the three fields a clone mutates. Commit 5cb62d88b records a
  *     clone assembled from an ENUMERATED facet list dropping three of six facets
  *     in silence — the record was created, the success toast fired, and the
  *     difference was discoverable only by diffing the two rows. A flow has far
@@ -68,7 +68,7 @@ const CTX = { request: {}, executionContext: { userId: 'user_1', systemPermissio
  * `MetadataProtectionFields`, so these are part of the parsed definition, not
  * decoration around it).
  *
- * Deliberately fat. The #11703 lesson is that a clone test passes trivially
+ * Deliberately fat. The lesson of commit 5cb62d88b is that a clone test passes trivially
  * when the fixture has nothing to lose, so {@link EXEMPLAR_FACET_FLOOR} below
  * pins that this exemplar keeps exercising the assertion.
  */
@@ -180,7 +180,7 @@ describe('#12156 — whole-definition copy (the #11703 counter-example as a test
         expect(facetKeys.length).toBeGreaterThanOrEqual(EXEMPLAR_FACET_FLOOR);
 
         // THE assertion. Not a spot-check of `nodes`/`edges` — an enumerated
-        // check is the very shape #11703 measured failing, so the comparison is
+        // check is the very shape commit 5cb62d88b records failing, so the comparison is
         // whole-object or it is nothing.
         expect(omit(clone, FLOW_CLONE_MUTATED_FIELDS)).toEqual(
             omit(source, [...FLOW_CLONE_MUTATED_FIELDS, ...FLOW_CLONE_DROPPED_KEYS]),

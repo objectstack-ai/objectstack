@@ -64,7 +64,7 @@ const SEEDS = [
 ];
 
 /**
- * [#10629] This fixture provisions the seeded business objects and nothing else, so the engine's
+ * [commit 13a6cb4ad] This fixture provisions the seeded business objects and nothing else, so the engine's
  * own single-tenant probe (`ObjectQL.probeInstallOrganizations`, memoised once
  * per engine) reads a `sys_organization` that was never created. The probe is
  * fail-soft by construction — it catches `isMissingTableError` and only that —
@@ -76,14 +76,14 @@ const ABSENT_TENANCY_TABLE = 'sys_organization';
 describe('multi-value lookup seeds on a REAL SqlDriver (framework#3911)', () => {
   let dir: string | null = null;
   let engine: ObjectQL | null = null;
-  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  /** [commit 13a6cb4ad] The expected-noise capture belonging to the latest boot. */
   let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
-    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // [commit 13a6cb4ad] The capture is a PIN, not a mute — asserted after teardown so a
     // failure here can never leave the engine running. Every test in this file
     // boots and writes, so the probe fires for each of them: this holds for a
     // single `-t` run as well as for the whole file.
@@ -98,7 +98,7 @@ describe('multi-value lookup seeds on a REAL SqlDriver (framework#3911)', () => 
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
-    // [#10629] Installed before the driver runs a statement and before the
+    // [commit 13a6cb4ad] Installed before the driver runs a statement and before the
     // engine issues a read — the two sinks the expected refusal travels out on.
     noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
     noise.captureDriver(driver);

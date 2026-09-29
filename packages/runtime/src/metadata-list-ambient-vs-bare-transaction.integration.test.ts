@@ -75,7 +75,7 @@ const SEEDED_NAME = 'thing';
 const STALLED_OBJECT = 'sys_metadata';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// [#10380] The BARE case's expected error output: WITHHELD from the shared
+// [commit dd8172ee2] The BARE case's expected error output: WITHHELD from the shared
 //          log, and ASSERTED instead
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -92,7 +92,7 @@ const STALLED_OBJECT = 'sys_metadata';
 //
 // Turbo interleaves package logs without attribution, so in that shard log
 // these are indistinguishable from a real failure. Not a hypothetical: they
-// were lifted VERBATIM into a p1 flake signature (#10293) and sent a whole
+// were lifted VERBATIM into a p1 flake signature (a vitest teardown race, fixed by commit 92a69d813) and sent a whole
 // dispatch cycle at the wrong mechanism. Expected-failure noise from a green
 // test is a diagnosis tax on every future red shard.
 //
@@ -203,7 +203,7 @@ interface Fixture {
   loader: DatabaseLoader;
   /** Every `driver.find` the fixture has observed, and whether it carried a transaction. */
   reads: () => Array<{ object: string; hasTx: boolean }>;
-  /** [#10380] What this fixture withheld from the shared log, per channel. */
+  /** [commit dd8172ee2] What this fixture withheld from the shared log, per channel. */
   withheld: WithheldNoise;
 }
 
@@ -220,7 +220,7 @@ afterEach(async () => {
 });
 
 async function boot(): Promise<Fixture> {
-  // [#10380] Installed BEFORE the driver exists, because knex's logger is
+  // [commit dd8172ee2] Installed BEFORE the driver exists, because knex's logger is
   // baked into the client at construction.
   const noise = newNoiseCapture();
 
@@ -230,10 +230,10 @@ async function boot(): Promise<Fixture> {
     useNullAsDefault: true,
     // See the header: shortens the wait, not the shape.
     acquireConnectionTimeout: ACQUIRE_MS,
-    // [#10380] Channel 1 of 3 — knex's own `Acquire connection error`.
+    // [commit dd8172ee2] Channel 1 of 3 — knex's own `Acquire connection error`.
     log: { warn: noise.knexWarn },
   });
-  // [#10380] Channel 2 of 3 — the driver's read-exit envelope. Assignment
+  // [commit dd8172ee2] Channel 2 of 3 — the driver's read-exit envelope. Assignment
   // rather than a constructor option because `logger` is a protected field
   // with a `console` default; this is the idiom the field's own doc comment
   // names ("Tests inject a spy") and that ~20 sibling driver suites use.
@@ -252,7 +252,7 @@ async function boot(): Promise<Fixture> {
   });
 
   const engine = new ObjectQL();
-  // [#10380] Channel 3 of 3 — the engine frame above the driver's exit. A
+  // [commit dd8172ee2] Channel 3 of 3 — the engine frame above the driver's exit. A
   // Proxy on ONE method, the idiom `engine-readonly-when-parent.test.ts`
   // established: every other logger method resolves to the engine's own.
   // [#17212] That method is `warn` — the level the engine reports this frame at.
@@ -362,7 +362,7 @@ describe('#7842 metadata list under an open transaction: ambient vs bare (real O
     // the acquire bound the bare case exhausts.
     expect(elapsed).toBeLessThan(STALL_CEILING_MS);
 
-    // ── [#10380] The capture's own anti-vacuity guard, on the side that is
+    // ── [commit dd8172ee2] The capture's own anti-vacuity guard, on the side that is
     // expected to be SILENT. The ambient path must produce none of the three
     // features — so if it ever started stalling, the sinks installed for the
     // bare case would swallow the evidence and this case would still pass on
@@ -422,7 +422,7 @@ describe('#7842 metadata list under an open transaction: ambient vs bare (real O
       expect(bare.length).toBeGreaterThan(0);
       expect(bare.every((r) => !r.hasTx)).toBe(true);
 
-      // ── [#10380] The capture is a PIN, not a mute. These three lines used
+      // ── [commit dd8172ee2] The capture is a PIN, not a mute. These three lines used
       // to reach the shared `Test Core` log out of a PASSING test and were
       // read there as a real failure; they are withheld now, and asserted
       // here instead. If the stall stops happening, the log goes quiet AND

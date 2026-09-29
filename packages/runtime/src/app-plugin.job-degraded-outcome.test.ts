@@ -91,7 +91,7 @@ afterEach(async () => {
 /**
  * A real engine over the migrated test backend, carrying the REAL `sys_job*`.
  *
- * ⚠️ [#10629] No expected-read-refusal capture here, deliberately and by
+ * ⚠️ [commit 13a6cb4ad] No expected-read-refusal capture here, deliberately and by
  * MEASUREMENT: every read this file performs carries `isSystem`, so the
  * engine's single-tenant probe over the unprovisioned `sys_organization` never
  * fires and neither refusal channel emits a frame (checked on the red run: zero

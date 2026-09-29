@@ -663,7 +663,7 @@ export class HttpDispatcher {
                 acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
         } catch (err) {
-            // [#13906 decision 1 A / #13279] The ONE fault that must stay loud:
+            // [#13906 decision 1 A / commit 6a180e42d] The ONE fault that must stay loud:
             // an authorization input that exists and could not be read (a
             // failed permission-store read, a `tenancy` service that is
             // registered and failed to build). Swallowing it here answered an
@@ -1125,7 +1125,7 @@ export class HttpDispatcher {
         // and parses the body against `ApiErrorSchema`, which now PASSES for
         // every body this door emits — the "parse every body it emits" half.
         const declaredCode = demotedDeclaredCode(thrown);
-        // [#9934] The producer-side user-facing marking rides as a declared
+        // [commit 79c46da90] The producer-side user-facing marking rides as a declared
         // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
         // like `declaredCode` — the shared resolver already answered whether
         // the throw declared one (`declaredUserMessage`'s non-empty-string
@@ -2794,7 +2794,7 @@ export class HttpDispatcher {
                     console.warn(`[HttpDispatcher] PERMISSION_DENIED on ${method} ${cleanPath} — ${withheld}`);
                 }
                 // [#13623] The producer's marked user-facing text rides out —
-                // the SECOND door that dropped it. #13241 repaired the
+                // the SECOND door that dropped it. Commit a21d2a9cf repaired the
                 // THROW-TRANSPARENT exit (`dispatcher-plugin.errorResponseBase`);
                 // a marked denial never reaches that exit, because this catch is
                 // not a pure rethrow: it recognises the denial and answers it
@@ -2821,7 +2821,7 @@ export class HttpDispatcher {
                 // FOR the caller, platform and driver code never set it, and it
                 // lands as a declared top-level sibling of `code`/`message`
                 // (`ApiErrorSchema.userMessage`), never inside `details`.
-                // The mark never moves the status or the `code` (#9934).
+                // The mark never moves the status or the `code` (commit 79c46da90).
                 const userMessage = declaredUserMessage(e);
                 return {
                     handled: true,

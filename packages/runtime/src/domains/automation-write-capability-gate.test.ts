@@ -33,12 +33,12 @@
  * `stays ungated` block below is the audit that makes any future change to
  * those verdicts come through this file.
  *
- * ## [#10243] `POST /:name/toggle` CROSSED that line — deliberately, by ruling
+ * ## [commit 266436a7f] `POST /:name/toggle` CROSSED that line — deliberately, by ruling
  *
  * ⭐ This is the flip, recorded here rather than left to be discovered. #10145
  * pinned toggle as ungated **in the open**, saying the verdict was a product
  * call and not a code call, so that a change to it would land in this file and
- * be visible. It was filed as #10243, measured over HTTP, and ruled on
+ * be visible. It was filed, measured over HTTP (commit 02b41232d), and ruled on
  * 2026-08-23: toggle joins the `manage_metadata` write set. One arm on the
  * existing `isFlowAuthoringWrite`; ⛔ no new capability name (option C was
  * declined).
@@ -175,7 +175,7 @@ const codeOf = (response: unknown): unknown => {
 /**
  * The gated writes, each with the service method it must never reach.
  *
- * [#10243] Four, not three: `POST /:name/toggle` joined by ruling. It is listed
+ * [commit 266436a7f] Four, not three: `POST /:name/toggle` joined by ruling. It is listed
  * HERE rather than given a parallel block of its own so it inherits every
  * direction the other three are held to — the 403 + `PERMISSION_DENIED`
  * envelope, the "the service method was never entered" spy assertion, and the
@@ -202,7 +202,7 @@ const AUTHORING_WRITES = [
         spy: (h: Harness) => h.unregisterFlow,
     },
     {
-        // [#10243] The enablement door. `enabled: false` deliberately — the
+        // [commit 266436a7f] The enablement door. `enabled: false` deliberately — the
         // caller trying to switch a shipped flow OFF is the one the measurement
         // caught reaching every organization on the deployment.
         name: 'POST /automation/:name/toggle (toggleFlow)',
@@ -391,7 +391,7 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
         it('[#10243 FLIPPED] POST /:name/toggle is NO LONGER in this block — it is gated now', async () => {
             // ⭐ This assertion used to read `.not.toBe(403)` and
             // `toHaveBeenCalledWith(FLOW, false)`. It is inverted deliberately,
-            // by the 2026-08-23 ruling on #10243, and the inversion is kept in
+            // by the 2026-08-23 ruling (commit 266436a7f), and the inversion is kept in
             // this block — rather than only added to the refusal loop above —
             // so that the audit reads as a CHANGED verdict instead of a pin
             // that quietly vanished. The full battery for this route (envelope,

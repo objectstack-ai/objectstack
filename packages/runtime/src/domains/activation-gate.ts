@@ -25,7 +25,7 @@
  *     is inert.
  *   - **`group` / `isolated`** — a real multi-organization deployment. Here the
  *     write requires the PLATFORM OPERATOR, because a tenant org admin flipping
- *     an install-wide switch is precisely #10243: that incident measured a
+ *     an install-wide switch is precisely the leak commit 02b41232d measured: a
  *     tenant org owner switching a shipped flow off ENVIRONMENT-WIDE, read back
  *     by an unrelated tenant in a different organization. ADR-0126 §5 makes
  *     that durable in the correct direction — and a durable install-wide row
@@ -64,7 +64,7 @@
  *
  * Driven, not argued: with the minted row present, a tenant org admin holding
  * only the org-scoped `manage_metadata` capability flipped the install-wide
- * switch under both walled postures — #10243 again, now with a DURABLE row.
+ * switch under both walled postures — the same leak commit 02b41232d measured, now with a DURABLE row.
  * See `activation-gate-positions-name-authority.test.ts`.
  *
  * ## Fail-open on an ABSENT posture is deliberate, not a gap
@@ -93,7 +93,7 @@ export const ACTIVATION_DENY_CODE = 'PERMISSION_DENIED';
 
 /**
  * [ADR-0066 D1 / #10145] The authoring capability every door onto the metadata
- * plane demands — and, since the #10243 ruling, the activation switch too:
+ * plane demands — and, since the ruling commit 266436a7f landed, the activation switch too:
  * *"Disabling a shipped flow is functionally equivalent to deleting it for as
  * long as it stays off"*, and `DELETE` already required it. Actions inherit the
  * sentence with one word changed.
@@ -149,7 +149,7 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
  * ⚠️ Callers MUST run this BEFORE the write is attempted and before body
  * validation, so a refused caller writes nothing and learns nothing about the
  * contract. "Write first, refuse second" is the worst shape here — it is
- * #10243 with an audit trail.
+ * the leak commit 02b41232d measured, with an audit trail.
  *
  * ⚠️ It has THREE exits, not two: a refusal, `undefined` to proceed, and a
  * THROW. See the posture read below for the class that throws and why a caller
@@ -246,7 +246,7 @@ export async function refuseUngrantedActivationWrite(
 }
 
 /**
- * [#10145 / #10243] The capability tier that sits IN FRONT of the §5 gate: the
+ * [#10145 / commit 266436a7f] The capability tier that sits IN FRONT of the §5 gate: the
  * caller must hold `manage_metadata` before the posture question is even asked.
  *
  * The `/automation` domain enforces this through its own

@@ -18,7 +18,8 @@ export const entry: SemanticMigration = {
     + 'declared on the object that stores the records and enforced by the LifecycleService — '
     + 'not a number on this policy document',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on the unread deadline keys '
+    + '(ruled A: retire per '
     + 'family). Six hour/minute/day-shaped keys sat on the published authorable surface and '
     + 'in the generated reference docs — an author could write `triageDeadlineHours: 4` and '
     + 'reasonably expect the platform to escalate after four hours — and read by NOTHING: '

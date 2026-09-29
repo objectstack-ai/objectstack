@@ -15,7 +15,7 @@ import {
 } from '@objectstack/core';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
-// the posture rule and the #10243 measurement behind it.
+// the posture rule and the measurement behind it (commit 02b41232d).
 import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
 // [#19874] What the run-lifecycle refusal names as the remedy is read off the
 // SAME inputs the platform-admin derivation reads — the requested posture, the
@@ -364,7 +364,7 @@ const FLOW_WRITE_DENY_MESSAGE =
  * same `code` and the same `status` as {@link FLOW_WRITE_DENY_MESSAGE}, and a
  * different sentence, because a different operation was attempted.
  *
- * ⛔ Copy, not policy. [#10243]'s ruling put `POST /:name/toggle` into the
+ * ⛔ Copy, not policy. The ruling commit 266436a7f landed put `POST /:name/toggle` into the
  * authoring write set and that classification is untouched here: the same
  * callers are refused, with the same `PERMISSION_DENIED` and the same 403.
  * What moves is only what a refused caller is TOLD. Switching a shipped flow
@@ -393,7 +393,7 @@ const FLOW_ENABLEMENT_DENY_MESSAGE =
  * sentence the refusal carries — and this file's own rule is that a question
  * spelled at two call sites is two questions that happen to agree today.
  *
- * ⛔ The truth table is [#10243]'s, moved nowhere: the exclusion of
+ * ⛔ The truth table is commit 266436a7f's, moved nowhere: the exclusion of
  * `parts[0] === 'trigger'` and the absence of any depth bound are that arm's,
  * for that arm's reasons, restated below where they are read.
  */
@@ -406,15 +406,15 @@ function isFlowEnablementWrite(parts: string[], method: string): boolean {
  *
  * One predicate, for the reason {@link isRunStateRead} is one predicate: this
  * domain gets one policy per data class, and a policy spelled at three call
- * sites is three policies that happen to agree today. [#10243] That is why the
+ * sites is three policies that happen to agree today. [commit 266436a7f] That is why the
  * toggle ruling below was one arm here rather than a fourth copy of the policy.
  *
  *   `POST   /`             → registerFlow    (create)
  *   `PUT    /:name`        → registerFlow    (update)
  *   `DELETE /:name`        → unregisterFlow  (deregister)
- *   `POST   /:name/toggle` → toggleFlow      (enablement — #10243, see below)
+ *   `POST   /:name/toggle` → toggleFlow      (enablement — commit 266436a7f, see below)
  *
- * ## [#10243] Why `toggle` joins them — ruled, not inferred
+ * ## [commit 266436a7f] Why `toggle` joins them — ruled, not inferred
  *
  * #10145 left it out and said so in the open, because whether disabling a flow
  * is authoring or operating is a product call rather than a code call. It was
@@ -459,7 +459,7 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
     // domain root, so `POST /trigger/:name` (parts `['trigger', name]`) and
     // `POST /:name/trigger` cannot reach this arm.
     if (method === 'POST' && parts.length === 0) return true;
-    // [#10243] `POST /automation/:name/toggle` — the enablement door.
+    // [commit 266436a7f] `POST /automation/:name/toggle` — the enablement door.
     //
     // Matched exactly as the ROUTER matches it, not approximately, because a
     // gate narrower than its route is a bypass and a gate wider than its route
@@ -581,7 +581,7 @@ function isFlowActivationWrite(parts: string[], method: string): boolean {
  * clause ({@link FLOW_ACTIVATION_SUBJECT}), which is the only part that ever
  * differed. The shared module's header carries the full rationale: why the
  * operator test is a POSITION, why an absent posture fails open, and what
- * #10243 measured.
+ * commit 02b41232d measured.
  */
 const refuseUngrantedFlowActivationWrite = (
     deps: DomainHandlerDeps,
@@ -629,13 +629,13 @@ const RUN_RESTORE_SEGMENT = 'restore-suspension';
  * gate narrower than its route is a bypass; a gate wider than its route is an
  * over-block.
  *
- * ⛔ `parts[0] === 'trigger'` is excluded, exactly as the toggle (#10243) and
+ * ⛔ `parts[0] === 'trigger'` is excluded, exactly as the toggle (commit 266436a7f) and
  * clone (#12156) arms exclude it, and the ROUTE ARMS carry the same exclusion
  * so the two spellings stay byte-identical. `POST /automation/trigger/:name`
  * is the LEGACY EXECUTION door, answered ABOVE the flow-scoped block, so for a
  * flow literally named `runs` the path `/automation/trigger/runs/x/cancel`
  * RUNS that flow. Gating it would over-block an execution door — the one thing
- * the #10243 ruling did not do — and dispatching a cancel from it would be the
+ * the ruling commit 266436a7f landed did not do — and dispatching a cancel from it would be the
  * mirror bypass.
  *
  * No upper bound on depth, for the reason the toggle arm documents: the arms
@@ -837,7 +837,7 @@ function refuseUngrantedRunLifecycleWrite(
  * [#13953] The CLOSED body envelope both lifecycle doors accept — exactly one
  * optional key, `reason`.
  *
- * Shaped on the resume door's own envelope discipline (#8796 / #9416), for the
+ * Shaped on the resume door's own envelope discipline (commit a4331227b / #9416), for the
  * same reason and with the same three refusals: the body itself must be a JSON
  * object (a string / number / boolean / array body used to normalise to `{}`
  * there and reach the engine as an empty signal, answered 200), an unknown
@@ -1517,7 +1517,7 @@ function flowDefinitionRefusal(err: any): unknown {
  * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
  * stamps `'FLOW_NO_START_NODE'`, and the arms below read those. #10025
  * repeated the same shape for the definition-level input-schema refusal —
- * spec seat first (#11504 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
+ * spec seat first (commit f90e82024 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
  * engine's non-retryable short-circuit stamps it — so its 422 is read here
  * through the same shared table, again never minted at this call site.
  *
@@ -1905,7 +1905,7 @@ export async function classifyResumeResult(
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
- *                                  ⚑ authoring write — `manage_metadata` (#10243):
+ *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
  *                                    ⚑ refused with its OWN sentence (#11666) —
@@ -2024,7 +2024,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // whether automation is mounted here. Ahead of every body check too — a
     // refused caller writes nothing and learns nothing about the definition
     // contract. Which routes: `isFlowAuthoringWrite` above, one predicate, with
-    // the execution surfaces deliberately outside it — [#10243] `POST
+    // the execution surfaces deliberately outside it — [commit 266436a7f] `POST
     // /:name/toggle` moved INSIDE it by ruling, and moved by editing that one
     // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
@@ -2370,7 +2370,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // name (ADR-0126 §7.1). The copy itself, the fields it mutates, the
         // keys it must not carry forward and the notice it returns all live in
         // `../flow-clone.ts` — see that module's header for the ADR and for
-        // #11703, the measurement that decides the copy's SHAPE.
+        // commit 5cb62d88b, the measurement that decides the copy's SHAPE.
         //
         // Built out of `getFlow` + `registerFlow`, not a new contract method:
         // `IAutomationService` lives in `packages/spec`, and this door needs
@@ -2400,7 +2400,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a clone field — the clone body is { name, label }' })),
                     );
                 }
-                // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, the #11513
+                // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, commit e170b0ae5's
                 // shape exactly). Refused here rather than defaulted, because
                 // every default a clone could pick is either the source's own
                 // name — the same-name clone the ADR bans outright — or a name
@@ -2488,7 +2488,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // values, applied as bare flow variables; `output`/`branchLabel` also
         // forwarded for approval-style resumes. The outer envelope is a CLOSED
         // set — exactly the four keys below — and an unknown top-level key is
-        // refused (#8796); since #9416 so is an accepted key carrying a value
+        // refused (commit a4331227b); since #9416 so is an accepted key carrying a value
         // of the wrong TYPE, and a body that is not a JSON object at all.
         // Returns the next paused `{ screen }` (multi-screen) or the completed
         // result.
@@ -2546,7 +2546,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // below, because its indices read as unknown keys) — so those
                 // reached the engine as an empty signal and answered 200
                 // `success:true` with the submission treated as EMPTY: the
-                // #8796 failure shape, reached without misspelling anything.
+                // failure shape commit a4331227b closed, reached without misspelling anything.
                 // `undefined` / `null` stay the legal bodyless resume (an
                 // empty submission is legal — a screen whose declared fields
                 // are all optional), which is why the normalisation survives
@@ -2569,7 +2569,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     );
                 }
                 const b = rawBody as Record<string, unknown>;
-                // [#8796] The outer envelope is a CLOSED SET (maintainer ruling
+                // [commit a4331227b] The outer envelope is a CLOSED SET (maintainer ruling
                 // 2026-08-15, Option A): an unknown top-level key is refused,
                 // located, naming the offending key(s) AND the accepted set —
                 // the closed-parameter-set policy (Route & surface ownership
@@ -2614,7 +2614,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         })),
                     );
                 }
-                // [#9416] VALUE SHAPES — the same silent-drop family as #8796,
+                // [#9416] VALUE SHAPES — the same silent-drop family commit a4331227b closed,
                 // one axis over: a key that IS accepted, carrying a value the
                 // engine contract excludes. The assembly below used to
                 // type-guard each key and skip what failed the guard, so
@@ -2624,7 +2624,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // submission — the caller told its screen input landed when
                 // nothing did. Ruled Option A (maintainer, on this card): 400,
                 // located, naming the key and the expected type, inheriting
-                // #8796's ruling together with its reason plus #3899's toggle
+                // the ruling commit a4331227b landed together with its reason plus #3899's toggle
                 // arm (a truthy non-boolean `enabled` is refused there, never
                 // coerced or dropped).
                 //
@@ -2644,7 +2644,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //
                 // Ordering: after the unknown-key refusal, so a body that is
                 // both misspelled and mis-shaped still reports the misspelling
-                // #8796 pinned; before `resume()`, so nothing reaches the
+                // commit a4331227b pinned; before `resume()`, so nothing reaches the
                 // engine until the body is legal and the suspension stays
                 // intact for a corrected retry.
                 const valueFailures: Array<{ field: string; code: 'invalid_type'; message: string }> = [];

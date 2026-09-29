@@ -72,7 +72,7 @@ import {
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
-// [#10503] The URL spelling contract itself — the map storage folds through,
+// [commit 67ceb9aef] The URL spelling contract itself — the map storage folds through,
 // and the fold the transport was missing. Imported so the sweep below is
 // quantified over the CONTRACT rather than over a hand-copied specimen list
 // (Prime Directive #8): a future spelling limb arrives inside the quantifier.
@@ -213,7 +213,7 @@ function makeDispatcher(
     protocol: unknown,
     engine: any,
     activeOrganizationId: string | undefined,
-    // [#10503] The `metadata` CORE-SERVICE slot, absent by default. The
+    // [commit 67ceb9aef] The `metadata` CORE-SERVICE slot, absent by default. The
     // `/published` route consults the protocol's layered overlay first and
     // only then falls back to THIS slot — the code/package store. Registering
     // it unconditionally would change which branch every #7018 case above
@@ -360,7 +360,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(declaresOrgOverride('flows')).toBe(declaresOrgOverride('flow'));
         // A runtime-registered type with no registry entry has no per-org read
         // channel either, so it is env-wide too. (`webhook` took this slot
-        // from `theme` at #10485 — the retired kind left the contract.)
+        // from `theme` at commit 35ad101bc — the retired kind left the contract.)
         expect(declaresOrgOverride('webhook')).toBe(false);
         // No active org in, no org out — for every type.
         expect(organizationIdForMetaWrite('view', undefined)).toBeUndefined();
@@ -505,8 +505,8 @@ describe('#7018 — the registry decides whether a metadata write carries the se
 });
 
 /**
- * #10503 — the dispatcher `/metadata` transport decided ORGANIZATION SCOPE
- * from the RAW path segment. The #10340 defect, one transport over.
+ * Until commit 67ceb9aef the dispatcher `/metadata` transport decided ORGANIZATION SCOPE
+ * from the RAW path segment. The defect commit 26f3588fb fixed, one transport over.
  *
  * ── What was broken ───────────────────────────────────────────────────────
  *
@@ -532,7 +532,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
  * store, which is keyed by CANONICAL type. Handed the raw segment it answered
  * 404 under a recognised plural and 200 under the singular twin.
  *
- * The correction is the one #10340 landed for REST and the one
+ * The correction is the one commit 26f3588fb landed for REST and the one
  * `packages/spec/src/meta-spelling/metadata-url-spelling.ts` mandates: fold
  * the segment through `canonicalMetaUrlType` AT THE BOUNDARY, before the scope
  * decision. ⛔ NOT by widening `declaresOrgOverride` — a predicate below the
@@ -580,7 +580,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             plural: 'translations',
             singular: 'translation',
             item: {
-                // [#12194] The addressing name is snake_case — the item-name
+                // [commit 311433f6b] The addressing name is snake_case — the item-name
                 // grammar refuses `zh-CN` as an ADDRESSING key (uppercase +
                 // dash). The BCP-47 spelling lives in `locale`, which is this
                 // type's required identity; the name was always free to choose.
