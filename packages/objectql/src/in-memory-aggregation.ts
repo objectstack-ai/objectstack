@@ -309,8 +309,10 @@ function toNumber(v: any): number {
  *
  * ⚠️ Residual, stated: PostgreSQL and MySQL add their doubles natively without
  * compensation, so over three or more fractions their native path can still
- * differ from this one in the last place. An exact `$eq` on a fractional sum
- * compares doubles; compare with a range.
+ * differ from this one in the last place. So can the folds that do not call
+ * this one: `driver-memory`'s `aggregate` and analytics faces, and
+ * `service-analytics`' draft preview (`preview-evaluator.ts`). An exact `$eq`
+ * on a fractional sum compares doubles; compare with a range.
  */
 function compensatedSum(nums: readonly number[]): number {
   let s = 0;
