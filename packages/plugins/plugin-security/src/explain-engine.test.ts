@@ -10,7 +10,7 @@ import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
-// [#13176] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
+// [commit a68c61267] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
 // (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
 // a layer's `contributors`, and a record attribution's `rules`. The engine
 // always populates both, which is why the assertions below reach through `?.`
@@ -215,7 +215,7 @@ describe('explainAccess (ADR-0090 D6)', () => {
     // `contributors` is the z.input type (defaulted, so optional pre-parse) —
     // normalize rather than dereference. Written when this file was outside
     // every tsc program and the motive was the TEST_DEBT ledger; it is the
-    // right shape either way, and [#13176] made it the compiler's business.
+    // right shape either way, and [commit a68c61267] made it the compiler's business.
     const dropped = (principal.contributors ?? []).filter((c) => c.state === 'expired' || c.state === 'deactivated');
     expect(dropped).toEqual([
       { kind: 'permission_set', name: 'quarter_close_admin', via: 'held until 2026-06-01T00:00:00Z — expired', state: 'expired' },
@@ -846,7 +846,7 @@ describe('buildContextForUser', () => {
     ]);
   });
 
-  // [#8714 / ADR-0049] The second reason of the shared held-state vocabulary:
+  // [commit 42b05af89 / ADR-0049] The second reason of the shared held-state vocabulary:
   // the catalogue row's `active` switch. The resolver drops these rows
   // fail-closed (#8613); the provenance pass re-reads them so the panel can say
   // "held — deactivated" instead of answering like the grant never existed.
@@ -1114,13 +1114,13 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
         { user_id: 'u2', position: 'hr_specialist' },
         { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
         { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
-        // [#8714] a held position whose catalogue row is switched off
+        // [commit 42b05af89] a held position whose catalogue row is switched off
         { user_id: 'u2', position: 'field_auditor' },
       ],
       sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
       sys_user_permission_set: [
         { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
-        // [#8714] a held direct grant whose SET's catalogue row is switched off
+        // [commit 42b05af89] a held direct grant whose SET's catalogue row is switched off
         { user_id: 'u2', permission_set_id: 'psOff' },
       ],
       sys_permission_set: [

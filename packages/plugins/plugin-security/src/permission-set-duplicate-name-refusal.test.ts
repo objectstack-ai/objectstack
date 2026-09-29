@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#19307] THE DUPLICATE-NAME REFUSAL on `sys_permission_set` — its ADR-0112
+ * [commit 8f6d83147] THE DUPLICATE-NAME REFUSAL on `sys_permission_set` — its ADR-0112
  * envelope, and the ORDER it stands in relative to the packaged-set lock.
  *
  * Two halves of one defect, both measured live on `examples/app-showcase`

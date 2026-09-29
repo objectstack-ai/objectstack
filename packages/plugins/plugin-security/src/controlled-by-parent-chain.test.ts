@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#11082] `controlled_by_parent` (ADR-0055) must COMPOSE ACROSS A CHAIN.
+// [ADR-0055 amendment] `controlled_by_parent` must COMPOSE ACROSS A CHAIN.
 //
 // ## What was measured before this suite existed
 //

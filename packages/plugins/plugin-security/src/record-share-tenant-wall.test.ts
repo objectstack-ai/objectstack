@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14484] A tenant-scoped read of `sys_record_share` under plugin-security's
+ * [commit 3f64fe6c6] A tenant-scoped read of `sys_record_share` under plugin-security's
  * Layer 0 returns the same grants the bare-context reads return for that
  * organization — the cliff the card named, closed and pinned.
  *

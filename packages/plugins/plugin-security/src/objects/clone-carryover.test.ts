@@ -1,17 +1,17 @@
-// #11992 — the exemplar half of the #11753 ruling (recommendation A,
+// #11992 — the exemplar half of the carry-over ruling (commit 0e4e51b0a, recommendation A,
 // maintainer 2026-08-25): the five `clone_permission_set` facet params DECLARE
 // the spec's `carryOver` key, so the clone dialog's JSON facets are copied
 // verbatim, shown read-only, and never offered as prefilled textareas an admin
 // could hand-mangle into a clone that grants MORE than its base.
 //
-// ⭐ IDENTITIES, NOT COUNTS (same discipline as the #11703 pins one file over):
+// ⭐ IDENTITIES, NOT COUNTS (same discipline as commit 5cb62d88b's pins one file over):
 // "five params declare it" holds constant while two of them swap. Every facet
 // is asserted by NAME, and the deliberate non-member (`description` — prose,
 // not a permission facet) is asserted NOT to carry the key, so the boundary of
 // the declaration is pinned from both sides.
 //
 // The SEND side is deliberately not restated here — that is
-// `packaged-permission-set-lock.test.ts`'s clone-payload suite (#11703 pin 6),
+// `packaged-permission-set-lock.test.ts`'s clone-payload suite (commit 5cb62d88b's pin 6),
 // which reads the params list and must stay green under this declaration
 // precisely because `carryOver` changes what the dialog RENDERS, never what it
 // SENDS.
@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { ActionParamSchema } from '@objectstack/spec/ui';
 import { SysPermissionSet } from './sys-permission-set.object.js';
 
-/** The five JSON-serialized definition facets the clone carries (#11703). */
+/** The five JSON-serialized definition facets the clone carries (commit 5cb62d88b). */
 const CARRIED_FACETS = [
   'object_permissions',
   'field_permissions',
