@@ -64,15 +64,19 @@
  * was written: `description` → text `--strict` 1, `--json --strict` 1, `--json`
  * 0, `warnings: []`, one notice; `subtitle` → 0 on every face, no notices.
  *
- * ⚠️ Re-judged under the one-authoring-shape ruling (#20367): `os validate`
- * refuses a default export `defineStack` did not build, and `defineStack`
- * applies the conversion itself at load (stderr notice), so the door's
- * `conversions` is empty and the cell below is unreachable by an accepted
- * config. The pin now holds what IS true — both faces agree at exit 0, the
- * notice fires in the producer — and the anti-vacuity guard reads stderr.
+ * Under the one-authoring-shape ruling (#20367) every accepted config is
+ * `defineStack` output, and `defineStack` applies the conversion itself at
+ * load — so the door's own pass converts nothing, and for one release this
+ * cell was unreachable: both faces exited 0 with `conversions: []`. It is
+ * reachable again (#20476) because the producer RECORDS the conversions it
+ * applied on the stack it returns (`stackConversionsOf`) and the door folds
+ * that record into the list `--strict` gates on and into `conversions`. The
+ * cell below is back to the measurement above: `description` → both `--strict`
+ * faces 1, `--json` alone 0, `warnings: []`, the one notice.
  *
- * The live-notice assertion (on stderr since the re-judgement) is the anti-vacuity guard, and it is
- * load-bearing rather than decorative. `page-header-subtitle-alias` is a LIVE
+ * The live-notice assertion (the payload entry, and the producer's one
+ * stderr line) is the anti-vacuity guard, and it is load-bearing rather than
+ * decorative. `page-header-subtitle-alias` is a LIVE
  * window that retires from the load path at protocol 18; the day it retires,
  * this fixture raises nothing and, without that assertion, the file would keep
  * passing while pinning an empty cell — precisely the failure this test exists
@@ -292,40 +296,67 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
   }, 120_000);
 
-  it('conversions-only (ruling B): the PRODUCER consumes the conversion at load — both faces agree at exit 0', async () => {
-    // Re-judged under the one-authoring-shape ruling (#20367). A config is now
-    // always `defineStack(…)` output, and `defineStack` runs the D2 conversion
-    // itself (either mode) and reports it on stderr, so the door's own
-    // `normalizeStackInput` has nothing left to convert: the #11301 cell —
-    // `{ valid: true, warnings: [], conversions: [...] }` at exit 1 — is no
-    // longer reachable by a config the door accepts. ⚠️ Recorded, not endorsed:
-    // `--strict` therefore does not gate on a retiring conversion for ANY
-    // accepted config (it never did for a `defineStack` one); the PR reports
-    // that as an open finding rather than widening this change to fix it.
+  it('conversions-only: a retiring conversion the PRODUCER applied fails --strict on BOTH faces', async () => {
+    // [#20476] `defineStack` converts at load and records what it applied on
+    // the stack it returns; the door folds that record into the list `--strict`
+    // gates on and into `conversions`. So the #11301 cell holds for the one
+    // authoring shape the door accepts: `{ valid: true, warnings: [],
+    // conversions: [the notice] }` at exit 1.
     const text = await runCli(['validate', '--strict'], conversionsDir);
     const json = await runCli(['validate', '--json', '--strict'], conversionsDir);
 
-    // Parity, the #11174 contract this file exists for, still holds.
-    expect(text.code, `text --strict:\n${text.stdout}\n${text.stderr}`).toBe(0);
+    // Floor, then parity — the #11174 contract this file exists for.
+    expect(text.code, `text --strict must fail on a retiring conversion:\n${text.stdout}\n${text.stderr}`).toBe(1);
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(text.code);
+    expect(text.stdout).toContain('Strict mode: warnings treated as errors');
 
     const payload = JSON.parse(json.stdout) as {
       valid?: unknown;
       warnings?: unknown;
-      conversions?: unknown;
+      conversions?: Array<Record<string, unknown>>;
     };
+    // `valid: true` beside exit 1: the stack is schema-valid; `--strict` is what
+    // promotes the conversion to a failure.
     expect(payload.valid).toBe(true);
+    // The cell's defining property: the exit is decided by `conversions`, a
+    // collection absent from `warnings`.
     expect(payload.warnings).toEqual([]);
-    expect(payload.conversions, 'the door computed no conversion: the producer already applied it').toEqual([]);
+    expect(
+      (payload.conversions ?? []).map((n) => ({ conversionId: n.conversionId, path: n.path, from: n.from, to: n.to })),
+      'the producer-applied conversion reaches the payload, once',
+    ).toEqual([
+      {
+        conversionId: 'page-header-subtitle-alias',
+        path: 'pages[0].regions[0].components[0].properties.subtitle',
+        from: 'description',
+        to: 'subtitle',
+      },
+    ]);
+    expect(typeof payload.conversions?.[0]?.retiresIn, 'the expiry rides the entry').toBe('number');
 
-    // Anti-vacuity: the conversion is LIVE — it fired, in the producer, on both
-    // faces. The day `page-header-subtitle-alias` retires this goes red; re-point
-    // `headerPageSource` at a live entry in `packages/spec/src/conversions/registry.ts`.
+    // The text face names what failed it, in its `⚠` block.
+    expect(text.stdout).toContain("conversion 'page-header-subtitle-alias'");
+
+    // Anti-vacuity AND the one-stderr-line property: the conversion is LIVE —
+    // it fired, in the producer, once per run — and no door-side line repeats it
+    // on stderr. The day `page-header-subtitle-alias` retires this goes red;
+    // re-point `headerPageSource` at a live entry in
+    // `packages/spec/src/conversions/registry.ts`.
     for (const run of [text, json]) {
-      expect(run.stderr, 'defineStack reported the conversion at load').toContain(
-        "conversion 'page-header-subtitle-alias'",
-      );
+      expect(
+        run.stderr.split("conversion 'page-header-subtitle-alias'").length - 1,
+        'defineStack reported the conversion at load, on exactly one stderr line',
+      ).toBe(1);
     }
+  }, 120_000);
+
+  it('conversions-only, without --strict: the same config exits 0 and still lists the conversion', async () => {
+    // Separates "gates on --strict" from "fails whenever a conversion is
+    // listed": the notice is advisory until `--strict` promotes it.
+    const json = await runCli(['validate', '--json'], conversionsDir);
+    expect(json.code, `--json without --strict must stay 0:\n${json.stdout}\n${json.stderr}`).toBe(0);
+    const payload = JSON.parse(json.stdout) as { conversions?: Array<{ conversionId?: unknown }> };
+    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual(['page-header-subtitle-alias']);
   }, 120_000);
 
   it('control: the same page under the CANONICAL key converts nothing and exits 0 on both faces', async () => {
