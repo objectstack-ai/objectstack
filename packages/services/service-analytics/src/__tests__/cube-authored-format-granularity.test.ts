@@ -27,7 +27,11 @@
  *   the `generateSql()` dry run; a stated granularity wins, one outside the
  *   list is not refused, a multi-entry list states no default, and a
  *   window-only `timeDimensions` entry stays a filter — the same five answers
- *   the dataset path gives.
+ *   the dataset path gives;
+ * - the declared narrowing: a bucketed query is served by the engine path,
+ *   which refuses a custom-SQL measure, so grouping such a measure by a
+ *   declared-default dimension is now refused — with the envelope, byte for
+ *   byte, that stating the same granularity by hand already got.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -264,5 +268,57 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
     expect(groupBys).toEqual([[{ field: 'placed_at', dateGranularity: 'month' }]]);
     expect(sqls).toHaveLength(1);
     expect(sqls[0]).toMatch(/created_at/);
+  });
+
+  it('DECLARED NARROWING: a custom-SQL measure grouped by a declared-default dimension gets the refusal a stated granularity gets', async () => {
+    const withExpression: Cube = CubeSchema.parse({
+      ...authored,
+      measures: {
+        ...authored.measures,
+        done_rate: { label: 'Done', type: 'number', sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)" },
+      },
+    });
+    const aggregated: string[] = [];
+    const sqls: string[] = [];
+    const service = new AnalyticsService({
+      logger: silentLogger,
+      cubes: [withExpression],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+      executeRawSql: async (_o, sql) => {
+        sqls.push(sql);
+        return [];
+      },
+      executeAggregate: async (object) => {
+        aggregated.push(object);
+        return [];
+      },
+    });
+    const envelope = (e: any) => ({ code: e?.code, status: e?.status });
+
+    const byDefault = await service
+      .query({ cube: 'orders', measures: ['done_rate'], dimensions: ['placed_at'] })
+      .catch((e: unknown) => e);
+    const byHand = await service
+      .query({
+        cube: 'orders',
+        measures: ['done_rate'],
+        dimensions: ['placed_at'],
+        timeDimensions: [{ dimension: 'placed_at', granularity: 'month' }],
+      })
+      .catch((e: unknown) => e);
+
+    expect(envelope(byDefault)).toEqual({ code: 'INVALID_FIELD', status: 400 });
+    // Not a new refusal: the one stating the granularity by hand already got.
+    expect({ ...envelope(byDefault), message: (byDefault as Error).message }).toEqual({
+      ...envelope(byHand),
+      message: (byHand as Error).message,
+    });
+    expect(aggregated).toEqual([]);
+    expect(sqls).toEqual([]);
+
+    // Control: the same measure grouped by a dimension that declares no single
+    // default is still answered, on the raw-SQL path, as it was before.
+    await service.query({ cube: 'orders', measures: ['done_rate'], dimensions: ['shipped_at'] });
+    expect(sqls).toHaveLength(1);
   });
 });
