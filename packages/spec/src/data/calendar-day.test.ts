@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { nextUtcCalendarDay } from './calendar-day';
+import { nextUtcCalendarDay, utcInstantMs } from './calendar-day';
 
 describe('nextUtcCalendarDay', () => {
   it('advances one calendar day', () => {
@@ -57,5 +57,53 @@ describe('nextUtcCalendarDay', () => {
     // would reject would mean the two halves disagree about the shape.
     const next = nextUtcCalendarDay('2026-12-31')!;
     expect(nextUtcCalendarDay(next)).toBe('2027-01-02');
+  });
+});
+
+/**
+ * [#20550] Every day of the supported years 0001..9999 is a calendar day to
+ * both helpers, the years 0001..0099 included. `Date.UTC` reads a year from 0
+ * to 99 as 1900 + year, so a construction through it built `0050-01-01` as
+ * 1950-01-01, the round trip failed, and both helpers answered `null` for
+ * every day of those years: a `$lte` or a `$between` maximum on such a day
+ * compiled to that day's midnight and missed the rest of it. Year 0100 is the
+ * control that always answered, and 2026 the everyday one.
+ */
+describe('[#20550] years 0001..0099 are calendar days, not 1900..1999', () => {
+  /** day · the day after it */
+  const DAYS: ReadonlyArray<readonly [string, string]> = [
+    ['0001-01-01', '0001-01-02'],
+    ['0050-01-01', '0050-01-02'],
+    ['0099-12-31', '0100-01-01'], // the century rolls over, not back to 1900
+    ['0100-01-01', '0100-01-02'], // the control that answered before
+    ['2026-07-15', '2026-07-16'], // the everyday control
+  ];
+
+  it('nextUtcCalendarDay answers the day after, in the year as written', () => {
+    for (const [day, next] of DAYS) expect(nextUtcCalendarDay(day), day).toBe(next);
+  });
+
+  it("utcInstantMs answers that day's midnight UTC", () => {
+    for (const [day] of DAYS) {
+      const ms = utcInstantMs(day);
+      expect(ms, day).toBe(Date.parse(`${day}T00:00:00.000Z`));
+      expect(new Date(ms!).toISOString(), day).toBe(`${day}T00:00:00.000Z`);
+    }
+  });
+
+  it('an impossible day in those years is still refused by both, not rolled over', () => {
+    for (const day of ['0050-02-30', '0001-13-01', '0099-04-31', '0100-02-29', '2026-02-30']) {
+      expect(nextUtcCalendarDay(day), day).toBeNull();
+      expect(utcInstantMs(day), day).toBeNull();
+    }
+  });
+
+  it('the leap rule is the proleptic Gregorian one in those years: 0004-02-29 is a day, 0100-02-29 is not', () => {
+    expect(nextUtcCalendarDay('0004-02-28')).toBe('0004-02-29');
+    expect(nextUtcCalendarDay('0004-02-29')).toBe('0004-03-01');
+    expect(utcInstantMs('0004-02-29')).toBe(Date.parse('0004-02-29T00:00:00.000Z'));
+    expect(nextUtcCalendarDay('0100-02-28')).toBe('0100-03-01'); // 0100 is not a leap year
+    expect(nextUtcCalendarDay('0100-02-29')).toBeNull();
+    expect(utcInstantMs('0100-02-29')).toBeNull();
   });
 });
