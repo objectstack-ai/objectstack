@@ -129,7 +129,7 @@ Type: `[string, string]`
 | **measures** | `Record<string, { label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; sql: string; … }>` | ✅ | Quantitative metrics, keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`. A metric declares no inner `name`. |
 | **dimensions** | `Record<string, { label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; sql: string; … }>` | ✅ | Qualitative attributes, keyed by dimension name: the record key IS the dimension's name, published and queried as `<cube>.<key>`. A dimension declares no inner `name`. |
 | **joins** | `Record<string, { name: string }>` | optional |  |
-| **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
+| **refreshKey** | `never` | optional | [REMOVED] `analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence is declared again when a result cache exists. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **public** | `boolean` | optional (default: `true`) | Whether the analytics API exposes this cube. Default true (visible). false hides it from GET /analytics/meta and refuses POST /analytics/query and /analytics/sql for it (CUBE_NOT_FOUND). Visibility only: the underlying object's permissions and row-level security still govern its records on every door. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -166,13 +166,6 @@ Type: `[string, string]`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. The KEY this join is declared under in the `joins` record is the FOREIGN-KEY FIELD on this cube's own object, not a second spelling of the object it reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and resolves a member written `<key>.<field>` through that alias. A join keyed after the TARGET object joins on a column the base object does not have, so nothing resolves. |
-
-### Nested Shape: `Cube.refreshKey`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **every** | `string` | optional | Refresh interval (e.g. "1 hour") |
-| **sql** | `string` | optional | SQL to check for data changes |
 
 
 ---

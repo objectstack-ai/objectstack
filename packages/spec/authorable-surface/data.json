@@ -97,7 +97,7 @@
     "data/Cube:measures",
     "data/Cube:name",
     "data/Cube:public",
-    "data/Cube:refreshKey",
+    "data/Cube:refreshKey [RETIRED]",
     "data/Cube:sql",
     "data/Cube:title",
     "data/CubeJoin:name",
