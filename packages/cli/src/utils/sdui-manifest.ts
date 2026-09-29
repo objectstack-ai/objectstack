@@ -29,12 +29,15 @@
  *                   untouched on every face, `--strict` included: failing here
  *                   would break every project that has no manifest of its own,
  *                   and such a project has no remedy but to author one.
- *   - `unusable`  → a manifest the PROJECT put in place that cannot be read,
- *                   parsed, or carries no `components` map. REFUSED (exit 1),
- *                   never degraded: its author asked for full validation, and
- *                   the `{}` shape already crashed the gate with a bare
- *                   TypeError while `{ oops` passed it silently — one rule now
- *                   covers both, with the file and the reason named.
+ *   - `unusable`  → a manifest that is present but cannot be read, parsed, or
+ *                   carries no `components` map. REFUSED (exit 1), never
+ *                   degraded: its author asked for full validation, and the
+ *                   `{}` shape already crashed the gate with a bare TypeError
+ *                   while `{ oops` passed it silently — one rule now covers
+ *                   both, with the file and the reason named. The same rule
+ *                   holds for the copy `@objectstack/console` ships (below):
+ *                   a damaged install is refused with that remedy, never read
+ *                   as "not found".
  *
  * Both the notice and the refusal fire only when the run has a page the JSX
  * gate actually checks. With none, the manifest is read by nothing, so a
@@ -48,16 +51,22 @@
  * layout got no notice and a broken manifest passed at exit 0: the silent
  * degradation this module exists to end, one layout over (#20113 round 1).
  *
- * ⛔ The console leg's FAILURE semantics are deliberately unchanged: the
- * specifier below resolves to nothing today (the console's `exports` map does
- * not publish that subpath), and whatever makes it reachable owns what a broken
- * shipped copy should do. Until then a failure there reads as "not found", and
- * the `absent` notice names the location, so it is not silent either.
+ * ## The console leg is reached through `package.json` (#19922)
+ *
+ * The second place looked is the copy `@objectstack/console` ships in its
+ * `dist/` — objectui's public-tier registry at the pinned commit, copied in by
+ * `scripts/build-console.sh`. This leg used to ask for that file by its own
+ * subpath, which the console's `exports` map does not publish (it publishes
+ * `./package.json` alone): the resolve threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, a
+ * `catch` swallowed it, and a project with no manifest of its own was checked
+ * at parse level even where the console shipped the file. It now resolves the
+ * console's `package.json` from the CLI's OWN location and joins the file's
+ * path to it ({@link consoleSduiManifestPath}), which keeps `exports` closed.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import chalk from 'chalk';
 import type { AuthoringFinding } from '@objectstack/lint';
 import { artifactPackages, packageBodyAsStack } from './artifact-packages.js';
@@ -67,8 +76,21 @@ import { authoringRuleUnionStack } from './stack-collections.js';
 /** The file the project provides, looked for in the working directory. */
 export const PROJECT_SDUI_MANIFEST_FILE = 'sdui.manifest.json';
 
-/** The copy shipped inside `@objectstack/console` — the second place looked. */
-export const CONSOLE_SDUI_MANIFEST_SPECIFIER = '@objectstack/console/dist/sdui.manifest.json';
+/**
+ * The copy shipped inside `@objectstack/console` — the second place looked —
+ * named as a package-relative path. ⛔ A name, not a specifier to resolve: the
+ * console's `exports` map publishes `./package.json` alone, so resolving this
+ * subpath throws `ERR_PACKAGE_PATH_NOT_EXPORTED`. {@link consoleSduiManifestPath}
+ * reaches the file; this spelling names it only when `@objectstack/console`
+ * itself cannot be resolved.
+ */
+export const CONSOLE_SDUI_MANIFEST = '@objectstack/console/dist/sdui.manifest.json';
+
+/** The one subpath the console's `exports` map publishes. */
+const CONSOLE_PACKAGE_JSON = '@objectstack/console/package.json';
+
+/** Where `scripts/build-console.sh` puts the manifest, relative to the console package root. */
+const CONSOLE_MANIFEST_IN_PACKAGE = 'dist/sdui.manifest.json';
 
 /**
  * The rule id the parse-level notice carries on every face: the `rule` of the
@@ -88,12 +110,18 @@ export type SduiManifestResolution =
     }
   | {
       readonly status: 'absent';
-      /** Every place looked, in order: an absolute path, then a package specifier. */
+      /**
+       * Every place looked, in order: the project's absolute path, then the
+       * console copy's — absolute when `@objectstack/console` resolves, else
+       * {@link CONSOLE_SDUI_MANIFEST}.
+       */
       readonly lookedAt: readonly string[];
     }
   | {
       readonly status: 'unusable';
-      /** The project manifest that exists but cannot be used. */
+      /** Whose file: the project's own, or the copy `@objectstack/console` ships. */
+      readonly source: 'project' | 'console';
+      /** The manifest file that exists but cannot be used. */
       readonly path: string;
       /** Why, as a clause: `it is not valid JSON (…)`. */
       readonly reason: string;
@@ -111,48 +139,70 @@ function isRecord(value: unknown): value is AnyRec {
  * manifest.components)`), so it is the shape floor — deeper checking is the
  * gate's own business once it has a manifest to check against.
  */
-function readManifestFile(path: string): SduiManifestResolution {
+function readManifestFile(path: string, source: 'project' | 'console'): SduiManifestResolution {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
   } catch (error) {
-    return { status: 'unusable', path, reason: `it could not be read (${(error as Error).message})` };
+    return { status: 'unusable', source, path, reason: `it could not be read (${(error as Error).message})` };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    return { status: 'unusable', path, reason: `it is not valid JSON (${(error as Error).message})` };
+    return { status: 'unusable', source, path, reason: `it is not valid JSON (${(error as Error).message})` };
   }
   if (!isRecord(parsed) || !isRecord(parsed.components)) {
-    return { status: 'unusable', path, reason: 'it is not a JSON object with a `components` map' };
+    return { status: 'unusable', source, path, reason: 'it is not a JSON object with a `components` map' };
   }
   return { status: 'resolved', manifest: parsed, path };
 }
 
 /**
- * The manifest for the project in `cwd`, or the reason there is none. Never
+ * Where `@objectstack/console` keeps the manifest it ships, as an absolute
+ * path, or `undefined` when that package cannot be resolved from `origin`.
+ * Whether the file exists there is the caller's question.
+ *
+ * Reached through the console's `package.json` plus a join — the way
+ * `resolveConsolePath()` already locates this static-asset package — because
+ * the file's own subpath is not in the console's `exports` (see
+ * {@link CONSOLE_SDUI_MANIFEST}).
+ *
+ * `origin` defaults to THIS module, so the console found is the CLI's own
+ * declared dependency, released in one fixed version group with it. ⛔ Not
+ * `cwd`: under pnpm a project that does not itself depend on
+ * `@objectstack/console` cannot resolve it from its own directory, and the
+ * gate's strength would then depend on hoisting. The parameter exists for the
+ * pins, which drive an installed-package layout.
+ */
+export function consoleSduiManifestPath(origin: string | URL = import.meta.url): string | undefined {
+  let packageJson: string;
+  try {
+    packageJson = createRequire(origin).resolve(CONSOLE_PACKAGE_JSON);
+  } catch {
+    return undefined;
+  }
+  return join(dirname(packageJson), CONSOLE_MANIFEST_IN_PACKAGE);
+}
+
+/**
+ * The manifest for the project in `cwd`, or the reason there is none: the
+ * project's own file first, then the copy `@objectstack/console` ships
+ * (located from `consoleOrigin`, see {@link consoleSduiManifestPath}). Never
  * throws: what an `unusable` answer costs is the caller's decision
  * ({@link resolveJsxGateManifest} refuses it; `init`'s scaffold check, which
  * reads the INVOKER's directory rather than the project's, does not).
  */
-export function resolveSduiManifest(cwd: string = process.cwd()): SduiManifestResolution {
+export function resolveSduiManifest(
+  cwd: string = process.cwd(),
+  consoleOrigin: string | URL = import.meta.url,
+): SduiManifestResolution {
   const projectManifest = join(cwd, PROJECT_SDUI_MANIFEST_FILE);
-  if (existsSync(projectManifest)) return readManifestFile(projectManifest);
+  if (existsSync(projectManifest)) return readManifestFile(projectManifest, 'project');
 
-  // Fall back to the manifest shipped inside @objectstack/console (built from
-  // objectui's public-tier registry; the CLI already depends on it). See the
-  // header: this leg's failure semantics are not this module's to change.
-  try {
-    const consoleManifest = createRequire(import.meta.url).resolve(CONSOLE_SDUI_MANIFEST_SPECIFIER);
-    if (existsSync(consoleManifest)) {
-      const fromConsole = readManifestFile(consoleManifest);
-      if (fromConsole.status === 'resolved') return fromConsole;
-    }
-  } catch {
-    /* not found — reported below as a place looked */
-  }
-  return { status: 'absent', lookedAt: [projectManifest, CONSOLE_SDUI_MANIFEST_SPECIFIER] };
+  const consoleManifest = consoleSduiManifestPath(consoleOrigin);
+  if (consoleManifest !== undefined && existsSync(consoleManifest)) return readManifestFile(consoleManifest, 'console');
+  return { status: 'absent', lookedAt: [projectManifest, consoleManifest ?? CONSOLE_SDUI_MANIFEST] };
 }
 
 /**
@@ -276,7 +326,9 @@ export function resolveJsxGateManifest(
     const hints = [
       `  The JSX page gate reads this file to check the components and props of ${pages} kind:'html' ` +
         `page(s), and it does not fall back to parse-level checking while the file is present.`,
-      '  Fix the file (a JSON object with a `components` map), or remove it to check those pages at parse level only.',
+      resolution.source === 'project'
+        ? '  Fix the file (a JSON object with a `components` map), or remove it to check those pages at parse level only.'
+        : '  It is the copy @objectstack/console ships, so that install is damaged: reinstall @objectstack/console.',
     ];
     printErrorToStderr(message);
     console.error('');

@@ -48,6 +48,12 @@ export {
   type VerifyIntegrityResult,
 } from './plugin-artifact-integrity.js';
 
+// The outbound HTTP signature scheme (`X-Objectstack-Signature`) — one
+// definition shared by the messaging outbox and the flow `http` node's inline
+// arm, which cannot import each other; `@objectstack/service-messaging`
+// re-exports both names unchanged.
+export { HTTP_SIGNATURE_HEADER, signHttpBody } from './http-signature.js';
+
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
 // The kernel never received a plugin's config to validate — factories close

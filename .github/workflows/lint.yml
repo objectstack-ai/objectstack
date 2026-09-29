@@ -3682,6 +3682,22 @@ jobs:
       - name: Post-publish npm verification self-test
         run: node scripts/release-verify-npm.mjs --self-test
 
+      # Release version-commit selection (ADR-0125 D1 as amended 2026-09-29).
+      # release.yml's publish lane queues a deployment only on the push that
+      # CARRIES the version commit, publishes that commit rather than a later
+      # push's head, and cancels a push-lane prompt still waiting for a version
+      # already on npm. scripts/release-pending-publish.mjs holds all three
+      # decisions. Its production path runs a few times a year, on a runner,
+      # against a history nobody can rewind, so its --self-test is the only
+      # instrument on that logic: throwaway repositories for a version commit
+      # then two landings, a merge-queue batch, a published version, a
+      # force-push and a shallow clone, each asserting the selected sha.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      - name: Release version-commit selection self-test
+        run: node scripts/release-pending-publish.mjs --self-test
+
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
       # greps for it. One did open — every PR gate sat on Node 20 (EOL

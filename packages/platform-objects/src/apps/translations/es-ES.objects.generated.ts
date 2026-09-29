@@ -897,8 +897,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Ámbito del tenant."
       },
       manager_user_id: {
-        label: "Responsable del departamento",
-        help: "Usuario responsable de esta unidad organizativa (responsable o jefe de departamento)."
+        label: "Responsable de la unidad de negocio",
+        help: "Usuario responsable de esta unidad organizativa (responsable o jefe de la unidad de negocio)."
       },
       active: {
         label: "Activo",
@@ -906,18 +906,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       effective_from: {
         label: "Vigente desde",
-        help: "Momento en que este departamento entró en funcionamiento (sincronización HRIS)."
+        help: "Momento en que esta unidad de negocio entró en funcionamiento (sincronización HRIS)."
       },
       effective_to: {
         label: "Vigente hasta",
-        help: "Momento en que este departamento se retiró (sincronización HRIS)."
+        help: "Momento en que esta unidad de negocio se retiró (sincronización HRIS)."
       },
       external_ref: {
         label: "Referencia externa",
         help: "ID en el HRIS ascendente (Workday / SAP HR / 北森)."
       },
       id: {
-        label: "ID de departamento"
+        label: "ID de unidad de negocio"
       },
       created_at: {
         label: "Creado el"
@@ -947,7 +947,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit_member: {
     label: "Miembro de unidad de negocio",
     pluralLabel: "Miembros de unidad de negocio",
-    description: "Asignación de usuario a un departamento (compatible con organizaciones matriciales y con vigencia temporal).",
+    description: "Asignación de usuario a una unidad de negocio (compatible con organizaciones matriciales y con vigencia temporal).",
     fields: {
       id: {
         label: "ID de miembro"
@@ -973,7 +973,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       is_primary: {
         label: "Asignación principal",
-        help: "Cuando el usuario pertenece a varios departamentos, este marca el canónico para los informes."
+        help: "Cuando el usuario pertenece a varias unidades de negocio, este campo marca la canónica para los informes."
       },
       effective_from: {
         label: "Vigente desde"
@@ -1092,7 +1092,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       backup_codes: {
         label: "Códigos de respaldo",
-        help: "Códigos de recuperación de respaldo serializados en JSON."
+        help: "Códigos de recuperación de respaldo, cifrados en reposo (un único texto cifrado opaco, no JSON legible)."
       },
       verified: {
         label: "Verificado",
@@ -2372,7 +2372,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "Notificación",
     pluralLabel: "Notificaciones",
-    description: "Entradas del buzón de notificaciones por usuario",
+    description: "Eventos de notificación: una fila por cada emit() (entrada de la capa 2 de ADR-0030)",
     fields: {
       id: {
         label: "ID de notificación"
@@ -2710,7 +2710,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_job_run: {
     label: "Ejecución de tarea",
     pluralLabel: "Ejecuciones de tarea",
-    description: "Registro de auditoría de ejecución de tareas en segundo plano",
+    description: "Historial de ejecución de tareas en segundo plano",
     fields: {
       id: {
         label: "ID de ejecución"
@@ -2999,7 +2999,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Organización para el aislamiento multi-tenant."
       },
       environment_id: {
-        label: "Proyecto (obsoleto)",
+        label: "Entorno (obsoleto)",
         help: "OBSOLETO. Use organization_id para el aislamiento del tenant."
       },
       version: {

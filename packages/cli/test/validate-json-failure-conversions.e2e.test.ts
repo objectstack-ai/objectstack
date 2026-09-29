@@ -158,6 +158,10 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
  * A stack whose `pages[0].kind` drives the live conversion. `pageKind` is a
  * parameter so the negative control can run the identical shape with the
  * CANONICAL spelling, where there is nothing to convert.
+ *
+ * The page is `<box>`, not `<div>`: where the CLI reaches the manifest
+ * `@objectstack/console` ships, the html tier refuses `div` (#19922), and that
+ * would add an author-time error no exit here is about.
  */
 function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extraFields?: string } = {}): string {
   const { pageKind = 'jsx', requires = [], extraFields = '' } = opts;
@@ -167,7 +171,7 @@ import { defineStack } from '@objectstack/spec';
 export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
-  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
+  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<box>hi</box>' }],
   objects: [
     {
       name: '${ns}_ticket',

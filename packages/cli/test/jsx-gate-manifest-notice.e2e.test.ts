@@ -42,16 +42,33 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
+import { consoleSduiManifestPath } from '../src/utils/sdui-manifest.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
+
+/**
+ * Whether the manifest-less path is reachable in THIS checkout (#19922). With
+ * no project manifest the CLI falls back to the copy its own
+ * `@objectstack/console` dependency ships, located from the same module the
+ * spawned CLI runs (`src/`, through `bin/run-dev.js`). In the workspace that is
+ * `packages/console/dist/sdui.manifest.json`, which exists only where the
+ * console has been built — never in the CI job that runs this file, often on a
+ * developer's machine. Where it exists, a project without a manifest is fully
+ * validated against it and the notice has nothing to report, so the cases that
+ * need "no manifest anywhere" are SKIPPED, by name, rather than asserting a
+ * state this checkout cannot produce. Every rule they pin is also pinned,
+ * hermetically, in `src/utils/sdui-manifest.test.ts`.
+ */
+const CONSOLE_COPY = consoleSduiManifestPath();
+const NO_MANIFEST_UNREACHABLE = CONSOLE_COPY !== undefined && existsSync(CONSOLE_COPY);
 
 /** `JSX_PARSE_LEVEL_ONLY_RULE` in `src/utils/sdui-manifest.ts`, spelled out as the published anchor. */
 const RULE = 'sdui/jsx-parse-level-only';
@@ -259,7 +276,7 @@ afterAll(() => {
   if (root) rmSync(root, { recursive: true, force: true });
 });
 
-describe('no manifest, kind:html pages — the notice, exit status unchanged', () => {
+describe.skipIf(NO_MANIFEST_UNREACHABLE)('no manifest, kind:html pages — the notice, exit status unchanged', () => {
   it.each([
     ['validate', '--strict'],
     ['build'],
@@ -364,7 +381,7 @@ describe('[round 1] html pages carried only in packages[], beside a top-level pa
     COMMANDS.map((command) => [layout, command, notice, malformed] as const),
   );
 
-  it.each(rows)('%s — os %s: the notice, counting the package page, exit 0', (_layout, command, notice) => {
+  it.skipIf(NO_MANIFEST_UNREACHABLE).each(rows)('%s — os %s: the notice, counting the package page, exit 0', (_layout, command, notice) => {
     const r = run(notice, command, '--json');
     expect(r.code, r.stdout + r.stderr).toBe(0);
     const notices = noticesIn(payloadOf(r, `${notice} ${command}`));
