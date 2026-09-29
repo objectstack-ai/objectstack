@@ -258,7 +258,9 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
     });
 
     expect(res._json).toMatchObject({ dryRun: true, total: REFUSED.length, ok: 0, errors: REFUSED.length });
-    for (const r of res._json.results) expect(r).toMatchObject({ ok: false, code: 'invalid_date' });
+    for (const [i, r] of res._json.results.entries()) {
+      expect(r).toMatchObject({ ok: false, field: REFUSED[i][0], code: 'invalid_date' });
+    }
     for (const [i] of REFUSED.entries()) {
       expect(await ctx.engine.findOne(OBJECT, { where: { id: `d${i}` } })).toBeNull();
     }
