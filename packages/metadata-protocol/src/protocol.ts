@@ -364,7 +364,8 @@ function governServedItem<T>(type: string, item: T): T {
  *
  * Exactly the shape, and exactly the reason, of the `stripReadDecorations` call
  * beside it in `saveMetaItem` (#4326) — the write path persists the request body
- * verbatim by design (ADR-0005 §Validation), so anything the READ adds must come
+ * verbatim by design for every type but `view` (ADR-0005 appendix (c), the
+ * "Addendum — 2026-05-16 (c)"), so anything the READ adds must come
  * off again on the way in or it is baked into `sys_metadata.metadata`, into its
  * checksum, and into every history diff. Kept a SEPARATE strip from that one
  * rather than folded into `METADATA_READ_DECORATIONS`, because the two lists are
@@ -691,14 +692,21 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
  *
  * Validation policy:
  *   - `safeParse` is used so we can craft a 422 with structured `issues`.
- *   - We do NOT replace the persisted document with `parsed.data`; the
- *     original payload is stored verbatim so Studio-only auxiliary fields
- *     (e.g. `isPinned`, `isDefault`, `sortOrder`) survive the round-trip.
- *     The one exception is filter `operator` spellings, which are grafted back
- *     from `parsed.data` so a save stops minting new legacy-alias rows — see
- *     {@link graftNormalizedOperators}. [#20101] A page that omits `type` is
- *     stored with the default `PageSchema` declares for it — see
- *     {@link withDeclaredPageTypeDefault}.
+ *   - [#20051] What is persisted depends on the type — ADR-0005 appendix (c),
+ *     the "Addendum — 2026-05-16 (c): spec validation on overlay save":
+ *     - `view` stores the parsed value of every key its body carried:
+ *       undeclared keys are dropped, schema defaults are not materialised
+ *       (ADR-0087's `storable` rule, the one flows follow). Every key the
+ *       console reads back off a stored row is declared on the contract
+ *       (`VIEW_CONSOLE_ROUND_TRIP_KEYS`), so the parse keeps it. See
+ *       {@link projectStorableViewBody}.
+ *     - Every other type stores its original payload verbatim, with two
+ *       normalizations grafted back from `parsed.data` so a save stops
+ *       minting legacy-alias rows — filter `operator` spellings
+ *       ({@link graftNormalizedOperators}) and the form `groups` → `sections`
+ *       move ({@link graftFoldedFormSections}). [#20101] A page that omits
+ *       `type` is stored with the default `PageSchema` declares for it — see
+ *       {@link withDeclaredPageTypeDefault}.
  *   - Types without a registered schema (the wiring-layer types
  *     `function`/`service`/`router`, and any plugin types that have not
  *     yet called `registerMetadataTypeSchema()`) fall through unvalidated.
@@ -1330,13 +1338,168 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
 }
 
 /**
+ * How many verify-and-restore rounds {@link projectStorableViewBody} may take.
+ * One round per level of key-moved nesting is what convergence costs: a
+ * `groups` → `sections` fold whose sections carry a `visibleOn` →
+ * `visibleWhen` fold is two levels. A `view` body is a bounded document, so a
+ * body still diverging after this many rounds is not converging at all.
+ */
+const STORABLE_VIEW_MAX_ROUNDS = 8;
+
+/** A JSON object — not an array, not `null`. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Equality as the store sees it: `JSON.stringify` semantics, so a key whose
+ * value is `undefined` is the same as an absent key, and key ORDER does not
+ * count (the list overlay's `type` default is re-applied in declaration
+ * position, so a re-parse can reorder keys it did not change).
+ */
+function storableEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+        return a.every((entry, i) => storableEqual(entry, b[i]));
+    }
+    if (isPlainRecord(a) && isPlainRecord(b)) {
+        const keysA = Object.keys(a).filter((k) => a[k] !== undefined);
+        const keysB = Object.keys(b).filter((k) => b[k] !== undefined);
+        if (keysA.length !== keysB.length) return false;
+        return keysA.every((k) => storableEqual(a[k], b[k]));
+    }
+    return false;
+}
+
+/**
+ * The one authored key, among those the parse did not keep at this position,
+ * whose value has the shape of `value` — the key a moved key was moved FROM.
+ * `undefined` when there is none, or more than one.
+ */
+function soleMovedFrom(dropped: readonly string[], authored: Record<string, unknown>, value: unknown): string | undefined {
+    const sameShape = (candidate: unknown): boolean => {
+        if (Array.isArray(value)) return Array.isArray(candidate) && candidate.length === value.length;
+        if (isPlainRecord(value)) return isPlainRecord(candidate);
+        return typeof candidate === typeof value && !isPlainRecord(candidate) && !Array.isArray(candidate);
+    };
+    const matches = dropped.filter((key) => sameShape(authored[key]));
+    return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * One round of {@link projectStorableViewBody}: the storable node at one
+ * position, built from the authored node, the parsed node, and — from the
+ * second round on — the re-parse of the previous round's body (`reparsed`) and
+ * that body itself (`previous`).
+ *
+ * - A key the author wrote and the parse kept is stored with its PARSED value,
+ *   recursively. That is what normalises (`notEquals` → `not_equals`,
+ *   `exportOptions: ['csv']` → `{ formats: ['csv'] }`) without storing a
+ *   default a nested parse added.
+ * - A key the author wrote and the parse did not keep is not stored: an
+ *   undeclared key, a console decoration, or the old spelling of a moved key.
+ * - A key the parse added is stored only on evidence. The previous round's body
+ *   did not carry it, so if the re-parse of that body produced the same value,
+ *   the parse applies it by itself — a schema DEFAULT, left to the parse
+ *   (ADR-0087's `storable` rule). If the re-parse did NOT reproduce it, the value
+ *   came from something the author wrote under another key — a MOVED key
+ *   (`groups` → `sections`, `visibleOn` → `visibleWhen`) — and it is stored,
+ *   projected against the authored key it moved from when that key is the only
+ *   one of its shape. Once stored it stays stored in later rounds, so the
+ *   rounds only ever add.
+ */
+function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unknown, previous: unknown): unknown {
+    if (isPlainRecord(parsed) && (authored === undefined || isPlainRecord(authored))) {
+        const a = authored ?? {};
+        const r = isPlainRecord(reparsed) ? reparsed : undefined;
+        const prev = isPlainRecord(previous) ? previous : undefined;
+        const out: Record<string, unknown> = {};
+        const dropped: string[] = [];
+        for (const [key, value] of Object.entries(a)) {
+            if (value === undefined) continue;
+            if (parsed[key] === undefined) {
+                dropped.push(key);
+                continue;
+            }
+            out[key] = buildStorableViewNode(value, parsed[key], r?.[key], prev?.[key]);
+        }
+        for (const [key, value] of Object.entries(parsed)) {
+            if (value === undefined || key in out || a[key] !== undefined) continue;
+            const storedBefore = prev !== undefined && prev[key] !== undefined;
+            if (!storedBefore && (r === undefined || storableEqual(r[key], value))) continue;
+            const from = soleMovedFrom(dropped, a, value);
+            out[key] = buildStorableViewNode(from === undefined ? undefined : a[from], value, r?.[key], prev?.[key]);
+        }
+        return out;
+    }
+    if (Array.isArray(parsed) && (authored === undefined || (Array.isArray(authored) && authored.length === parsed.length))) {
+        const r = Array.isArray(reparsed) && reparsed.length === parsed.length ? reparsed : undefined;
+        const prev = Array.isArray(previous) && previous.length === parsed.length ? previous : undefined;
+        return parsed.map((entry, i) => buildStorableViewNode(
+            Array.isArray(authored) ? authored[i] : undefined, entry, r?.[i], prev?.[i],
+        ));
+    }
+    return parsed;
+}
+
+/**
+ * [#20051] What the `view` write door STORES: the parsed value of every key the
+ * request body carried — undeclared keys dropped, schema defaults NOT
+ * materialised. Ruling 甲's end state ("a saved view is the parsed body") under
+ * letter B of its follow-up ruling, which puts views under the rule ADR-0087
+ * (addendum 2026-08-01b) records for flows: `storable` excludes schema
+ * defaults, so a stored row never pins the day's default.
+ *
+ * It replaces, for `view`, the two grafts that ran over the verbatim body —
+ * {@link graftNormalizedOperators} (a value normalised in place) and
+ * {@link graftFoldedFormSections} (a key moved). Both are special cases of it:
+ * a parsed value is stored for every authored key, and a moved key is found by
+ * evidence rather than by name, so `visibleOn` → `visibleWhen` (never grafted)
+ * is covered too. Every other type keeps the two grafts over its verbatim body.
+ *
+ * ## Why a re-parse, and what it proves
+ *
+ * The parse output alone cannot say which of the keys it added are defaults and
+ * which are moved keys: `sections` folded from `groups` and `collapsible`
+ * defaulted to `false` look the same. So the body built from the authored keys
+ * is parsed again, and a key the parse added is kept exactly when that
+ * re-parse does NOT reproduce it (see {@link buildStorableViewNode}). The loop
+ * ends when the re-parse of the stored body EQUALS the parse of the request
+ * body — the invariant the stored row is held to: a GET → PUT of it is judged
+ * the same, and every reader that parses it sees what the save accepted.
+ *
+ * `converged: false` — the loop found no body meeting that invariant (a
+ * re-parse refused an intermediate body, or a round added nothing). The caller
+ * then stores `parsed` itself: no key is lost, only that row's defaults are
+ * pinned. Nothing in the `view` schema reaches that arm today; it is the
+ * fail-safe for a schema change that makes one of the rounds' bodies invalid.
+ */
+export function projectStorableViewBody(
+    authored: unknown,
+    parsed: unknown,
+    reparse: (body: unknown) => { ok: true; data: unknown } | { ok: false },
+): { body: unknown; converged: boolean } {
+    let candidate = buildStorableViewNode(authored, parsed, undefined, undefined);
+    for (let round = 0; round < STORABLE_VIEW_MAX_ROUNDS; round++) {
+        const again = reparse(candidate);
+        if (!again.ok) break;
+        if (storableEqual(again.data, parsed)) return { body: candidate, converged: true };
+        const next = buildStorableViewNode(authored, parsed, again.data, candidate);
+        if (storableEqual(next, candidate)) break;
+        candidate = next;
+    }
+    return { body: parsed, converged: false };
+}
+
+/**
  * [#20101] Give a page body that omits `type` the default `PageSchema`
  * declares for it, and change nothing else.
  *
  * `PageSchema` declares `type: PageTypeSchema.default('record')`, so a page
  * authored without `type` IS a record page. The save gate parses with that
- * default and then persists the authored body verbatim (ADR-0005
- * §"Validation", {@link resolveOverlaySchema}), and every read serves a stored
+ * default and then persists the authored body verbatim (ADR-0005 appendix
+ * (c), {@link resolveOverlaySchema}), and every read serves a stored
  * row without parsing it. A record page written the natural way, with the
  * defaulted key left out, therefore reached every reader of the served body
  * with no `type` at all. A consumer that picks an object's record page by
@@ -4717,6 +4880,14 @@ export class ObjectStackProtocolImplementation implements
     private flowCanonicalizeFallbackWarned = new Set<string>();
 
     /**
+     * [#20051] Once-per-process dedupe (`type|name`) for the warning
+     * `saveMetaItem` emits when {@link projectStorableViewBody} does not converge
+     * and a `view` is stored as its whole parse output. Same reason as the flow
+     * dedupe above: Studio autosaves the same draft over and over.
+     */
+    private storableViewFallbackWarned = new Set<string>();
+
+    /**
      * Canonicalize a stored `sys_metadata` body on rehydration (#3903;
      * ADR-0087 addendum "stored metadata replays the chain").
      *
@@ -7336,7 +7507,8 @@ export class ObjectStackProtocolImplementation implements
      * [#8268, generalising #8038] The write-side counterpart of
      * {@link materializeFromRegistry}, owed for the reason
      * {@link stripServedSystemColumns} is owed one field family over: the write
-     * path persists the request body verbatim (ADR-0005 §Validation), so a
+     * path persists an `object`'s request body verbatim (ADR-0005 appendix
+     * (c), the "Addendum — 2026-05-16 (c)"), so a
      * document this service's read added a stamp to would otherwise be handed
      * straight back and stored carrying it.
      *
@@ -16144,7 +16316,9 @@ export class ObjectStackProtocolImplementation implements
         // stays something the server states, not something a caller claims.
         const writeSource = request.source ?? 'protocol.saveMetaItem';
         // Drop OUR OWN read decorations before anything reads the body (#4326).
-        // The write path persists verbatim by design (ADR-0005 §Validation), so
+        // The write path persists verbatim by design for every type but `view`
+        // (ADR-0005 appendix (c), the "Addendum — 2026-05-16 (c)"), and a view
+        // is gated on this same body before it is projected, so
         // the standard Studio round-trip — GET (decorated) → edit → PUT the whole
         // body — would otherwise bake a read-time verdict into the row, its
         // checksum, and every history diff. See {@link stripReadDecorations} for
@@ -16590,10 +16764,12 @@ export class ObjectStackProtocolImplementation implements
         // overlay type (see OVERLAY_VALIDATION_SCHEMAS), validate the payload
         // before persisting. We surface invalid payloads as `422
         // invalid_metadata` with structured Zod issues so the Studio form can
-        // highlight the offending field. The original `item` is kept verbatim
-        // — `parsed.data` would strip Studio-only auxiliary fields (e.g.
-        // isPinned, isDefault, sortOrder) that intentionally ride along with
-        // the overlay document. ADR-0005 §"Validation".
+        // highlight the offending field. What is then STORED depends on the
+        // type (ADR-0005 appendix (c), "Addendum — 2026-05-16 (c): spec
+        // validation on overlay save"): a `view` stores the parsed value of
+        // every key its body carried and nothing else
+        // ({@link projectStorableViewBody}, ADR-0087's `storable` rule); every
+        // other type keeps its request body, with the grafts below.
         //
         // [#5364] "so the Studio form can highlight the offending field" was
         // the promise; a top-level `z.union` broke it. Mapping only the issues
@@ -16633,25 +16809,53 @@ export class ObjectStackProtocolImplementation implements
                     (err as any).issues = issues;
                     throw err;
                 }
-                // Keep the body verbatim, but not its *legacy spellings*: the
-                // schema just folded them to canonical and the result would
-                // otherwise be discarded, so every save minted new alias rows.
-                // Two normalizations are grafted back, each by its own walk —
-                // filter `operator` values ({@link graftNormalizedOperators},
-                // objectui#2945) and the form `groups` → `sections` key move
-                // ({@link graftFoldedFormSections}, #7134). A key move is not
-                // expressible in the scalar walk, which is why there are two.
-                //
-                // The fold runs FIRST so the operator walk meets `sections`
-                // lined up with the parsed tree rather than a `groups` key the
-                // parsed side no longer has. Form sections carry no `operator`
-                // today (`visibleWhen` is a CEL string), so this ordering is
-                // structural hygiene rather than a measured fix — but it is the
-                // ordering that stays correct if one ever does.
-                request.item = graftNormalizedOperators(
-                    graftFoldedFormSections(request.item, parsed.data),
-                    parsed.data,
-                );
+                if (singularType === 'view') {
+                    // [#20051] A saved view is the parsed body: the parsed
+                    // value of every key the request carried, undeclared keys
+                    // dropped, schema defaults left to the parse. The two
+                    // grafts below are special cases of this projection, so a
+                    // view does not run them. See {@link projectStorableViewBody}.
+                    const storable = projectStorableViewBody(request.item, parsed.data, (body) => {
+                        const again = schema.safeParse(body);
+                        return again.success ? { ok: true, data: again.data } : { ok: false };
+                    });
+                    if (!storable.converged) {
+                        // Functional, not durability: the fallback stores the
+                        // whole parse output, so nothing the author wrote is
+                        // lost; only this row's schema defaults are pinned.
+                        const key = `${singularType}|${request.name}`;
+                        if (!this.storableViewFallbackWarned.has(key)) {
+                            this.storableViewFallbackWarned.add(key);
+                            console.warn(
+                                `[Protocol] view/${request.name}: the stored body is the whole parse output, schema `
+                                + `defaults included, because no body of only the keys the request carried re-parses `
+                                + `to the same view. Nothing the author wrote is lost; the defaults in this row no `
+                                + `longer follow the schema's. Re-save the view after a platform upgrade to re-derive it.`,
+                            );
+                        }
+                    }
+                    request.item = storable.body;
+                } else {
+                    // Every other type keeps its body verbatim, but not its *legacy spellings*: the
+                    // schema just folded them to canonical and the result would
+                    // otherwise be discarded, so every save minted new alias rows.
+                    // Two normalizations are grafted back, each by its own walk —
+                    // filter `operator` values ({@link graftNormalizedOperators},
+                    // objectui#2945) and the form `groups` → `sections` key move
+                    // ({@link graftFoldedFormSections}, #7134). A key move is not
+                    // expressible in the scalar walk, which is why there are two.
+                    //
+                    // The fold runs FIRST so the operator walk meets `sections`
+                    // lined up with the parsed tree rather than a `groups` key the
+                    // parsed side no longer has. Form sections carry no `operator`
+                    // today (`visibleWhen` is a CEL string), so this ordering is
+                    // structural hygiene rather than a measured fix — but it is the
+                    // ordering that stays correct if one ever does.
+                    request.item = graftNormalizedOperators(
+                        graftFoldedFormSections(request.item, parsed.data),
+                        parsed.data,
+                    );
+                }
                 // [#20101] …and a page's declared `type` default, the one
                 // default that a reader of the served body selects on. It is
                 // stored so that the served document and the stored row are
