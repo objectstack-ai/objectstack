@@ -1406,12 +1406,18 @@ describe('[#20846] validateRecord — a readable date / datetime outside its yea
   });
 
   it('CONTROL — a value that is not readable, or a number, keeps the ISO sentence', () => {
-    expect(refusal({ at: 'not-a-date' })).toMatchObject({ code: 'invalid_date', message: 'At must be a valid datetime (ISO-8601)' });
-    expect(refusal({ due: 'not-a-date' })).toMatchObject({ code: 'invalid_date', message: 'Due must be a valid date (ISO-8601)' });
     // Epoch milliseconds in year 10000: never a written value, whatever its year.
     const y10000 = Date.parse('+010000-01-01T00:00:00.000Z');
-    expect(refusal({ at: y10000 })).toMatchObject({ code: 'invalid_date', message: 'At must be a valid datetime (ISO-8601)' });
-    expect(refusal({ due: y10000 })).toMatchObject({ code: 'invalid_date', message: 'Due must be a valid date (ISO-8601)' });
+    for (const [data, sentence] of [
+      [{ at: 'not-a-date' }, 'At must be a valid datetime (ISO-8601)'],
+      [{ due: 'not-a-date' }, 'Due must be a valid date (ISO-8601)'],
+      [{ at: y10000 }, 'At must be a valid datetime (ISO-8601)'],
+      [{ due: y10000 }, 'Due must be a valid date (ISO-8601)'],
+    ] as const) {
+      const f = refusal(data);
+      expect(f.code, JSON.stringify(data)).toBe('invalid_date');
+      expect(f.message, JSON.stringify(data)).toBe(sentence);
+    }
   });
 
   it('CONTROL — a readable value inside the years, refused for its spelling, keeps the ISO sentence', () => {
