@@ -66,8 +66,9 @@
  * warning, because `changeset publish` skips an already-published version by
  * itself and an unreachable registry cannot publish anything either.
  *
- * `sweep` -- the waiting-prompt half. Lists this workflow's runs that are
- * `waiting`, and CANCELS a run only when ALL of these hold:
+ * `sweep` -- the waiting-prompt half. Finds this workflow's `waiting` runs
+ * (`collectWaitingRuns` says how, and why the server's status filter is never
+ * the only reading), and CANCELS a run only when ALL of these hold:
  *
  *   - it is not the calling run;
  *   - its event is `push` (a dispatch is a human's own act, and the D4 `force`
@@ -96,7 +97,8 @@
  * history nobody can rewind. `--self-test` builds throwaway repositories for the
  * sequences that matter (a version commit then two landings, a merge-queue
  * batch, a published version, a force-push, a shallow clone) and asserts the
- * selected sha; it is wired in lint.yml as the only instrument on this logic.
+ * selected sha, and drives the sweep's read through a stubbed API; it is wired
+ * in lint.yml as the only instrument on this logic.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -344,32 +346,111 @@ function expectOk(res, what) {
   return res.body;
 }
 
-/** Read every waiting run of one workflow into `judgeWaitingRuns`' shape. `http` is injectable. */
-export async function collectWaitingRuns({ http, repo, workflow }) {
-  const list = expectOk(
-    await http('GET', `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?status=waiting&per_page=100`),
-    `listing ${workflow}'s waiting runs`,
-  );
+/**
+ * How far back the unfiltered read looks. GitHub fails a job that has waited 30
+ * days at an environment, so no run created earlier is still waiting (unless it
+ * was re-run; only the filtered read reaches that far). A shorter "publish
+ * window" would have missed the 17.4.0 prompt, which waited 20 days.
+ */
+export const WAITING_READ_BACK_DAYS = 30;
+/** The page cap: release.yml made 2,800 runs (28 pages) in the 30 days to 2026-09-30. */
+export const WAITING_READ_MAX_PAGES = 50;
+const PER_PAGE = 100;
+
+/**
+ * Read every waiting run of one workflow into `judgeWaitingRuns`' shape. `http`
+ * and `now` are injectable.
+ *
+ * Three readings, never one. The server's `?status=waiting` filter answered the
+ * job token an empty list on both main pushes of 2026-09-29 (runs 36579512725,
+ * 36579680181) while the same URL listed a waiting run to another reader, so
+ * the unfiltered list is also read back `readBackDays` and `status` is selected
+ * here; every run either list names is then read directly, and that read's
+ * status is the one judged. A disagreement, or a list read that stopped short,
+ * is returned in `anomalies` -- the caller prints each as a warning.
+ */
+export async function collectWaitingRuns({
+  http,
+  repo,
+  workflow,
+  now = Date.now(),
+  readBackDays = WAITING_READ_BACK_DAYS,
+  maxPages = WAITING_READ_MAX_PAGES,
+}) {
+  const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
+  const list = expectOk(await http('GET', `${listPath}?status=waiting&per_page=${PER_PAGE}`), `listing ${workflow}'s waiting runs`);
+  const filtered = { total: list.total_count, ids: list.workflow_runs.map((r) => String(r.id)) };
+
+  const cutoff = now - readBackDays * 86_400_000;
+  const unfiltered = { days: readBackDays, runs: 0, pages: 0, oldest: null, stop: 'cap', ids: [] };
+  const seen = new Set();
+  while (unfiltered.pages < maxPages) {
+    unfiltered.pages += 1;
+    const page = expectOk(
+      await http('GET', `${listPath}?per_page=${PER_PAGE}&page=${unfiltered.pages}&exclude_pull_requests=true`),
+      `listing ${workflow}'s runs, page ${unfiltered.pages}`,
+    ).workflow_runs;
+    for (const r of page) {
+      // A run created mid-read shifts every page down by one: skip the repeat.
+      if (seen.has(String(r.id))) continue;
+      seen.add(String(r.id));
+      unfiltered.runs += 1;
+      unfiltered.oldest = r.created_at;
+      if (r.status === 'waiting') unfiltered.ids.push(String(r.id));
+    }
+    if (page.length < PER_PAGE) {
+      unfiltered.stop = 'end';
+      break;
+    }
+    if (Date.parse(page[page.length - 1].created_at) < cutoff) {
+      unfiltered.stop = 'bound';
+      break;
+    }
+  }
+
+  const anomalies = [];
+  if (filtered.total > filtered.ids.length) {
+    anomalies.push(`the status=waiting filter counts ${filtered.total} waiting runs but listed ${filtered.ids.length}.`);
+  }
+  if (unfiltered.stop === 'cap') {
+    anomalies.push(
+      `the unfiltered read stopped at its ${maxPages}-page cap, back to ${unfiltered.oldest}, short of ${readBackDays} days: ` +
+        'an older waiting run is seen only if the status=waiting filter lists it.',
+    );
+  }
+
   const runs = [];
-  for (const r of list.workflow_runs) {
+  for (const id of new Set([...filtered.ids, ...unfiltered.ids])) {
+    const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
+    const run = { id: r.id, event: r.event, status: r.status, headSha: r.head_sha, jobs: [], environments: [] };
+    runs.push(run);
+    if (r.status !== 'waiting') continue;
+    if (!filtered.ids.includes(id)) {
+      anomalies.push(`the status=waiting filter omitted run ${id}, which the unfiltered list and a direct read both answer waiting.`);
+    }
     const jobs = expectOk(
-      await http('GET', `/repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`),
-      `listing run ${r.id}'s jobs`,
+      await http('GET', `/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`),
+      `listing run ${id}'s jobs`,
     );
     const pending = expectOk(
-      await http('GET', `/repos/${repo}/actions/runs/${r.id}/pending_deployments`),
-      `reading run ${r.id}'s pending deployments`,
+      await http('GET', `/repos/${repo}/actions/runs/${id}/pending_deployments`),
+      `reading run ${id}'s pending deployments`,
     );
-    runs.push({
-      id: r.id,
-      event: r.event,
-      status: r.status,
-      headSha: r.head_sha,
-      jobs: jobs.jobs.map((j) => ({ name: j.name, status: j.status })),
-      environments: pending.map((p) => p.environment && p.environment.name).filter(Boolean),
-    });
+    run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
+    run.environments = pending.map((p) => p.environment && p.environment.name).filter(Boolean);
   }
-  return { runs, total: list.total_count };
+  return { runs, filtered, unfiltered, anomalies };
+}
+
+/** The readings a sweep verdict rests on, as one summary line -- printed on every run, "none waiting" included. */
+export function describeReadings({ runs, filtered, unfiltered }) {
+  const stop = { end: 'the whole list', bound: `the ${unfiltered.days}-day bound`, cap: 'CUT SHORT at the page cap' }[unfiltered.stop];
+  const direct = runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none (no list named a waiting run)';
+  return (
+    `- readings: \`?status=waiting\` total_count ${filtered.total}, listed [${filtered.ids.join(', ')}]; ` +
+    `unfiltered ${unfiltered.runs} run(s) over ${unfiltered.pages} page(s) back to ${unfiltered.oldest ?? 'no run'} ` +
+    `(${stop}), waiting [${unfiltered.ids.join(', ')}]; direct: ${direct}`
+  );
 }
 
 function requireEnv(name) {
@@ -385,13 +466,13 @@ async function sweep({ workflow, dryRun }) {
   const currentRunId = process.env.GITHUB_RUN_ID || '';
   const http = makeHttp({ apiUrl, token, dryRun });
 
-  const { runs, total } = await collectWaitingRuns({ http, repo, workflow });
-  if (total > runs.length) {
-    console.log(`::warning::${total} waiting runs, only the first ${runs.length} judged.`);
-  }
+  const read = await collectWaitingRuns({ http, repo, workflow });
+  for (const a of read.anomalies) console.log(`::warning::${a}`);
+  const { runs } = read;
   const verdict = judgeWaitingRuns({ runs, currentRunId, npmStateOf: (v) => npmState(v) });
 
-  const lines = [`### Waiting approval prompts (${runs.length} waiting run(s) of ${workflow})`, ''];
+  const waiting = runs.filter((r) => r.status === 'waiting').length;
+  const lines = [`### Waiting approval prompts (${waiting} waiting run(s) of ${workflow})`, '', describeReadings(read)];
   const failures = [];
   for (const c of verdict.cancel) {
     const url = `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${c.id}`;
@@ -421,7 +502,7 @@ async function sweep({ workflow, dryRun }) {
     }
     lines.push(`- untouched ${u.id}: ${u.reason}`);
   }
-  if (runs.length === 0) lines.push('- none waiting');
+  if (waiting === 0) lines.push('- none waiting');
   console.log(lines.join('\n'));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
 
@@ -455,11 +536,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a shallow clone -> refused, never a graft-boundary answer': 1,
   'npm view -> present / absent / unknown': 5,
   'a waiting prompt -> cancelled only on the push lane, only when its version is on npm': 9,
+  'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 10,
   'an event with no release predicate -> refused': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
-function selfTest() {
+async function selfTest() {
   let failed = 0;
   let current = null;
   const seen = new Map();
@@ -659,6 +741,119 @@ function selfTest() {
   check(where(107) === 'keep', 'npm unreadable -> kept, never judged stale on a guess');
   check(where(108) === 'untouched', 'an unevaluated job name is no prompt -> untouched');
 
+  battery('the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged');
+  const NOW = Date.parse('2026-09-30T00:00:00Z');
+  const ago = (days) => new Date(NOW - days * 86_400_000).toISOString();
+  const listed = (id, status, days) => ({ id, status, event: 'push', created_at: ago(days), head_sha: 'a'.repeat(40) });
+  const filler = (from, count, days) => Array.from({ length: count }, (_, i) => listed(from + i, 'completed', days));
+  const publishing = (id, version, days = 1) => ({
+    ...listed(id, 'waiting', days),
+    jobs: [prompt(version)],
+    pending: [{ environment: { name: 'release' } }],
+  });
+  const readWith = async ({ filter = [], filterTotal, pages = [[]], direct = {} }, opts = {}) => {
+    const calls = [];
+    const http = async (method, path) => {
+      calls.push(path);
+      const u = new URL(path, 'https://api.invalid');
+      let m;
+      if (u.pathname.endsWith('/actions/workflows/release.yml/runs')) {
+        if (u.searchParams.get('status') === 'waiting') {
+          return { status: 200, body: { total_count: filterTotal ?? filter.length, workflow_runs: filter } };
+        }
+        const page = pages[Number(u.searchParams.get('page')) - 1] ?? [];
+        return page === 'fail' ? { status: 502, body: 'bad gateway' } : { status: 200, body: { workflow_runs: page } };
+      }
+      if ((m = /\/actions\/runs\/(\d+)$/.exec(u.pathname))) return { status: 200, body: direct[m[1]] };
+      if ((m = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname))) return { status: 200, body: { jobs: direct[m[1]].jobs } };
+      if ((m = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(u.pathname))) return { status: 200, body: direct[m[1]].pending };
+      return { status: 404, body: null };
+    };
+    const read = await collectWaitingRuns({ http, repo: 'o/r', workflow: 'release.yml', now: NOW, ...opts });
+    return { read, calls };
+  };
+
+  const pin = await readWith({
+    filter: [],
+    pages: [[listed(201, 'waiting', 1), listed(202, 'completed', 2)]],
+    direct: { 201: publishing(201, '1.1.0') },
+  });
+  const pinVerdict = judgeWaitingRuns({ runs: pin.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) });
+  check(
+    pinVerdict.cancel.map((c) => c.id).join() === '201',
+    'the filtered read is empty, the unfiltered read holds a waiting push-lane run whose version is on npm -> cancel',
+  );
+  check(
+    pin.read.anomalies.length === 1 && /omitted run 201/.test(pin.read.anomalies[0]),
+    "and the filter's omission is a warning naming that run",
+  );
+
+  const quiet = await readWith({ pages: [[listed(301, 'completed', 1), listed(302, 'completed', 3)]] });
+  const quietLine = describeReadings(quiet.read);
+  check(
+    quiet.read.anomalies.length === 0 && quiet.read.runs.length === 0 &&
+      /total_count 0/.test(quietLine) && quietLine.includes(ago(3)) && /the whole list/.test(quietLine),
+    "nothing waiting -> no warning, and the summary still names the filter's total_count, how far back the list was read, and why it stopped",
+  );
+
+  const deep = await readWith({
+    pages: [filler(1000, 100, 1), [...filler(1100, 99, 20), listed(1199, 'completed', 31)], [listed(1200, 'waiting', 32)]],
+  });
+  check(
+    deep.read.unfiltered.stop === 'bound' && deep.read.unfiltered.pages === 2 &&
+      !deep.calls.some((c) => /page=3/.test(c)) && deep.read.anomalies.length === 0,
+    'the read stops at the page whose last run is older than the bound, and asks for no page past it',
+  );
+
+  const old = await readWith({
+    filter: [listed(1300, 'waiting', 40)],
+    pages: [[listed(1301, 'completed', 1)]],
+    direct: { 1300: publishing(1300, '1.1.0', 40) },
+  });
+  check(
+    old.read.runs.map((r) => String(r.id)).join() === '1300' && old.read.runs[0].jobs.length === 1 && old.read.anomalies.length === 0,
+    'a waiting run only the filter reaches (created before the window) is still read directly and judged',
+  );
+
+  const capped = await readWith({ pages: [filler(2000, 100, 1), filler(2100, 100, 2), filler(2200, 100, 3)] }, { maxPages: 2 });
+  check(
+    capped.read.unfiltered.stop === 'cap' && capped.read.anomalies.some((a) => /2-page cap/.test(a)) &&
+      /CUT SHORT/.test(describeReadings(capped.read)),
+    'the page cap reached before the bound -> a warning naming the cap, and the summary says the read was cut short',
+  );
+
+  const over = await readWith({ filter: [], filterTotal: 150 });
+  check(over.read.anomalies.some((a) => /counts 150 waiting runs but listed 0/.test(a)), 'a filter total_count above what it listed -> a warning');
+
+  const raced = await readWith({
+    filter: [listed(401, 'waiting', 1)],
+    pages: [[listed(401, 'waiting', 1)]],
+    direct: { 401: listed(401, 'completed', 1) },
+  });
+  const racedVerdict = judgeWaitingRuns({ runs: raced.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) });
+  check(
+    racedVerdict.untouched.some((u) => u.id === '401') && !raced.calls.some((c) => /401\/(jobs|pending)/.test(c)),
+    'a run both lists call waiting but a direct read answers completed -> judged on the direct read (untouched), its jobs never read',
+  );
+
+  const shifted = await readWith({
+    filter: [listed(501, 'waiting', 1)],
+    pages: [[...filler(5000, 99, 1), listed(501, 'waiting', 1)], [listed(501, 'waiting', 1), listed(502, 'completed', 2)]],
+    direct: { 501: publishing(501, '1.2.0') },
+  });
+  check(
+    shifted.read.unfiltered.runs === 101 && shifted.read.runs.length === 1 && shifted.calls.filter((c) => /runs\/501$/.test(c)).length === 1,
+    'a run repeated across two pages (the list shifted mid-read) -> counted once and read once',
+  );
+
+  let refused = false;
+  try {
+    await readWith({ pages: [filler(6000, 100, 1), 'fail'] });
+  } catch (err) {
+    refused = /page 2 answered HTTP 502/.test(String(err && err.message));
+  }
+  check(refused, 'a list page answering non-200 -> the read throws (a red job), never a partial answer');
+
   battery('an event with no release predicate -> refused');
   check(
     throws(() => decidePending({ event: 'schedule', range: { state: 'in-push' }, npm: 'absent' }), /no release predicate/),
@@ -711,7 +906,7 @@ function flag(args, name) {
 
 async function main(argv) {
   if (argv.includes('--self-test')) {
-    selfTest();
+    await selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
         '\n✗ release-pending-publish self-test: selfTest() returned without reaching its verdict, so no ' +
