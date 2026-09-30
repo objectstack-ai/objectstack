@@ -324,19 +324,10 @@
  },
  "packages/metadata-protocol/src/protocol.ts": {
   "#10377": 1,
-  "#3172": 1,
   "#3770": 1,
-  "#4196": 1,
-  "#4432": 1,
-  "#6190": 3,
+  "#6190": 2,
   "#6992": 1,
-  "#7894": 2,
-  "#8502": 1,
-  "#8586": 1,
-  "#8957": 2
- },
- "packages/metadata-protocol/src/runtime-authoring-gate.ts": {
-  "#6153": 1
+  "#8502": 1
  },
  "packages/metadata-protocol/src/sys-metadata-repository.ts": {
   "#4867": 1
