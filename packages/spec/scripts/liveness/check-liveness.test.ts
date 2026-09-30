@@ -935,8 +935,8 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
     // evidence-scan finding can be confused for it. The gate scans `evidence`
     // only for a status in `EVIDENCE_SCANNED_STATUSES`, which `planed` is not,
     // and it resolves `producer` at any status, but every path this row's
-    // `producer` cites is objectui-attributed, so it is counted and never
-    // resolved here.
+    // `producer` cites is objectui-attributed, so none of them is resolved
+    // against this checkout.
     setStatus(root, 'field', 'useGrouping', 'planed');
     return root;
   }
