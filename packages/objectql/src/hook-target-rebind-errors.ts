@@ -167,18 +167,20 @@ function buildMessage(info: {
       ? cleared
         ? ` The capability this used to have is RETIRED: clearing 'input.id' in a '${event}' handler ` +
           `converted a by-id write into a PREDICATE write over the caller's 'where'. Since ADR-0058 ` +
-          `Addendum II (#5574 / #5846) the dispatch ladder is resolved BEFORE the before phase — the ` +
+          `Addendum II the dispatch ladder is resolved BEFORE the before phase — the ` +
           `predicate path has to read its matched rows first, to build one context per row — so there ` +
           `is no ladder left to re-enter.`
         : ` The capability this used to have is RETIRED: rebinding 'input.id' in a '${event}' handler ` +
           `moved the write to another row. The engine now resolves the target BEFORE the before phase ` +
           `and computes the whole write against it — the pre-image, the 'readonlyWhen' locks, the ` +
           `validation rules — so a by-id target is immutable once a handler runs, on BOTH verbs. ` +
-          `'delete()' honoured a rebind until #6752 by re-resolving the new target; that is retired ` +
-          `too, so one rule now covers both.`
+          `'delete()' used to honour a rebind by re-resolving the new target; that is retired ` +
+          `too, because a handler that silently redirects which row gets deleted is a trap — so ` +
+          `one rule now covers both.`
       : path === 'unscoped-multi'
         ? ` This is the whole-operation dispatch an UNSCOPED predicate write delivers to a declared ` +
-          `shape guard (#9719, both write verbs since #9974): its 'id' is present-but-undefined ON ` +
+          `shape guard (one registered with 'dispatchUnscopedMultiWrite', on update and delete ` +
+          `alike): its 'id' is present-but-undefined ON ` +
           `PURPOSE — there is no target row — and the dispatch ladder was resolved before any handler ` +
           `ran, so binding 'input.id' here retargets nothing. It is refused rather than ignored, ` +
           `because a silent no-op is the failure this contract exists to abolish.`

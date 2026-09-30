@@ -31,10 +31,16 @@
  * `sql-driver-20280-mysql-date-read.test.ts` under `Temporal Conformance (live
  * PG + MySQL)`, and every door here hands the driver's value through.
  *
- * `datetime` is outside the change: a MySQL `DATETIME` in years 0..99 still
- * reads a century late, which waits on a decision about ADR-0053 D-F2 (the
- * client parser keeps an instant's `Date`). Its MySQL cells are pinned as
- * OBSERVED, so a decision that moves them has to move this file.
+ * `datetime` was outside that change: a MySQL `DATETIME` in years 0..99 still
+ * reads a century late (ADR-0053 D-F2 keeps the client parser's `Date` for an
+ * instant). Its MySQL cells are pinned as OBSERVED, so a decision that moves
+ * them has to move this file — and the card's second half did: a `datetime`
+ * begins at year 1000, MySQL's documented `DATETIME` floor, and both doors
+ * refuse one below it. The rows' `datetime` values below 1000 are therefore
+ * written straight through the driver, which no door fronts: they are what a
+ * row stored before that floor holds. Such a row still presents as before, is
+ * found by `$lt` on the floor's first instant (the operator's census), and
+ * takes a PATCH of another field or of that field onto the range.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -146,8 +152,13 @@ function measure(cell: Cell, config: Record<string, unknown>): void {
       };
 
       for (const row of ROWS) {
-        const res = await call('POST', '/api/v1/data/:object', { params: { object: OBJECT }, body: { ...row } });
+        // [#20280] A datetime below 1000 is refused at the create door now; it
+        // is written the way a row stored before the floor holds it.
+        const beforeTheFloor = row.opened_at < '1000';
+        const body = beforeTheFloor ? { id: row.id, placed_on: row.placed_on } : { ...row };
+        const res = await call('POST', '/api/v1/data/:object', { params: { object: OBJECT }, body });
         expect(res._status, JSON.stringify(res._json)).toBe(201);
+        if (beforeTheFloor) await driver.update(OBJECT, row.id, { opened_at: row.opened_at });
       }
     }, 60_000);
 
@@ -213,6 +224,43 @@ function measure(cell: Cell, config: Record<string, unknown>): void {
       expect(byId(await engine.find(OBJECT, {}), 'opened_at')).toEqual(expected);
       const q = await call('POST', '/api/v1/data/:object/query', { params: { object: OBJECT }, body: {} });
       expect(byId(q._json.records, 'opened_at')).toEqual(expected);
+    });
+
+    // [#20280] Last, because it edits two rows. The census and the remedy the
+    // changeset gives an operator for a datetime stored before the floor.
+    it('[#20280] a datetime below 1000 is refused at create; a row stored before the floor is found by $lt 1000 and takes a PATCH', async () => {
+      const created = await call('POST', '/api/v1/data/:object', {
+        params: { object: OBJECT }, body: { id: 'n1', placed_on: '2026-03-04', opened_at: '0500-01-01T00:00:00.000Z' },
+      });
+      expect(created._status, JSON.stringify(created._json)).toBe(400);
+      expect(created._json.fields.map((f: any) => [f.field, f.code])).toEqual([['opened_at', 'invalid_date']]);
+      // The census: the floor's first instant is a comparand the door admits.
+      const census = await call('POST', '/api/v1/data/:object/query', {
+        params: { object: OBJECT }, body: { where: { opened_at: { $lt: '1000-01-01T00:00:00.000Z' } } },
+      });
+      expect(census._status ?? 200, JSON.stringify(census._json)).toBe(200);
+      expect(census._json.records.map((r: any) => r.id).sort()).toEqual(['y9', 'y99', 'y999']);
+      // A comparand below the floor is refused, as every one is.
+      const below = await call('POST', '/api/v1/data/:object/query', {
+        params: { object: OBJECT }, body: { where: { opened_at: { $lt: '0500-01-01T00:00:00.000Z' } } },
+      });
+      expect(below._status, JSON.stringify(below._json)).toBe(400);
+      expect(below._json.code).toBe('INVALID_FILTER');
+      // Such a row still takes a PATCH of another field — the stored value is not re-judged —
+      const other = await call('PATCH', '/api/v1/data/:object/:id', {
+        params: { object: OBJECT, id: 'y999' }, body: { placed_on: '0999-06-16' },
+      });
+      expect(other._status ?? 200, JSON.stringify(other._json)).toBe(200);
+      // — and a PATCH that moves the instant onto the range; one that keeps it below is refused.
+      const kept = await call('PATCH', '/api/v1/data/:object/:id', {
+        params: { object: OBJECT, id: 'y9' }, body: { opened_at: '0009-03-05T10:00:00.000Z' },
+      });
+      expect(kept._status, JSON.stringify(kept._json)).toBe(400);
+      const moved = await call('PATCH', '/api/v1/data/:object/:id', {
+        params: { object: OBJECT, id: 'y9' }, body: { opened_at: '1000-01-01T00:00:00.000Z' },
+      });
+      expect(moved._status ?? 200, JSON.stringify(moved._json)).toBe(200);
+      expect((await engine.findOne(OBJECT, { where: { id: 'y9' } }))?.opened_at).toBe('1000-01-01T00:00:00.000Z');
     });
   });
 }

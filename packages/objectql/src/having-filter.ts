@@ -325,7 +325,7 @@ function unknownOperator(
   return invalidFilterError(
     `Unsupported operator '${op}' in \`${clause.root}\`. ${clause.semantics} and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
-    + `return unfiltered aggregates (#4286, ADR-0078).`,
+    + `return unfiltered aggregates (ADR-0078).`,
   );
 }
 

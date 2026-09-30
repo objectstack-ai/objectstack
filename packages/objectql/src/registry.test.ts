@@ -1198,7 +1198,7 @@ describe('warnStrippedLegacyApiMethods (#3543)', () => {
         expect(warn.mock.calls[0][0]).toContain('import');
         expect(warn.mock.calls[0][0]).toContain('export');
         expect(warn.mock.calls[0][0]).toContain('IGNORED');
-        expect(warn.mock.calls[0][0]).toContain('#3543');
+        expect(warn.mock.calls[0][0]).toContain('derived from them or retired');
         // primitives remain, so no deny-all escalation
         expect(warn.mock.calls[0][0]).not.toContain('deny-all');
     });

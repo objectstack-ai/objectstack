@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20264] The supported years of a `date` and a `datetime` are 0001..9999, on
- * every dialect this driver speaks. The refusal outside them sits one layer up,
+ * [#20264] The supported years of a `date` are 0001..9999, and [#20280] of a
+ * `datetime` 1000..9999, on every dialect this driver speaks. The refusal
+ * outside them sits one layer up,
  * at the engine's two doors (the temporal-comparand door and the record
  * validator, both asking `@objectstack/core`'s `isOutsideTemporalYearRange`), so
  * this driver's `where` and write paths are not a door and are not pinned as
@@ -23,10 +24,13 @@
  * MySQL documents `DATETIME` from year 1000, and a `DATETIME` in years
  * 0001..0099 is stored right and read back a century late through mysql2's
  * instant parser (`0009-03-04 10:00` → `2004-09-03T10:00Z`), which ADR-0053
- * D-F2 keeps. Those years are inside the range, so the doors accept them; the
- * MySQL cell asserts their STORED text, and the misread is a decision returned
- * to the maintainer. From year 0100 up MySQL reads a `DATETIME` back as written,
- * which the cell asserts.
+ * D-F2 keeps. [#20280] That is why a `datetime` begins at year 1000: the doors
+ * refuse one below it now, as a written value and as a comparand. The
+ * `datetime` rows below 1000 stay here on purpose — they are what a row stored
+ * before that floor holds, written straight through the driver, which no door
+ * fronts — and the MySQL cell asserts their STORED text. From year 0100 up
+ * MySQL reads a `DATETIME` back as written, which the cell asserts; year 1000
+ * is the floor's edge row.
  *
  * ## [#20549] A leap day, and the ISO spellings, beside the range
  *
@@ -54,12 +58,14 @@ const shape = (name: string) => ({
   fields: { placed_on: { type: 'date' }, opened_at: { type: 'datetime' } },
 }) as any;
 
-/** In chronological order on both fields: the edges, three early years and a 2026 control. */
+/** In chronological order on both fields: the edges, four early years and a 2026 control. */
 const ROWS = [
   { id: 'first', placed_on: '0001-01-01', opened_at: '0001-01-01T00:00:00.000Z' },
   { id: 'y0099', placed_on: '0099-03-04', opened_at: '0099-03-04T10:00:00.000Z' },
   { id: 'y0100', placed_on: '0100-03-04', opened_at: '0100-03-04T10:00:00.000Z' },
   { id: 'y0999', placed_on: '0999-06-15', opened_at: '0999-06-15T10:00:00.000Z' },
+  // [#20280] The `datetime` floor's edge.
+  { id: 'y1000', placed_on: '1000-01-01', opened_at: '1000-01-01T00:00:00.000Z' },
   { id: 'c2026', placed_on: '2026-02-01', opened_at: '2026-02-01T10:00:00.000Z' },
   // [#20549] The leap control: a February 29 that exists.
   { id: 'l2028', placed_on: '2028-02-29', opened_at: '2028-02-29T10:00:00.000Z' },
@@ -94,7 +100,7 @@ const readsBackAsWritten = (cell: DialectCell, row: (typeof ROWS)[number]) =>
   !(cell.id === 'mysql' && Number(row.opened_at.slice(0, 4)) < 100);
 
 function measure(cell: DialectCell): void {
-  describe(`[#20264] the supported years 0001..9999 — ${cell.label}`, () => {
+  describe(`[#20264] the supported years, a date 0001..9999 and a datetime 1000..9999 — ${cell.label}`, () => {
     let driver: SqlDriver;
     const ids = async (where: FilterCondition) =>
       (await driver.find(TABLE, { where }, NO_AUDIT)).map((r) => r.id as string)
@@ -119,7 +125,7 @@ function measure(cell: DialectCell): void {
       }
     });
 
-    it('a datetime in every year of the range is stored as that instant, and read back as written save the MySQL 0001..0099 cell', async () => {
+    it('a datetime in every year of the range, and one stored before its floor, is stored as that instant, and read back as written save the MySQL 0001..0099 cell', async () => {
       for (const row of ROWS) {
         const read = (await driver.findOne(TABLE, { where: { id: row.id } }, NO_AUDIT))?.opened_at;
         if (readsBackAsWritten(cell, row)) {

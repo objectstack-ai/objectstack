@@ -123,7 +123,7 @@ function buildRefusalMessage(
   const head = `${operation === 'insert' ? 'Insert' : 'Update'} on '${object}' was REFUSED: `;
   const tail =
     `To let the strip happen and merely observe it, drop ` +
-    `strictReadonlyWrites and pass options.onFieldsDropped instead (#3407).`;
+    `strictReadonlyWrites and pass options.onFieldsDropped instead.`;
 
   // Empty `drops` cannot happen on either throw site, but `every` on it is
   // vacuously true, which lands on the historical wording — the safe default.
@@ -138,7 +138,7 @@ function buildRefusalMessage(
       (operation === 'insert'
         ? `{ context: { isSystem: true } } — or, for a data migration reinstating legacy ` +
           `values for a runtime-owned field (a record number), the historical-import ` +
-          `context { context: { preserveAudit: true } } (#3493). `
+          `context { context: { preserveAudit: true } }. `
         : `{ context: { isSystem: true } } (this exempts statically 'readonly' fields, but NOT ` +
           `fields locked by a TRUE 'readonlyWhen' predicate — those stay locked for every ` +
           `API-boundary caller, isSystem included. A value DERIVED by a beforeUpdate hook is ` +

@@ -770,7 +770,7 @@ function rejectUnknownEngineOptions(
   throw new Error(
     `${operation}('${object}') does not recognise option${unknown.length > 1 ? 's' : ''} ` +
     `${details.join('; ')}. The engine executes none of ${unknown.length > 1 ? 'them' : 'it'}, ` +
-    `so the call would succeed with the option silently ignored (#4371). ` +
+    `so the call would succeed with the option silently ignored. ` +
     `Legal keys for ${operation}: ${[...legal].sort().join(', ')}.`,
   );
 }
@@ -1071,7 +1071,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
       `${JSON.stringify(where)}. A filter array is a comparison [field, operator, value], ` +
       `a logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY ` +
       `sugar (spec 'FilterArray'), lowered to a FilterCondition here before any driver sees ` +
-      `it (#5158). This value cannot be lowered, and an unapplied filter would have returned ` +
+      `it. This value cannot be lowered, and an unapplied filter would have returned ` +
       `the UNFILTERED result set. Recognised operators: ` +
       `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
       `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
@@ -1094,7 +1094,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
     throw new Error(
       `${operation}('${object}'): filter array ${JSON.stringify(where)} passed isFilterAST() ` +
       `but parseFilterAST() lowered it to nothing. Refusing rather than running the query ` +
-      `unfiltered (#5158).`,
+      `unfiltered.`,
     );
   }
   // [#5869] Door 2's half of the same check USED to be a second
@@ -9616,7 +9616,7 @@ export class ObjectQL implements IObjectQLEngine {
       FILE_REFERENCES_MIGRATION_ID,
       '[value-shape] this deployment has verified the file-as-reference migration — ' +
         'media value shapes are enforced and released field files may be collected ' +
-        '(ADR-0104 / #3617)',
+        '(ADR-0104)',
     );
   }
 
@@ -9664,7 +9664,7 @@ export class ObjectQL implements IObjectQLEngine {
       'valueShapesMigrationVerified',
       VALUE_SHAPES_MIGRATION_ID,
       '[value-shape] this deployment has verified the value-shape scan — reference and ' +
-        'structured-JSON value shapes are enforced (ADR-0104 / #3438)',
+        'structured-JSON value shapes are enforced (ADR-0104)',
     );
   }
 
@@ -9967,7 +9967,7 @@ export class ObjectQL implements IObjectQLEngine {
             'no byte is deleted on evidence this deployment has contradicted. Fix the data and run ' +
             '`os migrate ' +
             (migrationId === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
-            ' --apply` to clear it (ADR-0104 / #4797).',
+            ' --apply` to clear it (ADR-0104).',
         );
       })
       .catch((err: any) => {
@@ -9978,7 +9978,7 @@ export class ObjectQL implements IObjectQLEngine {
           `[value-shape] could not record the observed deviation for '${migrationId}' ` +
             `(${err?.message ?? err}) — the ledger still authorises irreversible collection while ` +
             'this deployment holds a value its own contract rejects; run the migration to ' +
-            're-derive the gate (#4797)',
+            're-derive the gate',
         );
       });
   }
@@ -10069,7 +10069,7 @@ export class ObjectQL implements IObjectQLEngine {
             `(${tally?.first.object}.${tally?.first.field}: ${tally?.first.detail}). ` +
             'The gate is closed again — fix the data, then run `os migrate ' +
             (migrationId === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
-            ' --apply` to re-earn it (ADR-0104 / #4769).',
+            ' --apply` to re-earn it (ADR-0104).',
         );
       })
       .catch((err: any) => {
@@ -10078,7 +10078,7 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.warn(
           `[value-shape] could not revoke the creation attestation for '${migrationId}' ` +
             `(${err?.message ?? err}) — the ledger still claims this deployment is verified ` +
-            'while its data contradicts that; run the migration to re-derive it (#4769)',
+            'while its data contradicts that; run the migration to re-derive it',
         );
       });
   }
@@ -10154,7 +10154,7 @@ export class ObjectQL implements IObjectQLEngine {
           '[value-shape] media values are checked but NOT enforced here, and released files are ' +
             'never collected — this deployment has not verified its file migration. Run ' +
             '`os migrate files-to-references` (dry run) to see what it would do, then `--apply` ' +
-            'to close the gate (ADR-0104 / #3617).',
+            'to close the gate (ADR-0104).',
         );
       }
       if (covered && !(await this.readMigrationFlagVerified(VALUE_SHAPES_MIGRATION_ID)).verified) {
@@ -10162,7 +10162,7 @@ export class ObjectQL implements IObjectQLEngine {
           '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
             'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
             '(dry run) to see what it would report, then `--apply` to close the gate ' +
-            '(ADR-0104 / #3438).',
+            '(ADR-0104).',
         );
       }
     } catch {
@@ -14017,7 +14017,9 @@ export class ObjectQL implements IObjectQLEngine {
            if (!ast) {
                throw new Error(
                  `[Security] Refusing bulk update on '${object}': row-scoping AST was not seeded ` +
-                   `(the predicate branch was reached without the #2982 seed).`,
+                   `(the predicate branch was reached without the AST seeded before the middleware ` +
+                   `chain — the one RLS and sharing compose their row-scoping onto, so that a bulk ` +
+                   `write reaches only the rows this caller may edit).`,
                );
            }
            // [#9974] The unscoped-multi shape check, BEFORE the matched-row
@@ -15199,7 +15201,8 @@ export class ObjectQL implements IObjectQLEngine {
       `Cascade delete of '${object}' cannot run as one unit of work: the cascade reaches an object routed ` +
         `to a datasource other than the default one ('${this.defaultDriver ?? '<none>'}'), and a transaction ` +
         "covers one driver's connection only (ADR-0119 D1 — no two-phase commit). The cascade therefore runs " +
-        'UNWRAPPED, exactly as it did before #7413: if a later dependent refuses the delete, the rows already ' +
+        'UNWRAPPED, as every cascade did before a single-datasource cascade was made one transaction: if a ' +
+        'later dependent refuses the delete, the rows already ' +
         'removed stay removed while the call rejects. Route the cascading objects to one datasource to get the ' +
         'atomic path. Reported once per object per engine instance.',
       { object, defaultDatasource: this.defaultDriver ?? undefined },
@@ -16337,7 +16340,9 @@ export class ObjectQL implements IObjectQLEngine {
         if (!ast) {
           throw new Error(
             `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
-              `(the predicate branch was reached without the #2982 seed).`,
+              `(the predicate branch was reached without the AST seeded before the middleware ` +
+              `chain — the one RLS and sharing compose their row-scoping onto, so that a bulk ` +
+              `write reaches only the rows this caller may edit).`,
           );
         }
         // [#9719] The unscoped-multi shape check, BEFORE the matched-row read:
@@ -16658,7 +16663,7 @@ export class ObjectQL implements IObjectQLEngine {
           + 'secret/password fields are masked on read and `internal: true` fields are omitted '
           + 'outright, so the value never leaves the engine on the generic data path; aggregating '
           + 'them (group-by, min/max, array_agg, …) would surface it. '
-          + 'Refusing (fail-closed) — see ADR-0100 / #3171 / #7922.',
+          + 'Refusing (fail-closed) — see ADR-0100.',
       );
     }
   }
@@ -17422,7 +17427,8 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug(
       `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}' while the ` +
         `transaction is open on '${scope.datasource}' — executing it OUTSIDE the transaction, on its own ` +
-        'connection (ADR-0057 §3.6 system ledger, carved out by #5351). It commits independently and will ' +
+        'connection (ADR-0057 §3.6 system ledger — the one class carved out of the cross-datasource write ' +
+        'refusal). It commits independently and will ' +
         'SURVIVE a rollback of this transaction: an audit/telemetry/event row may describe a write that was ' +
         'undone. That is the decided direction of error for an append-only ledger — an extra reconcilable ' +
         'row beats a missing row for a write that did commit. Said once per transaction per datasource.',
