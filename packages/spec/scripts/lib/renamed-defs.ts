@@ -74,14 +74,18 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
 
   // #4703 / ADR-0112 D9a — `FieldMapping` was published by THREE defs at once.
   // The two domain-specific sides take a domain prefix; `shared/FieldMapping`
-  // is the BASE that this rename's target (and, until #8075's whole-family
-  // retirement, `data/ExternalFieldMapping`)
-  // extend, so it keeps the bare name and is deliberately absent from this
-  // table. Note what an `extend` means for the invariants below: the target
-  // def's key set is a superset of the base's, so every carried key is found,
-  // while the base def is emitted unchanged and is neither a source nor a
-  // target here.
-  'integration/FieldMapping': 'integration/ConnectorFieldMapping', // 7 keys carried
+  // is the BASE that the connector side (and, until #8075's whole-family
+  // retirement, `data/ExternalFieldMapping`) extended, so it keeps the bare
+  // name and is deliberately absent from this table.
+  //
+  // ─── RETIRED, do not re-add: `integration/FieldMapping` →
+  // `integration/ConnectorFieldMapping` (7 keys were carried). The target left
+  // whole in protocol 18 with `connector.fieldMappings` (ADR-0049 — no engine
+  // ever moved a value through it), so `checkRenameTable` rejects it as a
+  // target this build no longer emits — the decay guard working as designed.
+  // The removal rides the real retirement kit (the `fieldMappings` tombstone,
+  // the D2 `connector-sync-keys-removed`, the deliberate manifest deletion),
+  // never this table: the `integration/RateLimitConfig` ruling above.
   'data/FieldMapping': 'data/ImportFieldMapping', //                  4 keys carried
 
   // #4738 / ADR-0112 D9a — `ConflictResolution` was published by THREE defs at
@@ -94,11 +98,14 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // distinct concept (client/server offline sync). #4988 then RETIRED
   // `ui/offline.zod.ts` whole (ADR-0049; deliberate manifest deletion, not
   // carried here either), so the bare name is now emitted by no def at all.
-  // This entry is unaffected and STAYS: its source is still unemitted, its
-  // target still emitted, and `ConnectorConflictResolution` remains the
-  // connector vocabulary's real name — a freed word is not a reason to rename
-  // back, which would be a second breaking change carrying no keys.
-  'integration/ConflictResolution': 'integration/ConnectorConflictResolution',
+  //
+  // ─── RETIRED, do not re-add: `integration/ConflictResolution` →
+  // `integration/ConnectorConflictResolution`. The target left whole in
+  // protocol 18 with `connector.syncConfig` (ADR-0049 — no engine ever ran a
+  // connector-attached sync or resolved a conflict), so this build no longer
+  // emits it; the removal rides the retirement kit (the `syncConfig`
+  // tombstone, the D2 `connector-sync-keys-removed`, the deliberate manifest
+  // deletion), never this table.
 
   // #4737 / ADR-0112 D9a — `ActionLocation` was published by ./studio AND ./ui
   // for two disjoint concepts. The studio side (3-value IDE surface enum,
