@@ -207,14 +207,15 @@ describe('the /automation definition doors persist what they register (showcase,
         stack = await boot(dbFile);
         token = await stack.signIn();
 
+        // Independent facts about one restart, so each is reported on its own.
         // The created flow survives.
-        expect(await engineLabel(CREATED)).toEqual({ status: 200, label: `Dogfood ${CREATED}` });
+        expect.soft(await engineLabel(CREATED)).toEqual({ status: 200, label: `Dogfood ${CREATED}` });
         // The update survives: the stored definition no longer wins over it.
-        expect(await engineLabel(META_STORED)).toEqual({ status: 200, label: UPDATED_LABEL });
+        expect.soft(await engineLabel(META_STORED)).toEqual({ status: 200, label: UPDATED_LABEL });
         // The refused create left nothing to bind, and the removed flow stays removed.
-        expect((await call('GET', `/automation/${UNSAVABLE}`)).status).toBe(404);
-        expect((await call('GET', `/automation/${REMOVED}`)).status).toBe(404);
+        expect.soft((await call('GET', `/automation/${UNSAVABLE}`)).status).toBe(404);
+        expect.soft((await call('GET', `/automation/${REMOVED}`)).status).toBe(404);
         // The packaged flow is the one its package ships.
-        expect((await engineLabel(SHIPPED)).status).toBe(200);
+        expect.soft((await engineLabel(SHIPPED)).status).toBe(200);
     }, 180_000);
 });
