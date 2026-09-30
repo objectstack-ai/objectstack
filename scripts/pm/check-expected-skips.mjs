@@ -59,7 +59,7 @@
  * declares — so a renamed, deleted or re-gated job reddens the roster instead
  * of letting it rot into memory. A NEW gated job is caught from the other
  * side: its first skip is a name outside the roster, exit 4, until someone
- * declares it with its mechanism.
+ * declares it — or `deriveNonPrEventSkips` below admits its one exact shape.
  *
  * ## What the API says about a skip, and what it does not
  *
@@ -132,7 +132,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -229,6 +229,11 @@ const CORE_REASON =
  * ⛔ Adding a row is a declaration that the skip is BY DESIGN, and the row must
  * name the mechanism — a row added to silence an exit 4 without one is the
  * finding written somewhere quieter.
+ *
+ * These are the LISTED rows. The judge reads them beside the DERIVED ones —
+ * `deriveNonPrEventSkips` below, one exact `if:` shape read off the tree — and
+ * ⛔ a job that shape admits is never listed here: the derivation refuses a
+ * name both halves carry.
  */
 export const EXPECTED_SKIPS = Object.freeze([
   {
@@ -402,6 +407,189 @@ export function workflowReader(root = ROOT) {
   };
 }
 
+/** Every workflow file under a root, sorted; empty when the directory is absent. */
+export function listWorkflowFiles(root = ROOT) {
+  const dir = join(root, WORKFLOW_DIR);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .sort();
+}
+
+// ---------------------------------------------------------------------------
+// The DERIVED half — one job-level `if:` shape, read off the tree.
+// ---------------------------------------------------------------------------
+
+/**
+ * The events a job may be gated to for its skip to be by design on every PR
+ * head. Neither ever fires FOR a pull request: `schedule` runs on the default
+ * branch's tip, and `workflow_dispatch` runs only when someone asks — and a
+ * dispatched run SELECTS the job, so it runs rather than skips. ⛔ Closed on
+ * purpose: `push` fires on a PR branch in any workflow that listens to it, and
+ * `merge_group` is the queue's own verdict — widening this list is a decision
+ * about those events, never a spelling fix.
+ */
+export const NON_PR_EVENTS = Object.freeze(['schedule', 'workflow_dispatch']);
+
+/** The one comparison a term may be: `github.event_name == '<lowercase event>'`. */
+const EVENT_NAME_TERM = /^github\.event_name\s*==\s*'([a-z_]+)'$/;
+/** One `${{ … }}` expression inside a job `name:` (lazy, so two in a name are two). */
+const NAME_EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
+/** A bare matrix reference — the one expression a pre-expansion skip reports raw. */
+const MATRIX_REFERENCE = /^matrix\.[A-Za-z_][A-Za-z0-9_-]*$/;
+
+/**
+ * Read a job-level `if:` as a gate to non-PR events ONLY, or answer null.
+ *
+ * ⛔ A recogniser, never an evaluator. The header's boundary stands: this file
+ * does not evaluate GitHub's expression language, and so it admits exactly one
+ * shape — a disjunction whose EVERY term is `github.event_name == '<e>'` with
+ * `<e>` in `NON_PR_EVENTS`, optionally wrapped whole in one `${{ … }}`. That
+ * shape is false on every `pull_request`, `push` and `merge_group` run by
+ * construction, so the job skips on each of them before it starts — and it
+ * reads nothing a run could make true: no `needs`, no output, no `inputs`, no
+ * `matrix`, no path, no label. Anything else answers null, and null keeps the
+ * skip where it was: outside the roster, exit 4. Measured refusals on this
+ * tree: `release.yml` › `version-pr` (a `workflow_dispatch` term conjoined with
+ * `inputs.refresh_version_pr`) and `merged-branch-reaper.yml` › `reap`
+ * (`success()` and `inputs.dry_run` beside its event terms).
+ *
+ * @param {unknown} cond  the job's `if:` as the YAML parser returned it
+ * @returns {string[]|null}  the sorted, de-duplicated events; null when not this shape
+ */
+export function nonPrEventGate(cond) {
+  if (typeof cond !== 'string') return null;
+  let expr = cond.trim();
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
+  if (wrapped) expr = wrapped[1].trim();
+  if (!expr || expr.includes('${{') || expr.includes('}}')) return null;
+  const events = [];
+  for (const term of expr.split('||')) {
+    const m = EVENT_NAME_TERM.exec(term.trim());
+    if (!m || !NON_PR_EVENTS.includes(m[1])) return null;
+    if (!events.includes(m[1])) events.push(m[1]);
+  }
+  return events.length > 0 ? events.sort() : null;
+}
+
+/**
+ * The name a job's check-run carries when it is skipped by a job-level gate —
+ * `name:` VERBATIM, else the job key — or the reason it cannot be told.
+ *
+ * GitHub evaluates the job-level `if:` BEFORE it expands a matrix, so a gated
+ * matrix job's skipped check-run keeps each `${{ matrix.* }}` reference
+ * literally (measured on PR #20748's head `a84b73af13`: the skipped check-run
+ * of `scaffold-e2e.yml` › `registry-canary` is named
+ * `Registry canary: ${{ matrix.template }}`, run 36658032070, as are ci.yml's
+ * two listed templates). Only an expanded job's check-runs carry expanded
+ * names, and an expanded job RAN, so no expanded name is ever a skip this
+ * derivation must admit. Any expression other than a bare matrix reference —
+ * `inputs.*`, `needs.*.outputs.*`, `github.*` — has an unmeasured skipped
+ * spelling, so it is refused rather than guessed.
+ *
+ * @returns {{ name: string } | { refused: string }}
+ */
+export function skippedCheckRunName(key, job) {
+  if (job?.name !== undefined && typeof job.name !== 'string') {
+    return { refused: `\`name:\` is a ${typeof job.name}, not a string — the check-run name is not derivable` };
+  }
+  const name = typeof job?.name === 'string' ? job.name : key;
+  const expressions = [...name.matchAll(NAME_EXPRESSION)].map((m) => m[1].trim());
+  if (expressions.length === 0) return { name };
+  const foreign = expressions.filter((e) => !MATRIX_REFERENCE.test(e));
+  if (foreign.length > 0) {
+    return {
+      refused: `\`name:\` holds ${foreign.map((e) => `\`\${{ ${e} }}\``).join(', ')} — only a bare \`\${{ matrix.* }}\` reference is measured to survive a pre-expansion skip raw`,
+    };
+  }
+  if (job?.strategy?.matrix === undefined) {
+    return { refused: '`name:` references `matrix.*` but the job declares no `strategy.matrix` — the skipped spelling is unmeasured' };
+  }
+  return { name };
+}
+
+/**
+ * Derive the expected skips no one lists: every job, in every workflow file,
+ * whose job-level `if:` `nonPrEventGate` admits, under the name
+ * `skippedCheckRunName` gives it.
+ *
+ * The roster judges NAMES, so a derived name must mean ONE job. A candidate is
+ * REFUSED — never admitted — when another job anywhere in the tree carries the
+ * same check-run name (a skip of that other job would read expected), when the
+ * listed roster already carries it (derive, don't list), or when its name
+ * cannot be told. A workflow that cannot be read derives nothing and is
+ * refused by file. Refusal is the safe direction: the skip stays exit 4. The
+ * self-test holds the live tree's refusal list at empty, so the job's author
+ * hears about it rather than a landing seat.
+ *
+ * @param {readonly string[]} files        workflow file names under `WORKFLOW_DIR`
+ * @param {(file: string) => object|null} readWorkflow
+ * @param {readonly object[]} [listed]     the listed roster the derived rows join
+ * @returns {{ rows: object[], refused: { workflow: string, job: string|null, reason: string }[], scanned: number }}
+ */
+export function deriveNonPrEventSkips(files, readWorkflow, listed = EXPECTED_SKIPS) {
+  const refused = [];
+  const jobs = [];
+  for (const workflow of files) {
+    const wf = readWorkflow(workflow);
+    if (!wf || typeof wf !== 'object') {
+      refused.push({ workflow, job: null, reason: 'the workflow could not be read — none of its jobs is derived' });
+      continue;
+    }
+    const entries = wf.jobs && typeof wf.jobs === 'object' ? Object.entries(wf.jobs) : [];
+    for (const [key, job] of entries) {
+      if (!job || typeof job !== 'object') continue;
+      jobs.push({ workflow, key, job, named: skippedCheckRunName(key, job) });
+    }
+  }
+  const bearers = new Map();
+  for (const j of jobs) {
+    if (!('name' in j.named)) continue;
+    bearers.set(j.named.name, (bearers.get(j.named.name) ?? 0) + 1);
+  }
+  const listedNames = new Set(listed.map((r) => r.name));
+  const rows = [];
+  for (const { workflow, key, job, named } of jobs) {
+    const events = nonPrEventGate(job.if);
+    if (events === null) continue;
+    if (!('name' in named)) {
+      refused.push({ workflow, job: key, reason: named.refused });
+      continue;
+    }
+    if (bearers.get(named.name) > 1) {
+      refused.push({ workflow, job: key, reason: `${bearers.get(named.name)} jobs in the tree carry the check-run name ${JSON.stringify(named.name)} — a skip of the other would read expected` });
+      continue;
+    }
+    if (listedNames.has(named.name)) {
+      refused.push({ workflow, job: key, reason: `the listed roster already carries ${JSON.stringify(named.name)} — derive, don't list: delete the listed row` });
+      continue;
+    }
+    const matrix = job.strategy?.matrix !== undefined;
+    rows.push(
+      Object.freeze({
+        name: named.name,
+        workflow,
+        job: key,
+        gate: Object.freeze({ kind: 'non-pr-event', events: Object.freeze(events) }),
+        derived: true,
+        reason:
+          `derived, not listed: the job-level \`if:\` selects only ${events.map((e) => `\`${e}\``).join(' / ')}, so every pull_request, push and merge_group run skips it` +
+          (matrix ? ' before its matrix expands, and the skipped check-run carries the raw `name:` template' : ''),
+      }),
+    );
+  }
+  return { rows, refused, scanned: files.length };
+}
+
+/**
+ * The roster the judge reads: the listed rows, then the rows derived from the
+ * workflows under `root`. The derivation travels beside it for the report.
+ */
+export function expectedSkipRoster(root = ROOT) {
+  const derivation = deriveNonPrEventSkips(listWorkflowFiles(root), workflowReader(root));
+  return { roster: Object.freeze([...EXPECTED_SKIPS, ...derivation.rows]), derivation };
+}
+
 // ---------------------------------------------------------------------------
 // The judge — pure over the REST check-runs shape.
 // ---------------------------------------------------------------------------
@@ -473,7 +661,9 @@ export function judgeCheckRuns(payload, roster = EXPECTED_SKIPS) {
     if (run.conclusion === 'skipped') {
       const row = byName.get(name);
       if (row) {
-        if (!expected.has(name)) expected.set(name, { name, count: 0, reason: row.reason, workflow: row.workflow, job: row.job });
+        if (!expected.has(name)) {
+          expected.set(name, { name, count: 0, reason: row.reason, workflow: row.workflow, job: row.job, derived: row.derived === true });
+        }
         expected.get(name).count += 1;
       } else {
         unexpected.push({
@@ -680,7 +870,7 @@ export function renderReport(judgement, meta = {}) {
   if (judgement.expected.length > 0) {
     L.push(`  expected skips (${judgement.expected.length} name(s), ${judgement.expected.reduce((n, e) => n + e.count, 0)} run(s)):`);
     for (const e of [...judgement.expected].sort((a, b) => a.name.localeCompare(b.name))) {
-      L.push(`    ×${e.count} ${e.name}  [${e.workflow} › ${e.job}]`);
+      L.push(`    ×${e.count} ${e.name}  [${e.workflow} › ${e.job}${e.derived ? '; derived' : ''}]`);
       L.push(`       ${e.reason}`);
     }
   } else {
@@ -707,11 +897,19 @@ export function renderReport(judgement, meta = {}) {
 }
 
 /** The roster, rendered for a seat that wants to read it without a network. */
-export function renderRoster(roster = EXPECTED_SKIPS) {
-  const L = [`check-expected-skips: ${roster.length} expected-skip name(s), declared in scripts/pm/check-expected-skips.mjs`];
+export function renderRoster(roster = EXPECTED_SKIPS, derivation = null) {
+  const derived = roster.filter((r) => r.derived === true).length;
+  const L = [
+    `check-expected-skips: ${roster.length} expected-skip name(s) — ${roster.length - derived} listed in scripts/pm/check-expected-skips.mjs, ` +
+      `${derived} derived from ${derivation ? `${derivation.scanned} workflow file(s)` : 'the workflows'}`,
+  ];
   for (const row of roster) {
-    L.push(`  ${row.name}  [${row.workflow} › ${row.job}; gate: ${row.gate.kind}${row.gate.outputs ? ` ${row.gate.outputs.join('|')}` : row.gate.label ? ` ${row.gate.label}` : ''}]`);
+    const detail = row.gate.outputs ? ` ${row.gate.outputs.join('|')}` : row.gate.label ? ` ${row.gate.label}` : row.gate.events ? ` ${row.gate.events.join('|')}` : '';
+    L.push(`  ${row.name}  [${row.workflow} › ${row.job}; gate: ${row.gate.kind}${detail}${row.derived === true ? '; derived' : ''}]`);
     L.push(`     ${row.reason}`);
+  }
+  for (const r of derivation?.refused ?? []) {
+    L.push(`  ⚠️  refused by the derivation — ${r.workflow}${r.job ? ` › ${r.job}` : ''}: ${r.reason}`);
   }
   return L;
 }
@@ -764,7 +962,8 @@ async function run(argv) {
     return EXIT_OK;
   }
   if (opts.roster) {
-    console.log(renderRoster().join('\n'));
+    const { roster, derivation } = expectedSkipRoster(ROOT);
+    console.log(renderRoster(roster, derivation).join('\n'));
     return EXIT_OK;
   }
   if (opts.errors.length > 0) {
@@ -809,7 +1008,7 @@ async function run(argv) {
     meta.head = sha;
     console.error(readPathLine());
   }
-  const judgement = judgeCheckRuns(payload);
+  const judgement = judgeCheckRuns(payload, expectedSkipRoster(ROOT).roster);
   const exit = verdictExit(judgement);
   if (opts.json) {
     console.log(JSON.stringify({ ...meta, exit, judgement }, null, 2));
