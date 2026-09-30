@@ -48,9 +48,10 @@ const objects = [
 /**
  * A flattened standalone list overlay, as the wire carries it: a raw ListView
  * config at the TOP level, `object` + `viewKind` required (#7741), plus the
- * console decorations a personalization PUT persists — `sort[].id` is
- * objectui's `crypto.randomUUID()` row id (#5074), stored verbatim because
- * `saveMetaItem` persists the original body.
+ * console decorations a personalization PUT carries — `sort[].id` is
+ * objectui's `crypto.randomUUID()` row id (#5074). It was stored verbatim
+ * until #20051 made a view store its parsed body; rows stored before that
+ * still carry it, so the rules keep being judged on it.
  */
 const overlay = (patch: Record<string, unknown>) => ({
   name: 'crm_case.custom',
@@ -264,7 +265,7 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
   // (`view.zod.ts`'s #5074 trace), so every pin/reorder toggle round-trips the
   // whole record, `config` included.
 
-  /** A ViewItem record as `saveMetaItem` stores it (original body, verbatim). */
+  /** A ViewItem record as the console PUTs it back (the stored record plus the patch). */
   const record = (
     configPatch: Record<string, unknown>,
     patch: Record<string, unknown> = {},
