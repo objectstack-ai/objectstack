@@ -158,11 +158,12 @@ describe.each(HOSTS)('on a %s host', (host) => {
   });
 
   describe('[#20599] bucketDateKey(week) puts a day in 0001..0099 in its own ISO week', () => {
-    // A key's year below 1000 is spelled unpadded (`49-W52`): the unpadded-key
-    // family, which this card leaves alone. So the key is read as numbers here,
-    // whatever its padding, and asserted as the ISO week of the day.
+    // [#20760] The key's year is four digits (`0049-W52`), so the key is read
+    // as a four-digit year and a week, and asserted as the ISO week of the
+    // day; an unpadded key does not parse and fails the assertion. The
+    // spelling itself is pinned in `datetime-bucket-key-four-digit-year.test.ts`.
     const weekOf = (key: string | null) => {
-      const m = /^(\d+)-W(\d{2})$/.exec(String(key));
+      const m = /^(\d{4})-W(\d{2})$/.exec(String(key));
       return m ? { year: Number(m[1]), week: Number(m[2]) } : key;
     };
 
@@ -242,9 +243,8 @@ describe.each(HOSTS)('on a %s host', (host) => {
       expect(bucketKeyToCalendarRange('2026-02-29', 'day')).toBeNull();
     });
 
-    // The week arm validates a reconstructed Monday against the week LABEL,
-    // which is spelled unpadded below the year 1000 (the unpadded-key family,
-    // left alone here), so it is pinned on the 2026 control only.
+    // [#20760] The week arm's keys in 0001..0999 (`0050-W01`, `0049-W52`) are
+    // pinned in `datetime-bucket-key-four-digit-year.test.ts`.
     it('week 2026-W01 (the control)', () => {
       expect(bucketKeyToCalendarRange('2026-W01', 'week')).toEqual({ start: '2025-12-29', end: '2026-01-05' });
     });

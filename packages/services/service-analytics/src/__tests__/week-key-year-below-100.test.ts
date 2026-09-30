@@ -9,8 +9,8 @@
  *   row on 0050-06-15 was keyed to a Monday in 1950.
  * - The dataset executor's `compareTo` alignment counts bucket ordinals from a
  *   bound's day (core's `zonedDateStartToUtcMs`, the same remap) and mints a
- *   week key back from an ordinal (`isoWeekKeyOfUtcMs`, whose January 4 was
- *   built by `Date.UTC` too).
+ *   week key back from an ordinal (then a private week rule, whose January 4
+ *   was built by `Date.UTC` too; since #20760 core's `bucketDateKey`).
  *
  * Both build through core's `wallClockToUtcMs` now. Pins: 0001, 0050 and 0099,
  * with 0100 (the first year `Date.UTC` reads as written) and a 2026 control,
@@ -62,10 +62,12 @@ describe.each(HOSTS)('on a %s host', (host) => {
   });
 
   describe('[#20599] compareTo bucket ordinals count a day in 0001..0099 in its own year', () => {
-    // A minted key's year below 1000 is spelled unpadded (`50-06`): the
-    // unpadded-key family, which this card leaves alone. The keys are read as
-    // numbers here, whatever their padding.
-    const numbers = (key: string) => key.split(/-[WQ]?/).map(Number);
+    // [#20760] A minted key's year is four digits (`0050-06`), so the key is
+    // read as numbers only when its year is; an unpadded key reads `NaN` and
+    // fails the assertion. The spelling itself is pinned in
+    // `bucket-key-four-digit-year.test.ts`.
+    const numbers = (key: string) =>
+      /^\d{4}(-|$)/.test(key) ? key.split(/-[WQ]?/).map(Number) : [Number.NaN];
 
     it.each([
       ['0001-06-15', 1],
