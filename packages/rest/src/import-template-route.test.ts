@@ -18,6 +18,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 import { parseXlsxToRows } from './import-prepare.js';
+import { isTemplateRequired, templateInsertDefault } from './import-template.js';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
 function makeSqliteDriver() {
@@ -338,6 +339,129 @@ describe('?template=true — the template filled in and imported back', () => {
       title: 'Sample', stage: 'open', secret_note: 'Sample', amount: 1, hot: true, tags: ['vip', 'new'], salary: 1,
     });
     expect(String(stored.close_date)).toContain('2026-01-31');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `*`: starred exactly when the engine refuses a blank
+// ---------------------------------------------------------------------------
+
+/** A required select whose option is marked `default: true` — the showcase task's `status` shape. */
+const TICKET = {
+  name: 'ticket', label: 'Ticket',
+  fields: {
+    title: { name: 'title', type: 'text', label: 'Title', required: true },
+    status: {
+      name: 'status', type: 'select', label: 'Status', required: true,
+      options: [{ label: 'Backlog', value: 'backlog', default: true }, { label: 'Done', value: 'done' }],
+    },
+  },
+};
+
+/** Import rows through the real door and return the report. */
+async function importRows(importRoute: any, object: string, body: Record<string, unknown>) {
+  const out = makeRes();
+  await importRoute.handler({ params: { object }, body } as any, out.res);
+  return out.json();
+}
+
+describe('?template=true — a required field the engine fills from its option default', () => {
+  it('is not starred, its instructions row says not required, and a blank cell imports to the default', async () => {
+    const { get, importRoute, engine } = await boot();
+    engine.registry.registerObject(TICKET as any);
+    await engine.syncSchemas();
+
+    const bytes = (await get({ template: 'true' }, 'ticket')).body();
+    const wb = await loadXlsxWorkbook(bytes);
+    const headers = (wb.worksheets[0].getRow(1).values as unknown[]).slice(1) as string[];
+    expect(headers).toEqual(['Title *', 'Status']);
+    const guide = wb.worksheets[1];
+    expect([guide.getCell('A6').value, guide.getCell('B6').value, guide.getCell('D6').value]).toEqual(['Status', 'status', 'No']);
+    expect([guide.getCell('A5').value, guide.getCell('D5').value]).toEqual(['Title *', 'Yes']);
+
+    // Fill the template the way a user does: a title, the Status cell left blank.
+    const sheet = wb.worksheets[0];
+    sheet.getCell('A2').value = 'Blank status';
+    sheet.getCell('B2').value = null;
+    const filled = Buffer.from(await wb.xlsx.writeBuffer());
+    const report = await importRows(importRoute, 'ticket', {
+      format: 'xlsx', xlsxBase64: filled.toString('base64'), mapping: { 'Title *': 'title', Status: 'status' },
+    });
+    expect(report, JSON.stringify(report)).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+    const [stored] = await engine.find('ticket', {});
+    expect(stored).toMatchObject({ title: 'Blank status', status: 'backlog' });
+  });
+});
+
+/**
+ * `isTemplateRequired` mirrors the engine's insert-time default
+ * (`ObjectQL.applyFieldDefaults` + `resolveOptionDefault`, both private, so
+ * the template cannot call them). This battery holds the mirror to the engine:
+ * for every shape, the template's own header is starred exactly when the real
+ * import door refuses a blank cell, and a filled blank stores the default the
+ * mirror predicts.
+ */
+const OPTS = [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }, { label: 'C', value: 'c' }];
+const mark = (...values: string[]) => OPTS.map((o) => (values.includes(o.value) ? { ...o, default: true } : o));
+
+const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 'accepted'; stored?: unknown }> = {
+  plain: { def: { type: 'text' }, blank: 'refused' },
+  default_value: { def: { type: 'text', defaultValue: 'x' }, blank: 'accepted', stored: 'x' },
+  default_value_false: { def: { type: 'boolean', defaultValue: false }, blank: 'accepted', stored: false },
+  option_default: { def: { type: 'select', options: mark('b') }, blank: 'accepted', stored: 'b' },
+  option_default_first_wins: { def: { type: 'select', options: mark('a', 'c') }, blank: 'accepted', stored: 'a' },
+  option_default_multiselect: { def: { type: 'multiselect', options: mark('a', 'c') }, blank: 'accepted', stored: ['a', 'c'] },
+  option_default_select_multiple: { def: { type: 'select', multiple: true, options: mark('b') }, blank: 'accepted', stored: ['b'] },
+  option_default_any_type: { def: { type: 'text', options: [{ label: 'X', value: 'x', default: true }] }, blank: 'accepted', stored: 'x' },
+  no_marked_option: { def: { type: 'select', options: OPTS }, blank: 'refused' },
+  marked_option_without_value: { def: { type: 'select', options: [{ label: 'A', default: true }, { label: 'B', value: 'b' }] }, blank: 'refused' },
+  non_canonical_flag: { def: { type: 'select', options: OPTS.map((o) => ({ ...o, default: 'true' })) }, blank: 'refused' },
+  default_value_null: { def: { type: 'text', defaultValue: null }, blank: 'refused' },
+  default_value_null_option_default: { def: { type: 'select', defaultValue: null, options: mark('c') }, blank: 'accepted', stored: 'c' },
+  default_value_beats_option: { def: { type: 'select', defaultValue: 'a', options: mark('b') }, blank: 'accepted', stored: 'a' },
+  default_value_empty_string: { def: { type: 'text', defaultValue: '' }, blank: 'refused' },
+  default_value_empty_array: { def: { type: 'multiselect', defaultValue: [], options: mark('a') }, blank: 'refused' },
+  readonly: { def: { type: 'text', readonly: true }, blank: 'accepted' },
+  system: { def: { type: 'text', system: true }, blank: 'accepted' },
+  autonumber: { def: { type: 'autonumber', autonumberFormat: 'N-{0000}' }, blank: 'accepted' },
+};
+
+describe('the `*` agrees with the engine: starred exactly when the import door refuses a blank', () => {
+  it('for every shape of default the engine reads', async () => {
+    const { get, importRoute, engine } = await boot();
+    const objectOf = (key: string) => `pty_${key}`;
+    for (const [key, { def }] of Object.entries(PARITY)) {
+      engine.registry.registerObject({
+        name: objectOf(key), label: key,
+        fields: { title: { name: 'title', type: 'text' }, f: { name: 'f', label: 'F', required: true, ...def } },
+      } as any);
+    }
+    await engine.syncSchemas();
+
+    const disagreements: string[] = [];
+    for (const [key, { def, blank, stored }] of Object.entries(PARITY)) {
+      const object = objectOf(key);
+      // The template's own verdict — its header, via `?fields=` so every shape is a column.
+      const wb = await loadXlsxWorkbook((await get({ template: 'true', fields: 'f' }, object)).body());
+      const starred = wb.worksheets[0].getCell('A1').value === 'F *';
+      expect(wb.worksheets[1].getCell('D5').value, key).toBe(starred ? 'Yes' : 'No');
+      expect(isTemplateRequired({ required: true, ...def }), key).toBe(starred);
+
+      // The engine's verdict — a blank cell through the real import door.
+      const report = await importRows(importRoute, object, { format: 'json', rows: [{ title: key, f: '' }] });
+      const refused = report?.errors === 1;
+      if (refused) expect(report.results?.[0], key).toMatchObject({ ok: false, field: 'f', code: 'required' });
+      else expect(report, `${key}: ${JSON.stringify(report)}`).toMatchObject({ ok: 1, errors: 0, created: 1 });
+
+      if (starred !== refused) disagreements.push(`${key}: template ${starred ? 'starred' : 'unstarred'}, engine ${refused ? 'refused' : 'accepted'} the blank`);
+      expect(refused ? 'refused' : 'accepted', key).toBe(blank);
+      if (!refused && stored !== undefined) {
+        const [row] = await engine.find(object, {});
+        expect(row?.f, key).toEqual(stored);
+        expect(templateInsertDefault({ required: true, ...def }), key).toEqual(stored);
+      }
+    }
+    expect(disagreements).toEqual([]);
   });
 });
 
