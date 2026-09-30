@@ -1060,7 +1060,7 @@ export class DevPlugin implements Plugin {
       );
     }
     // Same reasoning, same surface: "nothing is enforcing security" belongs
-    // next to the banner, not buried in the init log (#10036, #3900).
+    // next to the banner, not buried in the init log (#3900; commit 7552e0337 moved this check here from init()).
     this.warnIfNothingIsEnforcingSecurity(ctx);
     ctx.logger.info('');
     ctx.logger.info('   API:       /api/v1/data/:object');
@@ -1075,7 +1075,7 @@ export class DevPlugin implements Plugin {
    * so the slots stay empty — but silence about unenforced RBAC/RLS/masking
    * would be its own kind of fake).
    *
-   * ## Why this asks for `security`, and why it asks in `start()` (#10036)
+   * ## Why this asks for `security`, and why it asks in `start()` (commit 7552e0337)
    *
    * This used to probe `security.permissions` / `security.rls` /
    * `security.fieldMasker` from `init()`. Both halves of that were wrong, and
@@ -1094,7 +1094,7 @@ export class DevPlugin implements Plugin {
    *   internal handles and enforces nothing, so the warning stayed silent in
    *   the one state where its text is literally true. (The same presence
    *   signal misled `plugin-hono-server`'s `/auth/me/permissions`, fixed in
-   *   #10035 by this same move — two consumers, two packages, one misread:
+   *   commit c1731d023 by this same move — two consumers, two packages, one misread:
    *   that is a property of the signal, not of either reader.)
    *
    * - **Wrong phase.** `security` is registered in `SecurityPlugin.start()`,
