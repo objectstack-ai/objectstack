@@ -55,6 +55,21 @@ const CASES: Case[] = [
     accepted: false,
     contains: ['ISO-8601 instant'],
   },
+  // [#20740] A time is a zone-less wall clock (ADR-0053 D-C1). These parsed
+  // clean before, and every insert that fell back to them was then refused
+  // `invalid_time` on a field the caller never sent.
+  {
+    label: 'time + a wall clock with a Z',
+    field: { type: 'time', defaultValue: '10:00Z' },
+    accepted: false,
+    contains: ['(time)', '"10:00Z"'],
+  },
+  {
+    label: 'time + a wall clock with a non-zero offset',
+    field: { type: 'time', defaultValue: '10:00+08:00' },
+    accepted: false,
+    contains: ['(time)', '"10:00+08:00"'],
+  },
   {
     label: 'select + a non-member of its own options',
     field: {
@@ -116,6 +131,7 @@ const CASES: Case[] = [
   { label: 'VALID number', field: { type: 'number', defaultValue: 7 }, accepted: true },
   { label: 'VALID boolean', field: { type: 'boolean', defaultValue: false }, accepted: true },
   { label: 'VALID date (calendar day)', field: { type: 'date', defaultValue: '2026-08-10' }, accepted: true },
+  { label: 'VALID time (a zone-less wall clock)', field: { type: 'time', defaultValue: '10:00' }, accepted: true },
   {
     label: 'VALID select member',
     field: { type: 'select', options: [{ label: 'Gold', value: 'gold' }], defaultValue: 'gold' },

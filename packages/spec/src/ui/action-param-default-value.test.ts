@@ -71,6 +71,13 @@ const CASES: Array<{ label: string; param: Record<string, unknown>; accepted: bo
     accepted: false,
   },
   { label: 'boolean + a string', param: { name: 'notify', type: 'boolean', defaultValue: 'yes' }, accepted: false },
+  // [#20740] A time is a zone-less wall clock (ADR-0053 D-C1).
+  { label: 'time + a wall clock with a Z', param: { name: 'at', type: 'time', defaultValue: '10:00Z' }, accepted: false },
+  {
+    label: 'time + a wall clock with a non-zero offset',
+    param: { name: 'at', type: 'time', defaultValue: '10:00+08:00' },
+    accepted: false,
+  },
   {
     label: 'lookup + an embedded record object instead of an id',
     param: { name: 'owner', type: 'lookup', reference: 'sys_user', defaultValue: { id: 'usr_1', name: 'Ada' } },
@@ -95,6 +102,7 @@ const CASES: Array<{ label: string; param: Record<string, unknown>; accepted: bo
     accepted: true,
   },
   { label: 'VALID date', param: { name: 'due', type: 'date', defaultValue: '2026-08-10' }, accepted: true },
+  { label: 'VALID time (a zone-less wall clock)', param: { name: 'at', type: 'time', defaultValue: '10:00' }, accepted: true },
   { label: 'VALID boolean', param: { name: 'notify', type: 'boolean', defaultValue: true }, accepted: true },
   {
     label: 'json — an explicitly OPEN value contract, so any default rides',
@@ -236,5 +244,17 @@ describe('#6970 ActionParamSchema.defaultValue — authored defaults meet the pa
         `authoring and submit must agree for: ${label}`,
       ).toEqual({ case: label, authoringRejects: submitRejects });
     }
+  });
+});
+
+describe('[#20740] the submit door refuses a zone-suffixed `time` value', () => {
+  it('`validateActionParams` answers `invalid_shape` naming the param; a zone-less wall clock passes', () => {
+    for (const value of ['10:00Z', '10:00+08:00', '10:00:00-0530']) {
+      const issue = submitIssue({ name: 'at', type: 'time', defaultValue: value });
+      expect(issue, value).not.toBeNull();
+      expect(issue!.param).toBe('at');
+      expect(issue!.code).toBe('invalid_shape');
+    }
+    expect(submitIssue({ name: 'at', type: 'time', defaultValue: '10:00' })).toBeNull();
   });
 });
