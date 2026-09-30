@@ -398,9 +398,10 @@ export function normalizeFilterOperator(op: unknown): string {
 // (`components/src/custom/filter-builder.tsx:228`, re-stamped on read-back at
 // `plugin-view/src/config/view-config-utils.ts:146`/`:160`) and the sort builder
 // (`components/src/custom/sort-builder.tsx:68`/`:94`) both stamp
-// `id: crypto.randomUUID()` on every row they render. `saveMetaItem` validates
-// the PUT body and persists the AUTHORED body verbatim, so those ids reach the
-// wire and the store.
+// `id: crypto.randomUUID()` on every row they render, so those ids reach the
+// wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
+// parsed value of every key a body carries, and the ids are removed before the
+// parse.
 //
 // ⚠️ Why a `.strip()` on the wire member cannot do this job — the #4001 批 18 /
 // #5114 finding, and the reason this vocabulary exists at all: **`.strip()` does
@@ -487,8 +488,10 @@ function stripRowDecorations(value: unknown, isRow: boolean, depth: number): unk
  * authoring doors keep rejecting the key by name, which is the whole point of
  * the split.
  *
- * Nothing is lost at rest: `saveMetaItem` persists the ORIGINAL body, so the
- * console still reads its own ids back.
+ * [#20051] The ids do not reach the store: `saveMetaItem` stores the parsed
+ * body, and this runs before the parse. Nothing the console needs is lost, as
+ * {@link VIEW_CONSOLE_ROUND_TRIP_KEYS} records: the builders mint a fresh id
+ * for a row that has none.
  *
  * Returns the SAME reference when there is nothing to strip, so the common path
  * allocates nothing. Non-object inputs pass through — the schema owns those.
@@ -903,8 +906,8 @@ function foldAuthoredViewFilterOperator(op: ViewFilterOperator): string {
  * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
  * filter is read back into the builder —
  * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
- * validates the PUT body and then persists the AUTHORED body verbatim, so that
- * `id` is on the wire and in the store. Closed *without* a wire route, this
+ * validated the PUT body and then persisted the AUTHORED body verbatim (until
+ * #20051), so that `id` was on the wire and in the store. Closed *without* a wire route, this
  * shape turned every filter write carrying one into a 422 — measured on all
  * three paths, including the flattened personalization overlay that is the body
  * the console actually PUTs.
@@ -1631,10 +1634,10 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * `:742`); its own `UserFiltersSchema` declared the key. The spec's did not —
  * and the difference between the two shapes was *exactly* that one key.
  *
- * That gap was not inert, because the metadata write path does NOT persist
- * `parsed.data`: `saveMetaItem` validates with `safeParse` and then stores the
- * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survive
- * (`metadata-protocol/src/protocol.ts`, "Validation policy"). So an authored
+ * That gap was not inert, because the metadata write path did NOT persist
+ * `parsed.data` then: `saveMetaItem` validated with `safeParse` and stored the
+ * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survived
+ * (a `view` stores its parsed body since #20051). So an authored
  * `allowAddTab` was stripped only from the parse RESULT, which is discarded —
  * the stored document kept it and the renderer read it. **The capability
  * worked.** Closing the shape without declaring the key would have converted a
@@ -2611,8 +2614,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * normalizeViewMetadata persists on a console column-sort PUT"*, and `id` is
    * a UI row identity objectui stamps per row
    * (`components/src/custom/sort-builder.tsx:68`, `:94` —
-   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stores the
-   * original body. **`.strip()` on a wire member could not rescue it** — it
+   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stored the
+   * original body (until #20051). **`.strip()` on a wire member could not rescue it** — it
    * re-opens the TOP level only, and this is a nested block reached through that
    * member. See {@link stripViewConsoleDecorations}, which removes the
    * decoration on the wire door instead, at every depth.
@@ -5095,8 +5098,9 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  *  - **Not `.strict()`**: the console owns the internals of this per-user
  *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
  *    console key here must not 422 against an older server. The two known
- *    keys are typed; unknown inner keys parse (and `saveMetaItem` stores the
- *    original body verbatim anyway).
+ *    keys are typed; unknown inner keys parse. [#20051] They are not stored:
+ *    the save keeps only the keys the schema declares, so a new console key
+ *    is declared here before the console relies on reading it back.
  *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
  *    protocol def / authorable-surface entries, and declaring it on the
  *    authoring shape would bless hand-authoring a payload the product writes
@@ -5202,8 +5206,8 @@ const VIEW_SWITCHER_VISIBILITY_GROUPS = ['private', 'team', 'organization', 'pub
  * stored-view readers at the `.objectui-sha` pin and ran the console's write
  * bodies through {@link ViewMetadataSchema}. Before this declaration the list
  * overlay's `.strip()` dropped `isPinned` and `sortOrder` from the parse, and
- * both members dropped `visibility`: `saveMetaItem` stores the request body
- * verbatim (ADR-0005 appendix (c)), so the keys lived in the store and nowhere
+ * both members dropped `visibility`: `saveMetaItem` stored the request body
+ * verbatim then (ADR-0005 appendix (c)), so the keys lived in the store and nowhere
  * in the contract.
  *
  * None of the three is per-user. A stored `view` row is environment metadata
@@ -5240,12 +5244,31 @@ function viewSwitcherRowStateFields() {
 }
 
 /**
+ * [#20051] The refusal the ViewItem wire member gives a top-level `options` bag.
+ *
+ * A record's view body lives under `config`, and `config` declares each
+ * per-kind block (`kanban`, `calendar`, `timeline`, …) itself, so `config.KIND`
+ * is the record's one spelling. The legacy `options.KIND` bag belongs to the
+ * FLATTENED list overlay, where it is judged key by key and objectui pins it;
+ * on a record the member's top-level `.strip()` used to drop it from the parse
+ * unread while the save stored it, and one console reader (the interface page)
+ * rendered it while the object page did not. No console write puts it on a
+ * record. Declared ABOVE {@link viewItemWireFields}, its first reader, for the
+ * `OS_EAGER_SCHEMAS=1` TDZ reason given on {@link VIEW_SWITCHER_VISIBILITY_GROUPS}.
+ */
+const VIEW_ITEM_OPTIONS_REFUSED =
+  'A view item record carries no top-level `options` bag: its view body lives under `config`, and `config` '
+  + 'declares each per-kind block itself. Move each `options.KIND` block to `config.KIND` (for example '
+  + '`options.kanban` to `config.kanban`), or remove `options`.';
+
+/**
  * Auxiliary Studio round-trip keys, given an explicit DECLARED home on the wire
  * variant (#5074) instead of living implicitly on "the member nobody closed".
  *
  * The console writes them through the `view` metadata API and reads them back;
- * `saveMetaItem` persists the body verbatim, so they are on the wire and in the
- * store. They are deliberately declared HERE and not on {@link ViewItemSchema}:
+ * [#20051] the save stores the parsed value of every key a body carries, so a
+ * key is kept in the store only because it is declared here. They are
+ * deliberately declared HERE and not on {@link ViewItemSchema}:
  * an author who writes `isPinned` in a `*.view.ts` gets a named rejection
  * pointing at `order`, while the console's own PUT parses. [#20456] The
  * switcher's three keys come from {@link viewSwitcherRowStateFields}, the one
@@ -5262,6 +5285,17 @@ function viewItemWireFields() {
     // shape where `.strip()` used to let it ride through unchecked.
     columnState: ViewColumnStateSchema.optional()
       .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
+    // [#20051] Pinned ABSENT, refused by name — see
+    // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
+    // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
+    // member is published on its own as `ViewItemWire.json`, and `never` has a
+    // JSON Schema form (`not: {}`) where `undefined` has none.
+    options: z.never({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional()
+      .describe(
+        'Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under '
+        + '`config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the '
+        + 'flattened list overlay only.',
+      ),
   };
 }
 
@@ -5346,9 +5380,9 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 //      record/container can never be rescued by this lenient branch.
 //
 // Auxiliary Studio round-trip keys (`isPinned`, `sortOrder`, …) ride along on
-// the shapes Studio actually round-trips, matching the "persist the payload
-// verbatim" contract in `saveMetaItem` (it validates but stores the original
-// item). ⚠️ [#5074] The line that used to stand here said "all four members
+// the shapes Studio actually round-trips, DECLARED there, because the save
+// stores the parsed value of every key a body carries and nothing else
+// ([#20051]; it stored the original item until then). ⚠️ [#5074] The line that used to stand here said "all four members
 // strip-parse (no `.strict()`)". It was true when written, then half-false and
 // half-load-bearing (批 18 measured it), and is now replaced by the split. As
 // it stands, measured:
@@ -5377,12 +5411,12 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // below existed: member 4 both `.strip()`s AND declares no required key
 // (`FormViewSchema.type` even carries a `'simple'` default), so it matched
 // ANY object. `{ nope: 1 }` did not merely pass — it passed as a *view*,
-// reduced to `{ type: 'simple' }`, and `saveMetaItem` (which persists the
+// reduced to `{ type: 'simple' }`, and `saveMetaItem` (which then persisted the
 // ORIGINAL body, not the parse output) wrote `{"nope":1,"name":"…"}` into
 // `sys_metadata` as an ACTIVE view overlay. The read path then re-parsed the
 // same body through the same schema and badged it `_diagnostics.valid: true`
 // (#5598), so Studio agreed. `view` was the one common overlay type whose
-// declared write-path spec gate (ADR-0005 §Validation) could be bypassed by
+// declared write-path spec gate (ADR-0005 appendix (c)) could be bypassed by
 // an arbitrary body — Prime Directive #10's "declared ≠ enforced", one layer
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
@@ -6111,8 +6145,8 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
  * closing `ListViewSchema` for authoring (#4001) silently made this overlay
  * strict too — and this member exists precisely to carry Studio's auxiliary
- * round-trip keys (`isPinned`, `sortOrder`, …) that `saveMetaItem` persists
- * verbatim. Strict here is a 422 on a shape the platform itself writes. The
+ * round-trip keys (`isPinned`, `sortOrder`, …), which the save keeps because
+ * they are declared. Strict here is a 422 on a shape the platform itself writes. The
  * ledger names this as the trap to watch while batching: a response-side
  * extension of an authoring schema must strip back, or an upstream field
  * addition becomes a crash.

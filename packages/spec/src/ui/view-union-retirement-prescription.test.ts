@@ -190,9 +190,25 @@ function walkNeverLeaves(): NeverLeaf[] {
   return out;
 }
 
+/**
+ * [#20051] The one closed family of non-catchall `never` leaves that is NOT a
+ * retirement: a key pinned ABSENT on a member with a curated refusal, because
+ * it was never that member's key. It rides the same lift (a claimed-branch
+ * `invalid_type` / `expected: never` issue), so it is held to the same bar —
+ * its message is a prescription, never zod's default text. Closed: a new entry
+ * is a deliberate edit here, and every entry must still be reached.
+ */
+const REFUSED_ABSENT_LEAVES: Readonly<Record<string, RegExp>> = {
+  // The ViewItem record's top-level `options` bag, on both arms: the record's
+  // per-kind blocks live under `config` (stage (iv) of #20051, Q3).
+  'viewItem.|0.options': /^A view item record carries no top-level `options` bag: .*Move each `options\.KIND` block to `config\.KIND`/,
+  'viewItem.|1.options': /^A view item record carries no top-level `options` bag: .*Move each `options\.KIND` block to `config\.KIND`/,
+};
+
 describe('§2 population — every non-catchall `never` leaf on this surface is a prescription', () => {
   const leaves = walkNeverLeaves();
-  const tombstones = leaves.filter((l) => !l.isCatchall);
+  const pinned = leaves.filter((l) => !l.isCatchall && l.path in REFUSED_ABSENT_LEAVES);
+  const tombstones = leaves.filter((l) => !l.isCatchall && !(l.path in REFUSED_ABSENT_LEAVES));
   const catchalls = leaves.filter((l) => l.isCatchall);
 
   it('the walk reached both populations — the lit control for every zero below', () => {
@@ -203,6 +219,14 @@ describe('§2 population — every non-catchall `never` leaf on this surface is 
   it('every one of them carries a retirement prescription, not zod default text', () => {
     for (const leaf of tombstones) {
       expect(leaf.message, leaf.path).toContain('was removed');
+      expect(leaf.message, leaf.path).not.toContain('expected never, received');
+    }
+  });
+
+  it('[#20051] every pinned-absent key is reached, and carries its own curated refusal', () => {
+    expect(pinned.map((l) => l.path).sort()).toEqual(Object.keys(REFUSED_ABSENT_LEAVES).sort());
+    for (const leaf of pinned) {
+      expect(leaf.message, leaf.path).toMatch(REFUSED_ABSENT_LEAVES[leaf.path]!);
       expect(leaf.message, leaf.path).not.toContain('expected never, received');
     }
   });

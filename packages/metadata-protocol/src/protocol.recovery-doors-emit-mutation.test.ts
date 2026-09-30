@@ -561,7 +561,7 @@ describe('[#14179] reachability: the legacy exit is confined to bootstrap mode',
         // Non-empty: the branch is not dead code.
         expect(codeOnly.length).toBeGreaterThan(0);
         expect(codeOnly.map((e) => e.type).sort())
-            .toEqual(['agent', 'api', 'capability', 'field', 'job']);
+            .toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist']);
         // …and the #6960 carve-out reaches none of them, which is what makes
         // the 403 below total rather than incidental.
         expect(codeOnly.filter((e) => e.supportsOverlay)).toEqual([]);

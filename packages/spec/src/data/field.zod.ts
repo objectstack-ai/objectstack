@@ -10,7 +10,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 // `shared/visibility.ts`, which imports nothing at runtime.
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { SystemIdentifierSchema } from '../shared/identifiers.zod';
+import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
@@ -27,7 +27,7 @@ import {
   discriminateDefaultValueShape,
   suggestDefaultValueToken,
 } from './default-value-shape';
-import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
+import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES, SINGLE_OPTION_TYPES } from './field-value.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
 
 /**
@@ -1037,7 +1037,10 @@ export const FieldSchema = lazySchema(() => {
     // WRITE contract, and ADR-0113 moved neither.
     isRequired: 'required', mandatory: 'required',
     isUnique: 'unique',
-    values: 'options', choices: 'options', picklist: 'options', selectOptions: 'options',
+    // `picklist` is not here: it is a declared key — the reference to a shared
+    // option list, mutually exclusive with `options` (see the key below).
+    values: 'options', choices: 'options', selectOptions: 'options',
+    valueSet: 'picklist', globalValueSet: 'picklist', optionSet: 'picklist',
     relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
     onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
     formula: 'expression', calculation: 'expression', compute: 'expression',
@@ -1338,6 +1341,28 @@ export const FieldSchema = lazySchema(() => {
 
   /** Selection Options */
   options: z.array(SelectOptionSchema).optional().describe('Static options for select/multiselect'),
+
+  /**
+   * Reference to a shared option list — a `picklist` item, by name — in place
+   * of inline `options` (`data/picklist.zod.ts`).
+   *
+   * Mutually exclusive with `options`, refused at this door when both are
+   * written: the field's options come from exactly one source. Valid only on
+   * the option types (`select`, `radio`, `multiselect`, `checkboxes`,
+   * `tags`), the types whose value is an option code.
+   *
+   * The reference is resolved on the SERVER: the field a client reads from
+   * the object read exits carries the resolved `options` next to this key
+   * (`PicklistServedFieldSchema`), so renderers, the record validator
+   * and filter pickers read `options` exactly as they do for an inline list.
+   * Option labels translate under `picklists.<name>.options.<value>`, which
+   * every referencing field inherits.
+   */
+  picklist: SnakeCaseIdentifierSchema.optional().describe(
+    'Name of a shared `picklist` whose options this field offers — instead of `options`, never with it. '
+    + 'Option types only (select, radio, multiselect, checkboxes, tags). The server resolves the '
+    + 'reference: the field clients read carries the resolved `options`.',
+  ),
 
   /**
    * Relationship Config
@@ -2104,6 +2129,35 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
+  // A field's options come from exactly ONE source: inline `options`, or the
+  // shared list `picklist` names (`data/picklist.zod.ts`). Both is refused —
+  // two sources, one of them silently ignored. (Neither, on a single-choice
+  // type, stays the error-severity `FIELD_CHOICE_WITHOUT_OPTIONS` finding of
+  // `kernel/functional-completeness.ts`, whose prescription names both.)
+  if (field.picklist !== undefined) {
+    if (!SINGLE_OPTION_TYPES.has(field.type) && !MULTI_OPTION_TYPES.has(field.type)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['picklist'],
+        message:
+          `\`picklist\` is only valid on an option type — select, radio, multiselect, checkboxes or ` +
+          `tags (this field is \`${field.type}\`): it names the shared list the field's value is ` +
+          'chosen from, and this type stores no option code. Change the type, or remove `picklist`.',
+      });
+    }
+    if (field.options !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options'],
+        message:
+          '`picklist` and `options` cannot both be declared — a field takes its options from exactly ' +
+          "one source. Keep `picklist: '<name>'` and delete `options`: the shared list supplies them " +
+          '(to offer a new value, add it to the picklist, or through `picklistExtensions` when another ' +
+          'package owns it). Or delete `picklist` to keep an inline list of this field\'s own.',
+      });
+    }
+  }
+
   // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected
   // at the authoring seam — when the condition is FALSE the write contract
   // permits null, but the column would refuse it, so the author has declared
@@ -2556,6 +2610,53 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
  */
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
+/** `Field.select` with inline options — the array or `{ options }` forms. */
+function selectWithOptions(optionsOrConfig: Array<SelectOption | string> | Omit<FieldInput, 'options'> & { options: Array<SelectOption | string> }, config?: FieldInput) {
+  // Helper function to convert string to lowercase snake_case
+  const toSnakeCase = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/\s+/g, '_')  // Replace spaces with underscores
+      .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
+  };
+
+  // Support both old and new signatures:
+  // Old: Field.select(['a', 'b'], { label: 'X' })
+  // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
+  let options: SelectOption[];
+  let finalConfig: FieldInput;
+  
+  if (Array.isArray(optionsOrConfig)) {
+    // Old signature: array as first param
+    options = optionsOrConfig.map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    finalConfig = config || {};
+  } else {
+    // New signature: config object with options
+    options = (optionsOrConfig.options || []).map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    // Remove options from config to avoid confusion
+    const { options: _, ...restConfig } = optionsOrConfig;
+    finalConfig = restConfig;
+  }
+  
+  return { type: 'select', options, ...finalConfig } as const;
+}
+
+/**
+ * `Field.select` bound to a shared picklist — no `options` of its own: the
+ * picklist supplies them, and `FieldSchema` refuses the two together.
+ */
+function selectFromPicklist<const C extends FieldInput & { picklist: string; options?: undefined }>(config: C) {
+  return { type: 'select', ...config } as const;
+}
+
 export const Field = {
   text: (config: FieldInput = {}) => ({ type: 'text', ...config } as const),
   textarea: (config: FieldInput = {}) => ({ type: 'textarea', ...config } as const),
@@ -2623,44 +2724,18 @@ export const Field = {
    * @example Multi-word values - converts to snake_case
    * Field.select(['In Progress', 'Closed Won'], { label: 'Status' })
    * // Results in: [{ label: 'In Progress', value: 'in_progress' }, { label: 'Closed Won', value: 'closed_won' }]
+   *
+   * @example Shared picklist — the options come from the named `picklist` item
+   * Field.select({ picklist: 'industry', label: 'Industry' })
+   * // Results in: { type: 'select', picklist: 'industry', label: 'Industry' } — no `options`
    */
-  select: (optionsOrConfig: SelectOption[] | string[] | FieldInput & { options: SelectOption[] | string[] }, config?: FieldInput) => {
-    // Helper function to convert string to lowercase snake_case
-    const toSnakeCase = (str: string): string => {
-      return str
-        .toLowerCase()
-        .replace(/\s+/g, '_')  // Replace spaces with underscores
-        .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
-    };
-
-    // Support both old and new signatures:
-    // Old: Field.select(['a', 'b'], { label: 'X' })
-    // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
-    let options: SelectOption[];
-    let finalConfig: FieldInput;
-    
-    if (Array.isArray(optionsOrConfig)) {
-      // Old signature: array as first param
-      options = optionsOrConfig.map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      finalConfig = config || {};
-    } else {
-      // New signature: config object with options
-      options = (optionsOrConfig.options || []).map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      // Remove options from config to avoid confusion
-      const { options: _, ...restConfig } = optionsOrConfig;
-      finalConfig = restConfig;
-    }
-    
-    return { type: 'select', options, ...finalConfig } as const;
-  },
+  select: ((optionsOrConfig: unknown, config?: FieldInput) =>
+    !Array.isArray(optionsOrConfig)
+      && typeof (optionsOrConfig as { picklist?: unknown }).picklist === 'string'
+      && (optionsOrConfig as { options?: unknown }).options === undefined
+      ? selectFromPicklist(optionsOrConfig as FieldInput & { picklist: string; options?: undefined })
+      : selectWithOptions(optionsOrConfig as Parameters<typeof selectWithOptions>[0], config)
+  ) as typeof selectWithOptions & typeof selectFromPicklist,
 
   
   /**

@@ -393,13 +393,15 @@ describe('#7534 — unknown field on the EXPLICIT filter axes (real ObjectQL eng
         // `{owner_id: {region: 'NA'}}` names `owner_id` on THIS object and
         // `region` on the related one. Judging `region` against this object's
         // field map would refuse a legitimate relation filter.
-        // [#20745] The engine refuses the nested-relation form itself (no
-        // driver serves it) with INVALID_FILTER in its own words. This gate
-        // still never descends: the answer is not its INVALID_FIELD about
-        // `region`.
+        // [#20745] The engine refused the nested-relation form itself for a
+        // while. [#20802] It serves it now, judging the condition's keys
+        // against the RELATED object's declarations — here `owner_id` points
+        // at `sys_user`, which this harness does not register, so the engine
+        // answers INVALID_FILTER in its own words. This gate still never
+        // descends: the answer is not its INVALID_FIELD about `region`.
         const err: any = await find({ where: { owner_id: { region: 'NA' } } }).then(() => null, (e: any) => e);
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
-        expect(err.message).toContain('nested-relation form');
+        expect(err.message).toContain("puts a nested-relation condition (keys \"region\") at where.owner_id, beneath the declared lookup field 'owner_id'");
         expect(err.field).toBeUndefined();
     });
 

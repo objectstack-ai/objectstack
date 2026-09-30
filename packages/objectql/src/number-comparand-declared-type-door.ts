@@ -141,6 +141,18 @@
  * no meaning for), and a platform-provisioned column the declared map omits
  * (`id`, …): the same walk and the same three positions, words per kind.
  *
+ * ## [#20802] …and the nested-relation arm, at `where` only
+ *
+ * The nested-relation form is SERVED at `where` (`relation-filter-lowering.ts`).
+ * There a no-operator object beneath a relation column is not refused by the
+ * arm above: it is admitted against the related object's declarations
+ * (`admitRelationCondition` — one level, declared keys, a registered related
+ * object) or refused in words of its own. The engine then walks the admitted
+ * `where` again with this SAME walk ({@link mapRelationConditions}) to collect
+ * each condition and, after reading the related object, to replace it — so the
+ * door and the lowering find a condition at the same boundaries by
+ * construction. The per-aggregation `filter` and `having` keep the refusal.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
@@ -167,6 +179,13 @@ import {
   type NoOperatorObjectColumn,
   type NoOperatorObjectRefusal,
 } from './no-operator-object-door.js';
+import {
+  admitRelationCondition,
+  relationConditionRefusalMessage,
+  type RelationConditionRefusal,
+  type RelationFilterSite,
+  type RelationReplacement,
+} from './relation-filter-lowering.js';
 
 /** The operators whose one comparand is judged — the contract's list, never a re-listing. */
 const SCALAR_OPERATORS: ReadonlySet<string> = new Set(NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS);
@@ -209,19 +228,57 @@ type FactsOf = (key: string) => KeyFacts | null;
 interface RefusalSiteContext {
   readonly aggregated: boolean;
   readonly boundByDriver: boolean;
+  /**
+   * [#20802] This position serves the nested-relation form: a no-operator
+   * object beneath a relation column is a condition on the related object,
+   * admitted structurally ({@link admitRelationCondition}) and lowered by the
+   * engine. Only `where` does; the per-aggregation `filter` and `having` keep
+   * the no-operator-object refusal (see `relation-filter-lowering.ts`).
+   */
+  readonly servesRelations: boolean;
 }
 
 /** `where`, both spellings: a real declared field, and the driver binds it. */
-const WHERE_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: true };
+const WHERE_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: true, servesRelations: true };
 /** The per-aggregation `filter`: a real declared field, but the engine evaluates it itself. */
-const AGGREGATION_FILTER_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: false };
+const AGGREGATION_FILTER_SITE: RefusalSiteContext = { aggregated: false, boundByDriver: false, servesRelations: false };
 /** `having`: an aggregated-row column, evaluated by the engine, never bound. */
-const HAVING_SITE: RefusalSiteContext = { aggregated: true, boundByDriver: false };
+const HAVING_SITE: RefusalSiteContext = { aggregated: true, boundByDriver: false, servesRelations: false };
+
+/**
+ * [#20802] What the walk needs, beyond one position's facts, to serve the
+ * nested-relation form at `where`.
+ */
+export interface RelationArm {
+  /**
+   * The related object's declared schema, by name — the engine's registry.
+   * Absent, or answering nothing, and a condition beneath a relation is
+   * refused: its keys cannot be judged against a field map nobody supplied.
+   */
+  readonly schemaOf?: (name: string) => unknown;
+  /**
+   * LOWERING only: what replaces an admitted condition. Absent at the door,
+   * where an admitted condition is kept as written for the engine to lower.
+   */
+  readonly replace?: (site: RelationFilterSite) => RelationReplacement;
+}
+
+/** One walk's context: the position, and — at `where` — the relation arm. */
+interface WalkContext extends RefusalSiteContext {
+  readonly relations?: RelationArm;
+  /**
+   * [#20802] The lowering pass: only admitted relation conditions are
+   * rewritten. The number arm is not asked again — the door already narrowed
+   * every comparand it judges, and a second pass must not narrow twice.
+   */
+  readonly lowerOnly?: boolean;
+}
 
 /** The first refusal the walk met, and which arm raised it. */
 type Refusal =
   | { readonly arm: 'number'; readonly site: NonNumericComparand }
-  | { readonly arm: 'no-operator-object'; readonly site: NoOperatorObjectRefusal };
+  | { readonly arm: 'no-operator-object'; readonly site: NoOperatorObjectRefusal }
+  | { readonly arm: 'relation'; readonly site: RelationConditionRefusal };
 
 /** The walk's answer: the (possibly narrowed) node, or the first refusal. */
 type Outcome =
@@ -341,7 +398,9 @@ function judgeFieldSpec(
  * [#20546] It carries TWO arms, asked in order at every field key: the
  * no-operator-object arm (`no-operator-object-door.ts` — a plain object with
  * no `$` key where a scalar column's value belongs), then the number arm
- * ({@link judgeFieldSpec}). One traversal, one set of boundaries (the depth
+ * ({@link judgeFieldSpec}). [#20802] At `where` the first arm hands a relation
+ * column's object to the nested-relation admission instead, and the lowering
+ * pass ({@link WalkContext.lowerOnly}) asks that question alone. One traversal, one set of boundaries (the depth
  * bound, the combinators descended, the `$` and dotted keys skipped), two
  * questions — the shape the spec's save-door walk takes for its own arms
  * (`checkFilterConditionComparands`: "One walk, one set of boundaries, `n`
@@ -354,9 +413,12 @@ function judgeFieldSpec(
  * fields beneath it ungated — a hole, not a false 400), and a dotted key names
  * a path this door does not judge. Copy-on-write throughout.
  */
-function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: number, ctx: RefusalSiteContext): Outcome {
+function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: number, ctx: WalkContext): Outcome {
   if (depth > 32 || !isFilterNode(node)) return kept(node);
   let out: Record<string, unknown> | undefined;
+  // [#20802] Lowered multi-valued relation conditions, AND-ed into this node
+  // in place of their field entries once every key has been walked.
+  let clauses: FilterClause[] | undefined;
   for (const [key, value] of Object.entries(node)) {
     const here = `${path}.${key}`;
     let judged: Outcome;
@@ -382,25 +444,62 @@ function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: num
       // the nested-relation form, and none shares a meaning for a whole-value
       // match.
       if (facts.column !== null && isNoOperatorObject(value)) {
-        return {
-          ok: false,
-          refusal: {
-            arm: 'no-operator-object',
-            site: { field: key, column: facts.column, path: here, keys: Object.keys(value), aggregated: ctx.aggregated },
-          },
-        };
+        // [#20802] …except beneath a relation column at a position that serves
+        // the nested-relation form (`where`): there it is a condition on the
+        // related object, admitted by its declarations — or refused, loudly,
+        // in words of its own — and, in the lowering pass, rewritten.
+        if (ctx.servesRelations && facts.column.kind === 'relation' && facts.column.def !== undefined) {
+          const admitted = admitRelationCondition(key, facts.column.def, value, here, ctx.relations?.schemaOf);
+          if (!admitted.ok) return { ok: false, refusal: { arm: 'relation', site: admitted.refusal } };
+          const replace = ctx.relations?.replace;
+          if (!replace) continue;
+          const replacement = replace(admitted.site);
+          if (replacement.kind === 'clause') {
+            (clauses ??= []).push(replacement.clause);
+            delete (out ??= { ...node })[key];
+            continue;
+          }
+          judged = kept(replacement.value);
+        } else {
+          return {
+            ok: false,
+            refusal: {
+              arm: 'no-operator-object',
+              site: { field: key, column: facts.column, path: here, keys: Object.keys(value), aggregated: ctx.aggregated },
+            },
+          };
+        }
+      } else {
+        if (ctx.lowerOnly) continue;
+        const meta = facts.number;
+        // Only a judged field can refuse or narrow a comparand; a `formula`
+        // whose return type is unreadable is `deferred`, and everything else is
+        // `not-judged` — the spec's verdict, never a list here.
+        if (!meta || numberComparandFieldVerdict(meta) !== 'judged') continue;
+        judged = judgeFieldSpec(meta, key, value, here, ctx);
       }
-      const meta = facts.number;
-      // Only a judged field can refuse or narrow a comparand; a `formula`
-      // whose return type is unreadable is `deferred`, and everything else is
-      // `not-judged` — the spec's verdict, never a list here.
-      if (!meta || numberComparandFieldVerdict(meta) !== 'judged') continue;
-      judged = judgeFieldSpec(meta, key, value, here, ctx);
     }
     if (!judged.ok) return judged;
     if (judged.value !== value) (out ??= { ...node })[key] = judged.value;
   }
+  if (clauses) return kept(withClauses(out ?? { ...node }, clauses));
   return kept(out ?? node);
+}
+
+/** A condition the lowering AND-s into a node in place of a field entry. */
+type FilterClause = Record<string, unknown>;
+
+/**
+ * [#20802] AND `clauses` into `node` (a copy the walk owns): appended to the
+ * node's own `$and` when it has one, else as a new `$and`. A node whose `$and`
+ * is not a list — a shape the doors refuse, kept for them — is wrapped instead,
+ * so nothing it carries is overwritten.
+ */
+function withClauses(node: Record<string, unknown>, clauses: readonly FilterClause[]): Record<string, unknown> {
+  if (!Object.prototype.hasOwnProperty.call(node, '$and')) return { ...node, $and: [...clauses] };
+  const existing = node.$and;
+  if (Array.isArray(existing)) return { ...node, $and: [...existing, ...clauses] };
+  return { $and: [node, ...clauses] };
 }
 
 /** The judged fields of a `where` or a per-aggregation `filter`: the object's declared map. */
@@ -450,7 +549,9 @@ function refuse(context: string, refusal: Refusal): never {
   throw invalidFilterError(
     refusal.arm === 'number'
       ? numberComparandRefusalMessage(refusal.site, context)
-      : noOperatorObjectRefusalMessage(refusal.site, context),
+      : refusal.arm === 'relation'
+        ? relationConditionRefusalMessage(refusal.site, context)
+        : noOperatorObjectRefusalMessage(refusal.site, context),
   );
 }
 
@@ -477,10 +578,52 @@ export function narrowNumberComparands<W>(
   schema: unknown,
   where: W,
   path = 'where',
+  relations?: Pick<RelationArm, 'schemaOf'>,
 ): W {
   const factsOf = declaredFactsOf(schema);
   if (!factsOf) return where;
-  const walked = walkCondition(factsOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
+  // [#20802] At `where`, a condition beneath a relation column is ADMITTED
+  // here, against the related object's declarations (`relations.schemaOf`),
+  // and kept as written: the engine lowers it once it can read
+  // ({@link mapRelationConditions}). Without the related object's schema it is
+  // refused — the door cannot judge keys against a field map it was not given.
+  const ctx: WalkContext = path === 'where'
+    ? { ...WHERE_SITE, relations: relations?.schemaOf ? { schemaOf: relations.schemaOf } : undefined }
+    : AGGREGATION_FILTER_SITE;
+  const walked = walkCondition(factsOf, where, path, 0, ctx);
+  if (!walked.ok) refuse(`${operation}('${object}')`, walked.refusal);
+  return walked.value as W;
+}
+
+/**
+ * [#20802] The LOWERING pass over a `where` the door already admitted: the same
+ * walk, at the same boundaries, asking one question — is this a nested-relation
+ * condition — and handing each one it admits to `relations.replace`, whose
+ * answer takes its place (a new value for the field, or a clause AND-ed into
+ * its node). Nothing else is judged or narrowed again. Copy-on-write: returns
+ * `where` by reference when it holds no condition.
+ *
+ * The engine calls it twice per filter position that holds a condition: once
+ * to COLLECT the admitted conditions (a `replace` that records each site and
+ * returns it unchanged, whose output is discarded), and — after the related
+ * reads — once to REPLACE them, in the same order. One walk, so the two passes
+ * and the door cannot disagree about where a condition is.
+ *
+ * A condition this pass cannot admit is refused in the door's words: the door
+ * ran the same admission on the same declarations, so that is unreachable
+ * unless the filter changed between the two (a hook, a middleware) — and then
+ * the refusal is the right answer rather than a nested form reaching a driver.
+ */
+export function mapRelationConditions<W>(
+  object: string,
+  operation: string,
+  schema: unknown,
+  where: W,
+  relations: Required<RelationArm>,
+): W {
+  const factsOf = declaredFactsOf(schema);
+  if (!factsOf) return where;
+  const walked = walkCondition(factsOf, where, 'where', 0, { ...WHERE_SITE, relations, lowerOnly: true });
   if (!walked.ok) refuse(`${operation}('${object}')`, walked.refusal);
   return walked.value as W;
 }

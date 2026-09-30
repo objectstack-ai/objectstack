@@ -2260,6 +2260,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
@@ -2361,6 +2362,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
 

@@ -276,7 +276,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'picklist', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //

@@ -199,7 +199,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 该账户改为把 PR assign 给它替代通知,另一账户照常请审;轮次报告点名说明走了兜底。
 - 请审走免碰 draft 位的 REST 专用路,ready/draft 走中继 op;MCP 兜底已拒;端点见 rest-channel。
 - ④ 轮次报告单列 awaiting a human merge。
-- 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
+- 已入队 ⇒ 转 draft 并 disable,即请维护者手动出队(席位无实测手段);出队以阳性探针答。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。

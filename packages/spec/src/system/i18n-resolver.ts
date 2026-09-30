@@ -1058,6 +1058,7 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // `@objectstack/rest` reads the derived set.
   dataset: translateDataset,
   page: translatePage,
+  picklist: translatePicklist,
 };
 
 /**
@@ -2798,9 +2799,16 @@ export function translateObject<T extends ObjectLike>(
     const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
     if (translatedHelp) next.help = translatedHelp;
     if (Array.isArray(def.options)) {
+      // A picklist-bound field is served with its list's options resolved
+      // onto it (`PicklistServedFieldSchema`), and INHERITS the list's option
+      // labels (`picklists.<name>.options.<value>`); a field-level entry, when
+      // one exists, is the more specific and wins.
+      const picklist = typeof def.picklist === 'string' ? def.picklist : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
-        const translated = lookupObjectFieldOption(bundle, objectName, name, opt.value, opts);
+        const translated =
+          lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
+          (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);
         return translated ? { ...opt, label: translated } : opt;
       });
     }
@@ -2842,6 +2850,82 @@ export function translateObject<T extends ObjectLike>(
     ...(description !== undefined ? { description } : {}),
     ...(fields !== undefined ? { fields } : {}),
     ...(actions !== undefined ? { actions } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Picklist resolvers (label / options) — `picklists.<name>`
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal picklist metadata shape consumed by `translatePicklist`. */
+export interface PicklistLike {
+  name: string;
+  label?: string;
+  options?: Array<{ label?: string; value: string | number | boolean; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+function lookupPicklistLabel(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupPicklistOption(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  optionValue: string | number | boolean,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  const key = String(optionValue);
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.options?.[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a picklist metadata document — its `label`
+ * against `picklists.<name>.label`, and each option's `label` against
+ * `picklists.<name>.options.<value>`. The same option labels are what every
+ * referencing field inherits in {@link translateObject}, so the list is
+ * translated once. The input document is not mutated; a key the bundle does
+ * not carry leaves the authored value in place.
+ */
+export function translatePicklist<T extends PicklistLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object' || typeof doc.name !== 'string' || !bundle) return doc;
+  const picklistName = doc.name;
+  const label = lookupPicklistLabel(bundle, picklistName, opts);
+  let options = doc.options;
+  if (Array.isArray(doc.options)) {
+    let changed = false;
+    const next = doc.options.map((opt) => {
+      if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+      const translated = lookupPicklistOption(bundle, picklistName, opt.value, opts);
+      if (!translated) return opt;
+      changed = true;
+      return { ...opt, label: translated };
+    });
+    if (changed) options = next;
+  }
+  if (label === undefined && options === doc.options) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(options !== doc.options ? { options } : {}),
   };
 }
 

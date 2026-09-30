@@ -923,6 +923,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Datos semilla",
     description: "Datos predefinidos / de inicialización aplicados al publicar"
   },
+  picklist: {
+    label: "Lista de selección",
+    description: "Lista de opciones compartida a la que los campos de selección hacen referencia por nombre"
+  },
   mapping: {
     label: "Mapeo de importación",
     description: "Mapeo de campos de importación/exportación reutilizable (renombrado + transformaciones), referenciado por nombre al importar"

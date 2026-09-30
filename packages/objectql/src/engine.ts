@@ -39,7 +39,7 @@ import {
 // FilterCondition` lowering, run once per filter position after the doors and
 // after token resolution (`resolveThenLowerWhere`), so every driver and the
 // in-process `having` / per-aggregation evaluator receive the lowered filter.
-import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
+import { lowerFilterCondition, type FilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -53,7 +53,18 @@ import {
   assertTemporalComparandsInterpretable,
 } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
-import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
+import {
+  mapRelationConditions,
+  narrowHavingNumberComparands,
+  narrowNumberComparands,
+} from './number-comparand-declared-type-door.js';
+import {
+  lowerRelationSite,
+  RELATION_FILTER_ID_CAP,
+  relationFilterCapError,
+  type RelationFilterSite,
+  type RelationReplacement,
+} from './relation-filter-lowering.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -956,6 +967,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
   operation: string,
   bag: T,
   schema?: unknown,
+  schemaOf?: (name: string) => unknown,
 ): T {
   if (!bag) return bag;
   const where = (bag as Record<string, unknown>).where;
@@ -1035,7 +1047,13 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // [#20745] …and beneath a relation column (the nested-relation form no
     // driver serves), a structured-JSON column (a whole-value match the
     // drivers share no meaning for) and an undeclared `id`, in words per kind.
-    const numeric = narrowNumberComparands(object, operation, schema, where);
+    // [#20802] …except the nested-relation form, which this position SERVES:
+    // beneath a relation column it is admitted against the related object's
+    // declarations (`schemaOf`, the registry) and kept as written — the engine
+    // lowers it once it can read (`ObjectQL.lowerRelationConditions`) — or
+    // refused in words of its own (a key the related object does not declare,
+    // a second level, a related object that is not registered).
+    const numeric = narrowNumberComparands(object, operation, schema, where, 'where', { schemaOf });
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -1123,7 +1141,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // array sugar (`[['amount','>','abc']]`) names numeric fields too. [#20546]
   // …and lowers `['amount', '=', { a: 1 }]` to the no-operator object its
   // second arm refuses.
-  lowered.where = narrowNumberComparands(object, operation, schema, condition);
+  lowered.where = narrowNumberComparands(object, operation, schema, condition, 'where', { schemaOf });
   return lowered as T;
 }
 
@@ -1241,6 +1259,13 @@ function admissionRefusalOf(
  *    condition.
  * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
  *
+ * [#20802] Execution then lowers each nested-relation condition by READING
+ * the related object (`ObjectQL.lowerRelationConditions`); that read admits the
+ * condition through the related object's own two stages. The judge runs those
+ * two stages on each condition too — as a `find` on the related object — and
+ * stops there: which ids the read finds, the cap and the caller's permissions
+ * on the related object need data and a caller, and are execution's alone.
+ *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
  * something other than `where`: option-key folding and refusal, the driver
  * lookup (`getDriver`, before stage 1 on the writes and between the stages on
@@ -1266,16 +1291,62 @@ function judgeWhereAdmission(
   where: unknown,
   schema: unknown,
   context: Parameters<typeof filterTokenContextFrom>[0],
+  schemaOf?: (name: string) => unknown,
 ): EngineFilterJudgement {
   try {
-    const admitted = lowerWhereFilterArray(object, operation, { where }, schema);
-    resolveThenLowerWhere(admitted.where, context, declaredDatetimeLowering(schema));
+    const admitted = lowerWhereFilterArray(object, operation, { where }, schema, schemaOf);
+    const resolved = resolveWhereFilterTokens(admitted.where, context);
+    // [#20802] Each nested-relation condition the door admitted: execution
+    // reads the related object with it (`ObjectQL.lowerRelationConditions`),
+    // and that read admits it through the related object's own doors and
+    // resolver — so the judge asks the same of it here, as a `find` on the
+    // related object. What the read then finds (the ids, the cap, the caller's
+    // permissions) needs data and a caller, and is execution's alone. The rest
+    // of the filter is lowered with each condition standing for the empty id
+    // set, which the shared lowering treats as it treats any `$in` / `$or`.
+    const sites = relationSitesOf(object, operation, resolved, schema, schemaOf);
+    for (const site of sites) {
+      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf);
+      if (!inner.ok) return inner;
+    }
+    const related = sites.length === 0
+      ? resolved
+      : mapRelationConditions(object, operation, schema, resolved, {
+          schemaOf: schemaOf ?? (() => undefined),
+          replace: (site) => lowerRelationSite(site, []),
+        });
+    lowerFilterCondition(related, declaredDatetimeLowering(schema));
     return { ok: true };
   } catch (thrown) {
     const refusal = admissionRefusalOf(thrown);
     if (refusal) return refusal;
     throw thrown;
   }
+}
+
+/**
+ * [#20802] The nested-relation conditions a `where` holds, in walk order: the
+ * collecting pass of {@link mapRelationConditions} (each admitted site is
+ * recorded and kept as written, so nothing is rewritten). Empty for a filter
+ * with none, and for a registry-less host (no field map, no relation column).
+ */
+function relationSitesOf(
+  object: string,
+  operation: string,
+  where: unknown,
+  schema: unknown,
+  schemaOf: ((name: string) => unknown) | undefined,
+): RelationFilterSite[] {
+  const sites: RelationFilterSite[] = [];
+  if (where == null) return sites;
+  mapRelationConditions(object, operation, schema, where, {
+    schemaOf: schemaOf ?? (() => undefined),
+    replace: (site) => {
+      sites.push(site);
+      return { kind: 'value', value: site.condition };
+    },
+  });
+  return sites;
 }
 
 /**
@@ -8943,6 +9014,7 @@ export class ObjectQL implements IObjectQLEngine {
       where,
       this._registry.getObject(object),
       options?.context,
+      this.relatedSchemaOf,
     );
   }
 
@@ -11159,15 +11231,114 @@ export class ObjectQL implements IObjectQLEngine {
    * reason — the position's declared-type reader (`where`: the object's
    * fields; `having`: the aggregated row's columns).
    */
-  private resolveWhereTokens(
+  private async resolveWhereTokens(
     ast: QueryAST | undefined,
     execCtx: ExecutionContext | undefined,
     lowering: FilterLoweringOptions,
     position: 'where' | 'having' = 'where',
-  ): void {
+    operation = 'find',
+  ): Promise<void> {
     if (!ast || ast[position] == null) return;
     // [#20157] Through the stage function the judge also calls.
-    ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering);
+    if (position === 'having') {
+      ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering);
+      return;
+    }
+    // [#20802] `where` serves the nested-relation form: resolve, then lower
+    // each relation condition (a read of the related object, as the caller),
+    // then the shared lowering — {@link resolveRelateThenLowerWhere}.
+    ast[position] = await this.resolveRelateThenLowerWhere(
+      ast.object, operation, ast[position], execCtx, lowering,
+    );
+  }
+
+  /**
+   * [#20802] Stage 2 of `where` admission on every verb, whole: resolve the
+   * placeholders, then LOWER EACH NESTED-RELATION CONDITION
+   * ({@link lowerRelationConditions}), then run the shared lowering
+   * ({@link resolveThenLowerWhere}'s second half, `lowerFilterCondition`).
+   *
+   * The order is ADR-0053 D-D1 item 3's, extended by one step: tokens first,
+   * so a condition on the related object carries the resolved values (one
+   * instant for the whole filter) into the related read; the relation step
+   * before the shared lowering, so that lowering reads the `$in` / `$contains`
+   * the relation step produced — including the NULL-safe `$not` over it — and
+   * never a nested object whose columns belong to another object.
+   */
+  private async resolveRelateThenLowerWhere<W>(
+    object: string,
+    operation: string,
+    where: W,
+    execCtx: ExecutionContext | undefined,
+    lowering: FilterLoweringOptions,
+  ): Promise<W> {
+    const resolved = resolveWhereFilterTokens(where, execCtx);
+    const related = await this.lowerRelationConditions(object, operation, resolved, execCtx);
+    return lowerFilterCondition(related, lowering);
+  }
+
+  /**
+   * [#20802] The registry's declared schema of a related object, by name —
+   * what the `where` door admits a nested-relation condition's keys against.
+   */
+  private readonly relatedSchemaOf = (name: string): unknown => this._registry.getObject(name);
+
+  /**
+   * [#20802] Lower every nested-relation condition in one `where` —
+   * `{ owner: { region: 'NA' } }` beneath a relation field — into a filter
+   * every driver answers, by READING the related object: the ids of the
+   * records the condition matches become `$in` on a single-valued relation, or
+   * an `$or` of `$contains` per id on a multi-valued one
+   * (`relation-filter-lowering.ts` holds the forms, the cap and the words).
+   *
+   * **As the caller.** The read is this engine's own `find` on the related
+   * object with the caller's execution context — not a driver call and not a
+   * system read — so the related object's CRUD gate, row scope and field
+   * permissions apply exactly as they do to a direct read of it, and its own
+   * doors judge the condition's comparands against its own declarations. A
+   * refusal from any of them is the answer, loudly; nothing is swallowed.
+   *
+   * **Bounded.** The read asks for one id more than
+   * {@link RELATION_FILTER_ID_CAP}; receiving it, the filter is refused
+   * (`INVALID_FILTER` / 400, the two-step route in the words), never run over
+   * a cut-off list.
+   *
+   * Returns `where` by reference when it holds no condition — the common path
+   * reads nothing and allocates nothing beyond one walk.
+   */
+  private async lowerRelationConditions<W>(
+    object: string,
+    operation: string,
+    where: W,
+    execCtx: ExecutionContext | undefined,
+  ): Promise<W> {
+    if (where == null) return where;
+    const schema = this._registry.getObject(object);
+    const sites = relationSitesOf(object, operation, where, schema, this.relatedSchemaOf);
+    if (sites.length === 0) return where;
+    const context = `${operation}('${object}')`;
+    const replacements: RelationReplacement[] = [];
+    for (const site of sites) {
+      const rows = await this.find(site.target, {
+        where: site.condition as FilterCondition,
+        fields: ['id'],
+        limit: RELATION_FILTER_ID_CAP + 1,
+        ...(execCtx ? { context: execCtx } : {}),
+      });
+      const matched = Array.isArray(rows) ? rows : [];
+      if (matched.length > RELATION_FILTER_ID_CAP) {
+        throw relationFilterCapError(site, context, RELATION_FILTER_ID_CAP);
+      }
+      replacements.push(lowerRelationSite(
+        site,
+        matched.map((row) => (row as { id?: unknown } | null)?.id).filter((id) => id !== undefined && id !== null),
+      ));
+    }
+    let next = 0;
+    return mapRelationConditions(object, operation, schema, where, {
+      schemaOf: this.relatedSchemaOf,
+      replace: () => replacements[next++],
+    });
   }
 
   /**
@@ -11186,13 +11357,16 @@ export class ObjectQL implements IObjectQLEngine {
    * The lowering is copy-on-write too, so a `where` it rewrites lands on the
    * copy, never on the caller's object.
    */
-  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
+  private async withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
+    object: string,
+    operation: string,
     options: T,
     lowering: FilterLoweringOptions,
-  ): T {
+  ): Promise<T> {
     if (!options || options.where == null) return options;
-    // [#20157] Through the stage function the judge also calls.
-    const resolved = resolveThenLowerWhere(options.where, options.context, lowering);
+    // [#20157] Through the stage function the judge also calls. [#20802] …with
+    // the nested-relation step between resolution and the shared lowering.
+    const resolved = await this.resolveRelateThenLowerWhere(object, operation, options.where, options.context, lowering);
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
@@ -11405,7 +11579,7 @@ export class ObjectQL implements IObjectQLEngine {
     // (#4371, three shipped instances in #4370).
     query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
-    query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object));
+    query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     // `object` LAST: the resolved name must win. Spread-first used to let a
@@ -11485,7 +11659,7 @@ export class ObjectQL implements IObjectQLEngine {
     };
     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower (the shared
     // lowering), against the object's declared field types.
-    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findSchema));
+    await this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findSchema), 'where', 'find');
 
     await this.executeWithMiddleware(opCtx, async () => {
       const hookContext: HookContext = {
@@ -11703,7 +11877,7 @@ export class ObjectQL implements IObjectQLEngine {
     // matters here too: findOne({ sort }) means "first row of THIS order".
     query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
-    query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName));
+    query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
@@ -11758,7 +11932,7 @@ export class ObjectQL implements IObjectQLEngine {
       context: mergeReadContext(query?.context, options?.context),
     };
     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower.
-    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findOneSchema));
+    await this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findOneSchema), 'where', 'findOne');
 
     await this.executeWithMiddleware(opCtx, async () => {
       // [#3195] `findOne` fires the SAME `beforeFind`/`afterFind` hooks as
@@ -13366,7 +13540,7 @@ export class ObjectQL implements IObjectQLEngine {
      // [#5158] Lower before the by-id extraction below reads `where.id`: on an
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
-     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object));
+     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -13381,7 +13555,7 @@ export class ObjectQL implements IObjectQLEngine {
      // itself. Resolve first, then extract.
      // [ADR-0053 D-D1, amended — #5930] …and lowered in the same stage, before
      // the by-id extraction below reads the result.
-     options = this.withResolvedWhere(options, declaredDatetimeLowering(this._registry.getObject(object)));
+     options = await this.withResolvedWhere(object, 'update', options, declaredDatetimeLowering(this._registry.getObject(object)));
 
      // [#20308] The insert door's rule, same place: a blank on a
      // non-string-typed column is `null` before the middleware, the
@@ -16045,12 +16219,12 @@ export class ObjectQL implements IObjectQLEngine {
     rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
-    options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object));
+    options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
     // [ADR-0053 D-D1, amended — #5930] …and lowered in the same stage.
-    options = this.withResolvedWhere(options, declaredDatetimeLowering(this._registry.getObject(object)));
+    options = await this.withResolvedWhere(object, 'delete', options, declaredDatetimeLowering(this._registry.getObject(object)));
 
     // Extract ID logic mirroring update(): only a SCALAR `where.id` means
     // "delete one row by primary key". An operator object ({ $in: [...] }, …)
@@ -16565,7 +16739,7 @@ export class ObjectQL implements IObjectQLEngine {
      // `query.where` only, so an unfolded `{ filter }` counted the whole table.
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object));
+     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -16581,11 +16755,14 @@ export class ObjectQL implements IObjectQLEngine {
        options: query,
        context: mergeReadContext(query?.context, options?.context),
      };
-     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower.
-     this.resolveWhereTokens(
+     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower. [#20802] …with
+     // the nested-relation step between the two.
+     await this.resolveWhereTokens(
        opCtx.ast as QueryAST,
        opCtx.context,
        declaredDatetimeLowering(this._registry.getObject(object)),
+       'where',
+       'count',
      );
      // The caller's own `where`, placeholders expanded — captured BEFORE the
      // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
@@ -16674,7 +16851,7 @@ export class ObjectQL implements IObjectQLEngine {
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
-      query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object));
+      query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
@@ -16958,7 +17135,7 @@ export class ObjectQL implements IObjectQLEngine {
       // reads each aggregated column's type (`min` / `max` of a `datetime`
       // field is a `datetime`; a `count` is a number).
       const rowLowering = declaredDatetimeLowering(this._registry.getObject(object));
-      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, rowLowering);
+      await this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, rowLowering, 'where', 'aggregate');
       // [#10576] Filter tokens (`{userId}`-style placeholders, #3810) resolve
       // in per-aggregation filters exactly as they do in `where` — a filter
       // position is a filter position, and an unresolved placeholder would be
@@ -16988,7 +17165,7 @@ export class ObjectQL implements IObjectQLEngine {
       // and the other doors judged a string that resolves to a string.
       {
           const havingColumnTypes = aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields);
-          this.resolveWhereTokens(
+          await this.resolveWhereTokens(
               opCtx.ast as QueryAST,
               opCtx.context,
               { isDatetimeColumn: (column) => havingColumnTypes.get(column) === 'datetime' },

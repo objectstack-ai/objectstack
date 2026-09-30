@@ -91,6 +91,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'hook',        // Data hooks (HookSchema)
   'seed',        // Seed/fixture data — runtime-draftable; publishing applies it (SeedSchema)
   'mapping',     // Import/export field mappings (MappingSchema) — consumed by POST /data/:object/import via mappingName (#2611); promoted to a kind per the ADR-0088 admission test once the consumer landed
+  'picklist',    // Shared option list that select fields reference by name (PicklistSchema)
 
   // UI Protocol
   'view',        // List/form views (ViewSchema)
@@ -812,6 +813,16 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // `allowRuntimeCreate: true` so the import wizard can SAVE a hand-built
   // mapping as a named artifact; packaged mappings stay locked
   // (`allowOrgOverride: false`) like every artifact-backed item.
+  // `picklist`: a shared option list select fields reference by name
+  // (`Field.select({ picklist })`, `data/picklist.zod.ts`). PACKAGE-OWNED, so
+  // both runtime doors are closed: `allowRuntimeCreate: false` refuses a
+  // runtime create with 403 `not_creatable` and reads the prescription back
+  // from `filePatterns[0]`, and `allowOrgOverride: false` refuses a per-org
+  // overlay — an organization appending values is a later phase with its own
+  // admission (ADR-0005, additive only), not declared here. Another package
+  // adds values through `picklistExtensions`, on the artifact route.
+  // `loadOrder: 8` — before `object` (10), whose fields reference it.
+  { type: 'picklist', label: 'Picklist', description: 'Shared option list that select fields reference by name', filePatterns: ['**/*.picklist.ts', '**/*.picklist.yml', '**/*.picklist.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 8, domain: 'data' },
   { type: 'mapping', label: 'Import Mapping', description: 'Reusable import/export field mapping (rename + transforms), referenced by name at import', filePatterns: ['**/*.mapping.ts', '**/*.mapping.yml', '**/*.mapping.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 96, domain: 'data' },
 
   // UI Protocol

@@ -7,8 +7,9 @@
  * the field and the path, before any read — over a real `SqlDriver`, with a
  * file field's object reaching the driver as written. The two controls triage
  * first named here — a `lookup` field's nested relation filter and a `json`
- * field's object comparand — are refused by the same arm since #20745, in
- * words of their own (`data-nested-object-door.test.ts` pins them).
+ * field's object comparand — were refused by the same arm since #20745, in
+ * words of their own; the nested relation filter is SERVED at `where` since
+ * #20802 (`data-nested-object-door.test.ts` pins both).
  *
  * Measured on the base (`origin/main` `fbec216e2d`) through this door and the
  * engine, three rows:
@@ -16,7 +17,7 @@
  * | `where` | InMemoryDriver | SQLite | PostgreSQL 16 |
  * |:--|:--|:--|:--|
  * | `{ amount: { a: 1 } }` (number), `{ title: { a: 1 } }` (text) | 200, no rows | 400 `INVALID_FILTER`, the driver's words | same as SQLite |
- * | `{ owner: { region: 'NA' } }` (lookup), `{ meta: { a: 1 } }` (json) | 200, no rows / one row | 400, the driver's words | same — refused since #20745 |
+ * | `{ owner: { region: 'NA' } }` (lookup), `{ meta: { a: 1 } }` (json) | 200, no rows / one row | 400, the driver's words | same — refused since #20745; the lookup row served since #20802 |
  * | `aggregations[1].filter` `{ amount: { a: 1 } }` / `having` `{ total: { a: 1 } }` | count 0 / no group | same | same |
  *
  * The arm sits in the engine, in front of every driver, so one verdict holds

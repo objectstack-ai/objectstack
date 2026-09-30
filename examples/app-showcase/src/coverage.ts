@@ -75,6 +75,12 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes:
       'Named import mapping resolved via mappingName at POST /data/:object/import (#2611); promoted to a registry kind per the ADR-0088 admission test.',
   },
+  picklist: {
+    status: 'waived',
+    reason:
+      'The kind is declared ahead of its runtime reader: until the server resolves a picklist reference, a picklist-bound field is served with no options, so a demo would draw a select with nothing to choose. Demonstrate it (one list on two objects, an extension, a translated option) with the runtime layer.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/19519',
+  },
 
   // ── ui ──
   view: { status: 'demonstrated', files: ['src/ui/views/task.view.ts', 'src/ui/views/project.view.ts'] },
@@ -199,6 +205,12 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     status: 'demonstrated',
     files: ['src/data/extensions/account.extension.ts'],
     notes: 'Merged into showcase_account by the ObjectQL engine at registerApp (priority overlay).',
+  },
+  picklistExtensions: {
+    status: 'waived',
+    reason:
+      'Declared with the picklist kind, ahead of the runtime merge that adds an extension\'s options to the list it extends; demonstrated alongside `KIND_COVERAGE.picklist` when that layer lands.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/19519',
   },
   // `apis` is NOT listed here any more: as of #5271 it is a registry kind, so
   // its coverage lives in `KIND_COVERAGE.api` above. Leaving a duplicate row in

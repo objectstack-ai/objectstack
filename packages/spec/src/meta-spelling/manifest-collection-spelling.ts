@@ -90,6 +90,7 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   ragPipelines: 'rag_pipeline',
   hooks: 'hook',
   mappings: 'mapping',
+  picklists: 'picklist',
   analyticsCubes: 'analytics_cube',
   connectors: 'connector',
   datasources: 'datasource',

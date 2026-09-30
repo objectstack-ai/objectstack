@@ -38,9 +38,9 @@
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
 - 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
 - 按名定位失败才拉全表;订阅来的 `check_suite.completed` 是唤醒不是放行读数。
-- 转 draft 不是可靠的踢队手段:两向相反读数并存,处置按最坏走。
-- 本仓转 draft 同时掉 auto-merge 与队列成员资格,不自动恢复,转正后重挂;姊妹仓曾保位照合。
-- 补救:转 draft 与卸载 auto-merge 都做 —— 本仓卸载 auto-merge 单独不踢队。
+- 转 draft 不是可靠的踢队手段:本仓与姊妹仓均见已入队转 draft 仍保位照合,处置按最坏走。
+- 本仓转 draft 同秒掉 auto-merge 仅见于未入队时,转正后重挂;已入队者 2026-08-08、09-29 照合。
+- 补救:转 draft 与卸载 auto-merge 都做,本仓卸载单独不踢队;两手齐做亦未见踢队(08-08、09-28)。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。

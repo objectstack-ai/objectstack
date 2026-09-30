@@ -1146,7 +1146,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // sub-rows), and the field form's `inlineColumns` repeater (and its
       // `name`, `label`, `width` and `defaultHidden` sub-rows) — authored in all
       // three locales.
-      expect(translated.length, `${locale} positive control`).toBe(657);
+      // 658 with the `picklist` metadata type's display pair, authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(658);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

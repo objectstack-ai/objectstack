@@ -73,7 +73,7 @@ both are given. Writes take only the trailing argument.
 | Removed key | Live replacement |
 |:--|:--|
 | `query.cursor` | keyset paging — `where` on the sort key + `orderBy` + `limit` |
-| `query.joins` | `expand`, or a nested relation filter |
+| `query.joins` | `expand` (display), or filter the related object and `$in` its ids |
 | `query.distinct` | `groupBy` the fields — each unique combination is one row |
 | `query.windowFunctions` | report/dashboard metadata (**objectstack-ui**), or rank / accumulate in app code |
 | aggregation `distinct: true` | `count_distinct` |
@@ -85,7 +85,7 @@ procedure and the full tombstone register are **objectstack-upgrade**.
 
 ## Quick Reference — Detailed Rules
 
-- **[Filters](./rules/filters.md)** — all operators, logical combinations, nested relations, date macros and session tokens
+- **[Filters](./rules/filters.md)** — all operators, logical combinations, filtering by a related record, date macros and session tokens
 - **[Aggregation](./rules/aggregation.md)** — groupBy, date bucketing, functions, `having`, per-measure `filter`
 - **[Pagination](./rules/pagination.md)** — offset vs keyset, best practices, performance
 
@@ -184,14 +184,11 @@ Combine conditions with `$and`, `$or`, and `$not`:
 { where: { $not: { status: 'closed' } } }
 ```
 
-### Nested Relation Filters
+### Filtering by a related record
 
-Filter through relationships without an explicit join:
-
-```typescript
-// Accounts whose related contact has a verified profile
-{ object: 'account', where: { contact: { profile: { verified: true } } } }
-```
+`{ customer: { country: 'US' } }` beneath a lookup is refused, `INVALID_FILTER` /
+400: filter the related object first, then `$in` its ids —
+**[filter rules → Relation Filters](./rules/filters.md)**.
 
 ### Cross-field comparisons
 
@@ -331,7 +328,7 @@ that set, never widen it: over the REST/protocol ingress a name outside it is
 Mirror the related record's title into a **stored** field on the queried object
 and search that; the field, the write hooks and the lint wording are
 **objectstack-data → Search Fields (`searchableFields`)**. To *filter* by a
-related record's column use a nested relation filter; to *display* it, `expand`.
+related record's column, `$in` ids from its own query; to *display* it, `expand`.
 
 ## Common Patterns
 
@@ -340,7 +337,8 @@ related record's column use a nested relation filter; to *display* it, `expand`.
 | Scenario | Use |
 |:---------|:----|
 | Load lookup fields for display | `expand` |
-| Filter parent by child conditions | Nested relation filter |
+| Filter rows by their lookup target's column | Query the target object, then `{ lookup: { $in: ids } }` — `$contains` per id when `multiple` |
+| Filter parent by child conditions | Query the child with `fields: [lookup]`, then `{ id: { $in: those ids } }` on the parent |
 | **Keyword-search by a related record's title** | **Mirror the title into a stored field on this object and search that** — `search` never traverses |
 | Paginate/sort a parent's related records | Query the related object directly |
 | Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code |

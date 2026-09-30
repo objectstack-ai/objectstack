@@ -41,8 +41,9 @@ It calls `defineStack()` to declare all metadata.
 ### Full Configuration Reference
 
 `defineStack()` accepts an `ObjectStackDefinitionInput` whose top-level keys
-are `manifest`, `packages`, `objects`, `objectExtensions`, `views`, `apps`,
-`pages`, `dashboards`, `reports`, `datasets`, `actions`, `flows`, `jobs`,
+are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
+`picklistExtensions`, `views`, `apps`, `pages`, `dashboards`, `reports`,
+`datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `server`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
@@ -449,9 +450,8 @@ definition: never write it by hand, and never hand-write a raw
 
 ## CLI Commands
 
-Daily commands are covered in **Part 3 — Operations** below
-([jump there](./references/operations.md#part-3--operations-cli-testing-deployment)). High-level cheat
-sheet for the bootstrap loop:
+Daily commands are in [Part 3 — Operations](./references/operations.md#part-3--operations-cli-testing-deployment).
+Cheat sheet for the bootstrap loop:
 
 ```bash
 npx create-objectstack my-app

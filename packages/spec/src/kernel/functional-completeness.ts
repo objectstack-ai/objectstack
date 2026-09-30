@@ -187,7 +187,11 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
     });
   }
 
-  if (DEAD_WITHOUT_OPTIONS_ERROR.has(type) && !hasEntries(def.options)) {
+  // A `picklist` reference IS the field's option source (`data/picklist.zod.ts`):
+  // the served field carries the list's options resolved, so a picklist-bound
+  // choice is not the empty one this rule is about.
+  const hasOptionSource = hasEntries(def.options) || typeof def.picklist === 'string';
+  if (DEAD_WITHOUT_OPTIONS_ERROR.has(type) && !hasOptionSource) {
     out.push({
       rule: FIELD_CHOICE_WITHOUT_OPTIONS,
       severity: 'error',
@@ -196,9 +200,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
         `A \`${type}\` field with no \`options\` is a choice with nothing to choose: the form `
         + 'control is empty AND server-side value validation is disabled (`record-validator.ts` '
         + 'skips the check when the allowed list is empty), so any value writes through the API.',
-      fix: "options: [{ label: '…', value: '…' }]",
+      fix: "options: [{ label: '…', value: '…' }] — or picklist: '<name>' for a shared list",
     });
-  } else if (DEAD_WITHOUT_OPTIONS_WARNING.has(type) && !hasEntries(def.options)) {
+  } else if (DEAD_WITHOUT_OPTIONS_WARNING.has(type) && !hasOptionSource) {
     out.push({
       rule: FIELD_CHOICE_WITHOUT_OPTIONS,
       severity: 'warning',
