@@ -1,8 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * # `picklist` — a shared option list, referenced by name
- *
  * One list of select options that several fields on several objects use,
  * instead of an options array copied into each field (Salesforce's Global
  * Value Set, Dataverse's global choice). A field REFERENCES it with
