@@ -337,13 +337,17 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         });
         await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
-            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], extra: 1, object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
+            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], rowHeight: 'compact', extra: 1, object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         const diff = await protocol.diffMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
             fromVersion: 1, toVersion: 2,
         });
-        expect((diff as any).added.map((e: any) => e.path)).toContain('extra');
+        // [#20051] Re-judged at stage (iv): the added key is a DECLARED one
+        // (`rowHeight`). The undeclared `extra` never reaches a version — a
+        // view stores the parsed value of every key its body carried — so no
+        // diff can show it.
+        expect((diff as any).added.map((e: any) => e.path)).toEqual(['rowHeight']);
         expect((diff as any).changed.map((e: any) => e.path).sort()).toEqual(['columns', 'label']);
     });
 });
