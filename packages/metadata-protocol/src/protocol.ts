@@ -8676,6 +8676,33 @@ export class ObjectStackProtocolImplementation implements
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
+        // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
+        //
+        // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
+        // override, never an overlay read path". Since #20913 the flattened view
+        // ({@link readFlattenedMetaItems}, both faces) serves a flow name the
+        // loader's set holds from the loader's own entries alone, with two
+        // predicates. This read applies the SAME two, and ⛔ no third precedence
+        // path of its own:
+        //  • the stored-row half, {@link isShippedFlowName}, judged by NAME —
+        //    step 1 below does not adopt the stored row of such a name, whatever
+        //    its package binding or the stamps its own body carries;
+        //  • the registry half, {@link isStoredFlowEntryOfShippedName} — step 3
+        //    does not serve the registry's bare copy of that row (the hydrated
+        //    tenant row `getItem` answers first); the loader's entry is served.
+        // Adopted, the row was served with the artifact's protection envelope
+        // grafted over it (the merge at the end of this method): a stored body
+        // answered as the package's definition by name, while the list answered
+        // the loader's body for the same name.
+        //
+        // Scoped to the ACTIVE read. A draft is answered as a draft (the strict
+        // `state: 'draft'` read and the `previewDrafts` arm), never under the
+        // artifact's envelope, and the list's own preview arm is equally
+        // unfiltered. Organization-scoped flow rows never reach this read:
+        // `orgId` is `undefined` for `flow`, which declares no org override.
+        // What becomes of the stored rows themselves (keep, refuse, migrate) is
+        // not decided here.
+        const shippedFlowActiveRead = readState === 'active' && this.isShippedFlowName(request.type, request.name);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -8778,7 +8805,8 @@ export class ObjectStackProtocolImplementation implements
             };
             const record = (orgId ? await findOverlay(orgId) : undefined)
                 ?? await findOverlay(null);
-            if (record) {
+            // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
+            if (record && !shippedFlowActiveRead) {
                 item = this.convertStoredItem(
                     String(record.type ?? request.type),
                     typeof record.metadata === 'string'
@@ -8903,6 +8931,13 @@ export class ObjectStackProtocolImplementation implements
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
+            }
+            // [#20946] The registry half — see `shippedFlowActiveRead` above.
+            // `getItem` answers the bare slot first, and for a shipped flow name
+            // that slot holds the hydrated stored row, which is not one of the
+            // loader's entries; the loader's entry is the one the list serves.
+            if (this.isStoredFlowEntryOfShippedName(request.type, item)) {
+                item = this.lookupArtifactItem(request.type, request.name, request.packageId);
             }
         }
 
