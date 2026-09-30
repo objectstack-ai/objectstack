@@ -206,6 +206,12 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     files: ['src/data/extensions/account.extension.ts'],
     notes: 'Merged into showcase_account by the ObjectQL engine at registerApp (priority overlay).',
   },
+  picklistExtensions: {
+    status: 'waived',
+    reason:
+      'Declared with the picklist kind, ahead of the runtime merge that adds an extension\'s options to the list it extends; demonstrated alongside `KIND_COVERAGE.picklist` when that layer lands.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/19519',
+  },
   // `apis` is NOT listed here any more: as of #5271 it is a registry kind, so
   // its coverage lives in `KIND_COVERAGE.api` above. Leaving a duplicate row in
   // this manifest — whose contract is "stack collections that are NOT registry
