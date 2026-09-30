@@ -118,9 +118,6 @@
       "TS6133: 'query' is declared but its value is never read.": 1,
       "TS6133: 'schema' is declared but its value is never read.": 1
     },
-    "src/data/field.test.ts": {
-      "TS2322: Type 'string' is not assignable to type '…'.": 2
-    },
     "src/data/object-strictness-batch20.test.ts": {
       "TS2352: Conversion of type '…' to type '…' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1
     },

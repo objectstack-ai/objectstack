@@ -154,7 +154,7 @@ Translation data for a single field
 
 Map of locale codes to platform translation data
 
-**Type:** `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>`
+**Type:** `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>`
 
 
 ---
@@ -168,6 +168,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -194,6 +195,13 @@ Translation data for a single object
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+
+### Nested Shape: `PlatformTranslationData.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
 
 ### Nested Shape: `PlatformTranslationData.apps[string]`
 
@@ -282,7 +290,7 @@ Translation data for a single object
 
 Map of locale codes to per-app translation data
 
-**Type:** `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>`
+**Type:** `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>`
 
 
 ---
@@ -358,6 +366,7 @@ Per-app translation data for objects, apps, and UI messages
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -383,6 +392,13 @@ Translation data for a single object
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+
+### Nested Shape: `TranslationData.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
 
 ### Nested Shape: `TranslationData.apps[string]`
 
@@ -498,6 +514,7 @@ One locale of translations — the `translation` metadata type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
@@ -533,6 +550,13 @@ Translation data for a single object
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+
+### Nested Shape: `TranslationItem.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
 
 ### Nested Shape: `TranslationItem.apps[string]`
 

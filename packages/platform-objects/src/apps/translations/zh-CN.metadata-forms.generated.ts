@@ -923,6 +923,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "种子数据",
     description: "发布时应用的预置/初始化数据"
   },
+  picklist: {
+    label: "共享选项集",
+    description: "选择字段按名称引用的共享选项列表"
+  },
   mapping: {
     label: "导入映射",
     description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用"

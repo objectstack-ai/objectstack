@@ -165,6 +165,7 @@ const STORE: Record<string, any[]> = {
     page: [{ name: 'home', label: 'Home', type: 'app' }],
     action: [{ name: 'close_case', label: 'Close case', objectName: 'case', type: 'script' }],
     dataset: [{ name: 'pipeline', label: 'Pipeline', object: 'opportunity' }],
+    picklist: [{ name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] }],
     flow: [{ name: 'on_lead', label: 'On lead', type: 'autolaunched' }],
 };
 
@@ -484,7 +485,7 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 /** Every type a projection or a gate keys on, both spellings, plus every translatable type and an untouched control (`flow`). */
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
-    'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'flow',
+    'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -790,7 +791,7 @@ const ITEM_CELLS: readonly string[] = [
     '/meta/book/admin_guide', '/meta/books/help_center', '/meta/book/public_guide',
     '/meta/object/invoice', '/meta/objects/invoice',
     '/meta/dashboard/ops', '/meta/dashboards/ops',
-    '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/flow/on_lead', '/meta/api/crm_served',
+    '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/picklist/industry', '/meta/flow/on_lead', '/meta/api/crm_served',
 ];
 const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
 const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];

@@ -1,0 +1,135 @@
+---
+title: Picklist schema — Data Protocol reference
+navTitle: Picklist
+description: "One list of select options that several fields on several objects use, instead of an options array copied into each field."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+One list of select options that several fields on several objects use,
+instead of an options array copied into each field (Salesforce's Global
+Value Set, Dataverse's global choice). A field REFERENCES it with
+`picklist: '<name>'` in place of `options` — `Field.select({ picklist:
+'industry' })` — and the two are mutually exclusive at the field's schema
+door (see `FieldSchema.picklist`).
+
+Three shapes live here, one per position the list appears in:
+
+- `PicklistSchema` — the kind itself: `{ name, label, description?,
+  options }`, authored in a package (`*.picklist.ts`, or
+  `defineStack({ picklists })`). `options` is the field option shape
+  (`SelectOptionSchema`), reused verbatim — there is no second option
+  shape to learn.
+- `PicklistExtensionSchema` — `defineStack({ picklistExtensions })`,
+  the `objectExtensions` idiom: another package ADDS options to a picklist
+  it does not own. Additive only — removing or renaming a value stays with
+  the owning package, so the shape has no key for either.
+- `PicklistServedFieldSchema` — the served form of a picklist-bound
+  field: what a client reads from the object read exits once the reference
+  is resolved.
+
+Package-owned: the registry entry (`kernel/metadata-plugin.zod.ts`) takes
+no runtime create and no per-organization overlay. An organization-level
+overlay that appends values is a later phase with its own admission, and
+is not declared here.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/picklist.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { PicklistSchema, PicklistExtensionSchema, PicklistServedFieldSchema } from '@objectstack/spec/data';
+import type { Picklist, PicklistExtension, PicklistServedField } from '@objectstack/spec/data';
+
+// Validate data
+const result = PicklistSchema.parse(data);
+```
+
+---
+
+## Picklist
+
+A shared option list that select fields reference by name instead of copying options
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Picklist name (lowercase snake_case) — what a field's `picklist` names |
+| **label** | `string` | ✅ | Display label of the list itself |
+| **description** | `string` | optional | What the list enumerates, for authors choosing one |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | ✅ | The options every referencing field offers — the field option shape (`label`, `value`, `color`, `default`, `description`, `visibleWhen`), reused verbatim |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Picklist.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
+| **color** | `string` | optional | Color code for badges/charts |
+| **default** | `boolean` | optional | Is default option |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
+
+
+---
+
+## PicklistExtension
+
+Options added to a picklist owned by another package (additive only — the `objectExtensions` idiom)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **extend** | `string` | ✅ | Name of the picklist (owned by another package) to add options to |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | ✅ | Options appended to the target picklist (additive only) |
+
+### Nested Shape: `PicklistExtension.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
+| **color** | `string` | optional | Color code for badges/charts |
+| **default** | `boolean` | optional | Is default option |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
+
+
+---
+
+## PicklistServedField
+
+The served form of a picklist-bound field: `options` resolved, `picklist` kept
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **picklist** | `string` | ✅ | The picklist the field references, as authored |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | ✅ | The picklist's options resolved onto the field (with its extensions' options) |
+
+### Nested Shape: `PicklistServedField.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
+| **color** | `string` | optional | Color code for badges/charts |
+| **default** | `boolean` | optional | Is default option |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
+
+
+---
+

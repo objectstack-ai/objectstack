@@ -138,10 +138,9 @@ ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删�
 为 #4650
 路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
 
-枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己的 `error` map**
-上、按 `issue.input` 分派(`packages/spec/src/data/hook-body.zod.ts` 的
-`HookBodyCapability`,沿用 `object.managedBy: 'system'` 的先例)—— 三条路线里没有一条
-适用于「def 存活、只少一个值」。
+枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己**上:用
+`enumWithRetiredValues()`(`shared/retired-key.ts`)声明退役值及其处方,⛔ 不再手写 `error` map ——
+三条路线里没有一条适用于「def 存活、只少一个值」。
 
 ### guidance 字符串怎么写
 
@@ -180,11 +179,12 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       个 `fixture`,其 `expectedNotices` 等于**键**数,不是条目数。walker
       (`mapCollection`、`mapFlowNodes`、`renameKey`)住在 `conversions/walk.ts`,
       copy-on-write —— 没命中就原样返回输入引用。
-- [ ] **一条 `RETIRED_KEYS_BY_MAJOR` 条目**,在
-      `packages/spec/src/migrations/registry.ts` —— 字面 `'<defKey>:<name>'`,拼法照
+- [ ] **一条 `RETIRED_KEYS_BY_MAJOR` 条目**,在 `packages/spec/src/migrations/entries/retired-keys/`
+      加一个文件(命名见 `entries/README.md`),再跑 `pnpm --filter @objectstack/spec gen:migration-registry`
+      把它生成进 `registry.ts`,⛔ 永不在那里手打。条目值是字面 `'<defKey>:<name>'`,拼法照
       `authorable-surface/<category>.json`(去掉 `[RETIRED]` 标),挂在本 major 下。
-      这就是门 (b) 按精确集合成员读的字符串;不做推断,也不从邻键辐射。门禁的失败输
-      出会打印该粘贴的那一行。⚠ **不要**在墓碑落地前先加条目:点名一个还活着的键的
+      这就是门 (b) 按精确集合成员读的字符串;不做推断,也不从邻键辐射。
+      ⚠ **不要**在墓碑落地前先加条目:点名一个还活着的键的
       条目,会以「无人消费的注册」打红门 (b2)。
       *为什么要第二张表:* #4659 之前门 (b) 拿键的**叶名**去比对每条已注册的
       `surface`(`endsWith('.' + name)`,全 major,def 忽略),于是 `dashboard.aria`

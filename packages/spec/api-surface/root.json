@@ -164,6 +164,7 @@
     "defineObjectExtension (function)",
     "definePage (function)",
     "definePermissionSet (function)",
+    "definePicklist (function)",
     "definePosition (function)",
     "defineReport (function)",
     "defineSharingRule (function)",

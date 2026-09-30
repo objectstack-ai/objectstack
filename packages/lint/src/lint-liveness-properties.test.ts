@@ -1432,8 +1432,10 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
   // If `field.json` ever warns again these two flip, and the block above
   // ("field walk: a malformed `fields` array …") can take its real subject back
   // — but this block keeps working either way, which is the point.
-  it('the SHIPPED field ledger warns on nothing today — which is why the walk needs a subject of its own', () => {
-    expect([...authorWarnedProperties('field')]).toEqual([]);
+  it('the SHIPPED field ledger warns on `picklist` alone — which is why the walk needs a subject of its own', () => {
+    // `picklist` is `planned` + `authorWarn` until the server resolves picklist
+    // references; the synthetic slot below is still warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['picklist']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],

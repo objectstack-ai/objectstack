@@ -204,6 +204,7 @@ export type {
 } from './data/authoring-key-lint';
 export { defineCube } from './data/analytics.zod';
 export { defineMapping } from './data/mapping.zod';
+export { definePicklist } from './data/picklist.zod';
 // `defineTheme` was removed by commit 35ad101bc with `ui/theme.zod.ts` (ADR-0049) — see
 // the block in `./ui/index.ts`; `app.branding` is the one colour surface.
 export { defineTranslationBundle } from './system/translation.zod';

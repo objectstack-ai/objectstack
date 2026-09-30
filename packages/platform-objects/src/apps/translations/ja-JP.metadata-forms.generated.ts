@@ -923,6 +923,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "シードデータ",
     description: "公開時に適用されるフィクスチャ／初期化データ"
   },
+  picklist: {
+    label: "選択リスト",
+    description: "選択フィールドが名前で参照する共有の選択肢リスト"
+  },
   mapping: {
     label: "インポートマッピング",
     description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します"

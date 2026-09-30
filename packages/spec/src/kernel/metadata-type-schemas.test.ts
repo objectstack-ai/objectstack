@@ -634,7 +634,10 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
     // this schema either, and the conversion became an ordinary #4001 one.
     // `STILL_STRIP` shrinks to `view` alone, which IS the end state — its open
     // members are wire shapes with nowhere else to live (see that list's note).
-    expect(closed.length).toBe(25);
-    expect(types.length).toBe(26);
+    //
+    // 26 → 27 on 2026-09-30: `picklist` JOINED the registry, closed (a
+    // `strictObject` authoring surface), so the closed count moves with it.
+    expect(closed.length).toBe(26);
+    expect(types.length).toBe(27);
   });
 });
