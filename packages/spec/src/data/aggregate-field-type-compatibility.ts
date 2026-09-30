@@ -8,7 +8,9 @@
  * below). A `DatasetMeasure` pairs an `aggregate` with a `field`; this
  * table is the contract both consumer legs execute — the compile-time refusal
  * in the dataset compiler (#16099) and the authoring-time lint rule — so the
- * two cannot drift into two accounts of one pair.
+ * two cannot drift into two accounts of one pair. The `count_distinct` row has
+ * a third reader, the engine's `aggregate` door, which refuses a query-time
+ * pair the row refuses (the JSON-stored rows below).
  *
  * ## Why this exists
  *
@@ -26,7 +28,8 @@
  *
  * | Aggregate | Accepted field types |
  * |---|---|
- * | `count`, `count_distinct` | every `FieldType` — counting rows or distinct values reads no arithmetic off the value |
+ * | `count` | every `FieldType` — counting rows reads no arithmetic off the value |
+ * | `count_distinct` | every `FieldType` EXCEPT the JSON-stored ones — the structured-JSON class and the multi-option types, whose values no two backends compare for equality alike (#20808, see below) |
  * | `sum` | the numeric class EXCEPT `percent` — a rate does not add (see `isIncoherentAggregate`) — plus the boolean class |
  * | `avg` | the numeric class, `percent` included, plus the boolean class |
  * | `min`, `max` | the numeric class plus the temporal class — both return a value of the field's OWN type (#15768) — plus the boolean class |
@@ -77,6 +80,24 @@
  *   refused". `formula` carries a declared `returnType`, but it is VIRTUAL in
  *   SQL storage (no column is emitted), so no arithmetic aggregate can be
  *   lowered to it whatever that type says; `autonumber` is a formatted string.
+ * - **JSON-stored** = `STRUCTURED_JSON_TYPES` (`json`, `composite`,
+ *   `repeater`, `record`, `location`, `address`, `vector`) ∪
+ *   `MULTI_OPTION_TYPES` (`multiselect`, `checkboxes`, `tags`): the types
+ *   every SQL driver stores in a JSON column. They are refused for
+ *   `count_distinct` on this table's own ground — "can every backend give one
+ *   answer" — because no backend pair does (triage direction on #20808,
+ *   2026-09-30: "`AGGREGATE_FIELD_TYPE_COMPATIBILITY` stops accepting it").
+ *   Measured through `POST /api/v1/data/:object/query` over three rows, two
+ *   of them holding equal values: the in-memory driver counted 3 (each row's
+ *   value apart), SQLite counted 2 (equal serialized text), and PostgreSQL 16
+ *   refused the statement (`could not identify an equality operator for type
+ *   json`, a 500), on every member of both classes. `count` is untouched:
+ *   counting rows compares no value. The one other JSON-stored shape, a
+ *   multi-capable type flagged `multiple: true` (`select`, `lookup`, `user`,
+ *   `file`, `image`), is invisible to a per-TYPE table, so the engine's
+ *   aggregate door refuses it by the declaration (`isMultiValueField`) beside
+ *   this row's verdict. ⛔ No per-backend JSON distinctness is defined to
+ *   make the pair answerable: no caller of it was measured.
  *
  * One row the ruling's default covers used to be recorded here as an OVERRIDE
  * of an existing opinion. It is SETTLED GROUND now, and the opinion it
@@ -105,14 +126,17 @@
  * That predicate (`aggregation-policy.ts`) is the SEMANTIC opinion — "does
  * this number mean anything" — and `sum` × `percent` is refused here on its
  * authority. It also flags `count_distinct` × `percent`, which this table
- * ACCEPTS: the ruling reads `count_distinct` as "any type", and counting
- * distinct rates is backend-consistent even where it is odd. The two stay
+ * ACCEPTS: the ruling read `count_distinct` as "any type", the JSON-stored
+ * narrowing above does not reach a rate, and counting distinct rates is
+ * backend-consistent even where it is odd. The two stay
  * separate on purpose: this table answers "can every backend give one
  * answer", the lint warning answers "is that answer meaningful".
  *
  * ## What this module deliberately does NOT do
  *
- * It refuses nothing itself. The refusals are the two consumer legs; a
+ * It refuses nothing itself. The refusals are the consumer legs — the dataset
+ * compile leg and the authoring lint leg on every row, and the engine's
+ * `aggregate` door on the `count_distinct` row (#20808); a
  * consumer that cannot resolve a field's type (a relationship PATH it has no
  * metadata for) must NOT call the predicate with a guess — "cannot answer, do
  * not block" is the consumer's tier, not this table's.
@@ -152,8 +176,26 @@ const BOOLEAN_AGGREGATE_FIELD_TYPES = [
   'boolean', 'toggle',
 ] as const satisfies readonly FieldType[];
 
-/** Every declared `FieldType` — the `count` / `count_distinct` row. */
+/** Every declared `FieldType` — the `count` row. */
 const ANY_FIELD_TYPE: readonly FieldType[] = Object.freeze([...FieldType.options]);
+
+/**
+ * The JSON-stored types — the `STRUCTURED_JSON_TYPES` ∪ `MULTI_OPTION_TYPES`
+ * membership, spelled out for the same reason as the numeric class above (the
+ * pin test holds the two equal): a type joining either class elsewhere is a
+ * DECISION here. No two backends compare these values for equality alike, so
+ * the `count_distinct` row is every declared `FieldType` except these (#20808
+ * — see the module TSDoc).
+ */
+const JSON_STORED_AGGREGATE_FIELD_TYPES = [
+  'json', 'composite', 'repeater', 'record', 'location', 'address', 'vector',
+  'multiselect', 'checkboxes', 'tags',
+] as const satisfies readonly FieldType[];
+
+/** Every declared `FieldType` except the JSON-stored ones — the `count_distinct` row. */
+const DISTINCT_COMPARABLE_FIELD_TYPES: readonly FieldType[] = Object.freeze(
+  FieldType.options.filter((t) => !(JSON_STORED_AGGREGATE_FIELD_TYPES as readonly string[]).includes(t)),
+);
 
 /**
  * Which `FieldType`s each `AggregationFunction` may be applied to. Total over
@@ -166,7 +208,7 @@ const ANY_FIELD_TYPE: readonly FieldType[] = Object.freeze([...FieldType.options
 export const AGGREGATE_FIELD_TYPE_COMPATIBILITY: Readonly<Record<AggregationFunction, readonly FieldType[]>> =
   Object.freeze({
     count: ANY_FIELD_TYPE,
-    count_distinct: ANY_FIELD_TYPE,
+    count_distinct: DISTINCT_COMPARABLE_FIELD_TYPES,
     sum: Object.freeze([...ADDITIVE_AGGREGATE_FIELD_TYPES, ...BOOLEAN_AGGREGATE_FIELD_TYPES]),
     avg: Object.freeze([...NUMERIC_AGGREGATE_FIELD_TYPES, ...BOOLEAN_AGGREGATE_FIELD_TYPES]),
     min: Object.freeze([
@@ -180,7 +222,8 @@ export const AGGREGATE_FIELD_TYPE_COMPATIBILITY: Readonly<Record<AggregationFunc
 /**
  * May `aggregate` be applied to a field of `fieldType`? The single predicate
  * both consumer legs call, so one pair cannot be accepted at authoring and
- * refused at compile time.
+ * refused at compile time — and the one the engine's `aggregate` door asks for
+ * a `count_distinct` pair (#20808).
  *
  * Fail-closed on vocabulary AND on shape: a value outside `AggregationFunction`
  * or outside `FieldType` answers `false`, and so does anything that is not a

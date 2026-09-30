@@ -26,6 +26,8 @@ import {
   INSTANT_TYPES,
   CLOCK_TIME_TYPES,
   BOOLEAN_VALUE_TYPES,
+  STRUCTURED_JSON_TYPES,
+  MULTI_OPTION_TYPES,
 } from './field-value.zod';
 import { isIncoherentAggregate } from './aggregation-policy';
 import { AGGREGATION_CASES } from './aggregation-conformance';
@@ -40,6 +42,9 @@ const NUMERIC = ['currency', 'number', 'percent', 'progress', 'rating', 'slider'
 const ADDITIVE = NUMERIC.filter((t) => t !== 'percent');
 const TEMPORAL = ['date', 'datetime', 'time'];
 const BOOLEAN = ['boolean', 'toggle'];
+const JSON_STORED = [
+  'address', 'checkboxes', 'composite', 'json', 'location', 'multiselect', 'record', 'repeater', 'tags', 'vector',
+];
 
 describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — totality', () => {
   it('every AggregationFunction member has a row, and no row is for a non-member', () => {
@@ -69,9 +74,22 @@ describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — totality', () => {
 });
 
 describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — the ruled rows, resolved against the membership', () => {
-  it('`count` / `count_distinct`: every FieldType', () => {
+  it('`count`: every FieldType', () => {
     expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count)).toEqual(sorted(FieldType.options));
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct)).toEqual(sorted(FieldType.options));
+  });
+
+  it('[#20808] `count_distinct`: every FieldType EXCEPT the JSON-stored ones', () => {
+    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct))
+      .toEqual(sorted(FieldType.options.filter((t) => !JSON_STORED.includes(t))));
+  });
+
+  it('[#20808] the JSON-stored bucket IS the field-value structured-JSON class plus the multi-option types', () => {
+    // A type joining either class elsewhere is stored in a JSON column by every
+    // SQL driver, and no two backends compare such values alike — so it reds
+    // here until the count_distinct row records a decision.
+    expect(sorted([...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES])).toEqual(JSON_STORED);
+    const refused = FieldType.options.filter((t) => !AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct.includes(t));
+    expect(sorted(refused)).toEqual(JSON_STORED);
   });
 
   it('`sum`: the numeric class EXCEPT `percent`, plus the boolean class', () => {
@@ -157,10 +175,21 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     }
   });
 
-  it('accepts `count` / `count_distinct` over anything, `vector` and `formula` included', () => {
+  it('accepts `count` over anything, `vector` and `formula` included', () => {
     for (const t of FieldType.options) {
       expect(isAggregateCompatibleWithFieldType('count', t)).toBe(true);
-      expect(isAggregateCompatibleWithFieldType('count_distinct', t)).toBe(true);
+    }
+  });
+
+  it('[#20808] accepts `count_distinct` over every scalar-stored type — `formula`, `percent`, `select`, `lookup`, `file` included — and refuses the JSON-stored ones', () => {
+    for (const t of FieldType.options) {
+      expect(isAggregateCompatibleWithFieldType('count_distinct', t), t).toBe(!JSON_STORED.includes(t));
+    }
+    for (const t of ['formula', 'percent', 'text', 'select', 'lookup', 'user', 'file', 'image']) {
+      expect(isAggregateCompatibleWithFieldType('count_distinct', t), t).toBe(true);
+    }
+    for (const t of ['json', 'vector', 'address', 'tags', 'multiselect']) {
+      expect(isAggregateCompatibleWithFieldType('count_distinct', t), t).toBe(false);
     }
   });
 
@@ -168,9 +197,10 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     // Both refuse the sum of a rate.
     expect(isIncoherentAggregate('sum', 'percent')).toBe(true);
     expect(isAggregateCompatibleWithFieldType('sum', 'percent')).toBe(false);
-    // The semantic opinion flags count_distinct of a rate; the ruling reads
-    // `count_distinct` as "any type" and this table follows the ruling. Pinned
-    // so the divergence is visible, not discovered (reported on #16353).
+    // The semantic opinion flags count_distinct of a rate; the ruling read
+    // `count_distinct` as "any type", the JSON-stored narrowing (#20808) does
+    // not reach a rate, and this table follows both. Pinned so the divergence
+    // is visible, not discovered (reported on #16353).
     expect(isIncoherentAggregate('count_distinct', 'percent')).toBe(true);
     expect(isAggregateCompatibleWithFieldType('count_distinct', 'percent')).toBe(true);
   });
