@@ -149,7 +149,7 @@ describe('[#20935] analytics — a field the caller is served masked is readable
     });
 
     it('the control: a reader the rules do not apply to is served the same members, and the queryable reader is asked with the caller\'s context', async () => {
-      const getQueryableFields = vi.fn((object: string) => READABLE[object]);
+      const getQueryableFields = vi.fn((object: string, _context?: ExecutionContext) => READABLE[object]);
       const { service, executed } = makeService({ capabilities, getQueryableFields });
       await service.query({ cube: 'fq_authored', measures: ['count'], dimensions: ['alias_code', 'alias_owner_region'], where: { alias_code: 'x' } } as never, CALLER);
       expect(executed.length).toBeGreaterThan(0);
