@@ -5272,6 +5272,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'they meant.',
   },
   {
+    id: 'cube-member-sql-expression-retired',
+    order: 53,
+    text:
+      'It also narrows an analytics cube member\'s `sql` — `measures.<metric>.sql` and '
+      + '`dimensions.<dimension>.sql` — to a column reference: a field of the cube\'s object, a '
+      + 'relationship path ending in one, or `\'*\'` (maintainer ruling D, ADR-0021 "zero raw '
+      + 'SQL / zero raw expressions" carried from the dataset layer to the cube members it '
+      + 'compiles to; ADR-0049 enforce-or-remove). A SQL expression there names no single '
+      + 'field, so no platform check could judge which fields it reads, and the two analytics '
+      + 'strategies never agreed on it: the raw-SQL path ran it verbatim, the ObjectQL path '
+      + 'refused it. It is now refused at parse with a prescription naming the ADR-0021 dataset '
+      + 'form — a measure with its own structured `filter` for a conditional count or sum, and '
+      + '`derived: { op, of: [...] }` over named measures for a ratio, sum, difference or '
+      + 'product. No D2 conversion: an expression has no mechanical rewrite into a dataset, so '
+      + 'the semantic entry `cube-member-sql-expression-retired` carries the move, including '
+      + 'the scale change a ratio makes (a `derived` ratio is a 0–1 fraction).',
+  },
+  {
     id: 'cube-metric-filters-retired',
     order: 10,
     text:
@@ -5285,9 +5303,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'platform\'s structured-FilterCondition direction — it cannot be parameterized, '
       + 're-targeted per driver dialect, or walked by the lint filter rules. The mechanical '
       + 'conversion strips the key from old sources (pure lossless delete — it never had an '
-      + 'effect to lose); filter at query time with `where`, fold the condition into the '
-      + 'metric\'s own `sql` expression, or use an ADR-0021 dataset measure\'s structured '
-      + '`filter`.',
+      + 'effect to lose); filter at query time with `where`, or use an ADR-0021 dataset '
+      + 'measure\'s structured `filter` (a metric\'s own `sql` is a column reference, see '
+      + '`cube-member-sql-expression-retired`).',
   },
   {
     id: 'cube-refresh-key-retired',
@@ -8229,6 +8247,58 @@ const step18: MigrationStep = {
         + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
         + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
     },
+    // #20943, maintainer ruling D — a cube member's `sql` is a column reference;
+    // the expression half is retired at the contract (ADR-0021's zero raw
+    // expressions, carried from the dataset layer to the cube members it compiles
+    // to). Semantic only, with no D2 conversion: an expression has no mechanical
+    // rewrite — it moves to another metadata type, and a ratio changes scale on
+    // the way — so the upgrader owes the judgement this entry states.
+    {
+      id: 'cube-member-sql-expression-retired',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.sql and analyticsCubes[].dimensions.<dimension>.sql '
+        + '(data.MetricSchema.sql / data.DimensionSchema.sql) authored as a SQL expression — a CASE '
+        + 'expression, an aggregate or a ratio of aggregates, a quoted or $-prefixed spelling, or any '
+        + 'other value that is not a column reference',
+      replacement:
+        'a column reference: a field of the cube\'s object (`amount`), a relationship path ending '
+        + 'in one (`account.amount`), or `\'*\'` for a count. A derived value moves to an '
+        + 'ADR-0021 dataset over the same object: a conditional count or sum is a dataset measure '
+        + 'with its own structured `filter` (`{ name: \'done_count\', aggregate: \'count\', filter: '
+        + '{ status: \'done\' } }`), and a ratio, sum, difference or product of measures is '
+        + '`derived: { op, of: [...] }` over measures named in the same dataset (`{ name: '
+        + '\'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', \'task_count\'] }, format: '
+        + '\'0.0%\' }`). A dimension that bucketed a column with a CASE expression has no expression '
+        + 'form in either layer: group by the column itself, or keep the bucket as a field of the '
+        + 'object and name that field',
+      reason:
+        'Maintainer ruling D (2026-09-30), from the analytics field-level read gate: a member whose '
+        + '`sql` is an expression names no single field, so no platform check can judge which fields '
+        + 'it reads, and the analytics strategies never agreed on it — the raw-SQL path emitted it '
+        + 'verbatim and the ObjectQL path refused it. ADR-0021 already set the direction for the '
+        + 'author surface ("zero raw SQL / zero raw expressions"); it governed the dataset layer and '
+        + 'left the cube members it compiles to open, which is the gap this closes. The dataset form '
+        + 'is the declared home of a derived value because every field it reads is named: a measure '
+        + 'filter names its fields, and a derived measure references other measures by name only. '
+        + 'There is no D2 conversion: the rewrite moves a member to a different metadata type and '
+        + 'cannot be derived from the expression text in general, so only the author can say which '
+        + 'dataset measures express what the expression meant. A ratio also changes SCALE on the way: '
+        + 'a `derived` ratio is a 0–1 fraction, while an expression that multiplied by 100 returned '
+        + 'percentage points — pair the ratio with a `%` numeral pattern (the server marks a ratio '
+        + 'column\'s percent scale as a fraction) and re-check any consumer that read the old number '
+        + 'raw. ADR-0021 / ADR-0049 / ADR-0087',
+      acceptanceCriteria:
+        'Every analytics cube parses: `CubeSchema`, the analytics_cube write door and defineStack '
+        + 'refuse an expression member at its `sql` with a prescription that names the dataset form, '
+        + 'so the sweep is mechanical — parse each cube, and each refusal is one member to move. For '
+        + 'each moved measure, a dataset over the same object declares it, and a query over a fixture '
+        + 'where the condition excludes rows returns the same figure the expression returned (a '
+        + 'ratio: the same value divided by 100 when the expression returned percentage points). '
+        + 'Every dashboard, report or saved query that named the cube member now names the dataset '
+        + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+    },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
     // retirement family, even when D2 is lossless). The unknown-keys entry
@@ -8239,22 +8309,23 @@ const step18: MigrationStep = {
     {
       id: 'cube-metric-filters-retired',
       surface: 'analyticsCubes[].measures.<metric>.filters — the per-metric raw-SQL filter list',
-      replacement: 'One of three filters that ARE applied: a `where` condition at query time, the '
-        + 'condition folded into the metric\'s own `sql` expression (a conditional aggregate), or an '
-        + 'ADR-0021 dataset measure with a structured `filter`.',
+      replacement: 'One of the two filters that ARE applied: a `where` condition at query time, or an '
+        + 'ADR-0021 dataset measure with a structured `filter`. (A third channel — folding the condition '
+        + 'into the metric\'s own `sql` expression — left with `cube-member-sql-expression-retired`: a '
+        + 'member\'s `sql` is a column reference.)',
       reason: 'The D2 conversion `metric-filters-removed` deletes `filters` from every cube metric, and '
         + 'the delete is lossless in the narrow sense: neither SQL strategy ever read the key, so a '
         + 'metric authored with `filters: [{ sql: "stage = \'closed_won\'" }]` already returned the '
         + 'UNFILTERED aggregate under the author\'s metric name, and still does. That is exactly why the '
         + 'strip does not finish the job. The author wrote a condition because they wanted a filtered '
         + 'number; every dashboard, report and export reading that metric has been showing a larger '
-        + 'one. Only the author can say which of the three live mechanisms expresses the condition '
-        + 'they meant — a query-time `where` changes every query, a conditional aggregate changes the '
-        + 'metric, a dataset measure moves it to the governed layer — and whether numbers already '
-        + 'published from the unfiltered metric need to be revisited.',
+        + 'one. Only the author can say which of the two live mechanisms expresses the condition '
+        + 'they meant — a query-time `where` changes every query, a dataset measure moves the metric '
+        + 'to the governed layer — and whether numbers already published from the unfiltered metric '
+        + 'need to be revisited.',
       acceptanceCriteria: 'No cube metric carries `filters`; the parse refuses the key by name. For '
         + 'each metric that carried one, the author has either re-expressed the condition through one '
-        + 'of the three live mechanisms or decided the unfiltered aggregate is what they want — and '
+        + 'of the two live mechanisms or decided the unfiltered aggregate is what they want — and '
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',

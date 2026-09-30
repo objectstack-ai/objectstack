@@ -147,7 +147,7 @@ Type: `[string, string]`
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or field reference |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
 | **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
 ### Nested Shape: `Cube.dimensions[string]`
@@ -158,7 +158,7 @@ Type: `[string, string]`
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or column reference |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("status") or a relationship path ending in one ("account.industry"). Never a SQL expression. |
 | **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 ### Nested Shape: `Cube.joins[string]`
@@ -191,7 +191,7 @@ Type: `[string, string]`
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or column reference |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("status") or a relationship path ending in one ("account.industry"). Never a SQL expression. |
 | **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional | For a time dimension. A single interval is its default bucket: a query that groups by this dimension without stating a granularity is bucketed at it. Two or more intervals state no default. A granularity the query states always wins, listed or not. |
 
 
@@ -220,7 +220,7 @@ Type: `[string, string]`
 | **label** | `string` | ✅ | Human readable label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>` | ✅ |  |
-| **sql** | `string` | ✅ | SQL expression or field reference |
+| **sql** | `string` | ✅ | Column reference: a field of the cube's object ("amount"), a relationship path ending in one ("account.amount"), or "*" for a count. Never a SQL expression: a derived value is declared on an ADR-0021 dataset (a measure-scoped filter, or derived: `{ op, of }`). |
 | **format** | `string` | optional | Display format for this measure's result column: a numeral pattern such as "$0,0.00" or "0.0%". Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta. |
 
 

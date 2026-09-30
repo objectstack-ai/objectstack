@@ -15,11 +15,11 @@ export const entry: SemanticMigration = {
   surface:
     'analyticsCubes[].measures.<metric>.sql and analyticsCubes[].dimensions.<dimension>.sql '
     + '(data.MetricSchema.sql / data.DimensionSchema.sql) authored as a SQL expression — a CASE '
-    + 'expression, an aggregate or a ratio of aggregates, a quoted or $-prefixed spelling — and '
-    + "the row wildcard '*' on anything but a count measure",
+    + 'expression, an aggregate or a ratio of aggregates, a quoted or $-prefixed spelling, or any '
+    + 'other value that is not a column reference',
   replacement:
     'a column reference: a field of the cube\'s object (`amount`), a relationship path ending '
-    + 'in one (`account.amount`), or `\'*\'` on a `count` measure. A derived value moves to an '
+    + 'in one (`account.amount`), or `\'*\'` for a count. A derived value moves to an '
     + 'ADR-0021 dataset over the same object: a conditional count or sum is a dataset measure '
     + 'with its own structured `filter` (`{ name: \'done_count\', aggregate: \'count\', filter: '
     + '{ status: \'done\' } }`), and a ratio, sum, difference or product of measures is '
