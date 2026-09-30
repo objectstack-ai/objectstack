@@ -2,6 +2,7 @@
 "@objectstack/objectql": minor
 "@objectstack/spec": minor
 "@objectstack/lint": patch
+"@objectstack/service-analytics": patch
 ---
 
 fix(objectql,spec)!: a `groupBy` on a multi-value field and a `count_distinct` on a JSON-stored field are refused with `INVALID_FIELD` / 400 at the engine's `aggregate`, on every driver, and the aggregate × field-type table stops accepting `count_distinct` over the JSON-stored types
@@ -28,3 +29,5 @@ Clause-②: no (narrowing)
 **Unchanged.** A `groupBy` or `count_distinct` on a scalar-stored field, a single-value `select` or `lookup` included; `count` over any field; the `having`, filter and sort positions; and an undeclared name, which the REST door answers `INVALID_FIELD` as unknown before the engine is reached.
 
 `@objectstack/lint`: the dataset-measure refusal's hint no longer says `count_distinct` accepts every type.
+
+`@objectstack/service-analytics`: the dataset compile leg's refusal of a `count_distinct` measure over a JSON-stored field says why it diverges (the drivers compare the values for equality three ways) and prescribes `count`, or a scalar field for the part being counted; its other refusals no longer say `count_distinct` accepts every type.

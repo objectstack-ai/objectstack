@@ -157,7 +157,7 @@ describe('#16099 — the pairs this leg refuses are the TABLE\'s, not this packa
     expect(isAggregateCompatibleWithFieldType('avg', 'percent')).toBe(true);
   });
 
-  it('⭐ the refused set, enumerated by the card that enforced each part — 155 pairs, 0 left over', () => {
+  it('⭐ the refused set, enumerated by the card that enforced each part — 165 pairs, 0 left over', () => {
     // The arithmetic the PR bodies show, asserted rather than narrated, so a
     // row moving upstream moves this count instead of leaving a stale claim.
     // ⚠️ [#17560] The `minmaxString` / `selecting` split this case used to carry
@@ -165,21 +165,23 @@ describe('#16099 — the pairs this leg refuses are the TABLE\'s, not this packa
     // apart because they were "ruled to be AMENDED" under #17513, and decision
     // batch #127 found no ruling behind that and declined to amend the table.
     // The 42 and the 32 are one population again, enforced in one pass.
-    let refusedByTable = 0, temporal = 0, deriving = 0, selecting = 0;
+    let refusedByTable = 0, temporal = 0, deriving = 0, selecting = 0, distinct = 0;
     for (const a of Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY)) {
       for (const ft of FieldType.options) {
         if (isAggregateCompatibleWithFieldType(a, ft)) continue;
         refusedByTable++;
         if (a === 'min' || a === 'max') { selecting++; continue; }
+        if (a === 'count_distinct') { distinct++; continue; }
         if (TEMPORAL_SOURCE_FIELD_TYPES.has(ft)) { temporal++; continue; }
         deriving++;
       }
     }
-    expect(refusedByTable).toBe(155);
+    expect(refusedByTable).toBe(165);
     expect(temporal).toBe(6);          // commit 357f4992b's — `sum`/`avg` over the temporal class
     expect(deriving).toBe(75);         // #16099's — `sum`/`avg` over everything else
     expect(selecting).toBe(74);        // #17560's — `min`/`max`, 42 string + 32 non-string
-    expect(temporal + deriving + selecting).toBe(refusedByTable);
+    expect(distinct).toBe(10);         // #20808's — `count_distinct` over the JSON-stored types
+    expect(temporal + deriving + selecting + distinct).toBe(refusedByTable);
     // ⭐ And nothing is left declared-but-unenforced: one door judges all six.
     expect(Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY).length).toBe(6);
   });
@@ -326,13 +328,37 @@ describe('#16099 — the controls: every pair the table accepts still compiles',
     expect(err.message).not.toContain('derives a NUMBER');
   });
 
-  it('`count` / `count_distinct` accept every type — they read no arithmetic off the value', async () => {
+  it('`count` / `count_distinct` over a scalar-stored field compile — they read no arithmetic off the value', async () => {
     for (const aggregate of ['count', 'count_distinct'] as const) {
       const { go, sqls } = run(aggregate, 'note');
       const result: any = await go();
       expect(result.rows.length).toBe(1);
       expect(sqls.length).toBe(1);
     }
+  });
+
+  // [#20808] The table's `count_distinct` row stops accepting the JSON-stored
+  // types, and this door judges every row: the refusal says why a distinct
+  // count diverges there (EQUALITY, not arithmetic or order) and never says
+  // `count_distinct` accepts every type.
+  it('[#20808] `count_distinct` over a JSON-stored field → DATASET_INVALID / 400 in the distinct words, before any SQL', async () => {
+    for (const [field, declared] of [['payload', 'json'], ['embedding', 'vector'], ['tags_list', 'multiselect']] as const) {
+      expect(isAggregateCompatibleWithFieldType('count_distinct', declared), declared).toBe(false);
+      const { go, sqls } = run('count_distinct', field);
+      const err = await refusalOf(go);
+      expect({ code: err.code, status: err.status }, declared).toEqual({ code: 'DATASET_INVALID', status: 400 });
+      expect(err.message, declared).toContain(`declares as \`${declared}\``);
+      expect(err.message, declared).toContain('COMPARES the stored values for equality');
+      expect(err.message, declared).not.toContain('derives a NUMBER');
+      expect(err.message, declared).not.toMatch(/count_distinct` accept every type/);
+      expect(err.message, declared).toContain('`count` counts the rows');
+      expect(sqls.length, declared).toBe(0);
+    }
+    // `count` over the same field compiles — it compares nothing.
+    const { go, sqls } = run('count', 'payload');
+    const result: any = await go();
+    expect(result.rows.length).toBe(1);
+    expect(sqls.length).toBe(1);
   });
 
   it('the three cannot-answer tiers still do not block — unchanged by the widened scope', async () => {
