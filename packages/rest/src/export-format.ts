@@ -300,8 +300,8 @@ function zonedWallClock(d: Date, timezone?: string): { ymd: string; hms: string 
   // [#20602] The zone's calendar day, spelled by the same rule as every other
   // cell ({@link calendarDay}). Its year is NOT `Intl`'s `year` part, which is
   // an ERA year: year 0 (1 BC) reads `1` there, so padding it would spell
-  // `0001-01-01T03:00Z` in New York as the last day of year 1, a date a year
-  // later that `/import` would take. An offset is under a day, so the zone's
+  // `0001-01-01T03:00Z` in New York as the last day of year 1, a day a year
+  // later than the instant's. An offset is under a day, so the zone's
   // year is the instant's UTC year, one more when the zone has reached January
   // and UTC is still in December, one less the other way round.
   const month = Number(mo);

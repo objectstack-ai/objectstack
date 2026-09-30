@@ -17,18 +17,19 @@
  * Two layers:
  *
  * - **The formatter** (`formatCellValue`, the one path CSV, xlsx and JSON
- *   share): a census over the years 0001, 0050, 0500, 0999, 1000, 2026 and
- *   9999, `date` and `datetime`, with and without a business timezone. The
- *   1000, 2026 and 9999 cells are the pre-#20602 output, byte for byte.
+ *   share): a census over the years 0001, 0050, 0099, 0500, 0999, 1000, 2026
+ *   and 9999, `date` and `datetime`, with and without a business timezone.
+ *   The 1000, 2026 and 9999 cells are the pre-#20602 output, byte for byte.
  * - **The routes**: rows written through the create door, exported as CSV,
  *   xlsx and JSON, and re-imported into a fresh stack through the import door,
  *   store the same `date` and `datetime` values, under no business timezone,
  *   Asia/Shanghai and America/New_York.
  *
- * Not pinned here: the `datetime` round trip for years 0001..0099. The export
- * spells those padded (the census below), and the import reads them back a
- * century late, through `Date.UTC`'s two-digit-year remap in core's
- * `zonedWallClockToUtcMs`. That is #20599's, a different defect.
+ * A `datetime` names a year from 1000 (#20280): the create door refuses an
+ * earlier one, so the route rows before 1000 carry a `date` only. The one
+ * `datetime` cell the padding still reaches at the routes is an instant from
+ * 1000 on whose business-timezone day is in 0999: the boundary row, at
+ * `1000-01-01T02:00:00.000Z`, which America/New_York reads on 0999-12-31.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -43,7 +44,7 @@ import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 const DATE: ExportFieldMeta = { name: 'd', type: 'date' };
 const DATETIME: ExportFieldMeta = { name: 'dt', type: 'datetime' };
 
-const YEARS = ['0001', '0050', '0500', '0999', '1000', '2026', '9999'] as const;
+const YEARS = ['0001', '0050', '0099', '0500', '0999', '1000', '2026', '9999'] as const;
 
 const ZONES = [undefined, 'UTC', 'Asia/Shanghai', 'America/New_York', 'Not/AZone'] as const;
 
@@ -94,7 +95,7 @@ describe('[#20602] formatCellValue spells a four-digit year for every date and d
     // Year 1 in UTC, still year 0 in New York: year 0 has no four-digit form,
     // so it is spelled unpadded as the storage rule spells it and the import
     // refuses it. Padding `Intl`'s era year would spell the last day of year 1,
-    // a date a year later that the import would take.
+    // a day a year later than the instant's.
     const cell = String(formatCellValue('0001-01-01T03:00:00.000Z', DATETIME, 'America/New_York'));
     expect(cell.startsWith('0-12-31 ')).toBe(true);
     expect(cell.startsWith('0001-')).toBe(false);
@@ -118,17 +119,32 @@ const LEDGER = {
 
 const MAPPING = { ID: 'id', Day: 'd', At: 'dt' };
 
+/** [#20280] The first year the create door takes for a `datetime`. */
+const DATETIME_FIRST_YEAR = 1000;
+
+type Row = { year: string; id: string; d: string; dt?: string; dtDay: (zone: string | undefined) => string };
+
 /**
- * One row per year: the day `Y-01-01` and the instant at 10:00 UTC on it. The
- * rows for 0001 and 0050 carry no `datetime`: its import is #20599's (the
- * module note).
+ * One row per year: the day `Y-01-01` and, from 1000 on, the instant at 10:00
+ * UTC on it (the module note). Then the boundary row: the instant 02:00 UTC on
+ * 1000-01-01, which America/New_York reads on 0999-12-31.
  */
-const ROWS = YEARS.map((year) => ({
-  year,
-  id: `y${year}`,
-  d: `${year}-01-01`,
-  dt: year === '0001' || year === '0050' ? undefined : `${year}-01-01T10:00:00.000Z`,
-}));
+const ROWS: Row[] = [
+  ...YEARS.map((year) => ({
+    year,
+    id: `y${year}`,
+    d: `${year}-01-01`,
+    dt: Number(year) >= DATETIME_FIRST_YEAR ? `${year}-01-01T10:00:00.000Z` : undefined,
+    dtDay: () => `${year}-01-01`,
+  })),
+  {
+    year: '0999',
+    id: 'y0999-boundary',
+    d: '0999-12-31',
+    dt: '1000-01-01T02:00:00.000Z',
+    dtDay: (zone) => (zone === 'America/New_York' ? '0999-12-31' : '1000-01-01'),
+  },
+];
 
 function createMockServer() {
   const noop = () => {};
@@ -257,11 +273,11 @@ describe.each(BUSINESS_ZONES)('[#20602] GET /export then POST /import, business 
       }
     });
 
-    it.each(ROWS)('exports the $year row with a four-digit year and re-imports it unchanged', async (row) => {
+    it.each(ROWS)('exports the $id row with a four-digit year and re-imports it unchanged', async (row) => {
       const cell = cells.get(row.id)!;
       expect(cell.d).toBe(row.d);
       if (row.dt) {
-        expect(cell.dt.slice(0, 11)).toBe(`${row.year}-01-01 `);
+        expect(cell.dt.slice(0, 11)).toBe(`${row.dtDay(zone)} `);
         if (row.year === '2026') expect(cell.dt).toBe(CONTROL_DATETIME_CELL[zone ?? 'none']);
       } else {
         expect(cell.dt).toBe('');
