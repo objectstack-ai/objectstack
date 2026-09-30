@@ -363,10 +363,10 @@ const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$
  * compares a stored element against, which is what lets the analytics face's
  * SQLite echo name the same set (`memory-analytics.ts`).
  *
- * @see InMemoryDriver.filterContainsMembers — where the population decides
+ * @see InMemoryDriver.filterContainsTest — where the population decides
  *      whether a comparand is read this way at all.
  */
-export function containsMemberCandidates(value: unknown): Array<string | number | boolean | null> {
+function containsMemberCandidates(value: unknown): ContainsMember[] {
   const text = String(value);
   if (text === 'true') return [text, true];
   if (text === 'false') return [text, false];
@@ -377,6 +377,18 @@ export function containsMemberCandidates(value: unknown): Array<string | number 
   }
   return [text];
 }
+
+/** [#20874] A stored member a `$contains` comparand can name. */
+type ContainsMember = string | number | boolean | null;
+
+/**
+ * [#20874] The un-negated test `$contains` lowers to on this driver —
+ * membership on a declared JSON-stored field, the substring pattern elsewhere.
+ * See {@link InMemoryDriver.filterContainsTest}.
+ */
+export type MemoryContainsTest =
+  | { $elemMatch: { $in: ContainsMember[]; $not: { $type: 'array' } } }
+  | { $regex: RegExp };
 
 /**
  * [#20444] Each field's declared value shape — the `type` and `multiple` slice
@@ -1483,10 +1495,10 @@ export class InMemoryDriver implements IDataDriver {
       // was always literal, and that half was never the defect.
       //
       // [#20874] `contains` / `not_contains` take the ONE test the `$`-spelling
-      // takes ({@link containsTest}): membership on a declared JSON-stored
+      // takes ({@link filterContainsTest}): membership on a declared JSON-stored
       // field, the case-exact substring everywhere else.
       case 'contains':
-        return { [field]: this.containsTest(object, field, value) };
+        return { [field]: this.filterContainsTest(object, field, value) };
       // [#7536] `like` / `ilike` are NOT `contains`, and sharing this arm with
       // it was the memory-face twin of the wire defect #7536 closed: the
       // comparand was regex-ESCAPED (so a caller's `%` matched a literal percent
@@ -1508,7 +1520,7 @@ export class InMemoryDriver implements IDataDriver {
         };
       }
       case 'notcontains': case 'not_contains':
-        return { [field]: { $not: this.containsTest(object, field, value) } };
+        return { [field]: { $not: this.filterContainsTest(object, field, value) } };
       case 'startswith': case 'starts_with':
         return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`) } };
       case 'endswith': case 'ends_with':
@@ -1693,7 +1705,7 @@ export class InMemoryDriver implements IDataDriver {
    * refused — the vocabulary itself is enforced one level up (#5324).
    * [#20874] `object` is carried for `$contains` / `$notContains` alone: which
    * question they ask is the FIELD's declared storage shape
-   * ({@link containsTest}), and `field` names it only together with `object`.
+   * ({@link filterContainsTest}), and `field` names it only together with `object`.
    */
   private normalizeFieldOperators(
     ops: Record<string, any>,
@@ -1728,19 +1740,19 @@ export class InMemoryDriver implements IDataDriver {
         // Unicode-folding `i` flag is gone.
         //
         // [#20874] `$contains` / `$notContains` ask the ONE test
-        // {@link containsTest} builds: MEMBERSHIP on a declared JSON-stored
+        // {@link filterContainsTest} builds: MEMBERSHIP on a declared JSON-stored
         // field, the substring pattern everywhere else. The substring test
         // still joins `regexConditions`, so it composes with `$startsWith` /
         // `$endsWith` exactly as before; the membership test lowers to
         // `$elemMatch`, a key no other operator writes.
         case '$contains': {
-          const test = this.containsTest(object, field, val);
+          const test = this.filterContainsTest(object, field, val);
           if ('$elemMatch' in test) put('$elemMatch', test.$elemMatch);
           else regexConditions.push(test);
           break;
         }
         case '$notContains':
-          put('$not', this.containsTest(object, field, val));
+          put('$not', this.filterContainsTest(object, field, val));
           break;
         case '$startsWith':
           regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`) });
@@ -2303,7 +2315,7 @@ export class InMemoryDriver implements IDataDriver {
    *
    * [#20874] On a scalar column. A declared JSON-stored field asks MEMBERSHIP
    * instead, so the analytics face now takes the whole predicate
-   * ({@link filterContainsPredicate}), which uses this for the substring half.
+   * ({@link filterContainsTest}), which uses this for the substring half.
    *
    * Same reasoning as {@link filterComparandStorageForm} one method up, on the
    * other half of what a `contains` predicate needs. This driver's rule is
@@ -2375,71 +2387,47 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
-   * [#20874] The stored members a `$contains` / `$notContains` comparand names
-   * on `field` of `object` ({@link containsMemberCandidates}), or `null` when
-   * the field asks the SUBSTRING question instead
-   * ({@link isJsonStoredField}).
+   * [#20874] The one un-negated test `$contains` asks of `field` on `object` —
+   * behind every spelling of the operator on this package: the `$`-spelling and
+   * the AST spelling of the query path, and the analytics face, which wraps it
+   * in `$not` for `$notContains` exactly as the query path does and renders its
+   * SQL echo from the members it names.
    *
-   * Public for the analytics face's SQL echo, which has to RENDER the same
-   * question in SQLite's language — the same reason
-   * {@link filterComparandStorageForm} and {@link filterSubstringPattern} are
-   * public: a face that re-derived the population or the member reading would
-   * be a second place for the two faces to drift apart (#5374).
-   */
-  filterContainsMembers(object: string | undefined, field: string, value: unknown): Array<string | number | boolean | null> | null {
-    return this.isJsonStoredField(object, field) ? containsMemberCandidates(value) : null;
-  }
-
-  /**
-   * [#20874] The mingo predicate `$contains` becomes on `field` of `object`, or
-   * — `negate`d — `$notContains`: the whole field predicate, for the analytics
-   * (cube) face, built by the one rule the live query path uses
-   * ({@link containsTest}).
+   * - **A declared JSON-stored field ({@link isJsonStoredField}) → MEMBERSHIP**:
+   *   `{ $elemMatch: { $in: members, … } }` — some element of the stored array
+   *   IS one of the members the comparand names ({@link containsMemberCandidates}).
+   *   `$elemMatch` is array-only by construction, so a stored scalar, an object
+   *   or `null` has no member — the answer `driver-sql` gives on every dialect
+   *   (its constructs are array-only too). The `$not: { $type: 'array' }` clause
+   *   keeps a NESTED array out: mingo applies `$in` through an element that is
+   *   itself an array, so `[['u1']]` would otherwise answer `'u1'`, where SQLite
+   *   compares the element's JSON text `["u1"]` and does not. Measured on mingo
+   *   7.2 against `driver-sql`/SQLite over one fixture: with the clause the two
+   *   answer the same rows on every shape, `[null]` and `[[null]]` included.
+   * - **Anything else → `{ $regex }`, the case-exact literal SUBSTRING** (#6682),
+   *   {@link filterSubstringPattern} unchanged.
    *
-   * Returned whole, not as a pattern, because the two readings do not share a
-   * shape: the substring reading is a `$regex`, the membership reading an
-   * `$elemMatch`. The analytics face used to take {@link filterSubstringPattern}
-   * and wrap it in `$regex` itself, which is how it inherited the per-element
-   * substring answer on a stored array along with the query path.
-   */
-  filterContainsPredicate(object: string | undefined, field: string, value: unknown, negate: boolean): Record<string, unknown> {
-    const test = this.containsTest(object, field, value);
-    return negate ? { $not: test } : test;
-  }
-
-  /**
-   * [#20874] The one un-negated test behind every spelling of `$contains` on
-   * this package — the `$`-spelling and the AST spelling of the query path, and
-   * the analytics face through {@link filterContainsPredicate}.
-   *
-   * - **A declared JSON-stored field → MEMBERSHIP**: some element of the stored
-   *   array IS one of the comparand's candidates. `$elemMatch` is array-only by
-   *   construction, so a stored scalar, an object or `null` has no member — the
-   *   answer `driver-sql` gives on every dialect (its constructs are array-only
-   *   too). The `$not: { $type: 'array' }` clause keeps a NESTED array out: mingo
-   *   applies `$in` through an element that is itself an array, so `[['u1']]`
-   *   would otherwise answer `'u1'`, where SQLite compares the element's JSON
-   *   text `["u1"]` and does not. Measured on mingo 7.2 over one fixture: with
-   *   the clause, this and SQLite answer the same rows on every shape, `[null]`
-   *   and `[[null]]` included.
-   * - **Anything else → the case-exact literal SUBSTRING** (#6682), unchanged.
-   *
-   * The negation composes with the NULL rule rather than replacing it: `$not`
+   * Negated, it composes with the NULL rule rather than replacing it: `$not`
    * over either test admits a row whose field is null or missing (#5298), which
    * is `driver-sql`'s `col IS NULL OR NOT (…)`.
    *
+   * Public for the analytics face, for the reason {@link filterComparandStorageForm}
+   * and {@link filterSubstringPattern} are: a face that re-derived the population
+   * or the member reading would be a second place for the two faces to drift
+   * apart (#5374). Returned whole rather than as a pattern because the two
+   * readings do not share a shape — the analytics face used to take
+   * {@link filterSubstringPattern} and wrap it in a `$regex` of its own, which is
+   * how it inherited the per-element substring answer along with the query path.
+   *
    * ⚠️ On a field this driver holds no declaration for, the substring pattern
    * still reaches mingo, which applies a `$regex` to each element of an array
-   * value. That residue is the population's deliberate `false` above, the same
-   * one `driver-sql` keeps for a table it was never told about.
+   * value — the population's deliberate `false`, the same one `driver-sql` keeps
+   * for a table it was never told about.
    */
-  private containsTest(
-    object: string | undefined,
-    field: string,
-    value: unknown,
-  ): { $elemMatch: Record<string, unknown> } | { $regex: RegExp } {
-    const members = this.filterContainsMembers(object, field, value);
-    if (members) return { $elemMatch: { $in: members, $not: { $type: 'array' } } };
+  filterContainsTest(object: string | undefined, field: string, value: unknown): MemoryContainsTest {
+    if (this.isJsonStoredField(object, field)) {
+      return { $elemMatch: { $in: containsMemberCandidates(value), $not: { $type: 'array' } } };
+    }
     return { $regex: this.filterSubstringPattern(value) };
   }
 

@@ -20,7 +20,7 @@ import {
 // call: `isFilterAST` gates the shape, `parseFilterAST` lowers it. See
 // {@link lowerWhereFilterArray}. ⛔ No second FilterArray parser in this face.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
-import type { InMemoryDriver } from './memory-driver.js';
+import type { InMemoryDriver, MemoryContainsTest } from './memory-driver.js';
 import {
   Logger,
   createLogger,
@@ -238,9 +238,9 @@ interface MongoPredicateInput {
   /** The operands as authored. For operands that are not comparands. */
   readonly raw: readonly unknown[];
   /**
-   * The whole predicate `$contains` (or, `negate`d, `$notContains`) becomes on
-   * this member's column, built by the DRIVER's own rule
-   * (`filterContainsPredicate`) rather than re-derived here.
+   * The test `$contains` asks of this member's column, built by the DRIVER's
+   * own rule (`filterContainsTest`) rather than re-derived here — `$notContains`
+   * wraps it in `$not`, as the live query path does.
    *
    * [#7723] Case-EXACT, because that rule is: `filterSubstringPattern` carried
    * an `i` flag until #7723 took it off, putting the `$contains` family on the
@@ -254,7 +254,7 @@ interface MongoPredicateInput {
    * the predicate rather than a piece of it is what makes the membership reading
    * reach this face with the same edit, the lesson #7723 records above.
    */
-  readonly containment: (value: unknown, negate: boolean) => Record<string, unknown>;
+  readonly containment: (value: unknown) => MemoryContainsTest;
   /**
    * [#6520] A comparand as an ASCII-case-insensitive literal-substring pattern —
    * `$icontains`' fold, which is NOT {@link substring}'s.
@@ -345,7 +345,7 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   notIn: ({ comparands }) => ({ $nin: [...comparands] }),
   // A pattern, not a comparand: `raw`, and the driver's own rule — membership on
   // a declared JSON-stored field, the substring everywhere else (#20874).
-  contains: ({ raw, containment }) => containment(raw[0], false),
+  contains: ({ raw, containment }) => containment(raw[0]),
   // [#6520] The case-INSENSITIVE twin, folding ASCII and nothing else. It takes
   // `asciiSubstring`, not `substring`: the neighbour above folds Unicode, so
   // reusing it here would answer `CAFÉ` for `café` on this face while the SQL
@@ -355,7 +355,7 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // negation has to wrap a pattern, which is exactly what the live query path
   // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`) —
   // and, since #20874, the SAME test it builds, membership or substring.
-  notContains: ({ raw, containment }) => containment(raw[0], true),
+  notContains: ({ raw, containment }) => ({ $not: containment(raw[0]) }),
   // [#13195] A presence flag, not a comparand — and "present" means HAS A
   // VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in PR
   // #5962, ruled onto this face 2026-08-30. It used to emit `{$exists: <bool>}`
@@ -398,9 +398,9 @@ interface SqlPredicateInput {
   readonly globSubstring: (value: unknown) => string;
   /**
    * [#20874] The stored members a `$contains` comparand names on this column,
-   * or `null` when the column asks the SUBSTRING question — the DRIVER's answer
-   * (`filterContainsMembers`), the same one its `$match` twin executes. See
-   * {@link sqliteMembershipPredicate}.
+   * or `null` when the column asks the SUBSTRING question — read off the
+   * DRIVER's test (`filterContainsTest`), the one its `$match` twin executes.
+   * See {@link sqliteMembershipPredicate}.
    */
   readonly members: (value: unknown) => readonly unknown[] | null;
 }
@@ -1665,7 +1665,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       const predicate = this.mongoPredicateBuilder(filter.operator)({
         comparands: filter.values.map(storageForm),
         raw: filter.values,
-        containment: (value, negate) => this.driver.filterContainsPredicate(table, fieldPath, value, negate),
+        containment: (value) => this.driver.filterContainsTest(table, fieldPath, value),
         // [#6520] `$icontains`' fold, from the spec's shared definition rather
         // than from the driver's Unicode-folding `filterSubstringPattern`.
         asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
@@ -1737,7 +1737,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         raw: entry.values,
         literal: (value) => this.toSqlLiteral(value),
         globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
-        members: (value) => this.driver.filterContainsMembers(table, fieldPath, value),
+        members: (value) => {
+          // [#20874] Read off the very test the `$match` exit runs, so the echo
+          // and the chart can never name two different member sets.
+          const test = this.driver.filterContainsTest(table, fieldPath, value);
+          return '$elemMatch' in test ? test.$elemMatch.$in : null;
+        },
       }));
     }
     return clauses;
