@@ -56,13 +56,23 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { NON_TEXT_STORED_VALUE_TYPES } from '@objectstack/spec/data';
+import { lowerFilterCondition, NON_TEXT_STORED_VALUE_TYPES } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import {
   DIALECT_CELLS,
   declareUnprovisionedCell,
   type DialectCell,
 } from './live-dialect-matrix.testkit.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The `$not` operand a seam
+ * hands this driver: the shared lowering's rule 3 guards each leaf in the
+ * direction its operator answers for a row with no value. `SqlDriver` no longer
+ * carries its own copy of that rewrite (`nullSafeNegationOperand`), so the
+ * compile pin below reads the SQL for the operand a seam hands it.
+ */
+const seamedNot = (where: FilterCondition): FilterCondition =>
+  lowerFilterCondition(where, { isDatetimeColumn: () => false }) as FilterCondition;
 
 /** Issue-prefixed: the live cells share one database with every other suite here. */
 const TEMPORAL_OBJECT = 'os15683_temporal_text';
@@ -263,10 +273,10 @@ describe('[#15683] the per-dialect construct, compiled', () => {
 
   it('composes with the NULL-safe $not rewrite: NOT over the constant is total', () => {
     const d = typed(DIALECTS[1][1]);
-    const notContains = d.compileWhere({ $not: { on_day: { $contains: '2026' } } });
+    const notContains = d.compileWhere(seamedNot({ $not: { on_day: { $contains: '2026' } } }));
     expect(notContains).toMatch(/not \(.*is not null.*1 = 0/);
     expect(notContains).not.toMatch(/LIKE/);
-    const notNotContains = d.compileWhere({ $not: { on_day: { $notContains: '2026' } } });
+    const notNotContains = d.compileWhere(seamedNot({ $not: { on_day: { $notContains: '2026' } } }));
     expect(notNotContains).toMatch(/not \(.*is null.*1 = 1/);
   });
 

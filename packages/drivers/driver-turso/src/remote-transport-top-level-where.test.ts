@@ -4,8 +4,17 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The `$not` operand a seam
+ * hands this transport: the shared lowering's rule 3 guards each leaf in the
+ * direction its operator answers for a row with no value. The transport no
+ * longer carries its own copy of that rewrite, so the `$not` pins below compile
+ * the operand a seam hands it, and read the same SQL they always did.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 /**
  * Regression: a TOP-LEVEL `where` this transport cannot compile must THROW,
@@ -274,7 +283,7 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // [#5903] The `$not` operand carries the #5146 NULL guard on this face
       // now. What #1075 pins is that a well-formed top-level `where` still
       // COMPILES rather than being refused by the node gate — which it does.
-      expect((await compile({ $not: { stage: 'won' } })).sql).toBe(
+      expect((await compile(seamed({ $not: { stage: 'won' } }))).sql).toBe(
         `${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`,
       );
       expect((await compile({ closed_at: null })).sql).toBe(`${BARE_SCAN} WHERE "closed_at" IS NULL`);

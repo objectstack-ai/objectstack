@@ -26,9 +26,20 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type DriverOptions, type FilterCondition } from '@objectstack/spec/data';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { SqliteWasmDriver } from './index.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The `SqlDriver` this driver inherits no longer carries
+ * its own copy of that rewrite, so the answers below are the ones every seamed
+ * read gets, unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = <T,>(where: T): T => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 const NUL = String.fromCharCode(0x00);
 const BYPASS: DriverOptions = { bypassTenantAudit: true };
@@ -115,7 +126,7 @@ describe('[#20024] driver-sqlite-wasm — a comparand without U+0000 reads the w
   let driver: SqliteWasmDriver;
 
   const labelsWhere = async (where: FilterCondition): Promise<string[]> => {
-    const rows = (await driver.find(TABLE, { where }, BYPASS)) as Array<{ label: string }>;
+    const rows = (await driver.find(TABLE, { where: seamed(where) }, BYPASS)) as Array<{ label: string }>;
     return rows.map((r) => r.label).sort();
   };
 

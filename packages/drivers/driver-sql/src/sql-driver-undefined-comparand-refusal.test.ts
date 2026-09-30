@@ -74,7 +74,19 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from './index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the `$not` row below reads the answer every seamed read gets,
+ * unchanged; the refusal cases stay direct calls (the seams' own door refuses
+ * an `undefined` comparand before any lowering, so they stand for a caller
+ * that passes no seam). No column here is a declared `datetime`.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 interface WireBearingError extends Error {
   code?: string;
@@ -285,7 +297,7 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
     expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
     expect(await ids({ score: { $between: [5, 15] } })).toEqual(['1']);
     expect(await ids({ score: { $gte: 10 } })).toEqual(['1', '2']);
-    expect(await ids({ $not: { stage: 'won' } })).toEqual(['2']);
+    expect(await ids(seamed({ $not: { stage: 'won' } }))).toEqual(['2']);
     expect(await ids({})).toEqual(['1', '2']);
     expect(await ids({ $and: [] })).toEqual(['1', '2']);
     expect(await ids({ $or: [] })).toEqual([]);

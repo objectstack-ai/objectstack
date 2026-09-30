@@ -67,7 +67,16 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The `$not` operand a seam
+ * hands this transport: the shared lowering's rule 3 guards each leaf in the
+ * direction its operator answers for a row with no value. The transport no
+ * longer carries its own copy of that rewrite, so the `$not` pins below compile
+ * the operand a seam hands it, and read the same SQL they always did.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 interface WireBearingError extends Error {
   code?: string;
@@ -395,11 +404,11 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
       // makes it TOTAL. That is a change THIS suite must not read as a #5769
       // regression: what #5769 pins is that the node gate compiles the three
       // declared combinators rather than refusing them, and it still does.
-      expect((await compile({ $not: { stage: 'won' } })).sql).toBe(
+      expect((await compile(seamed({ $not: { stage: 'won' } }))).sql).toBe(
         `${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`,
       );
       expect(
-        (await compile({ $and: [{ $or: [{ stage: 'won' }] }, { $not: { stage: 'lost' } }] })).sql,
+        (await compile(seamed({ $and: [{ $or: [{ stage: 'won' }] }, { $not: { stage: 'lost' } }] }))).sql,
       ).toBe(
         `${BARE_SCAN} WHERE (((("stage" = ?))) AND (NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))))`,
       );

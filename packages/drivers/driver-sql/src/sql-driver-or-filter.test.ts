@@ -43,13 +43,24 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
+import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, lowerFilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import {
   DIALECT_CELLS,
   declareUnprovisionedCell,
   type DialectCell,
 } from './live-dialect-matrix.testkit.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the answers below are the ones every seamed read gets,
+ * unchanged. Every column the shared table declares is `text`, so the whole-day rule
+ * has nothing to rewrite.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 /**
  * Issue-prefixed table names: the live cells share one database with every
@@ -117,7 +128,7 @@ function declareFilterLogicSweep(cell: DialectCell): void {
     describe('shared conformance cases', () => {
       for (const c of FILTER_LOGIC_CASES) {
         it(c.name, async () => {
-          const rows = await driver.find(FILTER_TABLE, { where: c.filter });
+          const rows = await driver.find(FILTER_TABLE, { where: seamed(c.filter) as any });
           const got = rows
             .map((r: any) => String(r.id))
             .sort((x: string, y: string) => x.localeCompare(y));
