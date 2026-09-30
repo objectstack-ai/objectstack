@@ -508,12 +508,15 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
 
   it('GUARD the having walk narrows copy-on-write and judges only columns classed numeric', () => {
     const classes = new Map([['total', 'numeric' as const], ['label', 'text' as const], ['unknown', undefined]]);
+    // [#20546] The same reading's types, for the walk's no-operator-object arm
+    // (nothing here is an object without a `$` key, so it refuses nothing).
+    const types = new Map<string, string | undefined>([['total', 'number'], ['label', 'text'], ['unknown', undefined]]);
     const having = { total: { $in: ['1', 2] }, label: { $eq: 'abc' }, unknown: { $eq: 'abc' } };
-    const narrowed = narrowHavingNumberComparands(OBJECT, having, classes);
+    const narrowed = narrowHavingNumberComparands(OBJECT, having, classes, types);
     expect(narrowed).toEqual({ total: { $in: [1, 2] }, label: { $eq: 'abc' }, unknown: { $eq: 'abc' } });
     expect(having.total.$in).toEqual(['1', 2]);
     const untouched = { total: { $gt: 5 } };
-    expect(narrowHavingNumberComparands(OBJECT, untouched, classes)).toBe(untouched);
+    expect(narrowHavingNumberComparands(OBJECT, untouched, classes, types)).toBe(untouched);
   });
 
   // ── the REST doors that reach findData ──────────────────────────────────

@@ -37,6 +37,7 @@ import {
   utcInstantMs,
   isUnboundedAbove,
   compensatedSum,
+  wallClockToUtcMs,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -365,7 +366,9 @@ export function bucketDate(value: unknown, granularity: string, timezone?: strin
     case 'month': return `${y}-${m}`;
     case 'week': {
       // Build a UTC date from the zone-shifted parts, then step back to Monday.
-      const monday = new Date(Date.UTC(y, month - 1, dayNum));
+      // [#20599] Through core's `wallClockToUtcMs`, never `Date.UTC`, which
+      // reads a year from 0 to 99 as 1900 + year.
+      const monday = new Date(wallClockToUtcMs({ year: y, month, day: dayNum }));
       const dow = (monday.getUTCDay() + 6) % 7; // Monday=0
       monday.setUTCDate(monday.getUTCDate() - dow);
       return monday.toISOString().slice(0, 10);
