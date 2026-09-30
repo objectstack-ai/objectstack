@@ -8,7 +8,24 @@
  * a fraction is admitted on both, and a `Z` / offset suffix on a time of day is
  * refused on both with the same field code, `invalid_time`.
  *
- * MEASURED_TABLE
+ * Measured through the routes at the base (`96e72447`) and after, the process
+ * in America/New_York, on InMemoryDriver, SqlDriver over SQLite and SqlDriver
+ * over PostgreSQL 16.13 at `Asia/Shanghai` — the three answered alike on every
+ * row. The write door's column is unchanged by this fix.
+ *
+ * | `time` value | write door | `/import`, base | `/import`, now |
+ * |:--|:--|:--|:--|
+ * | `10:00:00.250`, `23:59:59.999` | 201, as written | row failed, `invalid_date` | as written |
+ * | `10:00:00.5`, `10:00:00.000` | `10:00:00.500`, `10:00:00` | row failed, `invalid_date` | the write door's value |
+ * | `2026-07-15T10:00:00.250Z`, `2026-07-15 10:00:00.250` | `10:00:00.250` | `10:00:00`, the fraction dropped | `10:00:00.250` |
+ * | `9999-12-31T23:00:00-02:00` | 400 `invalid_time` | `01:00:00` | row failed, `invalid_time` |
+ * | `10:00Z`, `10:00+08:00`, `10:00:00.250Z`, `+010000-01-01T10:00:00Z`, `25:00`, `9:00`, `07/15/2026 10:00` | 400 `invalid_time` | row failed, `invalid_date` | row failed, `invalid_time` |
+ * | `10:00:00`, `10:00`, `2026-07-15T18:00:00+08:00` | `10:00:00` | `10:00:00` | unchanged |
+ * | export → import of `10:00:00.250`, `23:59:59.999` (CSV, JSON) | — | both rows failed | as exported |
+ * | export → import of the `10:00:00` control | — | as exported | unchanged |
+ *
+ * The InMemoryDriver column came from a copy of this file with that driver in
+ * place of `SqlDriver`, not committed (see the dialect axis below).
  *
  * ## What is pinned here
  *
