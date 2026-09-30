@@ -2,7 +2,7 @@
 
 /**
  * The two tiers of this package's suite stay a PARTITION, and the tier of
- * every file stays what the file DOES (#13504, #14554).
+ * every file stays what the file DOES (commit 44813ba57, #14554).
  *
  * `vitest.config.ts` splits the suite into two named projects — `unit` (the
  * local default) and `integration` (spawns the real CLI or boots a real

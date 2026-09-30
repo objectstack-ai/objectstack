@@ -231,7 +231,7 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
       const { t } = transportWithCapturingClient();
       const err = await t.find('deal', { where: { payload: { $eq: { a: 1 } } } }).catch((e) => e);
       expect(err.message).toMatch(/must be a string, number, bigint, boolean, null or Date/);
-      expect(err.message).toMatch(/#1004, #1058/);
+      expect(err.message).toContain('indistinguishable from "no rows matched".');
     });
 
     it('truncates a large comparand rather than pasting it into the log', async () => {

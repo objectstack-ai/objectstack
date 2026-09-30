@@ -2,7 +2,7 @@
 
 /**
  * `os package publish` renders a failed publish as the SERVER's own sentence,
- * never as the literal `[object Object]` (#10763).
+ * never as the literal `[object Object]` (commit c2b97c2a1).
  *
  * ## The defect
  *

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10504 — `os validate` dropped the whole `UI:` row at zero apps, so a
+ * The defect commit ff5733e03 fixed — `os validate` dropped the whole `UI:` row at zero apps, so a
  * project with no navigable UI read identically to one whose summary simply
  * does not report on UI at all.
  *
@@ -71,7 +71,7 @@ const ZERO_APPS_STATS: MetadataStats = {
 const ONE_APP_STATS: MetadataStats = { ...ZERO_APPS_STATS, apps: 1 };
 
 /**
- * #10952's harsher fixture: a stack that declares nothing at all, so EVERY
+ * Commit 0d4bd93e7's harsher fixture: a stack that declares nothing at all, so EVERY
  * section is empty — including `Data:`, which the `blank` scaffold's one object
  * keeps populated. Before the fix this rendered the single line `UI: 0 Apps`.
  */
@@ -97,17 +97,17 @@ describe('[#10504] printMetadataStats renders the UI: row at zero apps', () => {
     expect(out).toContain('Data: 1 Objects  2 Fields');
   });
 
-  // #10504's fourth test asserted the NARROW scope it shipped with: that
+  // Commit ff5733e03's fourth test asserted the NARROW scope it shipped with: that
   // `Logic:`/`Security:` still dropped their whole row at zero. That card named
-  // this assertion as "the deliberate one to update" if #10952 landed the wider
-  // fix. #10952 landed it — triage generalised the principle (a summary section
+  // this assertion as "the deliberate one to update" if commit 0d4bd93e7's card landed the wider
+  // fix. Commit 0d4bd93e7 landed it — triage generalised the principle (a summary section
   // is never silently dropped; every section prints its zero state) — so the
   // assertion is replaced, deliberately and by name, with the per-section pins
   // in the next describe block.
 });
 
 /**
- * #10952 — the same drop, measured on the rows #10504 did not rule on.
+ * The defect commit 0d4bd93e7 fixed — the same drop, measured on the rows the ruling commit ff5733e03 landed did not rule on.
  *
  * Reproduced at this branch's base against the real CLI (`bin/run-dev.js
  * validate`, `NO_COLOR=1`) on two fixture stacks. One object, two fields and
@@ -122,7 +122,7 @@ describe('[#10504] printMetadataStats renders the UI: row at zero apps', () => {
  * just were not there, and "none of it" is indistinguishable from "not
  * reported on".
  *
- * Triage (issue comment 5380549313) generalised #10504's ruling: a summary
+ * Triage (issue comment 5380549313) generalised the ruling commit ff5733e03 landed: a summary
  * section is NEVER silently dropped; every section prints its zero state. The
  * constraint it set is consistency with the shipped `UI: 0 Apps` shape, not a
  * specific string.
@@ -179,7 +179,7 @@ describe('[#10952] printMetadataStats prints every section\'s zero state — no 
 });
 
 /**
- * #11172 — the two rows of `printMetadataStats` that #10952 did not reach.
+ * The defect commit 05181e8cc fixed — the two rows of `printMetadataStats` that commit 0d4bd93e7 did not reach.
  *
  * Both measured at that card's head against the real CLI (`bin/run-dev.js
  * validate`, `NO_COLOR=1`) on a stack declaring nothing. The whole summary was
@@ -252,7 +252,7 @@ describe('[#11172] printMetadataStats: the Runtime: row survives zero, and no me
     const keys = Object.keys(collectMetadataStats({}));
     // Anti-vacuity floor: an empty (or accidentally shrunken) key list would
     // satisfy the loop below perfectly while asserting nothing. 18 is the count
-    // after #11172 retired `translations`; retiring another metric under
+    // after commit 05181e8cc retired `translations`; retiring another metric under
     // enforce-or-remove means lowering this deliberately, which is the point.
     expect(keys.length).toBeGreaterThanOrEqual(18);
 

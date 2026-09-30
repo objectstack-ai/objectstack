@@ -1,4 +1,4 @@
-// The TEST-layer type-check program (#14710), adopting the mechanism #5286 set
+// The TEST-layer type-check program (commit 95fdf627b), adopting the mechanism #5286 set
 // for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
 // stays exactly as it is: it is the BUILD config, and its `include: ["src"]` is
 // correct for a build — `tsconfig.build.json` ships `src` and nothing else.

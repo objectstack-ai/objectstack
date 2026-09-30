@@ -313,7 +313,7 @@ describe('pnpm 11 build approvals in the rendered workspace file', () => {
 
 // A brand-new scaffold's first `pnpm install` reported two unmet peers, on the
 // one screen where a newcomer decides whether this project is solid, with
-// nothing they did to cause it (#10326). Both ranges belong to third-party
+// nothing they did to cause it (commit 675ab574e). Both ranges belong to third-party
 // packages we cannot edit, so the remedy is pnpm's scoped `allowedVersions` —
 // and it must travel INSIDE the scaffold, because a `peerDependencyRules` block
 // in this repo's own pnpm-workspace.yaml does not ship with published packages.
