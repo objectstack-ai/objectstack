@@ -297,50 +297,6 @@
   "#6603": 1,
   "#7020": 1
  },
- "packages/metadata-protocol/src/migrations/live-mysql-database.testkit.ts": {
-  "#10382": 1
- },
- "packages/metadata-protocol/src/migrations/overlay-index.ts": {
-  "#6418": 3,
-  "#8725": 1
- },
- "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts": {
-  "#8686": 9,
-  "#9261": 1,
-  "#9451": 4
- },
- "packages/metadata-protocol/src/migrations/sys-setting-identity-index.ts": {
-  "#8629": 4
- },
- "packages/metadata-protocol/src/migrations/view-definition-active-index.ts": {
-  "#5839": 3,
-  "#6417": 3,
-  "#8725": 1
- },
- "packages/metadata-protocol/src/plugin.ts": {
-  "#5839": 1,
-  "#8629": 1,
-  "#8686": 1
- },
- "packages/metadata-protocol/src/protocol.ts": {
-  "#10377": 1,
-  "#3172": 1,
-  "#3770": 1,
-  "#4196": 1,
-  "#4432": 1,
-  "#6190": 3,
-  "#6992": 1,
-  "#7894": 2,
-  "#8502": 1,
-  "#8586": 1,
-  "#8957": 2
- },
- "packages/metadata-protocol/src/runtime-authoring-gate.ts": {
-  "#6153": 1
- },
- "packages/metadata-protocol/src/sys-metadata-repository.ts": {
-  "#4867": 1
- },
  "packages/metadata/src/endpoint-matcher.ts": {
   "#5040": 1
  },

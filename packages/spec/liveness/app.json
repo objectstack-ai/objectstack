@@ -220,9 +220,12 @@
           "note": "2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0."
         },
         "description": {
-          "status": "dead",
-          "verifiedAt": "2026-08-01",
-          "note": "display annotation no surface renders. Benign — docs-shaped, kept, not warned (hook.label precedent). VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) under the previews ruling (#7131; README, 'Designer previews count as consumers'): 'no surface renders' is exactly the claim that ruling put back on the table for display keys, so it was measured instead of trusted. At objectui @e9ab52f9 AppPreview IS registered (previews/index.ts:40) and reachable (ResourceEditPage.tsx:949), and it contains ZERO occurrences of `areas` — it reads the app label at AppPreview.tsx:193 and walks `navigation` items, never the area collection. The area-level description reaches no human there."
+          "status": "live",
+          "verifiedAt": "2026-09-30",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#readAreas (resolves each area's `description` through `resolveI18nLabel` in the designer locale; unauthored stays undefined and draws nothing); objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/AppPreview.tsx#AppPreview (draws it under the area's label in the preview's Areas list, in read and design mode)",
+          "producer": "objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/previews/index.ts#registerBuiltinPreviews (registers AppPreview for `app`); objectui @db11afd4967: packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx#MetadataResourceEditPageImpl (`app` registers no custom EditPage, so the generic edit route resolves `getMetadataPreview('app')` and hands it the draft); framework: packages/rest/src/meta-item-read-gate.ts#filterAppForUserWithReason (the served app keeps every key of each area it serves)",
+          "note": "RE-GRADED dead → live 2026-09-30 (#20299) under the #7131 previews ruling (README, 'Designer previews count as consumers'): for a display key, being shown to a human is the whole claimed effect. objectui#11027, read at the `.objectui-sha` pin db11afd4967, added the Areas list; the superseded note measured AppPreview at @e9ab52f9 with zero `areas` reads. UNCHANGED: still docs-shaped, deliberately KEPT (ADR-0033) and not authorWarn'd."
         },
         "navigation": {
           "status": "live",
@@ -232,7 +235,7 @@
           "note": "the active area's tree replaces the top-level navigation. Since #4722 area trees ARE server-side gated: filterAppForUser (packages/rest/src/rest-server.ts:1870) runs the SAME filterNav over every `areas[].navigation`, so an item's `requiredPermissions` / `requiresService` is enforced identically in both trees and a gated entry (with its objectName/pageName/componentRef target) never reaches the browser. An area emptied BY the gate is dropped, mirroring the top-level group collapse; an area authored empty is passed through. Still client-only at both levels: `visible` (CEL — needs a bound user context the read layer lacks) and `requiresObject`. The area-LEVEL keys stay retired (#4651) — this enforces the items inside, not a revived area gate. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The `AppSchemaRenderer` leg is unchanged by this re-point."
         }
       },
-      "note": "Drilled because the gating keys diverged sharply from the live identity/tree keys — and they are gone: `visible` and `requiredPermissions` were RETIRED in 17.0.0 (#4651), rows DELETED because NavigationAreaSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Keep drilling: `description` is the surviving benign dead key, and the drill is what would catch a new gate being added here."
+      "note": "Drilled because the gating keys diverged sharply from the live identity/tree keys — and they are gone: `visible` and `requiredPermissions` were RETIRED in 17.0.0 (#4651), rows DELETED because NavigationAreaSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Keep drilling: the drill is what would catch a new gate being added here."
     },
     "contextSelectors": {
       "children": {
