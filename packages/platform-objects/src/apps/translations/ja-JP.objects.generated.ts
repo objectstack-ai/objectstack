@@ -431,15 +431,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "アクセストークン",
-        help: "プロバイダーが発行した有効な OAuth アクセストークン — データ API では決して返されません（#7987）。better-auth はエンジンの特権的な内部フィールドアクセサーを通じてこれを読み戻します"
+        help: "プロバイダーが発行した有効な OAuth アクセストークン — データ API では決して返されません。better-auth はエンジンの特権的な内部フィールドアクセサーを通じてこれを読み戻します"
       },
       refresh_token: {
         label: "リフレッシュトークン",
-        help: "有効な OAuth リフレッシュトークン — 長期間有効で、ObjectStack セッションを失効しても失効しません。データ API では決して返されません（#7987）"
+        help: "有効な OAuth リフレッシュトークン — 長期間有効で、ObjectStack セッションを失効しても失効しません。データ API では決して返されません"
       },
       id_token: {
         label: "ID トークン",
-        help: "プロバイダーが発行した OIDC ID トークン — データ API では決して返されません（#7987）"
+        help: "プロバイダーが発行した OIDC ID トークン — データ API では決して返されません"
       },
       access_token_expires_at: {
         label: "アクセストークン有効期限"

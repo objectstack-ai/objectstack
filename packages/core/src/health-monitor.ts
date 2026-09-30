@@ -82,7 +82,7 @@ const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
   [
     'autoRestart',
     "'autoRestart' was removed from PluginHealthCheck in @objectstack/spec 17.3.0 "
-    + '(#12032, ADR-0049 enforce-or-remove) — it never restarted a plugin. '
+    + '(ADR-0049 enforce-or-remove) — it never restarted a plugin. '
     + '`attemptRestart` called `plugin.destroy()` and stopped there, then '
     + "logged 'Plugin restarted' and set status `recovering`, and the periodic "
     + 'checks carried on against the destroyed instance — which the default '
@@ -94,14 +94,14 @@ const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
   [
     'maxRestartAttempts',
     "'maxRestartAttempts' was removed from PluginHealthCheck in "
-    + '@objectstack/spec 17.3.0 (#12032, ADR-0049 enforce-or-remove) — it capped a '
+    + '@objectstack/spec 17.3.0 (ADR-0049 enforce-or-remove) — it capped a '
     + 'restart that never happened, so it only counted `destroy()` calls. '
     + 'Delete the key.',
   ],
   [
     'restartBackoff',
     "'restartBackoff' was removed from PluginHealthCheck in @objectstack/spec "
-    + '17.3.0 (#12032, ADR-0049 enforce-or-remove) — it delayed a restart that '
+    + '17.3.0 (ADR-0049 enforce-or-remove) — it delayed a restart that '
     + 'never happened, so it only moved when the `destroy()` landed. Delete '
     + 'the key.',
   ],

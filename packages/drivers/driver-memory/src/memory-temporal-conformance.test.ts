@@ -35,6 +35,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
+  lowerFilterCondition,
   TEMPORAL_CASES,
   TEMPORAL_NOW,
   TEMPORAL_ROWS,
@@ -46,6 +47,23 @@ import { InMemoryDriver } from './memory-driver.js';
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
+
+/** The declared field maps this file syncs — what a typed seam reads. */
+const CONFORMANCE_FIELDS = { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } };
+const TIME_CONFORMANCE_FIELDS = { at: { type: 'time' }, why: { type: 'string' } };
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the case's filter through the shared lowering, reading the
+ * declared field map (`datetime` columns only). This driver keeps no
+ * whole-day copy of its own any more, so the whole-day cells are answered by
+ * the lowered filter, as on every seam-fed path; the expected rows are the
+ * shared table's, unchanged. Tokens resolve first, then lower (item 3).
+ */
+const lowered = <T,>(fields: Record<string, { type: string }>, filter: T): T =>
+  lowerFilterCondition(filter, {
+    isDatetimeColumn: (column) => Object.prototype.hasOwnProperty.call(fields, column) && fields[column]!.type === 'datetime',
+  });
 
 /**
  * The pre-#4047 storage forms, per the shared axis's seeding basis: `native`
@@ -88,7 +106,7 @@ describe('driver-memory — temporal conformance', () => {
     // without it the values would keep whatever form the writer produced.
     await driver.syncSchema('conformance', {
       name: 'conformance',
-      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
+      fields: CONFORMANCE_FIELDS,
     });
     for (const r of TEMPORAL_ROWS) {
       await driver.create('conformance', {
@@ -103,14 +121,14 @@ describe('driver-memory — temporal conformance', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) });
+        const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, resolveTokens(c.tokenFilter)) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -126,7 +144,7 @@ describe('driver-memory — Field.time conformance', () => {
     await driver.connect();
     await driver.syncSchema('time_conformance', {
       name: 'time_conformance',
-      fields: { at: { type: 'time' }, why: { type: 'string' } },
+      fields: TIME_CONFORMANCE_FIELDS,
     });
     for (const r of TEMPORAL_TIME_ROWS) {
       await driver.create('time_conformance', {
@@ -141,7 +159,7 @@ describe('driver-memory — Field.time conformance', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -159,7 +177,7 @@ describe('driver-memory — temporal conformance on rows that predate the schema
     // The retroactive pass runs here, on rows this driver never wrote.
     await driver.syncSchema('conformance', {
       name: 'conformance',
-      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
+      fields: CONFORMANCE_FIELDS,
     });
   });
 
@@ -179,7 +197,7 @@ describe('driver-memory — temporal conformance on rows that predate the schema
   // already swept above — a divergence here is a convergence bug by construction.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -194,7 +212,7 @@ describe('driver-memory — Field.time conformance on rows that predate the sche
     await driver.connect();
     await driver.syncSchema('time_conformance', {
       name: 'time_conformance',
-      fields: { at: { type: 'time' }, why: { type: 'string' } },
+      fields: TIME_CONFORMANCE_FIELDS,
     });
   });
 
@@ -209,7 +227,7 @@ describe('driver-memory — Field.time conformance on rows that predate the sche
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

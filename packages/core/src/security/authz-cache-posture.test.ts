@@ -64,7 +64,7 @@ describe('#11968 authz cache posture — the loud arm', () => {
     expect(message).toContain('7500ms');
     expect(message).toContain(AUTHZ_GRANTS_CACHE_TTL_ENV);
     expect(message).toMatch(/not an error/i);
-    expect(message).toContain('#4785');
+    expect(message).toContain('a silently-absent invalidation bridge is how a security control gets disabled without anyone noticing.');
   });
 });
 

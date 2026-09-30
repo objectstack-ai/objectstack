@@ -110,9 +110,9 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
     reason:
       'The row `admin_full_access` is resolved BY NAME from (§6b) — `platform_admin` is the '
       + "POSITION that row derives, not the row's own name. Renaming it, deleting it or switching "
-      + 'it off (ADR-0049 `active`, read here since #8613) un-makes every GRANT-derived platform '
+      + 'it off (ADR-0049 `active`, which this resolver honours) un-makes every GRANT-derived platform '
       + 'admin at once, with no identity table touched. ⚠️ It does NOT un-make a CONFIG-derived '
-      + 'one (§6b-config, #11970): that route sets the same standing from '
+      + 'one (§6b-config): that route sets the same standing from '
       + "`ADMIN_FULL_ACCESS_CAPABILITIES` in `@objectstack/spec` and matches the caller's own "
       + 'stored `sys_user` row, so it touches an identity table and never reads this one. With '
       + '`OS_PLATFORM_OWNER_EMAIL` unset the first sentence is the whole truth; with it declared, '
@@ -176,7 +176,7 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
   sys_user: {
     role: 'derives',
     reason:
-      '[#11663 L2] RECLASSIFIED from `reads-only`. This table used to be read only for the '
+      'RECLASSIFIED from `reads-only` when the config anchor landed. This table used to be read only for the '
       + '`current_user.email` RLS fallback and the cloud ADR-0024 `ai_seat` synthesis (§7), and the '
       + 'note here said so: "Neither confers administrator standing." That sentence is now FALSE. '
       + 'The config anchor (§6b-config) matches the row\'s own `email` against the deployment\'s '

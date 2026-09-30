@@ -90,7 +90,7 @@ export function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (driver-memory). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -219,7 +219,7 @@ export function filterArrayReachedDriverError(filters: unknown[]): Error {
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
       `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
       `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
-      `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+      `and protocol doors before any driver sees it. This driver no longer carries a ` +
       `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
       `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
       `all: write the prefix form ["or", condA, condB].`,
@@ -280,7 +280,7 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
       `comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated because the ` +
       `backends disagreed on what it means — driver-sql dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and this driver / @objectstack/formula ` +
-      `answered "matches nothing". #5240.`,
+      `answered "matches nothing".`,
   );
 }
 
@@ -447,8 +447,8 @@ export function uncompilableFieldOperatorError(
       `but cannot be compiled by ${capabilities.face}. Supported operators on this surface: ` +
       `${supported}. It is refused rather than dropped: a predicate that compiles to nothing does ` +
       `not narrow the query, it WIDENS it — the aggregate is then computed over rows the filter ` +
-      `excluded, and a chart drawn over them looks like a working chart (#3948, #4286/ADR-0078, ` +
-      `#5345). Rewrite the predicate with a supported operator, or run it through find().`,
+      `excluded, and a chart drawn over them looks like a working chart (ADR-0078). ` +
+      `Rewrite the predicate with a supported operator, or run it through find().`,
   );
 }
 
@@ -474,7 +474,7 @@ export function uncompilableCombinatorError(
       `It is refused rather than ignored: dropping a combinator discards a whole branch of the ` +
       `filter and WIDENS the result set, and "$not" is what compileCelToFilter emits for a CEL ` +
       `"!expr" RLS read scope — a dropped one is an over-permissive read, not an inaccurate ` +
-      `number (#3948, #5345).`,
+      `number.`,
   );
 }
 
@@ -522,7 +522,7 @@ export function unknownFieldOperatorError(op: string, field: string, path: strin
       `Supported operators: ${SUPPORTED_FIELD_OPERATOR_LIST}. ` +
       `Refused at ${path} rather than handed to the query engine, which answers an unknown ` +
       `operator with an error carrying no code and no status — a 500-shaped body for what is a ` +
-      `400-class client mistake (#5324).`,
+      `400-class client mistake.`,
   );
 }
 
@@ -540,7 +540,7 @@ export function unknownLogicalOperatorError(key: string, path: string): Error {
       `declared logical operators $and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every ` +
       `other key is a field name. It is refused rather than passed through to the query engine, ` +
       `which would answer with an uncoded error — or, worse, evaluate an operator the Filter ` +
-      `Protocol never declared (#5324).`,
+      `Protocol never declared.`,
   );
 }
 
@@ -568,7 +568,7 @@ export function malformedBetweenError(field: string, value: unknown, path: strin
       `It is refused rather than skipped: a range that compiles to no predicate answers with a ` +
       `row count the author never asked for, and this driver's faces did not even agree on ` +
       `WHICH — the live query path returned NO rows, the reference matcher returned EVERY row, ` +
-      `and a dropped AST comparison would have matched every record (#5328).`,
+      `and a dropped AST comparison would have matched every record.`,
   );
 }
 
@@ -614,7 +614,7 @@ export function nonBooleanNullComparandError(field: string, value: unknown, path
       `compiled IS NULL (anything but false), this driver's query path and driver-mongodb ` +
       `compiled IS NOT NULL (anything but true), and this driver's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
-      `the false it was written to mean (#5347).`,
+      `the false it was written to mean.`,
   );
 }
 

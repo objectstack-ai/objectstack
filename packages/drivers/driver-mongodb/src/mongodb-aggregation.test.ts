@@ -179,7 +179,7 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
         // door has no other way to learn the name was RETIRED rather than
         // merely misspelled.
         expect(thrown!.message).toContain('was REMOVED');
-        expect(thrown!.message).toContain('#6188');
+        expect(thrown!.message).toContain('(ADR-0049 enforce-or-remove: no SQL backend compiled it)');
       });
     }
 

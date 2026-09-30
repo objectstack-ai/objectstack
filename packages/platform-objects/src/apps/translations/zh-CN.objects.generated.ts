@@ -431,15 +431,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "访问令牌",
-        help: "由提供方签发的有效 OAuth 访问令牌——数据 API 绝不返回该值（#7987）；better-auth 通过引擎的特权内部字段访问器读回它"
+        help: "由提供方签发的有效 OAuth 访问令牌——数据 API 绝不返回该值；better-auth 通过引擎的特权内部字段访问器读回它"
       },
       refresh_token: {
         label: "刷新令牌",
-        help: "有效的 OAuth 刷新令牌——长期有效，撤销 ObjectStack 会话不会使其失效；数据 API 绝不返回该值（#7987）"
+        help: "有效的 OAuth 刷新令牌——长期有效，撤销 ObjectStack 会话不会使其失效；数据 API 绝不返回该值"
       },
       id_token: {
         label: "ID 令牌",
-        help: "由提供方签发的 OIDC ID 令牌——数据 API 绝不返回该值（#7987）"
+        help: "由提供方签发的 OIDC ID 令牌——数据 API 绝不返回该值"
       },
       access_token_expires_at: {
         label: "Access Token 过期时间"

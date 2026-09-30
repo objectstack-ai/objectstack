@@ -7,7 +7,7 @@ import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { isEngineDuplicateRecordEnvelope } from './error-response.js';
+import { isEngineDuplicateRecordEnvelope, mapDataError } from './error-response.js';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -353,11 +353,45 @@ export function sanitizeRowError(raw: unknown): string {
  * run and the commit alike, and both rows name it. A finding still wins, as
  * it does for `code`; an entry of `fields` that is not an object is not a
  * finding.
+ *
+ * ## A column the create door judges gets the create door's answer (#20701)
+ *
+ * A write can also fail in the DRIVER on a column: the object declares a
+ * field whose column the table does not have, because metadata and the
+ * physical schema drifted apart. The engine's declared-field door passes the
+ * key, since the field is declared, and the driver refuses it in its own words
+ * (SQLite `table X has no column named c` on insert, `no such column: c` on
+ * update). `POST /data/:object` classifies that error through `mapDataError`'s
+ * driver-string branch into `400 INVALID_FIELD`, with `field` and a sentence
+ * that names the drift and its fix. The row used to relay the driver's code
+ * (`SQLITE_ERROR`) and its text instead. So the error is classified here by
+ * the same mapper, for the same object, and when the door's verdict is
+ * `INVALID_FIELD` the row carries the door's `code`, `field` and sentence. The
+ * commit and the async job's rows both come through this function. An
+ * undeclared key reads as before: the door relays the engine's own envelope,
+ * in the engine's own words.
+ *
+ * Only that verdict is taken. The door also classifies a unique conflict and a
+ * NOT NULL failure, and it says different words about them than the row does:
+ * its conflict sentence has no trailing period and carries the engine's
+ * sentence as `developerMessage`, and its NOT NULL answer is
+ * `VALIDATION_FAILED` with a `required` finding and a `hint`, where the row
+ * relays the driver's code. Those rows keep their own answers here. A finding
+ * still wins over the door, as it does for `code` above.
  */
-function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
+function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
   const head: unknown = Array.isArray(e?.fields) ? e.fields[0] : undefined;
   const first = head !== null && typeof head === 'object' ? (head as { field?: unknown; code?: unknown }) : undefined;
+  if (first === undefined) {
+    const door = mapDataError(err, objectName).body;
+    if (door.code === 'INVALID_FIELD') {
+      return {
+        row: rowNo, ok: false, action: 'failed', error: String(door.error), code: 'INVALID_FIELD',
+        ...(typeof door.field === 'string' && door.field !== '' ? { field: door.field } : {}),
+      };
+    }
+  }
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
@@ -776,7 +810,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           ...(flushSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}) };
       } else {
         errCount++;
-        results[index] = toFailedResult(rowNo, res.error);
+        results[index] = toFailedResult(rowNo, res.error, objectName);
       }
     }
   };
@@ -892,7 +926,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         }
       } catch (err: any) {
         errCount++;
-        results[i] = toFailedResult(rowNo, err);
+        results[i] = toFailedResult(rowNo, err, objectName);
       }
 
       const processed = i + 1;

@@ -98,7 +98,7 @@ export function describeSupersededRegistration(
         `REPLACED the earlier one (${versionLabel(previous)}). Only the later instance is ` +
         `initialized and started; the earlier one is discarded without ever running init(). ` +
         `Duplicate registration by name is last-one-wins on both kernels by declared contract ` +
-        `(#9864) — register the plugin once if that is not what you meant.`
+        `— register the plugin once if that is not what you meant.`
     );
 }
 

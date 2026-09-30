@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type Cube, type FilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
@@ -44,13 +44,28 @@ const CUBE = {
 
 type Declaration = 'undeclared' | 'declared';
 
+const TASK_FIELDS: Record<string, { type: string }> = { created_at: { type: 'datetime' }, made_on: { type: 'date' } };
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] The `find()` reading is
+ * what the engine's `where` seam hands this driver, since the driver keeps no
+ * whole-day copy of its own: `declared` reads the declared field map (the
+ * typed seam, `datetime` columns only); `undeclared` has no field map to read,
+ * so the seam lowers type-blind (item 7) — the same reading the cube face's
+ * own door gives both.
+ */
+const SEAM: Record<Declaration, FilterLoweringOptions> = {
+  declared: { isDatetimeColumn: (column) => TASK_FIELDS[column]?.type === 'datetime' },
+  undeclared: {},
+};
+
 async function setup(declaration: Declaration, rows: ReadonlyArray<Record<string, unknown>> = CARD_ROWS) {
   const driver = new InMemoryDriver({});
   await driver.connect();
   if (declaration === 'declared') {
     await driver.syncSchema('task', {
       name: 'task',
-      fields: { created_at: { type: 'datetime' }, made_on: { type: 'date' } },
+      fields: TASK_FIELDS,
     });
   }
   for (const row of rows) await driver.create('task', { ...row });
@@ -72,7 +87,7 @@ const whereOf = (sql: string) => /WHERE (.*?)(?: GROUP BY|$)/.exec(sql)?.[1];
 async function answer(declaration: Declaration, where: FilterCondition, rows?: ReadonlyArray<Record<string, unknown>>) {
   const { driver, service } = await setup(declaration, rows);
   return {
-    find: ids(await driver.find('task', { where })),
+    find: ids(await driver.find('task', { where: lowerFilterCondition(where, SEAM[declaration]) })),
     cube: ids((await service.query(cubeQuery(where))).rows),
     echo: whereOf((await service.generateSql(cubeQuery(where))).sql),
   };
@@ -143,7 +158,9 @@ describe('[#20661] the siblings on this face', () => {
       dimensions: ['id'],
       timeDimensions: [{ dimension: 'created_at', dateRange: ['2026-07-01', '2026-07-28'] }],
     } as any);
-    const found = ids(await driver.find('task', { where: { created_at: { $gte: '2026-07-01', $lte: '2026-07-28' } } }));
+    const found = ids(await driver.find('task', {
+      where: lowerFilterCondition({ created_at: { $gte: '2026-07-01', $lte: '2026-07-28' } }, SEAM.declared),
+    }));
     expect(ids(result.rows)).toEqual(found);
     expect(ids(result.rows)).toEqual(['r27', 'r28']);
   });
