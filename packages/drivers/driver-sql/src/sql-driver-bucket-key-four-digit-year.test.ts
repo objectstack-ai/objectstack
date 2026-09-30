@@ -68,8 +68,8 @@ describe('[#20760] SqlDriver on SQLite and the in-memory face key a year below 1
     const rows = await driver.aggregate(TABLE, {
       groupBy: [{ field, dateGranularity: g }],
       aggregations: [{ function: 'count', alias: 'n' }],
-    } as any);
-    return rows.map((r: any) => r[field]).sort();
+    });
+    return rows.map((r: Record<string, unknown>) => String(r[field])).sort();
   }
 
   for (const g of Object.keys(EXPECTED) as Granularity[]) {
