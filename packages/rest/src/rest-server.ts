@@ -11728,6 +11728,48 @@ export class RestServer {
                 if (error?.code === 'OBJECT_NOT_FOUND' || error?.name === 'ExplainObjectNotFoundError') {
                     return respondError(res, 404, 'OBJECT_NOT_FOUND', msg.slice(0, 1000));
                 }
+                // [#20603] A refusal the SERVICE classified: an ADR-0112 `code`
+                // with a 4xx `status` (either spelling), or a sandboxed body's
+                // business `throw`. It is the caller's answer, not this route's
+                // fault. The measured producer is the explain engine answering
+                // enforcement's own refusal, `INVALID_FILTER` / 400, for a
+                // row-level filter the record matcher cannot evaluate: in a
+                // record-grained explanation, and since #20604 in an
+                // object-level one and for a `recordId` no row carries. The
+                // find that explain describes answers 400 for the same filter.
+                // This arm used to answer `500 EXPLAIN_FAILED`, so a client
+                // read an outage where the platform meant "this policy cannot
+                // be evaluated".
+                //
+                // The classification is {@link classifiedRefusalAnswer}, the
+                // `/data` door's own, imported for the same reason the analytics
+                // and record-share doors import it (#11684): a local list of
+                // codes here would be a third opinion on a question that file
+                // owns. It answers `undefined` for everything the 500 below
+                // still owns: a declared 5xx, half an envelope (a code without
+                // a status, #5352), a crashed sandbox body, an unclassified
+                // fault. The 403 and 404 arms above keep running first,
+                // because they also match refusals that declare no status.
+                //
+                // Re-dressed through this family's ONE emitter, as the
+                // record-share family re-dresses it: `code` is required by the
+                // nested envelope and the sandbox limb legitimately carries
+                // none, so the catalog's status floor fills it. The message is
+                // the classification's, which unwraps a sandbox wrapper and
+                // applies the `/data` door's bound.
+                //
+                // ⛔ Scope: status, code and message. The classification's
+                // `declaredCode` and `userMessage` siblings are not forwarded,
+                // because this family's emitter has no slot for them (its fifth
+                // argument is `details`) and no arm of the family forwards
+                // them today. Adding that slot is a change to the whole family.
+                const refusal = classifiedRefusalAnswer(error);
+                if (refusal) {
+                    const code = typeof refusal.body.code === 'string'
+                        ? refusal.body.code as ErrorCode
+                        : standardErrorCodeForHttpStatus(refusal.status);
+                    return respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
+                }
                 logError('[REST] Security explain error:', error);
                 // The 500 arm keeps its 500-char cap: an unexpected fault's
                 // message is not a contract, and truncating it stays a

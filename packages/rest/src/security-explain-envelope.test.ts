@@ -351,4 +351,128 @@ describe('[#8073] the whole explain family reduces to ONE skeleton', () => {
         expect(answer.status).toBe(200);
         expect(answer.body).toEqual(DECISION);
     });
+
+    it('the classified-refusal arm (#20603) reduces to the same skeleton as its siblings', async () => {
+        const reference = await boot(throwingExplain(new Error('boom'))).explainPost();
+        const classified = await boot(throwingExplain(explainRefusal())).explainPost();
+        expect(shapeOf(classified.body), JSON.stringify(classified.body)).toBe(shapeOf(reference.body));
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. [#20603] A refusal the SERVICE classified is the caller's answer, not a fault
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The record matcher's refusal (`@objectstack/formula`, `crossFieldClassError`
+ * and its siblings): `INVALID_FILTER` / 400, the envelope the find answers for
+ * the same filter. `explain` lets any matcher refusal other than the
+ * cross-class one propagate exactly as raised.
+ *
+ * Built by hand because neither `@objectstack/formula` nor
+ * `@objectstack/plugin-security` is a dependency of this package: the thrown
+ * SHAPE is the contract the route reads (#8016), as for the 403 and 404 arms.
+ */
+function matcherRefusal(): Error {
+    return Object.assign(
+        new Error('A field-to-field comparison ({ "$field": … }) in this filter compares two columns that share no comparison class.'),
+        { code: 'INVALID_FILTER', status: 400 },
+    );
+}
+
+/**
+ * The explain engine's own refusal (`crossFieldRefusalForExplain`,
+ * plugin-security `explain-engine.ts`): a fresh `Error` naming the policy, the
+ * matcher's `code` and `status` copied onto it, the matcher's error as `cause`.
+ */
+function explainRefusal(): Error {
+    const cause = matcherRefusal() as Error & { code: string; status: number };
+    return Object.assign(
+        new Error("The row-level security policy 'deal_guard' on 'deal' cannot be evaluated."),
+        { code: cause.code, status: cause.status, cause },
+    );
+}
+
+describe('[#20603] /security/explain — a classified service refusal keeps its own envelope', () => {
+    /**
+     * The request shapes that reach this refusal. A record-grained explanation
+     * (`recordId`) has refused since #20431. Since #20604 an object-level
+     * explanation (no `recordId`) refuses too, and so does a `recordId` that no
+     * row carries: the object-level pass refuses before any verdict. The
+     * service throws the same envelope for all of them.
+     *
+     * To this route the two `recordId` rows are the same request, since which
+     * ids exist is the service's business. Both are driven so that each shape
+     * the card names reaches the route. The batch form asks the object-level
+     * pass first, so its refusal arrives from that call.
+     */
+    const SHAPES: Array<[label: string, drive: (api: ReturnType<typeof boot>) => Promise<Answer>, asked: Record<string, unknown>]> = [
+        [
+            'record-grained — POST with the recordId of a row',
+            (api) => api.explainPost({ object: 'deal', operation: 'read', recordId: 'deal_1' }),
+            { object: 'deal', operation: 'read', recordId: 'deal_1' },
+        ],
+        [
+            'record-grained — POST with a recordId no row carries',
+            (api) => api.explainPost({ object: 'deal', operation: 'update', recordId: 'deal_missing' }),
+            { object: 'deal', operation: 'update', recordId: 'deal_missing' },
+        ],
+        [
+            'object-level — POST with no recordId',
+            (api) => api.explainPost({ object: 'deal', operation: 'read' }),
+            { object: 'deal', operation: 'read' },
+        ],
+        [
+            'object-level — GET, the other transport',
+            (api) => api.explainGet({ object: 'deal', operation: 'delete' }),
+            { object: 'deal', operation: 'delete' },
+        ],
+        [
+            'batch — POST recordIds, refused by the object-level pass',
+            (api) => api.explainPost({ object: 'deal', operation: 'read', recordIds: ['deal_1', 'deal_missing'] }),
+            { object: 'deal', operation: 'read' },
+        ],
+    ];
+
+    for (const [label, drive, asked] of SHAPES) {
+        it(`400 INVALID_FILTER, not 500 EXPLAIN_FAILED — ${label}`, async () => {
+            const svc = throwingExplain(explainRefusal());
+            const answer = await drive(boot(svc));
+            expectNestedEnvelope(answer, 400, 'INVALID_FILTER');
+            // The request that reached the service is the one this row names,
+            // so the refusal answered is the one this shape produces.
+            expect(svc.explain).toHaveBeenCalledTimes(1);
+            expect(svc.explain.mock.calls[0][0]).toEqual(asked);
+        });
+    }
+
+    it('a matcher refusal the engine propagates as raised answers the same 400', async () => {
+        const answer = await boot(throwingExplain(matcherRefusal()))
+            .explainPost({ object: 'deal', operation: 'read', recordId: 'deal_1' });
+        expectNestedEnvelope(answer, 400, 'INVALID_FILTER');
+    });
+
+    it('the status may be spelled `statusCode` — one declaration, either spelling', async () => {
+        const refusal = Object.assign(new Error('refused'), { code: 'INVALID_FILTER', statusCode: 400 });
+        expectNestedEnvelope(await boot(throwingExplain(refusal)).explainPost(), 400, 'INVALID_FILTER');
+    });
+
+    // ── Controls: what stays a fault ─────────────────────────────────────────
+
+    it('control — an unclassified throw still answers 500 EXPLAIN_FAILED', async () => {
+        const answer = await boot(throwingExplain(new Error('boom'))).explainPost({ object: 'deal', recordId: 'deal_1' });
+        expectNestedEnvelope(answer, 500, 'EXPLAIN_FAILED');
+    });
+
+    it('control — half an envelope (a code, no status) is not a classification: 500', async () => {
+        const half = Object.assign(new Error('refused'), { code: 'INVALID_FILTER' });
+        expectNestedEnvelope(await boot(throwingExplain(half)).explainPost(), 500, 'EXPLAIN_FAILED');
+    });
+
+    it('control — the 403 and 404 arms keep their answers', async () => {
+        const denial = Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED', name: 'PermissionDeniedError' });
+        expectNestedEnvelope(await boot(throwingExplain(denial)).explainPost(), 403, 'PERMISSION_DENIED');
+        const unknown = Object.assign(new Error('nope'), { code: 'OBJECT_NOT_FOUND' });
+        expectNestedEnvelope(await boot(throwingExplain(unknown)).explainPost(), 404, 'OBJECT_NOT_FOUND');
+    });
 });
