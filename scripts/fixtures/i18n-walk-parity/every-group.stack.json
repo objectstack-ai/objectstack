@@ -124,6 +124,16 @@
     }
   ],
 
+  "picklists": [
+    {
+      "name": "parity_tier",
+      "label": "Parity Tier",
+      "options": [
+        { "label": "Gold", "value": "gold" }
+      ]
+    }
+  ],
+
   "pages": [
     {
       "name": "parity_page",
