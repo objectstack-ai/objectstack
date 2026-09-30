@@ -52,7 +52,7 @@ function makeFakeEngine() {
 
 /**
  * The inert cron fixture, now shared with the sibling job suites rather than
- * spelled a second time here (#8628, #8748): why February 30th, and why
+ * spelled a second time here (#8628, commit 226cb71d5): why February 30th, and why
  * `'0 0 29 2 *'` is NOT a substitute, live in `never-fires.fixture.ts`.
  *
  * Nothing here depends on the registration being schedulable: `trigger()`
