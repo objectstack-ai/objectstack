@@ -313,7 +313,7 @@ export function assembleMetadataProtocol(
                         await ensureViewDefinitionActiveIndex(resolveIndexExec(ql), ctx.logger);
                     } catch (e: unknown) {
                         ctx.logger.warn(
-                            '[metadata-protocol] sys_view_definition active-row index migration skipped (#5839)',
+                            '[metadata-protocol] sys_view_definition active-row index migration skipped — the index that keeps a view name unique among ACTIVE rows only (an archived view frees its name) was not ensured this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
@@ -330,7 +330,7 @@ export function assembleMetadataProtocol(
                         });
                     } catch (e: unknown) {
                         ctx.logger.warn(
-                            '[metadata-protocol] sys_setting row-identity index migration skipped (#8629)',
+                            '[metadata-protocol] sys_setting row-identity index migration skipped — the NULL-safe index that enforces the declared row identity on tenant and global rows (user_id NULL there) was not ensured this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
@@ -351,7 +351,7 @@ export function assembleMetadataProtocol(
                         await backfillSeedTenancy(resolveSeedTenancySeam(ql), ctx.logger);
                     } catch (e: unknown) {
                         ctx.logger.warn(
-                            '[metadata-protocol] seed/API tenancy backfill skipped (#8686)',
+                            '[metadata-protocol] seed/API tenancy backfill skipped — the repair that adopts untenanted seed rows into the install\'s one organization and merges their autonumber counter did not run this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }

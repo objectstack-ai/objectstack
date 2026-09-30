@@ -354,6 +354,17 @@ import { prepareImportRequest } from './import-prepare.js';
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
+// [#18386] `?template=true` on the export door: the import template's column
+// rule, request reading and workbook. See the module header.
+import {
+    buildImportTemplateWorkbook,
+    describeTemplateColumns,
+    readTemplateMode,
+    resolveTemplateProjection,
+    templateColumns,
+    templateText,
+    type TemplateProjectionSource,
+} from './import-template.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
 import {
@@ -629,6 +640,11 @@ export const DATA_RECORD_READ_PARAMS: readonly string[] = ['select', 'expand'];
  * a loud export outage — the preservation half of
  * `rest-server-closed-query-params.test.ts` exists to make that impossible to
  * land, and pins `locale` by name for the reason above.
+ *
+ * [#18386] …and `template`, the mode switch: `template=true` answers an xlsx
+ * IMPORT template (`./import-template.ts`) instead of the data. It is read by
+ * `readTemplateMode`, which also refuses the row parameters above on a
+ * template request, since a template has no rows for them to select.
  */
 export const DATA_EXPORT_PARAMS: readonly string[] = [
     'format', 'header',
@@ -636,6 +652,7 @@ export const DATA_EXPORT_PARAMS: readonly string[] = [
     'filter', 'search', 'searchFields', 'orderby',
     'fields',
     'locale',
+    'template',
 ];
 
 /**
@@ -9571,6 +9588,8 @@ export class RestServer {
         //   header=false        (omit the header row for csv / xlsx; default true)
         //   limit=<n>           (default 10000, hard cap 50000)
         //   page=<n>            (driver chunk size, default 500, max 5000)
+        //   template=true       (an xlsx IMPORT template instead of the data — see
+        //                        `answerImportTemplate`; `false` or absent is the export)
         //
         // Values are formatted for readability from the object schema: lookup /
         // user fields resolve to a name (via injected $expand), select fields to
@@ -9584,7 +9603,7 @@ export class RestServer {
         //
         // A zero-row result still emits the header row when the column set is
         // authoritative (the security service's readable projection, or an explicit
-        // `fields=`), so an empty export doubles as an import template. Without a
+        // `fields=`). The import template is `template=true`, not this. Without a
         // projection it stays headerless, so FLS-hidden column names never leak.
         //
         // Streams the response so 50k-row exports do not buffer in memory; the
@@ -9639,8 +9658,21 @@ export class RestServer {
                     // and still answers what it answered before.
                     if (refuseUnknownQueryParams(req, res, DATA_EXPORT_PARAMS)) return;
                     if (refuseRepeatedQueryParams(req, res,
-                        ['format', 'header', 'limit', 'page', 'filter', 'search', 'orderby'])) return;
+                        ['format', 'header', 'limit', 'page', 'filter', 'search', 'orderby', 'template'])) return;
                     const q = req.query ?? {};
+                    // [#18386] `?template=true` answers the import template and
+                    // returns before a single export header is set, so without it
+                    // everything below runs exactly as it did before the mode
+                    // existed.
+                    const templateMode = readTemplateMode(q);
+                    if (templateMode.kind === 'refused') {
+                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: templateMode.message } });
+                        return;
+                    }
+                    if (templateMode.kind === 'template') {
+                        await this.answerImportTemplate(req, res, p, environmentId, objectName, context, q);
+                        return;
+                    }
                     const fmtRaw = String(q.format ?? 'csv').toLowerCase();
                     const format: 'csv' | 'json' | 'xlsx' =
                         fmtRaw === 'json' ? 'json' : fmtRaw === 'xlsx' ? 'xlsx' : 'csv';
@@ -10002,6 +10034,119 @@ export class RestServer {
                 tags: ['data', 'export'],
             },
         });
+    }
+
+    /**
+     * [#18386] `GET {basePath}/data/:object/export?template=true` — the IMPORT
+     * template: an xlsx workbook with a header row of the columns an import can
+     * write, one example row, dropdowns for the closed value domains, and an
+     * instructions sheet. No data is read.
+     *
+     * It runs behind the export door's two gates, unchanged — the object's
+     * `export` exposure ({@link enforceApiAccess}) and the caller's export
+     * permission ({@link enforceExportPermission}) — and after the query-string
+     * gates, so it is reached only by a request the export would have served.
+     *
+     * Columns: an explicit `?fields=` is honoured as asked; otherwise
+     * `templateColumns` over the object as this caller reads it, narrowed by
+     * `resolveTemplateProjection` — the security service's WRITE projection,
+     * or its read projection when it has none, which `X-Export-Template-Projection`
+     * and a note on the instructions sheet then state. A security service that
+     * is present but answers neither fails the request rather than answering an
+     * unnarrowed header.
+     */
+    private async answerImportTemplate(
+        req: any,
+        res: any,
+        p: RestProtocol,
+        environmentId: string | undefined,
+        objectName: string,
+        context: any,
+        q: Record<string, any>,
+    ): Promise<void> {
+        let explicitFields: string[] | undefined;
+        if (typeof q.fields === 'string' && q.fields.length > 0) {
+            explicitFields = q.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
+        } else if (Array.isArray(q.fields)) {
+            explicitFields = q.fields.filter((s: any) => typeof s === 'string' && s.length > 0);
+        }
+
+        // The object as the export reads it (registry first, `getObjectSchema`
+        // as the last resort), localized to the request — but NOT best-effort:
+        // a template without the schema has no columns to offer.
+        let schema: any = undefined;
+        if (typeof (p as any).getMetaItem === 'function') {
+            const found: any = await (p as any).getMetaItem({ type: 'object', name: objectName });
+            schema = found?.item;
+        }
+        if (!schema && typeof (p as any).getObjectSchema === 'function') {
+            schema = await (p as any).getObjectSchema(objectName, environmentId);
+        }
+        if (!schema || typeof schema !== 'object') {
+            const missing: any = new Error(`Object '${objectName}' was not found, so it has no import template.`);
+            missing.code = 'OBJECT_NOT_FOUND';
+            missing.status = 404;
+            throw missing;
+        }
+        schema = await this.translateMetaItem(req, 'object', environmentId, schema);
+
+        let permitted: ReadonlySet<string> | undefined;
+        let projection: TemplateProjectionSource = 'none';
+        if (!explicitFields || explicitFields.length === 0) {
+            const security = await this.resolveSecurityService(environmentId, req);
+            const answer = await resolveTemplateProjection(security, objectName, context);
+            if (answer.source === 'unanswered') {
+                // Declared 5xx: a fault, sanitised and logged — never read
+                // as "no such object" by the message heuristics.
+                throw Object.assign(
+                    new Error('The security service gave no field projection, so the import template '
+                        + 'cannot tell which columns this caller may write.'),
+                    { status: 500, code: 'INTERNAL_ERROR' },
+                );
+            }
+            if (answer.source !== 'none') permitted = answer.permitted;
+            projection = answer.source;
+        }
+        const fields = templateColumns(schema, { explicitFields, permitted });
+
+        // A reference column names the object it points at by that object's
+        // label, when it can be read; otherwise by its name.
+        const referenceLabels = new Map<string, string>();
+        const metaMap = buildFieldMetaMap(schema);
+        for (const f of fields) {
+            const target = metaMap.get(f)?.reference;
+            if (!target || referenceLabels.has(target)) continue;
+            let label = target;
+            try {
+                const found: any = typeof (p as any).getMetaItem === 'function'
+                    ? await (p as any).getMetaItem({ type: 'object', name: target })
+                    : undefined;
+                const translated: any = found?.item
+                    ? await this.translateMetaItem(req, 'object', environmentId, found.item)
+                    : undefined;
+                if (typeof translated?.label === 'string' && translated.label.trim().length > 0) label = translated.label;
+            } catch { /* the target's name stands in for its label */ }
+            referenceLabels.set(target, label);
+        }
+
+        const i18n = await this.resolveI18nService(environmentId, req).catch(() => undefined);
+        const locale = this.extractLocale(req, i18n);
+        const columns = describeTemplateColumns(schema, fields, { locale, referenceLabels });
+        const workbook = await buildImportTemplateWorkbook(columns, { locale, projection });
+        const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+
+        const timezone = typeof context?.timezone === 'string' && context.timezone ? String(context.timezone) : undefined;
+        const objectLabel = typeof schema.label === 'string' && schema.label.length > 0 ? schema.label : objectName;
+        res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.header('Content-Disposition', exportContentDisposition(
+            `${objectName}-template`, `${objectLabel}-${templateText(locale).filenameSuffix}`, 'xlsx', timezone,
+        ));
+        res.header('X-Export-Format', 'xlsx');
+        res.header('X-Export-Template', 'true');
+        res.header('X-Export-Template-Projection', projection);
+        res.header('Cache-Control', 'no-store');
+        res.write(bytes);
+        res.end();
     }
 
     /**

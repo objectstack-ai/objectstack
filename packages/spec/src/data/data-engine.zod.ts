@@ -247,8 +247,9 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
 /**
  * One strip event on a write path: the engine dropped caller-supplied field(s)
  * from the payload for a LEGAL reason — a read-only lock (static `readonly`
- * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), or the primary-key strip
- * that keeps a ruled-non-key payload value out of the id column (#6437) — and
+ * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), the primary-key strip
+ * that keeps a ruled-non-key payload value out of the id column (#6437), or the
+ * computed-field strip of a value no store has a column for (#20805) — and
  * completed the write without them. The write itself still succeeds —
  * stripping is legitimate semantics, not an error — but callers that report
  * success per requested field (e.g. a flow's `update_record` step) need to know
@@ -292,6 +293,12 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    *   payload `id` the update-dispatch ruling (`resolveEngineUpdateDispatch`)
    *   has already classified as *not* an identifier — an authoring error the
    *   write survives without.
+   * - `computed` — the field is a `formula`: the engine computes it on read, so
+   *   no driver has a column for it, and a value the caller supplies (the key a
+   *   full read returns, written back) is stripped on every write path and in
+   *   every context, `isSystem` included (#20805). NOT a read-only lock:
+   *   `isSystem` does not exempt it, because there is nowhere for the value to
+   *   land.
    *
    * `primary_key` names the FIELD's role, not the offending value's shape, on
    * purpose: `not_a_primary_key` would describe the value and become false the
@@ -300,7 +307,7 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    * the same register as the two read-only arms — each answers "what about this
    * FIELD caused the strip?".
    */
-  reason: z.enum(['readonly', 'readonly_when', 'primary_key']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier'),
+  reason: z.enum(['readonly', 'readonly_when', 'primary_key', 'computed']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for'),
 }).describe('A write-path strip event: caller-supplied fields legally dropped from the payload'));
 
 // --------------------------------------------------------------------------

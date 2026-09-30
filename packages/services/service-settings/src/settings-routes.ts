@@ -69,7 +69,7 @@ const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: tru
  *
  * `SettingsServicePlugin`'s `verifiedContextFromRequest` already re-raises the
  * brand rather than returning an enforced-but-empty context the routes would
- * read as a denial (#13279). But it is called as `await ctxOf(req)` from INSIDE
+ * read as a denial (commit 6a180e42d). But it is called as `await ctxOf(req)` from INSIDE
  * each route's own `try`, so until now the brand was caught here and re-encoded
  * — `message` survived, `code` and `status` did not, and those are the two a
  * client branches on. The declared `503` / `SERVICE_UNAVAILABLE` never reached

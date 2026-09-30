@@ -216,7 +216,7 @@ export function currentLiveMysqlDatabase(): string {
   const testPath = expect.getState().testPath;
   if (!testPath) {
     throw new Error(
-      'live-mysql isolation (#10382): vitest reported no testPath, so this live connection ' +
+      'live-mysql isolation: vitest reported no testPath, so this live connection ' +
         'cannot be given a per-file database and would fall back to sharing one with every ' +
         'other live file in this package — including its `drop database` in afterAll. Call ' +
         'currentLiveMysqlDatabase() from a test file.',

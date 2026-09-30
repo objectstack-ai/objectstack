@@ -682,7 +682,7 @@ export class SettingsService {
    * of a setting that genuinely has no persisted row must answer the manifest
    * `default`, and that is an ordinary, common thing for a boot-time reader to
    * do. Refusing it would turn a correct startup sequence into an error — which
-   * is why #10159's fix deliberately left reads open.
+   * is why commit 1ec36b730's write refusal deliberately left reads open.
    *
    * What is wrong is not the answer, it is that the answer was produced WITHOUT
    * CONSULTING the store. In the window {@link loadRows} takes its `this.memory`

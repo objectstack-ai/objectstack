@@ -1712,6 +1712,9 @@ export class SecurityPlugin implements Plugin {
         // route uses it to project columns instead of inferring readability
         // from already-masked data rows. See getReadableFields.
         getReadableFields: (object: string, context?: any) => this.getReadableFields(object, context),
+        // [#18386] Its write-side twin: the fields step 2.5 would not refuse.
+        // The import template narrows its columns by it. See getWritableFields.
+        getWritableFields: (object: string, context?: any) => this.getWritableFields(object, context),
         // [#3544] User-level export axis. `export ⊆ list`, so a bulk export
         // reaches the middleware as a plain `find` and `allowExport` would never
         // be consulted — the REST export route asks HERE before it streams.
@@ -1909,23 +1912,22 @@ export class SecurityPlugin implements Plugin {
       };
       // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
       // EXTENSION of the published contract rather than inside the typed
-      // literal above: `ISecurityService` lives in `packages/spec`, and the
-      // seat for this method there is a separate change (consumers already
-      // feature-detect, which is exactly why a partial surface degrades instead
-      // of lying). `Object.assign` keeps the literal type-checked against the
-      // contract while the extension stays visible as an extension.
+      // literal above (consumers already feature-detect, which is exactly why a
+      // partial surface degrades instead of lying). `Object.assign` keeps the
+      // literal type-checked against the contract while the extension stays
+      // visible as an extension.
       const registeredSecurityService = Object.assign(securityService, {
         getMetadataReadableFields: (object: string, context?: any) =>
           this.getMetadataReadableFields(object, context),
         // [field report — rc→GA declared≠enforced surfacing] Same extension
-        // pattern as `getMetadataReadableFields` above, same reason:
+        // pattern as `getMetadataReadableFields` above:
         // `ISecurityService` lives in `packages/spec` and this seat there is a
         // separate change. Consumers feature-detect.
         discardPermissionSetOverlay: (callerContext: any, id: string) =>
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -5455,16 +5457,74 @@ export class SecurityPlugin implements Plugin {
     context: any,
     options: { fallbackOnEmptySets: boolean },
   ): Promise<string[] | undefined> {
+    const mask = await this.resolveProjectionFieldMask(object, context, options);
+    if (mask.kind === 'answer') return mask.fields;
+
+    // [#8993] A field this caller sees PARTIALLY MASKED is still a served
+    // column — the read path REPLACES its value rather than deleting the key —
+    // so it stays in the projection (an export header must include the column
+    // whose masked values the same caller's rows carry). Mirrors the step-4
+    // exclusion exactly: an explicit permission-set deny keeps the field
+    // deleted, hence out of the projection.
+    const partialRules = mask.readPartialMaskRules();
+
+    // Readable = every schema field NOT explicitly masked non-readable. A field
+    // with no permission entry passes through (the field allow-list only
+    // enumerates fields it names) — the exact complement of maskResults' delete
+    // set, so the export header matches list's readable columns by construction.
+    return mask.allFields.filter((f) => mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
+  }
+
+  /**
+   * [#18386] Query surface: the field names field-level security lets the
+   * caller WRITE on `object` under `context` (a field's own rules, such as
+   * `readonly`, are not asked) — the write-side twin of {@link getReadableFields}.
+   *
+   * Same derivation as the read projection ({@link resolveProjectionFieldMask}),
+   * which is the one the middleware's step 2.5 write gate takes, and the answer
+   * is the complement of that gate's own primitive,
+   * `FieldMasker.getNonEditableFields` — so a field is here iff a payload
+   * naming it passes step 2.5. A caller with no permission sets gets the full
+   * set: the middleware skips step 2.5 for it.
+   */
+  async getWritableFields(object: string, context?: any): Promise<string[] | undefined> {
+    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
+    if (mask.kind === 'answer') return mask.fields;
+    const nonEditable = new Set(this.fieldMasker.getNonEditableFields(mask.fieldPerms));
+    return mask.allFields.filter((f) => !nonEditable.has(f));
+  }
+
+  /**
+   * The derivation both field projections share: the schema's field universe,
+   * the caller's permission sets, the evaluator's field map with the ADR-0066
+   * D3 `requiredPermissions` fold, and the ADR-0090 D10 delegator intersection
+   * — the steps, in order, that the middleware's read mask and its step 2.5
+   * write gate each take. A case that settles the answer before any mask
+   * exists comes back as `answer`.
+   */
+  private async resolveProjectionFieldMask(
+    object: string,
+    context: any,
+    options: { fallbackOnEmptySets: boolean },
+  ): Promise<
+    | { kind: 'answer'; fields: string[] | undefined }
+    | {
+      kind: 'mask';
+      allFields: string[];
+      fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
+      readPartialMaskRules: () => Record<string, FieldMaskingRule>;
+    }
+  > {
     const objectName = String(object ?? '');
-    if (!objectName) return undefined;
+    if (!objectName) return { kind: 'answer', fields: undefined };
     // The field universe — the SAME source the RLS field pass uses (ObjectQL's
     // live SchemaRegistry first, metadata artifact fallback). `null` → schema
     // not resolvable → let the caller fall back rather than guess.
     const fieldNameSet = await this.getObjectFieldNames(this.metadata, objectName, this.ql);
-    if (!fieldNameSet) return undefined;
+    if (!fieldNameSet) return { kind: 'answer', fields: undefined };
     const allFields = [...fieldNameSet];
     // System operations bypass FLS (mirrors the middleware's isSystem skip).
-    if (context?.isSystem) return allFields;
+    if (context?.isSystem) return { kind: 'answer', fields: allFields };
 
     let permissionSets = await this.resolvePermissionSetsForContext(context);
     if (permissionSets.length === 0 && options.fallbackOnEmptySets) {
@@ -5476,26 +5536,26 @@ export class SecurityPlugin implements Plugin {
     }
     // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
     // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
-    if (permissionSets.length === 0) return allFields;
+    if (permissionSets.length === 0) return { kind: 'answer', fields: allFields };
 
     const secMeta = await this.getObjectSecurityMeta(objectName);
     // [#3545] Posture unresolvable → expose no columns, the same fail-closed
     // stance this method already takes on a dangling delegator below. The
     // per-field capability contract (`fieldRequiredPermissions`) would otherwise
     // default to empty and silently unmask every capability-gated column.
-    if (secMeta.unresolved) return [];
+    if (secMeta.unresolved) return { kind: 'answer', fields: [] };
     const basePerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
     let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
 
-    // [ADR-0090 D10] On an on-behalf-of read the readable set must NOT widen
-    // past what the DELEGATOR can read — intersect the delegator's field mask
-    // too. A dangling delegator fails CLOSED (expose no columns), the same
-    // fail-closed stance the CRUD middleware takes on a 'missing' delegator.
+    // [ADR-0090 D10] On an on-behalf-of request the projection must NOT widen
+    // past the DELEGATOR's — intersect the delegator's field mask too. A
+    // dangling delegator fails CLOSED (expose no columns), the same fail-closed
+    // stance the CRUD middleware takes on a 'missing' delegator.
     let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
     let delegatorSets: PermissionSet[] | null = null;
     if (context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
-      if (del.kind === 'missing') return [];
+      if (del.kind === 'missing') return { kind: 'answer', fields: [] };
       if (del.kind === 'resolved') {
         delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         delBasePerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
@@ -5504,21 +5564,14 @@ export class SecurityPlugin implements Plugin {
       }
     }
 
-    // [#8993] A field this caller sees PARTIALLY MASKED is still a served
-    // column — the read path REPLACES its value rather than deleting the key —
-    // so it stays in the projection (an export header must include the column
-    // whose masked values the same caller's rows carry). Mirrors the step-4
-    // exclusion exactly: an explicit permission-set deny keeps the field
-    // deleted, hence out of the projection.
-    const partialRules = this.computeReadPartialMaskRules(
-      secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
-    );
-
-    // Readable = every schema field NOT explicitly masked non-readable. A field
-    // with no permission entry passes through (the field allow-list only
-    // enumerates fields it names) — the exact complement of maskResults' delete
-    // set, so the export header matches list's readable columns by construction.
-    return allFields.filter((f) => fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
+    return {
+      kind: 'mask',
+      allFields,
+      fieldPerms,
+      readPartialMaskRules: () => this.computeReadPartialMaskRules(
+        secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
+      ),
+    };
   }
 
   /**

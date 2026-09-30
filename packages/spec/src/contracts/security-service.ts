@@ -35,7 +35,8 @@
  *   "no answer — use your own fallback", NOT "no fields are readable". An empty
  *   array is a real answer and means the opposite: nothing is readable. Its
  *   metadata-plane sibling {@link ISecurityService.getMetadataReadableFields}
- *   (ADR-0106 D7) reads the same two empty answers the same way.
+ *   (ADR-0106 D7) and its write-side twin {@link ISecurityService.getWritableFields}
+ *   read the same two empty answers the same way.
  * - **Verdicts fail to ABSTENTION.** {@link ISecurityService.checkAuthoredRowWrite}
  *   answers a question a composing caller may use to WIDEN, so its failure mode
  *   is the one that changes nothing: `abstain`. It never reports `admit` for a
@@ -340,6 +341,33 @@ export interface ISecurityService {
    * this method only answers the projection question when a mask applies.
    */
   getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
+   * The field names `context` may WRITE on `object` as far as field-level
+   * security decides — the write-side twin of {@link getReadableFields}.
+   *
+   * Computed from schema + context by the same resolution as the write path's
+   * field-level-security gate: the returned set is the exact complement of the
+   * fields that gate refuses when a payload names them. Neither whether the
+   * caller may create or edit the OBJECT nor a field's own rules (`readonly`,
+   * `system`, a `formula` / `summary` / `autonumber` type) are part of the answer.
+   *
+   * **Fails SOFT, with the same two distinct empty answers as
+   * {@link getReadableFields}:** `undefined` is "no answer — use your own
+   * fallback" (e.g. the object schema could not be resolved); `[]` is the real
+   * answer that this caller may write NO field. A system context bypasses and
+   * yields the full field set.
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security service
+   * that predates it omits it; consumers feature-detect
+   * (`typeof svc.getWritableFields === 'function'`) and fall back to
+   * {@link getReadableFields}. That fallback is not the same answer — a field
+   * the caller may read but not edit is in it, and a write naming that field is
+   * refused — so a consumer that falls back STATES in its response that it
+   * narrowed by the read projection, ⛔ never presents it as the write one.
+   * Nothing is written past the gate either way: the write path still refuses.
+   */
+  getWritableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
    * The effective permission-set NAMES for `context` — positions expanded and
