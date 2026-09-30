@@ -218,15 +218,6 @@ export interface AnalyticsServicePluginOptions {
     context?: ExecutionContext,
   ) => boolean | Promise<boolean>;
   /**
-   * [#20917] The FIELD-LEVEL read admission — which fields of an object the
-   * caller may read. The service judges every member a query names against it
-   * before a strategy is selected (`AnalyticsServiceConfig.getReadableFields`).
-   * When omitted, the plugin auto-bridges to a registered `'security'`
-   * service's `getReadableFields(object, context)` — the reader computed from
-   * the same resolution the engine middleware enforces field permissions with.
-   */
-  getReadableFields?: AnalyticsServiceConfig['getReadableFields'];
-  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Typically wired from the dataset registry's compiled `allowedRelationships`.
    */
@@ -769,9 +760,12 @@ export class AnalyticsServicePlugin implements Plugin {
       autoBridgedReadAdmission = true;
     }
 
-    // [#20917] The FIELD-LEVEL half of the same read, bridged the same way and
+    // [#20917] The FIELD-LEVEL half of the same read
+    // (`AnalyticsServiceConfig.getReadableFields`), bridged the same way and
     // for the same reasons as the two halves above: resolution at CALL time,
-    // and the three resolutions kept apart.
+    // and the three resolutions kept apart. There is no plugin option for it:
+    // the reader is the security service's, and a host that composes its own
+    // reader constructs `AnalyticsService` with it.
     //
     //   ABSENT   — no security service: no field-level security anywhere on
     //              this deployment, `/data` included. The provider answers
@@ -786,27 +780,24 @@ export class AnalyticsServicePlugin implements Plugin {
     interface SecurityReadableFields {
       getReadableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
     }
-    let getReadableFields = this.options.getReadableFields;
-    if (!getReadableFields) {
-      getReadableFields = async (object, context) => {
-        let svc: SecurityReadableFields | undefined;
-        try {
-          svc = ctx.getService<SecurityReadableFields>('security');
-        } catch (e) {
-          throw new Error(
-            `resolving the "security" service threw (${String((e as Error)?.message ?? e)})`,
-          );
-        }
-        if (!svc) return undefined;
-        if (typeof svc.getReadableFields !== 'function') {
-          throw new Error(
-            'the registered "security" service exposes no getReadableFields(), so it cannot answer ' +
-            'which fields the caller may read',
-          );
-        }
-        return svc.getReadableFields(object, context);
-      };
-    }
+    const getReadableFields: AnalyticsServiceConfig['getReadableFields'] = async (object, context) => {
+      let svc: SecurityReadableFields | undefined;
+      try {
+        svc = ctx.getService<SecurityReadableFields>('security');
+      } catch (e) {
+        throw new Error(
+          `resolving the "security" service threw (${String((e as Error)?.message ?? e)})`,
+        );
+      }
+      if (!svc) return undefined;
+      if (typeof svc.getReadableFields !== 'function') {
+        throw new Error(
+          'the registered "security" service exposes no getReadableFields(), so it cannot answer ' +
+          'which fields the caller may read',
+        );
+      }
+      return svc.getReadableFields(object, context);
+    };
 
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
     // names lookup/master_detail FIELDS on the base object; the joined TABLE is
