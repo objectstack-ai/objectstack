@@ -112,7 +112,7 @@ export default defineStack({
  * Every listed factory, called with an argument its schema refuses, generated
  * FROM the list so a new entry is covered the day it is added. Each call names
  * itself in its probe, so a result can be matched to its factory. The last key
- * reads another member of the first owner through the shim's Proxy.
+ * reads another member of `ObjectSchema` through the shim's Proxy.
  */
 function everyFactoryConfig(): string {
   const byHome = new Map<string, string[]>();
@@ -127,13 +127,16 @@ function everyFactoryConfig(): string {
   );
   return [
     ...imports,
+    // A second, aliased binding of the same export, so the member read below
+    // never depends on which owners the list happens to name.
+    "import { ObjectSchema as __ObjectSchemaMembers } from '@objectstack/spec/data';",
     '',
     'export default {',
     '  results: [',
     ...calls,
     '  ],',
-    "  untouched: typeof ObjectSchema.safeParse === 'function'",
-    "    && ObjectSchema.safeParse({ name: 'sf_ok', fields: {} }).success,",
+    "  untouched: typeof __ObjectSchemaMembers.safeParse === 'function'",
+    "    && __ObjectSchemaMembers.safeParse({ name: 'sf_ok', fields: {} }).success,",
     '};',
     '',
   ].join('\n');
@@ -196,7 +199,9 @@ async function runMeta(configPath: string, flags: string[]): Promise<Run> {
 }
 
 function applied(run: Run): Array<{ conversionId: string; path: string }> {
-  return JSON.parse(run.stdout).applied.map((a: any) => ({ conversionId: a.conversionId, path: a.path }));
+  const payload = JSON.parse(run.stdout);
+  expect(Array.isArray(payload.applied), `no \`applied\` in the --json payload: ${run.stdout}`).toBe(true);
+  return payload.applied.map((a: any) => ({ conversionId: a.conversionId, path: a.path }));
 }
 
 beforeAll(() => {
