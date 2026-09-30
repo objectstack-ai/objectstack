@@ -112,6 +112,39 @@
  * NOTHING the table declares, though the table is precisely this gate's
  * population. Measured on 589758d22: 1 (gate, file) pair before, 3253 after.
  *
+ * ## The second subject: the `console` selection and the dist key it must move (#20765)
+ *
+ * The same filter job schedules `Console Pin Gate` from a second hand-kept list,
+ * `console:`, and that job restores its console dist from a cache keyed on
+ * `hashFiles(...)`. The two lists answer different questions and each has a hole
+ * the other one cannot see:
+ *
+ *   - A path the KEY hashes but the FILTER does not name moves the key without
+ *     starting the job, so the first build under the new key is the merge
+ *     queue's, where a check outside the required set cannot stop a merge.
+ *   - A path the FILTER names but the KEY does not hash starts the job, and the
+ *     job then restores the dist built before the change and skips the build
+ *     step, which is where the build-time assertion
+ *     (`scripts/assert-console-spec-injection.mjs`) lives. The run is green
+ *     without judging the change. That is only right for a GUARD: code every run
+ *     executes, hit or miss. `CONSOLE_GUARDS` declares those, each with the step
+ *     that runs it.
+ *
+ * Measured on the #20695 shape (the migration registries moved to a new spec
+ * entry): its queue build missed the cache, rebuilt, and went red with "Neither
+ * spec appears in the built console"; a fixture replay of the same head on the
+ * cache-hit path (the restored pre-move dist, its stamp, the post-move tree)
+ * exits 0. So the job judges an entry-layout change only when the key moves too.
+ *
+ * So `judgeConsole` holds five things of the checked-in ci.yml: every `console`
+ * entry is a literal path (with no pattern in the list, a path selects the job
+ * exactly when the list names it, which is what lets the self-test pin the
+ * selection, and a pattern under `packages/spec` would widen the job to every
+ * spec change); every key spelling in the job is one string; every hashed path
+ * is a `console` entry; every `console` entry is hashed or a declared guard; and
+ * every declared guard is still in the list and not hashed. Pure string again,
+ * for the reason above: no matcher, so no third recognizer.
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
@@ -124,7 +157,8 @@
  * exists and is not scheduled is the same dormant shape from the other side.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -159,11 +193,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(5) refusals: never a clean zero over a subject that was not read': 10,
   '(6) the real tree': 10,
   '(7) WIRING: the gate and its self-test really run in CI': 2,
+  '(8) the `console` selection and the dist key it must move': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -243,6 +278,38 @@ export function declarationsOf(table) {
  * does them.
  */
 export function readSchedulingFilters(source) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+  for (const name of SCHEDULING_FILTERS) {
+    if (!(name in filters)) {
+      return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
+    }
+  }
+
+  const job = jobs[SCHEDULED_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${SCHEDULED_JOB}\` job -- Layer A's \`--union-into\` step has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  const absent = SCHEDULING_FILTERS.filter((n) => !condition.includes(`needs.filter.outputs.${n}`));
+  if (absent.length > 0) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${SCHEDULED_JOB}\` job no longer names ${absent.map((n) => `\`${n}\``).join(', ')} in its \`if:\`, ` +
+        `so that filter does not schedule it any more and parity against it means nothing.\n` +
+        `    if: ${condition || '(absent)'}`,
+    };
+  }
+
+  return { filters, condition, entries: SCHEDULING_FILTERS.flatMap((n) => filters[n]) };
+}
+
+/**
+ * The shared half of both readers: ci.yml's `jobs` map and the `filter` job's
+ * path lists, or `{ refusal }` naming what could not be read. Both subjects of
+ * this gate read the lists through here, so they cannot disagree about what
+ * the lists are.
+ */
+function readFilterLists(source) {
   let doc;
   try {
     doc = parse(source);
@@ -282,26 +349,7 @@ export function readSchedulingFilters(source) {
       return { refusal: `${CI_WORKFLOW}'s \`${name}:\` filter is not a list of path strings.` };
     }
   }
-  for (const name of SCHEDULING_FILTERS) {
-    if (!(name in filters)) {
-      return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
-    }
-  }
-
-  const job = jobs[SCHEDULED_JOB];
-  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${SCHEDULED_JOB}\` job -- Layer A's \`--union-into\` step has moved.` };
-  const condition = typeof job.if === 'string' ? job.if : '';
-  const absent = SCHEDULING_FILTERS.filter((n) => !condition.includes(`needs.filter.outputs.${n}`));
-  if (absent.length > 0) {
-    return {
-      refusal:
-        `${CI_WORKFLOW}'s \`${SCHEDULED_JOB}\` job no longer names ${absent.map((n) => `\`${n}\``).join(', ')} in its \`if:\`, ` +
-        `so that filter does not schedule it any more and parity against it means nothing.\n` +
-        `    if: ${condition || '(absent)'}`,
-    };
-  }
-
-  return { filters, condition, entries: SCHEDULING_FILTERS.flatMap((n) => filters[n]) };
+  return { jobs, filters };
 }
 
 /**
@@ -333,6 +381,172 @@ export function judge(source, table) {
   );
 
   return { filters: read.filters, condition: read.condition, declarations, covered, uncovered, stale };
+}
+
+// ── The second subject: the `console` selection and its dist key (#20765) ────
+
+/** The filter list that schedules the console job, and that job, by id. */
+export const CONSOLE_FILTER = 'console';
+export const CONSOLE_JOB = 'console-pin';
+/** Every spelling of the console dist-cache key carries this. */
+const CONSOLE_KEY_MARKER = '-console-dist-';
+
+/**
+ * The `console` entries that are GUARDS rather than build inputs: code every
+ * run of the job executes, cache hit or miss, so a change to one is judged even
+ * when the dist is restored. Every other entry must move the dist key. A new
+ * entry lands in neither place by default: it reds as unclassified until
+ * someone decides which it is.
+ */
+export const CONSOLE_GUARDS = Object.freeze({
+  '.github/workflows/ci.yml': 'the job definition itself: its steps run on a hit and on a miss',
+  'scripts/check-console-sha.mjs': 'run by `pnpm check:console-sha` on every run, hit or miss',
+  'scripts/check-console-injection.mjs': 'run by `pnpm check:console-injection --require-stamp` on every run, hit or miss',
+});
+
+/** The quoted arguments of the ONE `hashFiles(...)` a key spells, or null. */
+export function hashFilesInputs(key) {
+  const calls = [...String(key).matchAll(/hashFiles\(([^)]*)\)/g)];
+  if (calls.length !== 1) return null;
+  const args = calls[0][1].split(',').map((a) => a.trim());
+  if (args.length === 0 || args.some((a) => !/^'[^']+'$/.test(a))) return null;
+  return args.map((a) => a.slice(1, -1));
+}
+
+/**
+ * Does a path select the console job? Only answerable when every entry is a
+ * literal path, which `judgeConsole` requires; `null` otherwise, so a caller
+ * can never read a pattern list as a membership test.
+ */
+export function consoleSelects(path, entries) {
+  if (entries.some((e) => WILDCARD.test(e))) return null;
+  return entries.includes(path);
+}
+
+/**
+ * The verdict on the console selection and the key it must move. `{ refusal }`
+ * for every state in which the subject was not read; otherwise the findings,
+ * each list empty on a clean tree.
+ */
+export function judgeConsole(source) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+
+  const entries = filters[CONSOLE_FILTER];
+  if (!entries) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${CONSOLE_FILTER}:\` filter.` };
+  if (entries.length === 0) return { refusal: `${CI_WORKFLOW}'s \`${CONSOLE_FILTER}:\` filter is empty.` };
+
+  const job = jobs[CONSOLE_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${CONSOLE_JOB}\` job -- the console gate has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  if (!condition.includes(`needs.filter.outputs.${CONSOLE_FILTER}`)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${CONSOLE_JOB}\` job no longer names \`${CONSOLE_FILTER}\` in its \`if:\`, so that ` +
+        `filter does not schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+
+  // Every place the job spells the key: the restore and save steps' `with.key`,
+  // and any env value that carries it (the remedy text the injection check prints).
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  const spellings = [];
+  for (const step of steps) {
+    const uses = String(step?.uses ?? '');
+    const key = step?.with?.key;
+    if (typeof key === 'string' && key.includes(CONSOLE_KEY_MARKER)) spellings.push({ where: `${uses || step?.name} key`, key, uses });
+    for (const [name, value] of Object.entries(step?.env ?? {})) {
+      if (typeof value === 'string' && value.includes(CONSOLE_KEY_MARKER)) spellings.push({ where: `env ${name}`, key: value, uses: '' });
+    }
+  }
+  const restores = spellings.filter((s) => s.uses.startsWith('actions/cache/restore'));
+  const saves = spellings.filter((s) => s.uses.startsWith('actions/cache/save'));
+  if (restores.length !== 1 || saves.length !== 1) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${CONSOLE_JOB}\` job spells the console dist key in ${restores.length} restore and ` +
+        `${saves.length} save step(s); this gate reads exactly one of each. The cache has moved or been split.`,
+    };
+  }
+  const keyInputs = hashFilesInputs(restores[0].key);
+  if (!keyInputs) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s console dist key does not spell exactly one \`hashFiles(...)\` of quoted paths:\n    ${restores[0].key}`,
+    };
+  }
+
+  const mismatched = spellings.filter((s) => s.key !== restores[0].key).map((s) => s.where);
+  const patterns = entries.filter((e) => WILDCARD.test(e));
+  const unselected = keyInputs.filter((p) => !entries.includes(p));
+  const unclassified = entries.filter((e) => !keyInputs.includes(e) && !Object.hasOwn(CONSOLE_GUARDS, e));
+  const staleGuards = Object.keys(CONSOLE_GUARDS).filter((g) => !entries.includes(g));
+  const hashedGuards = Object.keys(CONSOLE_GUARDS).filter((g) => keyInputs.includes(g));
+
+  return { entries, keyInputs, spellings: spellings.length, mismatched, patterns, unselected, unclassified, staleGuards, hashedGuards };
+}
+
+function reportConsole(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge the console selection.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  const lines = (xs) => xs.map((x) => `      ${x}`).join('\n');
+  if (verdict.patterns.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_FILTER}:\` filter carries pattern entr(ies):\n${lines(verdict.patterns)}\n` +
+        '    Name files. A pattern under packages/spec widens the console gate to every spec change, and a\n' +
+        '    list of literal paths is what lets this gate say which paths select the job.',
+    );
+  }
+  if (verdict.mismatched.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_JOB}\` job spells the console dist key differently at: ${verdict.mismatched.join(', ')}\n` +
+        '    The restore, the save and the remedy text must name ONE key, or a run saves an entry no run restores.',
+    );
+  }
+  if (verdict.unselected.length > 0) {
+    problems.push(
+      `the console dist key hashes path(s) the \`${CONSOLE_FILTER}:\` filter does not name:\n${lines(verdict.unselected)}\n` +
+        '    A change to one moves the key without starting the job, so its first build is the merge queue\'s,\n' +
+        `    where a check outside the required set cannot stop a merge. Add each to \`${CONSOLE_FILTER}:\`.`,
+    );
+  }
+  if (verdict.unclassified.length > 0) {
+    problems.push(
+      `the \`${CONSOLE_FILTER}:\` filter names path(s) the dist key does not hash and CONSOLE_GUARDS does not declare:\n` +
+        `${lines(verdict.unclassified)}\n` +
+        '    A head that moves one starts the job, restores the dist built before the change and skips the build\n' +
+        '    step, so the run is green without judging it. A BUILD INPUT goes into the key\'s hashFiles (all of its\n' +
+        '    spellings); a GUARD that every run executes goes into CONSOLE_GUARDS in this file, with the step.',
+    );
+  }
+  if (verdict.staleGuards.length > 0) {
+    problems.push(
+      `CONSOLE_GUARDS declares path(s) the \`${CONSOLE_FILTER}:\` filter no longer names:\n${lines(verdict.staleGuards)}\n` +
+        '    Delete the declaration, or restore the entry if the guard still runs.',
+    );
+  }
+  if (verdict.hashedGuards.length > 0) {
+    problems.push(
+      `CONSOLE_GUARDS declares path(s) the dist key also hashes:\n${lines(verdict.hashedGuards)}\n` +
+        '    A guard runs on a cache hit, so hashing it only buys a rebuild per change. Pick one kind.',
+    );
+  }
+  if (problems.length > 0) {
+    console.error('FAIL: ci.yml\'s `console` filter and the console dist key are out of step.\n');
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  console.log(
+    `OK: all ${verdict.entries.length} \`${CONSOLE_FILTER}\` entr(ies) are literal paths; ` +
+      `${verdict.keyInputs.length} are build inputs the console dist key hashes and ` +
+      `${verdict.entries.length - verdict.keyInputs.length} are declared guards; the key is spelled one way ` +
+      `in all ${verdict.spellings} place(s) the \`${CONSOLE_JOB}\` job uses it.`,
+  );
+  return 0;
 }
 
 function report(verdict) {
@@ -397,7 +611,10 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.error(`FAIL: cannot read ${CI_WORKFLOW}: ${err?.code ?? err?.message ?? err}`);
     return 1;
   }
-  return report(judge(source, table));
+  // Both subjects are judged and both report, so one red never hides the other.
+  const crosspkg = report(judge(source, table));
+  const consoleCode = reportConsole(judgeConsole(source));
+  return crosspkg === 0 && consoleCode === 0 ? 0 : 1;
 }
 
 function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
@@ -415,7 +632,18 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.glob}${row.covered ? `   via ${row.kind} ${row.via}` : ''}`);
   }
   console.log(`\n${seen.size} unique glob(s), ${verdict.uncovered.length} uncovered declaration(s).`);
-  return verdict.uncovered.length > 0 ? 1 : 0;
+
+  const con = judgeConsole(readFileSync(join(root, CI_WORKFLOW), 'utf8'));
+  if (con.refusal) {
+    console.error(`FAIL: ${con.refusal}`);
+    return 1;
+  }
+  console.log(`\n${CONSOLE_FILTER}: ${JSON.stringify(con.entries)}`);
+  for (const entry of con.entries) {
+    const kind = con.keyInputs.includes(entry) ? 'build input (hashed into the dist key)' : Object.hasOwn(CONSOLE_GUARDS, entry) ? `guard: ${CONSOLE_GUARDS[entry]}` : 'UNCLASSIFIED';
+    console.log(`${kind === 'UNCLASSIFIED' ? 'FAIL' : 'ok  '} ${entry}   ${kind}`);
+  }
+  return verdict.uncovered.length > 0 || con.unclassified.length > 0 ? 1 : 0;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
@@ -766,6 +994,125 @@ export async function selfTest() {
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
   }
 
+  // ── (8) the `console` selection and the dist key it must move (#20765) ───
+  battery('(8) the `console` selection and the dist key it must move');
+  const realSource = readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8');
+  const realConsole = judgeConsole(realSource);
+  const findingsOf = (v) =>
+    ['mismatched', 'patterns', 'unselected', 'unclassified', 'staleGuards', 'hashedGuards'].flatMap((k) => v[k] ?? ['(no verdict)']);
+  assert(!realConsole.refusal, `the checked-in ci.yml's console selection is readable -- ${realConsole.refusal ?? ''}`);
+  assert(findingsOf(realConsole).length === 0, `the checked-in console filter and dist key are in step -- ${findingsOf(realConsole).join(', ')}`);
+  // Triage's pins, over the real tree: the spec's entry layout selects the job
+  // AND moves the key, so the head judges the change instead of replaying a dist
+  // built before it; an ordinary spec source file does neither.
+  for (const layout of ['packages/spec/package.json', 'packages/spec/tsup.config.ts']) {
+    assert(
+      consoleSelects(layout, realConsole.entries ?? []) === true && (realConsole.keyInputs ?? []).includes(layout),
+      `a head touching only ${layout} selects Console Pin Gate and moves its dist key`,
+    );
+  }
+  const control = 'packages/spec/src/ui/view.zod.ts';
+  assert(
+    existsSync(join(REPO_ROOT, control)) && consoleSelects(control, realConsole.entries ?? []) === false,
+    `the control: a head touching only ${control} (a tracked spec source file) does NOT select Console Pin Gate`,
+  );
+  assert(
+    !(realConsole.entries ?? []).some((e) => e.startsWith('packages/spec/src/')),
+    'no console entry reaches into packages/spec/src -- the entry layout selects the job, the spec content does not',
+  );
+
+  // Synthetic trees. The default is clean, so every red below is the named drift.
+  const guardEntries = Object.keys(CONSOLE_GUARDS);
+  const keyOf = (paths) => `\${{ runner.os }}-console-dist-\${{ hashFiles(${paths.map((p) => `'${p}'`).join(', ')}) }}`;
+  const consoleFixture = ({ entries, key, saveKey, envKey, condition, withSave = true } = {}) => {
+    const k = key ?? keyOf(['.objectui-sha', 'scripts/build-console.sh']);
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(['packages/**']),
+      '            console:',
+      list(entries ?? ['.objectui-sha', 'scripts/build-console.sh', ...guardEntries]),
+      '  console-pin:',
+      `    if: ${JSON.stringify(condition ?? "${{ !cancelled() && needs.filter.outputs.console != 'false' }}")}`,
+      '    steps:',
+      '      - uses: actions/cache/restore@v6',
+      '        with:',
+      '          path: packages/console/dist',
+      `          key: ${k}`,
+      '      - run: pnpm check:console-injection --require-stamp',
+      '        env:',
+      `          CONSOLE_DIST_CACHE_KEY: ${envKey ?? k}`,
+      ...(withSave
+        ? ['      - uses: actions/cache/save@v6', '        with:', '          path: packages/console/dist', `          key: ${saveKey ?? k}`]
+        : []),
+    ].join('\n');
+  };
+  const clean = judgeConsole(consoleFixture());
+  assert(!clean.refusal && findingsOf(clean).length === 0, `positive control: the default synthetic tree is clean -- ${clean.refusal ?? findingsOf(clean).join(', ')}`);
+
+  const specInFilterOnly = judgeConsole(
+    consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/package.json', ...guardEntries] }),
+  );
+  assert(
+    (specInFilterOnly.unclassified ?? []).join(',') === 'packages/spec/package.json',
+    'THE HOLE: a spec path the filter names but the key does not hash is reported -- the head would replay a pre-change dist',
+  );
+  const keyOnly = judgeConsole(consoleFixture({ key: keyOf(['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/package.json']) }));
+  assert(
+    (keyOnly.unselected ?? []).join(',') === 'packages/spec/package.json',
+    'the other hole: a path the key hashes but the filter does not name is reported -- its first build would be the queue\'s',
+  );
+  const subtree = judgeConsole(consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', 'packages/spec/**', ...guardEntries] }));
+  assert((subtree.patterns ?? []).join(',') === 'packages/spec/**', 'a pattern entry is reported -- the filter must not become all of spec');
+  assert(consoleSelects('packages/spec/src/x.zod.ts', ['packages/spec/**']) === null, '-- and a pattern list is never read as a membership test');
+  const splitKey = judgeConsole(consoleFixture({ saveKey: keyOf(['.objectui-sha']) }));
+  assert(
+    (splitKey.mismatched ?? []).length === 1 && /cache\/save/.test(splitKey.mismatched[0]),
+    'a save step spelling a different key than the restore is reported, naming the save',
+  );
+  const staleGuard = judgeConsole(
+    consoleFixture({ entries: ['.objectui-sha', 'scripts/build-console.sh', ...guardEntries.filter((g) => g !== CI_WORKFLOW)] }),
+  );
+  assert((staleGuard.staleGuards ?? []).join(',') === CI_WORKFLOW, 'a declared guard the filter no longer names is reported stale');
+  const hashedGuard = judgeConsole(consoleFixture({ key: keyOf(['.objectui-sha', 'scripts/build-console.sh', CI_WORKFLOW]) }));
+  assert((hashedGuard.hashedGuards ?? []).join(',') === CI_WORKFLOW, 'a declared guard the key also hashes is reported');
+
+  assert(
+    /declares no \`console:\` filter/.test(judgeConsole(consoleFixture().replace(/            console:\n(              - '[^']*'\n?)+/, '')).refusal ?? ''),
+    'a filters input with no `console:` list => REFUSAL, not a clean zero',
+  );
+  assert(
+    /no longer names \`console\`/.test(judgeConsole(consoleFixture({ condition: "${{ !cancelled() }}" })).refusal ?? ''),
+    'the console job dropping the filter from its `if:` => REFUSAL',
+  );
+  assert(/exactly one of each/.test(judgeConsole(consoleFixture({ withSave: false })).refusal ?? ''), 'a job with no save step => REFUSAL');
+  assert(
+    hashFilesInputs("${{ runner.os }}-x-${{ hashFiles(env.PATHS) }}") === null &&
+      /quoted paths/.test(judgeConsole(consoleFixture({ key: "${{ runner.os }}-console-dist-${{ hashFiles(env.PATHS) }}" })).refusal ?? ''),
+    'a key whose hashFiles arguments are not quoted paths => REFUSAL: the gate cannot say what it hashes',
+  );
+
+  // The report path, over the real ci.yml with one drift injected: the spec's
+  // tsup entry list dropped from the filter while the key still hashes it.
+  const drifted = realSource.replace("              - 'packages/spec/tsup.config.ts'\n", '');
+  assert(drifted !== realSource, 'the report-path fixture found its anchor in the checked-in ci.yml');
+  const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
+  try {
+    mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(scratch, CI_WORKFLOW), drifted);
+    assert(quietly(() => main(scratch)) === 1, 'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -823,7 +1170,9 @@ export async function selfTest() {
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
       `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, ` +
-      `and the CI wiring read out of lint.yml.`,
+      `the CI wiring read out of lint.yml, and the \`console\` selection: the spec's entry layout selecting Console Pin ` +
+      `Gate and moving its dist key while a spec source file does neither, each way the filter and the key can drift ` +
+      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter.`,
   );
   selfTestReachedVerdict = true;
   return 0;
