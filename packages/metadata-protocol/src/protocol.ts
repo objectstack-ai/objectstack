@@ -14141,6 +14141,196 @@ export class ObjectStackProtocolImplementation implements
         return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
     }
 
+    /**
+     * [#20679, ADR-0126 §2] The `/meta` door's LOCKED-BASE verdict on an item
+     * that already exists, as a VALUE — for a second door that writes or
+     * removes the same artifact without passing through {@link saveMetaItem} /
+     * {@link deleteMetaItem}.
+     *
+     * The one caller today is `@objectstack/runtime`'s `/automation` domain:
+     * `PUT /automation/:name` re-registers a flow definition in the live
+     * automation engine and `DELETE /automation/:name` unregisters one, and
+     * neither is a `sys_metadata` write — so neither ever reached this class's
+     * refusals, nor `SysMetadataRepository`'s. A packaged flow the `/meta` door
+     * refuses to change could be changed, or removed, in place through that
+     * door on the `manage_metadata` authoring gate alone: the ADR-0126 §2
+     * promise ("the packaged base is locked — in-place edit refused loudly at
+     * the write door") kept by one door onto the artifact and not the other.
+     *
+     * ## Asked HERE, never re-derived by the caller
+     *
+     * Both answers are the ones this class already gives, from the same
+     * predicate and the same emitter — {@link packagedBaseOverrideRefusal} is
+     * `saveMetaItem`'s package door and {@link packagedBaseRemovalRefusal} is
+     * `deleteMetaItem`'s, each CALLED by those methods rather than copied into
+     * this one. "Is this artifact-backed?" ({@link isArtifactBacked}, the
+     * shadow-immune artifact lookup) and "does the type have an overlay
+     * channel?" ({@link isOverlayAllowed}, `allowOrgOverride` plus the
+     * `OS_METADATA_WRITABLE` hatch) keep exactly one spelling, and the refusal
+     * — its code, status and sentence — is registered to this package in the
+     * ADR-0112 ledger, so the caller relays it verbatim and emits nothing of
+     * its own.
+     *
+     * ## Topology-INDEPENDENT, deliberately
+     *
+     * `saveMetaItem` asks its package door behind `environmentId !== undefined`
+     * because on a host-config kernel the SAME predicate is enforced one layer
+     * down, by `SysMetadataRepository.assertAllowed` at the write itself — so
+     * the `/meta` door refuses a packaged item's in-place write on every
+     * topology. A caller whose write never reaches the repository has no such
+     * second layer, so it is answered here on every topology. The removal side
+     * agrees: the `/meta` door never removes a packaged base on any topology
+     * (on a host-config kernel with no overlay row its delete is a no-op that
+     * leaves the artifact standing, and with one the repository's delete gate
+     * refuses).
+     *
+     * ## What it deliberately does NOT answer
+     *
+     *  - a name no code package ships (not artifact-backed ⇒ `null`) —
+     *    creation is the `allowRuntimeCreate` tier's question, never this
+     *    lock's;
+     *  - the ADR-0010 per-item `_lock` (L3), which `saveMetaItem` enforces
+     *    separately and records to `sys_metadata_audit`: with the hatch shut,
+     *    an artifact-backed item of a type without `allowOrgOverride` is
+     *    refused here before its `_lock` could matter;
+     *  - a named base (`?package=`): the second door carries none, so the
+     *    package-less refusal (`NOT_OVERRIDABLE`) is the whole answer there.
+     *
+     * @returns the refusal to relay, or `null` when the `/meta` door would not
+     *          refuse this write or removal on the locked-base ground.
+     */
+    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete' }): Error | null {
+        // [#9009] Folded HERE, at the producer of the verdict, so a caller that
+        // arrives with a plural spelling cannot address around the lock.
+        const { type, name } = canonicalizeMetaRequestType(request);
+        return request.operation === 'delete'
+            ? this.packagedBaseRemovalRefusal(type, name)
+            : this.packagedBaseOverrideRefusal(type, name, undefined);
+    }
+
+    /**
+     * [#8184] THE PACKAGE DOOR — `saveMetaItem`'s refusal of a write onto an
+     * item a code package ships, on a type with no per-org overlay channel.
+     * `null` when the write is not refused on that ground.
+     *
+     * [#20679] Lifted out of `saveMetaItem` unchanged — predicate, emitters and
+     * the record below — so {@link packagedBaseRefusal} can hand a second write
+     * door the same verdict. `saveMetaItem` still asks it at the same position
+     * (behind `environmentId !== undefined`, below the code-only and org-scope
+     * refusals, above the ADR-0010 `_lock` check).
+     */
+    private packagedBaseOverrideRefusal(
+        type: string,
+        name: string,
+        packageId: string | null | undefined,
+    ): Error | null {
+        const artifactBacked = this.isArtifactBacked(type, name);
+        if (!artifactBacked || ObjectStackProtocolImplementation.isOverlayAllowed(type)) return null;
+        // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
+        // condition, and the reason this card exists.
+        //
+        // `SysMetadataRepository.assertAllowed` reads the base the
+        // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
+        // 'package'`) when it is read-only (#7682, then #8146's
+        // hatch ruling). That door is topology-INDEPENDENT — and it
+        // was unreachable here, because this branch throws first on
+        // every kernel with an `environmentId`. So one request
+        // answered `ITEM_LOCKED` on a host-config / CLI-assembled
+        // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
+        // project/cloud per-env one: the refusal VOCABULARY keyed off
+        // a row-scoping key, which is the #5086 / #6710 finding
+        // (see `saveMetaItem`'s #5086 block comment) arriving on the error codes.
+        // A client that learns to handle `ITEM_LOCKED` on one
+        // deployment never saw it on the other.
+        //
+        // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
+        // ({@link isWritablePackage}, the ADR-0070 rule in one
+        // place), same emitter — `readOnlyBaseOverrideError` is
+        // called, not copied — so the code, the status, the
+        // `lockSource`, the `packageId` and the sentence cannot drift
+        // between the two doors. Two independently-authored refusals
+        // for one condition is how `NOT_OVERRIDABLE`-everywhere
+        // started.
+        //
+        // THE LIMB ORDERING IS THE RULE, and it is the same ordering
+        // the repository states: BELOW every registry limb, ABOVE the
+        // hatch limb.
+        //   • Below the registry limb — this whole branch is guarded
+        //     by `!overlayAllowed`, so an `allowOrgOverride` type
+        //     never reaches the door. That is ADR-0005: an org
+        //     overlay of a code-shipped item ALWAYS names the
+        //     read-only package it customizes, and a door one limb
+        //     higher would close the overlay model outright. Pinned.
+        //   • Above the hatch limb — `isOverlayAllowed` folds
+        //     `OS_METADATA_WRITABLE` in, so an OPEN hatch takes the
+        //     write past this branch entirely, down to the repository
+        //     door, which applies the same rule with `hatchOpen:
+        //     true` and its own remedy. The hatch therefore still
+        //     never unlocks package writability on this topology
+        //     either (#8146 NARROW), and both directions of that
+        //     remedy selection are pinned in
+        //     `sys-metadata-repository.package-writability.test.ts`.
+        //     That is also why `hatchOpen` is passed as a literal
+        //     `false` here rather than recomputed: reaching this line
+        //     PROVES the hatch is closed, and a recomputed value
+        //     would be dead code dressed as a decision.
+        //
+        // ⛔ NARROW, exactly as the repository is: only a write that
+        // NAMES a read-only base is re-coded. A package-less write
+        // keeps `NOT_OVERRIDABLE` verbatim. Refusing a hatch write
+        // that names NO read-only base (BROAD) retires the hatch's
+        // only documented use and needs a maintainer decision plus a
+        // docs/ADR change — never arrived at from here.
+        //
+        // `runtime-only` needs no limb here: this branch is guarded by
+        // `artifactBacked`, so the intent is always
+        // `override-artifact`. The create side of the door is the
+        // ADR-0070 D1 gate further down `saveMetaItem`, which is already
+        // topology-independent and already answers
+        // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
+        const namedBase = typeof packageId === 'string' && packageId.length > 0;
+        if (namedBase && !this.isWritablePackage(packageId)) {
+            return SysMetadataRepository.readOnlyBaseOverrideError(
+                type, packageId as string, false,
+            );
+        }
+        const err = new Error(
+            `Metadata item '${type}/${name}' is provided by a code package `
+            + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
+            + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        (err as any).code = 'NOT_OVERRIDABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
+    /**
+     * `deleteMetaItem`'s refusal of a removal of an item a code package ships,
+     * on a type with no per-org overlay channel — EXCEPT a type whose loader
+     * merges an overlay at read time, where removing the row is repair (the
+     * #6960 ruling; the call site in {@link deleteMetaItem} carries the record
+     * and the tier boundary, which is `supportsOverlay`, never
+     * `allowOrgOverride`). `null` when the removal is not refused on that
+     * ground.
+     *
+     * [#20679] Lifted out of `deleteMetaItem` unchanged, for the reason
+     * {@link packagedBaseOverrideRefusal} was lifted out of `saveMetaItem`.
+     */
+    private packagedBaseRemovalRefusal(type: string, name: string): Error | null {
+        if (!this.isArtifactBacked(type, name)) return null;
+        if (ObjectStackProtocolImplementation.isOverlayAllowed(type)) return null;
+        if (ObjectStackProtocolImplementation.mergesOverlayAtRead(type)) return null;
+        const err = new Error(
+            `Metadata item '${type}/${name}' is provided by a code package `
+            + `and the type has not opted into per-org overlay writes. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        (err as any).code = 'NOT_OVERRIDABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
     // ───────────────────────────────────────────────────────────────────
     // ADR-0010 — metadata protection (Phase 1: L3 item-level lock)
     // ───────────────────────────────────────────────────────────────────
@@ -16011,86 +16201,18 @@ export class ObjectStackProtocolImplementation implements
         }
 
         if (this.environmentId !== undefined) {
-            const artifactBacked = this.isArtifactBacked(request.type, request.name);
-            if (artifactBacked && !overlayAllowed) {
-                // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
-                // condition, and the reason this card exists.
-                //
-                // `SysMetadataRepository.assertAllowed` reads the base the
-                // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
-                // 'package'`) when it is read-only (#7682, then #8146's
-                // hatch ruling). That door is topology-INDEPENDENT — and it
-                // was unreachable here, because this branch throws first on
-                // every kernel with an `environmentId`. So one request
-                // answered `ITEM_LOCKED` on a host-config / CLI-assembled
-                // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
-                // project/cloud per-env one: the refusal VOCABULARY keyed off
-                // a row-scoping key, which is the #5086 / #6710 finding
-                // (see the block comment above) arriving on the error codes.
-                // A client that learns to handle `ITEM_LOCKED` on one
-                // deployment never saw it on the other.
-                //
-                // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
-                // ({@link isWritablePackage}, the ADR-0070 rule in one
-                // place), same emitter — `readOnlyBaseOverrideError` is
-                // called, not copied — so the code, the status, the
-                // `lockSource`, the `packageId` and the sentence cannot drift
-                // between the two doors. Two independently-authored refusals
-                // for one condition is how `NOT_OVERRIDABLE`-everywhere
-                // started.
-                //
-                // THE LIMB ORDERING IS THE RULE, and it is the same ordering
-                // the repository states: BELOW every registry limb, ABOVE the
-                // hatch limb.
-                //   • Below the registry limb — this whole branch is guarded
-                //     by `!overlayAllowed`, so an `allowOrgOverride` type
-                //     never reaches the door. That is ADR-0005: an org
-                //     overlay of a code-shipped item ALWAYS names the
-                //     read-only package it customizes, and a door one limb
-                //     higher would close the overlay model outright. Pinned.
-                //   • Above the hatch limb — `isOverlayAllowed` folds
-                //     `OS_METADATA_WRITABLE` in, so an OPEN hatch takes the
-                //     write past this branch entirely, down to the repository
-                //     door, which applies the same rule with `hatchOpen:
-                //     true` and its own remedy. The hatch therefore still
-                //     never unlocks package writability on this topology
-                //     either (#8146 NARROW), and both directions of that
-                //     remedy selection are pinned in
-                //     `sys-metadata-repository.package-writability.test.ts`.
-                //     That is also why `hatchOpen` is passed as a literal
-                //     `false` here rather than recomputed: reaching this line
-                //     PROVES the hatch is closed, and a recomputed value
-                //     would be dead code dressed as a decision.
-                //
-                // ⛔ NARROW, exactly as the repository is: only a write that
-                // NAMES a read-only base is re-coded. A package-less write
-                // keeps `NOT_OVERRIDABLE` verbatim. Refusing a hatch write
-                // that names NO read-only base (BROAD) retires the hatch's
-                // only documented use and needs a maintainer decision plus a
-                // docs/ADR change — never arrived at from here.
-                //
-                // `runtime-only` needs no limb here: this branch is guarded by
-                // `artifactBacked`, so the intent is always
-                // `override-artifact`. The create side of the door is the
-                // ADR-0070 D1 gate further down this method, which is already
-                // topology-independent and already answers
-                // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
-                const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
-                if (namedBase && !this.isWritablePackage(request.packageId)) {
-                    throw SysMetadataRepository.readOnlyBaseOverrideError(
-                        request.type, request.packageId as string, false,
-                    );
-                }
-                const err = new Error(
-                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
-                    + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
-                    + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
-                    + `See docs/adr/0005-metadata-customization-overlay.md.`
-                );
-                (err as any).code = 'NOT_OVERRIDABLE';
-                (err as any).status = 403;
-                throw err;
-            }
+            // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
+            // code package ships, on a type with no per-org overlay channel.
+            // The verdict and its full record live in
+            // {@link packagedBaseOverrideRefusal}: [#20679] lifted out of this
+            // method UNCHANGED, so a second write door onto the same artifact
+            // asks this exact predicate and gets this exact emitter through
+            // {@link packagedBaseRefusal}, rather than a copy that agrees with
+            // this one only until either of them moves.
+            const packagedBaseOverride = this.packagedBaseOverrideRefusal(
+                request.type, request.name, request.packageId,
+            );
+            if (packagedBaseOverride) throw packagedBaseOverride;
 
             // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
             // overlay `_lock`) blocks save independent of the L1 type-level
@@ -21917,18 +22039,13 @@ export class ObjectStackProtocolImplementation implements
             // block (`environmentId === undefined`) and would otherwise be
             // refused there instead, leaving the fix half-done. See
             // {@link SysMetadataRepository.assertDeleteAllowed}.
-            const legacyOverlayRemoval = ObjectStackProtocolImplementation
-                .mergesOverlayAtRead(request.type);
-            if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
-                const err = new Error(
-                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
-                    + `and the type has not opted into per-org overlay writes. `
-                    + `See docs/adr/0005-metadata-customization-overlay.md.`
-                );
-                (err as any).code = 'NOT_OVERRIDABLE';
-                (err as any).status = 403;
-                throw err;
-            }
+            //
+            // [#20679] The verdict — the artifact-backed refusal AND the
+            // carve-out above — lives in {@link packagedBaseRemovalRefusal}, so a
+            // second removal door onto the same packaged artifact asks this one
+            // through {@link packagedBaseRefusal} instead of carrying a copy.
+            const packagedBaseRemoval = this.packagedBaseRemovalRefusal(request.type, request.name);
+            if (packagedBaseRemoval) throw packagedBaseRemoval;
             if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
                 const err = new Error(
                     `Metadata type '${request.type}' does not allow runtime creation or deletion.`
