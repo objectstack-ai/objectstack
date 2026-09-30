@@ -1604,8 +1604,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * → flattened into one cube-style entry per (field, operator) pair.
    *
    * [#5345] Everything outside {@link ANALYTICS_FILTER_CAPABILITIES} is REFUSED
-   * with `INVALID_FILTER` / 400, by the same walk the query path and the
-   * reference matcher use. It used to be dropped, and the direction of that drop
+   * with `INVALID_FILTER` / 400, by the same walk the query path uses (as the
+   * reference matcher did, until retired). It used to be dropped, and the direction of that drop
    * is what made it a defect rather than a limitation: fewer predicates means
    * MORE rows, so a widget filtered on `{$or: [...]}` aggregated the whole table
    * and looked like a working widget. `$not` made it a permission bug on top —

@@ -28,16 +28,23 @@
  * # Why these tests assert through BOTH faces
  *
  * The rule lives in exactly one function (`assertFilterConditionShape`) and both
- * faces call it. A regression that re-forks them fails HERE rather than being
+ * faces called it. A regression that re-forks them fails HERE rather than being
  * discovered by a conformance table that only exercises one — the same reason
  * `memory-filter-vocabulary-refusal.test.ts` doubles every case.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED. Its half of each refusal was that one function's, so the second
+ * face asserted here is the gate itself, called directly — the live path and
+ * the gate must refuse identically. Its row answers were the live path's too,
+ * with ONE exception, pinned at the foot of this file: `$exists` over a
+ * non-boolean flag, where the matcher and the live path disagreed.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { FilterCondition } from '@objectstack/spec/data';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -59,7 +66,7 @@ const ROWS = [
 const DRIVER_SQL_LEADING_SENTENCE = (field: string) =>
   `Operator "$null" on field "${field}" requires a boolean comparand (true or false).`;
 
-describe('[#5347] $null requires a boolean comparand, on both filter faces', () => {
+describe('[#5347] $null requires a boolean comparand, on the live path and its shape gate', () => {
   let driver: InMemoryDriver;
 
   beforeEach(async () => {
@@ -82,9 +89,6 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
     return (rows as any[]).map((r) => String(r.id)).sort();
   };
 
-  const matchIds = (where: unknown): string[] =>
-    ROWS.filter((row) => match(row, where as any)).map((r) => r.id).sort();
-
   const refusalOfFind = async (where: unknown): Promise<WireBearingError> => {
     try {
       await findIds(where);
@@ -94,13 +98,14 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
     throw new Error('expected the live query path to refuse this filter, but it resolved');
   };
 
-  const refusalOfMatch = (where: unknown): WireBearingError => {
+  /** The shared shape gate, called directly — the refusal the retired reference matcher raised. */
+  const refusalOfGate = (where: unknown): WireBearingError => {
     try {
-      matchIds(where);
+      assertFilterConditionShape(where, 'filter');
     } catch (e) {
       return e as WireBearingError;
     }
-    throw new Error('expected the reference matcher to refuse this filter, but it answered');
+    throw new Error('expected the shape gate to refuse this filter, but it passed');
   };
 
   const NON_BOOLEAN: Array<[label: string, value: unknown]> = [
@@ -124,8 +129,8 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
       expect(err.message).toContain('filter.stage.$null');
     });
 
-    it(`the reference matcher refuses ${label}, identically`, () => {
-      const err = refusalOfMatch({ stage: { $null: value } });
+    it(`the shape gate refuses ${label}, identically`, () => {
+      const err = refusalOfGate({ stage: { $null: value } });
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain(DRIVER_SQL_LEADING_SENTENCE('stage'));
@@ -133,7 +138,7 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
     });
   }
 
-  it('both faces refuse it inside a combinator, at the position that names it', async () => {
+  it('the live path and the gate refuse it inside a combinator, at the position that names it', async () => {
     for (const [where, path] of [
       [{ $and: [{ stage: { $null: 'yes' } }] }, 'filter.$and[0].stage.$null'],
       [{ $or: [{ stage: 'won' }, { stage: { $null: 1 } }] }, 'filter.$or[1].stage.$null'],
@@ -142,8 +147,8 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
       const findErr = await refusalOfFind(where);
       expect(findErr.code).toBe('INVALID_FILTER');
       expect(findErr.message).toContain(path);
-      const matchErr = refusalOfMatch(where);
-      expect(matchErr.message).toBe(findErr.message);
+      const gateErr = refusalOfGate(where);
+      expect(gateErr.message).toBe(findErr.message);
     }
   });
 
@@ -155,31 +160,38 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
       { $or: [{}, { stage: { $null: 'x' } }] },
     ]) {
       expect((await refusalOfFind(where)).code).toBe('INVALID_FILTER');
-      expect(refusalOfMatch(where).code).toBe('INVALID_FILTER');
+      expect(refusalOfGate(where).code).toBe('INVALID_FILTER');
     }
   });
 
-  it('true and false are unchanged on both faces, line by line', async () => {
+  it('true and false are unchanged, line by line', async () => {
+    // The retired reference matcher answered each line identically.
     expect(await findIds({ stage: { $null: true } })).toEqual(['2']);
-    expect(matchIds({ stage: { $null: true } })).toEqual(['2']);
     expect(await findIds({ stage: { $null: false } })).toEqual(['1']);
-    expect(matchIds({ stage: { $null: false } })).toEqual(['1']);
   });
 
-  it('the ordinary vocabulary is untouched on both faces', async () => {
+  it('the ordinary vocabulary is untouched', async () => {
+    // The retired reference matcher answered each line identically.
     expect(await findIds({ stage: 'won' })).toEqual(['1']);
-    expect(matchIds({ stage: 'won' })).toEqual(['1']);
     expect(await findIds({ score: { $between: [5, 15] } })).toEqual(['1']);
-    expect(matchIds({ score: { $between: [5, 15] } })).toEqual(['1']);
     expect(await findIds({ $or: [{ stage: 'won' }, { score: 20 }] })).toEqual(['1', '2']);
-    expect(matchIds({ $or: [{ stage: 'won' }, { score: 20 }] })).toEqual(['1', '2']);
     expect(await findIds({})).toEqual(['1', '2']);
   });
 
-  it('$exists is deliberately NOT tightened here', () => {
+  it('$exists is deliberately NOT tightened here — and the live path reads a non-boolean flag as FALSE', async () => {
     // #5347 ruled on `$null` alone. `$exists` diverges on its own axis (#5299
     // holds the open question of what "exists" means for a null-valued key), so
     // it keeps today's answers rather than being settled as a rider.
-    expect(matchIds({ stage: { $exists: 'yes' } })).toEqual(['1']);
+    //
+    // [#5930 step 4] This line used to pin the REFERENCE MATCHER's answer,
+    // `['1']`: it read the flag by truthiness (`!!'yes'`), so `'yes'` meant
+    // "has a value". The live path never agreed — it lowers `val === true` to
+    // `$ne: null` and anything else to `$eq: null`, so `'yes'` asks for the
+    // rows with NO value. That was the matcher's own divergence from the path
+    // users run; with the matcher retired, the live path's answer is pinned,
+    // measured, and the refusal this cell lacks is reported rather than
+    // decided here.
+    expect(await findIds({ stage: { $exists: 'yes' } })).toEqual(['2']);
+    expect(await findIds({ stage: { $exists: true } })).toEqual(['1']);
   });
 });

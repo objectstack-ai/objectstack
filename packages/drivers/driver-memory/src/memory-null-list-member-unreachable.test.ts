@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13357] Ruling point 3's NEGATIVE pin, matcher side: a refused null list
- * member cannot reach this package's reference matcher.
+ * [#13357] Ruling point 3's NEGATIVE pin, evaluator side: a refused null list
+ * member cannot reach this package's evaluator (the reference matcher when this
+ * was written, `InMemoryDriver.find` since that matcher's retirement).
  *
  * # What was ruled (2026-08-31, option C)
  *
@@ -31,8 +32,8 @@
  * `@objectstack/objectql`'s `engine-filter-array-lowering.test.ts`; the
  * wire/protocol face runs the same `parseFilterAST`.
  *
- * The boundary, stated rather than hidden: `match()` and
- * `InMemoryDriver.find()` remain plain library functions — a caller that
+ * The boundary, stated rather than hidden: `InMemoryDriver.find()` remains a
+ * plain library function (as `match()` was, until it was retired) — a caller that
  * skips the compile face meets only this package's own
  * `assertFilterConditionShape`, which is deliberately NOT extended to the
  * null-member rule (⛔ 不做跨后端对齐工程). That boundary is the same one
@@ -42,7 +43,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseFilterAST } from '@objectstack/spec/data';
 
-import { match } from './memory-matcher.js';
+import { InMemoryDriver } from './memory-driver.js';
 
 type Refusal = Error & { code?: string; status?: number };
 
@@ -59,54 +60,64 @@ const MISSING_ROWS: Array<Record<string, unknown>> = [
 /**
  * The direct-caller pipeline, exactly as the module note describes it: compile
  * first, evaluate second. The refusal has to land in step one — if compile
- * returns, the matcher HAS been reached and the pin below fails on the
- * sentinel rather than on a missing throw.
+ * returns, the driver HAS been reached and the pin below fails on the sentinel
+ * rather than on a missing throw.
+ *
+ * [#5930 step 4, ruling D6] Step two was the reference matcher's `match()`,
+ * which had no production caller and is retired; it is `InMemoryDriver.find`
+ * now — the evaluator a direct caller of this package actually reaches.
  */
-function compileThenMatch(rows: Array<Record<string, unknown>>, where: unknown): string[] {
+async function compileThenFind(rows: Array<Record<string, unknown>>, where: unknown): Promise<string[]> {
   const condition = parseFilterAST(where);
-  return rows.filter((row) => match(row, condition)).map((row) => String(row.id));
+  const driver = new InMemoryDriver({ persistence: false });
+  await driver.connect();
+  for (const row of rows) await driver.create('t', { ...row });
+  const found = new Set(
+    ((await driver.find('t', { where: condition } as never)) as Array<Record<string, unknown>>).map((r) => String(r.id)),
+  );
+  return rows.map((row) => String(row.id)).filter((id) => found.has(id));
 }
 
-const refusalOf = (run: () => unknown): Refusal => {
+const refusalOf = async (run: () => Promise<unknown>): Promise<Refusal> => {
   try {
-    run();
+    await run();
   } catch (e) {
     return e as Refusal;
   }
   throw new Error('expected the compile face to refuse this filter, but it returned');
 };
 
-describe('[#13357] a refused null list member cannot reach the matcher (ruled 2026-08-31)', () => {
+describe('[#13357] a refused null list member cannot reach the driver (ruled 2026-08-31)', () => {
   it.each([
     ['$in: [null]', { name: { $in: [null] } }],
     ['$nin: [null]', { name: { $nin: [null] } }],
     ['$between: [null, null]', { name: { $between: [null, null] } }],
     ['$between: [null, max]', { name: { $between: [null, 'z'] } }],
     ['$between: [min, null]', { name: { $between: ['a', null] } }],
-  ])('%s aborts at the compile face on BOTH readings of "no value"', (_label, where) => {
+  ])('%s aborts at the compile face on BOTH readings of "no value"', async (_label, where) => {
     // Record-independent by construction — the compile face never sees a row —
     // so the two readings that split the matcher (#13357's table) cannot even
     // be posed. Driving both anyway is the point of the pin: neither fixture
     // gets an answer, so there is no divergence left to observe.
     for (const rows of [NULLED_ROWS, MISSING_ROWS]) {
-      const err = refusalOf(() => compileThenMatch(rows, where));
+      const err = await refusalOf(() => compileThenFind(rows, where));
       expect(err.code, _label).toBe('INVALID_FILTER');
       expect(err.status, _label).toBe(400);
     }
   });
 
-  it('the pipeline itself is real — a legal list compiles and the matcher answers', () => {
+  it('the pipeline itself is real — a legal list compiles and the driver answers', async () => {
     // Positive control: without it, the refusals above would also "pass" if
-    // compileThenMatch were broken outright.
-    expect(compileThenMatch(NULLED_ROWS, { name: { $in: ['a'] } })).toEqual(['1']);
-    expect(compileThenMatch(MISSING_ROWS, { name: { $nin: ['a'] } })).toEqual(['3']);
+    // compileThenFind were broken outright.
+    expect(await compileThenFind(NULLED_ROWS, { name: { $in: ['a'] } })).toEqual(['1']);
+    expect(await compileThenFind(MISSING_ROWS, { name: { $nin: ['a'] } })).toEqual(['3']);
   });
 
-  it('an EMPTY list still passes the same face — the refusal is null-shaped, not list-shaped', () => {
+  it('an EMPTY list still passes the same face — the refusal is null-shaped, not list-shaped', async () => {
     // `$in: []` / `$nin: []` are declared predicates ("matches nothing" /
     // "matches everything") and PR #13630 pins them downstream; the carve-out
     // must not catch them.
-    expect(compileThenMatch(NULLED_ROWS, { name: { $in: [] } })).toEqual([]);
-    expect(compileThenMatch(NULLED_ROWS, { name: { $nin: [] } })).toEqual(['1', '3']);
+    expect(await compileThenFind(NULLED_ROWS, { name: { $in: [] } })).toEqual([]);
+    expect(await compileThenFind(NULLED_ROWS, { name: { $nin: [] } })).toEqual(['1', '3']);
   });
 });
