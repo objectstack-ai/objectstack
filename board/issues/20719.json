@@ -1,0 +1,35 @@
+{
+  "number": 20719,
+  "kind": "pull_request",
+  "title": "fix(deps): raise js-yaml floor to ^5.4.1 for GHSA-r3ph-w7gj-g6xm",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T21:10:32Z",
+  "updated_at": "2026-09-29T22:15:00Z",
+  "closed_at": "2026-09-29T22:14:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T22:14:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20719",
+  "body": "Fixes #20705\n\nClause-②: no\n\n## Summary\n\n`Validate Package Dependencies` (OSV-Scanner against `pnpm-lock.yaml`) flags `js-yaml@5.2.3` with GHSA-r3ph-w7gj-g6xm (5.3, fixed in 5.4.1). `@objectstack/metadata` is the only importer of `js-yaml`, so this PR raises its declared floor from `^5.2.3` to `^5.4.1` and takes the fix. It is the take-the-fix path `osv-scanner.toml` describes: the ledger keeps zero exemptions and is not touched, and neither is `.github/workflows/validate-deps.yml`.\n\n## Files\n\n- `packages/metadata/package.json`: `js-yaml` `^5.2.3` to `^5.4.1`.\n- `pnpm-lock.yaml`: regenerated with a plain `pnpm install --no-frozen-lockfile --prefer-offline` (pnpm 10.31.0, the `packageManager` pin), not edited by hand.\n- `.changeset/js-yaml-5-4-1-osv-2026-09-29.md`: one `patch` for `@objectstack/metadata`, `Clause-②: no`.\n\n## Lockfile diff\n\n6 insertions, 6 deletions, three hunks: the metadata importer's `js-yaml` specifier (`^5.2.3` to `^5.4.1`) and version (`5.2.3` to `5.4.2`), and the `js-yaml` package and snapshot entries (`js-yaml@5.2.3` to `js-yaml@5.4.2`; its one dependency `argparse@2.0.1` is unchanged). Nothing else moves.\n\n## Other js-yaml importers\n\nNone. `git grep` over every `package.json` finds `js-yaml` only in `packages/metadata` (plus `@types/js-yaml` `^4.0.9` as its devDependency, not a runtime copy). The lockfile had exactly one `js-yaml` version (5.2.3) and now has exactly one (5.4.2); there are no transitive copies and no `js-yaml` override in `pnpm-workspace.yaml`.\n\n## What I ran\n\n| Check | Result |\n|---|---|\n| `npm view js-yaml@5.4.1 version` | 5.4.1 |\n| OSV-Scanner v2.3.8 (release SHA-256 verified), `scan --offline-vulnerabilities --lockfile=pnpm-lock.yaml` on `origin/main`'s lockfile (control) | exit 1, GHSA-r3ph-w7gj-g6xm on `js-yaml` 5.2.3 |\n| The same scan on this branch | exit 0, `No issues found` (1369 packages) |\n| `@objectstack/metadata` build (with its dependency closure), typecheck | pass |\n| `@objectstack/metadata` test | 55 files, 828 tests pass |\n| `node scripts/pm/dispatch-gates.mjs --commands`, every derived command run, then `--ran` | 62 derived, 58 pass, 4 NOT MEASURED |\n\nThe 4 NOT MEASURED gates are `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`. Each exited 3 (prerequisite not met): they sweep the whole workspace's `dist/`, which a full `pnpm build` would supply, and this diff changes no source. CI runs them.\n\n## Changeset\n\nA `patch` for `@objectstack/metadata` with `Clause-②: no`. The only published change is a dependency-range floor; no exported symbol, option key or accept/reject verdict moves.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

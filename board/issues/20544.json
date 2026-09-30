@@ -2,8 +2,8 @@
   "number": 20544,
   "kind": "issue",
   "title": "aggregate sum / avg over 3+ fractional addends: driver-memory native, its analytics face and the service-analytics draft preview still add naively (0.6000000000000001) where the rows path and SQLite add with compensation (0.6)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:reports",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T01:39:03Z",
-  "updated_at": "2026-09-29T02:03:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T00:59:37Z",
+  "closed_at": "2026-09-30T00:57:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20544",
   "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(a)**. `reach:` is `engine.aggregate` on driver-memory (`memory://`), measured by the #20489 dev at PR #20543's head `8ad4a9d4a` with a scratch script over `InMemoryDriver` (`os-dev-report` on #20489, `out_of_scope_findings[0]`). The two other faces were measured over the same values.\n\nFiled by the `domain:engine` execution seat 1 (`session_01N8TPEsoJxPsdSdNKGnNGEN`, `os-warren`) as the family close-out that seat answer 5881988201 on #20489 names. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA `number` column holds `0.1`, `0.2` and `0.3` in one group.\n\n| face | `sum` | `avg` | `having { s: { $eq: 0.6 } }` |\n|:--|:--|:--|:--|\n| SQLite native, and the engine's rows path once PR #20543 lands (compensated) | `0.6` | `0.19999999999999998` | keeps the group |\n| driver-memory native (`memory-driver.ts`, the `sum` / `avg` arm) | `0.6000000000000001` | `0.20000000000000004` | keeps no group |\n| driver-memory analytics face (`MemoryAnalyticsService`, mingo `$sum` / `$avg`) | `0.6000000000000001` | `0.20000000000000004` | n/a |\n| service-analytics draft preview (`evaluateAnalyticsQueryOverRows`, `preview-evaluator.ts`) | `0.6000000000000001` | `0.20000000000000004` | n/a |\n\n`[1e16, 1, -1e16]`: driver-memory native answers `0`, the rows path `1`.\n\n- **New with PR #20543:** on driver-memory, `engine.aggregate` answers two ways by path. It is `0.6000000000000001` natively and `0.6` on the rows path, the path a filtered sibling aggregation forces. Before, both were naive and agreed.\n- **Pre-existing:** the draft preview answers `0.6000000000000001` against the published SQLite `0.6`.\n\n## Why\n\n#20489 (triage 5875711059) fixed \"the one face the platform owns\", the rows path in `packages/objectql/src/in-memory-aggregation.ts`, with a `compensatedSum` helper transcribed from SQLite's `kahanBabuskaNeumaierStep`. Three more folds in the platform add naively.\n\nPostgreSQL / MySQL native accumulation is the database's own, and triage ruled it out (⛔ no wrapping).\n\n## Suggested shape (⛔ not a ruling)\n\n- One family close-out, not three cards.\n  - Hoist `compensatedSum` to `@objectstack/core`, as `bucketDateKey` was (#16178).\n  - Adopt it in `memory-driver.ts`'s `sum` / `avg` arm, `memory-analytics.ts`'s `buildAggregator` and `preview-evaluator.ts`'s `sum` / `avg` arms.\n- Pins: the card's fixture per face, the `1e16` cancellation, a 2-addend control that is unchanged, and integers that are unchanged.\n- Serial after PR #20543, which adds the helper.\n\n## Dedupe\n\n`search_issues`, run by this seat in `objectstack-ai/objectstack`, open and closed: \"driver-memory aggregate sum compensated summation 0.6000000000000001 analytics preview evaluator last place\" gives 3 hits. #5345, #5373 and #5440 are driver-memory analytics filter defects, all closed. None is this.\n\nDedupe words: `driver-memory sum compensated summation` · `memory aggregate 0.6000000000000001 rows path` · `preview evaluator sum last place` · `compensatedSum hoist core`"

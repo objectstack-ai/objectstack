@@ -1,0 +1,35 @@
+{
+  "number": 20716,
+  "kind": "pull_request",
+  "title": "feat(spec): a semantic migration names the D2 conversions whose applied edits it judges (SemanticMigration.conversionIds)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T20:31:29Z",
+  "updated_at": "2026-09-29T22:14:59Z",
+  "closed_at": "2026-09-29T22:14:58Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-29T22:14:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20716",
+  "body": "Closes #20697\n\n`SemanticMigration` gains an optional `conversionIds`, naming the D2 conversions whose applied edits the entry judges. A test refuses an id that no registered conversion at or below the entry's step replays. One link is added after reading both sides: `flow-decision-edge-branching-first-match` → `flow-decision-mode-inclusive-explicit`.\n\nClause-②: yes (widening)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

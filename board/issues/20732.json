@@ -1,0 +1,36 @@
+{
+  "number": 20732,
+  "kind": "pull_request",
+  "title": "docs(design): predicate compilation convergence — design and cost account",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T22:50:30Z",
+  "updated_at": "2026-09-29T23:15:29Z",
+  "closed_at": "2026-09-29T23:15:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-29T23:15:27Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20732",
+  "body": "Part of #5930. This PR lands the investigation's deliverable. The build decision (the document's §6, D1–D7) goes to the maintainer on #5930 after it merges, so merging must not close the card.\nClause-②: no\n\nThis PR is the investigation's whole deliverable: `docs/design/predicate-compilation-convergence.md`. It is a design and a cost account for shape A (a shared semantic tree, with compilers that own only their dialect), measured on `3711e0b763`.\n\n⛔ It is not a build. The diff adds one document and edits no source, test, schema, gate or skill file. The document proposes; the build decision is the maintainer's.\n\n## What the document measures\n\n- **Census (H1).**\n  - 11 faces in 15 source files turn a `FilterCondition` into SQL, a query document or a boolean. The card counted 5 plus a half.\n  - Faces the card never named:\n    - `TursoDriver.toRemoteFilter`, a lowering pass in front of the remote transport;\n    - the three `driver-memory` faces: the query path, a reference matcher with no production caller, and the cube face;\n    - `driver-mongodb`;\n    - the analytics draft-preview evaluator;\n    - the per-aggregation `filter` half of `having`.\n  - The #5499 freeze was dissolved on 2026-08-11, so it excludes nothing.\n- **The shared layer.**\n  - About ten shared doors in spec, core and objectql decide what a filter may say. They run at six seams.\n  - What a filter *means* is still copied. The NULL-polarity quartet exists in 4 copies (293 code lines), and the whole-day upper bound is called from 10 face files (41 call sites).\n- **The measured tax (H2).**\n  - The `$empty` ruling took 4 cards, 4 PRs and 13 dev rounds, and edited 13 distinct face files.\n  - The last-supported-day ruling (#20600, then #20661) took 2 cards, 2 PRs and 3 rounds, and edited 10 distinct face files.\n  - The temporal comparand door (#20549 with #20480) is enforced at the engine seam. It took 1 PR and 1 round, and edited 0 face files.\n  - Between 2026-08-14 and `3711e0b763`, 22 commits edited 3 or more face files. By subject, 18 of them are filter semantics.\n- **The #6050 re-check.** At the faces' own entry points, four faces still answer an `undefined` comparand, each in its own way, and `driver-mongodb` passes it through. Every production path I traced refuses it at a shared door, except the `driver-memory` cube face, which runs no door.\n- **Shape A (H3) and the cost account (H4).** The document covers:\n  - what the tree holds and what stays per dialect;\n  - the bounded output vocabulary the census forces;\n  - two representations and the seams;\n  - the per-face migration table and the conformance net;\n  - the order of work and the risks.\n- **Recommendation, against the four axes: a smaller first slice.**\n  - Build one shared `FilterCondition` → `FilterCondition` lowering, and run it at the seams that already run the doors.\n  - It would hold `$between`, the whole-day bound and the NULL-polarity guards. Per-face deletions follow.\n  - It is not the full typed-IR build, and it adds no gate. It requires an ADR-0053 D-D1 amendment.\n  - Section 6 lists seven decisions for the maintainer.\n\n## Verification\n\n- **Gates.** `node scripts/pm/dispatch-gates.mjs --commands` on `c814d60164` derived 12 families, and `--ran` reconciled them: 12 run, 0 NOT MEASURED, every exit code recorded. All 12 exit 0.\n  - `check:doc-formula-expressions` first answered PREREQUISITE NOT MET (exit 3), because `@objectstack/lint` was not built. After the build it exits 0.\n- **Probes.** The probes behind sections 2.4 and 2.5 are scratch scripts, not committed. Appendix A describes them.\n- **NOT MEASURED:** PostgreSQL and MySQL, a live mongod, a live Turso remote server, every HTTP door, and the sibling repositories.\n- **Changeset.** `docs/design/` ships in no package, so this PR carries none and takes the `skip-changeset` label.\n\n## Acceptance notes\n\nThe census found these candidate defects. The dev report handed them to the seat, and nothing is filed from this PR itself. The seat filed items 1 and 2 as bare findings; items 3–5 stay notes.\n\n1. The read-scope compiler `compileScopedFilterToSql` applies no whole-day upper bound and binds temporal comparands exactly as written (section 2.5, item 1). Filed as #20733.\n2. `MemoryAnalyticsService` runs neither shared comparand door, so `{d: undefined}` reads as `{d: null}` (section 2.5, item 2). Filed as #20734.\n3. The draft-preview evaluator's `$contains` folds case (section 2.5, item 3).\n4. `memory-matcher.ts` `match()` has no production caller (section 2.5, item 4).\n5. `.claude/skills/pm-dispatch/references/compile-surfaces.md` has drifted from the code it lists (section 5, option C).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DEvba2nBuD4tWzfq8r8NFY)_\n"
+}

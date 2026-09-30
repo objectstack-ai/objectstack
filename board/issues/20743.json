@@ -1,0 +1,35 @@
+{
+  "number": 20743,
+  "kind": "pull_request",
+  "title": "fix(scripts): the console spec-injection probes are chosen with the bundle in view (#20646)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T01:20:14Z",
+  "updated_at": "2026-09-30T02:21:00Z",
+  "closed_at": "2026-09-30T02:20:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T02:20:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20743",
+  "body": "Fixes #20646\n\nClause-②: no\n\n`Console Pin Gate` is red on `main` since `fbec216e2d` (PR #20695, the `@objectstack/spec/migrations` entry split). Its build step exits 2: \"Neither spec appears in the built console — no @objectstack/spec content matched.\" The injection works. The check was reading text the console never bundles. This PR makes the build-time probe derivation choose with the bundle in view. The fresh leg stops reading entries the console never imports, and the stale leg becomes strictly stronger.\n\n## Root cause, measured\n\n`scripts/console-spec-probes.mjs` builds each spec's blob from every JS file the package's `exports` map resolves to. The assertion then took the alphabetically first unique `.describe()` text on each side. A console bundles only the entries it imports, so either probe could come from an entry the bundle can never carry.\n\nThe readings below compare the published `@objectstack/spec` 17.4.0 that objectui locks at pin `dd3f7e1be356` with the framework spec.\n\n| leg | framework | fresh witness (carried by) | in bundle | stale detector (carried by) | in bundle | old check |\n| --- | --- | --- | --- | --- | --- | --- |\n| dark | `f927864ea0` (main before the split) | \"A public export added or removed by one release.\" (`.`) | yes | \"Accepted developer agreement version\" (`./cloud`) | no | exit 0 |\n| lit | `fbec216e2d` (`origin/main`) | the same text, now (`./migrations`) | no | the same (`./cloud`) | no | exit 2 |\n\n- The witness moved with the split from the root to `./migrations`, which the console never imports. Meanwhile 102 of the 142 injected-only descriptions ARE in that bundle; the first sorts from `./ui`.\n- The stale leg was already blind. Its detector sits in the published `./cloud` entry, which objectui's shipped source never imports: 116 `/ui`, 62 `/data`, 17 `/kernel` and so on, and no `/cloud`. A console built WITHOUT the injection carries 56 of the 160 published-only descriptions, and not that one.\n- The spec side is not the cause. The console never imported the change manifest, and the injected spec is in the bundle. `packages/spec` is untouched here.\n\n## The fix (`scripts/console-spec-probes.mjs`, `chooseProbes`)\n\n- **Fresh witness:** the first injected-only description the bundle DOES carry. With none carried, \"neither spec appears\" is still exit 2.\n- **Stale leg:** judged over EVERY published-only description. It fails when ANY of them is in the bundle, and reports the first one found with the count. A bundle the old single pick flagged is still flagged, so this is strictly stronger.\n- **Stamp:** keeps its shape and version. With nothing published in the bundle, the stamped detector is the same one `pickProbe` chose, so `check:console-injection`'s cache-hit replay is unchanged.\n- **Assertion script:** `scripts/assert-console-spec-injection.mjs` calls `chooseProbes` and prints the counts. The exit ladder is unchanged: 0 verified, 1 published spec bundled, 2 unverified.\n- **Self-test:** `scripts/check-console-injection.mjs` gains battery 13 (roster floor 10 to 11). It runs the real assertion script on fixtures whose first unique candidate is not in the bundle:\n  - a working injection verifies, and its stamp replays green;\n  - a published-only description the old pick skipped fails the build and writes no stamp;\n  - neither side present stays exit 2.\n\n  I checked that the battery can fail: reverting `chooseProbes` to first-pick semantics made it red with 5 failures, and restoring the fix turned it green again.\n\n## Proof\n\nAll legs ran against real `vite build`s of the console, with the old and the new assertion on the same bundle.\n\n| console build | objectui pin | new check | old check |\n| --- | --- | --- | --- |\n| injected spec from `fbec216e2d` | `dd3f7e1be356` | exit 0 (witness from `./ui`; 102/142 present; 0/160 published) | exit 2 |\n| NOT injected (published spec) | `dd3f7e1be356` | exit 1 (56/160 published-only descriptions present) | exit 2 |\n| a bundle with no spec text | — | exit 2 (\"Neither spec appears\") | — |\n| injected spec from `f927864ea0` (dark) | `dd3f7e1be356` | exit 0 (111/142 present) | exit 0 |\n| injected spec from `fbec216e2d` | `db11afd49670` (PR #20706's pin) | exit 0 (102/142; 0/160) | exit 2 |\n| NOT injected (published spec) | `db11afd49670` | exit 1 (56/160) | exit 2 |\n\nOn this branch's head, the Console Pin Gate's steps run locally all pass: `bash scripts/build-console.sh` with the injected spec exits 0; the dist presence assert passes; `pnpm check:console-sha` exits 0; and `pnpm check:console-injection --require-stamp` exits 0 and replays the new stamp.\n\n## Verification record\n\n- `dispatch-gates --commands` for the 3 changed paths derives 31 families. `--ran` reconciles them as 30 run, all exit 0, and 1 NOT MEASURED: `check:pm-dispatch-gates`, whose self-test alone outruns the 590-second foreground cap here. It does not read these files' behaviour.\n- `node scripts/check-console-injection.mjs --self-test` passes: 44 assertions, battery floor met.\n- Lint, narrowed and proven: `eslint --no-inline-config` on the 3 changed files reports 0 errors and 0 warnings. The config enables no type-aware linting, so untouched files' verdicts cannot move.\n- No changeset: the diff touches only root `scripts/`, which ship in no published package (`@objectstack/spec-monorepo` is private).\n\n## Acceptance notes\n\n- **The cache-hit replay's stale leg is still a single stamped detector.** At this pin that detector is `./cloud` text no console bundles, so on a dist-cache HIT the replay cannot catch a published spec. The build-time leg now can. Fixing the replay needs a multi-detector stamp (a `stampVersion` bump that invalidates every cached dist under the unchanged cache key), which is outside this claim. Carrier: the `domain:spec` seat. Noted, not filed.\n- **CI on this head:** `Console Pin Gate` (job 109696257740) concluded success. The dist cache missed, so step 11 built the console and ran the changed assertion (105 of 145 injected-only descriptions present, all 160 published-only absent), and steps 12 to 14 passed on that fresh dist.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014EJ1ED8X4MMrT18BhVx4tx)_\n"
+}

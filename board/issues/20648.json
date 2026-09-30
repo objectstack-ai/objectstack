@@ -14,18 +14,20 @@
     "area:devpath",
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T13:12:09Z",
-  "updated_at": "2026-09-29T13:58:18Z",
+  "updated_at": "2026-09-30T01:40:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20648",
   "body": "Found while upgrading HotCRM from `@objectstack/*` 17.4.0 to 17.5.0 in place (objectstack-ai/hotcrm#1970): 17.5.0 was booted on a SQLite database that 17.4.0 had created.\n\n## Symptom\n\nEvery `objectstack dev` boot, and every `os migrate plan`, prints this on the upgraded database:\n\n```\nPaged read of 'sys_migration' is NOT deterministic: this driver did not create the table, so it cannot name a unique column to order by, and the query asked for no sort of its own. Walking the pages may serve one row twice and never serve another (objectstack#4363). Give the query an `orderBy` on a unique column, or declare the object so this driver manages its table.\n```\n\n**Control:** 17.4.0 on the same database file prints nothing about `sys_migration` in three boots.\n\n## Why it is a false positive\n\nThe reads are the platform's own point lookups by primary key. Neither can return more than one row:\n\n- `packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts`, `persistSeedTenancyReceiptRow`: `ledger.find(DATA_MIGRATION_FLAG_OBJECT, { where: { id: flag.id }, limit: 1, … })`\n- `packages/platform-objects/src/system/migration-flag.ts` (~line 68): `engine.find(DATA_MIGRATION_FLAG_OBJECT, { where: { id: migrationId }, limit: 1, … })`\n\nThe `limit: 1` makes the driver classify these as paged reads. On a table this driver instance did not create, the driver has no unique column to order by, so it warns. The warning then tells an operator to add an `orderBy` to a query that the operator did not write and cannot edit.\n\n## Impact\n\nIt is cosmetic, but it hits every in-place upgrade, on every boot. It is the first warning an upgrading operator sees, and its wording (\"may serve one row twice and never serve another\") reads as possible data loss in the migration ledger.\n\n## Suggested direction (not a ruling)\n\nEither option would work:\n\n- give the two lookups an explicit `orderBy: [{ field: 'id' }]`;\n- have the determinism check skip a read whose `where` pins a unique key with equality, since such a read has no pages to walk.\n\nThe second covers any other point lookup with the same shape.\n\nRelated: in the same upgraded database, `os migrate plan` also lists `+ sys_migration [add_columns: columns_moved_at]` as pending. That is additive and expected. It is noted here only because it is the same table."

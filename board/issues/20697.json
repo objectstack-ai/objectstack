@@ -2,8 +2,8 @@
   "number": 20697,
   "kind": "issue",
   "title": "spec(migrations): a semantic entry names the D2 conversions whose applied edits it judges (SemanticMigration.conversionIds), so os migrate meta can pair them (the spec half of #20620)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T18:00:05Z",
-  "updated_at": "2026-09-29T20:12:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T22:16:38Z",
+  "closed_at": "2026-09-29T22:14:59Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20697",
   "body": "**This card carries the `packages/spec` half of #20620 (direction 2, pairing). #20620 keeps the CLI printer.** Filing gate: **④ a coordination node**, the per-layer child of an in-flight card, filed the way #20618 was filed for #20583. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`). ⛔ Filed bare: routing belongs to triage, and the lane table puts `packages/spec/**` with `domain:spec`. ⛔ Not a claim.\n\n## Why this is owed\n\nTriage's direction 2 on #20620 (`5888087153`) reads: 「Where an applied conversion has a semantic sibling that judges it, print the sibling beside the applied edit, marked **review**. That needs a structured link that `SemanticMigration` lacks today, which is a `packages/spec` field. If the seat takes this, it files the spec child the way #20618 was filed for #20583.」 Direction 1 (order) ships in PR #20691, which says `Part of #20620`.\n\n## The measured pull\n\nHotCRM's upgrade printed 13 `flow-decision-mode-inclusive-explicit` edits as \"Applied\", while their judge, the semantic entry `flow-decision-edge-branching-first-match` (「nothing, where the out-edge conditions partition」), printed about 240 notices away. Over the chain from floor 16 (majors 17 and 18, at `8304fb9e13`) there are 103 chain conversions and 321 semantic entries. An exact-id mention search finds 57 candidate pairs: 49 conversions named, and 51 semantic entries naming at least one. 54 conversions are named by no entry. These are **candidates**, not links: prose mentions include incidental analogues (for example, `audit-log-action-enum-retired` names three unrelated conversions). The full candidate list is in the #20620 dev's report on that card.\n\n## The dev's proposal (⛔ the spec seat owns the shape)\n\n- **A (recommended by the dev):** `SemanticMigration.conversionIds?: readonly string[]` in `packages/spec/src/migrations/types.ts`, declared on the semantic side.\n  - It holds the ids of the D2 conversions, from this step's or an earlier step's `MigrationStep.conversionIds`, whose applied edits this entry judges.\n  - The printer joins it against `MigrationApplication.conversionId`, the same name on both sides.\n  - An assertion in the existing `migrations.test.ts` refuses an id that resolves to no conversion in the same or an earlier step. That is a test, not a new `check:*` gate.\n- **B:** `MetadataConversion.semanticIds?` on the conversion side. It puts D3 knowledge into the load path's D2 table, which does not own the judgment.\n- **C (rejected by triage's own rule):** pairing by prose-matching the id in the entry's text.\n\n## What #20620 keeps\n\nThe printer's pairing (show the linked entry beside the applied edit, marked **review**, with ⛔ no notice dropped), dispatched on #20620 once this field lands and the links are authored for the confirmed pairs.\n\nDedupe words: `SemanticMigration conversionIds` · `semantic entry judges conversion link` · `migrate meta pair applied edit review`"

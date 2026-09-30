@@ -2,8 +2,8 @@
   "number": 20637,
   "kind": "issue",
   "title": "[Decision] analytics: a cube's `refreshKey` has nothing to key on — build the cache for `every` and retire `sql`, keep both as authored intent, or retire both (the refreshKey half of #20282)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:reports",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T11:58:12Z",
-  "updated_at": "2026-09-29T20:22:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T21:24:10Z",
+  "closed_at": "2026-09-29T21:22:05Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20637",
   "body": "Ruled: 5890724395 · letter C — refreshKey retired whole (every and sql), no cache built; this card is the retirement card · 2026-09-29T12:59Z\n\nThis card carries the `refreshKey` half of #20282; #20282 keeps `format` and `granularities` (stage 2, PR #20635) and the descriptions (stage 3).\n\nFiled by the `domain:spec` execution seat 2 (`session_014EJ1ED8X4MMrT18BhVx4tx`, seat post #18549) from the #20282 stage-2 report `5889706157` (open question 1), with the seat's answer `5889752648`. The dispatch ordered `refreshKey` measured only. ⛔ Not a claim.\n\n## One-line problem\n\nAn analytics cube can declare how often its results refresh (`refreshKey: { every: '1 hour' }`), and the showcase app does. Nothing in the platform reads it: no cache exists, so the setting silently does nothing.\n\n## Background and evidence (measured by the stage-2 dev at tree `958251b6ac`)\n\n- `refreshKey` is declared on `analytics_cube` (`packages/spec/src/data/analytics.zod.ts`, `every` and `sql`, both optional strings). Both liveness rows are `dead`.\n- **Readers: 0.** `git grep refreshKey` over non-test `packages/services`, `packages/drivers` and `packages/rest` finds 0 hits. Repo-wide, it appears only in the spec, generated surfaces, migration notes and one author.\n- **Authors: 1.** `examples/app-showcase/src/data/analytics/showcase.cube.ts:87` declares `every: '1 hour'`.\n- **Nothing to key on.** `service-analytics` references no job, cache or scheduler service. Its one cache is request-scoped (`dimension-labels.ts#withLabelFetchCache`). A scheduler exists (`service-job`), and analytics does not use it.\n- **History.** The service README once advertised `enableCaching` / `cacheTTL` / `invalidateCache`; they were removed as fabricated (see the `service-analytics` CHANGELOG).\n- **`refreshKey.sql` has no safe seam.** It would run author-written raw SQL on a schedule outside the read-scope machinery. Every other cube `sql` is treated as an object name.\n\n## Governing text\n\n- Ruling A′ ④ on #18900 (`5727134555`), the maintainer's criterion: 「每族该问的是:主流平台有没有这个能力 —— 有 ⇒ 补消费端(一次做对);没有 ⇒ 退役,而不是看仓里有没有人读」.\n- Triage on #20282 (`5859510828`) applied it to this family: **ENFORCE**.\n- ADR-0049 (enforce-or-remove) states the same rule for security properties. `refreshKey.sql` is security-adjacent: it is raw SQL that would run outside read scope.\n- Protocol statement: this is not a request to change the protocol. It asks which enforcement the declared keys get, or whether they leave.\n\n## Premises, each with a re-check\n\n- Readers are still 0: `git grep -n refreshKey origin/main -- 'packages/services' 'packages/drivers' 'packages/rest' ':!*.test.ts'`.\n- `service-analytics` still uses no cache or job service: `git grep -n -E \"ICacheService|IJobService|cache\\.|jobs?\\.\" origin/main -- packages/services/service-analytics/src ':!*.test.ts'`.\n\n## Options (what each does, and what a customer would notice)\n\n| | What it does | What a customer notices |\n|:--|:--|:--|\n| **A** | Build `every` as a result cache in its own L card, sequenced after #20282's stage 3. It is keyed by cube, the normalized query and the caller's resolved read scope and tenant, with the TTL from `every`. Retire `sql` now: a tombstone, a D2 conversion that strips it, and the showcase edit. | Dashboards on busy cubes answer from cache within the declared cadence. An author who wrote `sql` gets a loud refusal with a migration note. |\n| **B** | Keep both keys as authored intent: the rows stay `dead` with this census, and nothing is built until a deployment pulls. | Nothing changes. A declared refresh cadence keeps doing nothing, silently. |\n| **C** | Retire `refreshKey` whole (`every` and `sql`): tombstones, a D2 strip and the showcase edit. This reverses triage's ENFORCE. | An author who declared a refresh cadence gets a loud refusal and a migration note. There is no caching, and none is promised. |\n\n- **A in business terms:** the platform promises the cadence the author wrote, as Cube.dev's `refreshKey` does for its caches. The half that cannot be made safe is removed.\n- **B in business terms:** a settings screen with a switch wired to nothing.\n- **C in business terms:** take the switch off the screen until there is a machine behind it.\n\n## 四轴分析(业务立场)\n\n- **实际业务需求:** 零实测拉动。0 个读者，1 个仓内作者（showcase 演示 `every: '1 hour'`），无任何部署报告看板慢。过去宣传过的分析缓存是虚构后被删除的。维护者判据只问主流有没有：Cube.dev 有 `refreshKey`，所以分诊判 ENFORCE。\n- **项目长远合理性:** 两年后的平台应当有按读权限范围正确分键的结果缓存，主流（Cube.dev 预聚合、Looker datagroup）都这样建模。但它是安全敏感子系统：分键漏掉读范围就会把 A 租户或 A 用户的行给 B，需要单独设计（很可能要 ADR），不能挂在本卡顺手做。`sql` 探针没有安全执行接缝，长远看应删。\n- **防 AI 写元数据犯错:** 不做任何事时，showcase 在教 AI 写一个无效的键：静默，谁也看不到错。A 让 `every` 兑现、让 `sql` 响亮拒绝；C 让两者都响亮拒绝；B 保留陷阱。\n- **创业阶段不扩散:** A 是新能力（L），所以只能作为单独、排在第 3 阶段之后的卡。B 是 declare-and-maintain，属永久义务。C 最省。\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性:A 收敛为主流形态（`every` 兑现、`sql` 删除），特例减少；B 保留一个声明未兑现的特例；C 删除声明，契约最小。\n- ② 实际业务拉动:今天没人撞上（0 读者、1 演示作者、无慢看板实测）；零拉动默认 defer 或 remove。\n- ③ 防 AI 犯错:A、C 都把静默无效变成响亮拒绝（C 全部，A 对 `sql`）；B 让 AI 继续照 showcase 写无效键。\n- ④ 创业阶段不扩散:C（remove）优于 A（新建 L 子系统）优于 B（声明并维护一个无效键）。\nPrior rulings read: `refreshKey` in docs/adr + docs/NORTH-STAR.md + AGENTS.md → 0 hits; ADR-0049 (enforce-or-remove, security properties); thread: #20282 (triage `5859510828`, pitfall note `5869426939`, stage-2 report `5889706157`, seat answer `5889752648`), ruling A′ ④ on #18900 (`5727134555`)\n\n## Recommendation\n\n**A**: build `every` in its own L card after stage 3, and retire `sql` now.\n- **Self-check:** 只看①选 A;②③④ 是否翻转:否(②④ 只把 `every` 的建设推到第 3 阶段之后、单独成卡，不改字母)。\n- **Fallback:** C, if you weigh startup focus above the ENFORCE ruling for this family. C is also a clean interim: retire now, and re-declare on the day a cache exists.\n- **Confidence gap:** this seat cannot see customer projects outside this repository. If a deployment already declares `refreshKey`, C breaks its load with a migration note, and A only breaks `sql`. There is no latency measurement of any dashboard, so A's value is the mainstream argument, not a measured pull.\n\n## After the ruling\n\n- **A:** this seat files an L card for the `every` cache, sequenced after #20282's stage 3 and marked for its own design review, and a small spec card that retires `sql`. `every`'s describe states \"not read yet\" until the cache lands.\n- **B:** the two rows stay `dead` with this census re-verified, and this card closes `not_planned` with the ruling cited.\n- **C:** one spec retirement card for both keys, and the showcase edit rides it.\n\nRelated: #20282 (the family card), PR #20635 (stage 2), #18900 (ruling A′).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

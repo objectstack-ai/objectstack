@@ -1,0 +1,26 @@
+{
+  "number": 20756,
+  "kind": "issue",
+  "title": "check-expected-skips reads scaffold-e2e.yml's by-design 'Registry canary' skip as outside the roster (exit 4) on every PR that touches create-objectstack",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T02:21:49Z",
+  "updated_at": "2026-09-30T02:21:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20756",
+  "body": "Filing gate: **③ a defect in a PM loop tool**, measured. `reach:` every PR whose diff selects `.github/workflows/scaffold-e2e.yml` (it is path-filtered to `create-objectstack`): the enqueue bar's skip reading answers exit 4 on a by-design skip, so the landing seat must hand-classify it each time. Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) while landing PR #20748. ⛔ Filed bare: routing belongs to triage (the lane table puts non-gate `scripts/pm/**` with `domain:skills`). ⛔ Not a claim.\n\n## Measured\n\n`node scripts/pm/check-expected-skips.mjs --pr 20748` at head `a84b73af13`:\n- 40 check-runs: 32 success, 8 skipped; 7 skips in the roster;\n- `⛔ unexpected skips (1) — outside the roster: Registry canary: ${{ matrix.template }}` (run `36658032070`, the `Scaffold E2E` workflow on `pull_request`), classified by the tool as `filter-miss: skipped before matrix expansion (the name is the raw template): a job-level if: or needs gate did not select this head`;\n- `VERDICT … 1 skipped check-run(s) outside the roster (exit 4)`.\n\n## Why it is by design\n\n`.github/workflows/scaffold-e2e.yml:464-465` declares `name: 'Registry canary: ${{ matrix.template }}'` with `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`. On every `pull_request` run the job is skipped before its matrix expands, so its check-run carries the raw, unexpanded name. The skip is expected on every PR that triggers the workflow, and the roster does not list it: likely because the roster matches expanded job names, or because it does not read this job-level `if:` shape. That is for the fix to measure.\n\n## Fix shape\n\nTeach the roster this job (a schedule/dispatch-only job-level `if:`, under its raw matrix name), so `check-expected-skips --pr` answers exit 0 for a `create-objectstack` PR whose only extra skip is this one. Pin: a `--check-runs-json` fixture carrying the raw-named skipped canary answers exit 0, and a genuinely unexpected skip still answers exit 4.\n\nDedupe: a search for `check-expected-skips Registry canary` and `expected-skips roster matrix` finds no open card. Dedupe words: `check-expected-skips Registry canary` · `raw matrix name skipped before expansion roster` · `scaffold-e2e schedule-only job skip`"
+}

@@ -2,8 +2,8 @@
   "number": 20646,
   "kind": "issue",
   "title": "spec: the root entry stops carrying the migration and conversion registries (about 1 MB of prose), so a console first screen no longer downloads os migrate text (the upstream payback of objectui#11088 D1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:spec",
     "enhancement",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [
@@ -23,12 +22,16 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T12:57:46Z",
-  "updated_at": "2026-09-29T19:10:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T02:22:08Z",
+  "closed_at": "2026-09-30T02:21:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20646",
-  "body": "Blocked-by: #20705\n\nFiled by the director seat (objectstack#12708, `session_01AsCNgFBs8HCjwhyHQsFbx3`) as the upstream payback card the maintainer's ruling on objectui#11088 (decision 1, letter A — raise the console first-screen ceiling now, pay it back at the source) names. ⛔ Not a claim.\n\n## What was measured (director seat, read-only, 2026-09-29)\n\n- objectui's 17.5.0 bump (PR objectui#11086) puts the console's eager closure at 3563.2 KB gzip against a 3149.4 KB budget: **+413.8 KB**, almost all of it `@objectstack/spec`'s `dist/index.js`, which grew from 2,583,323 to 3,753,923 bytes (+45 %) between 17.4.0 and 17.5.0 (the objectui seat's reading of the two tarballs).\n- Where it comes from, compared at the tag `@objectstack/spec@17.4.0` against `main`:\n  - `packages/spec/src/migrations/registry.ts`: 1,100,789 → 1,936,632 bytes (+836 KB);\n  - `packages/spec/src/conversions/registry.ts`: 391,787 → 559,713 bytes (+168 KB);\n  - `packages/spec/src` as a whole: 16.5 MB → 22.3 MB.\n  Those two files are almost entirely string literals — the retirement rationale fragments and the `os migrate meta` guidance texts landed this month — and pass into `dist` nearly 1 : 1, so they account for roughly 1.0 MB of the 1.17 MB `dist/index.js` growth.\n- Both are re-exported from the spec **root entry**: `packages/spec/src/index.ts:224` `export * from './conversions/index.js'` and `:227` `export * from './migrations/index.js'`. The package's `exports` map has no `./migrations` subpath (it has `./data`, `./ui`, `./automation`, … `./shared`).\n\nA console first screen validates and renders metadata; it never runs a migration. It pays for that text today because the root entry carries it.\n\n## What this card asks\n\nThe registries leave the root entry and become their own subpath (for example `@objectstack/spec/migrations`, carrying `conversions` too, or two subpaths); the consumers that need them import the subpath: `os migrate` and the CLI's migration guidance, `metadata-core`'s forward conversion, `check:migration-registry` and the other repo gates, and whatever else `git grep` finds importing `ALL_CONVERSIONS` / `RETIRED_KEYS_BY_MAJOR` / the semantic ledger from the root. Whether the root keeps a lazy re-export or drops the names is the seat's to decide with `Clause-②` in view: dropping names from the root entry is a narrowing for any consumer importing them from `@objectstack/spec` and needs the BREAKING banner and a migration note; a subpath added beside an unchanged root is a widening. Either way, measure first — the acceptance is a number, not a shape.\n\n## Acceptance\n\n- `@objectstack/spec` `dist/index.js` (and the ESM root chunk a bundler pulls) shrinks by about the registries' size; the pin reads the built root entry's byte count against a ceiling, or the eager-closure budget in objectui once the pin moves.\n- objectui's eager closure drops back under the ceiling objectui#11088 D1 raised, so the raise is paid back; the objectui-side card (console lazy-loads the metadata-admin-only spec validation) carries the rest.\n- No runtime behaviour changes: `os migrate meta`, the metadata-core forward conversion and every repo gate read the same tables from the subpath.\n\nRelated: objectui#11088 (the ruling), objectui#11073 / PR objectui#11086 (the bump), objectui#5531 (the precedent raise), #20613 (unrelated, same day)."
+  "body": "Filed by the director seat (objectstack#12708, `session_01AsCNgFBs8HCjwhyHQsFbx3`) as the upstream payback card the maintainer's ruling on objectui#11088 (decision 1, letter A — raise the console first-screen ceiling now, pay it back at the source) names. ⛔ Not a claim.\n\n## What was measured (director seat, read-only, 2026-09-29)\n\n- objectui's 17.5.0 bump (PR objectui#11086) puts the console's eager closure at 3563.2 KB gzip against a 3149.4 KB budget: **+413.8 KB**, almost all of it `@objectstack/spec`'s `dist/index.js`, which grew from 2,583,323 to 3,753,923 bytes (+45 %) between 17.4.0 and 17.5.0 (the objectui seat's reading of the two tarballs).\n- Where it comes from, compared at the tag `@objectstack/spec@17.4.0` against `main`:\n  - `packages/spec/src/migrations/registry.ts`: 1,100,789 → 1,936,632 bytes (+836 KB);\n  - `packages/spec/src/conversions/registry.ts`: 391,787 → 559,713 bytes (+168 KB);\n  - `packages/spec/src` as a whole: 16.5 MB → 22.3 MB.\n  Those two files are almost entirely string literals — the retirement rationale fragments and the `os migrate meta` guidance texts landed this month — and pass into `dist` nearly 1 : 1, so they account for roughly 1.0 MB of the 1.17 MB `dist/index.js` growth.\n- Both are re-exported from the spec **root entry**: `packages/spec/src/index.ts:224` `export * from './conversions/index.js'` and `:227` `export * from './migrations/index.js'`. The package's `exports` map has no `./migrations` subpath (it has `./data`, `./ui`, `./automation`, … `./shared`).\n\nA console first screen validates and renders metadata; it never runs a migration. It pays for that text today because the root entry carries it.\n\n## What this card asks\n\nThe registries leave the root entry and become their own subpath (for example `@objectstack/spec/migrations`, carrying `conversions` too, or two subpaths); the consumers that need them import the subpath: `os migrate` and the CLI's migration guidance, `metadata-core`'s forward conversion, `check:migration-registry` and the other repo gates, and whatever else `git grep` finds importing `ALL_CONVERSIONS` / `RETIRED_KEYS_BY_MAJOR` / the semantic ledger from the root. Whether the root keeps a lazy re-export or drops the names is the seat's to decide with `Clause-②` in view: dropping names from the root entry is a narrowing for any consumer importing them from `@objectstack/spec` and needs the BREAKING banner and a migration note; a subpath added beside an unchanged root is a widening. Either way, measure first — the acceptance is a number, not a shape.\n\n## Acceptance\n\n- `@objectstack/spec` `dist/index.js` (and the ESM root chunk a bundler pulls) shrinks by about the registries' size; the pin reads the built root entry's byte count against a ceiling, or the eager-closure budget in objectui once the pin moves.\n- objectui's eager closure drops back under the ceiling objectui#11088 D1 raised, so the raise is paid back; the objectui-side card (console lazy-loads the metadata-admin-only spec validation) carries the rest.\n- No runtime behaviour changes: `os migrate meta`, the metadata-core forward conversion and every repo gate read the same tables from the subpath.\n\nRelated: objectui#11088 (the ruling), objectui#11073 / PR objectui#11086 (the bump), objectui#5531 (the precedent raise), #20613 (unrelated, same day)."
 }

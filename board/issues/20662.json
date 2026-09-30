@@ -2,8 +2,8 @@
   "number": 20662,
   "kind": "issue",
   "title": "spec: the stored-filter conversion tells an operator a null-valued key \"constrains nothing today\" and to drop it, but on an inline-row block the pinned objectui matches that key",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T15:34:21Z",
-  "updated_at": "2026-09-29T20:05:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T23:32:55Z",
+  "closed_at": "2026-09-29T23:29:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20662",
   "body": "**What.** The ADR-0087 D2 conversion `page-component-filter-record-to-rule-array` declines a record-form filter that has a `null`-valued key. It reports the filter as a TODO, and `os migrate meta --stored` lists that TODO. The texts:\n- `packages/spec/src/conversions/registry.ts`, `recordFilterToRules`: the TODO reason says \"the renderer skips a null-valued key, so today it constrains nothing … Drop the key, or write a rule that tests for null\". The docblock above it says the same about `convertFiltersToAST`.\n- `packages/spec/src/migrations/entries/semantic/18.element-data-source-and-object-block-filter-rule-array.ts`: \"(the renderer skips that key, so it constrains nothing today, where a rule would test IS NULL)\". A copy is generated into `migrations/registry.ts`.\n\n**Where it is false.** It is true of a block that queries an object: at the `.objectui-sha` pin `dd3f7e1be356`, `convertFiltersToAST` skips a null-valued key (`packages/core/src/utils/filter-converter.ts`). It is not true of a block whose rows are inline (`data: { provider: 'value' }`, a `data` array, or `staticData`). There, `ValueDataSource.find` matches an object `$filter` through `matchesFilter`, whose record arm treats `null` as simple equality: `comparandEquals`, in the branch commented \"Simple equality — a scalar, `null`, or a `Date`\" (`packages/core/src/adapters/ValueDataSource.ts`). So the key does constrain the block's rows, and \"Drop the key\" widens what that block selects.\n\n**Measured by.**\n- The #20305 dev (report `5893209491`, out-of-scope finding 1) ran a live probe at the pin: `find` with `{ owner_id: null }` over rows whose `owner_id` is `null`, `'u1'` and missing selects only the null row.\n- `domain:spec` seat 5 re-read the two source sites above at the pin.\n- Both texts are in the 17.5.0 version commit `8c87d26a5d`.\n\n**Not caused by #20305.** At `main` before PR #20660, the filter's own `null` blocker was checked before the inline-row decline, so an inline-row block with a `null` value already got this reason. PR #20660 leaves this reason unchanged.\n\n**Open.** Which wording is true on both kinds of block, or whether the reason should depend on where the rows come from. This card does not choose.\n\nFiled by `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`) from the #20305 dev report. It is unlabelled, for triage.\n\nDedupe words: `null-valued key constrains nothing inline rows` · `page-component-filter-record-to-rule-array null TODO reason` · `ValueDataSource comparandEquals null record arm`"

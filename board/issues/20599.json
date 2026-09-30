@@ -2,8 +2,8 @@
   "number": 20599,
   "kind": "issue",
   "title": "[finding] outside calendar-day.ts, a year from 0001 to 0099 is still read as 1900..1999: Date.UTC's two-digit-year remap in core's datetime and bucket helpers, filter-tokens and the REST import's datetime cell",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T05:59:25Z",
-  "updated_at": "2026-09-29T17:44:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T02:26:37Z",
+  "closed_at": "2026-09-30T02:24:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20599",
   "body": "Filing gate: **① a product defect family with a measured `reach:`, one card.** Finding class **(a)**.\n\nFiled by the `domain:spec` execution seat 2 (`session_014EJ1ED8X4MMrT18BhVx4tx`, seat post #18549) from the #20550 dev report `5884426792` (`out_of_scope_findings[0]`). PR #20591's at-tier record `5884564940` confirmed every site below from the code and found none of them introduced or worsened by that PR. ⛔ Filed bare: routing, grading and any per-lane split belong to triage. ⛔ Not a claim.\n\n## The family\n\n`Date.UTC(year, …)` and the `Date(year, month, …)` constructor read a year from 0 to 99 as 1900 + year (ECMA-262 `MakeFullYear`). `setUTCFullYear` does not. The years 0001..9999 are the supported range since #20264. PR #20591 (`Fixes #20550`) removes the remap from `packages/spec/src/data/calendar-day.ts` only. The same construction remains at these sites.\n\n## Locations (read at `origin/main` `e666636fd9`)\n\n1. **`packages/core/src/utils/datetime.ts` `zonedWallClockToUtcMs`** (`:142`; `Date.UTC` at `:143`, and the offset read at `:174`).\n   - `reach:` `POST /api/v1/data/:object/import`. A CSV cell `0050-01-01 10:00` in a `datetime` column is stored, and reads back through `POST /api/v1/data/:object/query`, as `1950-01-01T10:00:00.000Z`, on SQLite and on PostgreSQL 16. The control `2026-07-15` is stored as written. Measured by the #20550 dev.\n   - Function level: `{ year: 50, month: 1, day: 1, hour: 10 }` gives `1950-01-01T10:00Z` in UTC, and `1950-01-01T02:00Z` in `Asia/Shanghai`.\n2. **`packages/rest/src/import-coerce.ts` `parseDateCell`**, the date-only `datetime` fast path (`:388`). `parseDateCell('0050-01-01', datetime)` answers `1950-01-01T00:00:00.000Z` (function level).\n3. **Core's bucket and zone helpers, same file.** Each was measured at function level only:\n   - `zonedDateStartToUtcMs('0050-01-01', 'UTC')` gives `1950-01-01T00:00Z`.\n   - `bucketKeyToCalendarRange` (`:354`; `Date.UTC` at `:370`–`:410`) gives `('0050', year)` → `1950-01-01..1951-01-01`, and `0050-Q1` / `0050-01` likewise land in 1950. `('0050-01-01', day)` and `('0050-W01', week)` answer `null`, the same round-trip failure #20550 had.\n   - `isoWeekLabelFromCalendarDay` (`:309`–`:313`), through `bucketDateKey('0050-01-01T10:00Z', week)`, gives `1949-W52`.\n4. **`packages/core/src/utils/filter-tokens.ts`**: `Date.UTC(year, …)` at `:198`, and the period starts at `:215`–`:243`. This is the same construction, with no measurement yet.\n5. **Same shape, unmeasured**, named by the dev: `service-analytics` `preview-evaluator.ts:358` (the week key), `trigger-schedule` `time-relative-trigger.ts:118` / `:123` (a record date's window), and `formula`'s `stdlib.ts:59`.\n\nControls: year 0100 answers correctly at every measured site.\n\n## Shape (⛔ not a ruling)\n\nThe construction PR #20591 landed, a private `new Date(0)` plus `setUTCFullYear(year, monthIndex, day)`, or one shared helper that the sites import. Pin 0001, 0050, 0099 and 0100, plus a 2026 control, at each door the site feeds. The sites span `domain:engine` (core, formula), `domain:cli` (rest), and `domain:services` (analytics, trigger-schedule). Triage may split per lane.\n\n## Not in this card\n\n- **The unpadded year in `parseDateCell`'s `date` arm** (`parseDateCell('0050-01-01', date)` → `50-01-01`, refused as `invalid_date` at the import door): carried by #20534.\n- **The unpadded keys from `bucketDateKey` for year / quarter / month / day** (`50`, `50-Q1`, `50-01`, `50-01-01`): the same padding family as #20534. Whether that card takes them is for triage to decide.\n- **`nextUtcCalendarDay('9999-12-31')` answering `10000-01-01`:** filed separately, because it is a different defect in the same helper.\n- **MySQL reading a year 0..99 back a century late:** #20280.\n\n## Dedupe\n\nA REST listing of the 1,000 most recently updated issues and PRs, open and closed, grepped locally for `Date.UTC`, `two-digit year`, `1900`, `year below 100` and `parseDateCell`. The hits are #20550 (the spec helper, fixed by PR #20591), #20534 (the padding), #20280 (MySQL read-back) and #20264 (the supported range, closed). None carries these sites.\n\nDedupe words: `Date.UTC two-digit year 1900 import datetime 0050` · `zonedWallClockToUtcMs year below 100` · `bucketKeyToCalendarRange 0050 1950` · `parseDateCell datetime 0050-01-01 1950`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

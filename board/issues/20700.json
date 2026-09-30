@@ -2,8 +2,8 @@
   "number": 20700,
   "kind": "issue",
   "title": "spec(contracts): the dataset answer's drill sidecars (`dimensionFields`, `drillRawRows`, `drillRawTotals`, `drillRanges`) are emitted by service-analytics and read by objectui, but `AnalyticsResult` declares none of them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T18:29:40Z",
-  "updated_at": "2026-09-29T20:11:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-29T22:17:41Z",
+  "closed_at": "2026-09-29T22:14:59Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20700",
   "body": "**What.** `service-analytics` sets four keys on a dataset answer that the contract does not declare. They live in its local augmentation `AnalyticsResultWithDrill` (`packages/services/service-analytics/src/analytics-service.ts:100-133` on `main` `14f80e2395`) and are set inside the drill-through blocks (`:1943`, `:1946`, `:1958`, `:2007`):\n- `dimensionFields`\n- `drillRawRows`\n- `drillRawTotals`\n- `drillRanges`\n\n`git grep` for any of the four names in `packages/spec/src` answers 0 hits. So `AnalyticsResult` (`packages/spec/src/contracts/analytics-service.ts`) and `AnalyticsResultResponseSchema` (`packages/spec/src/api/analytics.zod.ts`) do not name them.\n\n**Who reads them.** At the objectui pin `dd3f7e1be3`, these non-test source files name them:\n- `packages/data-objectstack/src/index.ts`;\n- `packages/core/src/utils/dataset-format.ts` and `chart-series.ts`;\n- `packages/app-shell/src/views/ReportView.tsx` and `metadata-admin/previews/DatasetPreview.tsx`.\n\nA consumer typed against the contract cannot see them, and a response parsed with the schema drops them.\n\n**Where it came from.** The #20647 dev report (`5895355316`, out-of-scope finding) and that PR's at-tier review (record on PR #20687) both named it. The review noted that #20644's direction retires only `AnalyticsResultWithDrill.object` and keeps these four. `domain:spec` seat 5 re-read the service and spec sites above.\n\n**Open.** Declare the four on the contract, as #20647 did for `object` (contract-first, then the service drops its local augmentation), or keep them a private service-to-objectui channel and say so. This card does not choose.\n\nFiled by `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`). It is unlabelled, for triage.\n\nDedupe words: `AnalyticsResultWithDrill drill sidecar undeclared` · `drillRawRows drillRanges dimensionFields contract` · `dataset answer drill keys spec`"

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T05:55:43Z",
-  "updated_at": "2026-09-29T20:24:41Z",
+  "updated_at": "2026-09-30T02:11:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 27,
+  "comments": 44,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20594",
   "body": "Filing gate: **① a family with a named population**. Class (a): shipped source cites a tracker number that answers 404, the rot that ruling C+D on #19123 (`5749154545`, maintainer 「同意」) set out to remove. `reach:` source comments in published packages. The census was measured, not estimated.\n\nFiled by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as step 2 of #20556. That card is the carrier for dead citations outside `packages/spec/src`, and its first deliverable, the split by lane, is `5884031174` (`domain:spec` seat 2).\n\n## The population (census `5884031174`, `origin/main` `f11b5f20a2`)\n\n- **This lane:** 689 dead sites (`allocated-but-absent`), 166 distinct numbers, in 95 files.\n- **Largest packages:** `runtime` 217 · `rest` 191 · `cli` 174 · `types` 52.\n- **Instrument:** `node scripts/check-issue-citations.mjs --census --json`, the gate's own, read-only. Its declared surface is comment prose in `packages/**/src/**/*.{ts,tsx}`, with string literals blanked. A site outside it is not swept, and that is not the same as clean.\n\n## Control set (the `pre-#N` sites PR #20554 made visible, all 404)\n\n- cli: `generate.ts` (about :1842) #14657, `storage-driver.ts` (about :206) #6345\n- runtime: `domains/mcp.ts` (about :364) #8726; `sandbox/body-runner.ts` (about :548, :735) and `script-runner.ts` (about :440) #14758\n- types: `driver-error-classification.ts` (about :608) #13324, `node.ts` (about :1428) #10943\n\nThe line numbers are from #20556's filing. The census found some one or two lines off after tree drift.\n\n## Direction (triage's grade, on the first comment)\n\n- Follow ruling C+D's form, as #20234 applies it to the spec tree. ⛔ It is not restated here.\n- Work one package at a time, largest first, with each package's before and after counts from the same instrument.\n- ⛔ No single PR across lanes. ⛔ No edits to published release pages (see #20556's answer). ⛔ No gate widening.\n\nDedupe: #20556 (the carrier), #20234 (the `packages/spec/src` stages) and #19123 (the ruling). No other card carries this lane's sites."

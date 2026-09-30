@@ -1,0 +1,35 @@
+{
+  "number": 20720,
+  "kind": "pull_request",
+  "title": "feat(spec): AnalyticsResult declares the four drill-through sidecars",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-29T21:15:54Z",
+  "updated_at": "2026-09-29T22:15:00Z",
+  "closed_at": "2026-09-29T22:14:58Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-29T22:14:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20720",
+  "body": "Closes #20700\n\n`AnalyticsResult` and `AnalyticsResultResponseSchema.data` declare the four drill-through sidecars `service-analytics` emits on a dataset answer: `dimensionFields`, `drillRawRows`, `drillRawTotals` and `drillRanges`. Each is optional, with the shape the service emits today. The service's local augmentation stays until its own follow-up.\n\nClause-②: yes (widening)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}
