@@ -5290,7 +5290,12 @@ function viewItemWireFields() {
     // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
     // member is published on its own as `ViewItemWire.json`, and `never` has a
     // JSON Schema form (`not: {}`) where `undefined` has none.
-    options: z.never({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional(),
+    options: z.never({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional()
+      .describe(
+        'Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under '
+        + '`config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the '
+        + 'flattened list overlay only.',
+      ),
   };
 }
 
