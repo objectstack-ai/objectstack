@@ -725,7 +725,7 @@ describe('#20805 a caller-supplied formula value — stripped and reported as co
 
       // Every context: a system writer has no column to land in either.
       const onSystem: unknown[] = [];
-      const sys = await e.insert('fx_proj', { n: 2, doubled: 7 }, { context: { isSystem: true }, onFieldsDropped: (ev) => onSystem.push(ev) } as any);
+      const sys = await e.insert('fx_proj', { n: 2, doubled: 7 }, { context: { isSystem: true }, onFieldsDropped: (ev: unknown) => onSystem.push(ev) } as any);
       expect(onSystem).toEqual([COMPUTED]);
       expect(await stored(driver, sys.id)).not.toHaveProperty('doubled');
     },
