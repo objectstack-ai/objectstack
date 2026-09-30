@@ -84,7 +84,7 @@ Flows are built from **20 built-in node types** (plugins register more via
 
 | Node | Purpose |
 |:-----|:--------|
-| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served with the definition to every member who can read flows (only `signingSecret` is withheld): never a credential there. Route by shape — a header credential → a declarative connector (`bearer` / `api-key`) with `auth.credentialRef`; a query-string key → `api-key` with `paramName`; a path-secret webhook url → a token-authenticated connector such as `slack` — called via `connector_action` |
+| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there. Route by shape — a header credential → a declarative connector (`bearer` / `basic` / `api-key`) with `auth.credentialRef`; a query-string key → `api-key` with `paramName`; a path-secret webhook url → a token-authenticated connector such as `slack` — called via `connector_action` |
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
@@ -139,7 +139,7 @@ variables: [
 ],
 ```
 
-→ Moved verbatim to [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
+→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
 
 ### Failure routing & `runAs`
 
@@ -153,8 +153,6 @@ variables: [
 > replays the flow from the start — prefer a fault edge when the failure is
 > local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
 > then reports success, and the failed step stays in the trace.
->
-> **It is not a way past a guardrail.**
 
 | ROUTES (runtime failure) | Does NOT route (fatal either way) |
 |:--|:--|
@@ -307,7 +305,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
 
 ---
 
-→ State Machines & Approvals moved verbatim to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) (State Machine — a `state_machine` validation rule · Approvals (Flow Nodes) · Send-back for revision · Recording a decision · Approver Types · Dynamic approvers (`type: 'expression'`) · Node Config (`ApprovalNodeConfigSchema`) · Branching, side-effects & rejection · Approval Best Practices) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
+→ State Machines & Approvals moved to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) (State Machine — a `state_machine` validation rule · Approvals (Flow Nodes) · Send-back for revision · Recording a decision · Approver Types · Dynamic approvers (`type: 'expression'`) · Node Config (`ApprovalNodeConfigSchema`) · Branching, side-effects & rejection · Approval Best Practices) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 
@@ -315,8 +313,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
 
 A `record_change` flow fires automatically on a data event. There is **no
 standalone trigger object and no top-level `trigger` / `event` key** — the
-binding lives entirely in the flow's **`start` node `config`**, which the
-automation engine parses and wires to the matching ObjectQL lifecycle hook.
+binding lives entirely in the flow's **`start` node `config`**.
 
 ### Prerequisite — declare the capabilities your nodes need
 
@@ -393,17 +390,18 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
 
-> **`previous`** and **`record`** are the CEL variables available in update
-> triggers — `previous.x` is the value before the change, `record.x` is the
-> value after. See [objectstack-formula](../objectstack-formula/SKILL.md).
+> `previous` (before the change) vs `record` (after) in an update trigger's
+> condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
 
-→ Moved verbatim to [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
 
 ---
 
 ## CRM Automation Blueprint
 
-Align with this CRM-style structure:
+Default approach for metadata apps — model the business lifecycle in
+Flow/Approval metadata first, reserve custom code for edge-case integrations —
+in this CRM-style structure:
 
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|
