@@ -56,6 +56,13 @@
       "status": "live",
       "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options."
     },
+    "picklist": {
+      "status": "planned",
+      "verifiedAt": "2026-09-30",
+      "authorWarn": true,
+      "authorHint": "A field that names a picklist is not yet resolved by the server: until picklist resolution ships, the field is served with no options, so its control offers nothing and a written value is not checked against the list. Keep inline `options` on fields that must work today.",
+      "note": "Declared with the spec layer (#19518); mutually exclusive with `options` at the schema door (FieldSchema superRefine). The reader is the runtime layer (#19519), which resolves the reference onto the served field's `options` — not landed, so `planned`. `authorWarn` because the interim is the misleading shape: the key parses and publishes, and the served field carries no options until #19519. Flip to `live` against its resolver."
+    },
     "deleteBehavior": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",
