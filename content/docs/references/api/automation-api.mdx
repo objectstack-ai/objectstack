@@ -25,6 +25,14 @@ the former `GET /api/v1/automation` list route, its request/response schemas
 and `client.automation.list` are retired (ADR-0087 semantic entry
 `automation-flow-list-route-retired`).
 
+The toggle door switches PACKAGED flows only: a flow a code package ships.
+It records the installation's choice in the packaged-metadata activation
+ledger (ADR-0126 §7.2). A flow authored in the deployment is not switched
+there. Its switch is its own `status`: `'obsolete'` disarms it and
+`'active'` arms it, published with the complete definition through
+`PUT /api/v1/automation/:name`. The toggle door refuses such a flow with
+409 `RESOURCE_CONFLICT`, names that switch, and changes nothing.
+
 **Endpoints**
 ```
 GET    /api/v1/automation/:name                — Get flow
@@ -32,7 +40,7 @@ POST   /api/v1/automation                      — Create flow
 PUT    /api/v1/automation/:name                — Update flow
 DELETE /api/v1/automation/:name                — Delete flow
 POST   /api/v1/automation/:name/trigger        — Trigger flow execution
-POST   /api/v1/automation/:name/toggle         — Enable/disable flow
+POST   /api/v1/automation/:name/toggle         — Enable/disable a packaged flow
 GET    /api/v1/automation/:name/runs           — List execution runs
 GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
 ```

@@ -18,7 +18,7 @@ Clause-②: no (narrowing)
 **Not refused:**
 
 - Enabling a flow that is already enabled. Nothing is re-armed.
-- A flow the customer authored, or a subflow the customer authored.
+- A subflow the customer authored. A flow the customer authored is not this switch's to enable at all: the activation switch switches packaged flows only, and it refuses a customer-authored flow for that reason before this guard is asked (see the entry "the toggle door refuses a flow no package ships, naming its status switch").
 - A subflow in a cycle of switched-off flows with the flow being enabled, including a flow that calls itself. Each flow in such a cycle would refuse the others, so no order could complete. A subflow in such a cycle whose definition's `status` also disables it is still named, with its publish remedy: no enable order changes a status.
 
 The disable direction of the same guard is described in its own entry, "disabling a packaged subflow completes once its packaged callers are switched off and hold no parked run".

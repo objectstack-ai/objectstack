@@ -106,7 +106,7 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 81 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -362,11 +362,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // route (door ④ — the list is `GET /meta/flow`). It carried
     // `domain: '/automation'`, a key other rows still carry, so `reachable`
     // moves with `population`, `blindSpot` stays 0 and `keys` stays 21.
-    population: 81,
-    reachable: 81,
+    // [#20676] 81 -> 82: the `POST /automation/:name/clone` row arrived with its
+    // mount (ADR-0126 §7.1). It carries `domain: '/automation'`, an EXISTING
+    // key, so `reachable` moves with `population`, `blindSpot` stays 0 and
+    // `keys` stays 21 (21 distinct domains before and after, re-derived).
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 81, "domain: '": 81, RouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +

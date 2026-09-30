@@ -210,7 +210,8 @@ describe('#9414 — the boundary: which exits must NOT carry a message', () => {
 
     it('a NEVER-DISPATCHED exit carries neither — a disabled flow has no terminal state', async () => {
         const { engine } = engineWith('pass');
-        engine.registerFlow('notify_owner', messageFlow('notify_owner') as never);
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('notify_owner', { ...messageFlow('notify_owner'), _packageId: 'crm' } as never);
         engine.toggleFlow('notify_owner', false);
 
         const result = await engine.execute('notify_owner');

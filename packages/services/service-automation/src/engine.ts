@@ -5135,7 +5135,88 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0126 §7.2] Flip a flow's activation — THE sanctioned off-switch.
+     * [#20726, ADR-0126 §7.2] Refuse the toggle door for a flow no package
+     * ships — loudly, naming that flow's own switch, and before anything is
+     * written or changed.
+     *
+     * ## Why the door switches packaged flows only
+     *
+     * The door records an installation's CHOICE about a packaged artifact in
+     * `sys_metadata_activation`, whose rows each name "the package that ships
+     * the base artifact" (§4), and §7.2 makes that row "the sanctioned
+     * off-switch for packaged flows". A flow authored in this deployment has
+     * no such package, and it already has an off-switch of its own: its
+     * definition's `status` (`obsolete` / `invalid` disarm it, see
+     * {@link registerFlow}; {@link isFlowEnabled} composes the two). Writing
+     * it into the ledger anyway would give it a SECOND off-switch under a
+     * package key its declaration excludes — with an empty id the durable
+     * store refused the write with a validation error naming a field the
+     * caller never sent, and with a sentinel id it would record a package
+     * that ships nothing.
+     *
+     * ⛔ The door does not rewrite the definition's `status` itself either:
+     * that would make it a second write door into definitions. It names the
+     * flow's update door instead — `PUT /automation/:name`, which drives
+     * {@link registerFlow} with the complete definition.
+     *
+     * "No package provenance" is `describeFlowContender(flow).source !==
+     * 'package'` — the one discriminator the §7.3 guards already ask
+     * (`isCodeArtifactBody`, ADR-0029 D9.6), ⛔ never a second reading. So a
+     * runtime row carrying the `sys_metadata` sentinel, and a tenant-authored
+     * row bound to an app package, are refused exactly as a flow with no
+     * package envelope at all is: provenance decides, not whether a package
+     * id happens to be non-empty.
+     *
+     * ADR-0112 envelope: code AND status. `RESOURCE_CONFLICT` (409) is the
+     * standard catalog's "the request conflicts with the resource's current
+     * state" member — the flow exists and the request is well-formed, but the
+     * target's provenance does not admit the act — and it is the code this
+     * same door already answers for its other state conflict (the §7.3
+     * enable guard), so the door speaks one dialect. ⛔ No new ledger entry is
+     * minted. Not a 400: nothing about the request is malformed. Not a 403:
+     * no caller could be authorized into it. Not `DELETE_RESTRICTED`: that
+     * member means dependencies.
+     *
+     * ## A customer flow a ledger row ALREADY holds off
+     *
+     * The ledger is keyed by name, and a row can already stand under a
+     * customer flow's name: this door used to accept a customer flow whose
+     * package id was non-empty (the sentinel and app-bound shapes above) and
+     * wrote one, and a customer overlay can shadow a packaged flow the ledger
+     * switched off. A status does not clear such a row ({@link isFlowEnabled}
+     * composes the two, neither overrides the other), so for that flow the
+     * refusal must not stop at "publish it `active`" — a step that completes
+     * nothing. It names the one that does, and the one the `FLOW_DISABLED`
+     * refusal already names for a ledger-held flow: a clone under a new name
+     * (ADR-0126 §7.1), which no row holds. Still nothing is written: which
+     * rows this door should clear is not this refusal's to decide.
+     */
+    private refuseCustomerAuthoredToggle(name: string, flow: FlowParsed, enabled: boolean): void {
+        if (describeFlowContender(flow).source === 'package') return;
+        const updateDoor = `its update door, PUT /automation/${name}, which takes the complete definition`;
+        const ownSwitch = this.flowLedgerDisabled.has(name)
+            ? `This flow's own switch is its definition's status, published through ${updateDoor} — but it is ` +
+              `ALSO held off by an activation-ledger row recorded under the name '${name}' (for a packaged flow of ` +
+              `that name, or by this switch before it refused customer-authored flows), and no status clears that ` +
+              `row. To run this flow, clone it under a new name through POST /automation/${name}/clone, which ` +
+              `arms the copy, and remove this one.`
+            : `This flow's switch is its own definition's status: publish it through ${updateDoor}, with status ` +
+              `'obsolete' to switch it off or 'active' to arm it.`;
+        throw Object.assign(
+            new Error(
+                `Flow '${name}' cannot be ${enabled ? 'enabled' : 'disabled'} through this switch: the switch turns ` +
+                    `packaged flows on and off, and '${name}' was authored in this deployment, not shipped by a ` +
+                    `package. The switch records an installation's choice about a packaged flow in the activation ` +
+                    `ledger (sys_metadata_activation, ADR-0126 §7.2). ${ownSwitch} Nothing was changed.`,
+            ),
+            { code: 'RESOURCE_CONFLICT', status: 409 },
+        );
+    }
+
+    /**
+     * [ADR-0126 §7.2] Flip a PACKAGED flow's activation — THE sanctioned
+     * off-switch for packaged flows. A flow no package ships is refused
+     * ({@link refuseCustomerAuthoredToggle}); its switch is its `status`.
      *
      * ## What changed, and why the durable write is inside this method
      *
@@ -5159,17 +5240,27 @@ export class AutomationEngine implements IAutomationService {
      * every other service method; the wire is the untrusted surface, and the
      * wire goes through the gate.
      *
-     * @throws when the flow is unknown, when §7.3's subflow guard refuses in
-     *   either direction, when the durable suspended-run store cannot be
-     *   listed while the disable guard judges a switched-off caller, or when
-     *   the durable write fails — a reported flip that did not persist is the
-     *   failure mode this whole leg exists to remove.
+     * @throws when the flow is unknown, when no package ships it
+     *   (`RESOURCE_CONFLICT` / 409, before anything is written or changed),
+     *   when §7.3's subflow guard refuses in either direction, when the
+     *   durable suspended-run store cannot be listed while the disable guard
+     *   judges a switched-off caller, or when the durable write fails — a
+     *   reported flip that did not persist is the failure mode this whole leg
+     *   exists to remove.
      */
     async toggleFlow(name: string, enabled: boolean): Promise<void> {
         const flow = this.flows.get(name);
         if (!flow) {
             throw new Error(`Flow '${name}' not found`);
         }
+
+        // [#20726, ADR-0126 §7.2] FIRST, ahead of both §7.3 guards: a flow no
+        // package ships is not this door's to switch in either direction, so
+        // neither guard's question arises, the disable guard's run-store read
+        // is never awaited for it, and the refusal lands before the ledger
+        // write and before any in-process change — with a ledger attached or
+        // in the degraded mode without one. Nothing half-flips.
+        this.refuseCustomerAuthoredToggle(name, flow, enabled);
 
         // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
         // a subflow pair breaks from either end. Disabling a child breaks the

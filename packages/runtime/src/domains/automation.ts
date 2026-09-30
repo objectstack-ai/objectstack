@@ -412,7 +412,10 @@ function isFlowEnablementWrite(parts: string[], method: string): boolean {
  *   `POST   /`             → registerFlow    (create)
  *   `PUT    /:name`        → registerFlow    (update)
  *   `DELETE /:name`        → unregisterFlow  (deregister)
- *   `POST   /:name/toggle` → toggleFlow      (enablement — commit 266436a7f, see below)
+ *   `POST   /:name/toggle` → toggleFlow      (enablement — commit 266436a7f, see below;
+ *                                             PACKAGED flows only, #20726: a customer
+ *                                             flow's switch is its `status`, via
+ *                                             `PUT /:name`)
  *
  * ## [commit 266436a7f] Why `toggle` joins them — ruled, not inferred
  *
@@ -1904,7 +1907,12 @@ export async function classifyResumeResult(
  *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
- *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
+ *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535). Switches
+ *                                  PACKAGED flows only — it writes the ADR-0126 §7.2
+ *                                  activation ledger. A flow no package ships → 409
+ *                                  `RESOURCE_CONFLICT` naming that flow's own switch,
+ *                                  its `status` ('obsolete' / 'active') published
+ *                                  through `PUT /:name`; nothing changes (#20726)
  *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
