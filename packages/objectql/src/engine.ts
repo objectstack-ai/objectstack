@@ -35,6 +35,11 @@ import {
   normalizeFilterComparandTypes,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
+// FilterCondition` lowering, run once per filter position after the doors and
+// after token resolution (`resolveThenLowerWhere`), so every driver and the
+// in-process `having` / per-aggregation evaluator receive the lowered filter.
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -1143,6 +1148,61 @@ function resolveWhereFilterTokens<W>(
 }
 
 /**
+ * [ADR-0053 D-D1, amended 2026-09-30 — #5930] Stage 2 of every filter
+ * position's admission, whole: resolve the placeholders
+ * ({@link resolveWhereFilterTokens}), THEN run the shared lowering
+ * (`lowerFilterCondition`, `@objectstack/spec/data`) — the `$between` split,
+ * the whole-day upper bound and the NULL-polarity guards.
+ *
+ * The order is the amendment's item 3: the lowering reads the comparand the
+ * comparison will run with, so a date macro (`{today}`, `{current_month_end}`)
+ * has already become the bare day the whole-day rule widens. Run beside the
+ * doors instead, it would meet `{today}` unresolved and leave it bare.
+ *
+ * ONE function for every position, so no verb can resolve without lowering:
+ * `where` on the five read / write verbs (`ObjectQL.resolveWhereTokens`,
+ * `ObjectQL.withResolvedWhere`), `aggregations[i].filter` and `having` on
+ * `aggregate`, and the judge ({@link judgeWhereAdmission}), which runs the
+ * same stage so its verdict is execution's. The lowering never refuses, so it
+ * adds no verdict of its own.
+ *
+ * `lowering` is the position's declared-type reader: this seam reads the
+ * object's declarations, so the whole-day rule rewrites a declared
+ * `datetime` column only ({@link declaredDatetimeLowering}) — the scope
+ * `SqlDriver` holds, so a `date`, `time` or non-temporal column reaches every
+ * driver byte-identical to before (the amendment's item 7).
+ *
+ * Returns the input by reference when nothing resolved and nothing lowered.
+ */
+function resolveThenLowerWhere<W>(
+  where: W,
+  context: Parameters<typeof filterTokenContextFrom>[0],
+  lowering: FilterLoweringOptions,
+): W {
+  return lowerFilterCondition(resolveWhereFilterTokens(where, context), lowering);
+}
+
+/**
+ * [ADR-0053 D-D1 item 7 — #5930] The typed reading of one object's filter
+ * positions: a column is `datetime` exactly when the object's declared field
+ * map says `type: 'datetime'` — the same test `SqlDriver` indexes its
+ * `datetimeFields` by, so the columns this seam widens are a subset of the
+ * columns every face widens today. No field map (a registry-less host) reads
+ * no column as `datetime`: the whole-day rule is then left to the faces, as it
+ * was, rather than applied type-blind to columns no driver would widen.
+ */
+function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
+  const fields = (schema as { fields?: unknown } | undefined)?.fields;
+  return {
+    isDatetimeColumn: (column) =>
+      fields !== null
+      && typeof fields === 'object'
+      && Object.prototype.hasOwnProperty.call(fields, column)
+      && ((fields as Record<string, { type?: unknown } | undefined>)[column]?.type === 'datetime'),
+  };
+}
+
+/**
  * [#20157] Is this thrown value a door's DIAGNOSTIC (the ADR-0112 envelope:
  * a string `code` and a numeric `status`), or something else?
  *
@@ -1208,7 +1268,7 @@ function judgeWhereAdmission(
 ): EngineFilterJudgement {
   try {
     const admitted = lowerWhereFilterArray(object, operation, { where }, schema);
-    resolveWhereFilterTokens(admitted.where, context);
+    resolveThenLowerWhere(admitted.where, context, declaredDatetimeLowering(schema));
     return { ok: true };
   } catch (thrown) {
     const refusal = admissionRefusalOf(thrown);
@@ -11007,15 +11067,22 @@ export class ObjectQL implements IObjectQLEngine {
    * is `FILTER_TOKEN_UNKNOWN` / 400. The resolver needs no field type — it walks
    * values, never keys — so a `having` keyed by aggregate aliases resolves as a
    * `where` keyed by fields does.
+   *
+   * [ADR-0053 D-D1, amended — #5930] …and then LOWERS the position, through
+   * {@link resolveThenLowerWhere}: resolution and lowering are one stage, so a
+   * verb cannot run one without the other. `lowering` is required for that
+   * reason — the position's declared-type reader (`where`: the object's
+   * fields; `having`: the aggregated row's columns).
    */
   private resolveWhereTokens(
     ast: QueryAST | undefined,
-    execCtx?: ExecutionContext,
+    execCtx: ExecutionContext | undefined,
+    lowering: FilterLoweringOptions,
     position: 'where' | 'having' = 'where',
   ): void {
     if (!ast || ast[position] == null) return;
     // [#20157] Through the stage function the judge also calls.
-    ast[position] = resolveWhereFilterTokens(ast[position], execCtx);
+    ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering);
   }
 
   /**
@@ -11028,13 +11095,19 @@ export class ObjectQL implements IObjectQLEngine {
    * made rather than assigning through: `options` belongs to the caller, and
    * writing back would bake one request's user id into a filter object the
    * caller may reuse (view metadata and flow node config both get reused).
+   *
+   * [ADR-0053 D-D1, amended — #5930] …and lowered, in the same stage
+   * ({@link resolveThenLowerWhere}), with the object's declared-type reader.
+   * The lowering is copy-on-write too, so a `where` it rewrites lands on the
+   * copy, never on the caller's object.
    */
   private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
     options: T,
+    lowering: FilterLoweringOptions,
   ): T {
     if (!options || options.where == null) return options;
     // [#20157] Through the stage function the judge also calls.
-    const resolved = resolveWhereFilterTokens(options.where, options.context);
+    const resolved = resolveThenLowerWhere(options.where, options.context, lowering);
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
@@ -11325,7 +11398,9 @@ export class ObjectQL implements IObjectQLEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
-    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+    // [ADR-0053 D-D1, amended — #5930] Resolve, then lower (the shared
+    // lowering), against the object's declared field types.
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findSchema));
 
     await this.executeWithMiddleware(opCtx, async () => {
       const hookContext: HookContext = {
@@ -11597,7 +11672,8 @@ export class ObjectQL implements IObjectQLEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
-    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+    // [ADR-0053 D-D1, amended — #5930] Resolve, then lower.
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, declaredDatetimeLowering(_findOneSchema));
 
     await this.executeWithMiddleware(opCtx, async () => {
       // [#3195] `findOne` fires the SAME `beforeFind`/`afterFind` hooks as
@@ -13019,7 +13095,9 @@ export class ObjectQL implements IObjectQLEngine {
      // Ordering matters: a scalar `where.id` becomes the by-id fast path below,
      // so an unresolved `{current_user_id}` would be bound as the primary key
      // itself. Resolve first, then extract.
-     options = this.withResolvedWhere(options);
+     // [ADR-0053 D-D1, amended — #5930] …and lowered in the same stage, before
+     // the by-id extraction below reads the result.
+     options = this.withResolvedWhere(options, declaredDatetimeLowering(this._registry.getObject(object)));
 
      // [#20308] The insert door's rule, same place: a blank on a
      // non-string-typed column is `null` before the middleware, the
@@ -15658,7 +15736,8 @@ export class ObjectQL implements IObjectQLEngine {
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
-    options = this.withResolvedWhere(options);
+    // [ADR-0053 D-D1, amended — #5930] …and lowered in the same stage.
+    options = this.withResolvedWhere(options, declaredDatetimeLowering(this._registry.getObject(object)));
 
     // Extract ID logic mirroring update(): only a SCALAR `where.id` means
     // "delete one row by primary key". An operator object ({ $in: [...] }, …)
@@ -16187,7 +16266,12 @@ export class ObjectQL implements IObjectQLEngine {
        options: query,
        context: mergeReadContext(query?.context, options?.context),
      };
-     this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower.
+     this.resolveWhereTokens(
+       opCtx.ast as QueryAST,
+       opCtx.context,
+       declaredDatetimeLowering(this._registry.getObject(object)),
+     );
      // The caller's own `where`, placeholders expanded — captured BEFORE the
      // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
      // still passes the unscoped filter (find() applies the read filters itself).
@@ -16544,7 +16628,14 @@ export class ObjectQL implements IObjectQLEngine {
         options: query,
         context: mergeReadContext(query?.context, options?.context),
       };
-      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+      // [ADR-0053 D-D1, amended — #5930] Each of this verb's three filter
+      // positions resolves, then lowers, through `resolveThenLowerWhere`: `where`
+      // and `aggregations[i].filter` narrow the object's raw rows, so they read
+      // its declared field types; `having` narrows the aggregated row, so it
+      // reads each aggregated column's type (`min` / `max` of a `datetime`
+      // field is a `datetime`; a `count` is a number).
+      const rowLowering = declaredDatetimeLowering(this._registry.getObject(object));
+      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, rowLowering);
       // [#10576] Filter tokens (`{userId}`-style placeholders, #3810) resolve
       // in per-aggregation filters exactly as they do in `where` — a filter
       // position is a filter position, and an unresolved placeholder would be
@@ -16555,11 +16646,10 @@ export class ObjectQL implements IObjectQLEngine {
       {
           const astAggs = (opCtx.ast as QueryAST).aggregations;
           if (Array.isArray(astAggs) && astAggs.some((a) => (a as { filter?: unknown })?.filter != null)) {
-              const tokenCtx = filterTokenContextFrom(opCtx.context);
               (opCtx.ast as QueryAST).aggregations = astAggs.map((a) => {
                   const f = (a as { filter?: unknown })?.filter;
                   if (f == null) return a;
-                  const resolved = resolveFilterTokens(f as any, tokenCtx);
+                  const resolved = resolveThenLowerWhere(f as any, opCtx.context, rowLowering);
                   return resolved === f ? a : { ...(a as object), filter: resolved } as typeof a;
               });
           }
@@ -16573,7 +16663,15 @@ export class ObjectQL implements IObjectQLEngine {
       // doors: the temporal door steps around a `{placeholder}` exactly as
       // `where`'s does (so, as there, the resolved value is not judged again),
       // and the other doors judged a string that resolves to a string.
-      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context, 'having');
+      {
+          const havingColumnTypes = aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields);
+          this.resolveWhereTokens(
+              opCtx.ast as QueryAST,
+              opCtx.context,
+              { isDatetimeColumn: (column) => havingColumnTypes.get(column) === 'datetime' },
+              'having',
+          );
+      }
 
       await this.executeWithMiddleware(opCtx, async () => {
         const ast = opCtx.ast as QueryAST;
