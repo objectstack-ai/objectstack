@@ -6,11 +6,12 @@ import type { SemanticMigration } from '../../types.js';
 // was `z.array(z.any())` while the other carrier, a relationship field's
 // `inlineColumns`, has been the strict `InlineGridColumnSchema` since #9227; the
 // carrier now REFERENCES that schema, so both carriers are judged by one
-// contract. D3 only, deliberately: the one mechanical respelling the family
-// had (`field` → `name`, conversion `field-column-lists-canonicalized`) is
-// already retired from the load path, and every other refused shape is a
-// judgment only the author can make. A stored view whose column fails is
-// refused with the column schema's own prescription, never stripped.
+// contract. The one mechanical respelling, `field` → `name`, is the D2
+// conversion `form-view-subform-columns-canonicalized` (the respelling
+// `field-column-lists-canonicalized` makes on `inlineColumns`); every other
+// refused shape is a judgment only the author can make. A view saved with a
+// failing column is refused with the column schema's own prescription, and a
+// stored row carrying one is diagnosed at rehydration; neither is stripped.
 export const entry: SemanticMigration = {
   id: 'form-view-subform-columns-closed',
   surface: 'view.form.subforms[].columns[] and view.formViews.<key>.subforms[].columns[] — the '
@@ -27,10 +28,12 @@ export const entry: SemanticMigration = {
     + '(option B, `scale` retired from the currency type) and the remedy ruled on 2026-09-24 '
     + '(option 乙 — a currency\'s ISO 4217 minor unit decides its display) — published green here. '
     + 'The carrier now references the column schema, so every rule it holds applies here too, with '
-    + 'its own prescription. NOT mechanically converted: the `field` → `name` respelling this family '
-    + 'had is already retired from the load path, and which column an unknown key or a mixed '
-    + '`field`/`name` entry meant is the author\'s call — a conversion that dropped the key would '
-    + 'accept on every load what the parse now refuses. Population measured at the change, on '
+    + 'its own prescription. Only the `field` spelling is converted mechanically — by the conversion '
+    + '`form-view-subform-columns-canonicalized`, which rewrites stored rows and assembled artifacts '
+    + 'and lists the edit under `os migrate meta`, while an author writing `field` meets the refusal. '
+    + 'Which column an unknown key or a mixed `field`/`name` entry meant is the author\'s call — a '
+    + 'conversion that dropped the key would accept on every load what the parse now refuses. '
+    + 'Population measured at the change, on '
     + 'origin/main cb4c31dd52: zero authored `subforms` in the repository (the showcase derives its '
     + 'master-detail grids from the data model instead), against one authored `inlineColumns` block '
     + 'as the control. Deployed metadata NOT MEASURED.',
