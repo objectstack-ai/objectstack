@@ -31,7 +31,7 @@
  * sites. One door that zero does not bound was named there but never driven:
  * `record-change-trigger.ts`'s `start()` binds `beforeUpdate` for the
  * `record-before-update` / `record-before-write` trigger types and hands the
- * write to USER-AUTHORED FLOW METADATA. The conclusion recorded on that card —
+ * write to USER-AUTHORED FLOW METADATA. The conclusion recorded in that census —
  * `buildContext` materialises a NEW record object by overlay rather than
  * handing the flow `ctx.input.data` by reference, so a flow cannot reach the
  * batch payload — was labelled by its own author a SOURCE READING, explicitly
