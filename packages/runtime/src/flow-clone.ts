@@ -71,7 +71,9 @@
  * definition whose stamps claim a package for a name no package ships — so a
  * copy that carried the base's envelope would be refused, not saved. The clone
  * door asks that rule of the copy this module builds and then saves it as an
- * ordinary tenant row. Pinned in `flow-clone.test.ts`.
+ * ordinary tenant row. Pinned in `domains/automation-flow-clone.test.ts` (the
+ * envelope drop) and `domains/automation-tenant-authored-write.test.ts` (the
+ * rule and the save).
  *
  * ## 3. REFERENCES ARE NOT RE-POINTED
  *

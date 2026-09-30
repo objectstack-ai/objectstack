@@ -109,8 +109,12 @@ function boot(
     const toggleFlow = vi.fn(async () => undefined);
     const getFlow = vi.fn(async (name: string) => flows.get(name) ?? null);
 
+    // [#20761] `findOne` answers the one store read the authoring rule makes —
+    // "is a stored row of this name bound to the package a body's stamp
+    // names?" — with "no row", the state of a deployment whose customer flows
+    // live in the engine only.
     const protocol = new ObjectStackProtocolImplementation(
-        { registry: makeRegistry() } as never,
+        { registry: makeRegistry(), findOne: async () => null } as never,
         () => new Map(),
         environmentId,
     );
@@ -254,13 +258,19 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         expect(h.registerFlow).not.toHaveBeenCalled();
 
         // …and a body claiming a package cannot lock the customer's own flow.
+        // [#20761] Nor is it written with that claim: every flow written
+        // through an authoring door is tenant-authored, so the claim is
+        // refused loudly and the engine is never entered — the one authoring
+        // rule, pinned in `automation-tenant-authored-write.test.ts`.
         const claimed = await h.dispatcher.handleAutomation(
             `/${CUSTOMER}`, 'PUT',
             { ...definitionOf(CUSTOMER, 'Claimed'), _packageId: PACKAGE_ID, _provenance: 'package' },
             AUTHOR(), undefined,
         );
-        expect(statusOf(claimed.response)).toBe(200);
-        expect(h.registerFlow).toHaveBeenCalledTimes(1);
+        expect(statusOf(claimed.response)).toBe(422);
+        expect(errorOf(claimed.response).code).toBe('INVALID_METADATA');
+        expect(h.registerFlow).not.toHaveBeenCalled();
+        expect(h.held(CUSTOMER)).toEqual(definitionOf(CUSTOMER));
     });
 
     it('the envelope check still answers first — a body that is not a definition is VALIDATION_FAILED, as on /meta', async () => {
@@ -302,6 +312,11 @@ describe('what the lock leaves open', () => {
 
     it('POST /:name/clone — the sanctioned customization path (ADR-0126 §7.1) — still authors a sibling', async () => {
         const h = boot();
+        // [#20761] The clone is also SAVED as a tenant row, through the
+        // protocol's own save — pinned in
+        // `automation-tenant-authored-write.test.ts`; stood in for here, where
+        // the store is not this file's subject.
+        vi.spyOn(h.protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
         const { response } = await h.dispatcher.handleAutomation(
             `/${PACKAGED}/clone`, 'POST', { name: 'my_alert_copy', label: 'My Alert' }, AUTHOR(), undefined,
         );
