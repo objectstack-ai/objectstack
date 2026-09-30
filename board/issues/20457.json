@@ -2,8 +2,8 @@
   "number": 20457,
   "kind": "issue",
   "title": "docs(adr): ADR-0005 appendix (c): the persisted document is the parsed body once every round-trip key is declared (#20051 stage iii, ruling 甲)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T14:21:58Z",
-  "updated_at": "2026-09-28T18:10:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T05:28:04Z",
+  "closed_at": "2026-09-30T05:28:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20457",
   "body": "Filing gate ③: a ruled task. Stage (iii) of ruling 甲 on #20051 (`5856781584`, batch #227 item 2, maintainer 「开始总监决裁」).\n\nBlocked-by: #20456\n\nFiled by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) in place of `domain:spec` seat 2, which the ruling names as filer and which is vacant (#18549). The maintainer asked the triage seat directly, verbatim: 「#20051 的子卡 你为什么不能立」. ⛔ Not a claim.\n- **Acting reader:** the `domain:skills` seat, since `docs/adr/**` is a governed surface; it lands at Tier H with the maintainer's APPROVED review.\n- **Duplicate check:** the same corpus and query as the stage (ii) card (#20456): 3 closed hits outside #20051 (#20186, #20230, #20101), none of them this stage. No open duplicate.\n\n## What the ruling orders (item 1, stage iii, verbatim)\n\n> Sub-card **「ADR-0005 appendix (c) amendment」**: governed (`docs/adr/**`), Tier H, the maintainer's APPROVED review; the appendix says the persisted document is the parsed body once every round-trip key is declared, with a dated note pointing at the spec symbols.\n\n## The text it amends\n\n`docs/adr/0005-metadata-customization-overlay.md`, appendix (c): 「The persisted document is the **original** `request.item`, NOT `parsed.data`. Studio attaches auxiliary fields (`isPinned`, `isDefault`, `sortOrder`, `objectName`, …) that aren't in the canonical schema; storing `parsed.data` would silently strip them on every save.」\n\n## Why it is blocked\n\nThe amendment says the parsed body is persisted **once every round-trip key is declared**, and its dated note cites the spec symbols that stage (ii) creates. It cannot be written truthfully before those symbols exist on `main`. Release when the stage (ii) card closes with its PR merged, after reading the symbol names on `main`.\n\n## Acceptance\n\n- Appendix (c) says the persisted document is the parsed body. It carries a dated note naming the stage (ii) spec symbols that declare each round-trip key.\n- ⛔ No change to persistence code or to the GUARD pins. Those are stage (iv)'s, on #20051 itself.\n- Tier H: the maintainer's APPROVED review on the PR.\n\nPart of #20051"

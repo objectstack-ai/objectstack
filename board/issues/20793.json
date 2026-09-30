@@ -1,0 +1,33 @@
+{
+  "number": 20793,
+  "kind": "issue",
+  "title": "[Decision] 半状态巡逻改用 composite action 时，objectui「不设锚点」的设置在 action 里没有落脚处：给 action 加一个显式开关，还是 objectui 改设锚点",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T06:18:26Z",
+  "updated_at": "2026-09-30T07:07:11Z",
+  "closed_at": "2026-09-30T07:06:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20793",
+  "body": "Ruled: 5905998989 · letter A — an opt-in input on the half-state patrol action (default off: empty anchor → notice + exit 0 + run summary; off → fails loudly); own objectstack execution card + PR by devx seat 2, objectui#11174 re-blocks on it; director batch #253 concurrence 5906024645 · 2026-09-30T07:06Z\n\nFiling gate: ② 只有维护者能做的决定。本卡承 #18471（裁定「只做②」，`5713650969`）执行中新生的问题，按「另立卡并回链已裁卡」单开。实测来自 objectstack-ai/objectui#11174 dev 报告 `5905306134`。立卡：`domain:devx` 2 号席（objectstack-ai/objectui#10917），`session_01TdiauJaVCHuj45EzZGUxHh`。查重：objectstack 与 objectui 的 `needs-user-decision` 卡（开 0、关 127）按 `anchor|half-state|半状态|patrol|巡逻` 查，命中 4 张，均为无关的旧文档/协议卡。\n\n## 维护者速读\n\n- **改了什么**：#18471 要求 objectui、cloud、hotcrm 三个仓改用 objectstack 的巡逻 composite action（钉 sha），删掉各自的副本。objectui 这一半（objectui#11174）做到一半卡住了。\n- **为什么要你裁**：\n  - objectui 按你之前的决定不设锚点 issue：objectui#7852 以 not planned 关闭，objectui#8740 把「没有锚点」定为受支持的配置（只发一条 notice，巡逻照样跑绿）。\n  - objectstack 的 action 把空锚点当错误：`action.yml:313-315` 报错并退出 1。\n  - 直接切换的话，objectui 每天 4 次定时巡逻全部变红。PR 上那次运行看不出来，因为 action 在 pull_request 上会跳过锚点步骤。\n- **席位意见**：荐 **A**（给 action 加一个显式的可选开关）。\n- **你要做的**：回一行，例如「11174 A」。\n\n---\n\n## 决策：objectui 的「无锚点」配置怎么迁到 composite action 上\n\n**实测**：\n- objectui 最近 8 次定时运行全部 success，走的都是无锚点路径。例如 run 36657770288：「Resolve the anchor issue」success，「Update the pinned anchor issue」skipped，并有 notice 「No anchor issue configured … supported configuration here (objectui#8740)」。\n- action 在 `43d492ff9` 和 `fb7b74691`（它最后一次改动）上都对空锚点报错退出。\n- action 的三个输入 `github-token`、`anchor-issue`、`closed-floor` 里，没有一个能表达「没有锚点也算正常」。\n\n**选项 × 真实代价**\n\n| 选项 | 做什么 | 代价 |\n|:--|:--|:--|\n| **A 加显式开关** | objectstack 给 action 加一个可选输入，默认关。打开后，空锚点 = notice + 退出 0 + 结果写进 run summary；不打开时照旧报错，非数字的锚点在两种情况下都报错。objectstack 先落一个小 PR（约 20 行、1 个输入），objectui#11174 随后机械切换。 | action 多一个输入；objectui#11174 要等这个 objectstack PR |\n| **B objectui 设锚点** | objectui 开一张 `tracking` 锚点 issue，并设仓库变量 `HALF_STATE_ANCHOR_ISSUE`；action 不改。 | 撤回你在 objectui#7852 的决定；需要你做仓库管理操作；锚点 issue 每天被改写 4 次（dev 报告：objectstack 已因同样的负担退役了自己的定时巡逻） |\n| **C 先切、接受变红** | 现在就切换，定时巡逻变红，等 A 或 B。 | 健康状态报红，会让人习惯性忽略红色，而这正是 objectui#8740 修掉的问题 |\n| **E objectui 退役定时巡逻** | 像 objectstack 那样不再定时跑。 | 超出「只做②」裁定的范围（它点名 objectui 要切换）；手动运行仍然需要 A 或 B |\n\n（消费端绕过——在 objectui 里用 `continue-on-error` 或 `if:` 跳过——不列为选项：它会把巡逻自身的失败一起吞掉，属于消费端宽容。）\n\n**业务含义直译**：\n- A = 共用的工具加一个「本仓没有公告栏也行」的正式开关，谁要用谁声明。\n- B = objectui 按共用工具的要求也立一块公告栏，但这块公告栏是你之前说过不要的。\n\nos-decision-facets\n① 项目长远合理性：A 把 objectui 已裁的设置变成 action 的显式契约，objectui 不再保留巡逻逻辑；B 零新表面，但回退你的决定；C、E 不解决问题。\n② 实际业务拉动：A 服务 objectui 实测在用的设置（最近 8 次定时运行）；hotcrm 有锚点（#15009），cloud 的锚点状态未测。\n③ 防 AI 犯错：A 默认行为不变，开关必须按名字显式声明；C 训练人忽略红色；消费端绕过会吞掉巡逻自身的失败。\n④ 创业阶段不扩散：A 多 1 个有具名需求的输入，不是门禁；B 不加输入，但每天 4 次写看板、占用你的时间。\nPrior rulings read: #18471「只做②」（`5713650969`）；objectui#7852（not planned）；objectui#8740（空锚点为受支持配置）；thread: objectui#11174 dev 报告 `5905306134`。\n\n**推荐：A**，回退 B。只看①选 A；②③④ 是否翻转：否。\n**置信缺口**：cloud 是否有锚点未测；若 cloud 也没有，A 同时覆盖 cloud 的切换。\n\n---\n\n**回一行即可**，例如「11174 A」。"
+}

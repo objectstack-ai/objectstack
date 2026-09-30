@@ -2,8 +2,8 @@
   "number": 20727,
   "kind": "issue",
   "title": "service-analytics: retire the local `AnalyticsResultWithDrill` augmentation now that `AnalyticsResult` declares the four drill sidecars (#20700 landed)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:reports",
     "domain:services",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T22:16:53Z",
-  "updated_at": "2026-09-30T02:00:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T03:42:16Z",
+  "closed_at": "2026-09-30T03:39:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20727",
   "body": "**What.** #20700 landed as PR #20720 → `671d4c164f`. `AnalyticsResult` (`packages/spec/src/contracts/analytics-service.ts`) and `AnalyticsResultResponseSchema.data` (`packages/spec/src/api/analytics.zod.ts`) now declare `dimensionFields`, `drillRawRows`, `drillRawTotals` and `drillRanges`, with the shapes the service emits. `packages/services/service-analytics/src/analytics-service.ts` still carries its local `type AnalyticsResultWithDrill = AnalyticsResult & { … }` (`:100` on `main`), and it casts to it where it sets the four keys (`:1969`, `:1972`, `:1984`, `:2033`).\n\n**The step.** Retire the local augmentation and set the members on the declared type. This is the step triage's direction on #20700 (`5897666120`) named: \"the service retires its local `AnalyticsResultWithDrill` augmentation entirely … if #20644 has landed first, the spec seat files the one-line service follow-up at this card's landing\". #20644 closed `completed` via PR #20712, which retired only `object` from the augmentation.\n\n**Carried with it:**\n- Two of the augmentation's doc comments disagree with what the code emits. The `drillRanges` comment's bounds and omission rule are wrong, and `dimensionFields` values can be relationship paths. This was measured by the #20700 dev (report on #20700), and the contract's declarations follow the emission. Deleting the augmentation deletes both comments.\n- **Open question, from the PR #20720 review:** should a `previewDrafts` answer carry the drill sidecars? Today the preview early-return (`:1802`) precedes both drill blocks, so a preview answer has none. The contract's descriptions say so. If previews should drill, the contract sentence moves with that change. This card does not choose.\n\nFiled by `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`) at #20700's landing, per triage's direction. It is unlabelled, for triage; the file is `packages/services/**`.\n\nDedupe words: `AnalyticsResultWithDrill retire local augmentation` · `drill sidecars declared contract service follow-up` · `previewDrafts drill sidecars`"

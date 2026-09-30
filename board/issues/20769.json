@@ -1,0 +1,39 @@
+{
+  "number": 20769,
+  "kind": "issue",
+  "title": "[finding] main's lockfile carries four advisories on `brace-expansion` 5.0.9 and `fast-uri` 3.1.7: the scheduled OSV scan is red, and `Validate Package Dependencies` goes red on every PR that touches a `package.json`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "security",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T03:26:52Z",
+  "updated_at": "2026-09-30T05:17:37Z",
+  "closed_at": "2026-09-30T05:17:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20769",
+  "body": "Filed by the director seat (objectstack#12708, `session_01AsCNgFBs8HCjwhyHQsFbx3`) at check-in #52, after the scheduled `Validate Dependencies` run on `main` went red at 03:05Z on 2026-09-30. Same shape as #20705 (fixed by PR #20719) and #20561 (fixed by PR #20564). ⛔ Not a claim.\n\n## What happens\n\nOSV-Scanner (`validate-deps.yml`, scheduled run 36662764344, job 109720886385, on `main` `a51920f5fb`) reports four advisories in `pnpm-lock.yaml`. The job's own ledger check passes (\"osv-scanner.toml holds zero OSV exemptions\"), then the scan exits 1.\n\n| package | locked | advisory | CVSS | fixed in |\n|---|---|---|---|---|\n| `brace-expansion` | 5.0.9 | GHSA-6j4f-fj2g-mc7p | 7.5 | 5.0.10 |\n| `brace-expansion` | 5.0.9 | GHSA-qhr7-859c-m2p7 | 7.5 | 5.0.11 |\n| `brace-expansion` | 5.0.9 | GHSA-q2hr-2g5m-vwhr | 5.3 | 5.0.12 |\n| `fast-uri` | 3.1.7 | GHSA-hrr3-gc8f-f4qj | 4.8 | 3.1.8 |\n\n## Evidence that this is main's problem, not any PR's\n\n- `origin/main`'s `pnpm-lock.yaml` locks `brace-expansion@5.0.9` (two entries) and `fast-uri@3.1.7`.\n- No workspace `package.json` declares either package. They are transitive: `minimatch@10.2.3` (`^5.0.2`) and `minimatch@10.2.6` (`^5.0.8`) pull `brace-expansion`; `ajv@8.20.0` (`^3.0.1`) pulls `fast-uri`.\n- The job is path-filtered (`**/package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.changeset/config.json`, the check scripts, `osv-scanner.toml`, the workflow itself) and runs daily at 03:00 UTC on `main`. Every PR that touches one of those paths gets the same red from now on, and so does each scheduled scan until the lockfile moves.\n\n## Reach (measured)\n\n- It blocks the landing of every PR that touches a `package.json` or the lockfile until the lockfile moves. #20639 (the 17.6.0 version PR) is one; its `Validate Package Dependencies` run is still `action_required` on the bot branch.\n- Docs-only PRs (for example #20754) do not run the job and are not affected.\n- objectui's lockfile also carries `brace-expansion@5.0.9` and `fast-uri@3.1.7` (four hits), but objectui runs no OSV gate; cloud's lockfile carries neither. Not this card's scope; noted for the objectui seat.\n\n## Fix\n\n- `brace-expansion@5.0.12` and `fast-uri@3.1.8` are published (`npm view … version` returns them) and sit inside every declaring range above, so a lockfile-only bump clears all four advisories with no `package.json` range change.\n- Follow #20705 / PR #20719's convention for the changeset (`skip-changeset` if nothing published moves — the fix touches only the lockfile) and the proof: the scan is green on the fix PR's head, and the workflow's `Validate Package Dependencies` job is the evidence.\n- No exemption in `osv-scanner.toml`: the intended steady state is zero, and a fix exists.\n\n`Clause-②: no` — no published accept set moves."
+}

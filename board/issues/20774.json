@@ -1,0 +1,33 @@
+{
+  "number": 20774,
+  "kind": "pull_request",
+  "title": "fix(deps): raise brace-expansion and fast-uri override floors for four OSV advisories",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T04:11:01Z",
+  "updated_at": "2026-09-30T05:14:41Z",
+  "closed_at": "2026-09-30T05:14:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T05:14:39Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20774",
+  "body": "Fixes #20769\n\nClause-②: no\n\n## Summary\n\n`Validate Package Dependencies` (OSV-Scanner against `pnpm-lock.yaml`) flags two transitive copies that `origin/main` locks:\n\n| Advisory | CVSS | Package | Locked on main | Fixed in |\n|---|---|---|---|---|\n| GHSA-6j4f-fj2g-mc7p | 7.5 | brace-expansion | 5.0.9 | 5.0.10 |\n| GHSA-qhr7-859c-m2p7 | 7.5 | brace-expansion | 5.0.9 | 5.0.11 |\n| GHSA-q2hr-2g5m-vwhr | 5.3 | brace-expansion | 5.0.9 | 5.0.12 |\n| GHSA-hrr3-gc8f-f4qj | 4.8 | fast-uri | 3.1.7 | 3.1.8 |\n\nBoth fix versions are published (`npm view brace-expansion@5.0.12 version` returns 5.0.12, `npm view fast-uri@3.1.8 version` returns 3.1.8). This is the take-the-fix path: `osv-scanner.toml` is untouched and still holds zero exemptions.\n\n## Change\n\nTwo override targets are raised in `pnpm-workspace.yaml`, selectors unchanged (both already sit on their major boundary):\n\n- `'brace-expansion@>=5.0.0 <6.0.0'`: `^5.0.9` to `^5.0.12`\n- `'fast-uri@<4.0.0'`: `^3.1.6` to `^3.1.8`\n\nEach advisory-history comment is extended in the file's existing style and names the new GHSA ids and #20769. The floor keeps this workspace's own resolution from ever re-locking a vulnerable copy. Workspace overrides do not reach downstream installs, so this PR does not claim to fix a consumer's own copy.\n\n## Lockfile\n\nRegenerated with `pnpm install --lockfile-only` (pnpm 10.31.0, the `packageManager` version), never hand-edited. The diff is 11 lines changed on each side (22 total) and names only these entries: the two override specifiers, `brace-expansion` 5.0.9 to 5.0.12 (package and snapshot entries, plus the two `brace-expansion:` dependents' edges), and `fast-uri` 3.1.7 to 3.1.8 (package and snapshot entries, plus the one `fast-uri:` dependent's edge). Nothing unrelated moves, and the scanned package count stays 1369. `pnpm install --frozen-lockfile` passes on the result.\n\nOther copies: none. Each package appears exactly once in the lockfile, at the vulnerable version on main and at the fixed version on this branch.\n\n## Changeset decision\n\nNo changeset. A workspace-override raise plus a lockfile move publishes nothing: no package's `files[]` content or declared range changes. The precedent is the devalue override PR (#18942, commit `5e0a1b9e02`), which touched exactly `pnpm-workspace.yaml` and `pnpm-lock.yaml` and added no changeset. The two other OSV precedents (#20719, #20564) each changed a published package's declared range, so they carried changesets and are not the shape here. No empty changeset is added. `Check Changeset` may stay red on this PR until a maintainer applies `skip-changeset`; the author seat does not apply labels.\n\n## What I ran\n\n| Check | Result |\n|---|---|\n| OSV-Scanner v2.3.8 (SHA-256 verified against the release checksum file), `--offline-vulnerabilities`, on `origin/main`'s lockfile | exit 1, exactly the four GHSAs above |\n| The same scan on this branch's lockfile | exit 0, `No issues found` (1369 packages) |\n| `pnpm install --frozen-lockfile` | pass |\n| `node scripts/pm/dispatch-gates.mjs --commands`, every derived command run, then `--ran` | 21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN |\n| Full `pnpm build` (under the shared verify lock, `--concurrency=2`) | 72/72 tasks pass |\n| After the build: `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content` | all exit 0 |\n| `check:override-consistency`, `check:vendor-export-contract-resolve`, `check:workspace-manifest-cycles`, `check:nul-bytes`, `check-osv-exemptions` and the rest of the derived list | all exit 0 |\n\nNot run: the per-package test suites of `minimatch` and `ajv` consumers. The gate derivation selects none for a two-path lockfile and workspace-yaml diff, and both bumps are patch-line moves inside the ranges the dependents already declare. CI's shards cover them.\n\n## Acceptance notes\n\nNone.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

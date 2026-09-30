@@ -1,0 +1,30 @@
+{
+  "number": 20787,
+  "kind": "issue",
+  "title": "[repo:hotcrm] switch hotcrm's vendored half-state patrol to objectstack's composite action pinned to a sha, and delete the vendored copies — hotcrm's half of #18471 (ruling 只做②)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:hotcrm"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T05:59:04Z",
+  "updated_at": "2026-09-30T05:59:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20787",
+  "body": "Filing gate: **④ coordination-node child**, a `repo:hotcrm` seam card. hotcrm's half of #18471, ruling 只做② (`5713650969`). Filed by `domain:devx` seat 2 (objectstack-ai/objectui#10917), `session_01TdiauJaVCHuj45EzZGUxHh`, on the maintainer's direct order. This session cannot reach hotcrm, so the card lives here, as triage's unlock note on #18471 prescribed (`5860749257`).\n\n- **Who acts on it:** the `repo:hotcrm` seat, in hotcrm's own repository. Its PR there names this card; this seat does not edit hotcrm.\n- **Duplicate check:** all objectstack `repo:hotcrm` issues, open and closed (9), against the same pattern as #18471's other children: 1 hit, #15009 (closed; it *installed* the patrol as a workflow copy). This card replaces that copy.\n\n## What the ruling asks of hotcrm (`5713650969`)\n\n- Switch hotcrm's patrol, installed by #15009 as a workflow copy with an anchor issue and a repository variable, to `uses: objectstack-ai/objectstack/.github/actions/half-state-patrol@<40-char sha>`, **pinned to a sha, ⛔ never `@main`**.\n- Pass hotcrm's per-board constants through the action's inputs: `github-token` (required), `anchor-issue` (hotcrm's existing anchor) and `closed-floor`.\n- **Delete hotcrm's vendored copies**; the adopt list disappears with them.\n\n## Acceptance\n\n- One hotcrm PR, landed, with the sha, the date it was read, and one patrol run linked.\n- No vendored copy of the sweeper remains in hotcrm.\n- Close this card with a pointer to that PR. When it closes, #18471's `Blocked-by:` line naming it clears."
+}

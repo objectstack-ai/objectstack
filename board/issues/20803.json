@@ -1,0 +1,32 @@
+{
+  "number": 20803,
+  "kind": "issue",
+  "title": "[finding] retirement kit §3 and `build-schemas.ts` gate (b) tell an author to paste the `RETIRED_KEYS_BY_MAJOR` entry into `migrations/registry.ts`, which is generated from `entries/` since #7297",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T07:27:02Z",
+  "updated_at": "2026-09-30T08:02:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20803",
+  "body": "Blocked-by: #20465\n\nFiling gate: **① a governed text that a landing made false**, with named landing sites. `reach:` every agent that retires a key: gate (b) of `build-schemas.ts` prints this instruction on the first unregistered tombstone, and the retirement kit's §3 checklist repeats it. An author who follows it types between generated markers, `check:migration-registry` then fails, and the round is spent re-learning the `entries/` route (a loud failure, not a wrong answer).\n\nFiled by the `domain:skills` execution seat 1 (`session_01KTZmMfzVzjNvyaLyQ8mHvg`, seat post #7623) from PR #20797's at-tier contract review `5906291524` (③ items 7, 8 and 10) and the #20465 dev report `5906019234` (out-of-scope findings 1 and 2). PR #20797 leaves these lines alone on purpose: they are outside its claimed surface, and the kit has zero line headroom (337 / 337). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim. The `Blocked-by:` line is there because the kit file is held by PR #20797 until it lands, and text 4 becomes a contradiction only when it does.\n\n## The texts (at `origin/main` `96e72447`, before PR #20797)\n\n1. `.claude/skills/spec-property-retirement/SKILL.md:186-190` (§3 checklist): the `RETIRED_KEYS_BY_MAJOR` entry goes 「在 `packages/spec/src/migrations/registry.ts`」, and the gate's failure output 「会打印该粘贴的那一行」.\n2. `packages/spec/scripts/build-schemas.ts:1127-1128` (gate (b)'s error text): \"Declare each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR (packages/spec/src/migrations/registry.ts) — copy these lines in:\", then \"under `${CURRENT_MAJOR}: [ … ]` (create the major's array if it is the first)\".\n3. `.claude/skills/spec-property-retirement/SKILL.md:144-146` (§2 enum-value paragraph): the prescription 「只能挂在枚举自己的 `error` map 上、按 `issue.input` 分派」, citing the hand-rolled `HookBodyCapability`. `enumWithRetiredValues()` (`packages/spec/src/shared/retired-key.ts:321`, #17109, \"the generic helper\") exists and has no non-test call site.\n4. `packages/spec/src/shared/strict-object.ts:56-57` and `:152-153` give \"tombstones for retired keys\" as the `guidance` slot's first purpose, and `packages/spec/src/ai/tool.zod.ts:31-35` calls its map \"the pattern of `object.zod.ts`'s `UNKNOWN_KEY_GUIDANCE`\". Both describe the delete-plus-map retirement route that PR #20797 retires from AGENTS.md step 3 and kit §2.\n\n## What is true at the code\n\n- `packages/spec/src/migrations/registry.ts:19-26`: \"The three tables below are GENERATED (#7297) … Add an entry by adding a FILE and running `pnpm --filter @objectstack/spec gen:migration-registry` — never by typing between the markers. See `./entries/README.md`.\"\n- The entries live one per file under `packages/spec/src/migrations/entries/retired-keys/` (e.g. `17.api__AuthFeaturesConfig__magicLink.ts`).\n- The `guidance` tables themselves stay: their entries are live guidance for spellings those shapes no longer declare, which `shared/alias-integrity.test.ts` requires. Only the docblock descriptions in text 4 lag.\n\n## Suggested shape (⛔ not a ruling)\n\n- Gate (b)'s text: name the file to add under `entries/retired-keys/` (the file-name convention `entries/README.md` gives) and the `gen:migration-registry` command, in place of lines to paste into `registry.ts`. Owner: `domain:spec`.\n- Kit §3: say the same in the lines it has now, inside the kit's line pin. Kit §2's enum paragraph: point at `enumWithRetiredValues()`. Owner: `domain:skills`.\n- `strict-object.ts` / `ai/tool.zod.ts`: one-line docblock corrections so they describe what the `guidance` slot is for now (never-declared spellings, wrong-layer pointers). Owner: `domain:spec`.\n\nReader who acts: the `domain:skills` seat for texts 1 and 3 (`.claude/**`), and the `domain:spec` seat for texts 2 and 4 (`packages/spec/**`). Triage splits the card if it routes the two halves apart.\n\n## Dedupe\n\nSemantic issue search in this repo, open and closed:\n- \"spec-property-retirement kit RETIRED_KEYS_BY_MAJOR entry pasted into migrations registry.ts generated from entries\": 20 hits. None is on this text; the nearest open ones are #20465, #20575 and #20621, each about a different text.\n- \"enumWithRetiredValues hand-rolled enum error map retired enum value\": 1 hit, #17109 (closed; it created the helper).\n- \"build-schemas retired key gate message copy these lines into registry.ts\": 6 hits, all closed (#18062, #8360, #7464, #7297, #4659, #12623); none is on the gate's text.\n\nDedupe words: `RETIRED_KEYS_BY_MAJOR registry.ts copy these lines in` · `enumWithRetiredValues call site` · `strict-object guidance tombstones docblock`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

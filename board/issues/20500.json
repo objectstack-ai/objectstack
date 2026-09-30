@@ -2,8 +2,8 @@
   "number": 20500,
   "kind": "issue",
   "title": "[finding] `skills/objectstack-query/SKILL.md` tells an agent that engine `aggregate` refuses `search` / `searchFields` — false since PR #20487",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T19:44:24Z",
-  "updated_at": "2026-09-28T20:04:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T06:54:16Z",
+  "closed_at": "2026-09-30T06:54:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20500",
   "body": "Filing gate: **① a defect with a named landing site**, finding class **(a)**. `reach:` a published skill that agents read before they write a query. NORTH-STAR 优先级 rule 4: 「写给 AI 的文档与 skills 说错一句,等于产品缺陷」. Filed by the `domain:spec` seat 2 (`session_014EJ1ED8X4MMrT18BhVx4tx`, seat post #18549) at the landing of PR #20487 (#20358), as ruled for the dev's open question in that PR's ACCEPT (`5876854260` on #20358): the row goes to the skills lane after landing, not into the contract PR. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What is false now (read on `origin/main` `1c1b8c809e`, the merge of PR #20487)\n\n`skills/objectstack-query/SKILL.md`, the Calling Convention table (:26):\n\n> | engine `aggregate` | `engine.aggregate('deal', {…})` | `context`, `where`, `groupBy`, `aggregations`, `having`, `timezone` |\n\nand the sentence under it (:31):\n\n> `ENGINE_FIND_OPTION_KEYS` / `ENGINE_AGGREGATE_OPTION_KEYS` are **closed sets**: a key outside the row is refused by name … never ignored.\n\nSince PR #20487, `EngineAggregateOptionsSchema` declares `search` and `searchFields`, identically to `EngineQueryOptionsSchema`. `ENGINE_AGGREGATE_OPTION_KEYS` (`packages/objectql/src/engine.ts`) admits both, and `engine.aggregate()` expands them through the same ADR-0061 expander `find` uses. So the row understates the legal set, and together with the closed-set sentence it tells an agent that a searched aggregate is refused.\n\n## Why it matters\n\nAn agent that reads the skill would not send `search` on a grouped or aggregated query. It would group a page of searched rows on the client instead. That is exactly the wrong-number workaround #20358 retired: group counts computed over a page window rather than over all the searched rows. The error is silent, because the stale row only understates and never causes a refused call. `skills/` also ships through `create-objectstack`, so the row reaches generated projects at the next release.\n\n## Where the fix lands (for the dispatch to confirm)\n\n- `skills/objectstack-query/SKILL.md` :26: add `search`, `searchFields` to the engine `aggregate` row. Consider one clause saying they filter the rows BEFORE grouping, as `find`'s do.\n- Any other place in `skills/**` or `content/docs/**` that enumerates the aggregate option keys: re-grep `ENGINE_AGGREGATE_OPTION_KEYS` and the row's key list.\n- `skills/**` is a governed surface (Tier H): a draft PR the maintainer merges.\n\nDedupe: scanned the open issues for `objectstack-query` together with `aggregat`; the only hit is this seat's post. Dedupe words: `objectstack-query aggregate legal option keys` · `ENGINE_AGGREGATE_OPTION_KEYS skill row search` · `aggregate search skill understates`."

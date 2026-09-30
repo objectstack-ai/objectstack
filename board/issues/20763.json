@@ -1,0 +1,39 @@
+{
+  "number": 20763,
+  "kind": "pull_request",
+  "title": "fix(spec)!: a time value carries no zone — ClockTimeValueSchema refuses a Z or an offset, with an ADR-0087 disposition for stored defaults (#20740)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T03:00:46Z",
+  "updated_at": "2026-09-30T03:59:40Z",
+  "closed_at": "2026-09-30T03:59:39Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-30T03:59:38Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20763",
+  "body": "Closes #20740\n\nClause-②: no (narrowing)\n\n`ClockTimeValueSchema` refuses a `Z` or a UTC offset. A `time` field default, a `time` action-param default or a submitted `time` action param that carries a zone is now refused when it is authored or submitted, and no longer only when an insert falls back to it. The record validator already refuses such a value on write. The D2 conversion `time-default-utc-suffix-dropped` drops a `Z` or a zero offset from a stored `time` default. A non-zero offset stays as stored and is reported as a TODO. D3 entry: `time-default-zone-refused`. `@objectstack/spec` minor, BREAKING.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

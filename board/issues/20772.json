@@ -1,0 +1,36 @@
+{
+  "number": 20772,
+  "kind": "pull_request",
+  "title": "docs(spec): replace the dead tracker citations in the manifest, dataset and permission liveness ledgers with the deciding commit, or the decision in words",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T03:56:32Z",
+  "updated_at": "2026-09-30T05:48:53Z",
+  "closed_at": "2026-09-30T05:25:24Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-30T05:25:24Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20772",
+  "body": "Part of #20234\n\nClause-②: no\n\nIn the `manifest`, `dataset` and `permission` liveness ledgers, a tracker number that answers 404 is replaced. The note now cites the commit that decided it (ruling C+D, form C), or, where the number alone carried the meaning, says what was decided (form D). Only `note` and `_note` strings change: no row's status, evidence, proof or date moves. One `@objectstack/spec` patch changeset, because `liveness/` ships in the package.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

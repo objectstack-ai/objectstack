@@ -14,18 +14,20 @@
     "bug",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T03:55:19Z",
-  "updated_at": "2026-09-29T18:41:40Z",
+  "updated_at": "2026-09-30T07:16:00Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20569",
   "body": "Filing gate: **① a product defect with a named landing site**. Class (b): a published skill contradicts the runtime and the Accepted ADR. `reach:` is a named real producer: `skills/objectstack-automation/SKILL.md`, which an authoring agent loads. It also ships to generated projects through `create-objectstack`.\n\nSplit by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) from #20553, items 1 and 2, when it graded that card. #20553 keeps the `os validate` half (`domain:spec`). This card is the skills-lane half, because `skills/**` is a Tier H governed surface. The evidence below is #20553's, filed by the `domain:services` seat (#6021) from the #20529 dev report `5882379577`.\n\n## What is false (read at `origin/main` `03b19d9c`, per #20553)\n\n1. **`skills/objectstack-automation/SKILL.md:356`**, the `secret` row: \"HMAC-SHA256 shared secret. Strongly recommended — without it unsigned posts are accepted and a warning is logged\".\n   - ADR-0041 (Accepted) requires a per-flow secret.\n   - Since PR #20551 (#20529, merged 2026-09-29), the runtime refuses an `api` flow with no non-blank `config.secret`: 400 `VALIDATION_FAILED` on the `/automation` write doors, and a skip with a warning at boot.\n2. **`skills/objectstack-automation/SKILL.md:52`**, the `api` row: \"Invoked explicitly via the API / `engine.execute()`, **or** bound as an inbound **webhook**\".\n   - The engine binds every `api`-kind flow to the inbound trigger, so no \"invoked explicitly only\" form of `type: 'api'` exists.\n   - The explicit-only form is `type: 'autolaunched'`, as PR #20551's changeset says.\n\nRe-check (from #20553): `git grep -n \"Strongly recommended — without it unsigned posts are accepted\" origin/main -- skills/objectstack-automation/SKILL.md` and `git grep -n \"Invoked explicitly via the API\" origin/main -- skills/objectstack-automation/SKILL.md` each expect 1 hit.\n\n## Direction (triage's grade, on the first comment)\n\n- `:356`: the secret is required. The row says what happens without one, which is refused at registration and not armed at boot, and names the header the signature goes in.\n- `:52`: `api` is the inbound-webhook kind and always needs a secret. The explicit-only form is `autolaunched`.\n- Before editing, census the other `skills/**` and `content/docs/**` lines that describe the `api` trigger or its secret.\n- ⛔ Keep it abstract under the security disclosure rule: no request recipe (#20552 is the open security card on the same secret).\n- Tier H: a draft PR that the maintainer merges.\n\nDedupe: the family search in #20553 (「api trigger secret os validate skill objectstack-automation inbound webhook secret optional」: #20529, #8025 and #7722) found no card for these lines.\n\nDedupe words: `objectstack-automation skill api secret optional` · `type api invoked explicitly autolaunched` · `skill trigger-api secret required`"

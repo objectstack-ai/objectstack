@@ -1,0 +1,29 @@
+{
+  "number": 20813,
+  "kind": "pull_request",
+  "title": "docs(query): stop enumerating a false closed set for the aggregate option keys",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T08:09:30Z",
+  "updated_at": "2026-09-30T08:27:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20813",
+  "body": "Fixes #20792\n\nClause-②: no\n\nTwo hand-written docs sentences presented the aggregate option set as a closed three-key list. The list is false on both paths. This PR keeps each sentence's true point and drops the enumeration; no key list is pasted into prose (the generated reference owns it).\n\n## Changes\n\n1. `content/docs/protocol/objectql/query-syntax.mdx` (Analytics: Revenue by Month)\n   - Before: \"`engine.aggregate()` accepts only `where` / `groupBy` / `aggregations` (plus a `timezone` for bucketing): there is no `orderBy` or `limit` on this path, so sort the returned rows yourself.\"\n   - After: \"`engine.aggregate()` takes a closed option set with no `orderBy` or `limit` (the full list is under `EngineAggregateOptions` in the Data Engine reference), so sort the returned rows yourself. It does carry a `timezone` for bucketing.\"\n2. `content/docs/data-modeling/queries.mdx` (UTC bucketing callout)\n   - Before: \"the `POST /api/v1/data/:object/query` route forwards only `where` / `groupBy` / `aggregations`, so a query sent over REST always buckets on UTC calendar boundaries.\"\n   - After: \"the `POST /api/v1/data/:object/query` route does not forward `timezone` to the engine, so a query sent over REST always buckets on UTC calendar boundaries.\"\n\n3. `content/docs/kernel/contracts/data-engine.mdx` (### EngineAggregateOptions, added in a second commit 7837c5c823)\n   - Before: an interface literal listing four of the eight keys, with groupBy typed as a string array.\n   - After: a one-line pointer to the generated reference, `/docs/references/data/data-engine#engineaggregateoptions`; the `AggregationNode` interface and the `distinct` removal note are kept.\n\n## Code anchors (origin/main at 96e724475c)\n\n- `packages/objectql/src/engine.ts:562-565`: `ENGINE_AGGREGATE_OPTION_KEYS` = context, where, groupBy, aggregations, having, timezone, search, searchFields. Enforced at `:16277` (`rejectUnknownEngineOptions`). No orderBy / limit, so the kept point holds.\n- `packages/metadata-protocol/src/protocol.ts:11324-11343`: the engine.aggregate call inside `findData` forwards where, groupBy, aggregations, having, search, searchFields, context. `timezone` is not in the bag, and no `timezone` read exists in `findData` (`:10937` to the call), so REST buckets on UTC.\n- `packages/rest/src/rest-server.ts:8808,8849`: `POST /data/:object/query` calls `p.findData(...)`, confirming the route reaches that path.\n- Generated reference already lists all eight keys: `content/docs/references/data/data-engine.mdx:891-906`.\n\n## Census (hand-written `content/docs/**`, excluding references/ and releases/)\n\nProse patterns: \"only `where`\", \"accepts only\", \"forwards only\", \"groupBy` / `aggregations`\", aggregate()-with-only/accepts/forwards, \"drops having/search/timezone\".\nInterface and type-literal patterns (added after review): `EngineAggregateOptions`, `AggregateOptions`, `groupBy?:`, `aggregations?:`, aggregate-signature blocks.\nHits: the three fixed above (`query-syntax.mdx` sentence, `queries.mdx` sentence, `kernel/contracts/data-engine.mdx` interface literal). Checked and left: `kernel/contracts/data-engine.mdx:28,39` (an import and the `aggregate(...)` signature, which name the type and copy no keys), `:573` (deprecated schema names), `query-syntax.mdx:74-75` (the QueryAST literal for find, not the aggregate option set), `query-syntax.mdx:85`, `:1434`, `api/error-catalog.mdx:301`, `api/data-api.mdx:194`. No further enumeration.\n\n## Acceptance notes\n\n- Stale comment on `ENGINE_DRIVER_PASSTHROUGH_KEYS` deliberately left out of this PR, as ruled.\n- No changeset: docs-only, content/docs is not a published surface.\n\n## Verification\n\nGate list from `node scripts/pm/dispatch-gates.mjs --commands` (40 families), each run at head 7837c5c823 with exit 0 (after building `@objectstack/lint...`, `@objectstack/spec` and `@objectstack/client-react...` for the gates that read built output); `--ran` reconciliation: 40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}
