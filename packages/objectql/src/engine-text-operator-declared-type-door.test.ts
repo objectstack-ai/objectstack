@@ -68,6 +68,7 @@ import {
   TEXT_OPERATOR_DOOR_FIXTURE,
   TEXT_OPERATOR_DOOR_FIXTURE_OBJECT,
   TEXT_OPERATOR_DOOR_TYPE_CLASSES,
+  lowerFilterCondition,
   type FilterTextCase,
   type FilterTextRowsCase,
   type TextOperatorDoorCase,
@@ -80,6 +81,19 @@ import { applyHaving } from './having-filter.js';
 import { findTextOperatorOverNonTextField } from './text-operator-declared-type-door.js';
 
 const OBJECT = TEXT_OPERATOR_DOOR_FIXTURE_OBJECT;
+
+/**
+ * [ADR-0053 D-D1, amended — #5930] What a driver receives is the door's output
+ * after the engine's shared lowering (the NULL-polarity guards on `$ne` / `$nin`
+ * / `$notContains`, the whole-day rule on a declared `datetime`), which runs
+ * after this door on every verb. The door rewrites nothing, so a pin on the
+ * driver's input compares against the same lowering of the caller's filter.
+ */
+const lowered = (where: unknown): unknown =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) =>
+      (TEXT_OPERATOR_DOOR_FIXTURE.fields as Record<string, { type?: string } | undefined>)[column]?.type === 'datetime',
+  });
 
 interface SeenRead { ast: any }
 
@@ -187,7 +201,7 @@ describe('[#15773] the text-operator declared-type door at the engine collection
       const filter = c.filter();
       await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
-      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(filter);
+      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(lowered(filter));
     }
   });
 
@@ -197,7 +211,7 @@ describe('[#15773] the text-operator declared-type door at the engine collection
       const filter = c.filter();
       await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
-      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(filter);
+      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(lowered(filter));
     }
   });
 

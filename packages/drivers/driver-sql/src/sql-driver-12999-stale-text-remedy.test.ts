@@ -190,10 +190,10 @@ describe('unkeyable TEXT column: the upgrade path names the real remedy (#12999)
 
     expect(message).toMatch(/Column\(s\) "token" are stored as TEXT because the field declares no `maxLength`/);
     expect(message).toMatch(/Declare `maxLength` on the field\(s\) so the column is emitted as varchar\(n\)/);
-    expect(message).toContain('#11374');
+    expect(message).toContain('so the column is emitted as varchar(n) and can be keyed.');
     // ⛔ The new branch must not reach this deployment: nothing here is stale.
     expect(message).not.toMatch(/ALREADY declares/);
-    expect(message).not.toContain('#12999');
+    expect(message).not.toContain('re-declaring `maxLength` changes nothing here');
   });
 
   it('COUNTER-PIN: a bound past the 768-character key ceiling is NOT a stale column', async () => {
@@ -207,7 +207,7 @@ describe('unkeyable TEXT column: the upgrade path names the real remedy (#12999)
 
     expect(message).toMatch(/wider than 768 characters/);
     expect(message).not.toMatch(/ALREADY declares/);
-    expect(message).not.toContain('#12999');
+    expect(message).not.toContain('re-declaring `maxLength` changes nothing here');
   });
 
   it('COUNTER-PIN: a table this driver holds no declaration for keeps the CREATE message', async () => {
@@ -221,7 +221,7 @@ describe('unkeyable TEXT column: the upgrade path names the real remedy (#12999)
     const message = (await explain(driver, 'os12999_unregistered', ['token'])) ?? '';
 
     expect(message).toMatch(/Declare `maxLength` on the field\(s\)/);
-    expect(message).not.toContain('#12999');
+    expect(message).not.toContain('re-declaring `maxLength` changes nothing here');
   });
 
   it('names BOTH dispositions when one key column is stale and another is unbounded', async () => {
@@ -240,7 +240,7 @@ describe('unkeyable TEXT column: the upgrade path names the real remedy (#12999)
     // …and the genuinely unbounded half is still told to declare a bound, so a
     // composite key does not send the operator down one route for both columns.
     expect(message).toMatch(/Column\(s\) "note" in the same key declare no usable bound and DO need `maxLength`/);
-    expect(message).toContain('#11374');
+    expect(message).toContain('DO need `maxLength` declared on the field.');
   });
 
   it('still declines to explain a failure that is not the TEXT-key refusal', async () => {

@@ -111,7 +111,7 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
     expect(entry.message).toContain('proj_task.tags');
     expect(entry.message).toContain('json');
     expect(entry.message).toContain('character varying');
-    expect(entry.message).toContain('#11535');
+    expect(entry.message).toContain('receives one opaque id instead of a list');
     // The remedy is the real statement, not a gesture at one.
     expect(entry.message).toContain(manualJsonConversionSql('postgres', 'proj_task', 'tags'));
     // The orphaned single-value index is part of the same picture: a json
