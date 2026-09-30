@@ -29,6 +29,9 @@ import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
+    SDUI_MANIFEST_SERVICE,
+    isUsableSduiManifest,
+    stampHtmlPageRequires,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
@@ -4834,6 +4837,40 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20312] The deployment's ADR-0080 SDUI component manifest, when the host
+     * registered one under {@link SDUI_MANIFEST_SERVICE} — `os serve` does, from
+     * the CLI's `resolveSduiManifest`. Read per publish, exactly as
+     * {@link resolveFlowCanonicalizer} reads `automation` and for its reason: a
+     * host may register the key after this protocol is assembled, and a value
+     * cached from a too-early read would switch the save door's page compile
+     * off for the life of the process. A re-registered value is therefore seen
+     * by the next publish.
+     *
+     * `undefined` when nothing is registered: the save door then judges an html
+     * page exactly as it did before the key existed, and the host that
+     * registers nothing is the one that says so at boot. A registered value
+     * that is not a manifest (no `components` map) is a host fault: it is
+     * warned about once and read as nothing, never compiled against.
+     */
+    private resolveSduiManifest(): unknown {
+        const value = this.getServicesRegistry?.().get(SDUI_MANIFEST_SERVICE);
+        if (value === undefined || isUsableSduiManifest(value)) return value;
+        if (!this.unusableSduiManifestWarned) {
+            this.unusableSduiManifestWarned = true;
+            console.warn(
+                `[Protocol] the '${SDUI_MANIFEST_SERVICE}' service is not an SDUI component manifest `
+                + `(a JSON object with a \`components\` map) — html page sources are saved without being `
+                + `compiled against it, and a page's \`requires\` is not validated. Register the parsed `
+                + `sdui.manifest.json of the console this deployment serves.`,
+            );
+        }
+        return undefined;
+    }
+
+    /** [#20312] One warn per process for an unusable registered manifest — see {@link resolveSduiManifest}. */
+    private unusableSduiManifestWarned = false;
+
+    /**
      * @param authoringChannel [#6710] which channel this kernel's metadata
      * writes arrive on. Omitted ⇒ `'environment'` ⇒ the #4463 runtime
      * authoring gate is ACTIVE. Only the genuine control-plane assembly passes
@@ -5166,6 +5203,10 @@ export class ObjectStackProtocolImplementation implements
                 ? (objectName, where, options) => this.engine.judgeFilter(objectName, where, options)
                 : undefined;
 
+        // [#20312] The host's SDUI component manifest — a host fact of the
+        // #6285 kind, read here per publish and passed in so the gate stays pure.
+        const sduiManifest = this.resolveSduiManifest();
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -5183,6 +5224,9 @@ export class ObjectStackProtocolImplementation implements
             orgWallEnforced: this.orgWallEnforced(),
             ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
             ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
+            // [#20312] The deployment's component manifest, read per publish;
+            // with it the gate compiles an html page's source (ADR-0080 §5).
+            ...(sduiManifest !== undefined ? { sduiManifest } : {}),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
@@ -16707,6 +16751,16 @@ export class ObjectStackProtocolImplementation implements
                 item: gatedItem,
             }),
         });
+
+        // [#20312] ADR-0080 §5: `requires` is derived from the source, not
+        // authored. With the deployment's manifest in hand, an html page is
+        // stored with the `requires` its compiled source yields — on a draft
+        // too, because the stamp is a derivation, not a gate (a draft whose
+        // source does not compile, or whose hand-written `requires` disagrees,
+        // is left as written for its publish to refuse; see
+        // `stampHtmlPageRequires`). A host with no manifest stores the body
+        // exactly as before.
+        request.item = stampHtmlPageRequires(singularType, request.item, this.resolveSduiManifest());
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
         // body before it persists (throws propagate to the caller with their

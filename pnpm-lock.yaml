@@ -1322,6 +1322,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../sdui-parser
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec

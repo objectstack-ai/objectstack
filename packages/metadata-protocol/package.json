@@ -43,6 +43,7 @@
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "zod": "^4.6.1"
