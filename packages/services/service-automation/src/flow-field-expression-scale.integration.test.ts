@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Commit 815585513's end-to-end oracle — the hotcrm quote-flow shape (hotcrm#1206),
+ * The end-to-end oracle for the issue behind commit 815585513 — the hotcrm quote-flow shape (hotcrm#1206),
  * reproduced in-tree because that repo is out of reach from here: a flow
  * computes a discounted money value (`180000 * (1 - 30/100)` =
  * `125999.99999999999`) and writes it into a `scale: 2` field.

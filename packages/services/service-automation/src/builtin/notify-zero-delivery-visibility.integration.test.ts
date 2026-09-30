@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Commit ae6dcf6a4 — a `notify` node that reached NOBODY must not read like a run that
+ * The card behind commit ae6dcf6a4: a `notify` node that reached NOBODY must not read like a run that
  * had nobody to reach.
  *
  * ## What was measured, and why a green suite proved nothing
