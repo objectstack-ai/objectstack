@@ -5002,8 +5002,18 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `db11afd49`, re-measured there 2026-09-29:
- * `plugin-gantt/src/index.tsx` and `record-source.ts` are byte-identical to
+ * — `.objectui-sha` = `e420df310`, re-measured there 2026-09-30: all three
+ * files changed across the hop from `db11afd49`, and every anchor was
+ * re-mapped through the diff and re-READ; NONE changed content. `ObjectGantt.tsx`
+ * +85/-26 (objectui#11141's inclusive date-only end, objectui#8348's
+ * record-source ladder, objectui#11070's `reference` spelling), every anchor
+ * MOVING with its cited text byte-identical — by 47 through `getGanttConfig`,
+ * by 49 through the reload, by 51 through the layout key and by 59 after it;
+ * `plugin-gantt/src/index.tsx` +10/-0 (objectui#8220: a comment and `filter` /
+ * `sort` inputs, in the array forms this row declares), the `gantt` input
+ * MOVING `:137` -> `:145`; `record-source.ts` +38/-27, the three rungs MOVING
+ * by 8. At `db11afd49` (2026-09-29)
+ * `plugin-gantt/src/index.tsx` and `record-source.ts` were byte-identical to
  * `dd3f7e1be`, and `ObjectGantt.tsx` changed (+14/-10: objectui#10866's
  * zoned-chart DST day read and write through `invertTo` / `invertFrom`, and
  * comment re-citations), the first insertion at `:391` and every later anchor
@@ -5031,46 +5041,46 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * every number was re-derived from that tree, and the `label` one moved far
  * enough that the retired reading now lands in an unrelated callback.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:673` — rung 1, `core/src/utils/record-source.ts:299`), `staticData` (rung 2,
- * `record-source.ts:303`), `objectName` (rung 3; also `:1736` and `:1931` here),
- * `filter` (`:869`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and `:1014` sends the held result to
- * `$filter`; at `f8a9d0fb0` `:869` sent it verbatim), `sort` (`:1015`, through
- * `convertSortToQueryParams` to `$orderby`), `gantt` (`:563-565` —
+ * `:722` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
+ * `record-source.ts:311`), `objectName` (rung 3; also `:1787` and `:1990` here),
+ * `filter` (`:918`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and `:1063` sends the held result to
+ * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1064`, through
+ * `convertSortToQueryParams` to `$orderby`), `gantt` (`:610-612` —
  * `getGanttConfig` branch 1, the author face and the registration's declared
- * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:137`),
+ * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:145`),
  * validated there against this
- * repo's own {@link GanttConfigSchema}), `navigation` (`:1864`), `label`
- * (`:2446`, resolved through `resolveInlineI18nLabel` for the export file
+ * repo's own {@link GanttConfigSchema}), `navigation` (`:1923`), `label`
+ * (`:2505`, resolved through `resolveInlineI18nLabel` for the export file
  * name — this record said `resolveI18nLabel`, which the line did not read at
  * `f8a9d0fb0` either —
  * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
  * pin `87af769e9` was a BLANK line (nothing cites `:1849` now), two above a dependency-delete callback's own comment,
  * so it is re-READ here, not re-pointed),
- * `skipWeekends` (`:1582`), `holidays` (`:1583`), `persistLayout` (`:1734`),
- * `viewName` (`:1736`), `markers` (`:2401`), `criticalPath` (`:2404`),
- * `showBaselines` (`:2407`), `readOnly` (`:2243` and `:2408`) and
- * `mobileReadOnly` (`:2409`).
+ * `skipWeekends` (`:1633`), `holidays` (`:1634`), `persistLayout` (`:1785`),
+ * `viewName` (`:1787`), `markers` (`:2460`), `criticalPath` (`:2463`),
+ * `showBaselines` (`:2466`), `readOnly` (`:2302` and `:2467`) and
+ * `mobileReadOnly` (`:2468`).
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:2444-2450`); a row cap — the
+ * `label` → the OBJECT's label → `objectName`, `:2503-2509`); a row cap — the
  * reload's `$top` is the platform ceiling, spread in as core's
- * `nonGridRowCeilingQuery()` (`:1025`: one probe row past the ceiling, which
+ * `nonGridRowCeilingQuery()` (`:1074`: one probe row past the ceiling, which
  * `applyNonGridRowCeiling` slices back off; at `f8a9d0fb0` a bare
  * `$top: NON_GRID_ROW_CEILING_TOP`, until objectui#7508 homed the ceiling in
- * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1023`); and
+ * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1072`); and
  * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
  * host props. ⚠️ New at `f8a9d0fb0` and recorded, not ruled: objectui#10250
  * gave the renderer two more reads, `search` and `searchableFields`
- * (`:836-839`, sent as `$search` / `$searchFields` at `:1029-1034`), which
+ * (`:885-888`, sent as `$search` / `$searchFields` at `:1078-1083`), which
  * `ListView.tsx` writes onto the node it generates from its toolbar Search
  * box — a host-generated key pair in the same position as the flatten
  * product, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
- * contract is already the SPEC's — `ObjectGantt.tsx:565` validates it against
+ * contract is already the SPEC's — `ObjectGantt.tsx:612` validates it against
  * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
@@ -5145,10 +5155,15 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:281-294`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3668-3687`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:3722-3741`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `db11afd49`) on 2026-09-29 —
+ * pin this repo builds against (`.objectui-sha` = `e420df310`) on 2026-09-30 —
+ * `ObjectTree.tsx` changed (+29/-26, objectui#8348's record-source arm and the
+ * host-data read below it), none of it inside `281-294` or `233-254`, which did
+ * not move; `ListView.tsx` changed above its `case 'tree'` arm (objectui#11021
+ * among others), which MOVED byte-identical `3668-3687` -> `3722-3741`, so the
+ * flat key set each reads or emits did not move. At `db11afd49`, 2026-09-29 —
  * `ObjectTree.tsx` changed in one comment line (`:1054`) and `ListView.tsx` in
  * comment citations and its region-aria read, none of it inside these ranges, so
  * `281-294` and `3668-3687` did not move; measured at `dd3f7e1be` on
@@ -5168,7 +5183,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3682`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3736`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -5197,10 +5212,18 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `db11afd49`, re-measured there 2026-09-29:
- * `plugin-tree/src/index.tsx` and `core/src/utils/record-source.ts` are
- * byte-identical to `dd3f7e1be` and `ObjectTree.tsx` changed in one comment line
- * (`:1054`), so every anchor below held unmoved and was re-read in place. At
+ * — `.objectui-sha` = `e420df310`, re-measured there 2026-09-30:
+ * `plugin-tree/src/index.tsx` is byte-identical to `db11afd49`;
+ * `core/src/utils/record-source.ts` changed (+38/-27) and its three rungs MOVED
+ * by 8 with their text byte-identical; `ObjectTree.tsx` changed (+29/-26,
+ * objectui#8348), and TWO anchors changed CONTENT, both toward this row, and
+ * say so where they are cited: the rung-1 call now passes `'view-data'`, and
+ * the host-data read no longer reads the authored `schema.data`; every other
+ * anchor MOVED by 2 or 3 with its cited text byte-identical. At `db11afd49`
+ * (2026-09-29) `plugin-tree/src/index.tsx` and
+ * `core/src/utils/record-source.ts` were byte-identical to `dd3f7e1be` and
+ * `ObjectTree.tsx` changed in one comment line (`:1054`), so every anchor held
+ * unmoved and was re-read in place. At
  * `dd3f7e1be` (2026-09-28):
  * `plugin-tree/src/index.tsx` is byte-identical to `f8a9d0fb0` (`git diff
  * --quiet`); `core/src/utils/record-source.ts` changed only in docblocks and
@@ -5223,25 +5246,27 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * one was re-derived from that tree, and the ladder call changed in CONTENT
  * as well as position.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:632` — rung 1, `core/src/utils/record-source.ts:299`, which returns the
- * authored value VERBATIM; that ONE site is the whole support
- * for the arm this row declares. ⚠️ The ARM this renderer passes is
- * `'undeclared'`, not the `'view-data'` its siblings pass, so rung 1 honours
- * any truthy value there — WIDER than this row, which is the harmless
- * direction: the bare array this door refuses is one the renderer would have
- * taken, never the reverse), `staticData` (rung 2,
- * `record-source.ts:303`), `objectName` (rung 3; also `:1023`, `:1074` and
- * `:1146` here, each behind `resolveRecordSourceObjectName`, plus the
- * parent-field detection at `:955-956`),
- * `filter` (`:737`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and holds the result: `:829` sends it to
- * `$filter` on the object fetch and `:913` on the inline `value` provider's
+ * `:634` — rung 1, `core/src/utils/record-source.ts:307`, which returns the
+ * authored value VERBATIM once it is on the arm; that ONE site is the whole
+ * support for the arm this row declares. ⚠️ At this pin the ARM this renderer
+ * passes is `'view-data'`, the one its siblings pass (objectui#8348), so a
+ * bare array under `data` is not a record source there and the ladder falls
+ * through to `staticData`, then `objectName`: renderer and row now draw the
+ * same line. Through `db11afd49` it passed `'undeclared'`, which honoured any
+ * truthy value — WIDER than this row, the harmless direction),
+ * `staticData` (rung 2,
+ * `record-source.ts:311`), `objectName` (rung 3; also `:1026`, `:1077` and
+ * `:1149` here, each behind `resolveRecordSourceObjectName`, plus the
+ * parent-field detection at `:958-959`),
+ * `filter` (`:739`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and holds the result: `:831` sends it to
+ * `$filter` on the object fetch and `:916` on the inline `value` provider's
  * `ValueDataSource` query, objectui#9136's; at `f8a9d0fb0` both sent
  * `schema.filter` verbatim, at `:753` and `:837`), `tree` (`:282`, the
  * nested config block `getTreeConfig` (`:281-294`) reads, and the
  * registration's declared `{ name: 'tree', type: 'object' }` input
- * (`plugin-tree/src/index.tsx:27-31`)) and `navigation` (`:1060`, handed to
- * `useNavigationOverlay` at `:1043`).
+ * (`plugin-tree/src/index.tsx:27-31`)) and `navigation` (`:1063`, handed to
+ * `useNavigationOverlay` at `:1046`).
  *
  * ⚠️ `data` IS declared here, and that is the measurement, not a family
  * symmetry. objectui#9234 left this block's rung-1 read marked `undeclared`
@@ -5254,36 +5279,40 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * resolving for this block means, and the mirror is the face that has to
  * follow.
  *
- * ⛔ `:862` is NOT a second site for the object arm, and citing it as one would
- * be citing a read of the opposite SHAPE: `(rest as any).data ?? schema.data`
- * (the cast on `schema` went away with objectui#8655; the one on `rest` stays)
- * is gated by `Array.isArray(passed)` on the very next line, so it
- * honours only the bare-ARRAY shorthand this row REFUSES — the same shorthand
- * `object-map` measures and declines one section up. One ladder site is
- * sufficient, and `:632` is it.
+ * ⛔ `:865` is NOT a second site for the object arm, and at this pin it is not
+ * a read of the authored key at all: it is `(rest as any).data`, gated by
+ * `Array.isArray(passed)` on the next line — the rows a HOST hands down as the
+ * `data` React prop. objectui#8348 dropped the `?? schema.data` fallback that
+ * line carried through `db11afd49` (`:862` there), the one reader that let an
+ * authored bare array draw rows whatever the ladder said, and objectui#9571
+ * had already stopped `SchemaRenderer` delivering the authored key as that
+ * prop. One ladder site is sufficient, and `:634` is it.
  *
  * Measured and deliberately NOT declared: the flat `TreeConfig` spellings
- * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand
- * `:862-863` accepts, which `ViewData` cannot publish (a discriminated union
- * over OBJECT variants) and for which `staticData` is this block's declared
- * door; `sort` — this renderer's fetch
- * (`:828-840`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, the
- * inline query (`:912-921`) carries `$filter` and `$top` only, and
+ * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand,
+ * which `ViewData` cannot publish (a discriminated union over OBJECT variants),
+ * for which `staticData` is this block's declared door, and which the renderer
+ * itself no longer accepts from an authored node at this pin (see `:865`
+ * above; `:862-863` accepted it through `db11afd49`); `sort` — this renderer's fetch
+ * (`:830-842`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, the
+ * inline query (`:915-924`) carries `$filter` and `$top` only, and
  * nothing else reads an order, so declaring one would publish a key with no read
  * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
  * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` at
- * `:838` and again at `:920` — a bare `$top: NON_GRID_ROW_CEILING_TOP` at
+ * `:840` and again at `:923` — a bare `$top: NON_GRID_ROW_CEILING_TOP` at
  * `f8a9d0fb0`, until objectui#7508 — marked "⛔ Not
- * authorable" at `:837`); and `filter.tree`, the legacy stash — ⚠️ no longer
+ * authorable" at `:839`); and `filter.tree`, the legacy stash — ⚠️ no longer
  * read since `f8a9d0fb0`: objectui#9549 deleted that arm, so `getTreeConfig`
  * (`:282`) takes the block from `tree` alone — which was a shape to stop
  * writing and is not a key to declare.
  *
- * This is also the one block of the three whose type is absent from the tracked
- * `sdui.manifest.json`, so `check:react-declaration-parity` reports it as
- * missing from the registry rather than comparing it — the derivation above is
- * from the renderer's sources at the pin either way, which is what #7751's
- * method asks for.
+ * This was also the one block of the three whose type was absent from the
+ * tracked `sdui.manifest.json`, so `check:react-declaration-parity` reported
+ * it as missing from the registry rather than comparing it. ⚠️ Re-read at
+ * `e420df310`: the manifest regenerated at this pin carries an `object-tree`
+ * entry, as the one at `db11afd49` already did. The derivation above is from
+ * the renderer's sources at the pin either way, which is what #7751's method
+ * asks for.
  *
  * VALUE posture for `tree`: {@link TreeConfigSchema}, this repo's own block —
  * #15469 closed it against unknown keys on exactly this measurement
