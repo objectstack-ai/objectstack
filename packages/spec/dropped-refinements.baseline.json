@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 212,
-    "droppedRefinementSites": 610,
+    "droppedRefinementSites": 612,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1326,12 +1326,14 @@
     },
     "ui/ObjectGridProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "grouping.fields.element.field"
       ]
     },
     "ui/ObjectKanbanProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "grouping.fields.element.field"
       ]
     },
     "ui/ObjectListView": {
