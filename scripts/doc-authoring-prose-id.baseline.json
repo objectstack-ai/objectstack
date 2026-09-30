@@ -297,9 +297,6 @@
   "#6603": 1,
   "#7020": 1
  },
- "packages/metadata-protocol/src/migrations/live-mysql-database.testkit.ts": {
-  "#10382": 1
- },
  "packages/metadata/src/endpoint-matcher.ts": {
   "#5040": 1
  },
