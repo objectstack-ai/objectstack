@@ -37,6 +37,11 @@
  *
  * The reader's own case table is `import-coerce.test.ts`'s `[#20534]` block;
  * this file pins the door.
+ *
+ * [#20280] The `datetime` cell `0001-01-01` in the table above is read right
+ * by the reader and is refused now by the write door behind it: a `datetime`
+ * begins at year 1000 (MySQL's documented `DATETIME` floor). The floor's own
+ * day is the admitted `datetime` control; a `date` keeps 0001..0999.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -74,6 +79,8 @@ const REFUSED: ReadonlyArray<readonly [field: Field, cell: string]> = [
   ['t', '07/15/2026 10:00'],
   ['dt', '2026-07-15 24:00'],
   ['d', '2026/2/30'],
+  // [#20280] Read right, and refused by the write door: a datetime begins at 1000.
+  ['dt', '0001-01-01'],
 ];
 
 /** [#20722] The write door's field code for a refused cell: `invalid_time` for a `time`. */
@@ -83,7 +90,7 @@ const codeOf = (field: Field) => (field === 't' ? 'invalid_time' : 'invalid_date
 const ADMITTED: ReadonlyArray<readonly [field: Field, cell: string, stored: string]> = [
   ['d', '0500-01-01', '0500-01-01'],
   ['d', '0001-01-01', '0001-01-01'],
-  ['dt', '0001-01-01', '0001-01-01T00:00:00.000Z'],
+  ['dt', '1000-01-01', '1000-01-01T00:00:00.000Z'],
   ['d', '2026-07-15', '2026-07-15'],
   ['dt', '2026-07-15T10:00:00Z', '2026-07-15T10:00:00.000Z'],
   ['dt', '2026-07-15T10:00:00+08:00', '2026-07-15T02:00:00.000Z'],

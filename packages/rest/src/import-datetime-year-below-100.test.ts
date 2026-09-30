@@ -29,6 +29,18 @@
  * changes nothing. Before 1901 the tz database gives Asia/Shanghai its local
  * mean time, +08:05:43, and America/New_York −04:56:02, which is the offset
  * both directions read those years at.
+ *
+ * ## [#20280] A `datetime` begins at year 1000
+ *
+ * MySQL documents its `DATETIME` from year 1000 only, and reads one stored in
+ * 0001..0099 back a century late, so the write door behind the import refuses
+ * a `datetime` in 0001..0999 now. The reader layer is unchanged: it still reads
+ * each cell in its own year, which is what #20599 fixed. The import door
+ * refuses each such row as `invalid_date` and stores nothing for it, beside the
+ * floor's first day (`1000-01-01 10:00`, still before 1901, so the tz
+ * database's local mean time still reads it) and the 2026 control, which it
+ * stores. The round trip runs at 1000 and 2026: the create door refuses the
+ * earlier years, so they have no row to export.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -48,6 +60,8 @@ const CELLS = [
   { id: 'c0050s', cell: '0050/1/1 10:00', utc: '0050-01-01T10:00:00.000Z', shanghai: '0050-01-01T01:54:17.000Z' },
   { id: 'c0099', cell: '0099-12-31 23:59:59', utc: '0099-12-31T23:59:59.000Z', shanghai: '0099-12-31T15:54:16.000Z' },
   { id: 'c0100', cell: '0100-01-01 10:00', utc: '0100-01-01T10:00:00.000Z', shanghai: '0100-01-01T01:54:17.000Z' },
+  // [#20280] The `datetime` floor's first day.
+  { id: 'c1000', cell: '1000-01-01 10:00', utc: '1000-01-01T10:00:00.000Z', shanghai: '1000-01-01T01:54:17.000Z' },
   { id: 'c2026', cell: '2026-07-15 10:00', utc: '2026-07-15T10:00:00.000Z', shanghai: '2026-07-15T02:00:00.000Z' },
   // A bare day is midnight UTC in every zone (#20534 already read it so).
   { id: 'd0050', cell: '0050-01-01', utc: '0050-01-01T00:00:00.000Z', shanghai: '0050-01-01T00:00:00.000Z' },
@@ -76,6 +90,9 @@ describe.each(['UTC', SHANGHAI])('[#20599] parseDateCell on a %s host', (host) =
 // ---------------------------------------------------------------------------
 // The routes, over a real engine.
 // ---------------------------------------------------------------------------
+
+/** [#20280] The cells the import door stores: a `datetime` from year 1000 on. */
+const STORED: ReadonlyArray<(typeof CELLS)[number]> = CELLS.filter((c) => c.utc >= '1000');
 
 const OBJECT = 'import_year_below_100_20599';
 
@@ -173,13 +190,23 @@ describe.each([
     }
   });
 
-  it('imports every row', () => {
-    expect(summary).toMatchObject({ total: CELLS.length, ok: CELLS.length, errors: 0 });
+  it('[#20280] imports the rows from year 1000 on, and refuses each row below it as invalid_date', () => {
+    expect(summary).toMatchObject({ total: CELLS.length, ok: STORED.length, errors: CELLS.length - STORED.length });
+    for (const [i, c] of CELLS.entries()) {
+      if (STORED.includes(c)) continue;
+      expect(summary.results[i], c.cell).toMatchObject({ ok: false, action: 'failed', field: 'dt', code: 'invalid_date' });
+    }
   });
 
-  it.each(CELLS)('stores $cell as the instant it names', async (c) => {
+  it.each(STORED)('stores $cell as the instant it names', async (c) => {
     const back = await stack.engine.findOne(OBJECT, { where: { id: c.id } });
     expect(storedInstant(back?.dt)).toBe(c[column]);
+  });
+
+  it('[#20280] stores nothing for a row below year 1000', async () => {
+    for (const c of CELLS.filter((x) => !STORED.includes(x))) {
+      expect(await stack.engine.findOne(OBJECT, { where: { id: c.id } }), c.cell).toBeNull();
+    }
   });
 });
 
@@ -190,7 +217,8 @@ describe.each([
  */
 const padExportYear = (cell: string) => cell.replace(/^(\d{1,3})-/, (_m, y: string) => `${y.padStart(4, '0')}-`);
 
-const ROUND_TRIP_YEARS = ['0001', '0050', '0099', '0100', '2026'] as const;
+// [#20280] From the `datetime` floor on: the create door refuses the earlier years.
+const ROUND_TRIP_YEARS = ['1000', '2026'] as const;
 const ROWS = ROUND_TRIP_YEARS.map((year) => ({ id: `y${year}`, dt: `${year}-01-01T10:00:00.000Z` }));
 
 describe.each([undefined, SHANGHAI, NEW_YORK] as const)('[#20599] GET /export then POST /import, business timezone %s', (zone) => {

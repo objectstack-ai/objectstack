@@ -189,11 +189,11 @@ describe('temporalStorageForm — total: what the rule cannot read comes back un
   });
 });
 
-// [#20264] The supported years, 0001..9999, on `date` and `datetime`: the one
-// range the temporal-comparand door (a comparand) and the record validator (a
-// written value) both ask, so they cannot disagree about a year. The year is
-// the one the kind's rule reads — a `date` string's leading day, otherwise the
-// UTC year of the instant.
+// [#20264] The supported years — a `date` 0001..9999, [#20280] a `datetime`
+// 1000..9999 — the one range the temporal-comparand door (a comparand) and the
+// record validator (a written value) both ask, so they cannot disagree about a
+// year. The year is the one the kind's rule reads — a `date` string's leading
+// day, otherwise the UTC year of the instant.
 describe('[#20264] isOutsideTemporalYearRange — the years a date or datetime value may name', () => {
   const at = (iso: string) => Date.parse(iso);
   const OUTSIDE: ReadonlyArray<readonly [string, unknown, 'date' | 'datetime' | 'both']> = [
@@ -208,22 +208,41 @@ describe('[#20264] isOutsideTemporalYearRange — the years a date or datetime v
     ['year 10000 in UTC, 9999 in its zone', '9999-12-31T23:59:59-01:00', 'datetime'],
     ['year 0 in UTC, 1 in its zone', '0001-01-01T00:00:00+08:00', 'datetime'],
     ['epoch milliseconds for year 10000, as a string', '253402300800000', 'datetime'],
+    // [#20280] A `datetime` before year 1000, MySQL's documented `DATETIME`
+    // floor — in every spelling — where #20264 read these as inside.
+    ['[#20280] the first instant of year 1, a number', at('0001-01-01T00:00:00.000Z'), 'datetime'],
+    ['[#20280] the first instant of year 1, a Date', new Date(at('0001-01-01T00:00:00.000Z')), 'datetime'],
+    ['[#20280] year 1, a bare day (midnight UTC)', '0001-01-01', 'datetime'],
+    ['[#20280] year 0099, an ISO instant', '0099-03-04T10:00:00.000Z', 'datetime'],
+    ['[#20280] the last instant of year 999, an ISO instant', '0999-12-31T23:59:59.999Z', 'datetime'],
+    ['[#20280] the last instant of year 999, a number', at('0999-12-31T23:59:59.999Z'), 'datetime'],
+    ['[#20280] year 999 in UTC, 1000 in its zone', '1000-01-01T00:00:00+08:00', 'datetime'],
   ];
   const INSIDE: ReadonlyArray<readonly [string, unknown, 'date' | 'datetime' | 'both']> = [
-    ['the first instant of year 1', at('0001-01-01T00:00:00.000Z'), 'both'],
     ['the last instant of year 9999', new Date(at('9999-12-31T23:59:59.999Z')), 'both'],
-    ['year 1, a bare day', '0001-01-01', 'both'],
     ['year 9999, a bare day', '9999-12-31', 'both'],
-    ['year 0099', '0099-03-04T10:00:00.000Z', 'both'],
     ['a 2026 instant (the control)', '2026-02-01T10:00:00.000Z', 'both'],
     ['a 2026 number (the control)', 1769940000000, 'both'],
+    // [#20280] The `datetime` floor's edge, in every spelling, on both kinds.
+    ['the first instant of year 1000, a number', at('1000-01-01T00:00:00.000Z'), 'both'],
+    ['the first instant of year 1000, a Date', new Date(at('1000-01-01T00:00:00.000Z')), 'both'],
+    ['the first instant of year 1000, an ISO instant', '1000-01-01T00:00:00.000Z', 'both'],
+    ['year 1000, a bare day', '1000-01-01', 'both'],
+    ['year 1000 in UTC, 999 in its zone', '0999-12-31T23:00:00-02:00', 'both'],
+    // A `date` keeps 0001..9999: the years before 1000 are the control the
+    // `datetime` floor must not reach.
+    ['the first instant of year 1', at('0001-01-01T00:00:00.000Z'), 'date'],
+    ['year 1, a bare day', '0001-01-01', 'date'],
+    ['year 0099', '0099-03-04T10:00:00.000Z', 'date'],
+    ['year 0999, a bare day', '0999-12-31', 'date'],
     // A `date` takes a string's leading day, whatever instant the rest names.
     ['year 9999 in its leading day, 10000 as an instant', '9999-12-31T23:59:59-01:00', 'date'],
     ['year 1 in its leading day, 0 as an instant', '0001-01-01T00:00:00+08:00', 'date'],
+    ['year 1000 in its leading day, 999 as an instant', '1000-01-01T00:00:00+08:00', 'date'],
   ];
   const kindsOf = (k: 'date' | 'datetime' | 'both') => (k === 'both' ? (['date', 'datetime'] as const) : [k]);
 
-  it('is true for a year outside 0001..9999, in every spelling the kind reads', () => {
+  it('is true for a year outside the kind\'s years, in every spelling the kind reads', () => {
     for (const [name, value, kinds] of OUTSIDE) {
       for (const kind of kindsOf(kinds)) expect(isOutsideTemporalYearRange(value, kind), `${kind}, ${name}`).toBe(true);
     }

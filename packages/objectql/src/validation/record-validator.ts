@@ -54,7 +54,8 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
- *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999;
+ *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
+ *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
  *                   a `date` string also carries a leading `YYYY-MM-DD` (#20481);
  *                   a string's leading day exists, and a `datetime` string is
  *                   an ISO 8601 spelling (#20525) — refused, never rolled over
@@ -1240,8 +1241,11 @@ function validateOne(
     // written value exactly when it is refused as a comparand. What that one
     // rule holds a `date` / `datetime` to:
     //
-    // - [#20264] a year from 0001 to 9999, whatever the spelling (a `Date` or a
-    //   string; `isOutsideTemporalYearRange`). A date written as
+    // - [#20264] a year from 0001 to 9999 for a `date` and [#20280] from 1000
+    //   to 9999 for a `datetime`, MySQL's documented `DATETIME` floor, whatever
+    //   the spelling (a `Date` or a string; `isOutsideTemporalYearRange`). A
+    //   `datetime` stored below year 1000 before that floor is read as stored
+    //   and is not rewritten; a write that carries one is refused. A date written as
     //   `+010000-01-01T00:00:00.000Z` has no leading `YYYY-MM-DD`, so the
     //   storage rule kept it verbatim (a stored non-day, 201 on memory and
     //   SQLite) and PostgreSQL refused it with a 500; year 0 is a 500 on

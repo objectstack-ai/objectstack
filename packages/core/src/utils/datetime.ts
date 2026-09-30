@@ -46,7 +46,8 @@ export interface WallClockParts extends CalendarParts {
  *
  * Not `Date.UTC(year, …)` and not `new Date(year, …)`: both read a year from 0
  * to 99 as 1900 + year (ECMA-262 `MakeFullYear`), so `0050-01-01` is built as
- * 1950-01-01 — while 0001..9999 is the supported range (`temporalStorageForm`).
+ * 1950-01-01 — while 0001..9999 is a `date`'s supported range ([#20280] a
+ * `datetime`'s is 1000..9999; `isOutsideTemporalYearRange`).
  * `setUTCFullYear` takes the year as written.
  *
  * Every component rolls over past its end exactly as `Date.UTC` rolls it, and

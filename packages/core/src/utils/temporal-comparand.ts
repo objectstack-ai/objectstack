@@ -89,7 +89,9 @@
  * or a string. `datetime` spells an instant past 9999 `+010000-…` and one
  * before year 0 `-000001-…`, which sort as no instant does, and PostgreSQL
  * answers `22009` / `22007`; year 0 is refused on both kinds because
- * PostgreSQL's `DATE` and `timestamptz` have no year 0 (`22008`). The range is
+ * PostgreSQL's `DATE` and `timestamptz` have no year 0 (`22008`). [#20280] A
+ * `datetime` starts at 1000, MySQL's documented `DATETIME` floor, so its range
+ * is 1000..9999; a `date` keeps 0001..9999. The range is
  * `temporal-storage-form.ts`'s `isOutsideTemporalYearRange`, the one the
  * record validator asks of a written value too; this predicate only calls it.
  *
@@ -111,14 +113,16 @@
  * - **Non-string comparands, save the year classes above.** A number is epoch
  *   milliseconds, a `Date` is an instant, `null` is a null test, and the
  *   `time` rule reads every finite one whose UTC year has four digits; so do
- *   the `date` and `datetime` rules for a year from 0001 to 9999. The #8690 refusal was scoped to strings by that
+ *   the `date` rule for a year from 0001 to 9999 and [#20280] the `datetime`
+ *   rule for one from 1000 to 9999. The #8690 refusal was scoped to strings by that
  *   card's own ruling — its triage queued "a non-interpretable bare string", and
  *   the maintainer ruling scoped its two options "to non-empty strings" so the
  *   empty-string cell stayed its own card. That scoped that change; it is not a
  *   standing rule that a non-string is never refused. [#20240] extends the
  *   refusal to the `date` class above by the triage direction on that card,
- *   [#20264] to `datetime` and the range 0001..9999 by triage's ruling, and
- *   [#20480] to a `time` column's instant outside the four-digit years.
+ *   [#20264] to `datetime` and the range 0001..9999 by triage's ruling,
+ *   [#20480] to a `time` column's instant outside the four-digit years, and
+ *   [#20280] to a `datetime` before year 1000 by triage's re-ruling.
  *   `NaN`, ±Infinity and an Invalid Date name no instant and no year, so they
  *   are not that class and stay unjudged, as before; no JSON body can carry
  *   one (JSON spells them `null`).
@@ -270,8 +274,9 @@ function keepsTimeOfDay(value: unknown): boolean {
  * hand back unchanged, or [#20549] would read as another value than it names
  * (an impossible calendar day, a `datetime` spelling outside
  * {@link ISO_DATETIME_WRITE_FORM}), and — on a `date` or `datetime` column — for a number,
- * a `Date` or a string the rule reads whose year falls outside 0001..9999
- * ([#20264], `isOutsideTemporalYearRange`), and — on a `time` column — for a
+ * a `Date` or a string the rule reads whose year falls outside the kind's
+ * supported years — 0001..9999 for a `date`, [#20280] 1000..9999 for a
+ * `datetime` ([#20264], `isOutsideTemporalYearRange`) — and — on a `time` column — for a
  * finite number, a valid `Date` or an instant string whose UTC year has no
  * four-digit spelling ([#20480]). Everything else — any other number
  * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
