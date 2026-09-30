@@ -72,6 +72,10 @@ describe('validation message catalog — completeness', () => {
       value_domain_iana_time_zone: ['{{value}}'],
       value_domain_iso_4217_currency: ['{{value}}'],
       value_domain_iso_3166_alpha2: ['{{value}}'],
+      // `invalid_date`'s range sentences (#20846) name the kind's years in
+      // every locale — from parameters, so the refusing door's range decides them.
+      invalid_date_range: ['{{firstYear}}', '{{lastYear}}'],
+      invalid_datetime_range: ['{{firstYear}}', '{{lastYear}}'],
     };
     for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
       for (const [key, placeholders] of Object.entries(required)) {
@@ -100,6 +104,12 @@ describe('renderValidationMessage — English output is unchanged (#3957 no-regr
     ['invalid_date', undefined, 'Amount must be a valid date (ISO-8601)'],
     ['invalid_datetime', undefined, 'Amount must be a valid datetime (ISO-8601)'],
     ['invalid_time', undefined, 'Amount must be a valid time (HH:MM or HH:MM:SS)'],
+    ['invalid_date_range', { firstYear: '0001', lastYear: '9999' }, 'Amount must be a date in the years 0001 to 9999'],
+    [
+      'invalid_datetime_range',
+      { firstYear: '1000', lastYear: '9999' },
+      'Amount must be a datetime whose UTC year falls in the years 1000 to 9999',
+    ],
     ['invalid_option', { allowed: 'a, b' }, 'Amount must be one of: a, b'],
     ['invalid_option_value', { value: 'z', allowed: 'a, b' }, 'Amount: "z" is not one of: a, b'],
     ['invalid_type_array', undefined, 'Amount must be an array of values'],
@@ -213,5 +223,33 @@ describe('interpolateValidationMessage', () => {
   it('renders a label-only fallback for an unknown message key', () => {
     expect(renderValidationMessage({ messageKey: 'no_such_key', label: 'Qty' }))
       .toBe('Qty (no_such_key)');
+  });
+});
+
+/**
+ * #20846 — a value the kind's rule reads, in a year outside the kind's
+ * supported years, is refused `invalid_date` with a sentence that names the
+ * years. The catalog never spells them: a template that carried a number would
+ * be a second copy of the range the doors judge by, and would go on naming the
+ * old years the day the range moved.
+ */
+describe('invalid_date_range / invalid_datetime_range — the years are parameters, never literals', () => {
+  it('no locale spells a year in the range sentences', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      for (const key of ['invalid_date_range', 'invalid_datetime_range']) {
+        expect(catalog[key], `${locale}.${key}`).toBeDefined();
+        const withoutPlaceholders = catalog[key].replace(/\{\{\w+\}\}/g, '');
+        expect(withoutPlaceholders, `${locale}.${key}`).not.toMatch(/\d/);
+      }
+    }
+  });
+
+  it('renders the years it is handed, in the caller\'s locale', () => {
+    expect(
+      renderValidationMessage(
+        { messageKey: 'invalid_datetime_range', label: '发生时间', params: { firstYear: '1000', lastYear: '9999' } },
+        { locale: 'zh-CN' },
+      ),
+    ).toBe('发生时间必须是 UTC 年份在 1000 年至 9999 年之间的日期时间');
   });
 });
