@@ -2621,6 +2621,53 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
  */
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
+/** `Field.select` with inline options — the array or `{ options }` forms. */
+function selectWithOptions(optionsOrConfig: SelectOption[] | string[] | FieldInput & { options: SelectOption[] | string[] }, config?: FieldInput) {
+  // Helper function to convert string to lowercase snake_case
+  const toSnakeCase = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/\s+/g, '_')  // Replace spaces with underscores
+      .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
+  };
+
+  // Support both old and new signatures:
+  // Old: Field.select(['a', 'b'], { label: 'X' })
+  // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
+  let options: SelectOption[];
+  let finalConfig: FieldInput;
+  
+  if (Array.isArray(optionsOrConfig)) {
+    // Old signature: array as first param
+    options = optionsOrConfig.map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    finalConfig = config || {};
+  } else {
+    // New signature: config object with options
+    options = (optionsOrConfig.options || []).map(o => 
+      typeof o === 'string' 
+        ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
+        : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
+    );
+    // Remove options from config to avoid confusion
+    const { options: _, ...restConfig } = optionsOrConfig;
+    finalConfig = restConfig;
+  }
+  
+  return { type: 'select', options, ...finalConfig } as const;
+}
+
+/**
+ * `Field.select` bound to a shared picklist — no `options` of its own: the
+ * picklist supplies them, and `FieldSchema` refuses the two together.
+ */
+function selectFromPicklist<const C extends FieldInput & { picklist: string; options?: undefined }>(config: C) {
+  return { type: 'select', ...config } as const;
+}
+
 export const Field = {
   text: (config: FieldInput = {}) => ({ type: 'text', ...config } as const),
   textarea: (config: FieldInput = {}) => ({ type: 'textarea', ...config } as const),
@@ -2693,49 +2740,13 @@ export const Field = {
    * Field.select({ picklist: 'industry', label: 'Industry' })
    * // Results in: { type: 'select', picklist: 'industry', label: 'Industry' } — no `options`
    */
-  select: (optionsOrConfig: SelectOption[] | string[] | FieldInput & { options: SelectOption[] | string[] } | FieldInput & { picklist: string; options?: never }, config?: FieldInput) => {
-    // A picklist reference carries no options of its own — the shared list
-    // supplies them, and `FieldSchema` refuses the two together.
-    if (!Array.isArray(optionsOrConfig) && typeof optionsOrConfig.picklist === 'string') {
-      return { type: 'select', ...optionsOrConfig } as const;
-    }
-
-    // Helper function to convert string to lowercase snake_case
-    const toSnakeCase = (str: string): string => {
-      return str
-        .toLowerCase()
-        .replace(/\s+/g, '_')  // Replace spaces with underscores
-        .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
-    };
-
-    // Support both old and new signatures:
-    // Old: Field.select(['a', 'b'], { label: 'X' })
-    // New: Field.select({ options: [{label: 'A', value: 'a'}], label: 'X' })
-    let options: SelectOption[];
-    let finalConfig: FieldInput;
-    
-    if (Array.isArray(optionsOrConfig)) {
-      // Old signature: array as first param
-      options = optionsOrConfig.map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      finalConfig = config || {};
-    } else {
-      // New signature: config object with options
-      options = (optionsOrConfig.options || []).map(o => 
-        typeof o === 'string' 
-          ? { label: o, value: toSnakeCase(o) }  // Auto-convert string to snake_case
-          : { ...o, value: o.value.toLowerCase() }  // Ensure value is lowercase
-      );
-      // Remove options from config to avoid confusion
-      const { options: _, ...restConfig } = optionsOrConfig;
-      finalConfig = restConfig;
-    }
-    
-    return { type: 'select', options, ...finalConfig } as const;
-  },
+  select: ((optionsOrConfig: unknown, config?: FieldInput) =>
+    !Array.isArray(optionsOrConfig)
+      && typeof (optionsOrConfig as { picklist?: unknown }).picklist === 'string'
+      && (optionsOrConfig as { options?: unknown }).options === undefined
+      ? selectFromPicklist(optionsOrConfig as FieldInput & { picklist: string })
+      : selectWithOptions(optionsOrConfig as Parameters<typeof selectWithOptions>[0], config)
+  ) as typeof selectFromPicklist & typeof selectWithOptions,
 
   
   /**
