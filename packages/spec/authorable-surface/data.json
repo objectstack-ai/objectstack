@@ -588,6 +588,7 @@
     "data/Mapping:_packageId",
     "data/Mapping:_packageVersion",
     "data/Mapping:_provenance",
+    "data/Mapping:connectorSource",
     "data/Mapping:fieldMapping",
     "data/Mapping:label",
     "data/Mapping:mode",

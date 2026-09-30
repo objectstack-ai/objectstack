@@ -7,8 +7,9 @@
  * - The connector protocol: one `ConnectorSchema`, provider-bound declarative
  *   instances, and the registry descriptor `GET /automation/connectors` serves
  * - Authentication methods (OAuth2, API Key, JWT, SAML)
- * - Data synchronization and field mapping
- * - Webhooks, rate limiting, and retry strategies
+ * - Retry strategies (connector-attached sync, field mapping, nested webhooks
+ *   and rate limiting were retired under ADR-0049 — a sync is defined on its
+ *   target `mapping`)
  *
  * The per-provider "Connector Templates" (`connector/saas.zod.ts`,
  * `connector/database.zod.ts`, file-storage, message-queue, github, vercel)

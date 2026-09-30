@@ -47,8 +47,9 @@ import {
 // retirement's three spellings) is SUBSUMED rather than deleted-in-isolation:
 // it goes with the shape that carried it, which is strictly stronger, because
 // there is no longer a mapping shape to author the key INTO. The base
-// `shared/FieldMapping` tombstone and the `integration/ConnectorFieldMapping`
-// spelling are untouched — `shared/mapping.test.ts` still pins those.
+// `shared/FieldMapping` tombstone is untouched — `shared/mapping.test.ts` still
+// pins it. (The `integration/ConnectorFieldMapping` spelling was the other
+// survivor until protocol 18 retired it whole with `connector.fieldMappings`.)
 //
 // Form follows #4988 / #5055: resolved symbol identity over every public entry
 // via the build-time `export-origins/` artifact, plus the file-deletion probe

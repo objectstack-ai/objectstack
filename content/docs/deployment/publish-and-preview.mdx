@@ -165,7 +165,7 @@ Common flags:
 | `--server`, `-s` | `OS_CLOUD_URL` | Cloud control-plane URL |
 | `--token`, `-t` | `OS_CLOUD_API_KEY` | Bearer token (service mode) |
 | `--version`, `-v` | — | Semver version (default: `artifact.manifest.version`) |
-| `--visibility` | — | `org` (default) · `private` · `marketplace` |
+| `--visibility` | — | `org` · `private` · `marketplace`. Omitted: the control plane decides — an existing package keeps its visibility, a new one gets its default (`org` on ObjectStack Cloud) |
 | `--org` | `OS_ORG_ID` | Owner org id (service mode) |
 | `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment `os environments switch` (or `os environments create --activate`) recorded for this control plane in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install the new version into `--env` after publishing |

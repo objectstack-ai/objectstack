@@ -55,17 +55,17 @@ export * from './schedule-organization.zod';
 // layer was narrative-only — zero importers across objectstack / cloud /
 // objectui, no engine ever parsed or executed a DataSyncConfig, and the def was
 // unreachable from the metadata-type roots (#4650 gate). Connector-attached
-// sync config is `ConnectorSchema.syncConfig` (integration/connector.zod.ts,
-// the live parse path). ⚠️ This note used to send readers on to `etl.zod.ts`
+// sync config (`ConnectorSchema.syncConfig`) was retired the same way under
+// ADR-0049; a sync is defined on its target `mapping` (`connectorSource`, with
+// a `job` for the cadence). ⚠️ This note used to send readers on to `etl.zod.ts`
 // for multi-step transformation; L2 was retired for the same narrative-only
 // reason at #6414, so that pointer is gone rather than re-aimed — there is no
 // third layer to forward to. The bare
 // `ConflictResolution` name went to `@objectstack/spec/ui` (offline sync) at
 // #4738 — and left the package entirely at #4988, which retired
-// `ui/offline.zod.ts` under ADR-0049. The connector vocabulary keeps its
-// `ConnectorConflictResolution` name; a freed word is not a reason to rename
-// back, and no domain may re-adopt the bare one (pinned in
-// `sync-retirement.test.ts`).
+// `ui/offline.zod.ts` under ADR-0049. The connector's
+// `ConnectorConflictResolution` left with `syncConfig`; no domain may re-adopt
+// the bare name (pinned in `sync-retirement.test.ts`).
 export * from './state-machine.zod';
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';

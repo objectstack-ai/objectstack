@@ -123,87 +123,14 @@
       "note": "RETIRED 2026-09-29 (ADR-0049 enforce-or-remove; the connector triggers family) — the `retire` arm of the decision the prior `triggers.key` row asked for ('either a polling/receiver engine or a retirement of the whole `ConnectorTriggerSchema` shape'), ruled with ADR-0041 left as it is: connector-event triggers stay in its third tier, as their own trigger package. Tombstoned at the schema with `retiredKey` (the prescription names the two shapes that work today — an `api` flow for an external event, a `schedule` flow for a scheduled pull, each calling the connector's action in a `connector_action` node — and both interval spellings; authoring it is a tsc error and a parse error), carried by `DeclarativeConnectorEntrySchema` too, and stripped from sources and stored rows by the protocol-18 conversion `connector-triggers-removed`, never turned into flows (the D3 entry `connector-triggers-retired`). `ConnectorTrigger` left whole. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). ⚠️ It is a LEAF now: the six per-key rows that were drilled under it — `key`, `label`, `description`, `type`, `intervalSeconds` (all `dead`, verified 2026-09-17) and the `interval` rename tombstone — left with the subtree, because the gate refuses `children` on a property that is not a container (the `health` precedent). Their verdicts are carried here, one reason for all six: nothing read a connector trigger. `packages/services/service-automation/src/engine.ts#registerConnector` walks `parsed.actions` only and stores the rest of the def unread; the engine's `this.triggers` map is the FLOW trigger-kind registry (`record_change` / `time_relative` / `schedule` / `api`, a closed set), which no connector trigger ever entered; no polling loop read `intervalSeconds`; and `polling` / `webhook` named two engines that do not exist for connectors — the webhook dispatcher is driven by `sys_webhook` rows materialized from the TOP-LEVEL `webhooks:` collection. The one runtime touch was a REFUSAL on a provider-bound instance, reasoned 'the provider derives them from the upstream at boot', which was untrue (no provider derives a trigger); the tombstone made it unreachable and it was deleted rather than re-reasoned. `interval` → `intervalSeconds`, the unit rename earlier in the same unreleased step, is absorbed: its conversion left the table, and its `integration/ConnectorTrigger:interval` retired-key registration stays as the record. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "syncConfig": {
-      "children": {
-        "strategy": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "`syncConfig` has NO reader outside packages/spec, and this ledger re-measured it rather than inheriting the claim: the only non-spec occurrence of the word in packages/ or examples/ is a prose comment in packages/qa/dogfood/test/expression-conformance.ledger.ts. No engine performs a connector-attached sync — no strategy dispatch, no direction dispatch, no batching, no conflict resolution. The same finding is recorded at the schema by the #16320 retirement of `syncConfig.schedule` ('nothing ever evaluated it'), which deleted the cron slot outright and left the rest of the block standing. ⛔ ADR-0049 owes this subtree a DECISION, not a mechanical sweep: it is seven keys of a declared capability the docs advertise (packages/spec/docs/SYNC_ARCHITECTURE.md ticks 'Conflict Resolution: multiple strategies'), so retiring it is a product call. The sub-keys below are dead for this one reason."
-        },
-        "direction": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy` — no connector-attached sync engine exists."
-        },
-        "realtimeSync": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy`. The `webhooks` subtree below is the mechanism this flag claims to enable, and it is dead on this type too."
-        },
-        "timestampField": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy` — nothing tracks a last-sync watermark for a connector."
-        },
-        "conflictResolution": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy`. Its default (`latest_wins`) is the kind of value that reads as a configured policy and resolves nothing."
-        },
-        "batchSize": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy` — no bulk path reads it."
-        },
-        "deleteMode": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy`. `soft_delete` by default, applied by nothing."
-        },
-        "filters": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `syncConfig.strategy`. Declared `z.record(z.string(), z.unknown())`, so it is not a container for this walk and no subtree rides on this verdict."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-30",
+      "note": "RETIRED 2026-09-30 (ADR-0049; the connector-attached sync family, one batch with `fieldMappings`) — the decision the prior `syncConfig.strategy` row asked for ('ADR-0049 owes this subtree a DECISION, not a mechanical sweep'), ruled ENFORCE on the maintainer's criterion with the definition MOVED to the target side: a sync is a `mapping` whose `connectorSource` names the connector it pulls from (recorded `planned` in mapping.json until the pull executor reads it), with a `job` for the cadence, and no schedule key returns to the connector. Tombstoned at the schema with `retiredKey` (the prescription names that target-side binding and the `job`; authoring it is a tsc error and a parse error), carried by `DeclarativeConnectorEntrySchema` too, and stripped — never moved into a `mapping` — from sources and stored rows by the protocol-18 conversion `connector-sync-keys-removed` (the D3 entry `connector-sync-keys-retired`). `DataSyncConfig`, `SyncStrategy` and `ConnectorConflictResolution` left whole. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). ⚠️ It is a LEAF now: the eight per-key rows drilled under it — `strategy`, `direction`, `realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode`, `filters` (all `dead`, verified 2026-09-17) — left with the subtree, because the gate refuses `children` on a property that is not a container (the `health` precedent). Their verdicts are carried here, one reason for all eight, re-measured at 793fb8390e: outside packages/spec the word `syncConfig` occurs only in two comments (packages/qa/dogfood/test/expression-conformance.ledger.ts), while `ConnectorSchema`, the lit control, is named in 17 files by the same scan; `packages/services/service-automation/src/plugin.ts#connectorInstanceSignature` and the declared-connector item carry neither sync key, and the def a provider registers is the provider's own, so no engine ran a strategy, a direction, a batch, a watermark, a conflict policy or a delete policy — `latest_wins` resolved nothing and `soft_delete` named a mode the platform does not have. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "fieldMappings": {
-      "children": {
-        "source": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Re-verified, not inherited: the ADR-0087 conversion registry's `field-mapping-transform-removed` entry (that is the id in full — no `connector-` prefix; the `connector-`-prefixed neighbour is `connector-rate-limit-config-removed`, a different retirement) measured (2026-08-06) that '`fieldMappings` is spelled only inside packages/spec — the four connector packages, the automation engine, REST and objectui never read it'. That still holds on this checkout: zero occurrences of `fieldMappings` anywhere in packages/ or examples/ outside packages/spec. A connector field mapping is parsed, stored, and moves no value. ⛔ Same disposition as `syncConfig`: a decision, not a sweep — the whole L3 sync layer it belongs to is declared and unbuilt. Sub-keys below are dead for this one reason."
-        },
-        "target": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `fieldMappings.source`."
-        },
-        "transform": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "REMOVED (#5552, ADR-0049) — tombstoned on the shared base `FieldMappingSchema` with `retiredKey`, which retires all three authorable spellings at once; the whole five-member `FieldMappingTransform` union went with it, because no runtime executed any of them. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Value conversion belongs on a surface that runs it: the import mapping's own `transform` (`data/mapping.zod.ts`), applied row by row by the REST import path and recorded live in mapping.json."
-        },
-        "defaultValue": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `fieldMappings.source`."
-        },
-        "dataType": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `fieldMappings.source`. SYNC_ARCHITECTURE.md's corrected note says an L3 mapping 'declares `dataType` and `syncMode` and performs no value transformation' — true about the transform half, and this row records that the declaration half is not read either."
-        },
-        "required": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `fieldMappings.source`. A `.default(false)` that no validation consults."
-        },
-        "syncMode": {
-          "status": "dead",
-          "verifiedAt": "2026-09-17",
-          "note": "Dead for the one reason recorded on `fieldMappings.source`. `read_only` / `write_only` / `bidirectional` gate nothing — there is no sync to gate."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-30",
+      "note": "RETIRED 2026-09-30 (ADR-0049; the connector-attached sync family, one batch with `syncConfig`) — a connector field mapping moved no value; the target-side field map is `mapping.fieldMapping`, which the REST import path executes (live in mapping.json), pulled through the mapping's `connectorSource`. Tombstoned at the schema with `retiredKey`, carried by `DeclarativeConnectorEntrySchema` too, and stripped from sources and stored rows by the protocol-18 conversion `connector-sync-keys-removed` (the D3 entry `connector-sync-keys-retired`). `ConnectorFieldMapping` left whole. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). ⚠️ It is a LEAF now: the seven per-key rows drilled under it — `source`, `target`, `defaultValue`, `dataType`, `required`, `syncMode` (all `dead`, verified 2026-09-17) and the `transform` tombstone of the earlier retirement (its `integration/ConnectorFieldMapping:transform` registration stays as the record) — left with the subtree, because the gate refuses `children` on a property that is not a container (the `health` precedent). Their verdicts are carried here, one reason for all seven, re-measured at 793fb8390e: `fieldMappings` occurs nowhere in code outside packages/spec, and nothing read `dataType`, `required` or `syncMode` — there was no sync for them to steer. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
     },
     "webhooks": {
       "status": "dead",
