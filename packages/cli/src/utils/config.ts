@@ -257,7 +257,8 @@ export function resolveConfigPath(source?: string): string {
 
 /**
  * Every `@objectstack/spec` entrypoint an authored config can reach the
- * `define*` helpers through — the root and every subpath export. Real projects
+ * `define*` helpers and the {@link STRICT_AUTHORING_FACTORIES} through — the
+ * root and every subpath export. Real projects
  * use both: the example apps import `defineView`/`defineApp` from
  * `@objectstack/spec/ui` and `defineHook`/`defineDatasource` from
  * `@objectstack/spec/data`, so a shim that knew only the root package would
