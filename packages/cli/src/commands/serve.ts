@@ -3086,6 +3086,24 @@ export default class Serve extends Command {
       });
       const kernel = runtime.getKernel();
 
+      // ── The deployment's SDUI component manifest (#20312, ADR-0080 §5) ──
+      // Resolved ONCE, beside the served config, through the same resolver the
+      // authoring commands use (the project's own sdui.manifest.json, then the
+      // copy @objectstack/console ships), and registered under the key the save
+      // door reads per publish — where every html page's `source` is compiled
+      // against it and its `requires` stamped and checked. Registered before any
+      // plugin inits, so no plugin can see the kernel without it. No manifest:
+      // nothing is registered, one line says what that costs, and the boot goes on.
+      {
+        const { SDUI_MANIFEST_SERVICE } = await import('@objectstack/metadata-protocol');
+        const { registerDeploymentSduiManifest } = await import('../utils/sdui-manifest.js');
+        const sduiManifestLine = registerDeploymentSduiManifest(
+          (manifest) => { kernel.registerService(SDUI_MANIFEST_SERVICE, manifest); },
+          path.dirname(absolutePath),
+        );
+        if (sduiManifestLine) console.warn(chalk.yellow(`  ⚠ ${sduiManifestLine}`));
+      }
+
       // Load plugins from configuration
       let plugins = config.plugins || [];
 
