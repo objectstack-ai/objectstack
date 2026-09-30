@@ -15,7 +15,7 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    // #8651 pinned this package's three engine doubles to the producer-side
+    // Commit 8c65046e4 pinned this package's three engine doubles to the producer-side
     // dispatch predicates, which meant taking `@objectstack/metadata-core` as a
     // devDependency — this package previously depended on neither home of the
     // predicate. That import is a VALUE import, and `@objectstack/metadata-core`

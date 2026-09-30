@@ -61,5 +61,5 @@ export default defineConfig({
   // them and left them standing (#10374/#13522). Deleting or rewriting this
   // config now costs the disarm as well as the alias. Paraphrased rather than
   // quoted, so a census grep for the retired wording does not land back on this
-  // file (#16917).
+  // file (commit 7ce3154e6).
 });

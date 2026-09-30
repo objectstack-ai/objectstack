@@ -68,7 +68,7 @@ const STDERR_DRAIN_POLL_MS = 50;
  * OWN default `warning` handler, which stays attached and prints every warning
  * as well (#16691, drained run: 147 729 bytes over 179 writes, 111 751 of them
  * from `config.js`, 35 133 from `internal/process/warning.js`). Measured on the
- * #12964 repro with a reader that was not draining: the pipe delivered exactly
+ * repro commit e6fd1caf7 fixed, with a reader that was not draining: the pipe delivered exactly
  * one 64 KiB buffer and everything after it was lost — this diagnostic AND
  * oclif's own `command … not found`, which `handle()` writes a moment later and
  * which the same tear-down takes.
@@ -149,7 +149,7 @@ async function announceInvocationFailure(error) {
 
 /**
  * Every module-load failure oclif reported while building its command table
- * (#12964), in emission order. Filled by the listener attached below.
+ * (commit e6fd1caf7), in emission order. Filled by the listener attached below.
  *
  * It HAS to be collected as it happens. `findCommand` `import()`s every command
  * module while `Config.load()` runs, warns on each one that will not load, and
@@ -359,7 +359,7 @@ if (!process.env.TSX_TSCONFIG_PATH) {
       env: { ...process.env, TSX_TSCONFIG_PATH: CLI_TSCONFIG },
     });
     if (!child.error) {
-      // A signalled child is reported as a signal, never as an exit code: #14715
+      // A signalled child is reported as a signal, never as an exit code: commit accb9231c
       // pinned that this CLI answers 2 for a failed run, and laundering a
       // SIGKILL into some number would make a killed child indistinguishable
       // from one that decided.
@@ -374,7 +374,7 @@ if (!process.env.TSX_TSCONFIG_PATH) {
 
 /**
  * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
- * still gets this CLI's own exit status instead of a crash. #14858.
+ * still gets this CLI's own exit status instead of a crash. Commit 0c5e97368.
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
  * listening IS an uncaught exception. With the parent's read end DESTROYED
@@ -397,7 +397,7 @@ if (!process.env.TSX_TSCONFIG_PATH) {
  *
  * Every OTHER reader of the same child answers **2** — drained (1209-1217 ms,
  * 147699 bytes delivered) and never-read (16178-16471 ms) both did, in the same
- * conditions. 2 is what oclif's `handle()` produces, and #14715 pinned it for
+ * conditions. 2 is what oclif's `handle()` produces, and commit accb9231c pinned it for
  * the never-read reader. So the closed reader was the one shape that could not
  * tell "the command failed" from "the CLI crashed", on the only channel it had
  * left.
@@ -463,7 +463,7 @@ const running = run(process.argv.slice(2), import.meta.url);
 // `process.listenerCount('warning') <= 1`, i.e. only node's own default is
 // attached. A collector attached before `run()` makes that count 2, oclif
 // silently declines to install, and every failing run through this shim quietly
-// loses those blocks (measured on the #12964 repro: 1518 lines of report became
+// loses those blocks (measured on the repro commit e6fd1caf7 fixed: 1518 lines of report became
 // 476, with nothing saying why).
 //
 // `run()` reaches `Config.load()` — and `displayWarnings()` inside it — in its

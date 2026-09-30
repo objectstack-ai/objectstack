@@ -313,7 +313,7 @@ export const EXPECTED_SKIPS = Object.freeze([
     workflow: 'ci.yml',
     job: 'console-pin',
     gate: { kind: 'filter-output', outputs: ['console'] },
-    reason: "gated on ci.yml's `filter` job `console` output (the `.objectui-sha` pin and the console build/probe scripts); a diff that moves none of them skips the pinned-console build",
+    reason: "gated on ci.yml's `filter` job `console` output (the `.objectui-sha` pin, the console build/probe scripts, and the spec's entry layout: `packages/spec/package.json` and `packages/spec/tsup.config.ts`); a diff that moves none of them skips the pinned-console build",
   },
 ]);
 

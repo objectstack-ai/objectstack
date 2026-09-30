@@ -1277,10 +1277,10 @@ export const FieldSchema = lazySchema(() => {
    * Presentation hint (#7768): whether a `number` field renders with digit
    * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
    * `scale` was the ONLY presentation-adjacent property `number` had, and it
-   * governs decimal places, not grouping — console renderers construct
+   * governs decimal places, not grouping — console renderers constructed
    * `Intl.NumberFormat` with grouping unconditionally ON, so an
    * ordinal/identifier integer stored as `Field.number({ scale: 0, min: 1900
-   * })` (a year) renders `2,026` everywhere it is shown. Downstream apps hit
+   * })` (a year) rendered `2,026` everywhere it was shown. Downstream apps hit
    * this three times (hotcrm-heimao#35/#40/#59) and each time converted the
    * field to `Field.text` to escape the comma — trading away numeric
    * semantics (range validation, sort-as-number, arithmetic) for a display
@@ -1289,9 +1289,10 @@ export const FieldSchema = lazySchema(() => {
    * Three-valued, and the absent case is deliberately NOT "grouping off":
    *   - **absent** (default state) — the author has not judged whether this
    *     number reads as a quantity or an identifier; the RENDERER decides.
-   *     Today that is an interim heuristic (objectui#4033, e.g. `scale: 0`
-   *     + no upper bound reads as a plain count and keeps grouping, a small
-   *     bounded integer range reads as ordinal-shaped and drops it);
+   *     Today that is an interim heuristic (objectui#4033: a declared
+   *     `scale: 0` reads as a discrete integer, a year or an ordinal, and
+   *     drops grouping, while any other `scale`, or none, keeps it — no
+   *     bound is read);
    *     eventually the locale's own default. Neither contract lives here —
    *     this key only carries the author's EXPLICIT override when they have
    *     one, exactly like `min`/`max`/`scale` carry constraints without
@@ -1308,8 +1309,9 @@ export const FieldSchema = lazySchema(() => {
    * number renderers are expected to pass it straight through. No default is
    * declared here on purpose — unlike `autonumberFormat`'s JSON-Schema
    * `default` annotation, there is no single grouping behavior every
-   * `number` field should present until the renderer half of this contract
-   * (objectui#4033) lands and retires the interim heuristic.
+   * `number` field should present: the renderer half of this contract has
+   * landed (objectui's `shouldGroupDisplayNumber` reads an authored value
+   * first) and keeps the interim heuristic for an absent key.
    */
   useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 

@@ -16,14 +16,14 @@ const HonoServerPlugin: ObjectStackManifest = {
   scope: 'project',
   description: 'HTTP server adapter using Hono framework. Exposes ObjectStack Runtime Protocol via REST API endpoints.',
   
-  // `configuration` and `capabilities` were retired (#11332, ADR-0049
+  // `configuration` and `capabilities` were retired (commit dce5cd4f0, ADR-0049
   // enforce-or-remove): nothing ever read either container. The port and
   // static-root settings this adapter needs are passed by the host that
   // composes it (the options object handed to its constructor), and
   // protocol/capability discovery never consulted the declaration —
   // dependency resolution runs off top-level `dependencies`.
 
-  // `contributes.events` was retired (#10724, ADR-0049): the declaration drove
+  // `contributes.events` was retired (commit be21955ba, ADR-0049): the declaration drove
   // nothing — this plugin already subscribes to `kernel:ready` / `kernel:listening`
   // imperatively in its own code, which is the enforced channel.
 };

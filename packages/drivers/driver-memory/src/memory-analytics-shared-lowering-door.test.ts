@@ -40,7 +40,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, type Cube, type FilterCondition } from '@objectstack/spec/data';
+import {
+  FILTER_LOGIC_CASES,
+  FILTER_LOGIC_ROWS,
+  lowerFilterCondition,
+  type Cube,
+  type FilterCondition,
+} from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
@@ -78,10 +84,13 @@ const DAY_ROWS = [
   { id: 'r29', created_at: '2026-07-29T10:00:00.000Z' },
 ];
 
+/** The declared field map `logic_row` syncs — what the engine's typed seam reads. */
+const LOGIC_ROW_FIELDS: Record<string, { type: string }> = { created_at: { type: 'datetime' } };
+
 async function setup(rows: ReadonlyArray<object>) {
   const driver = new InMemoryDriver({});
   await driver.connect();
-  await driver.syncSchema('logic_row', { name: 'logic_row', fields: { created_at: { type: 'datetime' } } });
+  await driver.syncSchema('logic_row', { name: 'logic_row', fields: LOGIC_ROW_FIELDS });
   for (const row of rows) await driver.create('logic_row', { ...(row as Record<string, unknown>) });
   const service = new MemoryAnalyticsService({ driver, cubes: [LOGIC_CUBE] });
   return { driver, service };
@@ -90,11 +99,21 @@ async function setup(rows: ReadonlyArray<object>) {
 const cubeQuery = (where?: FilterCondition) =>
   ({ cube: 'logic', measures: ['count'], dimensions: ['id'], ...(where === undefined ? {} : { where }) }) as any;
 
-/** The live query path, the cube's rows and the echo's WHERE, for one `where`. */
+/**
+ * The live query path, the cube's rows and the echo's WHERE, for one `where`.
+ *
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] The live query path is
+ * the engine's `where` seam and then this driver, which keeps no whole-day copy
+ * of its own: so `find()` is handed what that TYPED seam hands it — the filter
+ * through the shared lowering, reading {@link LOGIC_ROW_FIELDS}.
+ */
 async function answer(rows: ReadonlyArray<object>, where?: FilterCondition) {
   const { driver, service } = await setup(rows);
+  const seamed = lowerFilterCondition(where, {
+    isDatetimeColumn: (column) => LOGIC_ROW_FIELDS[column]?.type === 'datetime',
+  });
   return {
-    find: ids(await driver.find('logic_row', where === undefined ? {} : { where })),
+    find: ids(await driver.find('logic_row', seamed === undefined ? {} : { where: seamed })),
     cube: ids((await service.query(cubeQuery(where))).rows),
     echo: whereOf((await service.generateSql(cubeQuery(where))).sql),
   };

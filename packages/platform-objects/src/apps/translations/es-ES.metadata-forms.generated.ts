@@ -580,6 +580,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Decimales",
         helpText: "Número de dígitos decimales"
       },
+      useGrouping: {
+        label: "Separador de miles",
+        helpText: "Agrupación de dígitos (separador de miles) en los valores mostrados. Sin definir: lo decide el renderizador; un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el renderizador agrupe. Desactivado: nunca se agrupa, p. ej., un año o un ID. Activado: siempre se agrupa."
+      },
       currencyConfig: {
         label: "Configuración de moneda",
         helpText: "En qué moneda está este campo. Sin definir: modo dynamic. En ambos modos el valor almacenado es un número sin más."

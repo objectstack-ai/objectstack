@@ -11,6 +11,7 @@ import {
   lintUnknownAuthoringKeys,
   lintUnknownStackKeys,
   formatUnknownAuthoringKey,
+  stackConversionsOf,
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
@@ -239,7 +240,10 @@ export default class Compile extends Command {
     // the same `const` array the `onConversionNotice` sink pushes into, moved
     // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
     // still runs at exactly step 2, so a run that throws in `loadConfig` — above
-    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there,
+    // unless what it threw is a stack producer's refusal: that carries the
+    // conversions the producer applied before refusing, and the catch-all
+    // folds them (#20583) — step 1b's fold for the run whose load threw.
     //
     // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The success
     // payload keeps these separate deliberately (see its note at `conversions:`
@@ -1135,6 +1139,16 @@ export default class Compile extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — `os validate`'s catch-all fold, one door over, for the
+        // same reason: a refusing `defineStack` / `composeStacks` returns no
+        // stack, so step 1b never ran, and the producer stamps what it had
+        // applied on the ADR-0112 refusal it throws. `stackConversionsOf`
+        // answers `[]` for any other throw. ⛔ Folded, never recomputed, never
+        // read off stderr. Cannot double-count: this command calls no producer
+        // itself, so only the config module's load can raise a stamped
+        // refusal, and a throwing load precedes both other fillers of this list.
+        conversionNotices.push(...stackConversionsOf(error));
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }

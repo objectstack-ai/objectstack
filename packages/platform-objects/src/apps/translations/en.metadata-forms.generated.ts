@@ -580,6 +580,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Scale",
         helpText: "Number of decimal digits"
       },
+      useGrouping: {
+        label: "Use Grouping",
+        helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
+      },
       currencyConfig: {
         label: "Currency Config",
         helpText: "Which currency this field is in. Unset: dynamic mode. The stored value is a bare number in either mode."

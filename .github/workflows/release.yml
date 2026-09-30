@@ -1378,9 +1378,13 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # ci.yml's Console Pin Gate (#4290) uses this exact key, so the pin bump's
-      # PR run and this job share one build — keep the two in step if either
-      # input set changes.
+      # This key hashes the pin and the build script. ci.yml's Console Pin Gate
+      # (#4290) hashes a SUPERSET: those two, the probe scripts and the spec's
+      # entry layout (#20765). So the two workflows no longer share dist entries,
+      # and each one builds its own on a miss. Keeping this key narrower is
+      # deliberate. Following ci.yml would rebuild the console on every Version
+      # Packages merge, and publishing a cached console whose spec content lags
+      # is the existing cache design.
       #
       # Split restore/save, matching ci.yml, and not the combined actions/cache
       # action: the combined form's post-step saves even when the job FAILED,

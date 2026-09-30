@@ -160,7 +160,7 @@ export function assertMetadataRegisterContract(
         throw registerRefusal(
             `IMetadataService.register('${type}', '${name}'): data is ${shape}, not a metadata document. ` +
                 `register() stores plain-object documents only — accepting a value the service cannot key was measured as ` +
-                `accept-then-drop on document-keyed stores (#7378 row 3: refuse loudly, never coerce into storability). ` +
+                `accept-then-drop on document-keyed stores, so the contract refuses loudly and never coerces a value into storability. ` +
                 `Wrap the value in a document object whose shape the '${type}' type's schema accepts, or store it under a type that declares one.`,
         );
     }
@@ -169,7 +169,7 @@ export function assertMetadataRegisterContract(
         throw registerRefusal(
             `IMetadataService.register('${type}', '${name}'): data.name is '${String(documentName)}', which disagrees with the ` +
                 `name argument '${name}'. A disagreement is almost always an authoring bug, and resolving it silently in either ` +
-                `direction can file the item under a key the caller never wrote (#7378 row 1: refuse loudly, locate the mismatch). ` +
+                `direction can file the item under a key the caller never wrote, so the contract refuses loudly and names the mismatch. ` +
                 `Register under one name: pass the intended key as the argument and make data.name match it, or omit data.name.`,
         );
     }

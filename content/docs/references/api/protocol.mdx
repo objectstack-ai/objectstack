@@ -1735,7 +1735,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
-| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
 | **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11). |
@@ -1820,7 +1820,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
-| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
 | **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11). |
@@ -2977,7 +2977,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | The object name. |
 | **mode** | `Enum<'insert' \| 'update'>` | ✅ | The write mode the verdict was reached for. |
 | **valid** | `boolean` | ✅ | True when EVERY row is valid — the whole-set answer. |
-| **results** | `{ valid: boolean; errors: object[]; warnings: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
+| **results** | `{ valid: boolean; errors: object[]; warnings: object[]; droppedFields?: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
 | **posture** | `{ valueShapeStrict: boolean; mediaValueShapeStrict: boolean }` | ✅ | The ADR-0104 posture the verdict was reached under — reported because it is the difference between "this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to know which it got. An unconditionally-strict preview was considered and rejected (option B): it would fail rows on every un-migrated deployment that the write would have accepted. |
 
 ### Nested Shape: `ValidateDataResponse.results[number]`
@@ -2987,6 +2987,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **valid** | `boolean` | ✅ | True when this row would be accepted by the write path. |
 | **errors** | `{ field: string; code: string; message: string }[]` | ✅ | Findings that would REJECT this row. Empty when valid. |
 | **warnings** | `{ field: string; code: string; message: string }[]` | ✅ | Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a warn-first posture. The row is valid; the write would store it and log the same complaint. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS row, one event per reason, in the shape and reason vocabulary the write itself reports. A strip is not a finding: `valid` is unaffected, and the fields appear in neither `errors` nor `warnings`. Present only when at least one field would be dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing would be dropped. |
 
 ### Nested Shape: `ValidateDataResponse.posture`
 

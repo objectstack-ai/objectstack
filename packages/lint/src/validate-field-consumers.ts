@@ -40,7 +40,8 @@
  *     hook or action body, a dataset dimension or measure, a widget filter, a
  *     sharing-rule condition.
  *   - **display** — the field is drawn: a view column, a form section, a page
- *     binding, `highlightFields`, `searchableFields`, an index.
+ *     binding, an inline grid column ({@link creditInlineGridColumns}),
+ *     `highlightFields`, `searchableFields`, an index.
  *   - **carrier** — the field is merely carried along: a translation label, a
  *     seed value, an import-mapping column, a field-level permission grant, a
  *     flow's WRITE of the field, prose that names it. These are what a REMOVAL
@@ -272,12 +273,26 @@ const WRITE_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * [#20929] Keys whose array entries are INLINE CHILD COLLECTIONS: each entry
+ * names its child object in `childObject` and the child's grid in `columns`.
+ * Today that is a form view's `subforms` (`FormViewSchema.subforms`, on a view
+ * container's `form` and on every `formViews` entry), whose `columns` is the
+ * same `InlineGridColumnSchema` a relationship field's `inlineColumns` takes.
+ */
+const CHILD_COLLECTION_KEYS: ReadonlySet<string> = new Set(['subforms']);
+
+/**
  * Keys whose value is a literal from some other vocabulary, never a field
  * name. Without this list `type: 'summary'` on a roll-up reads as a reference
  * to a field named `summary`, and `accept: ['image/png']` as one to `image`.
  * `source` is deliberately ABSENT: it is the text of a CEL envelope
  * (`{ language: 'cel', source: 'record.quantity * record.unit_price' }`), and
  * skipping it read every tagged-template formula as reading nothing.
+ *
+ * `name` is a literal here and stays one: it is the identity of nearly every
+ * record in a stack. The one position where it names a field is an inline
+ * grid column, and that position is read on its own, against the child object,
+ * by {@link creditInlineGridColumns}, never by dropping `name` from this set.
  */
 const LITERAL_KEYS: ReadonlySet<string> = new Set([
   'type', 'reference', 'accept', 'provider', 'dialect', 'operator', 'aggregate', 'mode',
@@ -457,6 +472,49 @@ function scanText(
   }
 }
 
+/**
+ * [#20929] Credit the fields an inline grid's columns name, on the CHILD object.
+ *
+ * A column's `name` is the child field the grid reads and writes on every row
+ * (`InlineGridColumnSchema.name`), and the recommended entry is identity-only
+ * (`{ name: 'quantity' }`), so the name is often all a column says. The
+ * general walk skips `name` as a {@link LITERAL_KEYS} literal, which made every
+ * field a grid draws read as inert. This is the one position where `name` is
+ * read as a reference, and only against the child object its carrier resolves:
+ *
+ *   - a relationship field's `inlineColumns`: the field sits ON the child and
+ *     its `reference` names the PARENT, whose form draws the grid. So the child
+ *     is the object that DECLARES the field, not the related one. objectui's
+ *     `attachInlineSubforms` builds `{ childObject: <declaring object>,
+ *     columns: inlineColumns }`, and `collectHydratedInlineColumnErrors` in
+ *     `stack.zod.ts` resolves the carrier the same way.
+ *   - a child collection's `columns` ({@link CHILD_COLLECTION_KEYS}): the child
+ *     is the entry's `childObject`. The object the enclosing view is bound to
+ *     is the parent, so the context the walk carries is the wrong one here.
+ *
+ * A name the child does not declare is counted unresolved, like every other
+ * token that looks like a field and lands on no object.
+ */
+function creditInlineGridColumns(
+  ledger: ConsumerLedger,
+  columns: unknown,
+  childObject: string | undefined,
+  kind: SiteKind,
+  root: string,
+  columnsPath: string,
+): void {
+  if (!Array.isArray(columns)) return;
+  columns.forEach((column: unknown, i: number) => {
+    const field = isRec(column) ? strName(column.name) : undefined;
+    if (field === undefined || !ledger.objectsByField.has(field)) return;
+    if (ledger.declares(childObject, field)) {
+      ledger.record(childObject, field, { root, path: `${columnsPath}[${i}].name`, kind });
+    } else {
+      ledger.unresolved += 1;
+    }
+  });
+}
+
 /** The object context a record establishes for its own subtree, if any. */
 function contextOf(ledger: ConsumerLedger, rec: AnyRec, ctx: string | undefined): string | undefined {
   const named = (v: unknown): string | undefined => (ledger.isObject(v) ? v : undefined);
@@ -513,6 +571,11 @@ function walk(
   }
   const rec = node as AnyRec;
   const inner = contextOf(ledger, rec, ctx);
+  // [#20929] An entry of a child collection: its grid draws `childObject`'s
+  // fields, whatever object the enclosing view is bound to.
+  if (CHILD_COLLECTION_KEYS.has(leafKey)) {
+    creditInlineGridColumns(ledger, rec.columns, strName(rec.childObject), 'display', root, `${path}.columns`);
+  }
   for (const [key, value] of Object.entries(rec)) {
     const childPath = `${path}.${key}`;
     const childSegments = [...segments, key];
@@ -574,6 +637,20 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
     if (reference && displayField && ledger.declares(reference, displayField)) {
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });
     }
+    // [#20929] The grid's columns name fields of THIS object, the child. The
+    // grid exists only where the field sets `inlineEdit`: the spec's help text
+    // says `inlineColumns` is "used only when this field sets inlineEdit", and
+    // objectui's `attachInlineSubforms` skips the field otherwise. Without it
+    // the columns name the field and draw nothing, so they are a carrier a
+    // removal must clean, not a consumer.
+    creditInlineGridColumns(
+      ledger,
+      field.inlineColumns,
+      objectName,
+      field.inlineEdit ? 'display' : 'carrier',
+      'objects',
+      `${fieldPath}.inlineColumns`,
+    );
     for (const [key, value] of Object.entries(field)) {
       if (FIELD_SELF_KEYS.has(key) || key === 'displayField') continue;
       walk(ledger, value, objectName, 'objects', `${fieldPath}.${key}`, [key], key);
@@ -720,10 +797,12 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
       path,
       message:
         `field "${field}" on object "${object}" is declared but nothing in this stack reads or displays ` +
-        `it: no view column, form section, page binding, flow node, dataset, widget, formula, validation, ` +
-        `hook or action names it, no declared field group places it on the synthesized layout, and no ` +
+        `it: no view column, inline grid column, form section, page binding, flow node, dataset, widget, ` +
+        `formula, validation, hook or action names it, no declared field group places it on the ` +
+        `synthesized layout, and no ` +
         `seed or import mapping matches on it. A translation label, a seed value, an import-mapping ` +
-        `target, a permission grant or a flow that only WRITES it is a carrier, not a consumer. ` +
+        `target, a permission grant, a flow that only WRITES it, or an \`inlineColumns\` entry on a ` +
+        `relationship field that does not set \`inlineEdit\` (no grid is drawn) is a carrier, not a consumer. ` +
         `${verdictClause}${sharedClause}`,
       hint:
         `Give "${field}" a consumer — a view column, a form section, a page binding, a formula, a ` +

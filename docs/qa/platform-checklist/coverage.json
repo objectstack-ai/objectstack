@@ -225,6 +225,9 @@
         "api-backend.api-methods-verb-gate"
       ]
     },
+    "picklist": {
+      "waived": "WAIVED 2026-09-30 — there is no runtime behaviour to drive yet, measured rather than asserted. The spec layer landed (#19518, addbbf02ab): PicklistSchema, `Field.select({ picklist })`, PicklistServedFieldSchema, `picklistExtensions` and the `picklists.NAME` translation face. No runtime reads a picklist: packages/spec/liveness/picklist.json grades every key `planned`, and scripts/check-stack-collection-maps.mjs carries `picklists` and `picklistExtensions` as rows PENDING the runtime layer (#19519) in the METADATA_ARRAY_KEYS and ARTIFACT_FIELD_TO_TYPE registration maps. No code resolves a picklist onto a field or judges a write against one, so an item written to RUN today could only assert absence. The two items that will carry this kind are authored as `planned`: records-forms.picklist-shared-across-objects (phase 1: two objects, the package extension, the write door, the locale relabel) and records-forms.picklist-org-append (phase 2: the per-organization overlay, deferred by ruling 5904864936 on #18164). They are not listed under `items`, because a kind whose only items are planned is UNMAPPED and an entry cannot hold a waiver and items together. WHAT RETIRES THIS WAIVER — #19519 lands resolve-at-serve, the additive merge and write validation; records-forms.picklist-shared-across-objects gains its steps, runs, passes and is promoted to `active`, and the same edit replaces this waiver with `items` naming it, the planned organization item beside it. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver."
+    },
     "position": {
       "items": [
         "access-security.scope-depth-asymmetry",

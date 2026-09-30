@@ -2061,13 +2061,13 @@ when both files' `url`s agree.
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
-| `--visibility <level>` | — | `org` (default, installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review) |
+| `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectStack Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
 | `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
-| `--submit` | — | Submit the new version for marketplace review. Needs `--visibility marketplace` and a complete listing |
+| `--submit` | — | Submit the new version for marketplace review. Needs the package's visibility to be `marketplace` (already stored, or set with `--visibility marketplace`) and a complete listing |
 | `--auto-approve` | — | Platform admin only: skip the review queue and publish straight to the public catalog |
 | `--readme <markdown>` | — | Inline marketplace README. Mutually exclusive with `--readme-file` |
 | `--readme-file <path>` | — | README file, read at publish time. Mutually exclusive with `--readme` |

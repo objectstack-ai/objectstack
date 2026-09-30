@@ -4799,6 +4799,13 @@ function isNonCanonicalStoredType(type: string): boolean {
 }
 
 /**
+ * [#20819] An ADR-0126 customization regime the packaged-base refusal speaks
+ * for — only the regimes it needs today (see
+ * `ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME`).
+ */
+type PackagedBaseRegime = 'C';
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -8052,6 +8059,11 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // [#20913] A shipped flow name serves the loader's entries only — see
+        // {@link isShippedFlowName}. This is the registry half: a stored row
+        // the hydration registered under the bare key is not one of them.
+        items = items.filter((it) => !this.isStoredFlowEntryOfShippedName(request.type, it));
+
         // Always consult the DB so metadata persisted by the seeder /
         // bulkRegister shows up even when the registry already has unrelated
         // entries (the previous fallback-only logic meant per-env metadata
@@ -8194,7 +8206,13 @@ export class ObjectStackProtocolImplementation implements
                 // merge slot carries the bundle discriminator, so an
                 // `email_template` overlay lands on its own locale member
                 // instead of flattening every member of the bundle onto it.
-                items = mergePackageAwareOverlay(request.type, items, overlays, (data, prev) => {
+                // [#20913] …and the stored-row half: a row of a shipped flow name
+                // is not merged into the package's slot. It is still hydrated
+                // below, as the tenant row it is, so the boot pull reports it.
+                const mergeable = overlays.filter(
+                    ({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name),
+                );
+                items = mergePackageAwareOverlay(request.type, items, mergeable, (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -14524,6 +14542,49 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20913, #20761 ruling rule 1, ADR-0126 §2 / §3] Is `name` a FLOW name
+     * the loader's set holds ({@link packagedArtifactOwner})? Every other type,
+     * and a flow name no managed package ships, answers `false`.
+     *
+     * `flow` is Regime C: the packaged base is locked, "⛔ Never silent
+     * override, never an overlay read path". So the flattened view
+     * ({@link readFlattenedMetaItems}, both faces) serves a shipped flow name
+     * from the loader's own entries alone, and a stored row of that name is
+     * neither merged into the package's slot nor lets it stand in for it —
+     * {@link isStoredFlowEntryOfShippedName} for the registry's list, this
+     * predicate by NAME for a row read from the store, whose own bytes decide
+     * nothing. Merged, such a row was served under the package's provenance
+     * and the automation engine's `kernel:ready` sync armed it over the body
+     * the boot pull had armed: the stored body dispatched while every receipt
+     * named the package.
+     *
+     * The row itself is neither refused nor rewritten here: it stays at rest,
+     * {@link hydrateOverlayIntoRegistry} still registers it as the
+     * tenant-authored row it is, and the automation boot pull reports it as a
+     * shadowed contender. What becomes of such rows (keep, refuse, migrate) is
+     * not decided by this method.
+     */
+    private isShippedFlowName(type: string, name: unknown): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
+        if (typeof name !== 'string' || name === '') return false;
+        return this.packagedArtifactOwner({ type: 'flow', name }) !== undefined;
+    }
+
+    /**
+     * [#20913] A registry entry of a shipped flow name ({@link isShippedFlowName})
+     * that is NOT one of the loader's own entries — the stored row the
+     * hydration registered under the bare key. The loader's entries are told
+     * apart by `isCodeArtifactBody`, the per-entry test the set's own lookup
+     * (`SchemaRegistry.getArtifactItem`) applies; a stored flow row reaches the
+     * registry tenant-marked and, since this card, without the artifact's
+     * envelope ({@link hydrateOverlayIntoRegistry}), so it never passes it.
+     */
+    private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
+        return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
+            && !isCodeArtifactBody(item);
+    }
+
+    /**
      * [#20761, ADR-0126 §2 / §7.3] THE LOADER'S SET, read: the package that
      * ships `(type, name)` as a code artifact, or `undefined` when none does.
      *
@@ -14564,7 +14625,8 @@ export class ObjectStackProtocolImplementation implements
      *     flow: its served body echoes stamps that AGREE with the set, and the
      *     write is still an in-place edit of a locked base. With the
      *     `OS_METADATA_WRITABLE` hatch open the lock admits the write, and it
-     *     is still tenant-authored: the body's stamps decide nothing.
+     *     is still tenant-authored: the body's stamps decide nothing (the base
+     *     the write names still does — see the named-base rule below).
      *  2. **Any other name, with a body whose stamps would classify it as
      *     code-shipped** (`isCodeArtifactBody`, ADR-0029 D9.6), is refused
      *     LOUDLY. The body asserts a provenance the platform never
@@ -14593,6 +14655,46 @@ export class ObjectStackProtocolImplementation implements
      * into asserting a provenance. Not a 409: nothing about the target's
      * current state is contested — the name is free.
      *
+     * [#20863, ADR-0070 D1] **The named-base rule — after rule 1's lock,
+     * before rule 2: a base the write NAMES must be a package this deployment
+     * has installed.** A `/meta` save may name the package it is saved into.
+     * One naming an id no installed package has would store a flow bound to a
+     * package that does not exist and serve that binding back — a binding the
+     * platform can never honour, accepted silently. It is refused LOUDLY,
+     * whatever stamps the body carries: none (which rule 3 admits) or a stamp
+     * naming that same id (which the named-base agreement of rule 3 admits) —
+     * the two branches that used to let it through. The hatch does not lift
+     * it either: `OS_METADATA_WRITABLE` unlocks a TYPE, never a binding.
+     *
+     *  - "Installed" is read where the `/meta` write path already resolves a
+     *    base: {@link resolveWritePackageScope}, the registry's `getPackage`.
+     *    ⛔ Never a second list of packages, and ⛔ never the loader's set
+     *    alone — a tenant's own writable base (created through the package
+     *    door, rehydrated from the package store at boot) is installed and
+     *    ships no flow, and a save into it is the ordinary authoring path.
+     *  - The `sys_metadata` sentinel names no package — a row stored under it
+     *    reads back package-less — so a save naming it is a package-less save,
+     *    admitted as before.
+     *  - Fail direction: `resolveWritePackageScope` answers `undefined` for a
+     *    registry it cannot read as well as for an id it does not hold, so on
+     *    a registry with no `getPackage` (a metadata-only double — every real
+     *    composition's `SchemaRegistry` has one) a named base is refused. A
+     *    binding the platform cannot establish is not honoured: the same
+     *    closed direction the automation engine takes with no loader's-set
+     *    reader attached.
+     *
+     * `WRITABLE_PACKAGE_REQUIRED` / 422 — registered to this package in the
+     * ADR-0112 ledger, ⛔ no code is minted — because ADR-0070 D1 decided it
+     * for exactly this condition: a runtime create whose resolved target is
+     * MISSING, or read-only, is refused with it, and the prescription is the
+     * one this caller needs (choose or create a writable base, or name none).
+     * Not `INVALID_METADATA`: the definition may be perfectly valid — what is
+     * wrong is the base the request names, not a key in the body. The
+     * sentence is this refusal's own, because the D1 emitter's
+     * (`readOnlyBaseCreateError`) says the package is read-only, which is
+     * false of a package that does not exist; the `packageId` and `docs`
+     * members mirror that emitter's.
+     *
      * Scoped to `flow` (the 2026-09-30 ruling recorded on the card, point 5):
      * `/meta`'s handling of every OTHER type is unchanged, so for those this
      * returns `null` and the caller proceeds exactly as before.
@@ -14604,14 +14706,33 @@ export class ObjectStackProtocolImplementation implements
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
-        if (this.packagedArtifactOwner(folded) !== undefined) {
-            return this.packagedBaseRefusal({
+        const shipped = this.packagedArtifactOwner(folded) !== undefined;
+        if (shipped) {
+            const locked = this.packagedBaseRefusal({
                 type: folded.type,
                 name: folded.name,
                 operation: 'save',
                 ...(folded.packageId ? { packageId: folded.packageId } : {}),
             });
+            if (locked) return locked;
         }
+        // [#20863] The named-base rule (see the docblock): a base the write
+        // names must be a package the registry holds as installed.
+        const namedBase = folded.packageId;
+        if (namedBase && namedBase !== 'sys_metadata' && this.resolveWritePackageScope(namedBase) === undefined) {
+            const err = new Error(
+                `Cannot save flow '${folded.name}' into package '${namedBase}': no package with that id is `
+                + `installed in this deployment, so the flow would be stored bound to a package that does not `
+                + `exist. Name an installed writable package as the flow's base (or create one first), or save `
+                + `the flow without naming a package. Nothing was written.`,
+            );
+            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
+            (err as any).status = 422;
+            (err as any).packageId = namedBase;
+            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
+            return err;
+        }
+        if (shipped) return null;
         if (!isCodeArtifactBody(folded.item)) return null;
         const stamped = String((folded.item as { _packageId?: unknown })._packageId);
         if (folded.packageId === stamped) return null;
@@ -14670,6 +14791,85 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20819, ADR-0126 §2 / §3] The customization REGIME of a metadata type,
+     * declared for the types whose packaged-base refusal speaks for its regime.
+     *
+     * ADR-0126 §2 requires a Regime C refusal to name the sanctioned path —
+     * "in-place edit refused loudly at the write door, the refusal naming the
+     * sanctioned path" — and §10 gives the reason: a locked base that refuses
+     * with its sanctioned path in the message is what keeps AI-written metadata
+     * from guessing. The regime is recorded nowhere else in code (the ADR's
+     * table is prose, and the registry entries carry no regime field), so this
+     * map is its one declaration for the refusal, and
+     * {@link PACKAGED_BASE_REFUSAL_BY_REGIME} is keyed off it — never a second
+     * list of type names, and never a type branch in the emitters' prose.
+     *
+     * It carries `flow` only, deliberately, though ADR-0126 §3's Regime C row is
+     * longer — `flow`, `permission`, `action`, and pre-charted `tool` / `skill`
+     * / `position`. A type is declared here only once the Regime C sentence's
+     * paths are ITS served paths: that sentence names the `/automation` clone
+     * and switch routes, which exist for a flow alone. `action` has a switch at
+     * its own route and no clone at all (the action-clone half is not
+     * chartered, §8 item 2), and `permission` has its own clone machinery, so
+     * declaring either would advertise a route that does not exist for it —
+     * both keep the sentence they had until their own sanctioned paths are
+     * written into the table.
+     */
+    private static readonly PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegime>> = {
+        flow: 'C',
+    };
+
+    /**
+     * [#20819, ADR-0126 §2 / §7] The packaged-base refusal's sentence, chosen
+     * PER REGIME ({@link PACKAGED_BASE_REGIME}). A type with no declared regime
+     * keeps the sentence the emitters carry inline, byte for byte.
+     *
+     * Regime C (§2: behavioral — locked base, disable, clone-as-sibling) names
+     * its two sanctioned paths and cites the ADR that decided them:
+     *
+     *  - **clone under a new name** (§7.1) — `POST /automation/:name/clone`,
+     *    whose body `{ name, label }` requires both keys;
+     *  - **the enable/disable switch** (§7.2) — `POST /automation/:name/toggle`,
+     *    body `{ enabled }`, operator-gated per §5 where one install serves
+     *    several organizations (the `group` / `isolated` postures).
+     *
+     * ⛔ It does not name the `OS_METADATA_WRITABLE` hatch. The hatch still
+     * opens this lock exactly as before ({@link isOverlayAllowed}), so which
+     * writes are refused does not move — only what the refusal prescribes.
+     * ⛔ Nor does it prescribe editing the source and redeploying: the
+     * administrator of an installed package cannot do that.
+     *
+     * Kept under the REST door's 500-character client-message bound, past
+     * which the tail is truncated: 411 characters before the item's name on
+     * save and 404 on removal, so a name of up to 88 characters arrives whole.
+     */
+    private static readonly PACKAGED_BASE_REFUSAL_BY_REGIME: Readonly<
+        Record<PackagedBaseRegime, (type: string, name: string, operation: 'save' | 'delete') => string>
+    > = {
+        C: (type, name, operation) =>
+            `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
+            + (operation === 'delete' ? `against removal. ` : `against in-place edits. `)
+            + `Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, body {name, label}), `
+            + `or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; `
+            + `operator-only where one install serves several organizations). `
+            + `See docs/adr/0126-packaged-metadata-customization-model.md.`,
+    };
+
+    /**
+     * The regime-chosen refusal sentence for `(type, name, operation)`, or
+     * `undefined` when the type declares no regime and the emitter keeps its
+     * own sentence.
+     */
+    private static packagedBaseRegimeSentence(
+        type: string, name: string, operation: 'save' | 'delete',
+    ): string | undefined {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const regimes = ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME;
+        if (!Object.prototype.hasOwnProperty.call(regimes, singular)) return undefined;
+        return ObjectStackProtocolImplementation.PACKAGED_BASE_REFUSAL_BY_REGIME[regimes[singular]](singular, name, operation);
+    }
+
+    /**
      * [#8184] THE PACKAGE DOOR — `saveMetaItem`'s refusal of a write onto an
      * item a code package ships, on a type with no per-org overlay channel.
      * Throws the refusal; returns when the write is not refused on that ground.
@@ -14682,6 +14882,10 @@ export class ObjectStackProtocolImplementation implements
      * refusals, above the ADR-0010 `_lock` check). The one added line computes
      * `overlayAllowed` the way `saveMetaItem` computes it at its top. In the
      * record, "the block comment above" and "this method" mean `saveMetaItem`.
+     *
+     * [#20819] Since lifted, the package-less `NOT_OVERRIDABLE` SENTENCE is
+     * chosen per ADR-0126 regime ({@link packagedBaseRegimeSentence}); the
+     * predicate, the code, the status and the named-base limb are unchanged.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
@@ -14757,11 +14961,14 @@ export class ObjectStackProtocolImplementation implements
                     request.type, request.packageId as string, false,
                 );
             }
+            // [#20819] The SENTENCE is chosen per ADR-0126 regime; the code,
+            // the status and this branch's predicate are unchanged.
             const err = new Error(
-                `Metadata item '${request.type}/${request.name}' is provided by a code package `
+                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'save')
+                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
                 + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`
+                + `See docs/adr/0005-metadata-customization-overlay.md.`)
             );
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
@@ -14784,6 +14991,10 @@ export class ObjectStackProtocolImplementation implements
      * lines, byte for byte apart from indentation. The two added lines compute
      * `overlayAllowed` and `artifactBacked` the way `deleteMetaItem` computes
      * them, where both still stand for its `NOT_CREATABLE` check.
+     *
+     * [#20819] Since lifted, the SENTENCE is chosen per ADR-0126 regime
+     * ({@link packagedBaseRegimeSentence}); the predicate, the code and the
+     * status are unchanged.
      */
     private refusePackagedBaseRemoval(request: { type: string; name: string }): void {
         const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
@@ -14791,10 +15002,12 @@ export class ObjectStackProtocolImplementation implements
         const legacyOverlayRemoval = ObjectStackProtocolImplementation
             .mergesOverlayAtRead(request.type);
         if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
+            // [#20819] Sentence per ADR-0126 regime, as in the save door.
             const err = new Error(
-                `Metadata item '${request.type}/${request.name}' is provided by a code package `
+                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'delete')
+                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`
+                + `See docs/adr/0005-metadata-customization-overlay.md.`)
             );
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
@@ -15681,7 +15894,16 @@ export class ObjectStackProtocolImplementation implements
         // here. ⚠️ BEFORE the merge, never after — where a real artifact
         // exists its envelope must still win (ADR-0010 §3.3), and it does,
         // because {@link mergeArtifactProtection} overwrites `_provenance` last.
-        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), artifact), 'name' as any);
+        //
+        // [#20913, ADR-0126 §2] ⛔ Not for a FLOW. `flow` is Regime C: no
+        // overlay read path, so a stored flow row is never the artifact's
+        // overlay and the artifact's envelope is not its to wear. Grafted, a
+        // stored row of a shipped flow name read as the package's own entry —
+        // the boot pull's precedence could not tell the two contenders apart,
+        // and its receipt rendered both as the package. Registered as the
+        // tenant row it is, it is reported as one and never armed.
+        const envelope = canonicalType === 'flow' ? undefined : artifact;
+        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), 'name' as any);
         this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
     }
@@ -16564,9 +16786,12 @@ export class ObjectStackProtocolImplementation implements
         // caller sent: a flow no managed package loaded, sent with stamps that
         // would classify it as code-shipped, is refused loudly rather than
         // stripped silently, and a flow the loader's set holds is a locked
-        // base. A tenant row's own stamps echoed on a round trip pass and are
-        // stripped below as for every type. Every other type is untouched —
-        // {@link tenantAuthoredWriteRefusal} answers `null` for it.
+        // base. [#20863] The base this save names rides along, because the
+        // rule refuses one no installed package holds — a binding the
+        // platform could never honour. A tenant row's own stamps echoed on a
+        // round trip pass and are stripped below as for every type. Every
+        // other type is untouched — {@link tenantAuthoredWriteRefusal}
+        // answers `null` for it.
         //
         // Asked of AUTHORING writes only. The two server-stated rewrites of
         // rows this store already holds — {@link migrateStoredMetadata}

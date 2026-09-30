@@ -10,6 +10,7 @@ import {
   lintUnknownAuthoringKeys,
   lintUnknownStackKeys,
   formatUnknownAuthoringKey,
+  stackConversionsOf,
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
@@ -193,7 +194,10 @@ export default class Validate extends Command {
     // the same `const` array the `onConversionNotice` sink pushes into, moved
     // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
     // still runs at exactly step 2, so a run that throws in `loadConfig` — above
-    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there,
+    // unless what it threw is a stack producer's refusal: that carries the
+    // conversions the producer applied before refusing, which the run HAS
+    // already computed, and the catch-all folds them (#20583).
     //
     // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The two fields
     // are separate on the success payload by an explicit decision recorded at
@@ -205,13 +209,14 @@ export default class Validate extends Command {
     // authority to settle, so the shape is mirrored, not merged.
     //
     // No `conversionsSoFar()` wrapper: `warningsSoFar()` exists because five
-    // producers had to be concatenated in ONE stated order. This list has two
-    // fillers, and both push into this ONE array in the order the run reaches
-    // them — step 1b folds the record the stack producer left on the default
+    // producers had to be concatenated in ONE stated order. This list has three
+    // fillers, and each pushes into this ONE array in the order the run reaches
+    // it — step 1b folds the record the stack producer left on the default
     // export (`loaded.stackConversions`), step 2's own pass appends what it
-    // converts on the merged stack — so reading the binding directly already
-    // is the "a list cannot drift from itself" idiom the wrapper was built to
-    // buy.
+    // converts on the merged stack, and the catch-all folds the record a
+    // producer's REFUSAL carries when the load threw one (so on that run the
+    // other two never ran) — so reading the binding directly already is the
+    // "a list cannot drift from itself" idiom the wrapper was built to buy.
     const conversionNotices: ConversionNotice[] = [];
 
     try {
@@ -905,6 +910,19 @@ export default class Validate extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — step 1b's fold, for the run whose load threw. A refusing
+        // `defineStack` / `composeStacks` returns no stack, so step 1b never
+        // ran; the producer stamps what it had applied on the ADR-0112 refusal
+        // it throws instead, and `stackConversionsOf` reads it off the caught
+        // error — `[]` for any other throw (a plain `Error`, this command's own
+        // refusals). ⛔ Folded, never recomputed: no second conversion pass
+        // over the authored source, no reading of the producer's stderr line
+        // (warn-once per process, so it can be missing). Cannot double-count:
+        // this command calls no producer itself, so only the config module's
+        // load can raise a stamped refusal, and a throwing load precedes both
+        // other fillers of this list.
+        conversionNotices.push(...stackConversionsOf(error));
         await emitJson({
           valid: false,
           error: error.message,
@@ -916,7 +934,9 @@ export default class Validate extends Command {
           // the three lists already in hand.
           warnings: warningsSoFar(),
           // [commit 79cf692b0] Same reading, one field over: `[]` for a throw at load —
-          // step 2 had not run — and the notices in hand for any later throw.
+          // step 2 had not run — except a producer's refusal, which carries the
+          // conversions it applied (folded just above); the notices in hand for
+          // any later throw.
           conversions: conversionNotices,
           duration: timer.elapsed(),
         });

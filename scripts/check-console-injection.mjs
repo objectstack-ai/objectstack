@@ -7,20 +7,23 @@
  *
  * ## The hole this closes (objectstack#9667)
  *
- * The vendored Console SPA is cached under
- *
- *     ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
- *
- * spelled identically in ci.yml (twice: restore + save) and release.yml. The key
- * does NOT include packages/spec, so a dist built while spec was at state X is
- * restored and reused after spec moves on — and because
+ * The vendored Console SPA is cached under a key each workflow spells in its
+ * own restore step: ci.yml's `console-pin` job and release.yml's publish job.
+ * The key is deliberately not restated here, because a copy in a comment is one
+ * that nothing holds in step (scripts/check-ci-filter-parity.mjs holds ci.yml's
+ * spellings to its `console` filter). The two keys no longer match
+ * (objectstack#20765): release.yml hashes the pin and the build script, and
+ * ci.yml hashes those plus the probe scripts and the spec's ENTRY LAYOUT
+ * (package.json, tsup.config.ts). Neither includes the spec's CONTENT, so a dist
+ * built while spec was at state X is restored and reused after spec moves on,
+ * and because
  * scripts/assert-console-spec-injection.mjs runs INSIDE build-console.sh, a
  * cache hit skips the entire build step and therefore skips the assertion too.
  * The injection fixed resolution; the cache could still serve a console whose
  * bundled spec is not the one this build proved.
  *
- * Adding packages/spec to the cache key was considered and REJECTED: it busts
- * the key on every spec change and forces a full cold console rebuild (~20 min,
+ * Adding the whole of packages/spec to the cache key was considered and
+ * REJECTED: it busts the key on every spec change and forces a full cold console rebuild (~20 min,
  * measured) on a repo doing ~18 merges a day. The cache's economics — including
  * ci.yml's deliberate split restore/save, which exists so a failed build never
  * poisons the entry — are kept exactly as they are. Only the silent half is
@@ -48,11 +51,17 @@
  * the stamped detector is STILL ABSENT from this tree's spec. Once the published
  * spec catches up, the stamp is expired and says so instead of passing.
  *
- * ## Why packages/spec is NOT in ci.yml's console filter (objectstack#9710)
+ * ## Why the rest of packages/spec is NOT in ci.yml's console filter (objectstack#9710)
  *
- * That filter lists the pin, the build script and this gate's own sources — not
- * packages/spec — so a spec-only PR never schedules Console Pin Gate and never
- * reaches this check. Adding it is the obvious next thought; it was measured and
+ * That filter lists the pin, the build and probe scripts and this gate's own
+ * sources, and since objectstack#20765 also the spec's ENTRY LAYOUT
+ * (package.json's exports map and tsup.config.ts). ci.yml's dist key hashes
+ * each of those build inputs too, so a head that moves the entry layout MISSES
+ * the cache, rebuilds, and assert-console-spec-injection.mjs judges it; a
+ * cache hit could not have, as the paragraphs below explain. The rest of
+ * packages/spec is its CONTENT, which is in neither the filter nor the key, so
+ * a content-only spec PR never schedules Console Pin Gate and never reaches
+ * this check. Adding the content is the obvious next thought; it was measured and
  * DECLINED, and the reason is not cost, which is why it is recorded here rather
  * than left on a card: the job it would schedule is vacuous, not expensive.
  *
@@ -60,9 +69,9 @@
  * functions of the RESTORED DIST and its stamp — a missing dist, unreadable
  * assets or a malformed stamp, a missing stamp, the published-only detector
  * present in the bundle, the stamp's own fresh witness missing from it. A
- * spec-only diff cannot move any of those: the cache key is the one spelled at
- * the top of this header — the pin and the build script, nothing else — and
- * entries under it are IMMUTABLE, so all five replay what the last
+ * content-only spec diff cannot move any of those: it does not move the cache
+ * key (see the top of this header for what each key hashes), and entries under
+ * a key are IMMUTABLE, so all five replay what the last
  * console-filtered run already saw. Exactly ONE verdict reads this tree, the
  * expiry re-check, and it needs packages/spec/dist because readSpecBlob resolves
  * the package's exports map. So the restore-only job proposed there — no
@@ -214,13 +223,17 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  * How an operator clears a cached dist this gate refused.
  *
  * ⛔ The `gh cache delete` line is MAINTAINER-ONLY — it needs repo write scope,
- * and it deletes an entry shared by ci.yml and release.yml. It is named anyway
- * because ruling out a remedy an operator cannot discover is how a red becomes
- * noise; a contributor who cannot run it should hand this message to a
- * maintainer rather than guess.
+ * and it deletes an entry every later run of that workflow under the same key
+ * would restore. It is named anyway because ruling out a remedy an operator
+ * cannot discover is how a red becomes noise; a contributor who cannot run it
+ * should hand this message to a maintainer rather than guess.
+ *
+ * The key comes from the CI step (`CONSOLE_DIST_CACHE_KEY`). Without it (a local
+ * run) the line names WHERE each workflow spells its key instead of restating
+ * one: ci.yml's and release.yml's keys differ (objectstack#20765), and a copy
+ * here would be a third spelling nothing holds in step.
  */
 function remedy(cacheKey) {
-  const key = cacheKey || '${{ runner.os }}-console-dist-${{ hashFiles(\'.objectui-sha\', \'scripts/build-console.sh\') }}';
   return [
     '  How to clear this:',
     '',
@@ -231,7 +244,14 @@ function remedy(cacheKey) {
     '    • In CI — the restored artifact is a CACHE ENTRY, not anything in this PR.',
     "      Nothing in the diff can fix it; the entry has to go. ⛔ MAINTAINER-ONLY:",
     '',
-    `          gh cache delete "${key}"`,
+    `          gh cache delete "${cacheKey || 'KEY'}"`,
+    ...(cacheKey
+      ? []
+      : [
+          '',
+          "      KEY is the key the failing job's restore step printed. ci.yml's",
+          "      `console-pin` job and release.yml's publish job each spell their own.",
+        ]),
     '',
     '      then re-run the Console Pin Gate job. The next run misses, rebuilds,',
     '      and re-stamps.',

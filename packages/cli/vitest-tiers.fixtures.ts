@@ -191,7 +191,7 @@ export const PREDICATE_CASES: PredicateCase[] = [
 
   // -------------------------------------------------------------------------
   // The false positives the predicate was tuned against — every one of these
-  // was a real miscount of the text-match census #13504 replaced.
+  // was a real miscount of the text-match census commit 44813ba57 replaced.
   // -------------------------------------------------------------------------
   {
     name: 'a type-only driver import',

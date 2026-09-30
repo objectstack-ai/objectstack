@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import type { ImportRequest } from './export.zod';
+import type { ImportRequest, ImportRowResult } from './export.zod';
 import {
   ExportFormat,
   ImportValidationMode,
@@ -10,7 +10,12 @@ import {
   ExportImportTemplateSchema,
   ImportRequestSchema,
   CreateImportJobRequestSchema,
+  ImportRowResultSchema,
+  ImportJobResultsSchema,
 } from './export.zod';
+import type { ValidateDataIssue } from './protocol.zod';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
+import type { DroppedFieldsEvent } from '../data/data-engine.zod';
 
 // ==========================================
 // Export Format
@@ -384,5 +389,90 @@ describe('ImportRequestSchema — mappingName declared (#10330)', () => {
       .description ?? '';
     expect(described).toMatch(/[Mm]utually\s+exclusive/);
     expect(described).toMatch(/CONFLICTING_MAPPING/);
+  });
+});
+
+// ==========================================
+// Import Row Result — the write-drop signal and the served dry-run warnings
+// ==========================================
+
+/**
+ * The row report carries two optional keys that ride on an `ok` row:
+ * `droppedFields` (the engine's strip report, declared ahead of its producer)
+ * and `warnings` (served by the REST dry run before it was declared). The
+ * schema is a plain, non-strict `z.object`, so an undeclared key is not
+ * refused — it is STRIPPED by `parse`. Each pin therefore asserts the key
+ * SURVIVES a parse, never bare `success`: a schema without the key would
+ * still answer `success: true` and hand back a row with the report gone.
+ */
+describe('ImportRowResultSchema — droppedFields and warnings', () => {
+  const okRow = { row: 2, ok: true, action: 'created' as const, id: 'rec_1' };
+  const drops = [
+    { object: 'project', fields: ['doubled'], reason: 'computed' as const },
+    { object: 'project', fields: ['code'], reason: 'readonly' as const },
+  ];
+
+  it('parses a row without droppedFields — the key is optional', () => {
+    const parsed = ImportRowResultSchema.parse(okRow);
+    expect(parsed).toEqual(okRow);
+    expect('droppedFields' in parsed).toBe(false);
+  });
+
+  it('parses a row with droppedFields and keeps every event', () => {
+    const parsed = ImportRowResultSchema.parse({ ...okRow, droppedFields: drops });
+    expect(parsed.droppedFields).toEqual(drops);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.action).toBe('created');
+  });
+
+  it('the element is the engine\'s DroppedFieldsEventSchema itself — no second vocabulary', () => {
+    const element = ImportRowResultSchema.shape.droppedFields.unwrap().element;
+    expect(element).toBe(DroppedFieldsEventSchema);
+  });
+
+  it('accepts exactly the engine\'s reason set, `computed` included', () => {
+    const engineReasons = DroppedFieldsEventSchema.shape.reason.options;
+    expect(engineReasons).toContain('computed');
+    for (const reason of engineReasons) {
+      const parsed = ImportRowResultSchema.parse({
+        ...okRow, droppedFields: [{ object: 'project', fields: ['f'], reason }],
+      });
+      expect(parsed.droppedFields?.[0]?.reason, `reason ${reason}`).toBe(reason);
+    }
+    const outside = ImportRowResultSchema.safeParse({
+      ...okRow, droppedFields: [{ object: 'project', fields: ['f'], reason: 'not_a_reason' }],
+    });
+    expect(outside.success).toBe(false);
+    const issue = outside.success ? undefined : outside.error.issues[0];
+    expect(issue?.code).toBe('invalid_value');
+    expect(issue?.path).toEqual(['droppedFields', 0, 'reason']);
+  });
+
+  it('keeps the served dry-run warnings, in the validate verdict\'s issue shape', () => {
+    const warnings = [{ field: 'billing_address', code: 'invalid_type', message: 'billing_address has an invalid value' }];
+    const parsed = ImportRowResultSchema.parse({ ...okRow, warnings });
+    expect(parsed.warnings).toEqual(warnings);
+    const partial = ImportRowResultSchema.safeParse({ ...okRow, warnings: [{ field: 'x', code: 'y' }] });
+    expect(partial.success).toBe(false);
+    const issue = partial.success ? undefined : partial.error.issues[0];
+    expect(issue?.path).toEqual(['warnings', 0, 'message']);
+  });
+
+  it('the async job sample carries the same row keys', () => {
+    const parsed = ImportJobResultsSchema.parse({
+      jobId: 'imp_1', object: 'project', status: 'succeeded', dryRun: false, writeMode: 'insert',
+      total: 1, processed: 1, created: 1, updated: 0, skipped: 0, errors: 0, percentComplete: 100,
+      undoable: true, createdAt: '2026-09-30T00:00:00.000Z',
+      results: [{ ...okRow, droppedFields: drops }], resultsTruncated: false,
+    });
+    expect(parsed.results[0]?.droppedFields).toEqual(drops);
+    const described = (ImportJobResultsSchema.shape.results as { description?: string }).description ?? '';
+    expect(described).toMatch(/failures first/);
+    expect(described).toMatch(/inside the sample/);
+  });
+
+  it('the typed reader sees both keys, in the engine\'s and the verdict\'s types', () => {
+    expectTypeOf<NonNullable<ImportRowResult['droppedFields']>[number]>().toEqualTypeOf<DroppedFieldsEvent>();
+    expectTypeOf<NonNullable<ImportRowResult['warnings']>[number]>().toEqualTypeOf<ValidateDataIssue>();
   });
 });

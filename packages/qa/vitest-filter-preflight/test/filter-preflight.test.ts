@@ -2,7 +2,7 @@
 
 /**
  * A named path that will run no tests is reported, and a run that loses nothing
- * is byte-identical (#17853, #17978).
+ * is byte-identical (commit 08f5f0e5a, #17978).
  *
  * `../src/index.ts` carries the mechanism, the vitest readings, the measurement
  * that rejected the reporter seam and the measurement that rejected consuming

@@ -841,8 +841,9 @@ describe('FieldSchema', () => {
       expect(prop).toBeDefined();
       expect(prop.type).toBe('boolean');
       // Unlike `autonumberFormat`, this key carries no JSON-Schema `default`
-      // annotation — there is no renderer-agnostic grouping behavior to declare
-      // until the objectui half (#4033) retires the interim heuristic.
+      // annotation — there is no renderer-agnostic grouping behavior to declare:
+      // an absent key is the renderer's call, and the renderer half (objectui's
+      // `shouldGroupDisplayNumber`) keeps the interim heuristic for it.
       expect(prop.default).toBeUndefined();
       expect(js.required ?? []).not.toContain('useGrouping');
     });

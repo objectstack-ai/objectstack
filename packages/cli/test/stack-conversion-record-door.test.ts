@@ -41,6 +41,24 @@
  * unbuilt default export still lints and still converts through the command's
  * own pass (`lint-conversion-notices.e2e.test.ts` pins that half).
  *
+ * ## Convert, then REFUSE — the refusal carries the record, on all three doors (#20583)
+ *
+ * A strict `defineStack` that converts the retiring spelling and then refuses
+ * (`requires: ['no-such-capability']`, `STACK_CAPABILITY_UNKNOWN`) returns no
+ * stack, so there is no record on a default export to fold. The producer stamps
+ * the notices it applied on the refusal it throws instead, and each door's
+ * catch-all folds `stackConversionsOf(error)` into `conversions` beside the
+ * refusal. Before that fold all three answered `conversions: []` and the notice
+ * reached stderr alone.
+ *
+ * | door (`--json`)          | converts, then refuses       | canonical, then refuses (control) |
+ * |:-------------------------|:-----------------------------|:----------------------------------|
+ * | `os validate` / `build` / `lint` | exit 1, the refusal's `code`, the one notice | exit 1, the refusal's `code`, `[]` |
+ *
+ * The control holds the other direction: the same refusal from a source that
+ * needed no conversion answers `[]`, so an exit that reports the notice without
+ * reading it off the refusal it caught is red there.
+ *
  * `page-header-subtitle-alias` is the live conversion driven here (`description`
  * on a `page:header` component, canonical `subtitle`). The day it retires from
  * the load path the non-empty rows go red; re-point the fixture at a live entry
@@ -131,10 +149,10 @@ const page = (ns: string, headerKey: 'description' | 'subtitle') => `{
     ] }],
   }`;
 
-const stackBody = (ns: string, headerKey: 'description' | 'subtitle' | null) => `{
+const stackBody = (ns: string, headerKey: 'description' | 'subtitle' | null, requires?: string) => `{
   manifest: ${manifest(ns)},
   objects: [{ name: '${ns}_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
-  apps: [{ name: '${ns}_app', label: 'App' }],${headerKey ? `\n  pages: [${page(ns, headerKey)}],` : ''}
+  apps: [{ name: '${ns}_app', label: 'App' }],${headerKey ? `\n  pages: [${page(ns, headerKey)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
 }`;
 
 const IMPORT = `import { composeStacks, defineStack } from '@objectstack/spec';\n\n`;
@@ -160,6 +178,13 @@ const FIXTURES: Record<string, string> = {
     `export default defineStack(${stackBody('nep', null)});\n`,
   // The control: the canonical spelling.
   canonical: IMPORT + `export default defineStack(${stackBody('can', 'subtitle')});\n`,
+  // Convert, then refuse: the strict (default) `defineStack` converts the
+  // retiring spelling, then refuses an unknown capability token.
+  convertThenRefuse:
+    IMPORT + `export default defineStack(${stackBody('ctr', 'description', 'no-such-capability')});\n`,
+  // Its control: the same refusal from a source that needed no conversion.
+  canonicalThenRefuse:
+    IMPORT + `export default defineStack(${stackBody('ctc', 'subtitle', 'no-such-capability')});\n`,
 };
 
 let root = '';
@@ -263,6 +288,43 @@ describe("os lint --json — the producer's conversion record reaches `conversio
     expect(run.code, run.stdout + run.stderr).toBe(0);
     expectExactly(payloadOf(run, 'lint canonical'), [], 'lint canonical');
   }, 180_000);
+});
+
+describe("convert, then REFUSE — the refusal carries the conversions into each door's `--json` (#20583)", () => {
+  // The catch-all exit on every door: the load threw the producer's refusal, so
+  // the record rides on the error, not on a returned stack.
+  type Door = 'validate' | 'build' | 'lint';
+  const DOORS: Record<Door, (label: string) => string[]> = {
+    validate: () => ['validate', '--json'],
+    build: (label) => ['build', '--json', '-o', join(dirs[label], 'out', 'objectstack.json')],
+    lint: () => ['lint', '--json'],
+  };
+  const REFUSAL_CODE = 'STACK_CAPABILITY_UNKNOWN';
+
+  /** The catch-all payload's own verdict, per door (`os lint`'s is the `error` string alone). */
+  function expectCatchAll(command: Door, run: Run, p: Payload & { error?: unknown; code?: unknown }, label: string): void {
+    expect(run.code, `${label}: the refusal fails the run\n${run.stdout}${run.stderr}`).toBe(1);
+    expect(p.code, `${label}: the producer's refusal, unwrapped`).toBe(REFUSAL_CODE);
+    expect(typeof p.error, `${label}: the catch-all exit`).toBe('string');
+    if (command === 'validate') expect(p.valid).toBe(false);
+    if (command === 'build') expect(p.success).toBe(false);
+  }
+
+  for (const command of Object.keys(DOORS) as Door[]) {
+    it(`os ${command} --json: exit 1, the refusal, and the one notice the producer applied before refusing`, async () => {
+      const run = await runCli(DOORS[command]('convertThenRefuse'), dirs.convertThenRefuse);
+      const p = payloadOf(run, `${command} convertThenRefuse`);
+      expectCatchAll(command, run, p, `${command} convertThenRefuse`);
+      expectExactly(p, [THE_NOTICE], `${command} convertThenRefuse`);
+    }, 180_000);
+
+    it(`os ${command} --json control: the same refusal from a source that needed no conversion — \`[]\``, async () => {
+      const run = await runCli(DOORS[command]('canonicalThenRefuse'), dirs.canonicalThenRefuse);
+      const p = payloadOf(run, `${command} canonicalThenRefuse`);
+      expectCatchAll(command, run, p, `${command} canonicalThenRefuse`);
+      expectExactly(p, [], `${command} canonicalThenRefuse`);
+    }, 180_000);
+  }
 });
 
 describe('os validate --strict — a conversion the producer applied fails it, on both faces', () => {

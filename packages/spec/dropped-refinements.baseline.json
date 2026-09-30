@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 212,
-    "droppedRefinementSites": 612,
+    "droppedRefinementSites": 617,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -212,6 +212,7 @@
       "sites": [
         "form",
         "form.sections.element.in",
+        "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
@@ -1235,6 +1236,7 @@
         "",
         "sections.element.in",
         "sections.element.in.fields.element.options[1].in.publicPicker.filter.element",
+        "subforms.element.columns.element",
         "submitBehavior.options[1].url"
       ]
     },
@@ -1420,6 +1422,7 @@
       "sites": [
         "form",
         "form.sections.element.in",
+        "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
@@ -1446,6 +1449,7 @@
         "options[0].config.timeline.groupByField",
         "options[1].config",
         "options[1].config.sections.element.in",
+        "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]
     },
@@ -1460,6 +1464,7 @@
         "options[0].config.timeline.groupByField",
         "options[1].config",
         "options[1].config.sections.element.in",
+        "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]
     },

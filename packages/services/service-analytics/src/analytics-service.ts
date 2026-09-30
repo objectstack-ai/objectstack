@@ -45,6 +45,15 @@ import {
 // object-level `readAdmissionDeniedError` above, and the reason a fail-closed
 // row-scope denial can no longer be re-judged by its wording.
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
+// [#20917] …and the FIELD-level half, asked at the same door right after it:
+// every member a query names, judged against the caller's readable fields.
+import {
+  assertNamedFieldsReadable,
+  type QueryableFieldsProvider,
+  type NamedField,
+  type FieldReadRole,
+  type ReadableFieldsProvider,
+} from './field-read-admission.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -383,6 +392,112 @@ function resolveMemberSource(
   return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
 }
 
+/** [#20917] A dotted identifier path: relationship hops, then one column — `NativeSQLStrategy`'s own test. */
+const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
+
+/**
+ * [#20917] The fields a member's column `sql` reads, each on the object that
+ * declares it.
+ *
+ * - A bare identifier is a column of the base object.
+ * - A dotted identifier path is a relationship path: every segment but the
+ *   last is a relationship field on the object before it, the last is the
+ *   column. Each hop's object is the cube's join at that path, keyed as the
+ *   strategies key it (the path with its dots as `__`) and falling back to the
+ *   alias itself — the object both strategies read there. The relationship
+ *   fields are named too: a hidden relationship field discloses which record
+ *   each row points to, and the engine judges a path's first segment on the
+ *   local object for the same reason.
+ * - Anything else is an EXPRESSION the cube's author wrote (`CASE WHEN …`,
+ *   `SUM(…)`, `*`). It names no field this gate can attribute, so it adds
+ *   nothing — the author's declaration of a derived value, the way a formula
+ *   field is.
+ */
+function fieldsOfColumnSql(cube: Cube, baseObject: string, sql: string, role: FieldReadRole): NamedField[] {
+  const path = sql.trim();
+  if (BARE_IDENTIFIER.test(path)) return [{ object: baseObject, field: path, role }];
+  if (!IDENTIFIER_PATH.test(path)) return [];
+  const segments = path.split('.');
+  const joins = cube.joins as Record<string, { name?: unknown } | undefined> | undefined;
+  const out: NamedField[] = [];
+  let object = baseObject;
+  let alias = '';
+  for (const segment of segments.slice(0, -1)) {
+    out.push({ object, field: segment, role });
+    alias = alias ? `${alias}__${segment}` : segment;
+    const joined = joins?.[alias]?.name;
+    object = typeof joined === 'string' && joined !== '' ? joined : alias;
+  }
+  out.push({ object, field: segments[segments.length - 1], role });
+  return out;
+}
+
+/**
+ * [#20917] Every field a query reads, for the field-level read gate — the
+ * members the caller named and the compiled dataset's own filters, each
+ * resolved the way the strategies resolve it ({@link declaredMemberEntry}),
+ * base-object fields first.
+ *
+ * | position | resolved as | role |
+ * |:--|:--|:--|
+ * | `dimensions` | dimension | aggregate |
+ * | `timeDimensions` | any | aggregate when bucketed, else predicate (a window) |
+ * | `measures` | measure (the field it aggregates) | aggregate |
+ * | `where` leaves | any | predicate |
+ * | a requested measure's own filter | any | predicate |
+ * | the dataset's own filter | any | predicate |
+ * | `order` keys | any | predicate |
+ *
+ * An undeclared member is read as the column the strategies read for it: the
+ * member itself, a dotted one as a relationship path. A measure has no such
+ * fallback. The `where` members are read through the SAME lowering the
+ * strategies compile with (`normalizeAnalyticsFilterTree` +
+ * `collectFilterLeaves`), so the field the gate judges is the column that
+ * reaches the statement; a filter that lowering refuses is refused by the
+ * strategy, and names nothing here. A host read scope is deliberately absent:
+ * it is policy, and the engine's own field guard never judges policy
+ * predicates — they may name fields the caller cannot read.
+ *
+ * A cube whose `sql` is not a bare object name names no attributable field.
+ */
+function namedQueryFields(
+  query: AnalyticsQuery,
+  cube: Cube,
+  datasetScope: DatasetScope | undefined,
+): NamedField[] {
+  const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+  if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return [];
+  const out: NamedField[] = [];
+  const name = (member: string, kind: 'dimension' | 'measure' | 'any', role: FieldReadRole) => {
+    if (typeof member !== 'string' || member === '') return;
+    const entry = declaredMemberEntry(cube, member, kind);
+    const sql = entry ? entry.sql : kind === 'measure' ? undefined : member;
+    if (typeof sql === 'string') out.push(...fieldsOfColumnSql(cube, baseObject, sql, role));
+  };
+  const filterMembers = (where: unknown): string[] => {
+    if (!where || typeof where !== 'object') return [];
+    try {
+      return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
+    } catch {
+      return [];
+    }
+  };
+
+  for (const member of query.dimensions ?? []) name(member, 'dimension', 'aggregate');
+  for (const td of query.timeDimensions ?? []) name(td.dimension, 'any', td.granularity ? 'aggregate' : 'predicate');
+  for (const member of query.measures ?? []) name(member, 'measure', 'aggregate');
+  for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
+  for (const measure of query.measures ?? []) {
+    for (const member of filterMembers(datasetScope?.measureFilters?.[measure])) name(member, 'any', 'predicate');
+  }
+  for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
+  const order = (query as { order?: unknown }).order;
+  if (order && typeof order === 'object' && !Array.isArray(order)) {
+    for (const key of Object.keys(order)) name(key, 'any', 'predicate');
+  }
+  return [...out.filter((f) => f.object === baseObject), ...out.filter((f) => f.object !== baseObject)];
+}
+
 /**
  * `analytics_cube.dimensions.granularities` on the query doors: bucket every
  * GROUPED time dimension that names no granularity at the default its cube
@@ -583,6 +698,47 @@ export interface AnalyticsServiceConfig {
    * is the same deployment in which `/data` has no object-level gate either.
    */
   admitObjectRead?: ObjectReadAdmissionProvider;
+  /**
+   * [#20917] The FIELD-LEVEL read admission — which fields of an object the
+   * caller may read. Asked at the door, right after the object-level gate and
+   * before a strategy is selected, for every object a query names a field of:
+   * every member the query names — dimensions, measures, time dimensions,
+   * `where` members, order keys, joined members, and the compiled dataset's own
+   * and its requested measures' filters — is resolved to the field it reads
+   * and refused `PERMISSION_DENIED` / 403, in the engine's words, when that
+   * field is not readable. A host read scope ({@link getReadScope}) is not
+   * judged: a policy predicate may name fields the caller cannot read, as the
+   * engine's own field guard allows. See `field-read-admission.ts`.
+   *
+   * The plugin auto-bridges this to the `security` service's
+   * `getReadableFields`, so the answer is the one the engine middleware
+   * enforces with. MAY be async. `undefined` for an object is "no answer" and
+   * judges none of its fields; a THROW refuses the query (fail-closed). When
+   * the hook is absent entirely no field-level gate applies — the deployment
+   * has no security service, which is the one in which `/data` has no
+   * field-level security either.
+   */
+  getReadableFields?: ReadableFieldsProvider;
+  /**
+   * [#20935] The QUERY-side half of the same field-level gate — which fields of
+   * an object the caller may filter, sort, group or aggregate by. Asked beside
+   * {@link getReadableFields}, at the same point and for the same objects, and
+   * a member is admitted only when BOTH answers carry its field: every member
+   * an analytics query names is a query position, and a field the caller is
+   * served MASKED is readable but not queryable (as a group key it hands back
+   * the unmasked value; as a filter it rebuilds the masked span). Refused
+   * `PERMISSION_DENIED` / 403 in the engine's words for the same field.
+   *
+   * The plugin auto-bridges this to the `security` service's
+   * `getQueryableFields`, and when that service predates the method, or
+   * answers `undefined`, it fails CLOSED: every field that declares a
+   * `maskingRule` is treated as not queryable, whoever the caller is. MAY be
+   * async; a THROW refuses
+   * the query. A host that wires {@link getReadableFields} and not this judges
+   * masked fields by the read projection alone, which admits them — the
+   * service says so once, at construction.
+   */
+  getQueryableFields?: QueryableFieldsProvider;
   /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Joins outside this set are rejected by the strategy. Compiled datasets
@@ -994,6 +1150,10 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly readScopeProvider?: AnalyticsServiceConfig['getReadScope'];
   /** Object-level read-admission provider (bound per call to the request context). */
   private readonly readAdmissionProvider?: ObjectReadAdmissionProvider;
+  /** [#20917] Field-level read-admission provider (bound per call to the request context). */
+  private readonly readableFieldsProvider?: ReadableFieldsProvider;
+  /** [#20935] Field-level query-admission provider (bound per call to the request context). */
+  private readonly queryableFieldsProvider?: QueryableFieldsProvider;
   /**
    * Compiled datasets by name, as `registerDataset` registered them — feeds the
    * shared scope's join allowlist (D-C) and dataset scope. `queryDataset`
@@ -1062,6 +1222,15 @@ export class AnalyticsService implements IAnalyticsService {
 
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
+    this.readableFieldsProvider = config.getReadableFields;
+    this.queryableFieldsProvider = config.getQueryableFields;
+    if (this.readableFieldsProvider && !this.queryableFieldsProvider) {
+      this.logger.warn(
+        '[Analytics] getReadableFields is configured without getQueryableFields: a field a caller is served ' +
+          'MASKED is readable, so the field-level gate admits it as a group key, a filter or a sort key, ' +
+          'which the data API refuses. Supply getQueryableFields (the security service\'s getQueryableFields).',
+      );
+    }
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
@@ -1306,24 +1475,42 @@ export class AnalyticsService implements IAnalyticsService {
     // read"). `callCtx` is the ONE thing `query()` and `generateSql()` share,
     // so gating it covers the direct `/analytics/query` door, the `/analytics/sql`
     // echo door and — through `DatasetExecutor` — every dataset door.
-    await this.assertReadAdmitted(this.queryObjects(query, scope), context);
+    // [#20933] The set is derived ONCE here and handed to both questions, so
+    // the objects admitted and the objects scoped are one value, not two calls.
+    const objects = this.queryObjects(query, scope);
+    await this.assertReadAdmitted(objects, context);
+    // [#20917] …and the FIELD-level gate, right behind it and for the same
+    // reason: every member the query names is judged here, once, so every
+    // strategy — and the SQL echo — inherits the verdict by construction. The
+    // cube is read from `scope` AFTER `ensureCube`, so a measure it minted for
+    // this call is judged by the field it aggregates.
+    await this.assertFieldsReadable(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getDatasetScope(query.cube) : undefined,
+      context,
+    );
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:
     // a deployment with no `getReadScope` provider is exactly the one that most
     // needs the engine to scope for it.
     if (!this.readScopeProvider) return { ...this.baseCtx, ...reads, context, getDatasetScope };
-    // Pre-resolve the read scope for every object the strategy will scan (base
-    // + all declared joins) BEFORE the synchronous SQL builder runs, since the
+    // Pre-resolve the read scope for every object the strategy will scan (base,
+    // declared joins, relationship paths — `queryObjects`, the set the admission
+    // above read) BEFORE the synchronous SQL builder runs, since the
     // provider may be async (the production `security.getReadFilter` bridge).
     // The strategy then reads each object's filter synchronously from the map.
-    const scopes = await this.resolveReadScopes(query, context, scope);
+    const scopes = await this.resolveReadScopes(objects, context);
     return {
       ...this.baseCtx,
       ...reads,
       context,
       getDatasetScope,
       getReadScope: (objectName: string) => scopes.get(objectName) ?? null,
+      // [#20933] …and the set itself, for the strategy that looks at the scopes
+      // before it compiles (`NativeSQLStrategy`'s cross-field decline).
+      readScopedObjects: [...objects],
     };
   }
 
@@ -1382,15 +1569,30 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Every object this query will READ — the cube's base object plus every
-   * joined object.
+   * Every object this query will READ — the cube's base object, every join the
+   * cube declares, and every object a member the query names reaches through a
+   * relationship path.
    *
    * ONE derivation, two consumers: {@link resolveReadScopes} scopes exactly
    * this set and {@link assertReadAdmitted} admits exactly this set, so the set
    * that is row-scoped and the set that is admitted are provably the same set
    * rather than two lists that agree today. It is a SUPERSET of what a strategy
-   * actually scans (a strategy only joins along declared relationships), which
-   * is the safe direction: no scanned object is ever left ungated.
+   * actually scans (a declared join the query never uses is in it), which is
+   * the safe direction: no scanned object is ever left ungated.
+   *
+   * [#20933] A relationship path is read whether or not the cube declares it.
+   * A dotted member of an inferred cube, an authored member whose `sql` walks a
+   * relationship the cube's `joins` never lists, a dotted member the query
+   * names itself: `NativeSQLStrategy` joins the object at each hop
+   * (`qualifyAndRegisterJoin`) and `ObjectQLStrategy` reads it to resolve the
+   * related value. Those objects are in this set, so each is admitted and its
+   * read scope reaches the strategy exactly as a declared join's does — the
+   * strategies apply the scope of every object they read from this set, and
+   * carry no rule of their own. Each hop's object is the one the field gate
+   * attributes the hop's fields to ({@link namedQueryFields}: the cube's join
+   * keyed by the path with its dots as `__`, falling back to the alias itself),
+   * reused rather than re-derived, so the field gate and this set can never
+   * name different objects for the same hop.
    *
    * An unregistered cube yields the empty set — the query fails its own
    * cube-existence gate downstream, and inventing an object name here would
@@ -1405,14 +1607,21 @@ export class AnalyticsService implements IAnalyticsService {
   private queryObjects(query: AnalyticsQuery, scope: CubeScope): Set<string> {
     if (!query.cube) return new Set<string>();
     const cube = scope.getCube(query.cube);
-    return cube ? this.cubeObjects(cube) : new Set<string>();
+    if (!cube) return new Set<string>();
+    const objects = this.cubeObjects(cube);
+    for (const { object } of namedQueryFields(query, cube, this.cubeReads(scope).getDatasetScope(query.cube))) {
+      objects.add(object);
+    }
+    return objects;
   }
 
   /**
-   * {@link queryObjects} for a cube already in hand — the draft-preview branch
-   * holds the COMPILED dataset rather than a query naming it, and reaching for
-   * the registry there would make the gate depend on a registration side
-   * effect. One derivation, two entry points.
+   * The cube's own part of {@link queryObjects}: its base object and every
+   * join it declares. The draft-preview branch asks this part alone — it holds
+   * the COMPILED dataset rather than a query naming it (reaching for the
+   * registry there would make the gate depend on a registration side effect),
+   * and it evaluates the executor's queries over the base object's drafted seed
+   * rows in memory, so it reads no object through a relationship path.
    */
   private cubeObjects(cube: Cube): Set<string> {
     const objects = new Set<string>();
@@ -1454,14 +1663,44 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
-   * AND every joined object of the query's cube, keyed by object name. This is
-   * the async pre-pass that lets the synchronous strategy enforce scoping even
-   * when the provider (security `getReadFilter`) resolves asynchronously.
+   * [#20917] The FIELD-LEVEL read gate, asked at this door for every field the
+   * query names, BEFORE a strategy is selected — `NativeSQLStrategy` compiles
+   * members straight into a statement no middleware sees, so the engine's field
+   * guard could never reach it. See `field-read-admission.ts`.
    *
-   * The object set is `cube.sql` (base) plus every `cube.joins[*].name` — a
-   * SUPERSET of what the strategy actually scans (the strategy only joins along
-   * declared relationships), so no scanned object is ever left unscoped.
+   * A no-op when no provider is wired (no security service) or when the query
+   * names no field.
+   */
+  private async assertFieldsReadable(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    datasetScope: DatasetScope | undefined,
+    context: ExecutionContext | undefined,
+  ): Promise<void> {
+    const provider = this.readableFieldsProvider;
+    if (!provider || !cube) return;
+    const named = namedQueryFields(query, cube, datasetScope);
+    if (named.length === 0) return;
+    await assertNamedFieldsReadable(
+      named,
+      provider,
+      context,
+      (object) => this.getObjectFieldNames?.(object),
+      this.logger,
+      this.queryableFieldsProvider,
+    );
+  }
+
+  /**
+   * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
+   * AND every object the query reads through a join or a relationship path,
+   * keyed by object name. This is the async pre-pass that lets the synchronous
+   * strategy enforce scoping even when the provider (security `getReadFilter`)
+   * resolves asynchronously.
+   *
+   * The object set is {@link queryObjects} — the one the admission reads, a
+   * SUPERSET of what the strategy actually scans, so no scanned object is ever
+   * left unscoped.
    *
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
@@ -1475,15 +1714,14 @@ export class AnalyticsService implements IAnalyticsService {
    * enveloped, it is re-thrown before the wording is ever read.
    */
   private async resolveReadScopes(
-    query: AnalyticsQuery,
+    objects: Iterable<string>,
     context: ExecutionContext | undefined,
-    scope: CubeScope,
   ): Promise<Map<string, FilterCondition>> {
     const map = new Map<string, FilterCondition>();
     const provider = this.readScopeProvider;
-    if (!provider || !query.cube) return map;
+    if (!provider) return map;
 
-    for (const object of this.queryObjects(query, scope)) {
+    for (const object of objects) {
       let filter: FilterCondition | null | undefined;
       try {
         filter = await provider(object, context);
@@ -1774,8 +2012,19 @@ export class AnalyticsService implements IAnalyticsService {
         // pending seed either.
         await this.assertReadAdmitted(this.cubeObjects(compiled.cube), context);
         this.logger.debug(`[Analytics] queryDataset "${dataset.name}" → preview over ${seedRows.length} drafted seed row(s)`);
+        // [#20917] …and the field-level gate, per query the executor issues,
+        // over the same compiled dataset: a drafted seed row carries the same
+        // fields the published ones do.
         const previewService = {
-          query: async (q: AnalyticsQuery) => evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!),
+          query: async (q: AnalyticsQuery) => {
+            await this.assertFieldsReadable(
+              q,
+              compiled.cube,
+              { filter: compiled.filter, measureFilters: compiled.measureFilters },
+              context,
+            );
+            return evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!);
+          },
         } as IAnalyticsService;
         const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);
         // ADR-0021 result-column enrichment runs on this path too. Every key it

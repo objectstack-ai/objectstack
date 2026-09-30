@@ -579,7 +579,7 @@ describe('[#11230] a DECLARED non-scalar where.id beside the payload id is refus
     expect(message).toContain('multi:true');
     expect(message).toContain('drop id from the payload');
     expect(message).toContain('drop where.id');
-    expect(message).toContain('#11230');
+    expect(message).toContain('and any declared multi:true — silently ignored.');
   });
 
   it('a FALSY scalar where.id is a SCALAR, so #11230 does not reach it — the #11142 boundary is untouched', () => {

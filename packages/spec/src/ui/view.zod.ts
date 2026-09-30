@@ -69,7 +69,7 @@ import { retiredKey } from '../shared/retired-key';
 // so the bound this row applies costs no published export — see that module's
 // docblock for the measurement and for the two routes that were not taken.
 import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
-import { FieldType, SelectOptionSchema } from '../data/field.zod';
+import { FieldType, InlineGridColumnSchema, SelectOptionSchema } from '../data/field.zod';
 // [#19514] The text-comparand door the Filter Protocol publishes for the
 // case-insensitive contains operator — the discrimination `FILTER_TEXT_CASES`'
 // two REJECTION rows are about, and the reason text that answers them. Imported
@@ -4371,7 +4371,15 @@ export const FormViewSchema = lazySchema(() => strictObject({
   }, {
     childObject: z.string().describe('Child object whose records are entered inline'),
     relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected when omitted)'),
-    columns: z.array(z.any()).optional().describe('Editable grid columns (derived from the child object when omitted)'),
+    // #20901 — the SAME column contract a relationship field's `inlineColumns`
+    // takes, referenced rather than copied: both carriers feed one objectui
+    // grid, so the rulings the column carries (`scale` refused on a `currency`
+    // column — ruling B on #19629, remedy 乙 on #19910) hold on both. Until
+    // this was a reference the carrier was `z.array(z.any())`, so a refused
+    // key and a key the grid never reads both published green here. A column
+    // that declares no `type` takes it from the child field at render time;
+    // `defineStack`'s cross-reference check judges that resolved type.
+    columns: z.array(InlineGridColumnSchema).optional().describe("Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
     amountField: z.string().optional().describe('Numeric child column summed for the running total'),
     totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
     title: z.string().optional().describe('Section title'),

@@ -73,6 +73,19 @@ function setChildEvidence(root: string, type: string, prop: string, child: strin
   writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
 }
 
+/** Rewrite one property's `status` in a copied ledger. */
+function setStatus(root: string, type: string, prop: string, status: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  ledger.props[prop].status = status;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+/** One property's row, read back from a copied ledger. */
+function readRow(root: string, type: string, prop: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path.join(root, `${type}.json`), 'utf8')).props[prop];
+}
+
 /**
  * The population label the gate renders from `EVIDENCE_SCANNED_STATUSES`
  * (#13041). Mirrored here once rather than inlined at each assertion, and the
@@ -388,13 +401,23 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   });
 
   it('FAILS when a `planned` entry cites a repo-local file that is gone', () => {
-    // `field.useGrouping` is `planned` and carries no evidence today, so the
-    // pointer this writes is the only thing that can fail — and the rot is the
-    // plainest kind, the one the existence check has caught for `live` entries
-    // since #5623.
+    // The row is MADE `planned` in the copy rather than found that way. This
+    // case used to rely on `field.useGrouping` being `planned` in the shipped
+    // ledger, and when that row went `live` the case kept passing while it drove
+    // a `live` row — the one leg it exists for went unexercised, silently. The
+    // row's shipped `producer` and `evidenceScope` cite only objectui-attributed
+    // paths and trip nothing on a `planned` row, and `moveCount` keeps the copy's
+    // count shard in step with the flip, so the pointer written below is still
+    // the run's only cause — and the rot is the plainest kind, the one the
+    // existence check has caught for `live` entries since #5623.
     const root = path.join(tmp, 'planned-missing-file');
     cpSync(LEDGERS, root, { recursive: true });
+    const shipped = String(readRow(root, 'field', 'useGrouping').status);
+    setStatus(root, 'field', 'useGrouping', 'planned');
+    if (shipped !== 'planned') moveCount(root, 'field', shipped, 'planned');
     setEvidence(root, 'field', 'useGrouping', `${ROTTED} (rotted by the self-test)`);
+    // The control: the row this run judges IS `planned` in the copy.
+    expect(readRow(root, 'field', 'useGrouping').status).toBe('planned');
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
@@ -904,21 +927,16 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
   });
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  /** Rewrite one property's `status` in a copied ledger. */
-  function setStatus(root: string, type: string, prop: string, status: string): void {
-    const file = path.join(root, `${type}.json`);
-    const ledger = JSON.parse(readFileSync(file, 'utf8'));
-    ledger.props[prop].status = status;
-    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
-  }
-
   /** A copy of the real ledger root with `field.useGrouping` misspelled. */
   function typodRoot(name: string): string {
     const root = path.join(tmp, name);
     cpSync(LEDGERS, root, { recursive: true });
-    // `field.useGrouping` is `planned` and carries no evidence, so the misspelling
-    // is the only thing in the copy that can move a verdict — no evidence-scan
-    // finding can be confused for it.
+    // The misspelling is the only thing in the copy that can move a verdict — no
+    // evidence-scan finding can be confused for it. The gate scans `evidence`
+    // only for a status in `EVIDENCE_SCANNED_STATUSES`, which `planed` is not,
+    // and it resolves `producer` at any status, but every path this row's
+    // `producer` cites is objectui-attributed, so none of them is resolved
+    // against this checkout.
     setStatus(root, 'field', 'useGrouping', 'planed');
     return root;
   }

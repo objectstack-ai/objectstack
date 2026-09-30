@@ -215,7 +215,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
-| **results** | `{ row: integer; ok: boolean; action: Enum<'created' \| 'updated' \| 'skipped' \| 'failed'>; id?: string; … }[]` | ✅ | Capped sample of per-row outcomes (failures first) |
+| **results** | `{ row: integer; ok: boolean; action: Enum<'created' \| 'updated' \| 'skipped' \| 'failed'>; id?: string; … }[]` | ✅ | Capped sample of per-row outcomes, failures first. An ok row, and any `droppedFields` or `warnings` it carries, reaches this reader only if it falls inside the sample; `resultsTruncated` says whether the sample is partial, and the job counters count every row. |
 | **resultsTruncated** | `boolean` | ✅ | Whether `results` is a capped sample of a larger set |
 
 ### Nested Shape: `ImportJobResults.results[number]`
@@ -229,6 +229,8 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A dry-run row reports the strips the write would make; a committed row reports the strips it made. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
 
 
 ---
@@ -355,6 +357,8 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A dry-run row reports the strips the write would make; a committed row reports the strips it made. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
 
 
 ---
@@ -372,6 +376,26 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **field** | `string` | optional | Field that caused a coercion/validation error |
 | **code** | `string` | optional | Error code (failed rows) |
 | **error** | `string` | optional | Human-readable error message (failed rows) |
+| **warnings** | `{ field: string; code: string; message: string }[]` | optional | Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the verdict accepted: the row is `ok` because the write would store it and log the same complaint. A committed row never carries it, since the write path has no channel to report admitted findings on. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per reason, in the engine's own `droppedFields` shape and reason vocabulary. A dry-run row reports the strips the write would make; a committed row reports the strips it made. The row still succeeds: `ok` and `action` are unchanged. Present only when at least one field was dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing was dropped. In an async job's `results`, an ok row's drops reach the reader only if the row falls inside that capped, failures-first sample. |
+
+### Nested Shape: `ImportRowResult.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
+| **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
+| **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+
+### Nested Shape: `ImportRowResult.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
 
 
 ---

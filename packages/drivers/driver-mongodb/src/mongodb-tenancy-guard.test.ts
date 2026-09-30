@@ -85,7 +85,7 @@ describe('multi-tenancy boot guard (#3724)', () => {
         expect((err as Error).message).toContain('OS_MULTI_ORG_ENABLED');
         expect((err as Error).message).toContain('OS_TENANCY_POSTURE');
         expect((err as Error).message).toContain('@objectstack/driver-sql');
-        expect((err as Error).message).toContain('3724');
+        expect((err as Error).message).toContain('Rather than run unisolated,');
       }
     });
 

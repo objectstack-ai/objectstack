@@ -381,7 +381,7 @@ function reportDeferral(ctx: any, seed: SeedSettlementSnapshot): void {
         `sys_organization insert, and a skipSeedData boot writes nothing at all — so nothing observed ` +
         `now could prove or disprove the claim. The deployment stays warn-first until ` +
         `\`os migrate value-shapes --apply\` / \`os migrate files-to-references --apply\` records the ` +
-        `flag on a real scan (ADR-0104, #4795).`,
+        `flag on a real scan (ADR-0104).`,
     );
     return;
   }
@@ -389,7 +389,7 @@ function reportDeferral(ctx: any, seed: SeedSettlementSnapshot): void {
     `[platform-objects] fresh-datastore attestation deferred at kernel:ready: ${seed.inFlight} seed ` +
       `source(s) still writing (an inline seed overran OS_INLINE_SEED_BUDGET_MS and continues in the ` +
       `background). Attesting now would flip this boot to strict half-way through its own seed run. ` +
-      `It runs on \`app:seeded\` once the seed settles (ADR-0104, #4795).`,
+      `It runs on \`app:seeded\` once the seed settles (ADR-0104).`,
   );
 }
 

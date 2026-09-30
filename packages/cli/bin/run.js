@@ -160,12 +160,12 @@ try {
 
 /**
  * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
- * still gets this CLI's own exit status instead of a crash. #14858, reached on
+ * still gets this CLI's own exit status instead of a crash. The crash class commit 0c5e97368 fixed, reached on
  * THIS entry point by the #15564 measurement.
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
  * listening IS an uncaught exception. `bin/run-dev.js` has carried this
- * listener since #14858; the published entry did not, and #15564 was filed
+ * listener since commit 0c5e97368; the published entry did not, and #15564 was filed
  * NOT REPRODUCED because the two probes that had been run against it — a
  * bad command id, and `OBJECTSTACK_DEBUG=1` over an unbuilt `@objectstack/spec`
  * — both answered exit 2 with no `uncaughtException`. Re-run here, they still
@@ -217,7 +217,7 @@ try {
  *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
  *     exit  code=1
  *
- * 3 of 3 runs, 3049-3433 ms in — the same frame and the same status #14858
+ * 3 of 3 runs, 3049-3433 ms in — the same frame and the same status commit 0c5e97368's card
  * traced on the dev shim. The same child read by a draining parent boots and
  * serves, exit 0 at a 20 s SIGTERM, having written 7926 bytes over 16.6 s. So
  * the crash costs the run at its FIRST diagnostic line and 20 of its 21 stderr

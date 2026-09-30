@@ -156,6 +156,22 @@ function boot(
 const statusOf = (response: any): unknown => response?.status;
 const errorOf = (response: any): { code?: unknown; message?: unknown } => response?.body?.error ?? {};
 
+/**
+ * [#20819, ADR-0126 §2] The relayed refusal NAMES Regime C's sanctioned paths —
+ * the clone under a new name (§7.1) and the enable/disable switch (§7.2) — and
+ * neither the `OS_METADATA_WRITABLE` hatch nor a redeploy. The sentence is the
+ * metadata protocol's (`packagedBaseRefusal`, chosen per regime there); this
+ * asserts it arrives at these doors, not its wording.
+ */
+function expectRegimeCPrescription(response: any): void {
+    const message = String(errorOf(response).message);
+    expect(message).toContain('POST /api/v1/automation/:name/clone');
+    expect(message).toContain('POST /api/v1/automation/:name/toggle');
+    expect(message).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
+    expect(message).not.toContain('OS_METADATA_WRITABLE');
+    expect(message).not.toContain('redeploy');
+}
+
 afterEach(() => {
     delete process.env.OS_METADATA_WRITABLE;
     ObjectStackProtocolImplementation.resetEnvWritableCache();
@@ -174,6 +190,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
+                expectRegimeCPrescription(response);
                 // Refuse first, mutate never: the engine was not entered, and
                 // the live definition is the one that was there before.
                 expect(h.registerFlow).not.toHaveBeenCalled();
@@ -193,6 +210,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
+                expectRegimeCPrescription(response);
                 expect(h.unregisterFlow).not.toHaveBeenCalled();
 
                 const read = await h.dispatcher.handleAutomation(`/${PACKAGED}`, 'GET', undefined, AUTHOR(), undefined);
@@ -243,6 +261,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         );
         expect(statusOf(overwrite.response)).toBe(403);
         expect(errorOf(overwrite.response).code).toBe('NOT_OVERRIDABLE');
+        expectRegimeCPrescription(overwrite.response);
         expect(h.registerFlow).not.toHaveBeenCalled();
         expect(h.held(PACKAGED)).toBe(before);
 
@@ -349,10 +368,12 @@ describe('what the lock leaves open', () => {
         expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false);
     });
 
-    it('the operator hatch the refusal names (OS_METADATA_WRITABLE) opens this door exactly as it opens /meta', async () => {
-        // The refusal prescribes the hatch, so the prescription must be TRUE at
-        // this door: the verdict reads the same `isOverlayAllowed` the metadata
-        // door reads, hatch included — never a copy that forgets it.
+    it('the operator hatch (OS_METADATA_WRITABLE) opens this door exactly as it opens /meta', async () => {
+        // The verdict reads the same `isOverlayAllowed` the metadata door
+        // reads, hatch included — never a copy that forgets it. [#20819] The
+        // Regime C refusal no longer NAMES the hatch (it names clone and the
+        // switch); which writes the lock refuses did not move, so the hatch
+        // still opens both doors alike.
         process.env.OS_METADATA_WRITABLE = 'flow';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const h = boot();

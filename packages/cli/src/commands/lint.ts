@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
-import { normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
+import { normalizeStackInput, stackConversionsOf, type ConversionNotice } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { GLOBAL_ACTION_OBJECT_KEY } from '@objectstack/objectql';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
@@ -931,7 +931,9 @@ export default class Lint extends Command {
     // commit 79cf692b0): every failure exit carries the lists the run has ALREADY
     // COMPUTED, so the field means the same thing on every exit. The CALL that
     // fills it stays below, at the step that owns it — a throw in `loadConfig`,
-    // above it, reports `[]` honestly.
+    // above it, reports `[]` honestly, unless what it threw is a stack
+    // producer's refusal: that carries the conversions the producer applied
+    // before refusing, and the catch-all folds them (#20583).
     //
     // ⛔ NOT FOLDED INTO `issues`. Whether an auto-converted key should become
     // a `LintIssue` — or, on the sibling commands, whether `warnings` and
@@ -1170,9 +1172,23 @@ export default class Lint extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
+        // [#20583] The ADR-0087 D2 conversions a stack PRODUCER applied before
+        // it REFUSED — the fold right after `loadConfig` above, for the run
+        // whose load threw, and the same catch-all fold `os validate` /
+        // `os build` make. A refusing `defineStack` / `composeStacks` returns
+        // no stack, so that fold never ran; the producer stamps what it had
+        // applied on the ADR-0112 refusal it throws. `stackConversionsOf`
+        // answers `[]` for any other throw, so nothing moves for an unbuilt
+        // default export, which no producer built and none refused (the
+        // one-authoring-shape rule stays off this command). ⛔ Folded, never
+        // recomputed, never read off stderr. Cannot double-count: this command
+        // calls no producer itself, so only the config module's load can raise
+        // a stamped refusal, and a throwing load precedes both other fillers.
+        conversionNotices.push(...stackConversionsOf(error));
         // [commit 9fd45a952] Whatever the run had reached before the throw, under the
         // same 2026-08-25 ruling: `[]` for a throw in `loadConfig` — the
-        // normalize step never ran — and the notices in hand for any later one.
+        // normalize step never ran — except a producer's refusal, folded just
+        // above, and the notices in hand for any later one.
         // Wiring the producer without this exit would ship a fresh instance of
         // the defect commit 79cf692b0 fixed, one command over, on the day it was closed.
         await emitJson(

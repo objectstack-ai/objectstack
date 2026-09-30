@@ -43,7 +43,7 @@ describe('downstream consumer contract (#2035)', () => {
     ['ObjectExtension', ObjectExtensionSchema, more.DcObjectExtension],
     ['Cube', CubeSchema, more.DcCube],
     ['Mapping', MappingSchema, more.DcMapping],
-    // ['Theme', …] left with ThemeSchema (#10485, ADR-0049).
+    // ['Theme', …] left with ThemeSchema (commit 35ad101bc, ADR-0049).
     ['TranslationBundle', TranslationBundleSchema, more.DcTranslationBundle],
   ];
 
