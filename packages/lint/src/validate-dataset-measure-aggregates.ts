@@ -232,8 +232,9 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
           `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
           `"${field}" with one its \`${fieldType}\` type accepts: ` +
           `${aggregatesAccepting(fieldType).join(', ')}. ` +
-          `\`count\` / \`count_distinct\` accept every type because they read no arithmetic off ` +
-          `the value; a quantity that must be added up or averaged has to be STORED as a ` +
+          `\`count\` accepts every type because it reads no value, and \`count_distinct\` every ` +
+          `type but the JSON-stored ones, whose values no two backends compare alike; a ` +
+          `quantity that must be added up or averaged has to be STORED as a ` +
           `numeric field (a computed column) and aggregated as one. The compile leg refuses ` +
           `this same pair with \`400 DATASET_INVALID\` before any SQL is emitted, so this is ` +
           `the same fix made earlier.`,
