@@ -18,7 +18,9 @@
 // ledger rows, the trigger binding and the `/_status` row — never off the
 // guard's body:
 //   1. a customer-authored flow toggled through the door gets the named
-//      refusal, and the ledger and the flow are unchanged;
+//      refusal, and the ledger and the flow are unchanged — including one a
+//      ledger row already holds off, whose refusal names the step that
+//      completes for it;
 //   2. a packaged flow still toggles (the control);
 //   3. a customer flow published with `status: 'obsolete'` is not armed — the
 //      switch the refusal names works.
@@ -160,6 +162,38 @@ describe('[#20726] pin 1 — the toggle door refuses a customer-authored flow, a
         // The degraded-mode "IN PROCESS ONLY" flip was never reached.
         const warned = logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
         expect(warned.some((m: string) => m.includes('IN PROCESS ONLY'))).toBe(false);
+    });
+
+    // A customer flow can ALREADY be held off by a ledger row under its name:
+    // the door used to accept a flow whose package id was non-empty (the
+    // sentinel and app-bound shapes above) and wrote one, and a customer
+    // overlay can shadow a packaged flow the ledger switched off. A status
+    // does not clear such a row, so naming only the status would prescribe a
+    // step that completes nothing. The refusal names the step that does.
+    it('a customer flow a ledger row already holds off: still refused, the row untouched, and the step it names completes', async () => {
+        const { engine, store, records } = engineWithLedger();
+        await store.setActive({ name: 'customer_flow', packageId: 'sys_metadata', active: false });
+        engine.registerFlow('customer_flow', flowBody('customer_flow', { _packageId: 'sys_metadata', status: 'active' }));
+        await engine.hydrateFlowActivations();
+        const before = stateOf(engine, 'customer_flow');
+        expect(before).toMatchObject({ enabled: false, bound: false });
+
+        const refusal = await refusalOf(engine.toggleFlow('customer_flow', true));
+
+        expect(refusal.code).toBe('RESOURCE_CONFLICT');
+        expect(refusal.status).toBe(409);
+        expect(refusal.message).toContain('PUT /automation/customer_flow');
+        expect(refusal.message).toContain('POST /automation/customer_flow/clone');
+        expect(await store.list()).toEqual([{ name: 'customer_flow', packageId: 'sys_metadata', active: false }]);
+        expect(stateOf(engine, 'customer_flow')).toEqual(before);
+
+        // Its status does not arm it — which is why the refusal cannot stop there…
+        engine.registerFlow('customer_flow', flowBody('customer_flow', { _packageId: 'sys_metadata', status: 'active' }));
+        expect(records.isBound('customer_flow')).toBe(false);
+        // …and the named step completes: the clone door registers the whole
+        // definition under a new name, with no package envelope, and it is armed.
+        engine.registerFlow('customer_flow_copy', flowBody('customer_flow_copy', { status: 'draft' }));
+        expect(records.isBound('customer_flow_copy')).toBe(true);
     });
 });
 
