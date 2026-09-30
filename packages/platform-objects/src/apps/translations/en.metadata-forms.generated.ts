@@ -923,6 +923,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     label: "Seed Data",
     description: "Fixture / initialization data applied on publish"
   },
+  picklist: {
+    label: "Picklist",
+    description: "Shared option list that select fields reference by name"
+  },
   mapping: {
     label: "Import Mapping",
     description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"

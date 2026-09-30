@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/platform-objects': patch
 ---
 
 feat(spec): the `picklist` metadata kind — a shared option list that select fields reference by name (#19518)
@@ -11,3 +12,4 @@ Clause-②: yes (widening)
 - **The served shape.** `PicklistServedFieldSchema` declares what a client reads for a picklist-bound field: the resolved `options` next to the `picklist` that names the list. This release does not resolve the reference. Until the runtime does, a picklist-bound field is served without options, and the liveness ledger grades the key `planned` and warns an author who writes it.
 - **Extensions.** `defineStack({ picklistExtensions: [{ extend, options }] })` adds options to a picklist that another package owns. It can only add; removing or renaming a value stays with the owning package.
 - **Translation.** `TranslationData` gains `picklists.<name>.{ label?, options: { value: label } }`. `translatePicklist` translates a served picklist item. `translateObject` gives a picklist-bound field the list's option labels, and a field-level `options` entry still wins over them.
+- **Studio type label.** `@objectstack/platform-objects` carries the `picklist` type's label and description in its metadata-forms translation bundles (en, zh-CN, ja-JP, es-ES).
