@@ -345,8 +345,8 @@ function expectOk(res, what) {
   return res.body;
 }
 
-// GitHub fails a job after 30 days at an environment, so a run created earlier no
-// longer waits (bar a re-run, which only the filter reaches); the 17.4.0 prompt waited 20.
+// GitHub fails a job after 30 days at an environment, so a push run created
+// earlier no longer waits (bar a re-run, which only the filter reaches).
 export const WAITING_READ_BACK_DAYS = 30;
 // At most 5 landings per push across the 2,509 main pushes of the 29 days to
 // 2026-09-30, so the push that carried a version commit ends well inside 20.
