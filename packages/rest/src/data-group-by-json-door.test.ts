@@ -35,6 +35,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -68,7 +69,7 @@ const ROWS = [
   { id: 'd3', title: 'y', meta: { b: 1 }, spec: { k: 1 }, rep: [{ q: 1 }], rec: { r: 1 }, loc: { lat: 1, lng: 2 }, ship_to: { city: 'Paris' }, vec: [1, 2] },
 ];
 
-const COUNT = [{ function: 'count', alias: 'n' }];
+const COUNT: EngineAggregateOptions['aggregations'] = [{ function: 'count', alias: 'n' }];
 
 /** The route the refusal names — asserted on the REST body, so it must land inside the door's 500-character bound. */
 const ROUTE = 'Group by a field that stores one scalar value: store the part you group on in a field of its own and group by that field.';
@@ -169,7 +170,7 @@ for (const cell of CELLS) {
           expect(res.body.code, field).toBe('INVALID_FIELD');
           expect(res.body.error, field).toContain(`groupBy[0] names '${field}', a declared ${type} field`);
           expect(res.body.error, field).toContain(ROUTE);
-          const err = await engine.aggregate(OBJECT, { groupBy: [field], aggregations: COUNT } as any).then(() => null, (e: any) => e);
+          const err = await engine.aggregate(OBJECT, { groupBy: [field], aggregations: COUNT }).then(() => null, (e: any) => e);
           expect({ code: err?.code, status: err?.status }, `engine.aggregate, ${field}`).toEqual({ code: 'INVALID_FIELD', status: 400 });
         }
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
