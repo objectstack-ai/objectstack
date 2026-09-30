@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #16709 item 1 — the restore verb DROPS a hot copy the durable row proves
+ * Commit 8c7cca1ce, item 1 — the restore verb DROPS a hot copy the durable row proves
  * stale, and this file is the only thing that observes it.
  *
  * ## The gap this closes, measured

@@ -446,7 +446,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Waiting for the real outcome is not on the table: a notify
                     // node must not block a flow on a downstream channel.
                     //
-                    // ── `selected`: what makes a ZERO dispatch readable (#17123) ──
+                    // ── `selected`: what makes a ZERO dispatch readable (commit ae6dcf6a4) ──
                     //
                     // `acted` and `unmeasuredEffect` above answer "what did this
                     // node cause". Neither can answer "this node tried to notify

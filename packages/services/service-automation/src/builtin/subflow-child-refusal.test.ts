@@ -209,7 +209,7 @@ describe('subflow delegation: a child REFUSAL is answered as a refusal (#14379)'
         });
 
         it('refuses the signal-less gesture the same way, both pauses intact', async () => {
-            // #13648 normalises an absent signal to `{}` at the public door, so
+            // Commit 7307191db normalises an absent signal to `{}` at the public door, so
             // `resume(parentRunId)` lands on this same delegation path.
             const [parentRunId, childRunId] = await startPair();
 

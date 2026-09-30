@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #17123 — a `notify` node that reached NOBODY must not read like a run that
+ * The card behind commit ae6dcf6a4: a `notify` node that reached NOBODY must not read like a run that
  * had nobody to reach.
  *
  * ## What was measured, and why a green suite proved nothing
@@ -63,15 +63,15 @@
  * context. A test that invented its own two context shapes could agree with
  * itself while disagreeing with both doors.
  *
- * ## Why #16659 landing does not close this, stated as a measurement
+ * ## Why commit ecdfc9411 does not close this, stated as a measurement
  *
- * #16659 makes a scheduled flow carry its organization. That stops ONE cause
+ * Commit ecdfc9411 makes a scheduled flow carry its organization. That stops ONE cause
  * of a zero delivery; it does not make a zero delivery visible. The schedule
  * arm here is therefore driven in BOTH shapes:
  *
  *   - `cronTickToday()`   — no organization, the shape production builds now;
  *   - `cronTickWithOrg()` — carrying the PLATFORM organization, the shape a
- *     scheduled flow has once #16659 lands.
+ *     scheduled flow takes under commit ecdfc9411.
  *
  * On a multi-organization install the platform organization is not where the
  * recipients live, so the org-scoped `role:` expansion
@@ -142,7 +142,7 @@ function cronTickToday(): AutomationContext {
 }
 
 /**
- * `type: 'schedule'` as it fires once #16659 lands: the same context, now
+ * `type: 'schedule'` as it fires under commit ecdfc9411: the same context, now
  * carrying the organization the scheduled flow belongs to. On a
  * multi-organization install that is the platform organization, not the
  * employer one the recipients live in.
@@ -411,7 +411,7 @@ describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (k
     it('DIFFERENTIAL CONTROL: the two trigger families no longer render the same run', async () => {
         stack = await boot(kind);
 
-        // Family 1 — the cron tick, in the shape #16659 gives it. The platform
+        // Family 1 — the cron tick, in the shape commit ecdfc9411 gives it. The platform
         // organization has no admin members, so the org-scoped `role:` expansion
         // resolves to nobody and `emit()` returns delivered 0 / enqueued 0.
         const scheduled = await stack.engine.execute('nudge', cronTickWithOrg());

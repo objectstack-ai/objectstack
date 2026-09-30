@@ -170,7 +170,7 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // live in the child's log, so until this slot existed the parent's fold
       // could not see them and a parent whose child lost a row read
       // `failed: 0` — the misreading the run-level `failed` was added to
-      // prevent (#13681), one level up. Rolled up here, it folds into this
+      // prevent (commit 18d816a50), one level up. Rolled up here, it folds into this
       // node's `failures` and so into the run-level `failed`.
       //
       // Deliberately the SAME exit the three totals above already leave by, so

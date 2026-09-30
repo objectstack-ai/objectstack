@@ -57,6 +57,9 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 // and its write-path inverse — reused, never restated, for the definitions this
 // domain serves and overwrites.
 import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/metadata-protocol';
+// [#20679] Only the verdict's SIGNATURE — the locked-base refusal is asked of
+// the `protocol` service at request time, never re-derived here.
+import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 /**
  * Translate a trigger request body into the canonical `AutomationContext` the
@@ -1444,6 +1447,68 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * [#20679, ADR-0126 §2] THE LOCKED BASE at this domain's definition-write and
+ * removal doors — `PUT /:name`, `DELETE /:name`, and `POST /` onto a name the
+ * engine already holds (a create onto an existing name is an overwrite).
+ *
+ * ADR-0126 §2 puts a packaged flow in Regime C: "the packaged base is locked —
+ * in-place edit refused loudly at the write door". The metadata door kept that
+ * promise (`PUT /meta/flow/:name` on a flow a code package ships answers `403`
+ * `NOT_OVERRIDABLE`) and these doors did not: behind the `manage_metadata`
+ * authoring gate they went straight to the engine's `registerFlow` /
+ * `unregisterFlow`, which hold no lock and must not grow one — the boot pull
+ * registers every packaged flow through that same method. So an administrator
+ * refused at one door onto the artifact could rewrite, or remove, the same
+ * packaged flow in the live engine through another.
+ *
+ * ## One predicate, asked of its owner
+ *
+ * The verdict is the metadata protocol's, and it is ASKED, never re-derived
+ * here: `packagedBaseRefusal` answers with the same predicate (is the name
+ * artifact-backed, does the type have an overlay channel) and the same
+ * emitter `saveMetaItem` / `deleteMetaItem` use, so the two doors cannot
+ * disagree about which flows are locked or what the refusal says. The refusal
+ * is relayed as the producer built it — code, status and sentence — so this
+ * domain stamps no code of its own. What stays open is exactly what the ADR
+ * keeps open: a flow no code package ships (the customer's own) is written and
+ * removed as before; `POST /:name/clone` authors a sibling under a new name
+ * (§7.1); `POST /:name/toggle` is the activation switch (§7.2), not a
+ * definition write.
+ *
+ * ## Refuse first, then mutate
+ *
+ * Asked before the engine is called, so a refused write registers nothing and
+ * a refused removal unregisters nothing. On `DELETE` that also places it ahead
+ * of the engine's own ADR-0126 §7.3 refusal (`DELETE_RESTRICTED` / 409, a
+ * packaged subflow a packaged caller still reaches): a packaged base is locked
+ * whoever calls it, so that refusal is reached at this door only where this one
+ * admits the removal — with `OS_METADATA_WRITABLE` opening the `flow` type.
+ *
+ * ## Resolved as an authorization FACT
+ *
+ * `resolveServiceOrLoud`, not the `resolveService` probe: a `protocol` slot
+ * that is WIRED and failed to resolve is re-raised, so the write fails rather
+ * than proceeding as though nothing were locked. A composition with no metadata
+ * protocol at all — or one whose protocol brings no locked-base verdict — has
+ * no metadata door to be at parity with and no packaged base it can name, and
+ * keeps today's behaviour. Unscoped, exactly as the `/meta` domain resolves
+ * the slot, so both doors ask the SAME protocol instance about one artifact.
+ */
+async function refusePackagedFlowBaseChange(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    operation: 'save' | 'delete',
+): Promise<HttpDispatcherResult | undefined> {
+    const protocol: Partial<Pick<ObjectStackProtocolImplementation, 'packagedBaseRefusal'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    if (typeof protocol?.packagedBaseRefusal !== 'function') return undefined;
+    const refusal = protocol.packagedBaseRefusal({ type: FLOW_METADATA_TYPE, name, operation });
+    if (!refusal) return undefined;
+    return { handled: true, response: deps.errorFromThrown(refusal) };
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -1895,10 +1960,14 @@ export async function classifyResumeResult(
  *   GET    /:name                → getFlow
  *   POST   /                     → createFlow (registerFlow)
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — as `PUT /:name`
  *   PUT    /:name                → updateFlow
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — the `/meta` door's
+ *                                    `403` refusal, ADR-0126 §2 (#20679)
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — as `PUT /:name`
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
@@ -2173,6 +2242,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // `edge.condition` strings lowered to their envelopes) — the same
             // shape `GET /automation/:name` serves — never an echo of the
             // caller's own pre-parse bytes.
+            // [#20679, ADR-0126 §2] Creating onto a name the engine already
+            // holds is an overwrite (below), so a packaged flow's name is
+            // locked here exactly as on `PUT /:name` — the same verdict, asked
+            // before anything is read or registered. A name no code package
+            // ships is created as before.
+            const locked = await refusePackagedFlowBaseChange(deps, context, body.name, 'save');
+            if (locked) return locked;
             // [#20552] Creating onto a name the engine already holds is an
             // overwrite, so the round-trip rule applies here as on `PUT /:name`.
             const definition = await keepStoredFlowCredentials(automationService, body.name, body);
@@ -3058,6 +3134,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
                     ]);
                 }
+                // [#20679, ADR-0126 §2] A packaged flow's base is locked: the
+                // metadata protocol's own verdict, asked before anything is
+                // read or registered — see `refusePackagedFlowBaseChange`.
+                // After the envelope check, as on `/meta` (a missing body is
+                // refused before the lock is consulted there too).
+                const locked = await refusePackagedFlowBaseChange(deps, context, name, 'save');
+                if (locked) return locked;
                 // [#8123] Same class as POST /: the engine's verdict on the
                 // definition is served as a 400, not a 500 — reusing the
                 // same route-agnostic `flowDefinitionRefusal` helper POST
@@ -3087,6 +3170,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // DELETE /:name → deleteFlow
         if (parts.length === 1 && m === 'DELETE') {
             if (typeof automationService.unregisterFlow === 'function') {
+                // [#20679, ADR-0126 §2] …and removed only if it is not a
+                // packaged base — refused before the engine is asked.
+                const locked = await refusePackagedFlowBaseChange(deps, context, name, 'delete');
+                if (locked) return locked;
                 automationService.unregisterFlow(name);
                 return { handled: true, response: deps.success({ name, deleted: true }) };
             }

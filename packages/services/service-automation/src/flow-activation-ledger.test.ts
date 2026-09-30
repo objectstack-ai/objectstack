@@ -7,7 +7,7 @@
 // WHAT THIS REPLACES, AND WHY THE REPLACEMENT NEEDED TESTS OF ITS OWN
 //
 // The engine used to keep its off-switch in a process-local `flowEnabled` map.
-// #10243 measured the cost: the bit was NOT a row, so no organization wall
+// Commit 02b41232d measured the cost: the bit was NOT a row, so no organization wall
 // scoped it — `toggleFlow` wrote a name-keyed in-process map and the automation
 // service is ONE instance per environment, so on a real `isolated` posture a
 // tenant org owner switched a shipped flow off and an unrelated tenant in a
@@ -268,8 +268,8 @@ describe('ADR-0126 §7.2 — the install-level row unbinds the trigger', () => {
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'f', packageId: 'crm', active: false });
 
-        // A brand-new engine: the #10243 map's "cold boot reads enabled: true
-        // again" was recorded as mitigating-but-not-exculpating. It must no
+        // A brand-new engine: the retired map's "cold boot reads enabled: true
+        // again" was recorded (commit 266436a7f) as mitigating-but-not-exculpating. It must no
         // longer be true.
         const engine = new AutomationEngine(createTestLogger());
         const trigger = recordingTrigger('record_change');
@@ -1021,7 +1021,7 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// #10243 — the retired mechanism is GONE, not shaded
+// ADR-0126 §7.2 — the retired mechanism is GONE, not shaded
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#10243 — the process-local `flowEnabled` map is retired', () => {

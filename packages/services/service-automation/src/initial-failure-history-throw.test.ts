@@ -296,7 +296,7 @@ describe('#17562 — a failed run is still ANSWERED when its own history write t
         // CALLER is not a degradation"): what the caller is handed is the NODE's
         // failure. The bookkeeping failure is handed to nobody.
         //
-        // ⚠️ And NOT a #13398-class raise: `Logger` from
+        // ⚠️ And NOT a raise under the published-sink ruling (commit e238c79f0): `Logger` from
         // `@objectstack/spec/contracts` declares `error(message, error?, meta?)`
         // as a REQUIRED member, so nothing is grown onto a sink that lacks it.
         const store = new SyncThrowTerminalStore();
