@@ -305,14 +305,16 @@ export interface StrictAuthoringFactory {
  *
  * ## Why a written list and not a pattern
  *
- * Measured over every JS entrypoint of `@objectstack/spec`: 19 exported values
- * carry a `create` member. Five validate — the five below — and fourteen
- * (`ApiEndpoint`, `Task`, `RestServerConfig`, …) are identity factories,
- * `(config) => config`, that refuse nothing and so have nothing to tolerate.
+ * Measured over all 19 JS entrypoints of `@objectstack/spec`: 18 distinct
+ * exported values carry a `create` member (31 export names — each identity
+ * factory is exported a second time as its `*Schema`). Five validate — the
+ * five below — and thirteen (`ApiEndpoint`, `Task`, `RestServerConfig`, …) are
+ * identity factories, `(config) => config`, that refuse nothing and so have
+ * nothing to tolerate.
  * The other function members of exported namespaces (`Field.*`, `SCIM.*`,
  * `RLS.*`, `OData.*`) build or read values and validate nothing. So:
  *
- *  - a NAME pattern (`*.create`) would wrap fourteen no-ops and still say
+ *  - a NAME pattern (`*.create`) would wrap thirteen no-ops and still say
  *    nothing about which factories are strict;
  *  - a SHAPE enumeration at load cannot even see the one this list exists for:
  *    `ObjectSchema` is a lazy-schema Proxy whose `ownKeys` trap throws, so
