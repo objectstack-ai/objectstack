@@ -34,7 +34,7 @@
  * majority of real rows have no custom headers at all. Under a key-absence
  * inference every ordinary header-less email would look like a redacted row
  * and force a privileged read, and an engine without the accessor would fail
- * every ordinary send. (PR #8675 hit exactly this on `sys_account`'s optional
+ * every ordinary send. (Commit c9f595083 records exactly this on `sys_account`'s optional
  * token columns: inheriting "key missing ⇒ the strip ran" from a
  * `required: true` column broke ordinary sign-in, 16 red tests.) The schema
  * flag is cardinality-independent: it is true when the engine redacts and

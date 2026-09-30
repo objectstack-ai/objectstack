@@ -248,7 +248,7 @@ describe('sys_email.headers_json — authored headers vs the data API (#8149)', 
   });
 
   it('a message authored WITHOUT headers still delivers — the optional-column trap', async () => {
-    // The regression PR #8675 measured on a sibling card: `headers_json` is
+    // The regression commit c9f595083 records from a sibling card: `headers_json` is
     // `required: false`, and the overwhelming majority of real rows have no
     // custom headers at all. A seam that inferred "key missing ⇒ the strip
     // ran" would treat every ordinary email as a redacted row. This pins that
