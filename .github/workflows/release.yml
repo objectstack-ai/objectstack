@@ -1060,13 +1060,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
-      # covers the three reads (waiting runs, their jobs, their pending
-      # deployments). `contents: read` is the checkout of the script.
+      # covers the reads (the waiting-runs list, the runs at each version
+      # commit's push, each named run, its jobs and its pending deployments).
+      # `contents: read` is the checkout.
       actions: write
       contents: read
     steps:
+      # `fetch-depth: 0`: a push-lane prompt can only hang on the push that
+      # carried a version commit, and the sweep finds those on main's
+      # first-parent history; it refuses a shallow clone.
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

@@ -87,7 +87,7 @@ describe('DevPlugin', () => {
 
     const plugin = new DevPlugin({ seedAdminUser: false });
     await plugin.init(ctx);
-    // [#10036] `start()` too: the "nothing is enforcing security" warning
+    // [commit 7552e0337] `start()` too: the "nothing is enforcing security" warning
     // asserted at the bottom of this test moved to the start phase, because
     // `security` — the published service that means enforcement, as opposed
     // to the `init()`-registered internals that only mean "plugin loaded" —
@@ -124,7 +124,7 @@ describe('DevPlugin', () => {
     );
     expect(securityWarn).toBeDefined();
     // …and with the plugin genuinely absent it says so, rather than reporting
-    // the loaded-but-failed-to-start state (#10036).
+    // the loaded-but-failed-to-start state (the two told apart since commit 7552e0337).
     expect(securityWarn![0]).toContain('SecurityPlugin is not loaded');
   });
 
