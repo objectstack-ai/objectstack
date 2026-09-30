@@ -217,6 +217,31 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         });
     });
 
+    it('keys on the NAME the artifact loader registered — provenance stamps in the request body decide nothing', async () => {
+        // The verdict is asked with `{ type, name, operation }` only: whether a
+        // code package ships the name is read from the registry's loader-made
+        // entry, never from what the caller sends. So a body claiming tenant
+        // provenance cannot walk a packaged flow past the lock…
+        const h = boot({ environmentId: 'env_1' });
+        const disguised = await h.dispatcher.handleAutomation(
+            `/${PACKAGED}`, 'PUT',
+            { ...definitionOf(PACKAGED, 'Disguised'), _provenance: 'org', _packageId: 'sys_metadata' },
+            AUTHOR(), undefined,
+        );
+        expect(statusOf(disguised.response)).toBe(403);
+        expect(errorOf(disguised.response).code).toBe('NOT_OVERRIDABLE');
+        expect(h.registerFlow).not.toHaveBeenCalled();
+
+        // …and a body claiming a package cannot lock the customer's own flow.
+        const claimed = await h.dispatcher.handleAutomation(
+            `/${CUSTOMER}`, 'PUT',
+            { ...definitionOf(CUSTOMER, 'Claimed'), _packageId: PACKAGE_ID, _provenance: 'package' },
+            AUTHOR(), undefined,
+        );
+        expect(statusOf(claimed.response)).toBe(200);
+        expect(h.registerFlow).toHaveBeenCalledTimes(1);
+    });
+
     it('the envelope check still answers first — a body that is not a definition is VALIDATION_FAILED, as on /meta', async () => {
         // `/meta` refuses a null item before its lock; this door's twin is the
         // "expected a flow definition object" check, and it keeps its place.
